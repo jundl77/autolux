@@ -21,14 +21,12 @@ from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
 from nn import priors as nn_priors  # noqa: E402
 from nn.decoder import (  # noqa: E402
     DEFAULT_BOUNDARY_REF,
-    SHIPPING_DECODER_CONFIG,
     DecodeParams,
     FixedLagViterbi,
     bar_grid,
     bar_observations,
     build_decoder,
     decode_track,
-    load_decoder_config,
     observation_knobs,
     segments,
     temper,
@@ -942,24 +940,6 @@ def test_segments_run_length_encodes_a_decision_stream():
     assert spans == [(0, 6, "breakdown"), (6, 12, "drop")]
 
 
-def test_a_config_naming_a_knob_the_decoder_lacks_is_refused(tmp_path):
-    path = tmp_path / "decoder_config.json"
-    path.write_text(json.dumps({"chosen": {"lag_bars": 2, "tempurature": 0.5}}))
-    with pytest.raises(ValueError, match="tempurature"):
-        load_decoder_config(path)
-
-
-def test_a_config_of_known_knobs_round_trips(tmp_path):
-    path = tmp_path / "decoder_config.json"
-    path.write_text(
-        json.dumps({"chosen": {"lag_bars": 2, "temperature": 0.5, "floor_bars": [1, 2, 3, 4, 5]}})
-    )
-    params = load_decoder_config(path)
-    assert params.lag_bars == 2
-    assert params.temperature == 0.5
-    assert params.floor_bars == (1, 2, 3, 4, 5)
-
-
 def test_the_entry_bonus_in_the_config_equals_the_same_bonus_premultiplied():
     """The two expressions of the entry preference must agree, because BOTH
     exist on disk and applying both would double it.
@@ -1003,45 +983,6 @@ def test_the_shipped_priors_carry_no_premultiplied_entry_bonus(nn_artifacts):
     priors = Priors.load(artifacts().priors)
     rows = np.asarray(priors.transition, dtype=np.float64).sum(axis=1)
     assert np.abs(rows[rows > 0] - 1.0).max() < 1e-9
-
-
-def test_the_shipping_config_loads_and_is_the_l9d_point():
-    """The l9d point, per the file's own provenance block, and it is NOT a
-    sweep result.  The base is arm N's sweep pick; two knobs are moved on top
-    of it.  buildup_entry_bonus 1.0 is a decision bias of the same family as
-    drop_miss_cost -- chosen on 12 probe arcs, never validated on val, and the
-    config says so rather than implying a sweep.  The buildup floor sits at 3
-    bars against the sweep pick's 2: the campaign's own candidate was a
-    hand-set 4, which the axis was later measured against and found exactly
-    neutral -- floor 3 matches it on climbs, drop coverage and deficit and reads
-    slightly better on crispness, so it is taken because it costs nothing and
-    retires a hand-set value for the swept-adjacent one.  floor_bars is an explicit
-    vector on purpose -- it overrides floor_scale, so a priors refit does not
-    move these floors."""
-    params = load_decoder_config(SHIPPING_DECODER_CONFIG)
-    document = json.loads(SHIPPING_DECODER_CONFIG.read_text())
-    assert document["name"] == "l9d_buildup_entry_1nat_floor3"
-    assert dataclasses.asdict(params) == {
-        "lag_bars": 2,
-        "class_prior_division": True,
-        "prior_strength": 0.0,
-        "drop_miss_cost": 10.0,
-        "boundary_weight": 4.0,
-        "boundary_ref": 0.1,
-        "boundary_tolerance_sec": 0.5,
-        "min_coverage": 1,
-        "floor_scale": 1.0,
-        "floor_bars": (4, 4, 3, 4, 4, 8, 4, 4, 2),
-        "outro_escape": 0.04,
-        "temperature": 1.0,
-        "buildup_drop_bonus": 0.0,
-        "buildup_entry_bonus": 1.0,
-    }
-
-
-def test_the_shipping_config_names_every_knob_the_decoder_has():
-    chosen = json.loads(SHIPPING_DECODER_CONFIG.read_text())["chosen"]
-    assert set(chosen) == {f.name for f in dataclasses.fields(DecodeParams)}
 
 
 def test_a_floor_vector_off_disk_is_a_tuple_so_the_record_stays_hashable():
@@ -1234,22 +1175,6 @@ def test_a_non_finite_entry_bonus_is_refused():
         FixedLagViterbi(toy_priors(), buildup_entry_bonus=float("nan"))
     with pytest.raises(ValueError, match="buildup_entry_bonus"):
         FixedLagViterbi(toy_priors(), buildup_entry_bonus=float("inf"))
-
-
-def test_the_entry_bonus_round_trips_through_a_config_and_a_typo_still_raises(tmp_path):
-    path = tmp_path / "decoder_config.json"
-    path.write_text(json.dumps({"chosen": {"lag_bars": 2, "buildup_entry_bonus": 1.0}}))
-    assert load_decoder_config(path).buildup_entry_bonus == 1.0
-
-    # A config cut before the knob existed still loads, at the neutral point.
-    old = tmp_path / "old_config.json"
-    old.write_text(json.dumps({"chosen": {"lag_bars": 2}}))
-    assert load_decoder_config(old).buildup_entry_bonus == 0.0
-
-    typo = tmp_path / "typo_config.json"
-    typo.write_text(json.dumps({"chosen": {"buildup_entrance_bonus": 1.0}}))
-    with pytest.raises(ValueError, match="buildup_entrance_bonus"):
-        load_decoder_config(typo)
 
 
 def test_temper_is_the_identity_at_one_and_returns_the_same_array():

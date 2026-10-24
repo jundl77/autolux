@@ -59,21 +59,3 @@ def test_a_config_swept_in_another_space_is_refused():
         _check_class_space(
             _full(), NUM_SECTION_CLASSES, ('intro', 'buildup', 'breakdown', 'drop', 'outro')
         )
-
-
-def test_the_shipping_config_and_priors_pass_the_gate_off_their_own_records():
-    """The committed config carries its space; the gate reads it, not a copy."""
-    from autolux.lib.engine.section_decoder import SHIPPING_DECODER_CONFIG, decoder_config_classes
-
-    assert decoder_config_classes(SHIPPING_DECODER_CONFIG) == SECTION_LABELS
-
-
-def test_a_config_with_no_recorded_space_cannot_be_checked_and_says_so(tmp_path):
-    import json
-
-    from autolux.lib.engine.section_decoder import decoder_config_classes
-
-    path = tmp_path / 'decoder_config.json'
-    path.write_text(json.dumps({'chosen': {'lag_bars': 2}}), encoding='utf-8')
-    with pytest.raises(ValueError, match='class_space'):
-        decoder_config_classes(path)

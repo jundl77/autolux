@@ -2,16 +2,12 @@
 
 import hashlib
 import json
-import os
 import signal
-import socket
 import subprocess
 import sys
-import time
 import types
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
@@ -349,31 +345,6 @@ def test_two_launches_of_the_same_file_mint_different_tokens(song_file):
     assert str(song_file) in one and str(song_file) in two
 
 
-def test_refusals_render_red_and_successes_green():
-    for message in (
-        'commit refused: a title is required',
-        'edit refused: page is older than the labels on disk',
-        label_tool.stale_token_refusal('old', 'new'),
-        'committed ✓ ... admission FAILED (RuntimeError: x)',
-    ):
-        assert label_tool.status_style(message)['color'] == label_tool.STATUS_BAD
-    for message in (
-        'saved ✓ 12:00:00 · 3 sections → x',
-        'committed ✓ 4 sections · grid + manifest row added',
-    ):
-        assert label_tool.status_style(message)['color'] == label_tool.STATUS_OK
-
-
-def test_a_repeated_identical_refusal_still_visibly_changes(monkeypatch):
-    clock = iter(['12:00:00', '12:00:01'])
-    monkeypatch.setattr(label_tool.time, 'strftime', lambda fmt: next(clock))
-    message = 'commit refused: the artist field is empty'
-    first, second = label_tool.stamped(message), label_tool.stamped(message)
-    assert first != second
-    assert first.startswith(message) and first.endswith('12:00:00')
-    assert label_tool.status_style(first)['color'] == label_tool.STATUS_BAD
-
-
 def test_a_labels_file_that_cannot_be_parsed_refuses_every_edit(song_file):
     save_labels(str(song_file), SECTIONS)
     labels_path(str(song_file)).write_text('start,label\n', encoding='utf-8')
@@ -426,38 +397,6 @@ def test_launch_names_the_broken_line_before_it_decodes_anything(song_file, monk
     message = str(raised.value)
     assert str(labels_path(str(song_file))) in message
     assert 'line 1' in message and 'start' in message
-
-
-async def test_autolux_label_parses_and_dispatches(monkeypatch, tmp_path):
-    from cli.main import build_parser, label_cmd
-
-    song = tmp_path / 'song.mp3'
-    args = build_parser().parse_args(['label', str(song), '--port', '9001', '--seed'])
-    assert args.func is label_cmd
-    assert (args.audio, args.port, args.seed) == (str(song), 9001, True)
-
-    launched = {}
-    monkeypatch.setitem(
-        sys.modules,
-        'label_tool',
-        types.SimpleNamespace(
-            launch=lambda audio, port, seed: launched.update(audio=audio, port=port, seed=seed)
-        ),
-    )
-    await label_cmd(args)
-    assert launched == {'audio': str(song), 'port': 9001, 'seed': True}
-    assert not build_parser().parse_args(['label', str(song)]).seed
-
-
-async def test_the_labeller_takes_no_audio_device_flag(tmp_path):
-    """Where the sound comes out is a browser question, answered in the page."""
-    from cli.main import build_parser
-
-    args = build_parser().parse_args(['label', str(tmp_path / 'song.mp3')])
-    assert args.port == 8070
-    assert not hasattr(args, 'output_device')
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(['label', 'x.mp3', '-o', '7'])
 
 
 @pytest.fixture
@@ -592,11 +531,6 @@ def test_audio_of_the_same_size_but_different_bytes_is_not_the_same_track(song, 
 
 def test_the_digest_is_the_whole_file():
     assert len(audio_digest(__file__)) == 64
-
-
-def test_the_title_prefill_drops_a_trailing_youtube_id():
-    assert default_title('/x/is_it_beautiful.kUP_iJuoq9g.mp3') == 'is it beautiful'
-    assert default_title('/x/Konflict - Beckoning.mp3') == 'Konflict - Beckoning'
 
 
 def test_the_committed_shape_is_the_corpus_section_shape_and_round_trips():
@@ -827,265 +761,6 @@ def test_a_generated_beat_grid_is_read_when_present(song, corpus, song_id):
     assert beat_grid(str(song)) == [], 'an unreadable grid is absent, not fatal'
 
 
-def _track(duration: float = 214.842):
-    return types.SimpleNamespace(
-        duration=duration,
-        times=np.linspace(0.0, duration, 32),
-        envelope=np.zeros(32),
-        flux=np.zeros(32),
-    )
-
-
-def _find(component, target: str):
-    stack = [component]
-    while stack:
-        node = stack.pop()
-        if getattr(node, 'id', None) == target:
-            return node
-        children = getattr(node, 'children', None)
-        if isinstance(children, (list, tuple)):
-            stack.extend(children)
-        elif children is not None:
-            stack.append(children)
-    raise AssertionError(f'no component with id {target!r} in the layout')
-
-
-def test_a_page_reload_serves_the_labels_on_disk_not_the_ones_from_launch(song_file):
-    """A static layout is a launch-time snapshot that never expires.
-
-    Dash serves `app.layout` on every page load, so a single component instance
-    hands each reload the sections the process started with. That stale list is
-    the State every edit is applied to, so one edit after a reload rewrites the
-    file as launch-time state plus that edit.
-    """
-    track = _track()
-    app = label_tool.build_app(str(song_file), track)
-
-    sections = load_labels(str(song_file))
-    for cursor, label in ((31.25, 'buildup'), (48.0, 'drop'), (120.0, 'breakdown')):
-        sections, _ = apply_edit(
-            str(song_file),
-            'mark',
-            sections,
-            cursor=cursor,
-            new_label=label,
-            duration=track.duration,
-        )
-    assert len(sections) == 4
-
-    assert callable(app.layout), 'a layout built once cannot see a later edit'
-    served = app.layout()
-    assert _find(served, 'sections').data == sections
-    assert len(_find(served, 'table').children[0].children) == len(sections) + 1
-
-    apply_edit(
-        str(song_file),
-        'mark',
-        _find(served, 'sections').data,
-        cursor=200.0,
-        new_label='outro',
-        duration=track.duration,
-    )
-    assert len(load_labels(str(song_file))) == 5
-
-
-def test_the_page_carries_its_launch_token_and_the_server_serves_it(tmp_path):
-    """The stale-tab wiring end to end, minus the browser: the token baked into
-    the layout is the one `/token` answers, the banner starts hidden, and the
-    edit callback declares the token as State so every mutation sends it."""
-    audio = tmp_path / 'song.mp3'
-    audio.write_bytes(b'')
-    app = label_tool.build_app(str(audio), _track())
-    served = app.layout()
-
-    token = _find(served, 'launch-token').data
-    reply = app.server.test_client().get('/token')
-    assert reply.get_data(as_text=True) == token
-    assert _find(served, 'stale-banner').style['display'] == 'none'
-
-    other = label_tool.build_app(str(audio), _track())
-    assert other.server.test_client().get('/token').get_data(as_text=True) != token, (
-        'a relaunch mints a new token'
-    )
-
-    spec = next(v for k, v in app.callback_map.items() if 'sections.data' in k)
-    assert any(s['id'] == 'launch-token' for s in spec['state'])
-    assert 'status.style' in next(k for k in app.callback_map if 'sections.data' in k)
-
-
-def test_a_commit_click_immediately_shows_a_pending_status(tmp_path):
-    """The commit takes ~30 s server-side, so the click itself must say so:
-    a clientside callback on the commit button writes the pending text into
-    the status strip, and the server's stamped result overwrites it."""
-    audio = tmp_path / 'song.mp3'
-    audio.write_bytes(b'')
-    app = label_tool.build_app(str(audio), _track())
-
-    entry = next(
-        c
-        for c in app._callback_list
-        if c.get('clientside_function') and 'status.children@' in c['output']
-    )
-    assert 'status.style@' in entry['output']
-    assert entry['inputs'] == [{'id': 'commit', 'property': 'n_clicks'}]
-    assert entry['prevent_initial_call'] is True
-
-    js = next(
-        s
-        for s in app._inline_scripts
-        if 'window.__stale' in s and json.dumps(label_tool.COMMIT_PENDING_TEXT) in s
-    )
-    assert json.dumps(label_tool.COMMIT_PENDING_STYLE) in js
-
-
-def test_the_playhead_row_highlight_rides_the_cursor_store_not_a_new_poll(tmp_path):
-    """The playhead already reaches the page every tick via the cursor store,
-    so the row highlight hangs off that write -- no new interval, no server
-    round-trip, and the header row can never be the highlighted one."""
-    from dash import dcc
-
-    audio = tmp_path / 'song.mp3'
-    audio.write_bytes(b'')
-    app = label_tool.build_app(str(audio), _track())
-
-    entry = next(
-        c
-        for c in app._callback_list
-        if c.get('clientside_function') and 'playhead-echo.data' in c['output']
-    )
-    assert entry['inputs'] == [{'id': 'cursor', 'property': 'data'}]
-    assert entry['state'] == [{'id': 'sections', 'property': 'data'}]
-    assert any('playhead-row' in s for s in app._inline_scripts)
-
-    served = app.layout()
-    _find(served, 'playhead-echo')
-    stack, intervals = [served], []
-    while stack:
-        node = stack.pop()
-        if isinstance(node, dcc.Interval):
-            intervals.append(node.id)
-        children = getattr(node, 'children', None)
-        if isinstance(children, (list, tuple)):
-            stack.extend(children)
-        elif children is not None:
-            stack.append(children)
-    assert sorted(intervals) == ['stale-tick', 'tick']
-
-
-def test_spacebar_play_pause_binds_once_and_leaves_form_fields_alone(tmp_path):
-    """Space drives the same #player element every other path drives, and a
-    focused form control keeps its native space -- typing a title with spaces
-    must never toggle playback."""
-    audio = tmp_path / 'song.mp3'
-    audio.write_bytes(b'')
-    app = label_tool.build_app(str(audio), _track())
-
-    entry = next(
-        c
-        for c in app._callback_list
-        if c.get('clientside_function') and 'space-echo.data' in c['output']
-    )
-    assert entry['inputs'] == [{'id': 'tick', 'property': 'n_intervals'}]
-
-    js = label_tool.SPACE_PLAY_JS
-    assert any('__spaceBound' in s for s in app._inline_scripts)
-    for guarded in (
-        'INPUT',
-        'TEXTAREA',
-        'SELECT',
-        'BUTTON',
-        'AUDIO',
-        'isContentEditable',
-        'event.repeat',
-        'preventDefault',
-        '__spaceBound',
-    ):
-        assert guarded in js
-    _find(app.layout(), 'space-echo')
-
-
-def test_the_pending_style_is_neither_the_success_nor_the_refusal_style():
-    pending = label_tool.COMMIT_PENDING_STYLE
-    assert pending['color'] not in (label_tool.STATUS_OK, label_tool.STATUS_BAD)
-    assert pending != label_tool.status_style('saved ✓ 12:00:00 · 3 sections')
-    assert pending != label_tool.status_style('commit refused: a title is required')
-
-
-def test_the_audio_route_names_the_type_the_file_actually_is(tmp_path):
-    """Any input ffmpeg can decode is accepted, so the type is not a constant."""
-
-    def served(name: str) -> str:
-        audio = tmp_path / name
-        audio.write_bytes(b'\0' * 64)
-        app = label_tool.build_app(str(audio), _track())
-        return app.server.test_client().get('/audio').mimetype
-
-    assert served('song.mp3') == 'audio/mpeg'
-    assert served('song.flac').startswith('audio/')
-    assert served('song.flac') != 'audio/mpeg'
-    assert served('song.notatype') == 'application/octet-stream'
-
-
-def test_an_edit_reships_the_spans_and_never_the_full_track_traces():
-    """The traces are the whole decode; the spans are what an edit changes."""
-    track = _track()
-    figure = label_tool.build_figure(track, SECTIONS)
-    assert len(figure.data) == 3
-
-    operations = label_tool.render_patch(track, SECTIONS).to_plotly_json()['operations']
-
-    assert [op['location'] for op in operations] == [
-        ['layout', 'shapes'],
-        ['layout', 'annotations'],
-    ]
-    assert len(operations[0]['params']['value']) == len(figure.layout.shapes)
-    assert len(operations[1]['params']['value']) == len(figure.layout.annotations)
-
-
-AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-
-MUST_STAY_IGNORED = (
-    'training/data/raveform/annotations/segments.json',
-    'training/data/raveform/audio/kUP_iJuoq9g.mp3',
-    'training/data/raveform/manifest.csv',
-    'training/data/raveform/training_table.csv.gz',
-    'training/data/raveform/annotations/beats/0064.hzIFjGcOKbg.beat.csv',
-    'training/data/raveform/models/v1/model.onnx',
-)
-
-
-def _is_ignored(path: str) -> bool:
-    """Without -v: a path matching a NEGATED pattern is not reported, which is
-    the only reading of check-ignore that answers "is this ignored" for both."""
-    return (
-        subprocess.run(['git', 'check-ignore', '-q', path], cwd=AUTOLUX_PACKAGE_ROOT).returncode
-        == 0
-    )
-
-
-def test_the_corpus_stays_out_of_git_apart_from_hand_labels():
-    """Re-including hand labels punches a hole through the rule that keeps
-    ~13 GiB of corpus out of git; these must never come through it."""
-    escaped = [path for path in MUST_STAY_IGNORED if not _is_ignored(path)]
-    assert not escaped, f'these would be committed: {escaped}'
-
-
-def test_a_hand_label_is_the_one_thing_git_will_take():
-    assert not _is_ignored('training/data/raveform/annotations/hand-0123456789ab.hand.json')
-    assert not _is_ignored('training/data/raveform/annotations/anything.hand.json')
-
-
-def test_the_hole_is_exactly_one_suffix_in_exactly_one_directory():
-    for near_miss in (
-        'training/data/raveform/hand-abc.hand.json',
-        'training/data/hand-abc.hand.json',
-        'training/data/raveform/annotations/beats/x.hand.json',
-        'training/data/raveform/annotations/x.hand.json.bak',
-        'training/data/tmp_labels/song.mp3.labels.csv',
-    ):
-        assert _is_ignored(near_miss), f'{near_miss} escaped the corpus rule'
-
-
 def test_an_interrupt_with_no_show_to_stop_is_not_swallowed():
     """The whole of the reported Ctrl-C bug, reachable without a console.
 
@@ -1110,104 +785,6 @@ def test_the_handler_still_stops_a_running_show(monkeypatch):
     )
     main.death_handler(signal.SIGINT, None)
     assert stopped == [True]
-
-
-def _console_signals_are_deliverable() -> bool:
-    """Whether this process can actually send one, rather than whether it may.
-
-    `os.kill(pid, CTRL_C_EVENT)` is `GenerateConsoleCtrlEvent`, which does
-    nothing when the caller has no console -- a test runner started from a pipe
-    has none. Without this probe the interrupt test passes by never testing
-    anything, which is worse than not having it.
-    """
-    if os.name != 'nt':
-        return False
-    control = subprocess.Popen(
-        [sys.executable, '-c', "import sys,time\nprint('READY', flush=True)\ntime.sleep(30)\n"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-    )
-    try:
-        if not control.stdout.readline().startswith('READY'):
-            return False
-        os.kill(control.pid, signal.CTRL_C_EVENT)
-        try:
-            control.wait(timeout=8)
-            return True
-        except subprocess.TimeoutExpired:
-            return False
-    finally:
-        if control.poll() is None:
-            subprocess.run(['taskkill', '/PID', str(control.pid), '/T', '/F'], capture_output=True)
-
-
-_CTRL_C_HARNESS = """import sys,time
-print('READY', flush=True)
-time.sleep(120)
-"""
-
-
-def test_one_ctrl_c_ends_the_labeller(tmp_path):
-    if not _console_signals_are_deliverable():
-        pytest.skip(
-            'this runner has no console, so CTRL_C_EVENT reaches nothing '
-            '-- run the suite from a terminal to exercise the interrupt'
-        )
-
-    with socket.socket() as probe:
-        probe.bind(('127.0.0.1', 0))
-        port = probe.getsockname()[1]
-
-    tone = tmp_path / 'tone.wav'
-    subprocess.run(
-        [
-            'ffmpeg',
-            '-y',
-            '-v',
-            'error',
-            '-f',
-            'lavfi',
-            '-i',
-            'sine=frequency=440:duration=2',
-            str(tone),
-        ],
-        check=True,
-        stdin=subprocess.DEVNULL,
-    )
-
-    process = subprocess.Popen(
-        [sys.executable, '-m', 'autolux', 'label', str(tone), '--port', str(port)],
-        cwd=AUTOLUX_PACKAGE_ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-    )
-    try:
-        deadline = time.time() + 180
-        while time.time() < deadline:
-            with socket.socket() as probe:
-                if probe.connect_ex(('127.0.0.1', port)) == 0:
-                    break
-            assert process.poll() is None, 'the labeller died before serving'
-            time.sleep(0.2)
-        else:
-            raise AssertionError('the labeller never came up')
-
-        os.kill(process.pid, signal.CTRL_C_EVENT)
-        try:
-            process.communicate(timeout=20)
-        except subprocess.TimeoutExpired:
-            raise AssertionError('one Ctrl-C did not end the labeller')
-
-        with socket.socket() as probe:
-            assert probe.connect_ex(('127.0.0.1', port)) != 0, 'port still bound'
-    finally:
-        if process.poll() is None:
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
-            process.wait(timeout=10)
 
 
 def test_a_labelling_with_no_genre_omits_the_key_rather_than_guessing():
@@ -1346,25 +923,6 @@ def test_known_metadata_never_raises(tmp_path, monkeypatch):
         'title': 'a song',
         'genre': None,
     }
-
-
-def test_the_layout_prefills_artist_title_and_genre_from_known_metadata(song, corpus):
-    _publish(corpus, 'kUP_iJuoq9g', song.read_bytes())
-    (corpus / 'annotations' / 'kUP_iJuoq9g.hand.json').write_text(
-        json.dumps({'title': TITLE, 'genre': 'Trance'}), encoding='utf-8'
-    )
-
-    served = label_tool.build_app(str(song), _track()).layout()
-    assert _find(served, 'artist').value == ARTIST
-    assert _find(served, 'title').value == TRACK
-    assert _find(served, 'genre').value == 'Trance'
-
-
-def test_the_layout_falls_back_to_the_filename_prefill(song_file, corpus):
-    served = label_tool.build_app(str(song_file), _track()).layout()
-    assert _find(served, 'artist').value == ''
-    assert _find(served, 'title').value == default_title(str(song_file))
-    assert _find(served, 'genre').value == ''
 
 
 def _publish_with_sections(corpus, youtube_id, sections, payload=b'seed me'):

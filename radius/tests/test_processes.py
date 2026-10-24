@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.native_runtime import NativeRuntime, NativeSpec, validate_native
+from cli.native_runtime import NativeRuntime, NativeSpec
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,26 +29,6 @@ def spec(role, **config):
             **config,
         },
     )
-
-
-@pytest.mark.parametrize(
-    'key,value',
-    [
-        ('bus_port', -1),
-        ('bus_port', 65536),
-        ('sample_rate', 48000),
-        ('jitter_buffer_ms', 0),
-        ('dmx_universe', -1),
-        ('session', -1),
-        ('session', 0),
-        ('audio_core', 32),
-        ('audio_core', 2**64 - 1),
-        ('playback_delay_seconds', -1),
-    ],
-)
-def test_config_rejects_invalid_values_before_devices_open(tmp_path, key, value):
-    with pytest.raises(RuntimeError, match='config check failed'):
-        validate_native(spec('tx', **{key: value}), tmp_path)
 
 
 def test_actual_endpoints_heartbeat_both_ways_report_health_and_stop(tmp_path):

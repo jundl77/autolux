@@ -5,6 +5,8 @@
   contracts. Keep tests with each component.
 - Keep READMEs and AGENT files brief, describing current intent and contracts.
 - Fix discovered bugs and add meaningful regression tests.
+- Focus tests on transport, synchronization, lifecycle, model output and data
+  integrity. Do not add UI, configuration snapshot or static source-shape tests.
 - Build scripts and pre-commit hooks run Ruff and clang-format directly using
   the saved Python and C++ policy. Development helpers belong in root `tools/`,
   never business packages; do not add unused scaffolding or boilerplate.
