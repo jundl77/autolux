@@ -10,10 +10,10 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
-| `tools/` | Development validation |
+| `tools/` | Development checks and diagnostics |
 | `loopMIDI/`, `docs/` | Shared setup and documentation |
 
-Tests live in `autolux/tests/`, `cli/tests/` and `radius/tests/`.
+Each component keeps its own `tests/` directory.
 
 ## Setup
 
@@ -73,10 +73,9 @@ See [operations](docs/operations.md) and [Radius](radius/README.md).
 
 ## Formatting
 
-Both build scripts format Python and C++ before building. Run
-`uv run ruff format --check autolux cli radius tools` to check Python without writing;
-use `uv run clang-format --dry-run --Werror <files>` for C++.
-Pre-commit hooks format staged source files; re-stage any changes they make.
+Both build scripts format Python with Ruff and C++/Protobuf with clang-format.
+Run `uv run pre-commit run --all-files` to apply both saved policies across the
+repository. Commit hooks format staged source files; re-stage any changes they make.
 
 Python uses four spaces, a 100-column target and preserved quotes. C++ uses tabs
 at width four, a 120-column target, expanded function/control braces and blank
