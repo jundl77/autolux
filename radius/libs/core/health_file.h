@@ -1,10 +1,12 @@
 #pragma once
 #include <core/njson.h>
+#include <core/logger.h>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <windows.h>
+#include <system_error>
 
 namespace Radius {
 
@@ -28,8 +30,18 @@ inline void WriteHealth(njson health)
 		if (!output)
 			throw std::runtime_error("health file write failed");
 	}
-	if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-		throw std::runtime_error("health file replacement failed");
+	if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING))
+	{
+		const auto error = GetLastError();
+		if (error == ERROR_SHARING_VIOLATION || error == ERROR_ACCESS_DENIED)
+		{
+			// Windows readers may deny replacement. Keep the last complete report;
+			// the next health tick retries without stalling media delivery.
+			LOG(LL_WARN, "HEALTH", "health report replacement deferred (Windows error %lu)", error);
+			return;
+		}
+		throw std::system_error(error, std::system_category(), "health file replacement failed");
+	}
 }
 
 } // namespace Radius
