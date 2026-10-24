@@ -5,8 +5,6 @@ import pytest
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.telemetry_history import TelemetryHistory
 from autolux.simulate.system_metrics import (
-    build_telemetry_notices,
-    build_system_health_charts,
     build_metric_series,
 )
 
@@ -54,6 +52,11 @@ def test_history_is_bounded_by_both_time_and_number_of_samples():
     assert len(history.samples) == 301
     history.append(report(1000), {})
     assert len(history.samples) == 1
+
+
+def test_offline_report_omits_unmeasured_hardware_telemetry():
+    report = EventBuffer().to_report()
+    assert set(report) == {'duration_sec', 'beats', 'effects', 'intents', 'timing_log', 'metrics'}
 
 
 def test_session_report_retains_health_history_without_exposing_mutable_state():
@@ -124,62 +127,3 @@ def test_line_breaks_at_missing_reports_and_distinguishes_silence_from_no_signal
     assert len(x) == 4
     assert y[0] == pytest.approx(-6.0206)
     assert y[1:] == [None, -90, None]
-
-
-def test_charts_show_real_units_target_and_no_fabricated_data():
-    buffer = EventBuffer()
-    buffer.set_system_health(report())
-    plotted = build_system_health_charts(buffer.snapshot(), now=100)
-    assert len(plotted) == 6
-    assert plotted[0].data[0].y == (152,)
-    assert plotted[0].data[1].y == (150,)
-    assert plotted[0].data[1].line.dash == 'dot'
-    assert plotted[0].layout.yaxis.title.text == 'ms'
-    assert plotted[2].layout.yaxis.title.text == 'events/s'
-    assert plotted[2].data[0].y == (None,)  # No invented first counter delta.
-    assert plotted[2].layout.annotations[0].text == 'No measurements in this window'
-    assert all(not trace.connectgaps for fig in plotted for trace in fig.data)
-    old = build_system_health_charts(buffer.snapshot(), now=401)
-    assert all(len(trace.y) == 0 for fig in old for trace in fig.data)
-
-
-def test_alerts_only_show_exceptions_and_age_a_frozen_snapshot():
-    assert build_telemetry_notices({'system': report()}, now=100) == []
-    stale = build_telemetry_notices({'system': report()}, now=105)
-    assert '5 s old' in stale[0].children
-    state = report()
-    state['rx_age_seconds'] = 5
-    assert (
-        'Receiver telemetry unavailable'
-        in build_telemetry_notices({'system': state}, now=100)[0].children
-    )
-    assert 'No Radius telemetry' in build_telemetry_notices({}, now=100)[0].children
-
-
-def test_chart_refresh_reuses_show_snapshot_and_runs_at_most_once_per_second(monkeypatch):
-    from autolux.simulate.visualizer_app import build_app
-    from dash import no_update
-
-    buffer = EventBuffer()
-    buffer.set_system_health(report())
-    app = build_app(buffer)
-    callback = next(
-        entry['callback'].__wrapped__
-        for key, entry in app.callback_map.items()
-        if key.startswith('..metric-buffer')
-    )
-    monkeypatch.setattr('time.time', lambda: 100)
-    assert len(callback(None)) == 7
-    monkeypatch.setattr('time.time', lambda: 100.2)
-    assert all(value is no_update for value in callback(None))
-    monkeypatch.setattr('time.time', lambda: 101)
-    assert callback(None)[0] is not no_update
-
-
-def test_responsive_charts_keep_their_height_when_the_grid_changes_columns():
-    from autolux.simulate.system_metrics import build_system_health_panels
-
-    for panel in build_system_health_panels():
-        graph = panel.children[-1]
-        assert graph.responsive is True
-        assert graph.style['height'] == '218px'
