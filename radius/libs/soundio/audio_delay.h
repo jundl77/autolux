@@ -13,12 +13,12 @@ public:
 
 	size_t Frames() const
 	{
-		return mSamples.size() / mBytesPerFrame;
+		return mDelayBuffer.size() / mBytesPerFrame;
 	}
 
 private:
-	std::vector<char> mSamples;
-	size_t mPosition{0};
+	std::vector<char> mDelayBuffer;
+	size_t mBufferOffsetBytes{0};
 	size_t mBytesPerFrame{1};
 };
 

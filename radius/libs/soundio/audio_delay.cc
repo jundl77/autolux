@@ -12,22 +12,22 @@ void AudioDelay::Reset(double seconds, int sampleRate, int bytesPerFrame)
 		throw std::invalid_argument("invalid audio delay or frame geometry (delay must be 0..120 seconds)");
 
 	mBytesPerFrame = bytesPerFrame;
-	mSamples.assign(static_cast<size_t>(std::llround(seconds * sampleRate)) * mBytesPerFrame, 0);
-	mPosition = 0;
+	mDelayBuffer.assign(static_cast<size_t>(std::llround(seconds * sampleRate)) * mBytesPerFrame, 0);
+	mBufferOffsetBytes = 0;
 }
 
 void AudioDelay::Process(char* data, size_t size)
 {
 	if (size % mBytesPerFrame != 0)
 		throw std::invalid_argument("audio delay requires complete frames");
-	if (mSamples.empty())
+	if (mDelayBuffer.empty())
 		return;
 
 	while (size > 0)
 	{
-		const size_t count = (std::min)(size, mSamples.size() - mPosition);
-		std::swap_ranges(data, data + count, mSamples.data() + mPosition);
-		mPosition = (mPosition + count) % mSamples.size();
+		const size_t count = (std::min)(size, mDelayBuffer.size() - mBufferOffsetBytes);
+		std::swap_ranges(data, data + count, mDelayBuffer.data() + mBufferOffsetBytes);
+		mBufferOffsetBytes = (mBufferOffsetBytes + count) % mDelayBuffer.size();
 		data += count;
 		size -= count;
 	}

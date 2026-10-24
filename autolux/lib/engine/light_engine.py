@@ -70,7 +70,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._published_bpm: dict = {}
         self._intent_commits: int = 0
         self._audio_sec: float = 0.0
-        self._latency_logged_at: float | None = None
+        self._last_logged_latency_seconds: float | None = None
         self._committing_late: bool = False
         self._floor_armed: bool = True
         self._bypass_due_at: float | None = None
@@ -324,12 +324,12 @@ class LightEngine(IMusicAnalyserHandler):
             return
         latency = decoder.chain_latency_sec
         if (
-            self._latency_logged_at is not None
-            and abs(latency - self._latency_logged_at) < _LATENCY_LOG_STEP_SEC
+            self._last_logged_latency_seconds is not None
+            and abs(latency - self._last_logged_latency_seconds) < _LATENCY_LOG_STEP_SEC
         ):
             return
-        log = logging.info if self._latency_logged_at is None else logging.debug
-        self._latency_logged_at = latency
+        log = logging.info if self._last_logged_latency_seconds is None else logging.debug
+        self._last_logged_latency_seconds = latency
         log(
             f'[engine] chain latency {latency:.2f}s = '
             f'{decoder.feature_latency_sec:.2f}s features + '
