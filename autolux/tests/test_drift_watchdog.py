@@ -179,7 +179,7 @@ def test_forgiving_a_deliberate_stall_prevents_the_shed():
     _feed(dog, clock, 2000, BUF)
 
     clock.advance(0.2)
-    dog.forgive(0.2)
+    dog.exclude_pause_from_drift(0.2)
     _feed(dog, clock, 200, BUF)
     assert dog.level is ShedLevel.NONE
     assert abs(dog.total_drift_sec) < 0.05

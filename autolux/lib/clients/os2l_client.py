@@ -40,7 +40,7 @@ def on_service_state_change(
     zeroconf: Zeroconf, service_type: str, name: str, state_change: ServiceStateChange
 ) -> None:
     global global_services, service_discovery_error
-    logging.info(
+    logging.debug(
         f'[os2l-discovery] service state changed: [name: {name}, type {service_type}, state change: {state_change}]'
     )
 
@@ -55,9 +55,9 @@ def on_service_state_change(
     if state_change in (ServiceStateChange.Added, ServiceStateChange.Updated):
         try:
             service_info: Optional[ServiceInfo] = zeroconf.get_service_info(service_type, name)
-        except:
-            logging.warning(
-                f'[os2l-discovery] errored out on finding service info for name={name}, service_type={service_type}, state_change={state_change.name}'
+        except Exception as error:
+            logging.debug(
+                '[os2l-discovery] cannot resolve %s (%s): %s', name, state_change.name, error
             )
             return
         if service_info:
@@ -69,7 +69,7 @@ def on_service_state_change(
             os2l_service = Os2lService(
                 kept_addresses[0], service_info.port, service_info.name, service_info.server
             )
-            logging.info(f'[os2l-discovery] found: {os2l_service}')
+            logging.debug(f'[os2l-discovery] found: {os2l_service}')
             global_services[:] = [
                 service for service in global_services if service.service_name != service_info.name
             ]
@@ -97,7 +97,7 @@ class Os2lClient:
             raise RuntimeError(f'Expected one local OS2L service, found {len(global_services)}')
         service = global_services[0]
         self.os2l_sender.start(service.ipv4_address, service.port)
-        logging.info(f'[os2l] connected to service: {service})')
+        logging.info('[os2l] SoundSwitch connected at %s:%d', service.ipv4_address, service.port)
 
     def stop(self):
         self.os2l_sender.stop()

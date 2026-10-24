@@ -30,7 +30,7 @@ class DriftWatchdog:
         self._buffer_sec = buffer_sec
         self._clock = clock
         self._window_sec = window_sec
-        self._settling = threading.Lock()
+        self._state_lock = threading.Lock()
         self.reset()
 
     def reset(self) -> None:
@@ -46,8 +46,8 @@ class DriftWatchdog:
         self._shed_at: deque[float] = deque()
         self._first_wall: float | None = None
         self._calm_since: float | None = None
-        self._said: dict = {}
-        self._suppressed: dict = {}
+        self._last_log_at: dict = {}
+        self._suppressed_log_counts: dict = {}
 
     @property
     def level(self) -> ShedLevel:
@@ -57,7 +57,7 @@ class DriftWatchdog:
     def fault(self) -> str | None:
         return self._fault
 
-    def forgive(self, sec: float) -> None:
+    def exclude_pause_from_drift(self, sec: float) -> None:
         if sec <= 0:
             return
         self._samples = deque((w + sec, s) for w, s in self._samples)
@@ -79,13 +79,15 @@ class DriftWatchdog:
         if self._fault != kind:
             was = self._fault
             self._fault = kind
-            self._settle(f'stage fault: {kind}' if was is None else f'stage fault: {was} -> {kind}')
+            self._update_degradation_level(
+                f'stage fault: {kind}' if was is None else f'stage fault: {was} -> {kind}'
+            )
         return self._level
 
     def report_healthy(self) -> ShedLevel:
         if self._fault is not None:
             self._fault = None
-            self._settle('stage healthy')
+            self._update_degradation_level('stage healthy')
         return self._level
 
     def observe(self) -> ShedLevel:
@@ -115,7 +117,7 @@ class DriftWatchdog:
             self._calm_since = None
             if not self._drift_shed:
                 self._drift_shed = True
-                self._settle(
+                self._update_degradation_level(
                     f'drift {self._drift_sec:+.3f}s over a '
                     f'{self._window_sec:.0f}s window, peak '
                     f'{self.peak_drift_sec:.3f}s'
@@ -128,10 +130,10 @@ class DriftWatchdog:
             elif wall - self._calm_since >= self._window_sec:
                 self._drift_shed = False
                 self._calm_since = None
-                self._settle(f'pacing recovered ({self._drift_sec:+.3f}s)')
+                self._update_degradation_level(f'pacing recovered ({self._drift_sec:+.3f}s)')
 
-    def _settle(self, reason: str) -> None:
-        with self._settling:
+    def _update_degradation_level(self, reason: str) -> None:
+        with self._state_lock:
             target = ShedLevel.NN_SHED if self._drift_shed or self._fault else ShedLevel.NONE
             if target is self._level:
                 return
@@ -144,10 +146,12 @@ class DriftWatchdog:
                 self._shed_at.append(now)
                 while self._shed_at[0] < now - SHED_RATE_WINDOW_SEC:
                     self._shed_at.popleft()
-            last = self._said.get(direction)
+            last = self._last_log_at.get(direction)
             if last is not None and now - last < _LOG_INTERVAL_SEC:
-                self._suppressed[direction] = self._suppressed.get(direction, 0) + 1
+                self._suppressed_log_counts[direction] = (
+                    self._suppressed_log_counts.get(direction, 0) + 1
+                )
                 return
-            self._said[direction] = now
-            more = self._suppressed.pop(direction, 0)
+            self._last_log_at[direction] = now
+            more = self._suppressed_log_counts.pop(direction, 0)
             logging.warning(message + (f' [+{more} more since the last line]' if more else ''))

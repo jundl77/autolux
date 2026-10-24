@@ -324,7 +324,7 @@ async def test_the_rhythm_heartbeat_survives_repeated_song_resets(caplog):
     clock = VirtualClock()
     analyser = _make_analyser(clock)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         for _ in range(40):
             clock.advance(0.3)
             analyser._reset_state()
@@ -340,7 +340,7 @@ async def test_the_rhythm_heartbeat_actually_fires(caplog):
     clock = VirtualClock()
     analyser = _make_analyser(clock)
     clock.advance(11.0)
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         analyser._log_rhythm_state(clock.now())
     assert any('[rhythm]' in r.message for r in caplog.records)
 
@@ -351,7 +351,7 @@ async def test_the_heartbeat_rearms_rather_than_repeating_every_buffer(caplog):
     clock = VirtualClock()
     analyser = _make_analyser(clock)
     clock.advance(11.0)
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         analyser._log_rhythm_state(clock.now())
         clock.advance(0.1)
         analyser._log_rhythm_state(clock.now())

@@ -42,7 +42,7 @@ class StubMidiClient:
     async def set_autoloop(self, auto_loop: MidiChannel):
         e = _event('set_autoloop', self._clock.monotonic(), channel=auto_loop.name)
         self.events.append(e)
-        log.info(f'[stub_midi] set_autoloop: {auto_loop.name}')
+        log.debug(f'[stub_midi] set_autoloop: {auto_loop.name}')
 
     async def set_special_effect(self, special_effect: MidiChannel, duration_sec: int):
         e = _event(
@@ -52,12 +52,12 @@ class StubMidiClient:
             duration_sec=duration_sec,
         )
         self.events.append(e)
-        log.info(f'[stub_midi] set_special_effect: {special_effect.name}')
+        log.debug(f'[stub_midi] set_special_effect: {special_effect.name}')
 
     async def set_color_override(self, color: MidiChannel):
         e = _event('set_color_override', self._clock.monotonic(), channel=color.name)
         self.events.append(e)
-        log.info(f'[stub_midi] set_color_override: {color.name}')
+        log.debug(f'[stub_midi] set_color_override: {color.name}')
 
     async def clear_color_overrides(self):
         pass

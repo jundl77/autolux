@@ -1,10 +1,19 @@
 import pytest
+import logging
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
     LightIntent,
     EffectType,
     INTENT_EFFECTS,
 )
+
+
+async def test_applied_lighting_change_has_one_useful_info_line(effect_controller, caplog):
+    with caplog.at_level(logging.INFO):
+        await effect_controller.change_effect(LightIntent.BUILDUP)
+    assert len(caplog.records) == 1
+    assert 'intent=BUILDUP' in caplog.text
+    assert 'effect=' + effect_controller.last_effect.midi_channel.name in caplog.text
 
 
 def test_select_new_random_effect_avoids_previous(effect_controller):

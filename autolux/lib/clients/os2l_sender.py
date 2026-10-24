@@ -83,8 +83,7 @@ class Os2lSender:
             raise RuntimeError('OS2L output queue is full') from None
 
     def _run_sending_thread(self):
-        logging.info(f'[os2l] started sender thread')
-        logging.info(f'[os2l] connecting to {self.dest_ipv4_address}:{self.dest_port}')
+        logging.debug('[os2l] sender connecting to %s:%d', self.dest_ipv4_address, self.dest_port)
         server_address = (self.dest_ipv4_address, self.dest_port)
         try:
             self.os2l_socket.settimeout(1.0)
@@ -176,7 +175,7 @@ class Os2lSender:
         if not 1 <= frequency <= 60000:
             raise ValueError('OS2L frequency must be between 1 and 60000 milliseconds')
         self.send_update_frequency = datetime.timedelta(milliseconds=frequency)
-        logging.info('[os2l] setting update frequency to %d ms', frequency)
+        logging.debug('[os2l] setting update frequency to %d ms', frequency)
         self._send_message(os2l_messages.logon_message())
         self.logon_complete = True
         self._ready.set()

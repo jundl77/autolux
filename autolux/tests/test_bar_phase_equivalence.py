@@ -24,14 +24,14 @@ import phase_tracking as pt  # noqa: E402
 
 from autolux.lib.analyser.bar_tracker import FPS, TrackerChunk  # noqa: E402
 from autolux.lib.engine.bar_phase import (
-    AGG_HALFWIDTH,
-    BETA,
-    GAMMA,  # noqa: E402
-    GATE_T,
+    VOTE_AGGREGATION_RADIUS_FRAMES,
+    DOWNBEAT_EVIDENCE_WEIGHT,
+    DOWNBEAT_PROBABILITY_CEILING_MARGIN,  # noqa: E402
+    DOWNBEAT_PROBABILITY_THRESHOLD,
     LAG_BEATS,
     MAX_ADVANCE,
-    SIGMA,
-    ETA,
+    INTERVAL_RATIO_STANDARD_DEVIATION,
+    BEAT_SLIP_PRIOR_WEIGHT,
     BarPhaseFusion,
 )
 
@@ -68,7 +68,7 @@ def build_emission(beats, p, avail_t, gate_t, beta):
         pj = p[j]
         if not np.isfinite(pj) or pj < gate_t:
             continue
-        strength = _logit(min(pj, 1.0 - GAMMA)) - _logit(gate_t)
+        strength = _logit(min(pj, 1.0 - DOWNBEAT_PROBABILITY_CEILING_MARGIN)) - _logit(gate_t)
         r = int(np.searchsorted(beats, avail_t[j], side="left"))
         if r >= n:
             continue
@@ -77,11 +77,16 @@ def build_emission(beats, p, avail_t, gate_t, beta):
 
 
 def offline_committed(beats, db_logit, avail_frame):
-    p, avail_t = per_beat_votes(beats, db_logit, avail_frame, AGG_HALFWIDTH)
-    emission = build_emission(beats, p, avail_t, GATE_T, BETA)
+    p, avail_t = per_beat_votes(beats, db_logit, avail_frame, VOTE_AGGREGATION_RADIUS_FRAMES)
+    emission = build_emission(
+        beats, p, avail_t, DOWNBEAT_PROBABILITY_THRESHOLD, DOWNBEAT_EVIDENCE_WEIGHT
+    )
     ratios = pt.interval_ratios(beats, window=8)
     log_transition = pt.advance_log_weights(
-        ratios[1:], sigma=SIGMA, eta=ETA, max_advance=MAX_ADVANCE
+        ratios[1:],
+        sigma=INTERVAL_RATIO_STANDARD_DEVIATION,
+        eta=BEAT_SLIP_PRIOR_WEIGHT,
+        max_advance=MAX_ADVANCE,
     )
     log_start = np.log(np.asarray(pt.LIVE_START_PRIOR, dtype=np.float64))
     decided = pt.fixed_lag_viterbi(log_transition, emission, log_start, LAG_BEATS)

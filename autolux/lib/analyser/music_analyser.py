@@ -38,7 +38,7 @@ class MusicAnalyser:
         self.handler: IMusicAnalyserHandler = handler
         self.note_clicks: bool = note_clicks
 
-        self.click_sound: float = 0.15 * np.sin(
+        self.click_sound: np.ndarray = 0.15 * np.sin(
             2.0 * np.pi * np.arange(self.buffer_size) / self.buffer_size * self.sample_rate / 3000.0
         )
 
@@ -153,7 +153,7 @@ class MusicAnalyser:
         window = (now - (self._rhythm_log_at - _RHYTHM_LOG_INTERVAL)).total_seconds()
         self._rhythm_log_at = now + _RHYTHM_LOG_INTERVAL
         drift = self.get_drift_status()
-        logging.info(
+        logging.debug(
             f'[rhythm] madmom {self._beats_since_log} beats '
             f'({self._beats_since_log / window:.2f}/s) '
             f'over {window:.1f}s | bpm={self.get_bpm():.1f} '

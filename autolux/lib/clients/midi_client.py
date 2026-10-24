@@ -86,13 +86,13 @@ class MidiClient:
         await self._process_delayed_effects()
 
     async def set_autoloop(self, auto_loop: MidiChannel):
-        logging.info(f'[midi] set autoloop: {auto_loop.name}')
+        logging.debug(f'[midi] set autoloop: {auto_loop.name}')
         self.midi_out.send_message(mm.get_midi_msg_on(auto_loop))
         await asyncio.sleep(0.01)
         self.midi_out.send_message(mm.get_midi_msg_off(auto_loop))
 
     async def set_special_effect(self, special_effect: MidiChannel, duration_sec: int):
-        logging.info(f'[midi] set special effect: {special_effect.name}')
+        logging.debug(f'[midi] set special effect: {special_effect.name}')
         now = datetime.datetime.now()
         self.midi_out.send_message(mm.get_midi_msg_on(special_effect))
         self._pending_effects.append(
@@ -125,10 +125,10 @@ class MidiClient:
         for effect in self._pending_effects:
             if not effect.is_done and now - effect.start_ts > effect.duration:
                 if effect.action == EffectAction.ACTIVATE:
-                    logging.info(f'[midi] activating delayed effect: {effect}')
+                    logging.debug(f'[midi] activating delayed effect: {effect}')
                     self.midi_out.send_message(mm.get_midi_msg_on(effect.effect))
                 elif effect.action == EffectAction.DEACTIVATE:
-                    logging.info(f'[midi] deactivating effect: {effect}')
+                    logging.debug(f'[midi] deactivating effect: {effect}')
                     self.midi_out.send_message(mm.get_midi_msg_off(effect.effect))
                 else:
                     raise RuntimeError(f"unknown EffectAction: {effect.action}")

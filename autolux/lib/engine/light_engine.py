@@ -164,7 +164,9 @@ class LightEngine(IMusicAnalyserHandler):
             yield
         finally:
             if self._watchdog is not None:
-                self._watchdog.forgive(min(self._clock.monotonic() - started, SETTLE_SEC))
+                self._watchdog.exclude_pause_from_drift(
+                    min(self._clock.monotonic() - started, SETTLE_SEC)
+                )
 
     def _at_the_room(self, label: str, action) -> None:
         if self.command_queue:
@@ -195,7 +197,6 @@ class LightEngine(IMusicAnalyserHandler):
             self.section_decoder.reset()
 
     async def on_cycle(self):
-        await self.effect_controller.process_effects()
         self.overlay_client.flush_messages()
 
     def _publish_shed_state(self) -> None:
@@ -240,7 +241,7 @@ class LightEngine(IMusicAnalyserHandler):
         current_second = self.analyser.get_song_current_duration().total_seconds()
         rms_energy = self.analyser.get_rms_energy()
 
-        logging.info(f'[engine] [{current_second:.2f}s] beat #{beat_number}  bpm={bpm:.1f}')
+        logging.debug(f'[engine] [{current_second:.2f}s] beat #{beat_number}  bpm={bpm:.1f}')
         if self.event_buffer:
             self.event_buffer.add_beat(bpm, bpm_changed, rms=rms_energy)
 
@@ -275,7 +276,7 @@ class LightEngine(IMusicAnalyserHandler):
         for decision in decisions:
             intent = intent_for_class(decision.label)
 
-            logging.info(
+            logging.debug(
                 f'[engine] bar {decision.bar} @ {decision.start_sec:.2f}s  '
                 f'{decision.label} → {intent.name}'
             )
@@ -316,7 +317,7 @@ class LightEngine(IMusicAnalyserHandler):
     def _log_chain_latency(self) -> None:
         decoder = self.section_decoder
         if decoder is None:
-            logging.info(
+            logging.debug(
                 f'[engine] no section decoder — holding intent; '
                 f'playback delay {self._playback_delay_sec:.2f}s'
             )
@@ -327,15 +328,16 @@ class LightEngine(IMusicAnalyserHandler):
             and abs(latency - self._latency_logged_at) < _LATENCY_LOG_STEP_SEC
         ):
             return
+        log = logging.info if self._latency_logged_at is None else logging.debug
         self._latency_logged_at = latency
-        logging.info(
+        log(
             f'[engine] chain latency {latency:.2f}s = '
             f'{decoder.feature_latency_sec:.2f}s features + '
             f'{latency - decoder.feature_latency_sec:.2f}s decoder '
             f'({decoder.params.lag_bars} + 1 lag × {decoder.bar_sec:.3f}s bars) | '
             f'playback delay {self._playback_delay_sec:.2f}s → queue delay '
             f'{max(0.0, self._playback_delay_sec - latency):.2f}s — ensure '
-            f'native audio sender playback_delay_seconds matches'
+            f'Radius TX playback_delay_seconds matches'
         )
 
     async def _commit_intent(self, intent: LightIntent, age_sec: float) -> None:
@@ -393,7 +395,7 @@ class LightEngine(IMusicAnalyserHandler):
             await self.command_queue.enqueue('overlay', lambda: self._show_light_bar(dmx_data))
         else:
             self.overlay_client.update_overlay_data(OverlayEffect.LIGHT_BAR_24, dmx_data)
-        logging.info('[engine] note detected')
+        logging.debug('[engine] note detected')
 
     async def _show_light_bar(self, dmx_data: list) -> None:
         self.overlay_client.update_overlay_data(OverlayEffect.LIGHT_BAR_24, dmx_data)
@@ -420,7 +422,7 @@ class LightEngine(IMusicAnalyserHandler):
     async def _apply_refresh(self, committed: int) -> None:
         if self._intent_commits != committed or self._current_intent is None:
             return
-        logging.info(
+        logging.debug(
             f'[engine] boundary inside {self._current_intent.name} — refreshing the effect'
         )
         await self.effect_controller.change_effect(self._current_intent)
@@ -460,9 +462,5 @@ class LightEngine(IMusicAnalyserHandler):
         bpm = int(self.analyser.get_bpm())
         current_second = int(self.analyser.get_song_current_duration().total_seconds())
         intent_name = self._current_intent.name if self._current_intent else 'None'
-        logging.info(f'[engine] == current state ==')
-        logging.info(f'[engine]   realtime_bpm:    {bpm}')
-        logging.info(f'[engine]   intent:          {intent_name}')
-        logging.info(f'[engine]   current_second:  {current_second}')
-        logging.info(f'[engine]   last_effect:     {self.effect_controller.last_effect}')
+        logging.info('[music] bpm=%d | intent=%s | position=%ds', bpm, intent_name, current_second)
         self._log_chain_latency()

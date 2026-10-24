@@ -49,11 +49,8 @@ class EffectController:
         )
         self.last_color_override_time: datetime.datetime = self._clock.now()
 
-    async def process_effects(self):
-        pass
-
     async def change_effect(self, intent: LightIntent) -> None:
-        logging.info(f'[effect_controller] change_effect called, intent={intent.name}')
+        logging.debug('[lighting] selecting effect for %s', intent.name)
         pool = INTENT_EFFECTS[intent]
         new_effect = self._select_new_random_effect(pool, self.last_effect)
 
@@ -61,6 +58,12 @@ class EffectController:
             await self._apply_special_effect(new_effect)
         else:
             await self._apply_autoloop(new_effect)
+        name = (
+            new_effect.midi_channel.name
+            if new_effect.source == EffectSource.MIDI
+            else new_effect.overlay_effect.name
+        )
+        logging.info('[lighting] intent=%s | effect=%s', intent.name, name)
 
     def reset_state(self):
         self.last_effect = Effect(
@@ -88,9 +91,7 @@ class EffectController:
             await self.midi_client.set_special_effect(special_effect.midi_channel, duration_sec=30)
         elif special_effect.source == EffectSource.OVERLAY:
             effect_name = special_effect.overlay_effect.name
-        logging.info(
-            f'[effect_controller] applying special effect {effect_name}, type={special_effect.type.name}'
-        )
+        logging.debug('[lighting] applying special effect %s', effect_name)
         if self.event_buffer and effect_name:
             self.event_buffer.add_effect(effect_name, 'SPECIAL_EFFECT')
         self.last_special_effect = special_effect
@@ -98,7 +99,7 @@ class EffectController:
     async def _apply_autoloop(self, autoloop: Effect):
         assert autoloop.type == EffectType.AUTOLOOP
         assert autoloop.source == EffectSource.MIDI
-        logging.info(f'[effect_controller] changing autoloop to {autoloop.midi_channel.name}')
+        logging.debug('[lighting] applying autoloop %s', autoloop.midi_channel.name)
         await self.midi_client.set_autoloop(autoloop.midi_channel)
         if self.event_buffer:
             self.event_buffer.add_effect(autoloop.midi_channel.name, 'AUTOLOOP')
@@ -109,7 +110,7 @@ class EffectController:
         now = self._clock.now()
         time_diff = now - self.last_color_override_time
         if time_diff < datetime.timedelta(seconds=APPLY_COLOR_OVERRIDE_INTERVAL_SEC):
-            logging.info(
+            logging.debug(
                 f'[effect_controller] set color override in the last {APPLY_COLOR_OVERRIDE_INTERVAL_SEC} sec,'
                 f' will set it again in {APPLY_COLOR_OVERRIDE_INTERVAL_SEC - time_diff.seconds} sec'
             )

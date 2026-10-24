@@ -135,6 +135,22 @@ def engine(
     return light, command_queue, clock, midi
 
 
+async def test_beat_and_note_details_are_verbose_but_music_status_is_concise(caplog):
+    light, _, _, _ = engine()
+    with caplog.at_level(logging.INFO):
+        for beat in range(20):
+            await light.on_beat(beat, 128, False)
+            await light.on_note()
+        await light.on_10sec_callback()
+    assert len(caplog.records) == 1
+    assert '[music] bpm=128' in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        await light.on_beat(21, 128, False)
+        await light.on_note()
+    assert 'beat #21' in caplog.text and 'note detected' in caplog.text
+
+
 def decisions(*labels, start=0):
     return [BarDecision(start + i, label, (start + i) * 1.9) for i, label in enumerate(labels)]
 
@@ -520,7 +536,7 @@ class ForgivingWatchdog:
     def __init__(self):
         self.forgiven: list = []
 
-    def forgive(self, sec):
+    def exclude_pause_from_drift(self, sec):
         self.forgiven.append(sec)
 
 
@@ -1073,7 +1089,7 @@ async def test_the_deliberate_stall_forgives_the_settle_and_not_the_rest():
     light._watchdog = watchdog
 
     forgiven = []
-    watchdog.forgive = forgiven.append
+    watchdog.exclude_pause_from_drift = forgiven.append
     with light._deliberate_stall():
         clock.advance(SETTLE_SEC * 10)
 

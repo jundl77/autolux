@@ -11,7 +11,6 @@ from pathlib import Path
 from autolux.lib.main import AutoluxController, PLAYBACK_DELAY_SEC
 from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
 
-logging.basicConfig(format='%(asctime)s [%(levelname)s ] %(message)s', level=logging.INFO)
 global_app = None
 
 
@@ -85,7 +84,7 @@ def death_handler(signum, frame):
     Ctrl-C looks broken. Raise what the default handler would have."""
     if global_app is None:
         raise KeyboardInterrupt
-    logging.info('[DEATH] caught signal "SIGINT/SIGTERM", stopping')
+    logging.info('[main] stop requested; shutting down controller and receiver')
     global_app.stop()
 
 
@@ -125,6 +124,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparser.set_defaults(func=list_cmd)
 
     subparser = subparsers.add_parser('run', help='Create the specified instance')
+    subparser.add_argument(
+        '--verbose', action='store_true', help='Include beat, note and protocol diagnostics'
+    )
     subparser.add_argument(
         'midi_port_index',
         help='The midi port index of the midi device to use. Available devices are shown by running \'list\'',
@@ -205,6 +207,9 @@ async def main():
     if arguments and arguments[0] == '--prod':
         arguments = ['prod', *arguments[1:]]
     args = parser.parse_args(arguments)
+    from autolux.lib.logging_config import configure_logging
+
+    configure_logging(verbose=getattr(args, 'verbose', False))
 
     if not hasattr(args, 'func'):
         parser.print_help()
