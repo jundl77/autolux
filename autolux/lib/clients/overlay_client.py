@@ -55,7 +55,8 @@ class DmxOverlays:
         self.dmx_frame: DmxFrame = DmxFrame()
 
     def add_overlay(self, start: int, length: int, dmx_data: list[int], is_active: bool):
-        assert self.current_index < MAX_NUM_DMX_DEVICES, "out of available DMX devices"
+        if self.current_index + 1 >= MAX_NUM_DMX_DEVICES:
+            raise ValueError("out of available DMX devices")
         assert start + length <= 512, f"start + length has to be < 512"
         self.current_index += 1
         self.overlays[self.current_index] = DmxOverlay(start, length, is_active)
@@ -160,7 +161,7 @@ class OverlayClient:
         )
         self.effects_to_overlay_index[effect] = index
         self._should_flush = True
-        logging.info(f'[overlay] added overlay effect: {effect.name}')
+        logging.debug(f'[overlay] added overlay effect: {effect.name}')
 
     def _build_message(self, universe: int, overlays: DmxOverlays) -> bytes:
         msg = pack('=IBH', OVERLAY_PROTOCOL_ID, universe, overlays.get_num_overlays())
