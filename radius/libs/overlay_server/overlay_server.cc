@@ -1,6 +1,6 @@
 #include "overlay_server.h"
-#include <proto/overlay_proto.h>
-#include <proto/validation.h>
+#include <proto/radius/overlay_proto.h>
+#include <proto/radius/validation.h>
 #include <core/logger.h>
 #include <core/throw_if.h>
 #include <core/types.h>

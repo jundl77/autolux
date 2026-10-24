@@ -1,6 +1,6 @@
 #pragma once
 
-#include "overlay_proto.h"
+#include <proto/radius/overlay_proto.h>
 #include <cstring>
 
 namespace Radius {

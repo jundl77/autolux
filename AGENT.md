@@ -1,7 +1,8 @@
 # Autolux development
 
 - `cli/` owns lifecycle and deployment; `autolux/` owns analysis, control and data;
-  `radius/` owns transport and hardware output. Keep tests with each component.
+  `radius/` owns transport and hardware output; `proto/` owns shared protocol
+  contracts. Keep tests with each component.
 - Keep READMEs and AGENT files brief, describing current intent and contracts.
 - Fix discovered bugs and add meaningful regression tests.
 - Build scripts and pre-commit hooks run Ruff and clang-format directly using

@@ -41,16 +41,17 @@ def test_build_accepts_normal_stderr_but_propagates_package_failure(tmp_path, ex
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows PowerShell build workflow')
-def test_native_formatting_skips_deleted_tracked_files(tmp_path):
+@pytest.mark.parametrize('source_directory', ['radius', 'proto/radius'])
+def test_native_formatting_skips_deleted_tracked_files(tmp_path, source_directory):
     shutil.copyfile(
         Path(__file__).resolve().parents[2] / 'build-radius.ps1', tmp_path / 'build-radius.ps1'
     )
-    native = tmp_path / 'radius'
-    native.mkdir()
+    native = tmp_path / source_directory
+    native.mkdir(parents=True)
     deleted = native / 'old.proto'
     deleted.write_text('syntax = "proto3";\n')
     subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
-    subprocess.run(['git', 'add', 'radius/old.proto'], cwd=tmp_path, check=True)
+    subprocess.run(['git', 'add', f'{source_directory}/old.proto'], cwd=tmp_path, check=True)
     deleted.rename(native / 'radius.proto')
     (tmp_path / 'uv.cmd').write_text('@echo off\necho %*>>"%~dp0uv-invocations.txt"\nexit /b 0\n')
     environment = dict(os.environ, PATH=f'{tmp_path}{os.pathsep}{os.environ["PATH"]}')
@@ -71,5 +72,5 @@ def test_native_formatting_skips_deleted_tracked_files(tmp_path):
     # This fixture stops after formatting, before any compiler can run.
     assert result.returncode != 0
     invocations = (tmp_path / 'uv-invocations.txt').read_text()
-    assert 'clang-format -i --style=file radius/radius.proto' in invocations
+    assert f'clang-format -i --style=file {source_directory}/radius.proto' in invocations
     assert 'old.proto' not in invocations

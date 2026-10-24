@@ -1,5 +1,5 @@
 #pragma once
-#include "overlay_proto.h"
+#include <proto/radius/overlay_proto.h>
 #include <array>
 #include <algorithm>
 #include <cstring>

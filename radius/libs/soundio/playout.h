@@ -1,7 +1,7 @@
 #pragma once
 #include <core/spsc_queue.h>
 #include <core/clock.h>
-#include <proto/radius.h>
+#include <proto/radius/radius.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>

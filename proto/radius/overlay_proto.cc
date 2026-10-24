@@ -1,4 +1,4 @@
-#include "overlay_proto.h"
+#include <proto/radius/overlay_proto.h>
 #include <cstdint>
 #include <stdexcept>
 #include <string>

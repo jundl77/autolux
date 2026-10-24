@@ -8,7 +8,7 @@ try {
     $ErrorActionPreference = 'Continue'
     uv run --locked --extra dev ruff format autolux cli radius tools
     if ($LASTEXITCODE -ne 0) { throw 'Python formatting failed.' }
-    $nativeSources = @(git -c core.quotepath=false ls-files --cached --others --exclude-standard -- radius |
+    $nativeSources = @(git -c core.quotepath=false ls-files --cached --others --exclude-standard -- radius proto |
         Where-Object {
             $_ -match '\.(cc|cpp|h|hpp|proto)$' -and
             $_ -notmatch '^radius/(x_|cmake-build-)' -and

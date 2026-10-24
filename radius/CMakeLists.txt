@@ -17,6 +17,7 @@ add_subdirectory(x_njson)
 add_subdirectory(x_libsoundio)
 
 add_subdirectory(libs)
+add_subdirectory(../proto/radius proto/radius)
 add_subdirectory(radius_tx)
 add_subdirectory(radius_rx)
 

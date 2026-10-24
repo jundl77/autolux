@@ -14,6 +14,6 @@ repos:
         entry: uv run --locked --extra dev clang-format -i --style=file
         language: system
         types_or: [c, c++, proto]
-        files: ^radius/
+        files: ^(radius|proto)/
         exclude: ^radius/(x_|cmake-build-)
         require_serial: true

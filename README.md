@@ -10,6 +10,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
+| `proto/radius/` | Shared protocol schema and C++ codecs |
 | `tools/` | Development checks and diagnostics |
 | `loopMIDI/`, `docs/` | Shared setup and documentation |
 

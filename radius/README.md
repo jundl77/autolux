@@ -14,7 +14,7 @@ SSH. Each binary also accepts a config path, or `--check-config <path>`.
 ## Timing and transport
 
 The bus uses Google Protocol Buffers in UDP datagrams no larger than 1200 bytes.
-[`libs/proto/radius.proto`](libs/proto/radius.proto) defines the versioned envelope,
+[`proto/radius/radius.proto`](../proto/radius/radius.proto) defines the versioned envelope,
 audio, lighting, heartbeats and typed receiver telemetry. Session IDs and audio
 watermarks use `fixed64`; samples use packed protobuf floats at 44.1 kHz stereo.
 TX holds the show delay; RX starts with a 150 ms jitter target and uses

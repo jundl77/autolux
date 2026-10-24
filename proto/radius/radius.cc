@@ -1,4 +1,4 @@
-#include "radius.h"
+#include <proto/radius/radius.h>
 #include <cmath>
 
 namespace Radius::Bus {

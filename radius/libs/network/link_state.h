@@ -1,5 +1,5 @@
 #pragma once
-#include <proto/radius.h>
+#include <proto/radius/radius.h>
 #include <cstdint>
 #include <core/clock.h>
 

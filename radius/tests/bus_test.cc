@@ -1,6 +1,6 @@
-#include <proto/radius.h>
-#include <proto/dmx_state.h>
-#include <proto/artdmx.h>
+#include <proto/radius/radius.h>
+#include <proto/radius/dmx_state.h>
+#include <proto/radius/artdmx.h>
 #include <network/link_state.h>
 #include <soundio/playout.h>
 #include <core/spsc_queue.h>

@@ -5,7 +5,7 @@
 #include <core/health_file.h>
 #include <artnet/artnet_server.h>
 #include <overlay_server/overlay_server.h>
-#include <proto/dmx_state.h>
+#include <proto/radius/dmx_state.h>
 #include <soundio/audio_capture.h>
 
 namespace Radius {
