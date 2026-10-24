@@ -6,3 +6,4 @@ autolux/training/data/raveform/annotations/*.hand.json text eol=lf
 # Media and native lighting timelines must remain byte-identical.
 autolux/training/eval_audio/*.mp3 binary
 autolux/lighting/soundswitch/*.ssfile binary
+autolux/lighting/soundswitch/recordable/*.dat binary

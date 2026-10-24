@@ -232,17 +232,16 @@ async def test_a_decision_commits_the_intent_its_class_maps_to(label, intent):
     assert light.current_intent is intent
 
 
-@pytest.mark.parametrize('strobe_draw', [0.0, 1.0])
-async def test_repeated_class_keeps_its_loop_with_or_without_a_strobe(monkeypatch, strobe_draw):
-    monkeypatch.setattr('autolux.lib.engine.effect_controller.random.random', lambda: strobe_draw)
+@pytest.mark.parametrize('section_label', ['intro', 'drop'])
+async def test_repeated_class_holds_the_loop_without_retriggering_its_strobe(section_label):
     decoder = FakeDecoder()
     light, queue, clock, midi = engine(decoder=decoder)
     await elapse(light, clock, 20.0)
-    await bars(light, decoder, clock, 'drop', 'drop', 'drop')
+    await bars(light, decoder, clock, section_label, section_label, section_label)
     await settle(light, clock, queue)
     assert len(autoloops(midi)) == 1
     strobes = [event for event in midi.events if event['label'] == 'set_special_effect']
-    assert len(strobes) == (1 if strobe_draw == 0.0 else 0)
+    assert len(strobes) == (1 if section_label == 'drop' else 0)
     assert light.intent_commits == 1
 
 

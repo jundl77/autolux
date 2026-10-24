@@ -24,16 +24,16 @@ async def test_applied_lighting_change_has_one_useful_info_line(effect_controlle
     ],
 )
 async def test_section_uses_its_authored_loop_every_time(
-    effect_controller, stub_midi, monkeypatch, intent, channel
+    effect_controller, stub_midi, intent, channel
 ):
-    monkeypatch.setattr('autolux.lib.engine.effect_controller.random.random', lambda: 1.0)
     for _ in range(3):
         await effect_controller.change_effect(intent)
-    assert [event['channel'] for event in stub_midi.events] == [channel] * 3
+    assert [event['channel'] for event in stub_midi.events if event['label'] == 'set_autoloop'] == [
+        channel
+    ] * 3
 
 
-async def test_strobe_plays_over_the_drop_loop(effect_controller, stub_midi, monkeypatch):
-    monkeypatch.setattr('autolux.lib.engine.effect_controller.random.random', lambda: 0.0)
+async def test_strobe_plays_briefly_over_the_drop_loop(effect_controller, stub_midi):
     await effect_controller.change_effect(LightIntent.BREAKDOWN)
     await effect_controller.change_effect(LightIntent.DROP)
     assert [(event['label'], event['channel']) for event in stub_midi.events] == [
@@ -41,7 +41,7 @@ async def test_strobe_plays_over_the_drop_loop(effect_controller, stub_midi, mon
         ('set_autoloop', 'AUTOLOOP_BANK_1F'),
         ('set_special_effect', 'SPECIAL_EFFECT_STROBE'),
     ]
-    assert stub_midi.events[-1]['duration_sec'] == STROBE_DURATION_SEC
+    assert stub_midi.events[-1]['duration_sec'] == STROBE_DURATION_SEC == 1
 
 
 @pytest.mark.parametrize('intent', list(LightIntent))

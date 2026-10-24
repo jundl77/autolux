@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import random
 from typing import TYPE_CHECKING
 
 from autolux.lib.clients.midi_client import MidiClient
@@ -11,8 +10,7 @@ from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, Ligh
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
 
-DROP_STROBE_PROBABILITY = 1 / 6
-STROBE_DURATION_SEC = 30
+STROBE_DURATION_SEC = 1
 
 
 class EffectController:
@@ -29,7 +27,7 @@ class EffectController:
         logging.info('[lighting] intent=%s | effect=%s', intent.name, autoloop.name)
 
         # The drop loop must keep playing underneath the temporary strobe.
-        if intent == LightIntent.DROP and random.random() < DROP_STROBE_PROBABILITY:
+        if intent == LightIntent.DROP:
             strobe = MidiChannel.SPECIAL_EFFECT_STROBE
             await self.midi_client.set_special_effect(strobe, duration_sec=STROBE_DURATION_SEC)
             if self.event_buffer:
