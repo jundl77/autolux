@@ -540,13 +540,9 @@ def _build_legend() -> list:
     ]
 
 
-def _build_stat_card(label, value, detail=None):
+def _build_stat_card(label, value):
     return html.Div(
-        [
-            html.Div(label, className='stat-label') if label else None,
-            html.Div(value, className='stat-value'),
-            html.Div(detail, className='stat-detail') if detail else None,
-        ],
+        [html.Div(label, className='stat-label'), html.Div(value, className='stat-value')],
         className='show-stat',
     )
 
@@ -559,7 +555,10 @@ def _build_show_overview(snapshot: dict) -> list:
     cfg = _intent_config(snapshot.get('intent'))
     playing = _room_is_playing(snapshot)
     health = health_summary(snapshot)['state']
-    if health == 'healthy' and _timing_health(snapshot.get('timing_stats', {}))[2] == WARN_COLOR:
+    timing = (snapshot.get('timing_stats') or {}).get('by_label') or {}
+    if health == 'healthy' and any(
+        stream['mean_error_ms'] > TIMING_TOLERANCE_SEC * 1000 for stream in timing.values()
+    ):
         health = 'degraded'
     health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
     effect = snapshot.get('current_effect') or {}
@@ -568,65 +567,21 @@ def _build_show_overview(snapshot: dict) -> list:
         channel = 'Bank ' + channel.removeprefix('AUTOLOOP_BANK_')
     return [
         _build_stat_card(
-            '',
-            [
-                html.Span(
-                    f'● {health.title()}', id='health-indicator', style={'color': health_color}
-                ),
-                html.Span('PLAYING' if playing else 'PAUSED', style={'color': MUTED}),
-            ],
+            'Health',
+            html.Span(f'● {health.title()}', id='health-indicator', style={'color': health_color}),
         ),
         _build_stat_card(
-            '',
-            html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'}),
+            'Playback', html.Span('PLAYING' if playing else 'PAUSED', style={'color': MUTED})
         ),
         _build_stat_card(
-            '',
-            html.Span(cfg['label'], style={'color': cfg['primary']}),
+            'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
         ),
-        _build_stat_card(
-            'Effect',
-            html.Span(channel),
-        ),
-        _build_stat_card(
-            '',
-            html.Span(f'room {room_text}', id='room-clock'),
-            html.Span(f'song {song_text}', id='song-clock'),
-        ),
-        _build_stat_card(
-            'Delay',
-            html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s'),
-        ),
+        _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
+        _build_stat_card('Effect', html.Span(channel)),
+        _build_stat_card('Room position', html.Span(room_text, id='room-clock')),
+        _build_stat_card('Source position', html.Span(song_text, id='song-clock')),
+        _build_stat_card('Show delay', html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s')),
     ]
-
-
-def _build_command_timing_row(snapshot: dict) -> list:
-    verdict_str, stream_strs, timing_col = _timing_health(snapshot.get('timing_stats', {}))
-    return [
-        html.Span(
-            verdict_str,
-            style={'color': timing_col},
-            title='Mean absolute error against each command’s scheduled target.',
-        ),
-        *[html.Span(text, style={'color': MUTED}) for text in stream_strs],
-    ]
-
-
-def _timing_health(stats: dict) -> tuple:
-    by_label = stats.get('by_label') or {}
-    if not by_label:
-        return 'Command error —', [], MUTED
-    tolerance_ms = TIMING_TOLERANCE_SEC * 1000
-    worst = max(by_label, key=lambda label: by_label[label]['mean_error_ms'])
-    late = by_label[worst]['mean_error_ms'] > tolerance_ms
-    streams = [f'{label} {s["mean_error_ms"]:.0f} ms' for label, s in by_label.items()]
-    if late:
-        return (
-            'Command error',
-            streams,
-            WARN_COLOR,
-        )
-    return 'Command error', streams, MUTED
 
 
 STYLESHEET = (
@@ -643,20 +598,14 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
-.command-timing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
-                  padding: 12px 16px; border-top: 1px solid #273344;
-                  font-size: 12px; font-variant-numeric: tabular-nums; }
-.command-timing > span { white-space: nowrap; }
-.command-timing > span:first-child { white-space: normal; }
-.show-overview { display: flex; align-items: center; justify-content: space-between; }
-.show-stat { display: flex; align-items: baseline; gap: 8px; padding: 14px 16px;
+.show-overview { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); }
+.show-stat { padding: 14px 16px;
              min-width: 0; font-variant-numeric: tabular-nums; }
 .show-stat:last-child { border-right: 0; }
-.stat-label { font-size: 11px; color: #9baabb; }
+.stat-label { font-size: 10px; color: #9baabb; margin-bottom: 8px; }
 .stat-value { display: flex; gap: 14px; font-size: 15px; font-weight: 600; white-space: nowrap; }
-.stat-detail { font-size: 11px; color: #9baabb; white-space: nowrap; }
-.show-stat:nth-child(3) .stat-value { font-size: 15px; }
-.show-stat:nth-child(3) .stat-value span { filter: brightness(1.7); }
+.show-stat:nth-child(4) .stat-value { font-size: 15px; }
+.show-stat:nth-child(4) .stat-value span { filter: brightness(1.7); }
 .show-stat:nth-child(5) .stat-value { font-size: 15px; }
 .show-panel { border: 1px solid #273344; border-radius: 8px; overflow: hidden; background: #0d1117; }
 .show-panel .section-heading { margin: 0; padding: 14px 18px 6px; }
@@ -676,28 +625,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .diagnostics-content { padding-top: 16px; font-size: 12px; }
 .footer { display: flex; justify-content: space-between; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
-@media (max-width: 1150px) {
-    .dashboard { padding: 20px; }
-    .show-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .show-stat:nth-child(3) { border-right: 0; }
-    .show-stat:nth-child(-n+3) { border-bottom: 1px solid #273344; }
-    .charts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 650px) {
-    .dashboard { padding: 16px 12px; }
-    .show-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .show-stat:nth-child(n) { border-right: 1px solid #273344; }
-    .show-stat:nth-child(2n) { border-right: 0; }
-    .show-stat:nth-child(-n+4) { border-bottom: 1px solid #273344; }
-    .stat-value { font-size: 16px; }
-    .charts-grid { grid-template-columns: minmax(0, 1fr); }
-    .section-heading { flex-wrap: wrap; gap: 6px; }
-    .stage-grid { gap: 4px; padding: 12px 8px; }
-    .stage-grid > div { padding: 6px 2px !important; }
-    .legend { line-height: 1.8; }
-    .window-label { max-width: 125px; }
-}
-
 .ss-lamp { transition: background 0.08s ease; }
 .ss-lamp.ss-on { box-shadow: 0 0 var(--ss-base) var(--ss-lamp); }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -893,8 +820,8 @@ function(sync) {
         syncBeats();
         scroll(now);
         seatBeats(document.querySelector('#timeline .js-plotly-plot'));
-        tick('room-clock', 'room ', a.room, drift);
-        tick('song-clock', 'song ', a.song, drift);
+        tick('room-clock', '', a.room, drift);
+        tick('song-clock', '', a.song, drift);
         pulse(now);
         meter();
         requestAnimationFrame(frame);
@@ -1111,7 +1038,6 @@ def build_app(snapshot_source) -> dash.Dash:
             html.Section(
                 [
                     html.Div(id='metrics', className='show-overview'),
-                    html.Div(id='diagnostics', className='command-timing'),
                 ],
                 className='overview-panel',
             ),
@@ -1225,7 +1151,6 @@ def build_app(snapshot_source) -> dash.Dash:
             Output('metrics', 'children'),
             Output('stage', 'children'),
             Output('decoder', 'children'),
-            Output('diagnostics', 'children'),
         ],
         Input('gate', 'data'),
         prevent_initial_call=True,
@@ -1237,7 +1162,6 @@ def build_app(snapshot_source) -> dash.Dash:
             _build_show_overview(snap),
             _build_stage(snap),
             _build_decoder(snap),
-            _build_command_timing_row(snap),
         )
 
     @app.callback(

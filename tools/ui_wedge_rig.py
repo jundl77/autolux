@@ -97,7 +97,6 @@ def profile(show: RiggedShow, ticks: int) -> None:
         V._build_stage,
         V._build_decoder,
         V._build_show_overview,
-        V._build_command_timing_row,
         V._anchor,
     ):
         samples = []
