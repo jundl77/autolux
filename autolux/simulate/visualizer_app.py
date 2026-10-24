@@ -10,6 +10,7 @@ from dash import dcc, html, Input, Output
 import plotly.graph_objects as go
 
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
+from autolux.lib.system_health import health_summary
 from autolux.lib.ui_bridge import SNAPSHOT_HOST, SNAPSHOT_PATH, snapshot_port
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
 from autolux.simulate import system_metrics
@@ -203,27 +204,6 @@ def _room_is_playing(snapshot: dict) -> bool:
 def _room_bpm(snapshot: dict) -> float:
     heard = _heard_beats(snapshot)
     return heard[-1]['bpm'] if heard else snapshot.get('bpm', 0.0)
-
-
-def _beats_still_travelling(snapshot: dict) -> int:
-    delay = snapshot.get('look_ahead_sec', 0.0)
-    now = snapshot.get('now', 0.0)
-    stops = _room_stops(snapshot)
-    return sum(
-        1
-        for beat in snapshot.get('beats', [])
-        if beat['t'] + delay > now
-        and not any(beat['t'] < stop <= beat['t'] + delay for stop in stops)
-    )
-
-
-def _room_beat_count(snapshot: dict) -> int:
-    return max(
-        0,
-        snapshot.get('beats_detected', 0)
-        - _beats_still_travelling(snapshot)
-        - snapshot.get('beats_cut', 0),
-    )
 
 
 def _display_now(snapshot: dict, origin: float | None) -> float:
@@ -560,12 +540,12 @@ def _build_legend() -> list:
     ]
 
 
-def _build_stat_card(label, value, detail):
+def _build_stat_card(label, value, detail=None):
     return html.Div(
         [
-            html.Div(label, className='stat-label'),
+            html.Div(label, className='stat-label') if label else None,
             html.Div(value, className='stat-value'),
-            html.Div(detail, className='stat-detail'),
+            html.Div(detail, className='stat-detail') if detail else None,
         ],
         className='show-stat',
     )
@@ -573,56 +553,49 @@ def _build_stat_card(label, value, detail):
 
 def _build_show_overview(snapshot: dict) -> list:
     bpm = _room_bpm(snapshot)
-    beats = _room_beat_count(snapshot)
     song, room = _song_and_room(snapshot)
     song_text = '—' if song is None else _clock_text(song)
     room_text = '—' if room is None else _clock_text(room)
     cfg = _intent_config(snapshot.get('intent'))
     playing = _room_is_playing(snapshot)
-    shed = snapshot.get('shed') or {}
-    pill_str, pill_col = _shed_pill(shed)
-    rate_str, rate_col = _shed_rate(shed)
+    health = health_summary(snapshot)['state']
+    if health == 'healthy' and _timing_health(snapshot.get('timing_stats', {}))[2] == WARN_COLOR:
+        health = 'degraded'
+    health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
     effect = snapshot.get('current_effect') or {}
     channel = effect.get('channel', '—')
     if channel.startswith('AUTOLOOP_BANK_'):
         channel = 'Bank ' + channel.removeprefix('AUTOLOOP_BANK_')
     return [
         _build_stat_card(
-            'Playback',
-            html.Span(
-                '● PLAYING' if playing else '◌ PAUSED',
-                style={'color': OK_COLOR if playing else MUTED},
-            ),
+            '',
             [
-                html.Div(pill_str, style={'color': pill_col, 'fontWeight': 'bold'}),
-                html.Div(rate_str, style={'color': rate_col}),
-                html.Div('At the room playback position'),
+                html.Span(
+                    f'● {health.title()}', id='health-indicator', style={'color': health_color}
+                ),
+                html.Span('PLAYING' if playing else 'PAUSED', style={'color': MUTED}),
             ],
         ),
         _build_stat_card(
-            'Tempo',
+            '',
             html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'}),
-            html.Span(f'{beats} beats'),
         ),
         _build_stat_card(
-            'Lighting intent',
+            '',
             html.Span(cfg['label'], style={'color': cfg['primary']}),
-            'Committed music section',
         ),
         _build_stat_card(
-            'Active effect',
+            'Effect',
             html.Span(channel),
-            effect.get('type', 'No effect selected').replace('_', ' ').title(),
         ),
         _build_stat_card(
-            'Playback position',
+            '',
             html.Span(f'room {room_text}', id='room-clock'),
             html.Span(f'song {song_text}', id='song-clock'),
         ),
         _build_stat_card(
-            'Show delay',
+            'Delay',
             html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s'),
-            'Analysis lead · excludes RX buffering',
         ),
     ]
 
@@ -630,49 +603,30 @@ def _build_show_overview(snapshot: dict) -> list:
 def _build_command_timing_row(snapshot: dict) -> list:
     verdict_str, stream_strs, timing_col = _timing_health(snapshot.get('timing_stats', {}))
     return [
-        html.Span(verdict_str, style={'color': timing_col, 'fontWeight': 'bold'}),
+        html.Span(
+            verdict_str,
+            style={'color': timing_col},
+            title='Mean absolute error against each command’s scheduled target.',
+        ),
         *[html.Span(text, style={'color': MUTED}) for text in stream_strs],
     ]
-
-
-def _shed_pill(shed: dict) -> tuple:
-    if not shed:
-        return 'health: —', MUTED
-    if shed.get('level', 'NONE') != 'NONE':
-        fault = shed.get('fault')
-        return (f'health: ◆ DEGRADED — holding intent{f" ({fault})" if fault else ""}'), WARN_COLOR
-    return 'health: ● LIVE', OK_COLOR
-
-
-def _shed_rate(shed: dict) -> tuple:
-    if not shed:
-        return 'sheds: —', MUTED
-    rate = shed.get('sheds_per_min', 0)
-    total = shed.get('sheds', 0)
-    text = f'sheds {rate}/min'
-    if total:
-        text += f'  ·  {total} this run'
-    return text, (WARN_COLOR if rate else MUTED)
 
 
 def _timing_health(stats: dict) -> tuple:
     by_label = stats.get('by_label') or {}
     if not by_label:
-        return 'cmd timing: —', [], MUTED
+        return 'Command error —', [], MUTED
     tolerance_ms = TIMING_TOLERANCE_SEC * 1000
     worst = max(by_label, key=lambda label: by_label[label]['mean_error_ms'])
     late = by_label[worst]['mean_error_ms'] > tolerance_ms
-    streams = [
-        f'{label} {s["mean_delta_sec"]:.2f}s ±{s["mean_error_ms"]:.0f}ms'
-        for label, s in by_label.items()
-    ]
+    streams = [f'{label} {s["mean_error_ms"]:.0f} ms' for label, s in by_label.items()]
     if late:
         return (
-            (f'cmd timing: {worst} misses its target by {by_label[worst]["mean_error_ms"]:.0f}ms'),
+            'Command error',
             streams,
             WARN_COLOR,
         )
-    return 'cmd timing: on target', streams, OK_COLOR
+    return 'Command error', streams, MUTED
 
 
 STYLESHEET = (
@@ -694,12 +648,13 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
                   font-size: 12px; font-variant-numeric: tabular-nums; }
 .command-timing > span { white-space: nowrap; }
 .command-timing > span:first-child { white-space: normal; }
-.show-overview { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
-.show-stat { padding: 18px 16px; min-width: 0; border-right: 1px solid #273344; font-variant-numeric: tabular-nums; }
+.show-overview { display: flex; align-items: center; justify-content: space-between; }
+.show-stat { display: flex; align-items: baseline; gap: 8px; padding: 14px 16px;
+             min-width: 0; font-variant-numeric: tabular-nums; }
 .show-stat:last-child { border-right: 0; }
-.stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #9baabb; margin-bottom: 10px; }
-.stat-value { font-size: 18px; font-weight: 600; white-space: nowrap; }
-.stat-detail { font-size: 11px; color: #9baabb; margin-top: 8px; line-height: 1.5; }
+.stat-label { font-size: 11px; color: #9baabb; }
+.stat-value { display: flex; gap: 14px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.stat-detail { font-size: 11px; color: #9baabb; white-space: nowrap; }
 .show-stat:nth-child(3) .stat-value { font-size: 15px; }
 .show-stat:nth-child(3) .stat-value span { filter: brightness(1.7); }
 .show-stat:nth-child(5) .stat-value { font-size: 15px; }

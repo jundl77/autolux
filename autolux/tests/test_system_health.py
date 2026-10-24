@@ -30,7 +30,7 @@ def test_old_counters_do_not_make_a_recovered_show_permanently_unhealthy():
     snapshot = {'system': healthy()}
     assert health_summary(snapshot)['state'] == 'healthy'
     snapshot['system']['recent'] = {'underruns': 1}
-    assert health_summary(snapshot)['state'] == 'attention'
+    assert health_summary(snapshot)['state'] == 'degraded'
 
 
 def test_missing_buffer_measurements_do_not_invent_a_zero_or_default_target():
@@ -48,11 +48,44 @@ def test_stale_receiver_never_looks_connected_or_exports_a_zero_buffer():
     state = healthy()
     state['rx_age_seconds'] = 5
     buffer.set_system_health(state)
-    assert health_summary(buffer.snapshot())['state'] == 'attention'
+    assert health_summary(buffer.snapshot())['state'] == 'down'
     text = metrics(buffer).decode()
     assert 'radius_up{node="rx"} 0.0' in text
     assert 'radius_audio_buffer_seconds{node="rx"}' not in text
     assert 'radius_up{node="tx"} 1.0' in text
+
+
+def test_a_paused_show_with_fresh_transport_is_healthy():
+    assert health_summary({'system': healthy(), 'is_playing': False})['state'] == 'healthy'
+
+
+def test_missing_or_stale_controller_telemetry_is_down():
+    assert health_summary({})['state'] == 'down'
+    state = healthy()
+    state['updated_at'] -= 10
+    assert health_summary({'system': state})['state'] == 'down'
+
+
+def test_a_lost_heartbeat_link_is_down():
+    state = healthy()
+    state['rx']['link_up'] = False
+    assert health_summary({'system': state})['state'] == 'down'
+
+
+def test_disconnected_lighting_degrades_a_working_audio_link():
+    state = healthy()
+    state['rx']['dmx_connected'] = False
+    assert health_summary({'system': state})['state'] == 'degraded'
+
+
+def test_shedding_without_a_fault_message_and_recent_skips_are_degraded():
+    for shed in [{'level': 'NN_SHED'}, {'level': 'NONE', 'sheds_per_min': 2}]:
+        assert health_summary({'system': healthy(), 'shed': shed})['state'] == 'degraded'
+
+
+def test_historical_analysis_skips_do_not_keep_a_recovered_show_degraded():
+    shed = {'level': 'NONE', 'sheds': 9, 'sheds_per_min': 0}
+    assert health_summary({'system': healthy(), 'shed': shed})['state'] == 'healthy'
 
 
 def test_queue_drops_and_latency_recovery_explain_the_audio_warning():

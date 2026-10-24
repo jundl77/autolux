@@ -18,7 +18,7 @@ MILLISECONDS_PER_SECOND = 1000
 def health_summary(snapshot, *, now=None):
     system = snapshot.get('system') or {}
     if not system:
-        return {'state': 'unavailable', 'cards': []}
+        return {'state': 'down', 'cards': []}
     now = time.time() if now is None else now
     age = max(0, now - system.get('updated_at', 0))
     tx, rx = system.get('tx') or {}, system.get('rx') or {}
@@ -27,7 +27,10 @@ def health_summary(snapshot, *, now=None):
     tx_fresh = finite(tx_age) and tx_age + age < TELEMETRY_STALE_SECONDS
     rx_fresh = finite(rx_age) and rx_age + age < TELEMETRY_STALE_SECONDS
     link = tx_fresh and rx_fresh and tx.get('link_up') and rx.get('link_up')
-    fault = (snapshot.get('shed') or {}).get('fault')
+    shed = snapshot.get('shed') or {}
+    fault = shed.get('fault') or (
+        'Holding the last intent' if shed.get('level', 'NONE') != 'NONE' else None
+    )
     recent = system.get('recent') or {}
     glitches = sum(recent.values())
     audio_detail = (
@@ -106,7 +109,13 @@ def health_summary(snapshot, *, now=None):
             bool(lights and finite(lateness) and lateness < MAX_DMX_LATENESS_SECONDS),
         ),
     ]
-    return {'state': 'healthy' if all(c[3] for c in cards) else 'attention', 'cards': cards}
+    if age >= TELEMETRY_STALE_SECONDS or not link:
+        state = 'down'
+    elif all(c[3] for c in cards) and not shed.get('sheds_per_min', 0):
+        state = 'healthy'
+    else:
+        state = 'degraded'
+    return {'state': state, 'cards': cards}
 
 
 # Explicit, bounded metric set. Native counters are cumulative for the process lifetime.

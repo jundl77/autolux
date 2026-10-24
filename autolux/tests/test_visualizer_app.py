@@ -2,6 +2,7 @@ import pytest
 
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.simulate import visualizer_app as V
+from autolux.tests.test_system_health import healthy
 
 
 def _snapshot(**overrides) -> dict:
@@ -471,7 +472,7 @@ def test_the_app_reads_its_data_through_a_snapshot_call_and_nothing_else():
 
     assert poller.reads == 1
     assert '131 BPM' in ''.join(_texts(metrics))
-    assert '7 beats' in ''.join(_texts(metrics))
+    assert '7 beats' not in ''.join(_texts(metrics))
     assert anchor['now'] == 10.0
     assert stage and decoder
 
@@ -689,11 +690,11 @@ def _mid_play(**overrides) -> dict:
 
 
 def test_the_show_stops_once_the_detected_silence_has_persisted():
-    assert 'PAUSED' in _metric(V._build_show_overview(_stopping(now=62.0)), '◌')
+    assert 'PAUSED' in _metric(V._build_show_overview(_stopping(now=62.0)), 'PAUSED')
 
 
 def test_the_room_keeps_playing_the_tail_while_the_bypass_is_still_pending():
-    assert 'PLAYING' in _metric(V._build_show_overview(_stopping(now=61.99)), '●')
+    assert 'PLAYING' in _metric(V._build_show_overview(_stopping(now=61.99)), 'PLAYING')
 
 
 def test_the_timeline_resets_when_the_silence_persists_not_when_it_starts():
@@ -713,7 +714,7 @@ def test_a_gap_shorter_than_the_persistence_never_reaches_the_room_at_all():
     )
     assert [e['t'] for e in V._room_sound_events(seamless)] == [14.0]
     assert V._song_origin(seamless) == pytest.approx(14.0)
-    assert 'PLAYING' in _metric(V._build_show_overview(seamless), '●')
+    assert 'PLAYING' in _metric(V._build_show_overview(seamless), 'PLAYING')
 
 
 def test_the_room_holds_its_tail_through_the_window_before_a_resume_lands():
@@ -724,7 +725,7 @@ def test_the_room_holds_its_tail_through_the_window_before_a_resume_lands():
         sound_events=[{'t': 0.0, 'playing': True}, {'t': 100.0, 'playing': False}],
     )
     assert V._song_origin(mid_gap) == pytest.approx(14.0)
-    assert 'PLAYING' in _metric(V._build_show_overview(mid_gap), '●')
+    assert 'PLAYING' in _metric(V._build_show_overview(mid_gap), 'PLAYING')
 
 
 def _burst() -> dict:
@@ -743,7 +744,7 @@ def _burst() -> dict:
 def test_a_play_burst_shorter_than_the_look_ahead_never_reaches_the_room():
     assert [e['t'] for e in V._room_sound_events(_burst())] == [14.0, 62.0, 107.0]
     assert V._song_origin(_burst()) is None
-    assert 'PAUSED' in _metric(V._build_show_overview(_burst()), '◌')
+    assert 'PAUSED' in _metric(V._build_show_overview(_burst()), 'PAUSED')
 
 
 def test_a_start_that_lands_before_the_bypass_is_heard_and_then_cut():
@@ -867,10 +868,10 @@ def test_the_beats_still_in_the_air_at_a_stop_are_never_heard():
         beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 55.0, 'bpm': 128.0}],
     )
     assert V._heard_beats(silenced) == []
-    assert _metric(V._build_show_overview(silenced), '898') == '898 beats'
+    assert V._anchor(silenced)['beats'] == []
 
     aged_out = dict(silenced, now=110.0, beats=[])
-    assert _metric(V._build_show_overview(aged_out), '898') == '898 beats'
+    assert V._anchor(aged_out)['beats'] == []
 
 
 def test_the_tempo_is_the_last_beat_the_room_heard():
@@ -880,7 +881,7 @@ def test_the_tempo_is_the_last_beat_the_room_heard():
     assert _metric(items, '128') == '128 BPM'
 
 
-def test_the_beat_count_is_what_the_room_has_heard():
+def test_the_overview_omits_the_cumulative_beat_count():
     items = V._build_show_overview(
         _mid_play(
             now=70.0,
@@ -888,7 +889,7 @@ def test_the_beat_count_is_what_the_room_has_heard():
             beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 62.0, 'bpm': 128.0}, {'t': 64.0, 'bpm': 128.0}],
         )
     )
-    assert _metric(items, '898') == '898 beats'
+    assert '898 beats' not in ''.join(_texts(items))
 
 
 def test_the_payload_window_stays_wider_than_the_span_it_has_to_fill():
@@ -1016,7 +1017,7 @@ def _timing_stats(**streams) -> dict:
     }
 
 
-def test_timing_health_is_green_when_every_stream_matches_its_own_target():
+def test_timing_is_quiet_when_every_stream_matches_its_own_target():
     items = V._build_command_timing_row(
         _snapshot(
             timing_stats=_timing_stats(
@@ -1024,25 +1025,32 @@ def test_timing_health_is_green_when_every_stream_matches_its_own_target():
             )
         )
     )
-    assert _colour_of(items, 'cmd timing') == V.OK_COLOR
+    assert _colour_of(items, 'Command error') == V.MUTED
 
 
 def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
     items = V._build_command_timing_row(
         _snapshot(timing_stats=_timing_stats(beat=(14.0, 3.0), intent=(0.31, 310.0)))
     )
-    assert _colour_of(items, 'cmd timing') == V.WARN_COLOR
+    assert _colour_of(items, 'Command error') == V.WARN_COLOR
     assert 'intent' in ''.join(_texts(items))
+
+
+def test_missed_command_targets_degrade_the_single_overall_indicator():
+    snapshot = _snapshot(
+        system=healthy(), timing_stats=_timing_stats(beat=(14.0, 3.0), intent=(0.31, 310.0))
+    )
+    assert _metric(V._build_show_overview(snapshot), '●') == '● Degraded'
 
 
 def test_timing_health_does_not_depend_on_how_long_a_stream_waits():
     slow = V._build_command_timing_row(_snapshot(timing_stats=_timing_stats(beat=(14.0, 2.0))))
     fast = V._build_command_timing_row(_snapshot(timing_stats=_timing_stats(intent=(0.31, 2.0))))
-    assert _colour_of(slow, 'cmd timing') == _colour_of(fast, 'cmd timing') == V.OK_COLOR
+    assert _colour_of(slow, 'Command error') == _colour_of(fast, 'Command error') == V.MUTED
 
 
 def test_timing_health_is_muted_before_any_command_has_been_delivered():
-    assert _colour_of(V._build_command_timing_row(_snapshot()), 'cmd timing') == V.MUTED
+    assert _colour_of(V._build_command_timing_row(_snapshot()), 'Command error') == V.MUTED
 
 
 def test_the_event_buffer_splits_timing_by_stream():
@@ -1297,57 +1305,67 @@ def test_the_pill_leaves_playing_when_the_audio_runs_out():
     assert 'PAUSED' in pill, pill
 
 
-def test_a_run_with_no_watchdog_says_so_rather_than_claiming_health():
+def test_a_run_without_system_telemetry_does_not_claim_health():
     items = V._build_show_overview(_snapshot(shed={}))
-    assert _metric(items, 'health') == 'health: —'
-    assert _colour_of(items, 'health') == V.MUTED
-    assert _metric(items, 'sheds') == 'sheds: —'
+    assert _metric(items, '●') == '● Down'
 
 
-def test_a_healthy_chain_reads_live():
+def test_a_healthy_show_has_one_health_indicator_without_redundant_status():
     items = V._build_show_overview(
-        _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 0, 'sheds_per_min': 0})
+        _snapshot(
+            system=healthy(), shed={'level': 'NONE', 'fault': None, 'sheds': 0, 'sheds_per_min': 0}
+        )
     )
-    assert _metric(items, 'health') == 'health: ● LIVE'
-    assert _colour_of(items, 'health') == V.OK_COLOR
-    assert _metric(items, 'sheds') == 'sheds 0/min'
+    assert _metric(items, '●') == '● Healthy'
+    assert _colour_of(items, '●') == V.OK_COLOR
+    text = ' '.join(_texts(items))
+    assert text.count('Healthy') == 1
+    for redundant in ('LIVE', 'sheds 0/min', 'At the room', 'Committed music', 'Autoloop'):
+        assert redundant not in text
 
 
 def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
     items = V._build_show_overview(
-        _snapshot(shed={'level': 'NN_SHED', 'fault': 'hung_pass', 'sheds': 3, 'sheds_per_min': 2})
+        _snapshot(
+            system=healthy(),
+            shed={'level': 'NN_SHED', 'fault': 'hung_pass', 'sheds': 3, 'sheds_per_min': 2},
+        )
     )
-    pill = _metric(items, 'health')
-    assert 'DEGRADED' in pill and 'holding intent' in pill
-    assert 'hung_pass' in pill
-    assert _colour_of(items, 'health') == V.WARN_COLOR
+    assert _metric(items, '●') == '● Degraded'
+    assert _colour_of(items, '●') == V.WARN_COLOR
+    notices = V.system_metrics.build_telemetry_notices(
+        _snapshot(shed={'level': 'NN_SHED', 'fault': 'hung_pass'})
+    )
+    assert 'hung_pass' in ' '.join(_texts(notices))
 
 
 def test_a_shed_with_no_named_fault_still_reads_degraded():
     items = V._build_show_overview(
-        _snapshot(shed={'level': 'NN_SHED', 'fault': None, 'sheds': 1, 'sheds_per_min': 1})
+        _snapshot(
+            system=healthy(),
+            shed={'level': 'NN_SHED', 'fault': None, 'sheds': 1, 'sheds_per_min': 1},
+        )
     )
-    assert _metric(items, 'health') == 'health: ◆ DEGRADED — holding intent'
+    assert _metric(items, '●') == '● Degraded'
 
 
-def test_the_rate_and_the_run_total_are_both_readable():
-    items = V._build_show_overview(
+def test_current_analysis_skips_appear_as_an_exception_notice():
+    items = V.system_metrics.build_telemetry_notices(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 2})
     )
-    assert _metric(items, 'sheds') == 'sheds 2/min  ·  9 this run'
-    assert _colour_of(items, 'sheds') == V.WARN_COLOR
+    assert 'Analysis skips: 2/min.' in _texts(items)
 
 
 def test_a_run_that_settled_hours_ago_stops_shouting_about_it():
     items = V._build_show_overview(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 0})
     )
-    assert _metric(items, 'sheds') == 'sheds 0/min  ·  9 this run'
-    assert _colour_of(items, 'sheds') == V.MUTED
+    assert not any('skips' in text or 'sheds' in text for text in _texts(items))
 
 
 def _degraded_strip() -> dict:
     return _snapshot(
+        system=healthy(),
         now=133.0,
         look_ahead_sec=14.0,
         bpm=140.0,
@@ -1362,34 +1380,33 @@ def test_show_overview_groups_music_effect_and_playback_position():
     items = V._build_show_overview(_degraded_strip())
     text = ' '.join(_texts(items))
     for value in [
-        'Playback',
         '140 BPM',
         'ATMOSPHERIC',
-        'Active effect',
+        'Effect',
         'room 1min 59sec',
         'song 2min 13sec',
         '14 s',
     ]:
         assert value in text
-    assert 'health:' in text and 'cmd timing:' not in text
+    assert '● Degraded' in text and 'cmd timing:' not in text
 
 
 def test_overview_retains_timing_and_analysis_fault_details():
     items = V._build_show_overview(_degraded_strip())
-    assert 'holding intent' in _metric(items, 'health')
-    assert _colour_of(items, 'health') == V.WARN_COLOR
+    assert _metric(items, '●') == '● Degraded'
+    assert _colour_of(items, '●') == V.WARN_COLOR
     assert _texts(V._build_command_timing_row(_degraded_strip())) == [
-        'cmd timing: on target',
-        'beat 14.01s ±9ms',
-        'intent 1.41s ±1ms',
+        'Command error',
+        'beat 9 ms',
+        'intent 1 ms',
     ]
 
 
 def test_no_tempo_or_effect_is_shown_as_unavailable():
     items = V._build_show_overview(_snapshot(bpm=0))
     assert '— BPM' in _texts(items)
-    assert 'No Effect Selected' in _texts(items)
-    assert _metric(V._build_command_timing_row(_snapshot()), 'cmd timing') == 'cmd timing: —'
+    assert '—' in _texts(items)
+    assert _metric(V._build_command_timing_row(_snapshot()), 'Command error') == 'Command error —'
 
 
 def test_analysis_details_and_health_row_are_present_without_generic_status_cards():

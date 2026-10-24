@@ -236,7 +236,10 @@ def build_telemetry_notices(snapshot, *, now=None):
             and (not finite(dmx_age) or dmx_age + age >= DMX_INPUT_STALE_SECONDS)
         ):
             messages.append('No recent lighting input from SoundSwitch.')
-    fault = (snapshot.get('shed') or {}).get('fault')
-    if fault:
-        messages.append(f'Analysis is holding the last intent: {fault}')
+    shed = snapshot.get('shed') or {}
+    fault = shed.get('fault')
+    if fault or shed.get('level', 'NONE') != 'NONE':
+        messages.append(f'Analysis is holding the last intent{f": {fault}" if fault else "."}')
+    if shed.get('sheds_per_min', 0):
+        messages.append(f'Analysis skips: {shed["sheds_per_min"]}/min.')
     return [html.Div(message, className='telemetry-notice', role='status') for message in messages]
