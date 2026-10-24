@@ -11,13 +11,13 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-if str(REPO_ROOT / "training") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "training"))
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(AUTOLUX_PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(AUTOLUX_PACKAGE_ROOT))
+if str(AUTOLUX_PACKAGE_ROOT / "training") not in sys.path:
+    sys.path.insert(0, str(AUTOLUX_PACKAGE_ROOT / "training"))
 
-PROOF_FILE = REPO_ROOT / "training" / "nn_determinism_proof.json"
+PROOF_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "nn_determinism_proof.json"
 
 
 def sidecar_for(mp3: str) -> Path:
@@ -72,7 +72,7 @@ async def run_once(mp3: str, mode: str) -> dict:
 def _child(mp3: str, mode: str) -> dict:
     out = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), "--run-one", mp3, "--mode", mode],
-        cwd=str(REPO_ROOT),
+        cwd=str(AUTOLUX_PACKAGE_ROOT),
         capture_output=True,
         text=True,
     )

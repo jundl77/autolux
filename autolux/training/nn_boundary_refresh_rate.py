@@ -8,12 +8,12 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-for _path in (str(REPO_ROOT), str(REPO_ROOT / "training")):
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-RATE_FILE = REPO_ROOT / "training" / "nn_boundary_refresh_rate.json"
+RATE_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "nn_boundary_refresh_rate.json"
 GRID = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95)
 QUANTILES = (0.5, 0.75, 0.9, 0.95, 0.99)
 

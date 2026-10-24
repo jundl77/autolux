@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TRAINING_DIR = REPO_ROOT / "training"
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 

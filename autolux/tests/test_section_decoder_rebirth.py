@@ -25,8 +25,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-for extra in (REPO_ROOT / "training", REPO_ROOT / "training" / "decoder_rebirth"):
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+for extra in (
+    AUTOLUX_PACKAGE_ROOT / "training",
+    AUTOLUX_PACKAGE_ROOT / "training" / "decoder_rebirth",
+):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 

@@ -359,12 +359,12 @@ def hand_label(tmp_path: Path, body: str = '{"sections": []}') -> tuple:
     a linked worktree's corpus_dir() is the MAIN checkout's, so hashing through
     it would make this guard's verdict a fact about which worktree ran it.
     """
-    from run_eval_set import REPO_ROOT
+    from run_eval_set import AUTOLUX_PACKAGE_ROOT
 
     path = tmp_path / "a-hand-label.json"
     path.write_bytes(body.encode("utf-8"))
     try:
-        name = str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+        name = str(path.relative_to(AUTOLUX_PACKAGE_ROOT)).replace("\\", "/")
     except ValueError:
         name = path.as_posix()
     return name, hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -422,14 +422,14 @@ def test_a_track_the_owner_has_not_relabelled_pins_nothing(tmp_path):
 
 def test_every_overridden_ruling_has_its_hand_label_on_disk_at_the_recorded_sha():
     from eval_assets import load_labels
-    from run_eval_set import REPO_ROOT
+    from run_eval_set import AUTOLUX_PACKAGE_ROOT
 
     verify_owner_ground_truth(load_labels(EVAL_LABELS_FILE))
 
     for track_id, ruling in owner_rulings(load_labels(EVAL_LABELS_FILE)).items():
         if ruling.get("ruling") != OVERRIDDEN:
             continue
-        path = REPO_ROOT / ruling["file"]
+        path = AUTOLUX_PACKAGE_ROOT / ruling["file"]
         assert path.exists(), track_id
         assert file_sha256(path) == ruling["sha256"], track_id
 

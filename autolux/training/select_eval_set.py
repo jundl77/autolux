@@ -81,13 +81,13 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # training/ for the eval-pipeline scripts, training/raveform/ for the
 # corpus-acquisition ones -- both are scripts, not packages.
 for _path in (
-    str(REPO_ROOT),
+    str(AUTOLUX_PACKAGE_ROOT),
     str(Path(__file__).resolve().parent),
-    str(REPO_ROOT / "training" / "raveform"),
+    str(AUTOLUX_PACKAGE_ROOT / "training" / "raveform"),
 ):
     if _path not in sys.path:
         sys.path.insert(0, _path)
@@ -104,7 +104,7 @@ from raveform_manifest import section_runs  # noqa: E402
 
 from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
 
-EVAL_SET_FILE = REPO_ROOT / "training" / "eval_set.json"
+EVAL_SET_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "eval_set.json"
 
 DEFAULT_SEED = 20260726
 DEFAULT_SIZE = 10
@@ -641,7 +641,7 @@ def load_ok_rows(data_dir: Path) -> list:
 
 
 def default_data_dir() -> Path:
-    return REPO_ROOT / "training" / "data" / "raveform"
+    return AUTOLUX_PACKAGE_ROOT / "training" / "data" / "raveform"
 
 
 def _describe_frozen(path: Path, data_dir: Path) -> list:

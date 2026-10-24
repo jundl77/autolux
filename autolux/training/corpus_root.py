@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR_ENV = "RAVEFORM_DATA_DIR"
 
 # The hand labels are the one thing under training/data that git tracks, so
@@ -17,7 +17,7 @@ MARKERS = ("models", "manifest.csv")
 
 
 def default_data_dir() -> Path:
-    return REPO_ROOT / "training" / "data" / "raveform"
+    return AUTOLUX_PACKAGE_ROOT / "training" / "data" / "raveform"
 
 
 def is_corpus(path: Path) -> bool:
@@ -36,8 +36,8 @@ def corpus_dir() -> Path:
         main = Path(main_checkout_git_dir).parent
         # Resolve shared assets from the primary checkout.
         for shared in (
-            main / 'autolux' / local.relative_to(REPO_ROOT),
-            main / local.relative_to(REPO_ROOT),
+            main / 'autolux' / local.relative_to(AUTOLUX_PACKAGE_ROOT),
+            main / local.relative_to(AUTOLUX_PACKAGE_ROOT),
         ):
             if is_corpus(shared):
                 return shared
@@ -47,7 +47,7 @@ def corpus_dir() -> Path:
 def _git(*args: str) -> str | None:
     try:
         proc = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), *args],
+            ["git", "-C", str(AUTOLUX_PACKAGE_ROOT), *args],
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,

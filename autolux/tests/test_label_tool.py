@@ -1042,7 +1042,7 @@ def test_an_edit_reships_the_spans_and_never_the_full_track_traces():
     assert len(operations[1]['params']['value']) == len(figure.layout.annotations)
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 MUST_STAY_IGNORED = (
     'training/data/raveform/annotations/segments.json',
@@ -1057,7 +1057,10 @@ MUST_STAY_IGNORED = (
 def _is_ignored(path: str) -> bool:
     """Without -v: a path matching a NEGATED pattern is not reported, which is
     the only reading of check-ignore that answers "is this ignored" for both."""
-    return subprocess.run(['git', 'check-ignore', '-q', path], cwd=REPO_ROOT).returncode == 0
+    return (
+        subprocess.run(['git', 'check-ignore', '-q', path], cwd=AUTOLUX_PACKAGE_ROOT).returncode
+        == 0
+    )
 
 
 def test_the_corpus_stays_out_of_git_apart_from_hand_labels():
@@ -1176,7 +1179,7 @@ def test_one_ctrl_c_ends_the_labeller(tmp_path):
 
     process = subprocess.Popen(
         [sys.executable, '-m', 'autolux', 'label', str(tone), '--port', str(port)],
-        cwd=REPO_ROOT,
+        cwd=AUTOLUX_PACKAGE_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

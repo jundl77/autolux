@@ -97,8 +97,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-for _path in (str(REPO_ROOT), str(REPO_ROOT / "training")):
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -1272,13 +1272,17 @@ def render_report(result: dict) -> str:
 
 
 def default_data_dir() -> Path:
-    return REPO_ROOT / "training" / "data" / "raveform"
+    return AUTOLUX_PACKAGE_ROOT / "training" / "data" / "raveform"
 
 
 def git_sha() -> str:
     try:
         return subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, check=True, capture_output=True, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=AUTOLUX_PACKAGE_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
         ).stdout.strip()
     except Exception:  # pragma: no cover
         return "unknown"

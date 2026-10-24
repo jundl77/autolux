@@ -33,7 +33,7 @@ def linked(tmp_path, monkeypatch):
     corpus = _corpus(main)
     linked_root = _worktree(tmp_path, "linked")
     monkeypatch.delenv(corpus_root.DATA_DIR_ENV, raising=False)
-    monkeypatch.setattr(corpus_root, "REPO_ROOT", linked_root)
+    monkeypatch.setattr(corpus_root, "AUTOLUX_PACKAGE_ROOT", linked_root)
     monkeypatch.setattr(corpus_root, "_git", lambda *a: str(main / ".git"))
     return main, corpus, linked_root
 
@@ -47,7 +47,7 @@ def test_the_main_checkouts_own_corpus_wins(tmp_path, monkeypatch):
     main = _worktree(tmp_path, "main")
     corpus = _corpus(main)
     monkeypatch.delenv(corpus_root.DATA_DIR_ENV, raising=False)
-    monkeypatch.setattr(corpus_root, "REPO_ROOT", main)
+    monkeypatch.setattr(corpus_root, "AUTOLUX_PACKAGE_ROOT", main)
     monkeypatch.setattr(corpus_root, "_git", lambda *a: str(main / ".git"))
     assert corpus_root.corpus_dir() == corpus
 
@@ -62,6 +62,6 @@ def test_the_environment_override_outranks_both(linked, monkeypatch, tmp_path):
 def test_no_corpus_anywhere_still_names_this_checkout(tmp_path, monkeypatch):
     linked_root = _worktree(tmp_path, "linked")
     monkeypatch.delenv(corpus_root.DATA_DIR_ENV, raising=False)
-    monkeypatch.setattr(corpus_root, "REPO_ROOT", linked_root)
+    monkeypatch.setattr(corpus_root, "AUTOLUX_PACKAGE_ROOT", linked_root)
     monkeypatch.setattr(corpus_root, "_git", lambda *a: None)
     assert corpus_root.corpus_dir() == linked_root / "training" / "data" / "raveform"

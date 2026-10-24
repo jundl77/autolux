@@ -5,9 +5,9 @@ import tomllib
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PYPROJECT = REPO_ROOT.parent / "pyproject.toml"
-LIVE_PATH = REPO_ROOT / "lib"
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT = AUTOLUX_PACKAGE_ROOT.parent / "pyproject.toml"
+LIVE_PATH = AUTOLUX_PACKAGE_ROOT / "lib"
 
 RETIRED = ("tensorflow", "tensorflow_hub", "aubio")
 # The viewer runs in its own process; a GIL shared with it costs the show sheds.
@@ -67,13 +67,13 @@ def test_the_live_path_imports_neither_tensorflow_nor_aubio():
     for path in sorted(LIVE_PATH.rglob("*.py")):
         found = _imported_modules(path) & set(RETIRED)
         if found:
-            offenders[str(path.relative_to(REPO_ROOT))] = sorted(found)
+            offenders[str(path.relative_to(AUTOLUX_PACKAGE_ROOT))] = sorted(found)
     assert not offenders, offenders
 
 
 def _live_modules() -> list:
     return sorted(
-        ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+        ".".join(path.relative_to(AUTOLUX_PACKAGE_ROOT).with_suffix("").parts)
         for path in LIVE_PATH.rglob("*.py")
         if path.name != "__init__.py"
     )
@@ -93,7 +93,7 @@ def _load_the_live_path():
         _probe_result.append(
             subprocess.run(
                 [sys.executable, "-c", probe],
-                cwd=REPO_ROOT,
+                cwd=AUTOLUX_PACKAGE_ROOT,
                 capture_output=True,
                 text=True,
                 timeout=600,

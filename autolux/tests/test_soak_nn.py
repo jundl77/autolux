@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-for _path in (str(REPO_ROOT), str(REPO_ROOT / "training")):
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 

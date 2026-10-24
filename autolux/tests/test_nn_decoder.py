@@ -12,8 +12,8 @@ import math
 import numpy as np
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-TRAINING_DIR = REPO_ROOT / "training"
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
@@ -842,7 +842,7 @@ def test_importing_the_decoder_does_not_drag_torch_onto_the_decode_path():
         "print(leaked, len(sys.modules))"
     )
     result = subprocess.run(
-        [sys.executable, "-c", probe], cwd=str(REPO_ROOT), capture_output=True, text=True
+        [sys.executable, "-c", probe], cwd=str(AUTOLUX_PACKAGE_ROOT), capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
     leaked, modules = result.stdout.strip().rsplit(" ", 1)

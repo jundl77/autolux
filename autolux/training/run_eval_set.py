@@ -13,11 +13,11 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 for _path in (
-    str(REPO_ROOT),
-    str(REPO_ROOT / "training"),
-    str(REPO_ROOT / "training" / "raveform"),
+    str(AUTOLUX_PACKAGE_ROOT),
+    str(AUTOLUX_PACKAGE_ROOT / "training"),
+    str(AUTOLUX_PACKAGE_ROOT / "training" / "raveform"),
 ):
     if _path not in sys.path:
         sys.path.insert(0, _path)
@@ -59,7 +59,7 @@ from evaluate_against_labels import (  # noqa: E402
 from raveform_fetch_annotations import SEGMENTS_FILE, annotations_dir  # noqa: E402
 from select_eval_set import EVAL_SET_FILE, load_eval_set, verify_inputs  # noqa: E402
 
-BASELINE_FILE = REPO_ROOT / "training" / "eval_set_baseline.json"
+BASELINE_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "eval_set_baseline.json"
 
 # Every granularity the run measures and prints.
 REPORTED_SPACES = (RAW9, LEGACY_V1)
@@ -121,7 +121,7 @@ COUNT_FACTS = (
 
 AUDIO_MISSING_HINT = (
     "eval-set audio missing -- expected the committed copy in "
-    f"{EVAL_AUDIO_DIR.relative_to(REPO_ROOT).as_posix()}/ (re-cut it with "
+    f"{EVAL_AUDIO_DIR.relative_to(AUTOLUX_PACKAGE_ROOT).as_posix()}/ (re-cut it with "
     "training/eval_assets.py --cut) or the corpus mp3 from "
     "training/raveform/raveform_download.py"
 )
@@ -241,7 +241,7 @@ def verify_owner_ground_truth(slice_document: dict) -> None:
             continue
         name = str(ruling.get("file") or "")
         recorded = str(ruling.get("sha256") or "")
-        label = REPO_ROOT / name
+        label = AUTOLUX_PACKAGE_ROOT / name
         if not name or not recorded:
             drift.append(f"{track_id} -- the ruling records no file and sha256")
         elif not label.exists():
@@ -534,7 +534,7 @@ def build_document(
 def eval_set_identity(path: Path, document: dict) -> dict:
     path = Path(path)
     try:
-        name = str(path.resolve().relative_to(REPO_ROOT)).replace("\\", "/")
+        name = str(path.resolve().relative_to(AUTOLUX_PACKAGE_ROOT)).replace("\\", "/")
     except ValueError:
         name = path.name
     return {
@@ -936,7 +936,7 @@ def run(
     gated = corpus[GATED_TRUTH]
     document = build_document(
         eval_set=eval_set_identity(eval_set_path, eval_document),
-        pipeline_sha_=pipeline_sha(REPO_ROOT),
+        pipeline_sha_=pipeline_sha(AUTOLUX_PACKAGE_ROOT),
         entries={result.track_id: result.entry for result in runs},
         aggregate_metrics=track_metrics(gated[GATED_SPACE]),
         aggregate_spaces={space: space_block(gated[space]) for space in REPORTED_SPACES},

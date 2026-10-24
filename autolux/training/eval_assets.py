@@ -60,10 +60,10 @@ import shutil
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 for _path in (
     str(Path(__file__).resolve().parent),
-    str(REPO_ROOT / "training" / "raveform"),
+    str(AUTOLUX_PACKAGE_ROOT / "training" / "raveform"),
 ):
     if _path not in sys.path:
         sys.path.insert(0, _path)
@@ -80,8 +80,8 @@ from raveform_fetch_annotations import (  # noqa: E402
     youtube_id as track_youtube_id,
 )
 
-EVAL_AUDIO_DIR = REPO_ROOT / "training" / "eval_audio"
-EVAL_LABELS_FILE = REPO_ROOT / "training" / "eval_labels.json"
+EVAL_AUDIO_DIR = AUTOLUX_PACKAGE_ROOT / "training" / "eval_audio"
+EVAL_LABELS_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "eval_labels.json"
 
 # Hand labels are the one thing under training/data/ that git tracks, so every
 # checkout and every linked worktree materialises its own copy here.
@@ -89,7 +89,7 @@ EVAL_LABELS_FILE = REPO_ROOT / "training" / "eval_labels.json"
 # corpus, which holds whatever that checkout has -- including uncommitted
 # labels.  Hashing through it would make the provenance verdict a fact about
 # which worktree ran it, so the tracked path is the one the slice pins.
-REPO_CORPUS_DIR = REPO_ROOT / "training" / "data" / "raveform"
+REPO_CORPUS_DIR = AUTOLUX_PACKAGE_ROOT / "training" / "data" / "raveform"
 
 # How many characters of the base64url digest name a file.  Changing this
 # renames every committed mp3, so it is a re-cut, not a tweak.
@@ -147,9 +147,9 @@ def artifacts_block() -> dict:
     first re-freeze would leave them describing files that are no longer there.
     """
     return {
-        "audio_dir": str(EVAL_AUDIO_DIR.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "audio_dir": str(EVAL_AUDIO_DIR.relative_to(AUTOLUX_PACKAGE_ROOT)).replace("\\", "/"),
         "audio_name_scheme": AUDIO_NAME_SCHEME,
-        "labels": str(EVAL_LABELS_FILE.relative_to(REPO_ROOT)).replace("\\", "/"),
+        "labels": str(EVAL_LABELS_FILE.relative_to(AUTOLUX_PACKAGE_ROOT)).replace("\\", "/"),
     }
 
 
@@ -272,7 +272,7 @@ def hand_label_name(youtube_id: str, root: Path | None = None) -> str:
     a corpus dir that may not be this checkout's."""
     path = hand_label_path(youtube_id, root)
     try:
-        return str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+        return str(path.relative_to(AUTOLUX_PACKAGE_ROOT)).replace("\\", "/")
     except ValueError:
         return path.as_posix()
 

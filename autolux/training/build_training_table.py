@@ -22,11 +22,11 @@ from typing import NamedTuple
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+AUTOLUX_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 for _path in (
-    str(REPO_ROOT),
-    str(REPO_ROOT / "training"),
-    str(REPO_ROOT / "training" / "raveform"),
+    str(AUTOLUX_PACKAGE_ROOT),
+    str(AUTOLUX_PACKAGE_ROOT / "training"),
+    str(AUTOLUX_PACKAGE_ROOT / "training" / "raveform"),
 ):
     if _path not in sys.path:
         sys.path.insert(0, _path)
@@ -845,7 +845,7 @@ def _git(repo_root: Path, *args: str) -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
-def git_sha(repo_root: Path = REPO_ROOT) -> str:
+def git_sha(repo_root: Path = AUTOLUX_PACKAGE_ROOT) -> str:
     return _git(repo_root, "rev-parse", "HEAD") or "unknown"
 
 
@@ -853,7 +853,7 @@ def git_sha(repo_root: Path = REPO_ROOT) -> str:
 _PIPELINE_PATHSPEC = (":(glob)lib/**/*.py", ":(glob)simulate/**/*.py")
 
 
-def pipeline_sha(repo_root: Path = REPO_ROOT) -> str:
+def pipeline_sha(repo_root: Path = AUTOLUX_PACKAGE_ROOT) -> str:
     sha = _git(repo_root, "log", "-1", "--format=%H", "--", *_PIPELINE_PATHSPEC)
     if not sha:
         return "unknown"

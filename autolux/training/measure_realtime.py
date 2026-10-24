@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 
 # The worktree's own tree, not whatever the editable install points at.
-_REPO_ROOT = str(Path(__file__).resolve().parents[1])
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+_AUTOLUX_PACKAGE_ROOT = str(Path(__file__).resolve().parents[1])
+if _AUTOLUX_PACKAGE_ROOT not in sys.path:
+    sys.path.insert(0, _AUTOLUX_PACKAGE_ROOT)
 
 SR, BUFFER = 44100, 256
 BUDGET_MS = 1000.0 * BUFFER / SR
