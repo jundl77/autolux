@@ -1,7 +1,5 @@
 import logging
-import asyncio
 import datetime
-import time
 
 from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
 
@@ -37,16 +35,13 @@ class AutoluxController:
         from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
         from autolux.lib.delayed_monitor import DelayedMonitor
 
-        self.debug_mode: bool = debug_mode
         self.disable_os2l: bool = disable_os2l
         self.enable_ui: bool = enable_ui
         self._ui_port: int = ui_port
         self._ui = None
-        self._report_path: str | None = report_path
         self.is_running: bool = False
         self._stop_requested = False
         self.health_check = None
-        self.loop = asyncio.get_event_loop()
         self.command_queue: DelayedCommandQueue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
 
         self._enable_playback: bool = debug_mode or output_device_index is not None

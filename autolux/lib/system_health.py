@@ -10,6 +10,9 @@ from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 MIN_BUFFER_TARGET_RATIO = 0.25
 MAX_BUFFER_TARGET_RATIO = 3
 MAX_DMX_LATENESS_SECONDS = 0.05
+AUDIO_INPUT_STALE_SECONDS = 1
+DMX_INPUT_STALE_SECONDS = 3
+MILLISECONDS_PER_SECOND = 1000
 
 
 def health_summary(snapshot, *, now=None):
@@ -43,21 +46,30 @@ def health_summary(snapshot, *, now=None):
     fill, target = rx.get('audio_buffer_seconds'), rx.get('buffer_target_seconds')
     buffer_available = rx_fresh and finite(fill)
     target_available = finite(target) and target > 0
-    buffer_detail = f'Target {target * 1000:.0f} ms' if target_available else 'Target unavailable'
+    buffer_detail = (
+        f'Target {target * MILLISECONDS_PER_SECOND:.0f} ms'
+        if target_available
+        else 'Target unavailable'
+    )
     correction = rx.get('clock_correction_ppm')
     if finite(correction):
         buffer_detail += f' · clock correction {correction:.0f} ppm'
     input_age = rx.get('audio_input_age_seconds')
-    audio_fresh = rx_fresh and input_age is not None and input_age + age < 1
+    audio_fresh = rx_fresh and input_age is not None and input_age + age < AUDIO_INPUT_STALE_SECONDS
     dmx_age = tx.get('dmx_input_age_seconds')
-    lights = link and rx.get('dmx_connected') and dmx_age is not None and dmx_age + age < 3
+    lights = (
+        link
+        and rx.get('dmx_connected')
+        and dmx_age is not None
+        and dmx_age + age < DMX_INPUT_STALE_SECONDS
+    )
     lateness = rx.get('dmx_lateness_seconds')
     cards = [
         (
             'Autolux',
-            'Stopped' if age >= 3 else 'Degraded' if fault else 'Running',
+            'Stopped' if age >= TELEMETRY_STALE_SECONDS else 'Degraded' if fault else 'Running',
             str(fault or 'Analysis and controller'),
-            age < 3 and not fault,
+            age < TELEMETRY_STALE_SECONDS and not fault,
         ),
         (
             'Radius link',
@@ -73,7 +85,7 @@ def health_summary(snapshot, *, now=None):
         ),
         (
             'Audio buffer',
-            f'{fill * 1000:.0f} ms' if buffer_available else 'Unavailable',
+            f'{fill * MILLISECONDS_PER_SECOND:.0f} ms' if buffer_available else 'Unavailable',
             buffer_detail,
             buffer_available
             and target_available
@@ -87,7 +99,9 @@ def health_summary(snapshot, *, now=None):
         ),
         (
             'Audio / lights',
-            f'{lateness * 1000:.0f} ms' if lights and lateness is not None else 'Unavailable',
+            f'{lateness * MILLISECONDS_PER_SECOND:.0f} ms'
+            if lights and lateness is not None
+            else 'Unavailable',
             'Lighting scheduling lateness',
             bool(lights and finite(lateness) and lateness < MAX_DMX_LATENESS_SECONDS),
         ),
@@ -131,7 +145,9 @@ class HealthCollector:
         system = snapshot.get('system') or {}
         age = max(0, time.time() - system.get('updated_at', 0))
         yield GaugeMetricFamily(
-            'autolux_up', 'Controller health updates are fresh.', value=int(age < 3)
+            'autolux_up',
+            'Controller health updates are fresh.',
+            value=int(age < TELEMETRY_STALE_SECONDS),
         )
         shed = snapshot.get('shed') or {}
         yield GaugeMetricFamily(
@@ -144,7 +160,7 @@ class HealthCollector:
             yield GaugeMetricFamily(
                 'autolux_command_timing_error_seconds',
                 'Mean absolute command scheduling error.',
-                value=timing / 1000,
+                value=timing / MILLISECONDS_PER_SECOND,
             )
         up = GaugeMetricFamily(
             'radius_up',
@@ -154,7 +170,7 @@ class HealthCollector:
         for node in ('tx', 'rx'):
             info = system.get(node) or {}
             measured_age = system.get(f'{node}_age_seconds')
-            fresh = measured_age is not None and measured_age + age < 3
+            fresh = measured_age is not None and measured_age + age < TELEMETRY_STALE_SECONDS
             up.add_metric([node], int(fresh and bool(info.get('up')) and bool(info.get('link_up'))))
         yield up
         for mapping, factory in ((GAUGES, GaugeMetricFamily), (COUNTERS, CounterMetricFamily)):
@@ -163,7 +179,7 @@ class HealthCollector:
                 for node in ('tx', 'rx'):
                     value = (system.get(node) or {}).get(key)
                     measured_age = system.get(f'{node}_age_seconds')
-                    if measured_age is None or measured_age + age >= 3:
+                    if measured_age is None or measured_age + age >= TELEMETRY_STALE_SECONDS:
                         continue  # Missing measurements must not look like healthy zeros.
                     if isinstance(value, (int, float)) and math.isfinite(value):
                         metric.add_metric([node], value)

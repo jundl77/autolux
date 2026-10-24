@@ -8,6 +8,7 @@ from dash import dcc, html
 import plotly.graph_objects as go
 
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, HISTORY_WINDOW_SECONDS, finite
+from autolux.lib.system_health import AUDIO_INPUT_STALE_SECONDS, DMX_INPUT_STALE_SECONDS
 
 BLUE, TEAL, AMBER, RED = '#73b6ff', '#59d5be', '#f6c177', '#ef818c'
 PANELS = (
@@ -224,7 +225,7 @@ def build_telemetry_notices(snapshot, *, now=None):
                 and measured_age + age < TELEMETRY_STALE_SECONDS
             ):
                 input_age = info.get('audio_input_age_seconds')
-                if not finite(input_age) or input_age + age >= 1:
+                if not finite(input_age) or input_age + age >= AUDIO_INPUT_STALE_SECONDS:
                     messages.append('No recent audio packets at the receiver.')
         tx = system.get('tx') or {}
         dmx_age = tx.get('dmx_input_age_seconds')
@@ -232,7 +233,7 @@ def build_telemetry_notices(snapshot, *, now=None):
         if (
             finite(tx_age)
             and tx_age + age < TELEMETRY_STALE_SECONDS
-            and (not finite(dmx_age) or dmx_age + age >= 3)
+            and (not finite(dmx_age) or dmx_age + age >= DMX_INPUT_STALE_SECONDS)
         ):
             messages.append('No recent lighting input from SoundSwitch.')
     fault = (snapshot.get('shed') or {}).get('fault')

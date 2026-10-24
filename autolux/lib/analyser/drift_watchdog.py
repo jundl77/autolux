@@ -46,7 +46,7 @@ class DriftWatchdog:
         self._shed_at: deque[float] = deque()
         self._first_wall: float | None = None
         self._calm_since: float | None = None
-        self._last_log_at: dict = {}
+        self._last_log_times_seconds: dict = {}
         self._suppressed_log_counts: dict = {}
 
     @property
@@ -146,12 +146,12 @@ class DriftWatchdog:
                 self._shed_at.append(now)
                 while self._shed_at[0] < now - SHED_RATE_WINDOW_SEC:
                     self._shed_at.popleft()
-            last = self._last_log_at.get(direction)
+            last = self._last_log_times_seconds.get(direction)
             if last is not None and now - last < _LOG_INTERVAL_SEC:
                 self._suppressed_log_counts[direction] = (
                     self._suppressed_log_counts.get(direction, 0) + 1
                 )
                 return
-            self._last_log_at[direction] = now
+            self._last_log_times_seconds[direction] = now
             more = self._suppressed_log_counts.pop(direction, 0)
             logging.warning(message + (f' [+{more} more since the last line]' if more else ''))

@@ -7,12 +7,18 @@ from pathlib import Path
 import time
 
 from autolux.lib.system_health import health_summary
+from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS
+
+DEFAULT_HEALTH_LOG_INTERVAL_SECONDS = 30
+HEALTH_SAMPLE_INTERVAL_SECONDS = 0.5
+MAX_HEALTH_HISTORY_SAMPLES = 120
+RECENT_ERROR_WINDOW_SECONDS = 10
 
 
 class HealthLogger:
     """Log health transitions and a compact thirty-second status line."""
 
-    def __init__(self, *, interval=30, clock=time.monotonic):
+    def __init__(self, *, interval=DEFAULT_HEALTH_LOG_INTERVAL_SECONDS, clock=time.monotonic):
         self.interval, self.clock = interval, clock
         self._next = 0
         self._previous = None
@@ -44,13 +50,13 @@ class HealthLogger:
 class HealthMonitor:
     def __init__(self, path, session=None):
         self.path, self.session = Path(path), session
-        self._history = deque(maxlen=120)
+        self._history = deque(maxlen=MAX_HEALTH_HISTORY_SAMPLES)
         self._last = {}
         self._read_at = 0
 
     def snapshot(self):
         now = time.time()
-        if now - self._read_at >= 0.5:
+        if now - self._read_at >= HEALTH_SAMPLE_INTERVAL_SECONDS:
             try:
                 value = json.loads(self.path.read_text())
                 if self.session is not None and value.get('session') != self.session:
@@ -71,10 +77,12 @@ class HealthMonitor:
             + rx.get('overflow_frames_total', 0),
             'latency_recoveries': rx.get('latency_trims_total', 0),
         }
-        if age is not None and age < 3:
-            if not self._history or now - self._history[-1][0] >= 0.5:
+        if age is not None and age < TELEMETRY_STALE_SECONDS:
+            if not self._history or now - self._history[-1][0] >= HEALTH_SAMPLE_INTERVAL_SECONDS:
                 self._history.append((now, counters))
-            while len(self._history) > 1 and self._history[1][0] < now - 10:
+            while (
+                len(self._history) > 1 and self._history[1][0] < now - RECENT_ERROR_WINDOW_SECONDS
+            ):
                 self._history.popleft()
         baseline = self._history[0][1] if self._history else counters
         return {
