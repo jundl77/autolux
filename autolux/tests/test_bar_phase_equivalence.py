@@ -10,6 +10,7 @@ arrival order, and demands the identical committed position stream.
 """
 
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -20,18 +21,18 @@ for extra in (REPO_ROOT / "training" / "phase_tracking",):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-import phase_tracking as pt  # noqa: E402
+import phase_tracking as pt
 
-from autolux.lib.analyser.bar_tracker import FPS, TrackerChunk  # noqa: E402
+from autolux.lib.analyser.bar_tracker import FPS, TrackerChunk
 from autolux.lib.engine.bar_phase import (
-    VOTE_AGGREGATION_RADIUS_FRAMES,
     DOWNBEAT_EVIDENCE_WEIGHT,
-    DOWNBEAT_PROBABILITY_CEILING_MARGIN,  # noqa: E402
+    DOWNBEAT_PROBABILITY_CEILING_MARGIN,
     DOWNBEAT_PROBABILITY_THRESHOLD,
+    INTERVAL_RATIO_STANDARD_DEVIATION,
     LAG_BEATS,
     MAX_ADVANCE,
-    INTERVAL_RATIO_STANDARD_DEVIATION,
-    BEAT_SLIP_PRIOR_WEIGHT,
+    PRIOR_FACTOR_PER_SLIPPED_BEAT,
+    VOTE_AGGREGATION_RADIUS_FRAMES,
     BarPhaseFusion,
 )
 
@@ -85,7 +86,7 @@ def offline_committed(beats, db_logit, avail_frame):
     log_transition = pt.advance_log_weights(
         ratios[1:],
         sigma=INTERVAL_RATIO_STANDARD_DEVIATION,
-        eta=BEAT_SLIP_PRIOR_WEIGHT,
+        eta=PRIOR_FACTOR_PER_SLIPPED_BEAT,
         max_advance=MAX_ADVANCE,
     )
     log_start = np.log(np.asarray(pt.LIVE_START_PRIOR, dtype=np.float64))
@@ -180,7 +181,7 @@ def test_the_fusion_with_no_evidence_converges_to_the_anchor1_count():
 
 
 def test_a_dead_tracker_freezes_the_offset_and_keeps_counting():
-    beats, logits, chunks, _, _ = make_session(2, slip_every=40)
+    beats, _, chunks, _, _ = make_session(2, slip_every=40)
     tracker = _FakeTracker()
     fusion = BarPhaseFusion(tracker, None)
     events = [("chunk", c.avail_sec, c) for c in chunks] + [("beat", t, t) for t in beats]
@@ -194,7 +195,7 @@ def test_a_dead_tracker_freezes_the_offset_and_keeps_counting():
         else:
             out.append(fusion.push_beat(payload))
     tail = out[len(out) // 2 :]
-    steps = {(b - a) % 4 for a, b in zip(tail, tail[1:])}
+    steps = {(b - a) % 4 for a, b in pairwise(tail)}
     assert steps == {1}, "after the tracker died every advance must be +1"
 
 

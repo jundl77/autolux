@@ -32,11 +32,11 @@ if _PHASE_TRACKING_DIR not in sys.path:
     sys.path.insert(0, _PHASE_TRACKING_DIR)
 
 from phase_tracking import (
-    LIVE_START_PRIOR,  # noqa: E402
+    LIVE_START_PRIOR,
     advance_log_weights,
 )
 
-from autolux.lib.analyser.bar_tracker import FPS  # noqa: E402
+from autolux.lib.analyser.bar_tracker import FPS
 
 # The #330/#332 operating point (c2a_causal/RESULTS.md).
 DOWNBEAT_PROBABILITY_THRESHOLD = 0.6
@@ -45,7 +45,7 @@ DOWNBEAT_PROBABILITY_CEILING_MARGIN = 0.03
 LAG_BEATS = 2
 VOTE_AGGREGATION_RADIUS_FRAMES = 3
 INTERVAL_RATIO_STANDARD_DEVIATION = 0.22
-BEAT_SLIP_PRIOR_WEIGHT = 0.02
+PRIOR_FACTOR_PER_SLIPPED_BEAT = 0.02
 MAX_ADVANCE = 4
 
 _BEATS_PER_BAR = 4
@@ -134,7 +134,7 @@ class BarPhaseFusion:
         self._logit_store = np.zeros(_FRAME_BUFFER_CAPACITY, dtype=np.float32)
         self._frame_availability_times_seconds = np.full(_FRAME_BUFFER_CAPACITY, np.nan)
         self._stored_frame_ids = np.full(_FRAME_BUFFER_CAPACITY, -1, dtype=np.int64)
-        self._latest_frame_end = 0
+        self._received_frames_end_index = 0
         self.corrections = 0
         self.reset()
 
@@ -143,7 +143,7 @@ class BarPhaseFusion:
         self._ratios.reset()
         self._frame_availability_times_seconds[:] = np.nan
         self._stored_frame_ids[:] = -1
-        self._latest_frame_end = 0
+        self._received_frames_end_index = 0
 
     def reanchor(self, at_sec: float) -> int:
         """The gap-ending beat: uniform prior — its true position is a coin toss."""
@@ -153,15 +153,15 @@ class BarPhaseFusion:
 
     def _reset_phase_state(self, prior) -> None:
         self._beat_count = 0
-        self._phase_offset = 0
+        self._phase_offset_beats = 0
         self._previous_interval_ratio = float("nan")
         self._pending_beat_votes: deque = deque()
-        self._available_downbeat_votes: list = []
-        self._tracking_active = self._tracker_has_live_evidence()
+        self._computed_downbeat_votes: list = []
+        self._tracking_active = self._can_use_tracker_evidence()
         self._trellis = _Trellis(prior, LAG_BEATS) if self._tracking_active else None
         self._trellis_start_beat = 0
 
-    def _tracker_has_live_evidence(self) -> bool:
+    def _can_use_tracker_evidence(self) -> bool:
         if self._tracker is None or not getattr(self._tracker, "alive", False):
             return False
         if self._watchdog is None:
@@ -173,11 +173,11 @@ class BarPhaseFusion:
     def _suspend(self) -> None:
         self._trellis = None
         self._pending_beat_votes.clear()
-        self._available_downbeat_votes.clear()
+        self._computed_downbeat_votes.clear()
         self._tracking_active = False
 
     def _resume(self) -> None:
-        held = (self._beat_count + self._phase_offset) % _BEATS_PER_BAR
+        held = (self._beat_count + self._phase_offset_beats) % _BEATS_PER_BAR
         prior = np.full(_BEATS_PER_BAR, 1e-12)
         prior[held] = 1.0
         self._trellis = _Trellis(prior, LAG_BEATS)
@@ -191,20 +191,20 @@ class BarPhaseFusion:
         self._logit_store[slots] = np.asarray(chunk.db_logits, dtype=np.float32)
         self._frame_availability_times_seconds[slots] = float(chunk.avail_sec)
         self._stored_frame_ids[slots] = frames
-        self._latest_frame_end = max(self._latest_frame_end, int(chunk.frame_hi))
-        self._resolve_pending_beat_votes()
+        self._received_frames_end_index = max(self._received_frames_end_index, int(chunk.frame_hi))
+        self._compute_ready_beat_votes()
 
-    def _resolve_pending_beat_votes(self) -> None:
+    def _compute_ready_beat_votes(self) -> None:
         while self._pending_beat_votes:
-            local, at_sec, frame = self._pending_beat_votes[0]
-            if self._latest_frame_end < frame + VOTE_AGGREGATION_RADIUS_FRAMES + 1:
+            local, frame = self._pending_beat_votes[0]
+            if self._received_frames_end_index < frame + VOTE_AGGREGATION_RADIUS_FRAMES + 1:
                 return
             self._pending_beat_votes.popleft()
-            vote = self._downbeat_vote_for(local, frame)
+            vote = self._compute_downbeat_vote(local, frame)
             if vote is not None:
-                self._available_downbeat_votes.append(vote)
+                self._computed_downbeat_votes.append(vote)
 
-    def _downbeat_vote_for(self, local: int, frame: int):
+    def _compute_downbeat_vote(self, local: int, frame: int):
         lo = max(0, frame - VOTE_AGGREGATION_RADIUS_FRAMES)
         hi = frame + VOTE_AGGREGATION_RADIUS_FRAMES + 1
         frames = np.arange(lo, hi)
@@ -225,7 +225,7 @@ class BarPhaseFusion:
 
     def push_beat(self, at_sec: float) -> int:
         at_sec = float(at_sec)
-        live = self._tracker_has_live_evidence()
+        live = self._can_use_tracker_evidence()
         if live and not self._tracking_active:
             self._resume()
         elif not live and self._tracking_active:
@@ -233,39 +233,41 @@ class BarPhaseFusion:
 
         ratio = self._ratios.push(at_sec)
         local = self._beat_count - self._trellis_start_beat
-        committed = (self._beat_count + self._phase_offset) % _BEATS_PER_BAR
+        committed = (self._beat_count + self._phase_offset_beats) % _BEATS_PER_BAR
 
         if self._tracking_active:
-            self._resolve_pending_beat_votes()
+            self._compute_ready_beat_votes()
             emission = np.zeros(_BEATS_PER_BAR, dtype=np.float64)
             kept = []
-            for source, strength, avail_t in self._available_downbeat_votes:
+            for source, strength, avail_t in self._computed_downbeat_votes:
                 if avail_t <= at_sec:
                     emission[(local - source) % _BEATS_PER_BAR] += (
                         DOWNBEAT_EVIDENCE_WEIGHT * strength
                     )
                 else:
                     kept.append((source, strength, avail_t))
-            self._available_downbeat_votes = kept
+            self._computed_downbeat_votes = kept
 
             transition = None
             if local > 0:
                 transition = advance_log_weights(
                     np.array([self._previous_interval_ratio, ratio]),
                     sigma=INTERVAL_RATIO_STANDARD_DEVIATION,
-                    eta=BEAT_SLIP_PRIOR_WEIGHT,
+                    eta=PRIOR_FACTOR_PER_SLIPPED_BEAT,
                     max_advance=MAX_ADVANCE,
                 )[1]
             decided = self._trellis.push(emission, transition)
             if decided is not None:
                 target = (
-                    self._trellis_start_beat + local - LAG_BEATS + self._phase_offset
+                    self._trellis_start_beat + local - LAG_BEATS + self._phase_offset_beats
                 ) % _BEATS_PER_BAR
                 if decided != target:
-                    self._phase_offset = (self._phase_offset + decided - target) % _BEATS_PER_BAR
+                    self._phase_offset_beats = (
+                        self._phase_offset_beats + decided - target
+                    ) % _BEATS_PER_BAR
                     self.corrections += 1
             frame = int(np.round(at_sec * FPS))
-            self._pending_beat_votes.append((local, at_sec, frame))
+            self._pending_beat_votes.append((local, frame))
 
         self._previous_interval_ratio = ratio
         self._beat_count += 1
