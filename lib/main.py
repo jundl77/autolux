@@ -9,7 +9,8 @@ import datetime
 import time
 
 from lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
-# Must match playback_delay_seconds in dmx-enttec-node and simulate/runner.py's copy.
+# start-show.ps1 copies this to dmx-enttec-node's audio sender configuration.
+# simulate/runner.py uses the same delay for replay.
 PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
 logging.basicConfig(format='%(asctime)s [%(levelname)s ] %(message)s', level=logging.INFO)
@@ -50,7 +51,7 @@ class SoundSwitchAutoPilot:
         self._monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, self._play_monitored)
         self.audio_client: PyAudioClient = PyAudioClient(SAMPLE_RATE, BUFFER_SIZE, input_device_index, output_device_index)
         self.midi_client: MidiClient = MidiClient(midi_port_index)
-        self.os2l_client: Os2lClient = Os2lClient()
+        self.os2l_client: Os2lClient = Os2lClient(playback_delay_sec=PLAYBACK_DELAY_SEC)
         self.overlay_client: OverlayClient = OverlayClient()
 
         from lib.engine.event_buffer import EventBuffer

@@ -32,7 +32,7 @@ def get_ip_addresses_for_all_interfaces():
     for iface in netifaces.interfaces():
         iface_data = netifaces.ifaddresses(iface)
         if netifaces.AF_INET in iface_data:
-            ips.append(netifaces.ifaddresses(iface)[netifaces.AF_INET][0]['addr'])
+            ips.extend(address['addr'] for address in iface_data[netifaces.AF_INET])
     return ips
 
 
@@ -45,7 +45,11 @@ def on_service_state_change(zeroconf: Zeroconf,
 
     local_ips = get_ip_addresses_for_all_interfaces()
 
-    if state_change is ServiceStateChange.Added:
+    if state_change is ServiceStateChange.Removed:
+        global_services[:] = [service for service in global_services if service.service_name != name]
+        return
+
+    if state_change in (ServiceStateChange.Added, ServiceStateChange.Updated):
         try:
             service_info: Optional[ServiceInfo] = zeroconf.get_service_info(service_type, name)
         except:
@@ -53,21 +57,21 @@ def on_service_state_change(zeroconf: Zeroconf,
             return
         if service_info:
             ipv4_addresses: List[str] = service_info.parsed_scoped_addresses(IPVersion.V4Only)
-            kept_addresses = [address for address in ipv4_addresses if address in local_ips]
+            kept_addresses = [address for address in local_ips if address in ipv4_addresses]
             if len(kept_addresses) == 0:
-                return
-            if len(kept_addresses) != 1:
-                service_discovery_error = f'found more than one os2l service on local ips: {local_ips}, found: {kept_addresses}'
                 return
 
             os2l_service = Os2lService(kept_addresses[0], service_info.port, service_info.name, service_info.server)
             logging.info(f'[os2l-discovery] found: {os2l_service}')
+            global_services[:] = [service for service in global_services
+                                  if service.service_name != service_info.name]
             global_services.append(os2l_service)
 
 
 class Os2lClient:
-    def __init__(self):
-        self.os2l_sender: Os2lSender = Os2lSender()
+    def __init__(self, playback_delay_sec: float = 0.0):
+        self._playback_delay_sec = playback_delay_sec
+        self.os2l_sender: Os2lSender = Os2lSender(playback_delay_sec=playback_delay_sec)
 
     def set_analyser(self, analyser: MusicAnalyser):
         self.os2l_sender.set_analyser(analyser)
@@ -92,12 +96,14 @@ class Os2lClient:
             self.os2l_sender.stop()
 
     def on_sound_start(self, time_elapsed_ms: int, beat_pos: float, first_downbeat_ms: float, bpm: float):
-        self.os2l_sender.send_message(os2l_messages.logon_message())
-        self.os2l_sender.send_message(os2l_messages.song_loaded_message(time_elapsed_ms, beat_pos, first_downbeat_ms, bpm))
-        self.os2l_sender.send_message(os2l_messages.play_start_message())
+        self.os2l_sender.send_message(
+            os2l_messages.logon_message()
+            + os2l_messages.song_loaded_message(time_elapsed_ms, beat_pos, first_downbeat_ms, bpm)
+            + os2l_messages.play_start_message(), delay_sec=self._playback_delay_sec)
 
     def on_sound_stop(self):
-        self.os2l_sender.send_message(os2l_messages.play_stop_message())
+        self.os2l_sender.send_message(os2l_messages.play_stop_message(),
+                                     delay_sec=self._playback_delay_sec)
 
     async def send_beat(self, change: bool, pos: int, bpm: float, strength: float):
         message = os2l_messages.beat_message(change, pos, bpm, strength)
@@ -105,6 +111,8 @@ class Os2lClient:
 
     def _find_services(self):
         global service_discovery_error
+        global_services.clear()
+        service_discovery_error = ''
         zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
         service_names = [OS2L_SERVICE_NAME]
         ServiceBrowser(zeroconf, service_names, handlers=[on_service_state_change])

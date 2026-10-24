@@ -980,7 +980,7 @@ def build_app(snapshot_source) -> dash.Dash:
 
 def run_app(snapshot_source, port: int = 8050) -> None:
     app = build_app(snapshot_source)
-    print(f'\n  Visualizer → http://localhost:{port}\n')
+    print(f'\n  Visualizer: http://localhost:{port}\n')
     app.run(host='0.0.0.0', port=port, debug=False)
 
 

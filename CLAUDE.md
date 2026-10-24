@@ -559,8 +559,14 @@ The rule engine ran *ahead* of the audience and `DelayedCommandQueue` held every
 command back by the whole look-ahead. The model runs *behind*, so the correct
 relation is `queue_delay = playback_delay - chain_latency`, and it must be >= 0.
 `PLAYBACK_DELAY_SEC` is **14.0 s** and must match `playback_delay_seconds` in
-dmx-enttec-node; it is defined in `lib/main.py` and mirrored in
-`simulate/runner.py`. Local debug playback is delayed by the same amount, so
+dmx-enttec-node's **audio sender**; it is defined in `lib/main.py` and mirrored in
+`simulate/runner.py`. `start-show.ps1` derives the sender's configuration from
+that setting on every launch, verifies both programs capture the same undelayed
+device, and refuses an old sender binary that cannot validate the new config.
+The sender delays complete stereo frames before UDP transmission; the remote
+receiver and DMX protocol stay compatible, with ordinary transport/device
+latency additional to the model's budget. The launcher owns the sender process
+and stops it when the show exits. Local debug playback is delayed by the same amount, so
 headphone monitoring stays in sync.
 
 - **`lag_bars = 2` is the chosen point on a measured curve, not a default.** The
@@ -603,11 +609,13 @@ headphone monitoring stays in sync.
   the bars are drawn on, so a run in which it changed measured something
   different, whatever the scores did.
 - **Everything the room can see waits; the engine's own bookkeeping does not.**
-  Song-boundary resets and the OS2L wire (which talks to a DJ's software, not to
-  the audience) happen immediately; MIDI, the overlay chase and the stage go
-  through the queue. Before that split the stage blacked out while the last
-  fourteen seconds of a track were still playing -- inaudible in every report,
-  unmissable in the venue.
+  Song-boundary resets happen immediately. MIDI and the overlay chase go through
+  the engine's queue. OS2L is consumed by SoundSwitch itself: its song boundaries
+  and periodic playhead snapshots now wait in the sender for the same room delay.
+  Beat messages already waited in the engine, so the sender sends those without
+  another delay. An ordered schedule lets a due beat pass a future playhead
+  snapshot. Previously the beat pulses described room audio while the continuously
+  published playhead and play/stop state described audio fourteen seconds ahead.
 
 ### Fast simulation and the cell cache
 
@@ -1029,6 +1037,19 @@ timer-throttling flags) restores the real behaviour rather than faking it, and
 ---
 
 ## Running
+
+For the installed Windows room setup, `./start-show.ps1 -CheckOnly` checks the
+devices, model and sender; `./start-show.ps1` starts the sender and live show
+together. SoundSwitch must be out of MIDI mapping mode. The launcher resolves
+device names rather than assuming stable numeric indices and starts loopMIDI
+when necessary. Music goes to CABLE Input; both consumers read CABLE Output.
+Sender logs and generated configuration live under the ignored `.live/` folder.
+The viewer's console startup message is ASCII so a redirected Windows console
+cannot terminate the separate viewer on a Unicode encoding error.
+OS2L discovery identifies a SoundSwitch instance by its advertised service name,
+not by how many local interface addresses it advertises. Ethernet, Hyper-V and
+VirtualBox addresses for one instance must not be mistaken for competing shows;
+repeat announcements update that instance's endpoint instead of duplicating it.
 
 ```bash
 # Install dependencies (requires uv: https://github.com/astral-sh/uv).

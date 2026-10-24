@@ -3,25 +3,32 @@ import logging
 import socket
 import json
 import datetime
+import heapq
+import itertools
 from threading import Thread
 from queue import Queue, Empty
 import lib.clients.os2l_messages as os2l_messages
 from lib.analyser.music_analyser import MusicAnalyser
+from lib.clock import Clock, SYSTEM_CLOCK
 
 
 class Os2lSender:
-    def __init__(self):
+    def __init__(self, playback_delay_sec: float = 0.0, clock: Clock = SYSTEM_CLOCK):
+        self._playback_delay_sec = playback_delay_sec
+        self._clock = clock
         self.analyser: MusicAnalyser = None
         self.dest_ipv4_address: str = None
         self.dest_port: int = None
         self.os2l_socket: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sending_thread = Thread(target=self._run_sending_thread)
         self.message_queue: Queue = Queue()
+        self._pending_messages: list = []
+        self._message_sequence = itertools.count()
         self.is_running: bool = False
         self.logon_complete: bool = False
 
         self.send_update_frequency: datetime.timedelta = datetime.timedelta(milliseconds=25)
-        self.last_update_sent: datetime.datetime = datetime.datetime.now()
+        self.last_update_sent: datetime.datetime = self._clock.now()
 
     def set_analyser(self, analyser: MusicAnalyser):
         self.analyser: MusicAnalyser = analyser
@@ -43,8 +50,9 @@ class Os2lSender:
             self._send_message(os2l_messages.shutdown_message())
             self.os2l_socket.close()
 
-    def send_message(self, message: str):
-        self.message_queue.put(message)
+    def send_message(self, message: str, delay_sec: float = 0.0):
+        self.message_queue.put((self._clock.monotonic() + delay_sec,
+                                next(self._message_sequence), message))
 
     def _run_sending_thread(self):
         logging.info(f'[os2l] started sender thread')
@@ -70,20 +78,25 @@ class Os2lSender:
     def _poll_queue(self):
         if not self.logon_complete:
             return
-        try:
-            message = self.message_queue.get(block=False)
+        while True:
+            try:
+                heapq.heappush(self._pending_messages, self.message_queue.get_nowait())
+            except Empty:
+                break
+        now = self._clock.monotonic()
+        while self._pending_messages and self._pending_messages[0][0] <= now:
+            _, _, message = heapq.heappop(self._pending_messages)
             self._send_message(message)
-        except Empty:
-            pass
 
     def _send_update_if_due(self):
-        now = datetime.datetime.now()
+        now = self._clock.now()
         is_playing = self.analyser.is_song_playing()
         if is_playing and now - self.last_update_sent > self.send_update_frequency:
             beat_position: float = self.analyser.get_beat_position()
             time_elapsed: datetime.timedelta = self.analyser.get_song_current_duration()
             time_elapsed_ms: int = int(time_elapsed.total_seconds() * 1000)
-            self.send_message(os2l_messages.update_message(beat_position, time_elapsed_ms))
+            self.send_message(os2l_messages.update_message(beat_position, time_elapsed_ms),
+                              delay_sec=self._playback_delay_sec)
             self.last_update_sent = now
 
     def _send_message(self, message: str):
