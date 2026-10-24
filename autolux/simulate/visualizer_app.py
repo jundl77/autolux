@@ -42,8 +42,6 @@ WARN_COLOR = '#f0883e'
 MUTED = '#6e7681'
 POSTERIOR_FILL = '#58a6ff'
 
-HEALTH_FONT_SIZE = '14px'
-
 BEAT_MARKER_SIZE = 16
 BEATS_PER_BAR = 4
 BAR_LABEL_EVERY = 4
@@ -581,6 +579,9 @@ def _build_show_overview(snapshot: dict) -> list:
     room_text = '—' if room is None else _clock_text(room)
     cfg = _intent_config(snapshot.get('intent'))
     playing = _room_is_playing(snapshot)
+    shed = snapshot.get('shed') or {}
+    pill_str, pill_col = _shed_pill(shed)
+    rate_str, rate_col = _shed_rate(shed)
     effect = snapshot.get('current_effect') or {}
     channel = effect.get('channel', '—')
     if channel.startswith('AUTOLOOP_BANK_'):
@@ -592,7 +593,11 @@ def _build_show_overview(snapshot: dict) -> list:
                 '● PLAYING' if playing else '◌ PAUSED',
                 style={'color': OK_COLOR if playing else MUTED},
             ),
-            'At the room playback position',
+            [
+                html.Div(pill_str, style={'color': pill_col, 'fontWeight': 'bold'}),
+                html.Div(rate_str, style={'color': rate_col}),
+                html.Div('At the room playback position'),
+            ],
         ),
         _build_stat_card(
             'Tempo',
@@ -622,17 +627,9 @@ def _build_show_overview(snapshot: dict) -> list:
     ]
 
 
-def _build_state_health_row(snapshot: dict) -> list:
+def _build_command_timing_row(snapshot: dict) -> list:
     verdict_str, stream_strs, timing_col = _timing_health(snapshot.get('timing_stats', {}))
-    shed = snapshot.get('shed') or {}
-    pill_str, pill_col = _shed_pill(shed)
-    rate_str, rate_col = _shed_rate(shed)
     return [
-        html.Span(
-            pill_str,
-            style={'color': pill_col, 'fontWeight': 'bold', 'fontSize': HEALTH_FONT_SIZE},
-        ),
-        html.Span(rate_str, style={'color': rate_col}),
         html.Span(verdict_str, style={'color': timing_col, 'fontWeight': 'bold'}),
         *[html.Span(text, style={'color': MUTED}) for text in stream_strs],
     ]
@@ -692,11 +689,11 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
-.state-health { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
-                padding: 12px 16px; border-bottom: 1px solid #273344;
-                font-size: 12px; font-variant-numeric: tabular-nums; }
-.state-health > span { white-space: nowrap; }
-.state-health > span:first-child { white-space: normal; }
+.command-timing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
+                  padding: 12px 16px; border-top: 1px solid #273344;
+                  font-size: 12px; font-variant-numeric: tabular-nums; }
+.command-timing > span { white-space: nowrap; }
+.command-timing > span:first-child { white-space: normal; }
 .show-overview { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .show-stat { padding: 18px 16px; min-width: 0; border-right: 1px solid #273344; font-variant-numeric: tabular-nums; }
 .show-stat:last-child { border-right: 0; }
@@ -1119,8 +1116,17 @@ def build_app(snapshot_source) -> dash.Dash:
     )
     app.index_string = INDEX_TEMPLATE
     from prometheus_client import make_wsgi_app
+    from flask import request
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
     from autolux.lib.system_health import registry_for
+
+    @app.server.before_request
+    def reject_stale_dashboard_callback():
+        if request.path == '/_dash-update-component' and request.method == 'POST':
+            payload = request.get_json(silent=True)
+            output = payload.get('output') if isinstance(payload, dict) else None
+            if not isinstance(output, str) or output not in app.callback_map:
+                return {'error': 'Dashboard changed. Refresh this page.'}, 409
 
     app.server.wsgi_app = DispatcherMiddleware(
         app.server.wsgi_app,
@@ -1149,8 +1155,8 @@ def build_app(snapshot_source) -> dash.Dash:
             html.Div(id='telemetry-alerts'),
             html.Section(
                 [
-                    html.Div(id='diagnostics', className='state-health'),
                     html.Div(id='metrics', className='show-overview'),
+                    html.Div(id='diagnostics', className='command-timing'),
                 ],
                 className='overview-panel',
             ),
@@ -1276,7 +1282,7 @@ def build_app(snapshot_source) -> dash.Dash:
             _build_show_overview(snap),
             _build_stage(snap),
             _build_decoder(snap),
-            _build_state_health_row(snap),
+            _build_command_timing_row(snap),
         )
 
     @app.callback(
