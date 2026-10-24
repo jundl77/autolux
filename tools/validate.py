@@ -30,8 +30,8 @@ def validation_steps(output_dir):
             'build',
             ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'build.ps1')],
         ),
-        ('tests', python + ['-m', 'pytest', '-q']),
-        ('backtest', python + ['autolux/training/run_eval_set.py', '--quiet']),
+        ('tests', python + ['-m', 'pytest', '-q', '-ra']),
+        ('backtest', python + ['autolux/training/run_eval_set.py']),
         (
             'simulation',
             python
