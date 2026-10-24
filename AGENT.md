@@ -11,6 +11,7 @@
 - Review new or changed naming concepts with the personal `blind-naming-test`
   skill: fresh low-effort reviewers see names only; compare their explanations
   against the code, rename mismatches and retest without revealing the answer.
+  Cap reviews at important domain/API names, units and invariants; skip routine locals.
 
 ## Runtime
 

@@ -40,7 +40,7 @@ Two artifacts, both committed:
     the other and the published pin keeps meaning what it meant.
 
 The naming scheme is recorded in the eval set's ``artifacts`` provenance block
-(see ``artifacts_block``) -- the scheme, not a mapping, because the mapping is
+(see ``build_eval_artifact_metadata``) -- the scheme, not a mapping, because the mapping is
 computable and a committed one would be a second source of truth.
 
 Re-cutting (only after the eval set is re-frozen)::
@@ -106,7 +106,7 @@ LABELS_SCHEMA_VERSION = 2
 # with the owner's hand labels substituted wherever he has ruled one wrong.
 PUBLISHED = "published"
 OWNER = "owner"
-TRUTHS = (OWNER, PUBLISHED)
+ANNOTATION_SOURCES = (OWNER, PUBLISHED)
 
 # What the owner has said about one frozen track.  Coverage is "how many has he
 # ruled on", not "how many did he relabel": for a track he listens to and
@@ -114,7 +114,7 @@ TRUTHS = (OWNER, PUBLISHED)
 OVERRIDDEN = "overridden"  # he relabelled it -- a committed *.hand.json
 ACCEPTED = "accepted"  # he ruled the published label correct
 UNREVIEWED = "unreviewed"  # he has not ruled
-RULINGS = (OVERRIDDEN, ACCEPTED, UNREVIEWED)
+OWNER_RULING_STATUSES = (OVERRIDDEN, ACCEPTED, UNREVIEWED)
 
 
 # --------------------------------------------------------------------------- #
@@ -139,7 +139,7 @@ def committed_audio_path(youtube_id: str, audio_dir: Path | None = None) -> Path
     return Path(audio_dir or EVAL_AUDIO_DIR) / f"{opaque_name(youtube_id)}.mp3"
 
 
-def artifacts_block() -> dict:
+def build_eval_artifact_metadata() -> dict:
     """The eval set's record of what is committed alongside it.
 
     The SCHEME, never the mapping: ten ``id -> filename`` lines in a committed
@@ -285,7 +285,7 @@ def hand_records(root: Path | None = None) -> dict:
     return {track_youtube_id(record): record for record in load_hand_tracks(root)}
 
 
-def carried_ruling(previous: dict | None) -> dict:
+def preserve_accepted_ruling(previous: dict | None) -> dict:
     """What a track with no hand label is ruled, given what the slice said before.
 
     An ``accepted`` ruling is the owner listening to a track and deciding the
@@ -338,7 +338,7 @@ def copy_audio(data_dir: Path, youtube_ids: list, audio_dir: Path | None = None)
     return copied
 
 
-def cut_labels(
+def write_eval_label_slice(
     data_dir: Path, eval_set: dict, path: Path | None = None, hand_root: Path | None = None
 ) -> dict:
     """Write the label slice for the eval set out of the corpus annotations.
@@ -375,7 +375,7 @@ def cut_labels(
         track_id, youtube = str(track["track_id"]), str(track["youtube_id"])
         record = hand.get(youtube)
         if record is None:
-            rulings[track_id] = carried_ruling(previous.get(track_id))
+            rulings[track_id] = preserve_accepted_ruling(previous.get(track_id))
             continue
         rulings[track_id] = {
             "ruling": OVERRIDDEN,
@@ -402,7 +402,9 @@ def cut_labels(
 # --------------------------------------------------------------------------- #
 
 
-def verify(eval_set: dict, audio_dir: Path | None = None, labels_path: Path | None = None) -> list:
+def collect_artifact_problems(
+    eval_set: dict, audio_dir: Path | None = None, labels_path: Path | None = None
+) -> list:
     """Everything about the committed artifacts that is wrong, one line each."""
     problems = []
     for youtube_id in eval_set["youtube_ids"]:
@@ -457,7 +459,7 @@ def main(argv: list | None = None) -> int:
         print(f"corpus: {data_dir}")
         for youtube_id, path, sha in copy_audio(data_dir, eval_set["youtube_ids"]):
             print(f"  {youtube_id:<14} -> {path.name}  {sha[:16]}...")
-        document = cut_labels(data_dir, eval_set)
+        document = write_eval_label_slice(data_dir, eval_set)
         print(
             f"labels: {EVAL_LABELS_FILE.name} "
             f"({len(document['tracks'])} tracks, source "
@@ -466,9 +468,9 @@ def main(argv: list | None = None) -> int:
         tally = collections.Counter(
             str(ruling.get("ruling")) for ruling in owner_rulings(document).values()
         )
-        print(f"owner : {', '.join(f'{tally[name]} {name}' for name in RULINGS)}")
+        print(f"owner : {', '.join(f'{tally[name]} {name}' for name in OWNER_RULING_STATUSES)}")
 
-    problems = verify(eval_set)
+    problems = collect_artifact_problems(eval_set)
     if problems:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)

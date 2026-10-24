@@ -12,6 +12,7 @@ if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
 from eval_assets import (  # noqa: E402
+    ANNOTATION_SOURCES,
     ACCEPTED,
     EVAL_LABELS_FILE,
     OVERRIDDEN,
@@ -35,7 +36,6 @@ from run_eval_set import (  # noqa: E402
     GATED_TRUTH,
     GUARDED_METRICS,
     REPORTED_SPACES,
-    REPORTED_TRUTHS,
     audio_path,
     build_document,
     build_jobs,
@@ -214,7 +214,9 @@ def test_build_jobs_gives_each_worker_only_its_own_sections(tmp_path):
     document = eval_document(("a.1", "1", 400.0))
     sections = {"a.1": [(0.0, 10.0, "intro")], "other.2": [(0.0, 5.0, "drop")]}
     jobs = build_jobs(tmp_path, select_tracks(document), by_truth(sections))
-    assert [job.sections for job in jobs] == [{truth: sections["a.1"] for truth in REPORTED_TRUTHS}]
+    assert [job.sections for job in jobs] == [
+        {truth: sections["a.1"] for truth in ANNOTATION_SOURCES}
+    ]
 
 
 def test_build_jobs_carries_every_truths_reading_of_the_same_track(tmp_path):
@@ -287,7 +289,7 @@ def test_labels_resolution_falls_back_to_the_corpus_annotation(tmp_path):
 def test_the_committed_slice_covers_exactly_the_frozen_eval_set(tmp_path):
     truths = load_sections_by_truth(tmp_path)
     frozen = {track["track_id"] for track in load_eval_set(EVAL_SET_FILE)["tracks"]}
-    assert set(truths) == set(REPORTED_TRUTHS)
+    assert set(truths) == set(ANNOTATION_SOURCES)
     for truth, sections in truths.items():
         assert set(sections) == frozen, truth
         assert all(len(sections[track_id]) > 1 for track_id in frozen), truth
@@ -676,7 +678,7 @@ def test_every_committed_row_reads_the_run_through_both_annotators():
     baseline = committed_baseline()
     rows = {"(aggregate)": baseline["aggregate"], **baseline["tracks"]}
     for name, row in rows.items():
-        assert set(row.get("truths") or {}) == set(REPORTED_TRUTHS), name
+        assert set(row.get("truths") or {}) == set(ANNOTATION_SOURCES), name
         for truth, block in row["truths"].items():
             missing = [metric for metric in GUARDED_METRICS if metric not in block]
             assert not missing, f"{name}/{truth} is missing {missing}"
@@ -709,7 +711,7 @@ def test_the_committed_baseline_records_the_configuration_it_was_cut_under():
     assert baseline["gate"]["metrics"] == dict(GUARDED_METRICS)
     assert baseline["space"] and baseline["stream"]
     assert baseline["truth"] == GATED_TRUTH
-    assert list(baseline["reported_truths"]) == list(REPORTED_TRUTHS)
+    assert list(baseline["reported_truths"]) == list(ANNOTATION_SOURCES)
 
 
 def test_the_committed_baseline_compares_clean_against_itself():
@@ -916,7 +918,7 @@ def test_the_gated_truth_is_still_the_published_annotation():
     measured and printed, and the gate has not moved.  Flipping this line is a
     re-freeze of the ground truth and re-cuts the baseline in the same commit."""
     assert GATED_TRUTH == PUBLISHED
-    assert set(REPORTED_TRUTHS) == {OWNER, PUBLISHED}
+    assert set(ANNOTATION_SOURCES) == {OWNER, PUBLISHED}
 
 
 def test_no_single_hardcoded_truth_survives_in_the_runner():
@@ -961,7 +963,7 @@ def test_the_ungated_truth_cannot_fail_the_gate_on_its_own():
     commit until the flip."""
     baseline = result_document({"a.1": entry()})
     current = result_document(
-        {"a.1": entry(truths={truth: metrics(macro_f1=0.01) for truth in REPORTED_TRUTHS})}
+        {"a.1": entry(truths={truth: metrics(macro_f1=0.01) for truth in ANNOTATION_SOURCES})}
     )
 
     assert compare(baseline, current).failed is False
@@ -996,7 +998,7 @@ def test_a_track_entry_reports_both_annotators_with_every_guarded_metric():
 
     built = built_entry(report, sections, owner)
 
-    assert set(built["truths"]) == set(REPORTED_TRUTHS)
+    assert set(built["truths"]) == set(ANNOTATION_SOURCES)
     for truth, block in built["truths"].items():
         assert not [metric for metric in GUARDED_METRICS if metric not in block], truth
         assert not [fact for fact in COUNT_FACTS if fact not in block and fact != "beats"], truth
@@ -1234,11 +1236,11 @@ def test_the_printed_table_shows_the_owner_reading_beside_the_gated_one():
     correction is visible before the gate flips, so nothing waits."""
     from run_eval_set import TrackRun, render_table
 
-    truths = {truth: dict(metrics(), label_boundaries=7, rows=90) for truth in REPORTED_TRUTHS}
+    truths = {truth: dict(metrics(), label_boundaries=7, rows=90) for truth in ANNOTATION_SOURCES}
     run = TrackRun("a.1", "1", entry(truths=truths), {}, 3.0)
     text = render_table([run], dict(metrics(), truths=truths), 300.0, 3.0)
 
-    for truth in REPORTED_TRUTHS:
+    for truth in ANNOTATION_SOURCES:
         assert truth in text
     assert GATED_TRUTH in text and "gated one" in text
     assert text.isascii()
@@ -1250,7 +1252,7 @@ def test_the_table_renders_a_row_that_carries_only_the_guarded_metrics():
     the whole pass.  Nothing on the display path may require a field."""
     from run_eval_set import TrackRun, render_table
 
-    thin = {truth: metrics() for truth in REPORTED_TRUTHS}
+    thin = {truth: metrics() for truth in ANNOTATION_SOURCES}
     run = TrackRun("a.1", "1", entry(truths=thin), {}, 3.0)
 
     text = render_table([run], dict(metrics(), truths=thin), 300.0, 3.0)

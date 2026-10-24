@@ -32,13 +32,13 @@ from eval_assets import (  # noqa: E402  (needs the path insert above)
     OVERRIDDEN,
     OWNER,
     PUBLISHED,
-    RULINGS,
+    OWNER_RULING_STATUSES,
     UNREVIEWED,
-    artifacts_block,
+    build_eval_artifact_metadata,
     build_labels_document,
     committed_audio_path,
     copy_audio,
-    cut_labels,
+    write_eval_label_slice,
     hand_label_path,
     labels_source_sha,
     load_labels,
@@ -46,7 +46,7 @@ from eval_assets import (  # noqa: E402  (needs the path insert above)
     owner_rulings,
     sections_by_track,
     sections_by_truth,
-    verify,
+    collect_artifact_problems,
 )
 from raveform_fetch_annotations import merge_hand_tracks  # noqa: E402
 from select_eval_set import EVAL_SET_FILE, load_eval_set  # noqa: E402
@@ -99,7 +99,7 @@ def test_derived_names_leak_nothing_about_the_track():
 
 
 def test_the_provenance_block_records_the_scheme_not_a_mapping():
-    block = artifacts_block()
+    block = build_eval_artifact_metadata()
     assert block["audio_name_scheme"] == AUDIO_NAME_SCHEME
     assert block["audio_dir"] == "training/eval_audio"
     assert block["labels"] == "training/eval_labels.json"
@@ -110,7 +110,7 @@ def test_the_provenance_block_records_the_scheme_not_a_mapping():
 def test_the_eval_set_records_the_scheme_this_code_implements():
     """A provenance block that drifts from the code is worse than none: it is a
     documented way to compute the wrong filename."""
-    assert EVAL_SET["artifacts"] == artifacts_block()
+    assert EVAL_SET["artifacts"] == build_eval_artifact_metadata()
 
 
 # --------------------------------------------------------------------------- #
@@ -182,7 +182,7 @@ def test_cut_labels_takes_the_records_verbatim(tmp_path):
     data_dir = fake_corpus(tmp_path, [wanted, other])
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(
+    document = write_eval_label_slice(
         data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand"
     )
 
@@ -195,7 +195,7 @@ def test_cut_labels_records_the_sha_of_the_annotation_it_cut(tmp_path):
     data_dir = fake_corpus(tmp_path, [{"key": "a.1", "id": "1", "sections": []}])
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(
+    document = write_eval_label_slice(
         data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand"
     )
 
@@ -211,7 +211,9 @@ def test_cut_labels_records_the_sha_of_every_hand_label_it_adopted(tmp_path):
     label = write_hand_label(hand_root, "1", HAND_SECTIONS)
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
+    document = write_eval_label_slice(
+        data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root
+    )
 
     ruling = owner_rulings(document)["a.1"]
     assert ruling["ruling"] == OVERRIDDEN
@@ -233,7 +235,9 @@ def test_every_owner_record_is_the_corpus_merge_of_its_published_and_hand_record
     write_hand_label(hand_root, "1", HAND_SECTIONS)
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
+    document = write_eval_label_slice(
+        data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root
+    )
 
     hand = {
         "id": "1",
@@ -263,7 +267,9 @@ def test_only_an_overridden_track_gets_an_owner_record(tmp_path):
         "tracks": [{"track_id": "a.1", "youtube_id": "1"}, {"track_id": "b.2", "youtube_id": "2"}]
     }
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
+    document = write_eval_label_slice(
+        data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root
+    )
     truths = sections_by_truth(document)
 
     assert [record["key"] for record in document["owner_tracks"]] == ["a.1"]
@@ -286,7 +292,9 @@ def test_the_rulings_name_every_frozen_track_even_the_unruled_ones(tmp_path):
     }
 
     rulings = owner_rulings(
-        cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
+        write_eval_label_slice(
+            data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root
+        )
     )
 
     assert set(rulings) == {"a.1", "b.2"}
@@ -301,13 +309,13 @@ def test_a_recut_carries_an_accepted_ruling_forward(tmp_path):
     data_dir = fake_corpus(tmp_path, [{"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS}])
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
     path = tmp_path / "labels.json"
-    cut_labels(data_dir, eval_set, path=path, hand_root=tmp_path / "hand")
+    write_eval_label_slice(data_dir, eval_set, path=path, hand_root=tmp_path / "hand")
 
     document = json.loads(path.read_text(encoding="utf-8"))
     document["truths"][OWNER]["rulings"]["a.1"] = {"ruling": ACCEPTED, "dated": "2026-09-09"}
     path.write_text(json.dumps(document), encoding="utf-8")
 
-    again = cut_labels(data_dir, eval_set, path=path, hand_root=tmp_path / "hand")
+    again = write_eval_label_slice(data_dir, eval_set, path=path, hand_root=tmp_path / "hand")
 
     assert owner_rulings(again)["a.1"] == {"ruling": ACCEPTED, "dated": "2026-09-09"}
 
@@ -318,7 +326,9 @@ def test_cut_labels_refuses_an_eval_track_with_no_annotation(tmp_path):
         "tracks": [{"track_id": "a.1", "youtube_id": "1"}, {"track_id": "b.2", "youtube_id": "2"}]
     }
     with pytest.raises(RuntimeError, match="b.2"):
-        cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand")
+        write_eval_label_slice(
+            data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand"
+        )
 
 
 def test_load_labels_rejects_a_document_that_is_not_a_slice(tmp_path):
@@ -367,11 +377,11 @@ def test_build_labels_document_is_json_round_trippable():
 
 
 def test_verify_passes_on_the_committed_artifacts():
-    assert verify(EVAL_SET) == []
+    assert collect_artifact_problems(EVAL_SET) == []
 
 
 def test_verify_names_a_pruned_mp3(tmp_path):
-    problems = verify(EVAL_SET, audio_dir=tmp_path)
+    problems = collect_artifact_problems(EVAL_SET, audio_dir=tmp_path)
     assert len(problems) == len(EVAL_SET["youtube_ids"])
     assert all("missing committed audio" in problem for problem in problems)
 
@@ -392,7 +402,7 @@ def test_the_committed_slice_rules_on_every_frozen_track():
     rulings = owner_rulings(load_labels(EVAL_LABELS_FILE))
     assert set(rulings) == {track["track_id"] for track in EVAL_SET["tracks"]}
     for track_id, ruling in rulings.items():
-        assert ruling.get("ruling") in RULINGS, track_id
+        assert ruling.get("ruling") in OWNER_RULING_STATUSES, track_id
 
 
 def test_the_hand_labels_the_slice_pins_are_checked_out_with_canonical_line_endings():

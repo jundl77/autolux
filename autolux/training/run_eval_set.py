@@ -34,7 +34,7 @@ from eval_assets import (  # noqa: E402
     OVERRIDDEN,
     OWNER,
     PUBLISHED,
-    TRUTHS,
+    ANNOTATION_SOURCES,
     UNREVIEWED,
     committed_audio_path,
     corpus_audio_path,
@@ -71,11 +71,6 @@ REPORTED_SPACES = (RAW9, LEGACY_V1)
 # space is not this one -- a gate reading macro-F1 across two different label
 # vocabularies would call that drift a regression or, worse, a pass.
 GATED_SPACE = RAW9
-
-# Every annotator the run measures and prints.  One simulation, joined and
-# scored once per truth: the labels are never read by the simulation, so the
-# expensive half runs once and a second reading costs a sub-second CPU join.
-REPORTED_TRUTHS = TRUTHS
 
 # The one the committed baseline gates.  The owner has ruled published labels
 # wrong on benchmark tracks and relabelled them, and the benchmark is to agree
@@ -460,7 +455,7 @@ def truth_block(scores: dict, rows: int, stats=None) -> dict:
 def track_entry(report: dict, reads: dict, youtube_id: str, song_sec: float) -> dict:
     from autolux.simulate.evaluator import report_checksum
 
-    blocks = {truth: truth_block(*reads[truth]) for truth in REPORTED_TRUTHS}
+    blocks = {truth: truth_block(*reads[truth]) for truth in ANNOTATION_SOURCES}
     gated = blocks[GATED_TRUTH]
     entry = {
         "youtube_id": youtube_id,
@@ -485,13 +480,13 @@ def run_job(job: Job) -> TrackRun:
     report, song_sec, wall_sec = simulate_report(audio_path(Path(job.data_dir), youtube_id))
     reads = {
         truth: score_report(track_id, youtube_id, report, job.sections[truth])
-        for truth in REPORTED_TRUTHS
+        for truth in ANNOTATION_SOURCES
     }
     return TrackRun(
         track_id,
         youtube_id,
         track_entry(report, reads, youtube_id, song_sec),
-        {truth: reads[truth][0] for truth in REPORTED_TRUTHS},
+        {truth: reads[truth][0] for truth in ANNOTATION_SOURCES},
         wall_sec,
     )
 
@@ -513,7 +508,7 @@ def build_document(
         "space": GATED_SPACE,
         "reported_spaces": list(REPORTED_SPACES),
         "truth": GATED_TRUTH,
-        "reported_truths": list(REPORTED_TRUTHS),
+        "reported_truths": list(ANNOTATION_SOURCES),
         "stream": STREAM,
         "boundary_tolerance_sec": BOUNDARY_TOLERANCE_SEC,
         "crispness_tolerance_sec": CRISPNESS_TOLERANCE_SEC,
@@ -753,9 +748,9 @@ def render_truths(runs: list, aggregate_entry: dict) -> list:
         + "".join(
             f'{truth + " macroF1":>19}{"acc":>7}{"bF1":>7}{"crisp":>7}'
             f'{"flick/m":>9}{"rows":>7}{"bnd":>6}'
-            for truth in REPORTED_TRUTHS
+            for truth in ANNOTATION_SOURCES
         ),
-        "  " + "-" * (20 + 62 * len(REPORTED_TRUTHS)),
+        "  " + "-" * (20 + 62 * len(ANNOTATION_SOURCES)),
     ]
     rows = [(run.track_id, run.entry.get("truths") or {}) for run in runs]
     aggregate_truths = aggregate_entry.get("truths") or {}
@@ -763,7 +758,7 @@ def render_truths(runs: list, aggregate_entry: dict) -> list:
         rows.append(("(aggregate)", aggregate_truths))
     for track_id, blocks in rows:
         cells = ""
-        for truth in REPORTED_TRUTHS:
+        for truth in ANNOTATION_SOURCES:
             block = blocks.get(truth)
             if block is None:
                 cells += f'{"-":>62}'
@@ -863,7 +858,7 @@ def build_jobs(data_dir: Path, tracks: list, sections_by_truth: dict) -> list:
     jobs = []
     for track in tracks:
         sections = {}
-        for truth in REPORTED_TRUTHS:
+        for truth in ANNOTATION_SOURCES:
             spans = (sections_by_truth.get(truth) or {}).get(track["track_id"])
             if spans is None:
                 raise RuntimeError(
@@ -931,7 +926,7 @@ def run(
             space: aggregate([result.scores[truth][space] for result in runs])
             for space in REPORTED_SPACES
         }
-        for truth in REPORTED_TRUTHS
+        for truth in ANNOTATION_SOURCES
     }
     gated = corpus[GATED_TRUTH]
     document = build_document(
@@ -945,7 +940,7 @@ def run(
                 **space_block(corpus[truth][GATED_SPACE]),
                 "spaces": {space: space_block(corpus[truth][space]) for space in REPORTED_SPACES},
             }
-            for truth in REPORTED_TRUTHS
+            for truth in ANNOTATION_SOURCES
         },
     )
     return document, runs, total_song, total_wall

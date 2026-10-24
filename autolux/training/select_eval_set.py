@@ -93,7 +93,7 @@ for _path in (
         sys.path.insert(0, _path)
 
 from build_clean_manifest import CLEAN_MANIFEST_FILE, STATUS_OK  # noqa: E402
-from eval_assets import artifacts_block  # noqa: E402
+from eval_assets import build_eval_artifact_metadata  # noqa: E402
 from raveform_fetch_annotations import (  # noqa: E402
     SEGMENTS_FILE,
     annotations_dir,
@@ -531,7 +531,7 @@ def build_document(
         # derived -- the scheme, never a mapping (see eval_assets).  A re-freeze
         # rewrites this document, so it has to be emitted, not hand-added, or
         # the first --force would drop it.
-        "artifacts": artifacts_block(),
+        "artifacts": build_eval_artifact_metadata(),
         "rationale": {pick.candidate.youtube_id: rationale_line(pick) for pick in picks},
         "tracks": [
             {
