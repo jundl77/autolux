@@ -6,7 +6,7 @@
 
 namespace Radius::OverlayIdl {
 
-std::string ToString(std::span<DmxOverlay, 100> overlays)
+std::string ToString(std::span<DmxOverlay, MaxOverlays> overlays)
 {
 #ifdef NDEBUG
 	// don't compile this, because it's an expensive string computation
@@ -19,7 +19,7 @@ std::string ToString(std::span<DmxOverlay, 100> overlays)
 		for (int y = 0; y < 20; y++)
 		{
 			index += 1;
-			if (index < 100)
+			if (index < MaxOverlays)
 			{
 				const DmxOverlay& overlay = overlays[index];
 				s += std::to_string(overlay.mStart) + "-" + std::to_string(overlay.mLength) + ", ";

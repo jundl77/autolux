@@ -8,13 +8,13 @@ namespace Radius {
 
 class DmxState
 {
-	std::array<uint8_t, 512> mBase{};
+	std::array<uint8_t, DmxFrameSize> mBase{};
 	OverlayIdl::OverlayMessage mOverlay{};
 
 public:
 	void Base(const DmxFrame& frame)
 	{
-		std::memcpy(mBase.data(), frame.data(), 512);
+		std::memcpy(mBase.data(), frame.data(), DmxFrameSize);
 	}
 
 	void Overlay(const OverlayIdl::OverlayMessage& overlay)
@@ -22,10 +22,10 @@ public:
 		mOverlay = overlay;
 	}
 
-	std::array<uint8_t, 512> Compose() const
+	std::array<uint8_t, DmxFrameSize> Compose() const
 	{
 		auto frame = mBase;
-		for (size_t i = 0; i < (std::min)(size_t(mOverlay.mNumOverlays), size_t(100)); ++i)
+		for (size_t i = 0; i < (std::min)(size_t(mOverlay.mNumOverlays), std::size(mOverlay.mOverlays)); ++i)
 		{
 			const auto start = mOverlay.mOverlays[i].mStart, length = mOverlay.mOverlays[i].mLength;
 			if (size_t(start) + length <= frame.size())

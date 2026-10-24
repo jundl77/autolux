@@ -3,6 +3,9 @@
 
 namespace Radius {
 
+constexpr int SocketBufferBytes = 1024 * 1024;
+constexpr int MaxBusDatagramsPerPoll = 512;
+
 BusSocket::~BusSocket()
 {
 	if (mSocket != INVALID_SOCKET)
@@ -30,7 +33,7 @@ void BusSocket::Open(const std::string& bindAddress, const std::string& peer, ui
 	mSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (mSocket == INVALID_SOCKET)
 		throw std::runtime_error("bus socket failed");
-	const int buffer = 1024 * 1024;
+	const int buffer = SocketBufferBytes;
 	if (setsockopt(mSocket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&buffer), sizeof(buffer)) ||
 	    setsockopt(mSocket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&buffer), sizeof(buffer)))
 		throw std::runtime_error("bus socket buffer setup failed");
@@ -41,11 +44,11 @@ void BusSocket::Open(const std::string& bindAddress, const std::string& peer, ui
 	mConnected = !receiver;
 }
 
-bool BusSocket::Send(const Bus::Packet& packet)
+bool BusSocket::Send(const Bus::Envelope& packet)
 {
 	if (!mConnected)
 		return false;
-	std::array<uint8_t, Bus::MaxDatagram> bytes{};
+	std::array<uint8_t, Bus::MaxDatagramBytes> bytes{};
 	const auto size = Bus::Encode(packet, bytes);
 	if (!size || sendto(mSocket, reinterpret_cast<const char*>(bytes.data()), static_cast<int>(size), 0,
 	                    reinterpret_cast<const sockaddr*>(&mPeer), sizeof(mPeer)) != size)
@@ -57,12 +60,12 @@ bool BusSocket::Send(const Bus::Packet& packet)
 	return true;
 }
 
-void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Packet&)>& handler)
+void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Envelope&)>& handler)
 {
 	// Drain bursts instead of reading one datagram per Windows scheduler tick.
-	for (int i = 0; i < 512; ++i)
+	for (int i = 0; i < MaxBusDatagramsPerPoll; ++i)
 	{
-		std::array<uint8_t, Bus::MaxDatagram + 1> bytes{};
+		std::array<uint8_t, Bus::MaxDatagramBytes + 1> bytes{};
 		sockaddr_in source{};
 		int sourceSize = sizeof(source);
 		const int size = recvfrom(mSocket, reinterpret_cast<char*>(bytes.data()), static_cast<int>(bytes.size()), 0,
@@ -79,9 +82,10 @@ void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Packe
 			}
 			throw std::runtime_error("bus receive failed: " + std::to_string(error));
 		}
-		Bus::Packet packet;
+		Bus::Envelope packet;
 		if (source.sin_addr.s_addr != mPeer.sin_addr.s_addr || (mConnected && source.sin_port != mPeer.sin_port) ||
-		    !Bus::Decode(bytes.data(), size, packet) || packet.session != session)
+		    !Bus::Decode(bytes.data(), size, session, packet) || (mReceiver && packet.has_receiver_telemetry()) ||
+		    (!mReceiver && (packet.has_audio() || packet.has_lighting())))
 		{
 			++invalidPackets;
 			continue;

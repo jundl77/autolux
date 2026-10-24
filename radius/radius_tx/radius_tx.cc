@@ -3,6 +3,10 @@
 
 namespace Radius {
 
+constexpr int MaxAudioPacketsPerTick = 128;
+constexpr uint64_t DmxSendIntervalMilliseconds = 25;
+constexpr uint64_t DmxInputTimeoutMilliseconds = 3000;
+
 void RadiusTx::Start()
 {
 	ConfigureThread(mConfig.mCoreAffinity);
@@ -24,83 +28,78 @@ void RadiusTx::Tick()
 	const auto now = SteadyMs();
 	if (mAudio.error)
 		throw std::runtime_error("audio capture failed: " + std::to_string(mAudio.error.load()));
-	mBus.Poll(mConfig.mSession, [&](const Bus::Packet& p) {
-		if (p.kind == Bus::Kind::Heartbeat)
+	mBus.Poll(mConfig.mSession, [&](const Bus::Envelope& p) {
+		if (p.has_heartbeat())
 		{
 			mLink.Received(now);
 			++mHeartbeatsReceived;
 		}
-		if (p.kind == Bus::Kind::Health)
+		if (p.has_receiver_telemetry())
 		{
-			auto health = njson::parse(p.payload.begin(), p.payload.begin() + p.size, nullptr, false);
-			if (health.is_object())
-			{
-				mReceiver = std::move(health);
-				mReceiverAt = now;
-			}
+			mReceiver = Bus::ReceiverTelemetryToJson(p.receiver_telemetry());
+			mReceiverAt = now;
 		}
 	});
 	if (mLink.Expired(now))
 		throw std::runtime_error("receiver heartbeat timed out after 30 seconds");
 	if (mLink.Due(now))
 	{
-		Bus::Packet p;
-		p.session = mConfig.mSession;
+		auto p = Bus::NewEnvelope(mConfig.mSession);
+		p.mutable_heartbeat();
 		if (mBus.Send(p))
 		{
 			mLink.Sent(now);
 			++mHeartbeatsSent;
 		}
 	}
-	for (int i = 0; i < 128; ++i)
+	for (int i = 0; i < MaxAudioPacketsPerTick; ++i)
 	{
 		const auto* block = mAudio.Front();
 		if (!block)
 			break;
-		Bus::Packet p;
-		p.kind = Bus::Kind::Audio;
-		p.session = mConfig.mSession;
-		p.watermark = block->watermark;
-		p.sequence = ++mAudioSequence;
-		p.size = block->frames * 8;
-		std::memcpy(p.payload.data(), block->samples.data(), p.size);
+		auto p = Bus::NewEnvelope(mConfig.mSession);
+		p.set_audio_frame_watermark(block->watermark);
+		p.set_sequence(++mAudioSequence);
+		auto* audio = p.mutable_audio();
+		audio->set_sample_rate_hz(mConfig.mAudioSampleRate);
+		audio->set_channel_count(Bus::Channels);
+		audio->mutable_interleaved_samples()->Add(block->samples.begin(),
+		                                          block->samples.begin() + block->frames * Bus::Channels);
 		mBus.Send(p);
 		mAudio.Pop();
 	}
-	if (mConfig.mArtnetEnabled && now - mLastDmxSend >= 25)
+	if (mConfig.mArtnetEnabled && now - mLastDmxSend >= DmxSendIntervalMilliseconds)
 	{
-		Bus::Packet p;
-		p.kind = Bus::Kind::Dmx;
-		p.session = mConfig.mSession;
-		p.watermark = mAudio.watermark.load();
-		p.sequence = ++mDmxSequence;
-		p.size = 512;
-		if (mDmxAt && now - mDmxAt < 3000)
-		{
-			auto frame = mDmx.Compose();
-			std::memcpy(p.payload.data(), frame.data(), 512);
-		}
+		auto p = Bus::NewEnvelope(mConfig.mSession);
+		p.set_audio_frame_watermark(mAudio.watermark.load());
+		p.set_sequence(++mDmxSequence);
+		std::array<uint8_t, DmxFrameSize> frame{};
+		if (mDmxAt && now - mDmxAt < DmxInputTimeoutMilliseconds)
+			frame = mDmx.Compose();
+		p.mutable_lighting()->set_channels(frame.data(), frame.size());
 		mBus.Send(p);
 		mLastDmxSend = now;
 	}
-	if (now - mHealthAt >= 1000)
+	if (now - mHealthAt >= Bus::HealthReportIntervalMilliseconds)
 	{
-		njson tx = {{"up", true},
-		            {"link_up", mLink.Up(now)},
-		            {"heartbeat_age_seconds", mLink.Age(now)},
-		            {"heartbeats_sent", mHeartbeatsSent},
-		            {"heartbeats_received", mHeartbeatsReceived},
-		            {"audio_buffer_seconds", mAudio.QueuedFrames() / double(mConfig.mAudioSampleRate)},
-		            {"capture_overruns_total", mAudio.captureOverruns.load()},
-		            {"queue_dropped_frames_total", mAudio.droppedFrames.load()},
-		            {"send_failures_total", mBus.sendFailures},
-		            {"invalid_packets_total", mBus.invalidPackets},
-		            {"playback_delay_seconds", mConfig.mPlaybackDelaySeconds},
-		            {"dmx_input_age_seconds", mDmxAt ? njson((now - mDmxAt) / 1000.0) : njson(nullptr)}};
+		njson tx = {
+		    {"up", true},
+		    {"link_up", mLink.Up(now)},
+		    {"heartbeat_age_seconds", mLink.Age(now)},
+		    {"heartbeats_sent", mHeartbeatsSent},
+		    {"heartbeats_received", mHeartbeatsReceived},
+		    {"audio_buffer_seconds", mAudio.QueuedFrames() / double(mConfig.mAudioSampleRate)},
+		    {"capture_overruns_total", mAudio.captureOverruns.load()},
+		    {"queue_dropped_frames_total", mAudio.droppedFrames.load()},
+		    {"send_failures_total", mBus.sendFailures},
+		    {"invalid_packets_total", mBus.invalidPackets},
+		    {"playback_delay_seconds", mConfig.mPlaybackDelaySeconds},
+		    {"dmx_input_age_seconds", mDmxAt ? njson((now - mDmxAt) / double(MillisecondsPerSecond)) : njson(nullptr)}};
 		WriteHealth({{"session", mConfig.mSession},
 		             {"tx", tx},
 		             {"rx", mReceiver},
-		             {"rx_age_seconds", mReceiverAt ? njson((now - mReceiverAt) / 1000.0) : njson(nullptr)}});
+		             {"rx_age_seconds",
+		              mReceiverAt ? njson((now - mReceiverAt) / double(MillisecondsPerSecond)) : njson(nullptr)}});
 		mHealthAt = now;
 	}
 }

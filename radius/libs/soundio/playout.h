@@ -1,5 +1,6 @@
 #pragma once
 #include <core/spsc_queue.h>
+#include <core/clock.h>
 #include <proto/bus.h>
 #include <algorithm>
 #include <atomic>
@@ -10,12 +11,20 @@ namespace Radius {
 // Network producer; audio callback consumer. Fixed storage, no locks or allocation.
 class Playout
 {
-	SpscQueue<Bus::AudioBlock, 256> mQueue;
+	static constexpr size_t QueueCapacityBlocks = 256;
+	static constexpr int LatencyRecoveryTargetMultiple = 4;
+	static constexpr double ClockCorrectionGain = 0.01;
+	static constexpr double MaxClockCorrectionRatio = 0.001;
+	static constexpr double ClockCorrectionSmoothing = 0.02;
+	static constexpr int PartsPerMillion = 1000000;
+	static constexpr int StarvationTimeoutMilliseconds = 250;
+	static constexpr uint64_t InterpolationLookaheadFrames = 2;
+	SpscQueue<Bus::AudioBlock, QueueCapacityBlocks> mQueue;
 	uint64_t mAcceptedEnd = 0, mCursor = 0;
 	size_t mOffset = 0;
 	int mRate, mTarget;
 	bool mPrimed = false, mStarved = false;
-	float mCurrent[2]{}, mNext[2]{};
+	float mCurrent[Bus::Channels]{}, mNext[Bus::Channels]{};
 	double mPhase = 0, mRatio = 1;
 	uint64_t mMissingRun = 0;
 	std::atomic<uint64_t> mLatest{0};
@@ -44,8 +53,8 @@ class Playout
 				return true;
 			}
 			mOffset = static_cast<size_t>(mCursor - block->watermark);
-			frame[0] = block->samples[2 * mOffset];
-			frame[1] = block->samples[2 * mOffset + 1];
+			frame[0] = block->samples[Bus::Channels * mOffset];
+			frame[1] = block->samples[Bus::Channels * mOffset + 1];
 			++mCursor;
 			++mOffset;
 			if (mOffset == block->frames)
@@ -65,7 +74,7 @@ public:
 
 	explicit Playout(int rate, int targetMs)
 	    : mRate(rate)
-	    , mTarget(rate * targetMs / 1000)
+	    , mTarget(rate * targetMs / MillisecondsPerSecond)
 	{
 	}
 
@@ -94,7 +103,7 @@ public:
 	{
 		// Correct slow device clock differences continuously. Large backlog is recovered
 		// explicitly, so a transient stall cannot turn into seconds of permanent latency.
-		if (mPrimed && mLatest.load() > mCursor + uint64_t(mTarget * 4))
+		if (mPrimed && mLatest.load() > mCursor + uint64_t(mTarget * LatencyRecoveryTargetMultiple))
 		{
 			const auto keepFrom = mLatest.load() - mTarget;
 			while (auto* block = mQueue.Front())
@@ -123,9 +132,10 @@ public:
 		const auto latest = mLatest.load();
 		const int fill = latest > mCursor ? static_cast<int>(latest - mCursor) : 0;
 		bufferedFrames = fill;
-		const double desired = 1.0 + std::clamp((fill - mTarget) / double(mRate) * 0.01, -0.001, 0.001);
-		mRatio += 0.02 * (desired - mRatio);
-		driftPpm = static_cast<int>((mRatio - 1) * 1000000);
+		const double desired = 1.0 + std::clamp((fill - mTarget) / double(mRate) * ClockCorrectionGain,
+		                                        -MaxClockCorrectionRatio, MaxClockCorrectionRatio);
+		mRatio += ClockCorrectionSmoothing * (desired - mRatio);
+		driftPpm = static_cast<int>((mRatio - 1) * PartsPerMillion);
 	}
 
 	void Frame(float* output) noexcept
@@ -135,7 +145,7 @@ public:
 			output[0] = output[1] = 0;
 			return;
 		}
-		for (int ch = 0; ch < 2; ++ch)
+		for (size_t ch = 0; ch < Bus::Channels; ++ch)
 			output[ch] = mCurrent[ch] + float(mPhase) * (mNext[ch] - mCurrent[ch]);
 		mPhase += mRatio;
 		while (mPhase >= 1)
@@ -150,7 +160,7 @@ public:
 				mStarved = true;
 				++concealedFrames;
 				++mMissingRun;
-				if (mMissingRun > uint64_t(mRate / 4))
+				if (mMissingRun > uint64_t(mRate * StarvationTimeoutMilliseconds / MillisecondsPerSecond))
 					mPrimed = false;
 			}
 			else
@@ -159,7 +169,8 @@ public:
 				mMissingRun = 0;
 			}
 		}
-		played.store(mCursor > 2 ? mCursor - 2 : 0, std::memory_order_release);
+		played.store(mCursor > InterpolationLookaheadFrames ? mCursor - InterpolationLookaheadFrames : 0,
+		             std::memory_order_release);
 	}
 };
 

@@ -5,6 +5,7 @@ file(GLOB sources *.cc *.h)
 add_library(${name} ${sources})
 target_link_libraries(${name}
         radius_core_lib
+        radius_proto_lib
         )
 
 IF (WIN32)

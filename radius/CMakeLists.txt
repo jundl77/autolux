@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.1)
+cmake_minimum_required(VERSION 3.16)
 
 project(radius LANGUAGES C CXX)
 
@@ -11,6 +11,7 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
 endif()
 
 include(cmake/FindFTD2XX.cmake)
+include(cmake/Protobuf.cmake)
 
 add_subdirectory(x_njson)
 add_subdirectory(x_libsoundio)
@@ -27,7 +28,7 @@ add_executable(transport_test tests/transport_test.cc)
 target_link_libraries(transport_test PRIVATE radius_network_lib radius_core_lib)
 add_test(NAME transport COMMAND transport_test)
 add_executable(bus_test tests/bus_test.cc)
-target_include_directories(bus_test PRIVATE libs)
+target_link_libraries(bus_test PRIVATE radius_proto_lib)
 add_test(NAME bus COMMAND bus_test)
 add_executable(usb_test tests/usb_test.cc libs/enttec/usb_client.cc libs/enttec/libenttec/usb_pro.cc)
 target_include_directories(usb_test PRIVATE libs)

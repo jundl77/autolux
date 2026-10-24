@@ -18,8 +18,8 @@ public:
 	BusSocket() = default;
 	~BusSocket();
 	void Open(const std::string& bindAddress, const std::string& peer, uint16_t port, bool receiver);
-	bool Send(const Bus::Packet&);
-	void Poll(uint64_t session, const std::function<void(const Bus::Packet&)>&);
+	bool Send(const Bus::Envelope&);
+	void Poll(uint64_t session, const std::function<void(const Bus::Envelope&)>&);
 };
 
 } // namespace Radius

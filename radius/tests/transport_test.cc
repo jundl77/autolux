@@ -1,5 +1,6 @@
 #include <proto/validation.h>
 #include <network/udp_server.h>
+#include <network/bus_socket.h>
 #include <core/clock.h>
 #include <thread>
 #include <iostream>
@@ -32,9 +33,89 @@ struct Receiver : IUdpServerHandler
 	}
 };
 
+void CheckBusPackets()
+{
+	constexpr uint64_t Session = UINT64_MAX;
+	constexpr auto PollTimeout = 2s;
+	BusSocket receiver;
+	// Reserve an ephemeral local port before opening the receiver there.
+	SOCKET raw = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	Check(raw != INVALID_SOCKET);
+	sockaddr_in destination{};
+	destination.sin_family = AF_INET;
+	destination.sin_addr.s_addr = inet_addr("127.0.0.1");
+	Check(bind(raw, reinterpret_cast<sockaddr*>(&destination), sizeof(destination)) == 0);
+	int addressSize = sizeof(destination);
+	Check(getsockname(raw, reinterpret_cast<sockaddr*>(&destination), &addressSize) == 0);
+	closesocket(raw);
+	receiver.Open("127.0.0.1", "127.0.0.1", ntohs(destination.sin_port), true);
+	raw = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	Check(raw != INVALID_SOCKET);
+	const auto send = [&](const std::string& data) {
+		Check(sendto(raw, data.data(), static_cast<int>(data.size()), 0, reinterpret_cast<sockaddr*>(&destination),
+		             sizeof(destination)) == data.size());
+	};
+	uint64_t accepted = 0;
+	const auto handler = [&](const Bus::Envelope& packet) {
+		Check(packet.has_heartbeat());
+		++accepted;
+	};
+	auto invalid = Bus::NewEnvelope(Session - 1);
+	invalid.mutable_heartbeat();
+	send(invalid.SerializeAsString());
+	invalid.set_session_id(Session);
+	invalid.set_protocol_version(Bus::ProtocolVersion + 1);
+	send(invalid.SerializeAsString());
+	invalid.set_protocol_version(Bus::ProtocolVersion);
+	invalid.clear_payload();
+	send(invalid.SerializeAsString());
+	auto* health = invalid.mutable_receiver_telemetry();
+	health->set_up(true);
+	health->set_buffer_target_seconds(0.15);
+	send(invalid.SerializeAsString()); // RX must not accept telemetry from TX.
+	send(std::string(Bus::MaxDatagramBytes + 1, '\0'));
+	send(std::string(Bus::MaxDatagramBytes * 2, '\0'));
+	constexpr uint64_t InvalidPackets = 6;
+	auto deadline = std::chrono::steady_clock::now() + PollTimeout;
+	while (receiver.invalidPackets < InvalidPackets && std::chrono::steady_clock::now() < deadline)
+	{
+		receiver.Poll(Session, handler);
+		std::this_thread::sleep_for(1ms);
+	}
+	Check(receiver.invalidPackets == InvalidPackets && accepted == 0);
+	// Invalid input must not claim the peer's port; a different, valid TX can still connect.
+	BusSocket transmitter;
+	transmitter.Open("127.0.0.1", "127.0.0.1", ntohs(destination.sin_port), false);
+	auto heartbeat = Bus::NewEnvelope(Session);
+	heartbeat.mutable_heartbeat();
+	Check(transmitter.Send(heartbeat));
+	deadline = std::chrono::steady_clock::now() + PollTimeout;
+	while (accepted == 0 && std::chrono::steady_clock::now() < deadline)
+	{
+		receiver.Poll(Session, handler);
+		std::this_thread::sleep_for(1ms);
+	}
+	Check(accepted == 1 && receiver.receivedPackets == 1);
+	Check(receiver.Send(heartbeat));
+	auto lighting = Bus::NewEnvelope(Session);
+	lighting.mutable_lighting()->set_channels(std::string(DmxFrameSize, '\0'));
+	Check(receiver.Send(lighting)); // TX rejects the wrong direction's media.
+	uint64_t replies = 0;
+	deadline = std::chrono::steady_clock::now() + PollTimeout;
+	while ((replies == 0 || transmitter.invalidPackets == 0) && std::chrono::steady_clock::now() < deadline)
+	{
+		transmitter.Poll(Session, [&](const Bus::Envelope& packet) {
+			Check(packet.has_heartbeat());
+			++replies;
+		});
+		std::this_thread::sleep_for(1ms);
+	}
+	Check(replies == 1 && transmitter.invalidPackets == 1);
+	closesocket(raw);
+}
+
 int main()
 {
-	Clock::Initialise();
 	OverlayIdl::OverlayMessage overlay{}, parsed{};
 	overlay.mNumOverlays = 1;
 	overlay.mOverlays[0] = {0, 512};
@@ -53,6 +134,7 @@ int main()
 	Receiver receiver(loop);
 	UdpServer server(LogModule{"TEST"}, loop, receiver, 4096);
 	server.Start(0, PollingMode::Poll1ms);
+	CheckBusPackets();
 	SOCKET client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	sockaddr_in destination{};
 	destination.sin_family = AF_INET;

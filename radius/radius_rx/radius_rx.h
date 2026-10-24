@@ -11,6 +11,7 @@ namespace Radius {
 
 class RadiusRx : public App
 {
+	static constexpr size_t DmxQueueCapacityPackets = 256;
 	const Config& mConfig;
 	EventLoop& mLoop;
 	BusSocket mBus;
@@ -18,7 +19,7 @@ class RadiusRx : public App
 	AudioPlayback mAudio;
 	EventLoop mDmxLoop;
 	std::thread mDmxThread;
-	SpscQueue<Bus::Packet, 256> mDmxQueue;
+	SpscQueue<Bus::LightingFrame, DmxQueueCapacityPackets> mDmxQueue;
 	std::atomic<bool> mDmxConnected{false}, mDmxFailed{false};
 	std::atomic<uint64_t> mDmxFrames{0}, mDmxAt{0}, mAudioAt{0};
 	std::atomic<int64_t> mDmxLateness{0};
@@ -26,6 +27,7 @@ class RadiusRx : public App
 	uint64_t mAudioMaxGap = 0;
 	float mAudioPeak = 0;
 	uint32_t mLastDmxSequence = 0;
+	bool mHasDmxSequence = false;
 	ScopedHandler mPoll;
 	void Tick();
 	void StartDmx();

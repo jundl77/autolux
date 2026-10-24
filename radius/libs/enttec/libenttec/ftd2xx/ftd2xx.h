@@ -853,7 +853,7 @@ typedef struct ft_eeprom_4222h
 	UCHAR SIMO_Suspend;         // 2 for push-low, 3 for push high, 0 and 1 reserved
 	UCHAR IO2_IO3_Suspend;      // 2 for push-low, 3 for push high, 0 and 1 reserved
 	UCHAR
-	    SlaveSelect_Suspend; // 0 for no-change (not implemented on Rev A), 2 for push-low, 3 for push high, 1 reserved
+	SlaveSelect_Suspend; // 0 for no-change (not implemented on Rev A), 2 for push-low, 3 for push high, 1 reserved
 	// GPIO
 	UCHAR GPIO0_Drive;     // valid values are 4mA, 8mA, 12mA, 16mA
 	UCHAR GPIO1_Drive;     // valid values are 4mA, 8mA, 12mA, 16mA

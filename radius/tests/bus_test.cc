@@ -8,6 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <cmath>
+#include <limits>
 using namespace Radius;
 
 void Check(bool ok, const char* message)
@@ -26,8 +27,156 @@ Bus::AudioBlock Block(uint64_t start)
 	return block;
 }
 
+void CheckProtocol()
+{
+	constexpr uint64_t Session = UINT64_MAX;
+	auto packet = Bus::NewEnvelope(Session);
+	packet.set_audio_frame_watermark(UINT64_MAX - Bus::AudioFrames);
+	packet.set_sequence(UINT32_MAX);
+	auto* audio = packet.mutable_audio();
+	audio->set_sample_rate_hz(Bus::SampleRateHz);
+	audio->set_channel_count(Bus::Channels);
+	const std::array<float, 4> extremes = {std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
+	                                       std::numeric_limits<float>::denorm_min(), -0.0f};
+	for (size_t i = 0; i < Bus::AudioFrames * Bus::Channels; ++i)
+		audio->add_interleaved_samples(extremes[i % extremes.size()]);
+	std::array<uint8_t, Bus::MaxDatagramBytes> wire{};
+	const auto size = Bus::Encode(packet, wire);
+	Check(size > 0 && size <= Bus::MaxDatagramBytes, "audio MTU budget");
+	Bus::Envelope decoded;
+	Check(Bus::Decode(wire.data(), size, Session, decoded), "protobuf audio round trip");
+	Check(decoded.session_id() == Session && decoded.audio_frame_watermark() == packet.audio_frame_watermark() &&
+	          decoded.sequence() == UINT32_MAX,
+	      "exact 64-bit identifiers and sequence");
+	Check(decoded.audio().sample_rate_hz() == Bus::SampleRateHz && decoded.audio().channel_count() == Bus::Channels &&
+	          decoded.audio().interleaved_samples_size() == Bus::AudioFrames * Bus::Channels,
+	      "audio format and sample count");
+	Check(std::memcmp(decoded.audio().interleaved_samples().data(), audio->interleaved_samples().data(),
+	                  Bus::AudioFrames * Bus::AudioBytesPerFrame) == 0,
+	      "IEEE float samples preserve bits");
+	for (size_t n = 0; n < size; ++n)
+		Check(!Bus::Decode(wire.data(), n, Session, decoded), "truncated protobuf accepted");
+	Check(!Bus::Decode(wire.data(), size, Session - 1, decoded), "wrong session accepted");
+	std::array<uint8_t, Bus::MaxDatagramBytes + 1> oversized{};
+	Check(!Bus::Decode(oversized.data(), oversized.size(), Session, decoded), "oversize datagram accepted");
+	const auto header = Bus::NewEnvelope(Session).SerializeAsString();
+	const auto unknownPayload = header + std::string("\x72\0", 2); // Unknown oneof field 14, empty message.
+	Check(!Bus::Decode(unknownPayload.data(), unknownPayload.size(), Session, decoded), "unknown kind accepted");
+	const auto malformedLength = header + std::string("\x52\xff\xff\xff\xff\x07", 6);
+	Check(!Bus::Decode(malformedLength.data(), malformedLength.size(), Session, decoded), "malformed length accepted");
+	const auto rejects = [&](const Bus::Envelope& invalid) {
+		Check(Bus::Encode(invalid, wire) == 0, "invalid outgoing message accepted");
+		const auto raw = invalid.SerializeAsString();
+		Check(!Bus::Decode(raw.data(), raw.size(), Session, decoded), "invalid incoming message accepted");
+	};
+	packet.set_protocol_version(Bus::ProtocolVersion + 1);
+	rejects(packet);
+	packet.set_protocol_version(Bus::ProtocolVersion);
+	packet.set_session_id(0);
+	rejects(packet);
+	packet.set_session_id(Session);
+	packet.set_audio_frame_watermark(UINT64_MAX - Bus::AudioFrames + 1);
+	rejects(packet);
+	packet.set_audio_frame_watermark(0);
+	audio->set_sample_rate_hz(Bus::SampleRateHz + 1);
+	rejects(packet);
+	audio->set_sample_rate_hz(Bus::SampleRateHz);
+	audio->set_channel_count(Bus::Channels + 1);
+	rejects(packet);
+	audio->set_channel_count(Bus::Channels);
+	audio->set_interleaved_samples(0, std::numeric_limits<float>::quiet_NaN());
+	rejects(packet);
+	audio->set_interleaved_samples(0, std::numeric_limits<float>::infinity());
+	rejects(packet);
+	audio->set_interleaved_samples(0, 0);
+	audio->add_interleaved_samples(0);
+	rejects(packet);
+	audio->mutable_interleaved_samples()->Clear();
+	rejects(packet);
+	audio->add_interleaved_samples(0);
+	rejects(packet);
+	packet.clear_payload();
+	rejects(packet);
+	packet.mutable_heartbeat();
+	rejects(packet); // Media sequence is invalid on a heartbeat.
+	packet.set_sequence(0);
+	Check(Bus::Encode(packet, wire) > 0, "heartbeat payload presence");
+	packet.set_audio_frame_watermark(UINT64_MAX);
+	std::string dmx(DmxFrameSize, '\0');
+	for (size_t channel = 0; channel < dmx.size(); ++channel)
+		dmx[channel] = static_cast<char>(channel);
+	packet.mutable_lighting()->set_channels(dmx);
+	const auto lightingSize = Bus::Encode(packet, wire);
+	Check(lightingSize && Bus::Decode(wire.data(), lightingSize, Session, decoded) &&
+	          decoded.audio_frame_watermark() == UINT64_MAX && decoded.lighting().channels() == dmx,
+	      "lighting bytes and maximum watermark");
+	packet.mutable_lighting()->set_channels(dmx.substr(1));
+	rejects(packet);
+	packet.mutable_lighting()->set_channels(dmx + '\0');
+	rejects(packet);
+
+	packet = Bus::NewEnvelope(Session);
+	auto& health = *packet.mutable_receiver_telemetry();
+	health.set_up(true);
+	health.set_link_up(true);
+	health.set_heartbeat_age_seconds(0.5);
+	health.set_audio_buffer_seconds(0.125);
+	health.set_buffer_target_seconds(0.15);
+	health.set_clock_correction_ppm(-999);
+	health.set_dmx_lateness_seconds(0.025);
+	health.set_audio_signal_peak(0.75f);
+	health.set_heartbeats_sent(UINT64_MAX);
+	health.set_heartbeats_received(UINT64_MAX);
+	health.set_underruns_total(UINT64_MAX);
+	health.set_device_underruns_total(UINT64_MAX);
+	health.set_concealed_frames_total(UINT64_MAX);
+	health.set_lost_frames_total(UINT64_MAX);
+	health.set_overflow_frames_total(UINT64_MAX);
+	health.set_late_packets_total(UINT64_MAX);
+	health.set_latency_trims_total(UINT64_MAX);
+	health.set_dmx_frames_total(UINT64_MAX);
+	health.set_dmx_dropped_total(UINT64_MAX);
+	health.set_invalid_packets_total(UINT64_MAX);
+	health.set_send_failures_total(UINT64_MAX);
+	auto telemetrySize = Bus::Encode(packet, wire);
+	Check(telemetrySize && Bus::Decode(wire.data(), telemetrySize, Session, decoded), "telemetry round trip");
+	auto json = Bus::ReceiverTelemetryToJson(decoded.receiver_telemetry());
+	Check(json.size() == 24 && json["up"] == true && json["link_up"] == true && json["dmx_connected"] == false,
+	      "dashboard health schema");
+	Check(json["audio_input_age_seconds"].is_null() && json["audio_max_gap_seconds"].is_null(),
+	      "missing input stays unavailable");
+	for (const auto* key : {"heartbeats_sent", "heartbeats_received", "underruns_total", "device_underruns_total",
+	                        "concealed_frames_total", "lost_frames_total", "overflow_frames_total",
+	                        "late_packets_total", "latency_trims_total", "dmx_frames_total", "dmx_dropped_total",
+	                        "invalid_packets_total", "send_failures_total"})
+		Check(json[key].is_number_unsigned() && json[key].get<uint64_t>() == UINT64_MAX,
+		      "telemetry counters retain full uint64 range");
+	Check(json["heartbeat_age_seconds"] == 0.5 && json["audio_buffer_seconds"] == 0.125 &&
+	          json["buffer_target_seconds"] == 0.15 && json["clock_correction_ppm"] == -999 &&
+	          json["dmx_lateness_seconds"] == 0.025 && json["audio_signal_peak"] == 0.75,
+	      "telemetry units unchanged");
+	health.set_audio_input_age_seconds(0);
+	health.set_audio_max_gap_seconds(0);
+	telemetrySize = Bus::Encode(packet, wire);
+	Check(telemetrySize && Bus::Decode(wire.data(), telemetrySize, Session, decoded), "zero input age round trip");
+	json = Bus::ReceiverTelemetryToJson(decoded.receiver_telemetry());
+	Check(json["audio_input_age_seconds"] == 0 && json["audio_max_gap_seconds"] == 0,
+	      "measured zero remains distinct from unavailable");
+	health.set_audio_input_age_seconds(-1);
+	rejects(packet);
+	health.clear_audio_input_age_seconds();
+	rejects(packet);
+	health.clear_audio_max_gap_seconds();
+	health.set_audio_signal_peak(std::numeric_limits<float>::quiet_NaN());
+	rejects(packet);
+	health.set_audio_signal_peak(0);
+	health.set_buffer_target_seconds(0);
+	rejects(packet);
+}
+
 int main()
 {
+	CheckProtocol();
 	std::array<uint8_t, 530> art{};
 	std::memcpy(art.data(), "Art-Net\0", 8);
 	art[9] = 0x50;
@@ -45,27 +194,6 @@ int main()
 	art[16] = 0;
 	art[17] = 2;
 	Check(DecodeArtDmx(art.data(), 20, channels, universe) && channels[2] == 0, "short ArtDmx clears stale tail");
-	Bus::Packet packet, decoded;
-	packet.kind = Bus::Kind::Audio;
-	packet.size = 1024;
-	packet.session = 0xf0123456789abcde;
-	packet.watermark = 0x123456789abcdef0;
-	std::array<uint8_t, Bus::MaxDatagram> wire{};
-	const auto size = Bus::Encode(packet, wire);
-	Check(size < 1200, "MTU budget");
-	Check(Bus::Decode(wire.data(), size, decoded), "packet round trip");
-	Check(decoded.watermark == packet.watermark && decoded.session == packet.session, "64-bit identifiers");
-	for (size_t n = 0; n < size; ++n)
-		Check(!Bus::Decode(wire.data(), n, decoded), "truncated packet accepted");
-	wire[6] = 0xff;
-	wire[7] = 0xff;
-	Check(!Bus::Decode(wire.data(), size, decoded), "oversized payload");
-	Bus::Encode(packet, wire);
-	wire[28] = 1;
-	Check(!Bus::Decode(wire.data(), size, decoded), "reserved header");
-	packet.watermark = UINT64_MAX;
-	Bus::Encode(packet, wire);
-	Check(!Bus::Decode(wire.data(), size, decoded), "wrapping watermark");
 	LinkState link(0);
 	Check(link.Due(0) && !link.Up(0), "initial heartbeat");
 	link.Sent(0);

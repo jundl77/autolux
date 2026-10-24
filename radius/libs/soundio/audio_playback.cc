@@ -6,6 +6,8 @@
 
 namespace Radius {
 
+constexpr double PlaybackLatencySeconds = 0.02;
+
 AudioPlayback::~AudioPlayback()
 {
 	if (mStream)
@@ -27,7 +29,7 @@ void AudioPlayback::Start()
 	mStream->format = SoundIoFormatFloat32LE;
 	mStream->layout = *soundio_channel_layout_get_builtin(SoundIoChannelLayoutIdStereo);
 	mStream->sample_rate = mConfig.mAudioSampleRate;
-	mStream->software_latency = 0.02;
+	mStream->software_latency = PlaybackLatencySeconds;
 	mStream->write_callback = Write;
 	mStream->underflow_callback = [](SoundIoOutStream* s) {
 		++static_cast<AudioPlayback*>(s->userdata)->deviceUnderruns;
@@ -38,7 +40,7 @@ void AudioPlayback::Start()
 	const int open = soundio_outstream_open(mStream);
 	if (open)
 		throw std::runtime_error(std::string("playback open: ") + soundio_strerror(open));
-	if (mStream->bytes_per_frame != 8 || mStream->layout.channel_count != 2)
+	if (mStream->bytes_per_frame != Bus::AudioBytesPerFrame || mStream->layout.channel_count != Bus::Channels)
 		throw std::runtime_error("playback requires stereo Float32LE");
 	const int start = soundio_outstream_start(mStream);
 	if (start)
@@ -77,9 +79,9 @@ void AudioPlayback::Write(SoundIoOutStream* stream, int minimum, int maximum) no
 			break;
 		for (int frame = 0; frame < count; ++frame)
 		{
-			float stereo[2];
+			float stereo[Bus::Channels];
 			self.playout.Frame(stereo);
-			for (int ch = 0; ch < 2; ++ch)
+			for (size_t ch = 0; ch < Bus::Channels; ++ch)
 				std::memcpy(areas[ch].ptr + frame * areas[ch].step, &stereo[ch], sizeof(float));
 		}
 		const int end = soundio_outstream_end_write(stream);

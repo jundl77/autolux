@@ -9,12 +9,13 @@ namespace Radius {
 
 class AudioCapture
 {
+	static constexpr size_t QueueCapacityBlocks = 128;
 	const Config& mConfig;
 	SoundIo* mIo = nullptr;
 	SoundIoDevice* mDevice = nullptr;
 	SoundIoInStream* mStream = nullptr;
 	AudioDelay mDelay;
-	SpscQueue<Bus::AudioBlock, 128> mQueue;
+	SpscQueue<Bus::AudioBlock, QueueCapacityBlocks> mQueue;
 	uint64_t mFrame = 0;
 	bool mThreadConfigured = false;
 	static void Read(SoundIoInStream*, int, int) noexcept;

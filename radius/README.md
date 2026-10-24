@@ -13,9 +13,11 @@ SSH. Each binary also accepts a config path, or `--check-config <path>`.
 
 ## Timing and transport
 
-The bus uses UDP datagrams no larger than 1056 bytes. Its versioned header carries
-an 8-byte session ID and an 8-byte audio-frame watermark. Audio is 44.1 kHz stereo
-Float32LE. TX holds the show delay; RX starts with a 150 ms jitter target and uses
+The bus uses Google Protocol Buffers in UDP datagrams no larger than 1200 bytes.
+[`libs/proto/bus.proto`](libs/proto/bus.proto) defines the versioned envelope,
+audio, lighting, heartbeats and typed receiver telemetry. Session IDs and audio
+watermarks use `fixed64`; samples use packed protobuf floats at 44.1 kHz stereo.
+TX holds the show delay; RX starts with a 150 ms jitter target and uses
 bounded clock correction. Network and audio-device latency are additional.
 
 Audio callbacks use fixed queues and perform no network or USB I/O. Full queues
@@ -27,6 +29,14 @@ latency. USB refresh and device latency limit physical alignment; this is not a
 sample-accurate lighting output guarantee. Loss of media blanks DMX after one
 second. Both endpoints heartbeat every 10 seconds and exit after 30 seconds
 without the peer heartbeat. RX sends health once per second.
+
+CMake downloads SHA256-pinned Protobuf v33.5 and Abseil 20250512.1, builds matching
+`protoc`, and generates C++ under the build directory. Endpoints link the static
+lite runtime without reflection; generated code is neither checked in nor formatted.
+The first build needs internet access. Protocol v2 requires upgrading TX and RX
+together; v1 packets, wrong sessions, invalid message kinds, malformed/oversize
+packets and invalid media values are rejected and counted. Dashboard `health.json`
+retains its existing keys, units, integer counters and null ages for missing input.
 
 `audio_core`, `network_core` and `dmx_core` optionally pin separate threads;
 `-1` leaves scheduling to Windows. SoundSwitch's local Art-Net output feeds

@@ -61,7 +61,6 @@ std::optional<AppContext> SetupApp(int argc, char* argv[], const std::string& ap
 		sStopRequested = 1;
 	});
 
-	Clock::Initialise();
 	SetGlobalLogLevel(LL_DEBUG);
 
 	std::optional<Config> config = LoadConfig(argc, argv, appName, appType);

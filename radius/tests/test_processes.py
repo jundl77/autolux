@@ -55,7 +55,11 @@ def test_actual_endpoints_heartbeat_both_ways_report_health_and_stop(tmp_path):
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]
     with NativeRuntime(
-        [spec('rx', bus_port=port), spec('tx', bus_port=port)], tmp_path / 'run'
+        [
+            spec('rx', bus_port=port, session=2**64 - 1),
+            spec('tx', bus_port=port, session=2**64 - 1),
+        ],
+        tmp_path / 'run',
     ) as runtime:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -73,6 +77,11 @@ def test_actual_endpoints_heartbeat_both_ways_report_health_and_stop(tmp_path):
         else:
             pytest.fail('Bidirectional 10-second heartbeats or receiver health missing')
         assert report['tx']['link_up'] and report['rx']['link_up']
+        assert report['session'] == 2**64 - 1
+        assert report['rx']['audio_input_age_seconds'] is None
+        assert report['rx']['audio_max_gap_seconds'] is None
+        assert report['rx']['buffer_target_seconds'] == 0.15
+        assert report['rx']['invalid_packets_total'] == 0
         assert report['rx_age_seconds'] < 2
         children = [process for _, process, _ in runtime.children]
     assert all(process.returncode == 0 for process in children)

@@ -1,6 +1,7 @@
 #pragma once
 #include <proto/bus.h>
 #include <cstdint>
+#include <core/clock.h>
 
 namespace Radius {
 
@@ -44,7 +45,7 @@ public:
 
 	double Age(uint64_t now) const
 	{
-		return (now - (mHasReceived ? mReceived : mStarted)) / 1000.0;
+		return (now - (mHasReceived ? mReceived : mStarted)) / double(MillisecondsPerSecond);
 	}
 };
 

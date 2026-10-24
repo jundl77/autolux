@@ -5,6 +5,8 @@
 
 namespace Radius {
 
+constexpr double CaptureLatencySeconds = 0.01;
+
 AudioCapture::~AudioCapture()
 {
 	if (mStream)
@@ -26,7 +28,7 @@ void AudioCapture::Start()
 	mStream->format = SoundIoFormatFloat32LE;
 	mStream->layout = *soundio_channel_layout_get_builtin(SoundIoChannelLayoutIdStereo);
 	mStream->sample_rate = mConfig.mAudioSampleRate;
-	mStream->software_latency = 0.01;
+	mStream->software_latency = CaptureLatencySeconds;
 	mStream->read_callback = Read;
 	mStream->overflow_callback = [](SoundIoInStream* s) {
 		++static_cast<AudioCapture*>(s->userdata)->captureOverruns;
@@ -37,9 +39,9 @@ void AudioCapture::Start()
 	const int open = soundio_instream_open(mStream);
 	if (open)
 		throw std::runtime_error(std::string("capture open: ") + soundio_strerror(open));
-	if (mStream->bytes_per_frame != 8 || mStream->layout.channel_count != 2)
+	if (mStream->bytes_per_frame != Bus::AudioBytesPerFrame || mStream->layout.channel_count != Bus::Channels)
 		throw std::runtime_error("capture requires stereo Float32LE");
-	mDelay.Reset(mConfig.mPlaybackDelaySeconds, mConfig.mAudioSampleRate, 8);
+	mDelay.Reset(mConfig.mPlaybackDelaySeconds, mConfig.mAudioSampleRate, Bus::AudioBytesPerFrame);
 	const int start = soundio_instream_start(mStream);
 	if (start)
 		throw std::runtime_error(std::string("capture start: ") + soundio_strerror(start));
@@ -90,10 +92,10 @@ void AudioCapture::Read(SoundIoInStream* stream, int, int maximum) noexcept
 			block.watermark = self.mFrame;
 			if (areas)
 				for (int frame = 0; frame < chunk; ++frame)
-					for (int ch = 0; ch < 2; ++ch)
-						std::memcpy(&block.samples[2 * frame + ch], areas[ch].ptr + (offset + frame) * areas[ch].step,
-						            sizeof(float));
-			self.mDelay.Process(reinterpret_cast<char*>(block.samples.data()), chunk * 8);
+					for (size_t ch = 0; ch < Bus::Channels; ++ch)
+						std::memcpy(&block.samples[Bus::Channels * frame + ch],
+						            areas[ch].ptr + (offset + frame) * areas[ch].step, sizeof(float));
+			self.mDelay.Process(reinterpret_cast<char*>(block.samples.data()), chunk * Bus::AudioBytesPerFrame);
 			if (!self.mQueue.Push(block))
 				self.droppedFrames += chunk;
 			self.mFrame += chunk;
