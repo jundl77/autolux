@@ -15,7 +15,7 @@ using DmxFrame = std::span<uint8_t, DmxFrameSize>;
 
 std::string ToString(const DmxFrame&);
 
-template <size_t T> std::string HexToString(const std::span<uint8_t, T>& span)
+template <size_t T> std::string FormatByteValuesAsDecimal(const std::span<uint8_t, T>& span)
 {
 #ifdef NDEBUG
 	// don't compile this, because it's an expensive string computation

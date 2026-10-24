@@ -104,15 +104,28 @@ int main()
 	Check(closes == closed, "double close");
 	Radius::EventLoop loop;
 	Radius::EnttecUSBClient usb(loop);
+	Check(usb.FramesWrittenTotal() == 0, "USB frame count starts at zero");
 	usb.Start();
+	Check(usb.FramesWrittenTotal() == 1, "startup blackout counts as one successful frame write");
 	Check(lastWrite[1] == SET_DMX_TX_MODE && lastWrite[4] == 0,
 	      "startup is a DMX blackout, never a widget-settings write");
 	std::array<uint8_t, 512> frame{};
 	frame[0] = 255;
 	usb.UpdateFrame(Radius::DmxFrame(frame));
-	writeFailure = true;
+	frame[0] = 127;
+	usb.UpdateFrame(Radius::DmxFrame(frame));
+	Check(usb.FramesWrittenTotal() == 1, "pending coalesced updates are not USB writes");
 	auto deadline = loop.AddTimer(500ms, [&] {
 		loop.Stop();
+	});
+	auto verifyFlush = loop.AddPoller([&] {
+		if (writeFailure || usb.FramesWrittenTotal() < 2)
+			return;
+		Check(usb.FramesWrittenTotal() == 2 && lastWrite[5] == 127,
+		      "one successful flush counts once and writes the latest pending frame");
+		frame[0] = 64;
+		usb.UpdateFrame(Radius::DmxFrame(frame));
+		writeFailure = true;
 	});
 	bool failed = false;
 	try
@@ -123,6 +136,8 @@ int main()
 	{
 		failed = true;
 	}
-	Check(failed && closes == closed + 1, "USB output failure must stop the worker and close the device");
+	Check(failed && writeFailure && closes == closed + 1,
+	      "USB output failure must stop the worker and close the device");
+	Check(usb.FramesWrittenTotal() == 2, "failed output does not increment the successful frame count");
 	std::cout << "USB framing, short reads/writes, driver failure, startup blackout and close ownership passed\n";
 }

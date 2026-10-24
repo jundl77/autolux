@@ -26,7 +26,7 @@ class RadiusRx : public App
 	uint64_t mHealthAt = 0, mDmxDrops = 0, mDmxLate = 0, mHeartbeatsSent = 0, mHeartbeatsReceived = 0;
 	uint64_t mAudioMaxGap = 0;
 	float mAudioPeak = 0;
-	std::optional<uint32_t> mLastDmxSequence;
+	std::optional<uint32_t> mLastDmxSequenceNumber;
 	ScopedHandler mPoll;
 	void Tick();
 	void StartDmx();

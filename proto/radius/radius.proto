@@ -49,7 +49,7 @@ message ReceiverTelemetry {
   uint64 latency_trims_total = 14;
   sint32 clock_correction_ppm = 15;
   bool dmx_connected = 16;
-  uint64 dmx_frames_total = 17;
+  uint64 dmx_frames_total = 17;  // Complete successful Enttec frame writes, including blackouts.
   uint64 dmx_dropped_total = 18;
   double dmx_lateness_seconds = 19;
   optional double audio_input_age_seconds = 20;

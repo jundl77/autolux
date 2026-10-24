@@ -3,6 +3,7 @@
 #include <core/logger.h>
 #include <core/throw_if.h>
 #include <string>
+#include <thread>
 
 namespace Radius {
 
@@ -10,6 +11,8 @@ static const LogModule LM_USB_CLIENT{"USB_CLIENT"};
 static const WORD sVID = 0x0403;
 static const WORD sPID = 0x6001;
 static constexpr uint8_t DMX_PACKET_START_CODE = 0;
+static constexpr auto UsbFrameFlushInterval = 15ms;
+static constexpr auto UsbDriverPostReloadDelay = 3500ms;
 
 EnttecUSBClient::EnttecUSBClient(EventLoop& loop)
     : mEventLoop(loop)
@@ -41,18 +44,15 @@ void EnttecUSBClient::Start()
 
 	mIsNewFrame = true;
 	FlushFrame(); // Establish a black frame before accepting media.
-	mSenderHandle = mEventLoop.AddTimer(15ms, [this]() {
+	mSenderHandle = mEventLoop.AddTimer(UsbFrameFlushInterval, [this]() {
 		FlushFrame();
-	});
-	mMetricsHandle = mEventLoop.AddTimer(5s, [this]() {
-		ReportMetrics();
 	});
 }
 
 void EnttecUSBClient::UpdateFrame(const DmxFrame& dmxFrame)
 {
 	// we need to shift the whole frame up by one to set DMX_PACKET_START_CODE
-	std::memset(mSerializedFrame, 0, DmxFrameSize + 1);
+	std::memset(mSerializedFrame, 0, sizeof(mSerializedFrame));
 	std::memcpy(mSerializedFrame + 1, dmxFrame.data(), dmxFrame.size());
 	mSerializedFrame[0] = DMX_PACKET_START_CODE;
 	mIsNewFrame = true;
@@ -67,7 +67,6 @@ void EnttecUSBClient::FlushFrame()
 		return;
 	}
 
-	static_assert(sizeof(mSerializedFrame) == 513);
 	int res = FTDI_SendData(SET_DMX_TX_MODE, mSerializedFrame, sizeof(mSerializedFrame));
 	if (res != TRUE)
 	{
@@ -76,17 +75,18 @@ void EnttecUSBClient::FlushFrame()
 		mDeviceConnected = false;
 		throw std::runtime_error("Enttec USB output failed");
 	}
-	mSendCounter += 1;
+	++mFramesWrittenTotal;
 	mIsNewFrame = false;
 	DEBUG_LOG(LL_DEBUG, LM_USB_CLIENT, "sent DMX frame to USB device successfully, frame: %s",
-	          HexToString<513>(mSerializedFrame).c_str());
+	          FormatByteValuesAsDecimal<sizeof(mSerializedFrame)>(mSerializedFrame).c_str());
 }
 
 void EnttecUSBClient::ReloadDriver()
 {
-	LOG(LL_INFO, LM_USB_CLIENT, "reloading devices for use with drivers (wait 3.5sec)");
+	LOG(LL_INFO, LM_USB_CLIENT, "reloading devices for use with drivers (wait %lld ms)",
+	    static_cast<long long>(UsbDriverPostReloadDelay.count()));
 	mFtStatus = FT_Reload(sVID, sPID);
-	Sleep(3500);
+	std::this_thread::sleep_for(UsbDriverPostReloadDelay);
 	if (mFtStatus != FT_OK)
 	{
 		LOG(LL_INFO, LM_USB_CLIENT, "reloading D2XX driver failed");
@@ -95,12 +95,6 @@ void EnttecUSBClient::ReloadDriver()
 	{
 		LOG(LL_INFO, LM_USB_CLIENT, "reloading D2XX driver passed");
 	}
-}
-
-void EnttecUSBClient::ReportMetrics()
-{
-	LOG(LL_INFO, LM_USB_CLIENT, "sent %d dmx frames in the last 5 sec", mSendCounter);
-	mSendCounter = 0;
 }
 
 } // namespace Radius

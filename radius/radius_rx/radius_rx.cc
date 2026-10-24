@@ -39,9 +39,11 @@ void RadiusRx::StartDmx()
 			ConfigureThread(mConfig.mDmxCore);
 			EnttecUSBClient usb(mDmxLoop);
 			usb.Start();
+			mDmxFrames = usb.FramesWrittenTotal();
 			mDmxConnected = true;
 			bool dark = true;
 			auto timer = mDmxLoop.AddTimer(DmxSchedulePollInterval, [&] {
+				mDmxFrames = usb.FramesWrittenTotal();
 				// Read published input times first; a concurrent update must not be newer than now.
 				const auto dmxAt = mDmxAt.load();
 				const auto audioAt = mAudioAt.load();
@@ -76,7 +78,6 @@ void RadiusRx::StartDmx()
 				if (changed)
 				{
 					usb.UpdateFrame(DmxFrame(frame));
-					++mDmxFrames;
 					dark = false;
 				}
 			});
@@ -127,12 +128,12 @@ void RadiusRx::Tick()
 		}
 		else if (p.has_lighting() && mConfig.mDmxEnabled)
 		{
-			if (!Bus::IsNewerSequenceNumber(p.sequence_number(), mLastDmxSequence))
+			if (!Bus::IsNewerSequenceNumber(p.sequence_number(), mLastDmxSequenceNumber))
 			{
 				++mDmxLate;
 				return;
 			}
-			mLastDmxSequence = p.sequence_number();
+			mLastDmxSequenceNumber = p.sequence_number();
 			Bus::LightingFrame frame;
 			frame.watermark = p.audio_frame_position();
 			std::memcpy(frame.channels.data(), p.lighting().channels().data(), DmxFrameSize);

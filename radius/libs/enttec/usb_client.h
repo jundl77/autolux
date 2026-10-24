@@ -18,10 +18,14 @@ public:
 	void Start();
 	void UpdateFrame(const DmxFrame&);
 
+	uint64_t FramesWrittenTotal() const
+	{
+		return mFramesWrittenTotal;
+	}
+
 private:
 	void FlushFrame();
 	void ReloadDriver();
-	void ReportMetrics();
 
 	EventLoop& mEventLoop;
 	FT_STATUS mFtStatus;
@@ -30,10 +34,9 @@ private:
 
 	uint8_t mSerializedFrame[DmxFrameSize + 1]{};
 	bool mIsNewFrame = false;
-	int mSendCounter = 0;
+	uint64_t mFramesWrittenTotal = 0;
 
 	ScopedHandler mSenderHandle;
-	ScopedHandler mMetricsHandle;
 };
 
 } // namespace Radius

@@ -5,7 +5,7 @@ namespace Radius {
 
 std::string ToString(const DmxFrame& frame)
 {
-	return HexToString<DmxFrameSize>(frame);
+	return FormatByteValuesAsDecimal<DmxFrameSize>(frame);
 }
 
 } // namespace Radius
