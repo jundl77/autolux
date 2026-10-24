@@ -142,7 +142,8 @@ def test_a_viewer_that_starts_before_the_show_renders_a_blank_frame():
     snapshot = _poller(_free_port()).snapshot()
     assert snapshot == V.BLANK_SNAPSHOT
     assert V._build_timeline(snapshot) is not None
-    assert V._build_metrics(snapshot)
+    assert V._build_show_overview(snapshot)
+    assert V._build_command_timing_row(snapshot)
     assert V._build_stage(snapshot)
 
 

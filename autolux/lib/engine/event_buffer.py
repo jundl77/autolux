@@ -229,6 +229,8 @@ class EventBuffer:
                 'effects': all_effects,
                 'intents': all_intents,
                 'timing_log': tlog,
+                'system': copy.deepcopy(self._system_health),
+                'system_history': self._system_history.snapshot(),
                 'metrics': {
                     'look_ahead_sec': self._look_ahead_sec,
                     'beats_detected': len(all_beats),

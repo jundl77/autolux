@@ -56,6 +56,21 @@ def test_history_is_bounded_by_both_time_and_number_of_samples():
     assert len(history.samples) == 1
 
 
+def test_session_report_retains_health_history_without_exposing_mutable_state():
+    buffer = EventBuffer()
+    buffer.start()
+    buffer.set_system_health(report(100))
+    buffer.set_system_health(report(101))
+    saved = buffer.to_report()
+    assert saved['system']['sample_timestamp'] == 101
+    assert [sample['at'] for sample in saved['system_history']] == [100, 101]
+    saved['system']['rx']['audio_buffer_seconds'] = -1
+    saved['system_history'][0]['buffer_ms'] = -1
+    retained = buffer.to_report()
+    assert retained['system']['rx']['audio_buffer_seconds'] == 0.152
+    assert retained['system_history'][0]['buffer_ms'] == 152
+
+
 def test_new_session_clears_history_including_when_timestamp_moves_backwards():
     history = TelemetryHistory()
     history.append(report(100), {})
