@@ -51,7 +51,7 @@ import module_source  # noqa: E402
 # ``ceiling`` exists only in the phase-B checkout, so the rest of training.nn
 # must come from beside it rather than from whichever copy an import reached
 # first -- the two disagree, and nothing downstream would say which ran.
-module_source.require("training.nn", PHASE_B)
+module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
 import numpy as np  # noqa: E402
 

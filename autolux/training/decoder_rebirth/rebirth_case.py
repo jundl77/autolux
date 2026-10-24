@@ -38,7 +38,7 @@ import module_source  # noqa: E402
 # one the offline package still tolerates an older class space for.  Asked
 # before the names are bound, because a decoder chosen by import order is a
 # measurement of a codebase nobody named.
-module_source.require("training.nn", ROOT)
+module_source.require_imported_package_under_root("training.nn", ROOT)
 
 from training.nn.decoder import DecodeParams, build_decoder, temper  # noqa: E402
 from training.nn.evaluate_v1 import write_json  # noqa: E402

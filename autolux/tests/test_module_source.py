@@ -77,7 +77,9 @@ def test_the_pattern_is_still_worth_guarding():
 
 @pytest.mark.parametrize("script", _scripts_naming_another_checkout(), ids=lambda p: p.stem)
 def test_a_script_naming_another_checkout_states_which_one_it_imports(script):
-    assert "module_source.require(" in script.read_text(encoding="utf-8"), (
+    assert "module_source.require_imported_package_under_root(" in script.read_text(
+        encoding="utf-8"
+    ), (
         f"{script.relative_to(REPO)} puts another checkout on sys.path without "
         f"declaring which one its training.nn must come from"
     )

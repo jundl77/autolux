@@ -34,7 +34,7 @@ import module_source  # noqa: E402
 # ``ceiling`` exists only in the phase-B checkout, so the rest of training.nn
 # must come from beside it rather than from whichever copy an import reached
 # first -- the two disagree, and nothing downstream would say which ran.
-module_source.require("training.nn", PHASE_B)
+module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
 from ng_common import CAMP, CORPUS, F3_DIR, NEW_HAND_IDS  # noqa: E402
 from ng_ag8_variants import SHIFTS, variant_id  # noqa: E402

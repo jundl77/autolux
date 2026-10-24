@@ -32,7 +32,7 @@ sys.path.append(str(HERE.parent))
 
 import module_source  # noqa: E402
 
-module_source.require("training.nn", PHASE_B)
+module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
 import training.nn.decoder  # noqa: E402
 from training.nn.evaluate_v1 import split_ids, write_json  # noqa: E402

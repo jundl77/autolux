@@ -37,15 +37,15 @@ MAIN = Path(__file__).resolve().parents[2]
 # is usually NOT what MAIN has checked out.  NG_CODE_ROOT points imports (and
 # the committed-config gate) at a worktree holding that branch; default is the
 # night's behaviour exactly.
-from autolux.training.runtime_paths import code_component
+from autolux.training.runtime_paths import resolve_autolux_package_directory
 
-CODE = code_component(os.environ.get("NG_CODE_ROOT", str(MAIN)))
+CODE = resolve_autolux_package_directory(os.environ.get("NG_CODE_ROOT", str(MAIN)))
 W = str(CODE)
 sys.path[:0] = [str(CODE.parent), W, W + r"\training"]
 from autolux.training import module_source
 
-module_source.require("autolux.lib", CODE)
-module_source.require("nn", CODE)
+module_source.require_imported_package_under_root("autolux.lib", CODE)
+module_source.require_imported_package_under_root("nn", CODE)
 
 try:
     _kernel32 = ctypes.windll.kernel32

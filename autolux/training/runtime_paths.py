@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-def code_component(path):
+def resolve_autolux_package_directory(path):
     root = Path(path).resolve()
     component = root / 'autolux' if (root / 'autolux/lib').is_dir() else root
     if (

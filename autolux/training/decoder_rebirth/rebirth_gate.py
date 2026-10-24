@@ -47,7 +47,7 @@ import module_source  # noqa: E402
 
 # The whole gate is phase-B's generation: ``ceiling`` and ``paired`` exist
 # nowhere else, so every training.nn it reads must come from there too.
-module_source.require("training.nn", PHASE_B)
+module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
 from training.nn.decoder import (
     DecodeParams,

@@ -1,18 +1,18 @@
 from pathlib import Path
 import pytest
-from autolux.training.runtime_paths import code_component
+from autolux.training.runtime_paths import resolve_autolux_package_directory
 
 
 def test_project_and_component_paths_select_the_same_source():
     component = Path(__file__).resolve().parents[1]
-    assert code_component(component.parent) == component
-    assert code_component(component) == component
+    assert resolve_autolux_package_directory(component.parent) == component
+    assert resolve_autolux_package_directory(component) == component
 
 
 def test_unrelated_worktree_is_rejected_instead_of_importing_installed_code(tmp_path):
     (tmp_path / 'lib').mkdir()
     with pytest.raises(ValueError, match='not an Autolux'):
-        code_component(tmp_path)
+        resolve_autolux_package_directory(tmp_path)
 
 
 @pytest.mark.parametrize('campaign', ['l9b_campaign', 'l9c_campaign'])

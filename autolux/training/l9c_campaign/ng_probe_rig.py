@@ -30,16 +30,16 @@ MAIN = Path(__file__).resolve().parents[2]
 # config) must come from the l9c_campaign branch, which MAIN usually no longer
 # has checked out after bank time.  NG_CODE_ROOT points the code role at a
 # worktree holding that branch; default is the night's behaviour exactly.
-from autolux.training.runtime_paths import code_component
+from autolux.training.runtime_paths import resolve_autolux_package_directory
 
-CODE = code_component(os.environ.get("NG_CODE_ROOT", str(MAIN)))
+CODE = resolve_autolux_package_directory(os.environ.get("NG_CODE_ROOT", str(MAIN)))
 DATA = MAIN / "training" / "data" / "raveform"
 CAMP = DATA / "models" / "l9c_campaign"
 L9B_CAMP = DATA / "models" / "l9b_campaign"
 sys.path.insert(0, str(CODE.parent))
 from autolux.training import module_source
 
-module_source.require("autolux.lib", CODE)
+module_source.require_imported_package_under_root("autolux.lib", CODE)
 
 from autolux.lib import section_chain  # noqa: E402
 
