@@ -49,7 +49,7 @@ def write_report(app, path):
         from autolux.simulate.evaluator import evaluate, print_evaluation
 
         report = app.event_buffer.to_report()
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2, default=str)
         logging.info(f'[main] report written: {path}')
         print_evaluation(evaluate(report))
@@ -93,6 +93,9 @@ signal.signal(signal.SIGTERM, death_handler)
 
 
 def run_sync():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
