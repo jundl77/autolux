@@ -43,7 +43,6 @@ MUTED = '#6e7681'
 POSTERIOR_FILL = '#58a6ff'
 
 HEALTH_FONT_SIZE = '14px'
-TIMING_FONT_SIZE = '12px'
 
 BEAT_MARKER_SIZE = 16
 BEATS_PER_BAR = 4
@@ -623,54 +622,20 @@ def _build_show_overview(snapshot: dict) -> list:
     ]
 
 
-def _build_analysis_diagnostics(snapshot: dict) -> list:
+def _build_state_health_row(snapshot: dict) -> list:
     verdict_str, stream_strs, timing_col = _timing_health(snapshot.get('timing_stats', {}))
     shed = snapshot.get('shed') or {}
     pill_str, pill_col = _shed_pill(shed)
     rate_str, rate_col = _shed_rate(shed)
     return [
-        _metric_row(
-            [
-                html.Span(
-                    pill_str,
-                    style={
-                        'color': pill_col,
-                        'fontWeight': 'bold',
-                        'fontSize': HEALTH_FONT_SIZE,
-                        'border': f'1px solid {pill_col}',
-                        'borderRadius': '4px',
-                        'padding': '2px 10px',
-                    },
-                ),
-                html.Span(rate_str, style={'color': rate_col}),
-            ],
-            alignItems='center',
+        html.Span(
+            pill_str,
+            style={'color': pill_col, 'fontWeight': 'bold', 'fontSize': HEALTH_FONT_SIZE},
         ),
-        _metric_row(
-            [html.Span(verdict_str, style={'color': timing_col, 'fontWeight': 'bold'})]
-            + [html.Span(text, style={'color': MUTED, 'minWidth': '21ch'}) for text in stream_strs],
-            fontSize=TIMING_FONT_SIZE,
-            columnGap='16px',
-            marginBottom='0',
-            marginTop='2px',
-            paddingTop='7px',
-            borderTop=f'1px solid {BORDER}',
-        ),
+        html.Span(rate_str, style={'color': rate_col}),
+        html.Span(verdict_str, style={'color': timing_col, 'fontWeight': 'bold'}),
+        *[html.Span(text, style={'color': MUTED}) for text in stream_strs],
     ]
-
-
-def _metric_row(items: list, **overrides) -> html.Div:
-    style = {
-        'display': 'flex',
-        'alignItems': 'baseline',
-        'flexWrap': 'wrap',
-        'columnGap': '22px',
-        'rowGap': '4px',
-        'marginBottom': '7px',
-        'fontVariantNumeric': 'tabular-nums',
-    }
-    style.update(overrides)
-    return html.Div(items, style=style)
 
 
 def _shed_pill(shed: dict) -> tuple:
@@ -726,8 +691,13 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 .window-label { font-size: 11px; color: #9baabb; text-align: right; }
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
-.show-overview { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-                 border: 1px solid #273344; border-radius: 8px; background: #111923; }
+.overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
+.state-health { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
+                padding: 12px 16px; border-bottom: 1px solid #273344;
+                font-size: 12px; font-variant-numeric: tabular-nums; }
+.state-health > span { white-space: nowrap; }
+.state-health > span:first-child { white-space: normal; }
+.show-overview { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
 .show-stat { padding: 18px 16px; min-width: 0; border-right: 1px solid #273344; font-variant-numeric: tabular-nums; }
 .show-stat:last-child { border-right: 0; }
 .stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #9baabb; margin-bottom: 10px; }
@@ -749,8 +719,8 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .panel-description { margin: 0 16px 4px; color: #9baabb; font-size: 11px; line-height: 1.5; min-height: 50px; }
 .telemetry-notice { padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
                     color: #f6c177; margin-bottom: 12px; font-size: 12px; }
-.diagnostics { margin-top: 22px; border-top: 1px solid #273344; padding-top: 16px; }
-.diagnostics summary { cursor: pointer; font-size: 12px; color: #9baabb; }
+.diagnostics { border-bottom: 1px solid #273344; padding: 16px 18px; }
+.diagnostics h2 { margin: 0; font-size: 14px; color: #e6edf3; }
 .diagnostics-content { padding-top: 16px; font-size: 12px; }
 .footer { display: flex; justify-content: space-between; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
@@ -1177,7 +1147,13 @@ def build_app(snapshot_source) -> dash.Dash:
                 className='masthead',
             ),
             html.Div(id='telemetry-alerts'),
-            html.Div(id='metrics', className='show-overview'),
+            html.Section(
+                [
+                    html.Div(id='diagnostics', className='state-health'),
+                    html.Div(id='metrics', className='show-overview'),
+                ],
+                className='overview-panel',
+            ),
             html.Div(
                 [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
                 className='section-heading',
@@ -1225,6 +1201,18 @@ def build_app(snapshot_source) -> dash.Dash:
                             'borderBottom': f'1px solid {BORDER}',
                         },
                     ),
+                    html.Section(
+                        [
+                            html.H2('Analysis diagnostics'),
+                            html.Div(
+                                [
+                                    html.Div(id='decoder'),
+                                ],
+                                className='diagnostics-content',
+                            ),
+                        ],
+                        className='diagnostics',
+                    ),
                     html.Div(
                         [
                             html.H2('Intent preview'),
@@ -1244,19 +1232,6 @@ def build_app(snapshot_source) -> dash.Dash:
                 className='section-heading',
             ),
             html.Div(system_metrics.build_system_health_panels(), className='charts-grid'),
-            html.Details(
-                [
-                    html.Summary('Analysis & command diagnostics'),
-                    html.Div(
-                        [
-                            html.Div(id='decoder'),
-                            html.Div(id='diagnostics', style={'marginTop': '16px'}),
-                        ],
-                        className='diagnostics-content',
-                    ),
-                ],
-                className='diagnostics',
-            ),
             html.Footer(
                 [
                     html.Span(
@@ -1301,7 +1276,7 @@ def build_app(snapshot_source) -> dash.Dash:
             _build_show_overview(snap),
             _build_stage(snap),
             _build_decoder(snap),
-            _build_analysis_diagnostics(snap),
+            _build_state_health_row(snap),
         )
 
     @app.callback(

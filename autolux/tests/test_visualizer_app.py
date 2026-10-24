@@ -987,7 +987,7 @@ def _timing_stats(**streams) -> dict:
 
 
 def test_timing_health_is_green_when_every_stream_matches_its_own_target():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(
             timing_stats=_timing_stats(
                 beat=(14.0, 3.0), intent=(0.31, 2.0), overlay=(14.0, 3.0), refresh=(6.02, 1.0)
@@ -998,7 +998,7 @@ def test_timing_health_is_green_when_every_stream_matches_its_own_target():
 
 
 def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(timing_stats=_timing_stats(beat=(14.0, 3.0), intent=(0.31, 310.0)))
     )
     assert _colour_of(items, 'cmd timing') == V.WARN_COLOR
@@ -1006,13 +1006,13 @@ def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
 
 
 def test_timing_health_does_not_depend_on_how_long_a_stream_waits():
-    slow = V._build_analysis_diagnostics(_snapshot(timing_stats=_timing_stats(beat=(14.0, 2.0))))
-    fast = V._build_analysis_diagnostics(_snapshot(timing_stats=_timing_stats(intent=(0.31, 2.0))))
+    slow = V._build_state_health_row(_snapshot(timing_stats=_timing_stats(beat=(14.0, 2.0))))
+    fast = V._build_state_health_row(_snapshot(timing_stats=_timing_stats(intent=(0.31, 2.0))))
     assert _colour_of(slow, 'cmd timing') == _colour_of(fast, 'cmd timing') == V.OK_COLOR
 
 
 def test_timing_health_is_muted_before_any_command_has_been_delivered():
-    assert _colour_of(V._build_analysis_diagnostics(_snapshot()), 'cmd timing') == V.MUTED
+    assert _colour_of(V._build_state_health_row(_snapshot()), 'cmd timing') == V.MUTED
 
 
 def test_the_event_buffer_splits_timing_by_stream():
@@ -1268,14 +1268,14 @@ def test_the_pill_leaves_playing_when_the_audio_runs_out():
 
 
 def test_a_run_with_no_watchdog_says_so_rather_than_claiming_health():
-    items = V._build_analysis_diagnostics(_snapshot(shed={}))
+    items = V._build_state_health_row(_snapshot(shed={}))
     assert _metric(items, 'health') == 'health: —'
     assert _colour_of(items, 'health') == V.MUTED
     assert _metric(items, 'sheds') == 'sheds: —'
 
 
 def test_a_healthy_chain_reads_live():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 0, 'sheds_per_min': 0})
     )
     assert _metric(items, 'health') == 'health: ● LIVE'
@@ -1284,7 +1284,7 @@ def test_a_healthy_chain_reads_live():
 
 
 def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(shed={'level': 'NN_SHED', 'fault': 'hung_pass', 'sheds': 3, 'sheds_per_min': 2})
     )
     pill = _metric(items, 'health')
@@ -1294,14 +1294,14 @@ def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
 
 
 def test_a_shed_with_no_named_fault_still_reads_degraded():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(shed={'level': 'NN_SHED', 'fault': None, 'sheds': 1, 'sheds_per_min': 1})
     )
     assert _metric(items, 'health') == 'health: ◆ DEGRADED — holding intent'
 
 
 def test_the_rate_and_the_run_total_are_both_readable():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 2})
     )
     assert _metric(items, 'sheds') == 'sheds 2/min  ·  9 this run'
@@ -1309,7 +1309,7 @@ def test_the_rate_and_the_run_total_are_both_readable():
 
 
 def test_a_run_that_settled_hours_ago_stops_shouting_about_it():
-    items = V._build_analysis_diagnostics(
+    items = V._build_state_health_row(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 0})
     )
     assert _metric(items, 'sheds') == 'sheds 0/min  ·  9 this run'
@@ -1344,21 +1344,21 @@ def test_show_overview_groups_music_effect_and_playback_position():
     assert 'health:' not in text and 'cmd timing:' not in text
 
 
-def test_advanced_diagnostics_retain_timing_and_analysis_fault_details():
-    items = V._build_analysis_diagnostics(_degraded_strip())
+def test_state_health_row_retains_timing_and_analysis_fault_details():
+    items = V._build_state_health_row(_degraded_strip())
     assert 'holding intent' in _metric(items, 'health')
     assert _colour_of(items, 'health') == V.WARN_COLOR
-    assert _texts(items[-1]) == ['cmd timing: on target', 'beat 14.01s ±9ms', 'intent 1.41s ±1ms']
+    assert _texts(items[2:]) == ['cmd timing: on target', 'beat 14.01s ±9ms', 'intent 1.41s ±1ms']
 
 
 def test_no_tempo_or_effect_is_shown_as_unavailable():
     items = V._build_show_overview(_snapshot(bpm=0))
     assert '— BPM' in _texts(items)
     assert 'No Effect Selected' in _texts(items)
-    assert _metric(V._build_analysis_diagnostics(_snapshot()), 'cmd timing') == 'cmd timing: —'
+    assert _metric(V._build_state_health_row(_snapshot()), 'cmd timing') == 'cmd timing: —'
 
 
-def test_analysis_details_are_collapsed_and_generic_status_cards_are_absent():
+def test_analysis_details_and_health_row_are_present_without_generic_status_cards():
     app = _app()
     assert _find_by_id(app.layout, 'system-health') is None
     assert _find_by_id(app.layout, 'diagnostics') is not None

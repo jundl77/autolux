@@ -43,10 +43,10 @@ PANELS = (
     (
         'loss',
         'Audio loss & overflow',
-        'Audio frames lost in transit or rejected by full queues, per second. These are frames, not network packets.',
+        'Missing audio frames observed at RX and frames rejected by full queues, per second. Missing frames can include TX drops.',
         'frames/s',
         (
-            ('lost_frames', 'Network loss', RED, True),
+            ('lost_frames', 'Missing at RX', RED, True),
             ('tx_dropped_frames', 'TX overflow', AMBER, True),
             ('rx_dropped_frames', 'RX overflow', BLUE, True),
         ),
