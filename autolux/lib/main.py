@@ -2,6 +2,7 @@ import logging
 import datetime
 
 from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 # Production mode copies this to the native audio sender configuration.
 # simulate/runner.py uses the same delay for replay.
@@ -18,7 +19,7 @@ class AutoluxController:
         debug_mode: bool = False,
         disable_os2l: bool = False,
         enable_ui: bool = False,
-        ui_port: int = 8050,
+        ui_port: int = DEFAULT_DASHBOARD_PORT,
         report_path: str | None = None,
         enable_monitoring: bool = False,
         overlay_host: str | None = None,

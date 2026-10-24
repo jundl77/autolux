@@ -10,6 +10,7 @@ from pathlib import Path
 
 from autolux.lib.main import AutoluxController, PLAYBACK_DELAY_SEC
 from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 global_app = None
 
@@ -170,8 +171,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparser.add_argument(
         '--ui-port',
         type=int,
-        default=8050,
-        help='Visualizer Dash server port (default: 8050)',
+        default=DEFAULT_DASHBOARD_PORT,
+        help=f'Dashboard port (default: {DEFAULT_DASHBOARD_PORT})',
         required=False,
         dest='ui_port',
     )

@@ -11,7 +11,15 @@ import plotly.graph_objects as go
 
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.system_health import health_summary
-from autolux.lib.ui_bridge import SNAPSHOT_HOST, SNAPSHOT_PATH, snapshot_port
+from autolux.lib.ui_bridge import (
+    DEFAULT_DASHBOARD_PORT,
+    DASHBOARD_MDNS_HOSTNAME,
+    DASHBOARD_BIND_ADDRESS,
+    SNAPSHOT_HOST,
+    SNAPSHOT_PATH,
+    advertise_dashboard_mdns,
+    snapshot_port,
+)
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
 from autolux.simulate import system_metrics
 
@@ -949,7 +957,10 @@ class SnapshotPoller:
     """The show over a socket, in place of the EventBuffer this used to hold."""
 
     def __init__(
-        self, host: str = SNAPSHOT_HOST, port: int = 8051, timeout: float = POLL_TIMEOUT_SEC
+        self,
+        host: str = SNAPSHOT_HOST,
+        port: int = snapshot_port(DEFAULT_DASHBOARD_PORT),
+        timeout: float = POLL_TIMEOUT_SEC,
     ):
         self._host, self._port, self._timeout = host, port, timeout
         self._connection = None
@@ -1200,13 +1211,19 @@ def build_app(snapshot_source) -> dash.Dash:
     return app
 
 
-def run_app(snapshot_source, port: int = 8050) -> None:
+def run_app(snapshot_source, port: int = DEFAULT_DASHBOARD_PORT) -> None:
     from autolux.lib.logging_config import configure_logging
 
     configure_logging()
     app = build_app(snapshot_source)
-    logging.info('[dashboard] ready at http://localhost:%d', port)
-    app.run(host='0.0.0.0', port=port, debug=False)
+    with advertise_dashboard_mdns(port):
+        logging.info(
+            '[dashboard] http://%s:%d (listening on %s)',
+            DASHBOARD_MDNS_HOSTNAME.rstrip('.'),
+            port,
+            DASHBOARD_BIND_ADDRESS,
+        )
+        app.run(host=DASHBOARD_BIND_ADDRESS, port=port, debug=False)
 
 
 def main(argv=None) -> None:
@@ -1214,7 +1231,12 @@ def main(argv=None) -> None:
         description='The lighting visualizer, in its own process: it polls the '
         'show for snapshots and owns every pixel and every callback.'
     )
-    parser.add_argument('--port', type=int, default=8050, help='Dash server port (default: 8050)')
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=DEFAULT_DASHBOARD_PORT,
+        help=f'Dashboard port (default: {DEFAULT_DASHBOARD_PORT})',
+    )
     parser.add_argument(
         '--snapshot-port',
         type=int,

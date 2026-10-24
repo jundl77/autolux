@@ -17,6 +17,7 @@ import time
 import uuid
 
 from cli.native_runtime import NativeRuntime, NativeSpec, validate_native
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 ROOT = Path(__file__).resolve().parents[1]
 READINESS_TIMEOUT_SECONDS = 45
@@ -50,7 +51,7 @@ def add_arguments(parser):
         help='Run all tests, builds, backtest, simulation and readiness checks without starting a show',
     )
     parser.add_argument('--no-ui', action='store_true')
-    parser.add_argument('--ui-port', type=int, default=8050)
+    parser.add_argument('--ui-port', type=int, default=DEFAULT_DASHBOARD_PORT)
     parser.add_argument('--duration', type=float, help='Stop automatically after this many seconds')
     parser.add_argument('--report')
 

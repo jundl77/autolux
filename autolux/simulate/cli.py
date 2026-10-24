@@ -5,6 +5,7 @@ import sys
 import time
 
 from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 
 async def _run_pipeline(
@@ -222,7 +223,9 @@ def add_simulate_subparser(subparsers):
         'passing it without --ui paces the run without a '
         'viewer. Device indices come from `autolux list`.',
     )
-    fp.add_argument('--port', type=int, default=8050, help='Dash server port (--ui only)')
+    fp.add_argument(
+        '--port', type=int, default=DEFAULT_DASHBOARD_PORT, help='Dashboard port (--ui only)'
+    )
 
     rp = sub.add_parser('realtime', help='Simulate from microphone in real time')
     rp.add_argument(
@@ -231,7 +234,7 @@ def add_simulate_subparser(subparsers):
         default=None,
         help='PyAudio input device index (default: system default)',
     )
-    rp.add_argument('--port', type=int, default=8050, help='Dash server port')
+    rp.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT, help='Dashboard port')
 
     sim.set_defaults(func=simulate_cmd)
 

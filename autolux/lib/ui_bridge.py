@@ -12,13 +12,49 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from contextlib import contextmanager
+import socket
 
+DEFAULT_DASHBOARD_PORT = 7643
+DASHBOARD_MDNS_HOSTNAME = 'autolux.local.'
+DASHBOARD_BIND_ADDRESS = '0.0.0.0'
+DEFAULT_ROUTE_PROBE = ('192.0.2.1', 9)
 SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
 _VIEWER_POLL_SEC = 0.2
+
+
+@contextmanager
+def advertise_dashboard_mdns(port: int):
+    from zeroconf import IPVersion, NonUniqueNameException, ServiceInfo, Zeroconf
+
+    discovery = None
+    try:
+        try:
+            # UDP connect selects the default route without sending any traffic.
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+                route.connect(DEFAULT_ROUTE_PROBE)
+                address = route.getsockname()[0]
+            discovery = Zeroconf(interfaces=[address], ip_version=IPVersion.V4Only)
+            discovery.register_service(
+                ServiceInfo(
+                    '_http._tcp.local.',
+                    'Autolux._http._tcp.local.',
+                    parsed_addresses=[address],
+                    port=port,
+                    server=DASHBOARD_MDNS_HOSTNAME,
+                    properties={'path': '/'},
+                )
+            )
+        except (OSError, NonUniqueNameException) as error:
+            logging.warning('[dashboard] local hostname unavailable; use the PC IP: %s', error)
+        yield
+    finally:
+        if discovery is not None:
+            discovery.close()
 
 
 def snapshot_port(ui_port: int) -> int:
@@ -176,7 +212,7 @@ def start(event_buffer, ui_port: int) -> UiBridge | None:
         server.stop()
         return None
     logging.info(
-        f'[ui] visualizer → http://localhost:{ui_port} '
+        f'[ui] dashboard → http://{DASHBOARD_MDNS_HOSTNAME.rstrip(".")}:{ui_port} '
         f'(pid {viewer.pid}, reading :{server.port}{SNAPSHOT_PATH})'
     )
     return UiBridge(server, viewer, ui_port)

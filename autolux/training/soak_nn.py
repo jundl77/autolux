@@ -19,6 +19,7 @@ for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training"))
 
 from eval_assets import committed_audio_path  # noqa: E402
 from select_eval_set import EVAL_SET_FILE, load_eval_set  # noqa: E402
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT  # noqa: E402
 
 SAMPLE_INTERVAL_SEC = 1.0
 BUCKET_SEC = 60.0
@@ -381,10 +382,8 @@ def main(argv: list | None = None) -> int:
     soak.add_argument(
         "--ui-port",
         type=int,
-        default=8050,
-        help="--report alone starts Dash (main.py gates the UI "
-        "thread on the event buffer, not on --ui), so this "
-        "moves it off a port something else may hold",
+        default=DEFAULT_DASHBOARD_PORT,
+        help="Dashboard port for a live soak",
     )
     soak.add_argument("--report", default=None)
     soak.add_argument("--record", default=None)

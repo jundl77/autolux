@@ -50,9 +50,12 @@ Radius TX and Autolux. Ctrl-C stops the owned session at both ends. RDP is not
 needed during operation. Config templates live beside the two Radius apps;
 `--tx-config`, `--rx-config` and `--receiver-host` override them.
 
-Open **http://127.0.0.1:8050** for analysis, lighting and system health.
+Open **http://autolux.local:7643** for analysis, lighting and system health.
+The dashboard binds to `0.0.0.0`; mDNS publishes the local hostname while it runs.
+Allow TCP 7643 and UDP 5353 from your local network in Windows Firewall.
+If a device cannot resolve mDNS, use the controller PC’s LAN IP with port 7643.
 Prometheus metrics are at `/metrics` on the same address. `--no-ui` keeps metrics
-available on port 8051. Logs and generated configs are under `.live/`.
+available on port 7644. Logs and generated configs are under `.live/`.
 
 ## Verify
 

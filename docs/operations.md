@@ -7,7 +7,7 @@ backtest and simulation. Both leave outputs stopped. Stop a show with Ctrl-C or
 
 ## Health
 
-The dashboard at `http://localhost:8050` groups playback, tempo, intent and effect
+The dashboard at `http://autolux.local:7643` groups playback, tempo, intent and effect
 above the show timeline. Transport charts retain five minutes of receiver buffer,
 audio level, interruptions, lost/dropped audio frames, scheduling error and DMX
 delivery. Counters appear as rates; missing reports and counter resets leave gaps.
@@ -38,7 +38,8 @@ and system health every thirty seconds or when its state changes. HTTP access lo
 are suppressed; server errors and recovery messages remain visible.
 Use `uv run autolux --prod --verbose` for beat, note and protocol diagnostics.
 
-Prometheus scrapes `http://127.0.0.1:8050/metrics` (8051 with `--no-ui`). Use
+Prometheus scrapes `http://autolux.local:7643/metrics`; headless mode serves local
+metrics at `http://127.0.0.1:7644/metrics`. Use
 `docs/prometheus.yml` as a local scrape configuration, and point Grafana at that
 Prometheus server if longer-term history is needed. Metrics use seconds, cumulative
 counters and fixed endpoint labels. Stale endpoint data is unavailable, never zero.

@@ -25,5 +25,5 @@ binary/DLL bundles under the receiver user's local application-data directory.
 SSH runs one supervised receiver session; no Python installation is required on
 the receiver. Concurrent receiver sessions are refused. Session logs are retained.
 
-The default dashboard is port 8050, with Prometheus at `/metrics`. Headless mode
-serves metrics on port 8051. Use `--duration 90` for a bounded live test.
+The default dashboard is port 7643, with Prometheus at `/metrics`. Headless mode
+serves metrics on port 7644. Use `--duration 90` for a bounded live test.
