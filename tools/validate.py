@@ -14,24 +14,8 @@ TIMEOUT_EXIT_CODE = 124
 
 
 def validation_steps(output_dir):
-    native_sources = (
-        subprocess.check_output(
-            ['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'radius'],
-            cwd=ROOT,
-        )
-        .decode('utf8')
-        .split('\0')
-    )
-    native_sources = sorted(
-        {
-            name
-            for name in native_sources
-            if Path(name).suffix in {'.cc', '.cpp', '.h', '.hpp', '.proto'}
-            and not name.startswith(('radius/x_', 'radius/cmake-build-'))
-        }
-    )
     audio_files = sorted((ROOT / 'autolux/training/eval_audio').glob('*.mp3'))
-    if not native_sources or not audio_files:
+    if not audio_files:
         raise RuntimeError(
             'Full validation requires the source checkout and committed evaluation audio.'
         )
@@ -41,7 +25,7 @@ def validation_steps(output_dir):
             'python-format',
             python + ['-m', 'ruff', 'format', '--check', 'autolux', 'cli', 'radius', 'tools'],
         ),
-        ('cpp-format', ['clang-format', '--dry-run', '--Werror', *native_sources]),
+        ('cpp-format', python + ['-m', 'pre_commit', 'run', 'cpp-format', '--all-files']),
         (
             'build',
             ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'build.ps1')],
