@@ -40,7 +40,7 @@ def build_simulation(
     if section is None:
         section = load_section_chain(watchdog=watchdog, audio_client=audio_client)
 
-    effect_controller = EffectController(midi_client, event_buffer=event_buffer, clock=clock)
+    effect_controller = EffectController(midi_client, event_buffer=event_buffer)
     light_engine = LightEngine(
         midi_client,
         os2l_client,

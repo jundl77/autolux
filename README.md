@@ -7,6 +7,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | --- | --- |
 | `cli/` | Startup, SSH deployment, supervision and shutdown |
 | `autolux/lib/` | Music analysis and lighting decisions |
+| `autolux/lighting/` | Authored SoundSwitch section loops |
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
@@ -35,6 +36,10 @@ output to localhost, and exit MIDI mapping mode. Use **loopMIDI Port 1** and rou
 music to **CABLE Input**; analysis and Radius both capture **CABLE Output**.
 The receiver needs speakers, the Enttec USB device and key-based Windows SSH.
 See [receiver setup](cli/README.md).
+
+Install the [four section loops](autolux/lighting/soundswitch/README.md) in the Home
+venue and enable infinite autoloop repeat. Committed section changes select the
+matching loop; unchanged sections keep playing it.
 
 ## Run
 

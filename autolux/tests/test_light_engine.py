@@ -1,4 +1,4 @@
-"""#142 retired the engine's classifier: decoder decisions alone drive the lights."""
+"""Committed sections select loops at room playback time."""
 
 import logging
 from collections import deque
@@ -66,7 +66,17 @@ class FakeDecoder:
     chain_latency_sec = 13.66
     feature_latency_sec = 7.9938
     bar_sec = 1.8898
-    classes = ('intro', 'buildup', 'breakdown', 'drop', 'outro')
+    classes = (
+        'intro',
+        'altintro',
+        'buildup',
+        'breakdown',
+        'bridge',
+        'drop',
+        'cooldown',
+        'outro',
+        'altoutro',
+    )
 
     @property
     def bar_edges(self):
@@ -123,7 +133,7 @@ def engine(
         midi,
         StubOs2lClient(clock=clock),
         StubOverlayClient(clock=clock),
-        EffectController(midi, clock=clock, event_buffer=buffer),
+        EffectController(midi, event_buffer=buffer),
         command_queue,
         event_buffer=buffer,
         playback_delay_sec=playback_delay_sec,
@@ -203,6 +213,10 @@ async def settle(light, clock, queue, sec=20.0, step=0.25):
     'label,intent',
     [
         ('intro', LightIntent.ATMOSPHERIC),
+        ('altintro', LightIntent.ATMOSPHERIC),
+        ('altoutro', LightIntent.ATMOSPHERIC),
+        ('bridge', LightIntent.BREAKDOWN),
+        ('cooldown', LightIntent.BREAKDOWN),
         ('outro', LightIntent.ATMOSPHERIC),
         ('buildup', LightIntent.BUILDUP),
         ('breakdown', LightIntent.BREAKDOWN),
@@ -218,20 +232,22 @@ async def test_a_decision_commits_the_intent_its_class_maps_to(label, intent):
     assert light.current_intent is intent
 
 
-async def test_the_same_class_twice_does_not_re_roll_the_effect():
+@pytest.mark.parametrize('strobe_draw', [0.0, 1.0])
+async def test_repeated_class_keeps_its_loop_with_or_without_a_strobe(monkeypatch, strobe_draw):
+    monkeypatch.setattr('autolux.lib.engine.effect_controller.random.random', lambda: strobe_draw)
     decoder = FakeDecoder()
     light, queue, clock, midi = engine(decoder=decoder)
     await elapse(light, clock, 20.0)
     await bars(light, decoder, clock, 'drop', 'drop', 'drop')
     await settle(light, clock, queue)
-    lit = [e for e in midi.events if e['label'] in ('set_autoloop', 'set_special_effect')]
-    assert len(lit) == 1
+    assert len(autoloops(midi)) == 1
+    strobes = [event for event in midi.events if event['label'] == 'set_special_effect']
+    assert len(strobes) == (1 if strobe_draw == 0.0 else 0)
     assert light.intent_commits == 1
 
 
 async def test_a_sustained_drop_stays_drop_with_no_engine_derived_promotion():
-    """The intent layer is a pure mapped image of the class space -- a long drop
-    evolves through effect refresh inside DROP's banks, not a family change."""
+    """A long drop holds its selected effect until the section changes."""
     decoder = FakeDecoder()
     light, queue, clock, _ = engine(decoder=decoder)
     await elapse(light, clock, 20.0)
@@ -550,7 +566,7 @@ async def test_the_midi_settle_is_forgiven_where_it_actually_runs():
         midi,
         StubOs2lClient(clock=SYSTEM_CLOCK),
         StubOverlayClient(clock=SYSTEM_CLOCK),
-        EffectController(midi, clock=SYSTEM_CLOCK),
+        EffectController(midi),
         None,
         playback_delay_sec=0.0,
         watchdog=watchdog,
@@ -574,7 +590,7 @@ async def test_the_sound_start_settle_is_forgiven_too():
         midi,
         StubOs2lClient(clock=SYSTEM_CLOCK),
         StubOverlayClient(clock=SYSTEM_CLOCK),
-        EffectController(midi, clock=SYSTEM_CLOCK),
+        EffectController(midi),
         None,
         playback_delay_sec=0.0,
         watchdog=watchdog,
@@ -596,7 +612,7 @@ async def test_the_settle_is_forgiven_from_the_queue_not_from_the_handler():
         midi,
         StubOs2lClient(clock=clock),
         StubOverlayClient(clock=clock),
-        EffectController(midi, clock=clock),
+        EffectController(midi),
         queue,
         playback_delay_sec=14.0,
         watchdog=watchdog,
@@ -649,7 +665,7 @@ async def test_a_clamped_pair_is_delivered_in_commit_order():
     assert light.current_intent is LightIntent.BREAKDOWN
 
 
-async def test_a_statement_about_later_audio_still_supersedes():
+async def test_beat_absence_holds_the_loop_until_a_committed_section_change():
     decoder = FakeDecoder()
     light, queue, clock, midi = engine(decoder=decoder, events=True)
     await elapse(light, clock, 40.0)
@@ -658,7 +674,7 @@ async def test_a_statement_about_later_audio_still_supersedes():
 
     light.analyser.since_beat = 3.0
     await light.on_100ms_callback()
-    assert light.decided_intent is LightIntent.ATMOSPHERIC
+    assert light.decided_intent is LightIntent.DROP
 
     light.analyser.since_beat = 0.0
     await bars(light, decoder, clock, 'breakdown')
@@ -750,7 +766,7 @@ async def boundary(light, chain, clock, score, *, age_sec=8.0, sec=0.5):
 
 
 def autoloops(midi):
-    return [e for e in midi.events if e['label'] in ('set_autoloop', 'set_special_effect')]
+    return [e for e in midi.events if e['label'] == 'set_autoloop']
 
 
 async def held(light, decoder, chain, clock, queue, label='drop'):
@@ -759,197 +775,95 @@ async def held(light, decoder, chain, clock, queue, label='drop'):
     await settle(light, clock, queue)
 
 
-async def test_a_boundary_inside_a_held_intent_re_rolls_the_effect():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    before = len(autoloops(midi))
-    intent = light.current_intent
-
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
-
-    assert len(autoloops(midi)) == before + 1
-    assert light.current_intent is intent
-
-
-async def test_a_refresh_does_not_appear_on_the_intent_timeline():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    blocks = len(light.event_buffer.snapshot()['intents'])
-
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
-
-    assert len(light.event_buffer.snapshot()['intents']) == blocks
-
-
-async def test_a_quiet_boundary_changes_nothing():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    before = len(autoloops(midi))
-
-    await boundary(light, chain, clock, 0.0)
-    await settle(light, clock, queue)
-
-    assert len(autoloops(midi)) == before
-
-
-async def test_a_refresh_re_rolls_from_the_intent_the_stage_is_showing():
-    from autolux.lib.engine.effect_definitions import INTENT_EFFECTS
-
+@pytest.mark.parametrize('score', [0.0, 0.5, 1.0])
+async def test_boundary_scores_never_replace_a_held_sections_loop(score):
     decoder, chain = FakeDecoder(), FakeChain()
     light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
     await held(light, decoder, chain, clock, queue, label='breakdown')
+    before = list(autoloops(midi))
+    blocks = len(light.event_buffer.snapshot()['intents'])
 
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
+    for _ in range(3):
+        await boundary(light, chain, clock, score)
+        await settle(light, clock, queue)
 
-    pool = {effect.midi_channel.name for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]}
-    assert autoloops(midi)[-1]['channel'] in pool
+    assert autoloops(midi) == before
+    assert len(light.event_buffer.snapshot()['intents']) == blocks
 
 
-async def test_a_boundary_before_anything_is_committed_lights_nothing():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
+@pytest.mark.parametrize('queued', [False, True])
+@pytest.mark.parametrize(
+    'labels',
+    [
+        ('intro', 'altintro', 'outro', 'altoutro'),
+        ('breakdown', 'bridge', 'cooldown'),
+    ],
+)
+async def test_each_section_change_selects_once_even_within_one_lighting_family(queued, labels):
+    decoder = FakeDecoder()
+    light, queue, clock, midi = engine(decoder=decoder, queue=queued)
     await elapse(light, clock, 20.0)
+    for label in labels:
+        await bars(light, decoder, clock, label, label)
+    if queued:
+        await settle(light, clock, queue)
 
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
+    assert len(autoloops(midi)) == len(labels)
+    assert light.intent_commits == len(labels)
+    channels = [event['channel'] for event in autoloops(midi)]
+    assert len(set(channels)) == 1
 
-    assert autoloops(midi) == []
 
-
-async def test_a_second_boundary_inside_the_cooldown_is_ignored():
-    """The retired mechanism's cooldown_time_window_sec = 10, transferred verbatim."""
-    from autolux.lib.engine.light_engine import REFRESH_COOLDOWN_SEC
-
+async def test_a_same_family_section_change_waits_for_room_playback():
     decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    before = len(autoloops(midi))
+    light, queue, clock, midi = engine(decoder=decoder, chain=chain)
+    await held(light, decoder, chain, clock, queue, label='intro')
+    before = list(autoloops(midi))
+    await commit(light, decoder, clock, 'outro', age_sec=8.0)
 
-    await boundary(light, chain, clock, 1.0)
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
-    assert len(autoloops(midi)) == before + 1
-
-    await elapse(light, clock, REFRESH_COOLDOWN_SEC)
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
-    assert len(autoloops(midi)) == before + 2
+    clock.advance(5.99)
+    await queue.drain()
+    assert autoloops(midi) == before
+    clock.advance(0.02)
+    await queue.drain()
+    assert len(autoloops(midi)) == len(before) + 1
+    assert light.current_intent is LightIntent.ATMOSPHERIC
 
 
-async def test_a_refresh_never_displaces_a_pending_intent_change():
+async def test_decoder_gap_recovery_keeps_the_loop_for_the_same_section():
     decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue, label='drop')
-
-    await bars(light, decoder, clock, 'breakdown', age_sec=0.5)
-    pending = len(queued_intents(queue))
-    assert pending == 1
-
-    await boundary(light, chain, clock, 1.0)
-    assert len(queued_intents(queue)) == pending
-
-    await settle(light, clock, queue)
-    assert light.current_intent is LightIntent.BREAKDOWN
-
-
-async def test_a_refresh_queued_across_an_intent_change_is_dropped():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue, label='drop')
-    before = len(autoloops(midi))
-
-    await boundary(light, chain, clock, 1.0)
-    await bars(light, decoder, clock, 'breakdown', age_sec=13.7)
-    await settle(light, clock, queue)
-
-    assert len(autoloops(midi)) == before + 1
-    assert light.current_intent is LightIntent.BREAKDOWN
-
-
-async def test_a_refresh_lands_when_the_room_hears_the_audio_that_caused_it():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    await boundary(light, chain, clock, 1.0, age_sec=8.0)
-
-    refresh = [item for item in queue._queue if item[4] == 'refresh']
-    assert len(refresh) == 1
-    assert refresh[0][3] == pytest.approx(14.0 - 8.0, abs=1e-6)
-
-
-async def test_a_gap_clears_the_refresh_cooldown():
-    from autolux.lib.engine.light_engine import REFRESH_COOLDOWN_SEC
-
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
-    before = len(autoloops(midi))
+    light, queue, clock, midi = engine(decoder=decoder, chain=chain)
+    await held(light, decoder, chain, clock, queue, label='breakdown')
+    before = list(autoloops(midi))
 
     chain.gap = True
     await elapse(light, clock, 0.5)
     await boundary(light, chain, clock, 1.0)
+    await bars(light, decoder, clock, 'breakdown')
     await settle(light, clock, queue)
-
-    assert len(autoloops(midi)) == before + 1
-    assert REFRESH_COOLDOWN_SEC > 1.0
+    assert autoloops(midi) == before
 
 
-async def test_the_refresh_threshold_sits_inside_the_score_the_head_emits():
-    from autolux.lib.engine.light_engine import BOUNDARY_REFRESH_SCORE
-
-    assert 0.0 < BOUNDARY_REFRESH_SCORE < 1.0
-
-
-async def test_a_song_boundary_clears_the_refresh_cooldown():
+async def test_boundaries_leave_a_pending_section_change_to_fire_once():
     decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue)
-    await boundary(light, chain, clock, 1.0)
-    await settle(light, clock, queue)
-
-    light.on_sound_stop()
-    light.on_sound_start()
-    await settle(light, clock, queue)
-    await bars(light, decoder, clock, 'drop')
-    await settle(light, clock, queue)
+    light, queue, clock, midi = engine(decoder=decoder, chain=chain)
+    await held(light, decoder, chain, clock, queue, label='intro')
     before = len(autoloops(midi))
+    await bars(light, decoder, clock, 'breakdown', age_sec=0.5)
 
     await boundary(light, chain, clock, 1.0)
     await settle(light, clock, queue)
-
     assert len(autoloops(midi)) == before + 1
+    assert light.current_intent is LightIntent.BREAKDOWN
 
 
-def test_the_refresh_threshold_was_priced_against_the_retired_ceiling():
-    """Re-price with training/nn_boundary_refresh_rate.py if either constant moves."""
-    import json
-    from pathlib import Path
-
-    from autolux.lib.engine.light_engine import BOUNDARY_REFRESH_SCORE, REFRESH_COOLDOWN_SEC
-
-    record = json.loads(
-        (
-            Path(__file__).resolve().parents[1] / 'training' / 'nn_boundary_refresh_rate.json'
-        ).read_text(encoding='utf-8')
-    )
-
-    assert record['chosen_threshold'] == BOUNDARY_REFRESH_SCORE
-    assert record['cooldown_sec'] == REFRESH_COOLDOWN_SEC
-    ceiling = record['retired_ceiling_per_minute']
-    assert ceiling == 60.0 / REFRESH_COOLDOWN_SEC
-    assert 0.0 < record['realised_per_minute']['max'] < ceiling / 2.0
-    assert record['tracks'], 'the record was cut against no tracks'
-    for track in record['tracks'].values():
-        rate = track['refreshes_per_minute'][str(BOUNDARY_REFRESH_SCORE)]
-        assert 0.0 < rate < ceiling
+async def test_a_boundary_before_anything_is_committed_lights_nothing():
+    decoder, chain = FakeDecoder(), FakeChain()
+    light, queue, clock, midi = engine(decoder=decoder, chain=chain)
+    await elapse(light, clock, 20.0)
+    await boundary(light, chain, clock, 1.0)
+    await settle(light, clock, queue)
+    assert autoloops(midi) == []
 
 
 async def test_the_decoder_state_reaches_the_event_buffer():
@@ -1042,41 +956,6 @@ async def test_a_song_boundary_clears_the_intents_still_in_flight():
 
     assert queued_intents(queue) == []
     assert light.decided_intent is None
-
-
-async def test_a_song_boundary_clears_the_refreshes_still_in_flight():
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue, label='drop')
-    await boundary(light, chain, clock, 1.0)
-    assert [item for item in queue._queue if item[4] == 'refresh']
-
-    light.on_sound_stop()
-
-    assert [item for item in queue._queue if item[4] == 'refresh'] == []
-
-
-async def test_a_refresh_sharing_an_intent_change_s_fire_time_is_dropped():
-    from autolux.lib.analyser.section_model import Posterior
-
-    decoder, chain = FakeDecoder(), FakeChain()
-    light, queue, clock, midi = engine(decoder=decoder, chain=chain, events=True)
-    await held(light, decoder, chain, clock, queue, label='drop')
-    before = len(autoloops(midi))
-
-    beyond_the_playback_delay = light.audio_sec - 20.0
-    chain.pending = [
-        Posterior(0, beyond_the_playback_delay, np.zeros(5), 1.0),
-        Posterior(1, beyond_the_playback_delay, np.zeros(5), 0.0),
-    ]
-    decoder._script = [[], [BarDecision(9, 'breakdown', beyond_the_playback_delay)]]
-    await elapse(light, clock, 0.5)
-
-    assert [item for item in queue._queue if item[4] == 'refresh'] == []
-
-    await settle(light, clock, queue)
-    assert len(autoloops(midi)) == before + 1
-    assert light.current_intent is LightIntent.BREAKDOWN
 
 
 async def test_the_deliberate_stall_forgives_the_settle_and_not_the_rest():

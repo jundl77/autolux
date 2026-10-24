@@ -20,16 +20,10 @@ if TYPE_CHECKING:
 
 _BEAT_ABSENCE_SEC = 2.5
 
-# 32 beat-commits on the retired device, converted to bars at 4 beats each.
-
 _LATENCY_LOG_STEP_SEC = 0.25
 _SHED_PUBLISH_SEC = 1.0
-_BYPASSED_ON_STOP = ('sound', 'intent', 'refresh', 'overlay')
+_BYPASSED_ON_STOP = ('sound', 'intent', 'overlay')
 COLD_START_FLOOR_MARGIN_SEC = 4.0
-
-REFRESH_COOLDOWN_SEC = 10.0
-# Priced by training/nn_boundary_refresh_rate.py at 1.55 refreshes/min.
-BOUNDARY_REFRESH_SCORE = 0.5
 
 
 class LightEngine(IMusicAnalyserHandler):
@@ -64,8 +58,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._playback_delay_sec: float = playback_delay_sec
         self._clock: Clock = clock
         self._note_counter: int = 0
-        self._atmospheric_sent: bool = False
         self._current_intent: LightIntent | None = None
+        self._section_class_at_playback: str | None = None
         self._pending_intents: list = []
         self._published_bpm: dict = {}
         self._intent_commits: int = 0
@@ -75,7 +69,6 @@ class LightEngine(IMusicAnalyserHandler):
         self._floor_armed: bool = True
         self._bypass_due_at: float | None = None
         self._shed_published_at: float = float('-inf')
-        self._last_refresh_sec: float = float('-inf')
         self._committed = None
         self._log_chain_latency()
 
@@ -109,7 +102,6 @@ class LightEngine(IMusicAnalyserHandler):
     def on_sound_stop(self):
         logging.info('[engine] sound stop')
         self.os2l_client.on_sound_stop()
-        self.effect_controller.reset_state()
         if self.event_buffer:
             self.event_buffer.set_playing(False)
         self._bypass_due_at = self._clock.monotonic() + STOP_PERSISTENCE_SEC
@@ -181,15 +173,13 @@ class LightEngine(IMusicAnalyserHandler):
         self._restart_for_the_next_song()
 
     def _restart_for_the_next_song(self) -> None:
-        self._atmospheric_sent = False
         self._current_intent = None
+        self._section_class_at_playback = None
         self._floor_armed = True
         if self.command_queue:
             self.command_queue.drop_pending('intent', float('-inf'))
-            self.command_queue.drop_pending('refresh', float('-inf'))
         self._pending_intents = []
         self._committed = None
-        self._last_refresh_sec = float('-inf')
         self._audio_sec = 0.0
         if self.section_chain is not None:
             self.section_chain.reset()
@@ -223,7 +213,6 @@ class LightEngine(IMusicAnalyserHandler):
         drained = self.section_chain.push_audio(audio_signal)
         if drained.gap:
             self.section_decoder.reset(cold_start=False)
-            self._last_refresh_sec = float('-inf')
             self._committed = None
             self._publish_decoder_state(None)
         for posterior in drained.posteriors:
@@ -235,7 +224,6 @@ class LightEngine(IMusicAnalyserHandler):
                     posterior.time_sec, posterior.posterior, posterior.boundary
                 )
             )
-            await self._refresh_on_boundary(posterior.boundary, posterior.time_sec)
 
     async def on_beat(self, beat_number: int, bpm: float, bpm_changed: bool) -> None:
         current_second = self.analyser.get_song_current_duration().total_seconds()
@@ -244,8 +232,6 @@ class LightEngine(IMusicAnalyserHandler):
         logging.debug(f'[engine] [{current_second:.2f}s] beat #{beat_number}  bpm={bpm:.1f}')
         if self.event_buffer:
             self.event_buffer.add_beat(bpm, bpm_changed, rms=rms_energy)
-
-        self._atmospheric_sent = False
 
         if self.section_decoder is not None:
             await self._commit(self.section_decoder.push_beat(self._audio_sec))
@@ -280,7 +266,11 @@ class LightEngine(IMusicAnalyserHandler):
                 f'[engine] bar {decision.bar} @ {decision.start_sec:.2f}s  '
                 f'{decision.label} → {intent.name}'
             )
-            await self._commit_intent(intent, max(0.0, self._audio_sec - decision.start_sec))
+            await self._commit_intent(
+                intent,
+                max(0.0, self._audio_sec - decision.start_sec),
+                section_label=decision.label,
+            )
 
     def _publish_decoder_state(self, decision) -> None:
         if self.event_buffer is None or self.section_decoder is None:
@@ -340,7 +330,9 @@ class LightEngine(IMusicAnalyserHandler):
             f'Radius TX playback_delay_seconds matches'
         )
 
-    async def _commit_intent(self, intent: LightIntent, age_sec: float) -> None:
+    async def _commit_intent(
+        self, intent: LightIntent, age_sec: float, *, section_label: str | None = None
+    ) -> None:
         self._floor_armed = False
         now = self._clock.monotonic()
         fire_at = now - age_sec + self._playback_delay_sec
@@ -350,19 +342,26 @@ class LightEngine(IMusicAnalyserHandler):
         if self.command_queue:
             self.command_queue.drop_pending('intent', fire_at)
         self._pending_intents = [item for item in self._pending_intents if item[0] <= fire_at]
-        if intent is self.decided_intent:
+        decided_section_label = (
+            self._pending_intents[-1][2]
+            if self._pending_intents
+            else self._section_class_at_playback
+        )
+        if intent is self.decided_intent and (
+            section_label is None or section_label == decided_section_label
+        ):
             return
 
-        if self.command_queue:
-            self.command_queue.drop_pending('refresh', fire_at, inclusive=True)
         song_sec = None if self.event_buffer is None else self.event_buffer.elapsed() - age_sec
         if not self.command_queue:
-            await self._apply_intent(None, intent, song_sec)
+            await self._apply_intent(None, intent, song_sec, section_label)
             return
-        entry = (fire_at, intent)
+        entry = (fire_at, intent, section_label)
         self._pending_intents.append(entry)
         await self.command_queue.enqueue(
-            'intent', lambda: self._apply_intent(entry, intent, song_sec), delay_sec=fire_at - now
+            'intent',
+            lambda: self._apply_intent(entry, intent, song_sec, section_label),
+            delay_sec=fire_at - now,
         )
 
     def _note_lateness(self, late_sec: float) -> None:
@@ -378,12 +377,15 @@ class LightEngine(IMusicAnalyserHandler):
             self._committing_late = False
             logging.info('[engine] the chain is back inside the playback delay')
 
-    async def _apply_intent(self, entry, intent: LightIntent, song_sec: float | None) -> None:
+    async def _apply_intent(
+        self, entry, intent: LightIntent, song_sec: float | None, section_label: str | None
+    ) -> None:
         if entry is not None and self._pending_intents and self._pending_intents[0] is entry:
             self._pending_intents.pop(0)
         if self.event_buffer:
             self.event_buffer.set_intent(intent.value, song_sec=song_sec)
         self._current_intent = intent
+        self._section_class_at_playback = section_label
         self._intent_commits += 1
         await self.effect_controller.change_effect(intent)
 
@@ -399,33 +401,6 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _show_light_bar(self, dmx_data: list) -> None:
         self.overlay_client.update_overlay_data(OverlayEffect.LIGHT_BAR_24, dmx_data)
-
-    async def _refresh_on_boundary(self, boundary: float, song_sec: float) -> None:
-        if boundary < BOUNDARY_REFRESH_SCORE:
-            return
-        if song_sec - self._last_refresh_sec < REFRESH_COOLDOWN_SEC:
-            return
-        self._last_refresh_sec = song_sec
-        if self._current_intent is None and not self._pending_intents:
-            return
-
-        now = self._clock.monotonic()
-        fire_at = max(now, now - (self._audio_sec - song_sec) + self._playback_delay_sec)
-        committed = self._intent_commits
-        if not self.command_queue:
-            await self._apply_refresh(committed)
-            return
-        await self.command_queue.enqueue(
-            'refresh', lambda: self._apply_refresh(committed), delay_sec=fire_at - now
-        )
-
-    async def _apply_refresh(self, committed: int) -> None:
-        if self._intent_commits != committed or self._current_intent is None:
-            return
-        logging.debug(
-            f'[engine] boundary inside {self._current_intent.name} — refreshing the effect'
-        )
-        await self.effect_controller.change_effect(self._current_intent)
 
     async def _floor_if_nothing_arrived(self) -> None:
         if not self._floor_armed:
@@ -445,10 +420,11 @@ class LightEngine(IMusicAnalyserHandler):
         if not self.analyser.is_song_playing():
             return
         await self._floor_if_nothing_arrived()
-        if self.analyser.get_seconds_since_last_beat() > _BEAT_ABSENCE_SEC:
-            if not self._atmospheric_sent:
-                self._atmospheric_sent = True
-                await self._commit_intent(LightIntent.ATMOSPHERIC, 0.0)
+        if (
+            self.decided_intent is None
+            and self.analyser.get_seconds_since_last_beat() > _BEAT_ABSENCE_SEC
+        ):
+            await self._commit_intent(LightIntent.ATMOSPHERIC, 0.0)
 
     async def on_1sec_callback(self):
         if not self.analyser.is_song_playing():

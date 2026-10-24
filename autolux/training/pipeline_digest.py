@@ -120,12 +120,11 @@ def _intent_at(intents: list, t: float) -> str | None:
 
 
 def _channels_come_from_the_intents_pool(report: dict) -> bool:
-    from autolux.lib.engine.effect_definitions import INTENT_EFFECTS
+    from autolux.lib.clients.midi_message import MidiChannel
+    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 
-    pools = {
-        intent.value: {effect.midi_channel.name for effect in effects}
-        for intent, effects in INTENT_EFFECTS.items()
-    }
+    pools = {intent.value: {autoloop.name} for intent, autoloop in AUTOLOOP_BY_LIGHT_INTENT.items()}
+    pools[LightIntent.DROP.value].add(MidiChannel.SPECIAL_EFFECT_STROBE.name)
     return all(
         effect['channel'] in pools.get(_intent_at(report['intents'], effect['t']), ())
         for effect in report['effects']

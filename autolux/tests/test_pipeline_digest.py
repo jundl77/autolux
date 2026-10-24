@@ -102,10 +102,10 @@ def _overlay(t, effect='LIGHT_BAR_24'):
     return {'label': 'overlay_update', 'time': t, 'effect': effect}
 
 
-def _pool_channel(intent, index=0):
-    from autolux.lib.engine.effect_definitions import INTENT_EFFECTS, LightIntent
+def _pool_channel(intent):
+    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 
-    return INTENT_EFFECTS[LightIntent(intent)][index].midi_channel.name
+    return AUTOLOOP_BY_LIGHT_INTENT[LightIntent(intent)].name
 
 
 def test_the_three_beat_column_sets_do_not_overlap():

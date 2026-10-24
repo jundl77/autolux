@@ -1,137 +1,37 @@
 from __future__ import annotations
+
 import logging
 import random
-import datetime
 from typing import TYPE_CHECKING
+
 from autolux.lib.clients.midi_client import MidiClient
 from autolux.lib.clients.midi_message import MidiChannel
-from autolux.lib.engine.effect_definitions import (
-    EffectSource,
-    EffectType,
-    Effect,
-    LightIntent,
-    COLOR_OVERRIDES,
-    SPECIAL_EFFECTS,
-    INTENT_EFFECTS,
-)
-from autolux.lib.clock import Clock, SYSTEM_CLOCK
+from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
 
-APPLY_COLOR_OVERRIDE_INTERVAL_SEC = 60 * 5
+DROP_STROBE_PROBABILITY = 1 / 6
+STROBE_DURATION_SEC = 30
 
 
 class EffectController:
-    def __init__(
-        self,
-        midi_client: MidiClient,
-        event_buffer: EventBuffer | None = None,
-        clock: Clock = SYSTEM_CLOCK,
-    ):
-        self.midi_client: MidiClient = midi_client
-        self.event_buffer: EventBuffer | None = event_buffer
-        self._clock: Clock = clock
-        self.last_effect: Effect = Effect(
-            type=EffectType.AUTOLOOP,
-            source=EffectSource.MIDI,
-            midi_channel=MidiChannel.AUTOLOOP_BANK_1A,
-        )
-        self.last_special_effect: Effect = Effect(
-            type=EffectType.SPECIAL_EFFECT,
-            source=EffectSource.MIDI,
-            midi_channel=MidiChannel.SPECIAL_EFFECT_STROBE,
-        )
-        self.last_color_override: Effect = Effect(
-            type=EffectType.AUTOLOOP,
-            source=EffectSource.MIDI,
-            midi_channel=MidiChannel.COLOR_OVERRIDE_1,
-        )
-        self.last_color_override_time: datetime.datetime = self._clock.now()
+    def __init__(self, midi_client: MidiClient, event_buffer: EventBuffer | None = None):
+        self.midi_client = midi_client
+        self.event_buffer = event_buffer
 
     async def change_effect(self, intent: LightIntent) -> None:
-        logging.debug('[lighting] selecting effect for %s', intent.name)
-        pool = INTENT_EFFECTS[intent]
-        new_effect = self._select_new_random_effect(pool, self.last_effect)
-
-        if new_effect.type == EffectType.SPECIAL_EFFECT:
-            await self._apply_special_effect(new_effect)
-        else:
-            await self._apply_autoloop(new_effect)
-        name = (
-            new_effect.midi_channel.name
-            if new_effect.source == EffectSource.MIDI
-            else new_effect.overlay_effect.name
-        )
-        logging.info('[lighting] intent=%s | effect=%s', intent.name, name)
-
-    def reset_state(self):
-        self.last_effect = Effect(
-            type=EffectType.AUTOLOOP,
-            source=EffectSource.MIDI,
-            midi_channel=MidiChannel.AUTOLOOP_BANK_1A,
-        )
-        self.last_special_effect = Effect(
-            type=EffectType.SPECIAL_EFFECT,
-            source=EffectSource.MIDI,
-            midi_channel=MidiChannel.SPECIAL_EFFECT_STROBE,
-        )
-        self.last_color_override = Effect(
-            type=EffectType.AUTOLOOP,
-            source=EffectSource.MIDI,
-            midi_channel=MidiChannel.COLOR_OVERRIDE_1,
-        )
-        self.last_color_override_time = self._clock.now()
-
-    async def _apply_special_effect(self, special_effect: Effect):
-        assert special_effect.type == EffectType.SPECIAL_EFFECT
-        effect_name = None
-        if special_effect.source == EffectSource.MIDI:
-            effect_name = special_effect.midi_channel.name
-            await self.midi_client.set_special_effect(special_effect.midi_channel, duration_sec=30)
-        elif special_effect.source == EffectSource.OVERLAY:
-            effect_name = special_effect.overlay_effect.name
-        logging.debug('[lighting] applying special effect %s', effect_name)
-        if self.event_buffer and effect_name:
-            self.event_buffer.add_effect(effect_name, 'SPECIAL_EFFECT')
-        self.last_special_effect = special_effect
-
-    async def _apply_autoloop(self, autoloop: Effect):
-        assert autoloop.type == EffectType.AUTOLOOP
-        assert autoloop.source == EffectSource.MIDI
-        logging.debug('[lighting] applying autoloop %s', autoloop.midi_channel.name)
-        await self.midi_client.set_autoloop(autoloop.midi_channel)
+        autoloop = AUTOLOOP_BY_LIGHT_INTENT[intent]
+        await self.midi_client.clear_color_overrides()
+        await self.midi_client.set_autoloop(autoloop)
         if self.event_buffer:
-            self.event_buffer.add_effect(autoloop.midi_channel.name, 'AUTOLOOP')
-        await self._apply_color_override_if_due()
-        self.last_effect = autoloop
+            self.event_buffer.add_effect(autoloop.name, 'AUTOLOOP')
+        logging.info('[lighting] intent=%s | effect=%s', intent.name, autoloop.name)
 
-    async def _apply_color_override_if_due(self):
-        now = self._clock.now()
-        time_diff = now - self.last_color_override_time
-        if time_diff < datetime.timedelta(seconds=APPLY_COLOR_OVERRIDE_INTERVAL_SEC):
-            logging.debug(
-                f'[effect_controller] set color override in the last {APPLY_COLOR_OVERRIDE_INTERVAL_SEC} sec,'
-                f' will set it again in {APPLY_COLOR_OVERRIDE_INTERVAL_SEC - time_diff.seconds} sec'
-            )
-            await self.midi_client.clear_color_overrides()
-            return
-
-        new_color: Effect = self._select_new_random_effect(
-            COLOR_OVERRIDES, self.last_color_override
-        )
-        logging.info(
-            f'[effect_controller] setting color override to color: {new_color.midi_channel.name}'
-        )
-        await self.midi_client.set_color_override(new_color.midi_channel)
-        self.last_color_override = new_color
-        self.last_color_override_time = now
-
-    def _select_new_random_effect(self, effects: list[Effect], previous_effect: Effect) -> Effect:
-        assert len(effects) > 1, (
-            f'effect pool must have >1 entries to avoid an infinite loop (got {len(effects)})'
-        )
-        i: int = random.randrange(0, len(effects), 1)
-        while effects[i] == previous_effect:
-            i = random.randrange(0, len(effects), 1)
-        return effects[i]
+        # The drop loop must keep playing underneath the temporary strobe.
+        if intent == LightIntent.DROP and random.random() < DROP_STROBE_PROBABILITY:
+            strobe = MidiChannel.SPECIAL_EFFECT_STROBE
+            await self.midi_client.set_special_effect(strobe, duration_sec=STROBE_DURATION_SEC)
+            if self.event_buffer:
+                self.event_buffer.add_effect(strobe.name, 'SPECIAL_EFFECT')
+            logging.info('[lighting] strobe | duration=%ds', STROBE_DURATION_SEC)

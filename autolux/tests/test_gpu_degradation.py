@@ -292,7 +292,7 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, m
         midi,
         StubOs2lClient(clock=clock),
         StubOverlayClient(clock=clock),
-        EffectController(midi, clock=clock, event_buffer=events),
+        EffectController(midi, event_buffer=events),
         queue,
         event_buffer=events,
         playback_delay_sec=14.0,
