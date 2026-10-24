@@ -3,13 +3,13 @@ syntax = "proto3";
 package Radius.Bus;
 option optimize_for = LITE_RUNTIME;
 
-// One complete UDP datagram, at most 1200 bytes. Protocol v2 replaces the old
-// Radius header; TX and RX must be upgraded together. No service or RPC layer.
+// One complete UDP payload, at most 1200 bytes. Both endpoints must agree on
+// protocol_version. Each datagram contains exactly one typed payload.
 message Envelope {
   uint32 protocol_version = 1;
-  fixed64 session_id = 2;             // Nonzero, exact 64-bit session identifier.
-  fixed64 audio_frame_watermark = 3;  // First stereo frame on the session clock.
-  fixed32 sequence = 4;               // Per media kind; wraps modulo 2^32.
+  fixed64 session_id = 2;            // Nonzero, exact 64-bit session identifier.
+  fixed64 audio_frame_position = 3;  // Session stereo frame index: audio start or lighting target.
+  fixed32 sequence_number = 4;       // Per media kind; wraps modulo 2^32.
   oneof payload {
     Audio audio = 10;
     Lighting lighting = 11;
@@ -25,7 +25,7 @@ message Audio {
 }
 
 message Lighting {
-  bytes channels = 1;  // Exactly 512 DMX channel values, scheduled at the envelope watermark.
+  bytes channels = 1;  // Exactly 512 DMX channel values, scheduled at audio_frame_position.
 }
 
 message Heartbeat {}

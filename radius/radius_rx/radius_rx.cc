@@ -42,10 +42,13 @@ void RadiusRx::StartDmx()
 			mDmxConnected = true;
 			bool dark = true;
 			auto timer = mDmxLoop.AddTimer(DmxSchedulePollInterval, [&] {
+				// Read published input times first; a concurrent update must not be newer than now.
+				const auto dmxAt = mDmxAt.load();
+				const auto audioAt = mAudioAt.load();
 				const auto now = SteadyMs();
 				const bool stale =
-				    !mDmxAt || now - mDmxAt.load() > ReceiverInputTimeoutMilliseconds ||
-				    (mConfig.mAudioEnabled && (!mAudioAt || now - mAudioAt.load() > ReceiverInputTimeoutMilliseconds));
+				    IsInputStale(now, dmxAt, ReceiverInputTimeoutMilliseconds) ||
+				    (mConfig.mAudioEnabled && IsInputStale(now, audioAt, ReceiverInputTimeoutMilliseconds));
 				if (stale)
 				{
 					if (!dark)
@@ -108,8 +111,8 @@ void RadiusRx::Tick()
 		else if (p.has_audio() && mConfig.mAudioEnabled)
 		{
 			Bus::AudioBlock block;
-			block.watermark = p.audio_frame_watermark();
-			block.frames = p.audio().interleaved_samples_size() / Bus::Channels;
+			block.watermark = p.audio_frame_position();
+			block.frames = static_cast<uint16_t>(p.audio().interleaved_samples_size() / Bus::Channels);
 			std::copy(p.audio().interleaved_samples().begin(), p.audio().interleaved_samples().end(),
 			          block.samples.begin());
 			for (size_t i = 0; i < block.frames * Bus::Channels; ++i)
@@ -124,15 +127,14 @@ void RadiusRx::Tick()
 		}
 		else if (p.has_lighting() && mConfig.mDmxEnabled)
 		{
-			if (mHasDmxSequence && static_cast<int32_t>(p.sequence() - mLastDmxSequence) <= 0)
+			if (!Bus::IsNewerSequenceNumber(p.sequence_number(), mLastDmxSequence))
 			{
 				++mDmxLate;
 				return;
 			}
-			mLastDmxSequence = p.sequence();
-			mHasDmxSequence = true;
+			mLastDmxSequence = p.sequence_number();
 			Bus::LightingFrame frame;
-			frame.watermark = p.audio_frame_watermark();
+			frame.watermark = p.audio_frame_position();
 			std::memcpy(frame.channels.data(), p.lighting().channels().data(), DmxFrameSize);
 			if (!mDmxQueue.Push(frame))
 				++mDmxDrops;

@@ -1,7 +1,7 @@
 #pragma once
 #include <core/spsc_queue.h>
 #include <core/clock.h>
-#include <proto/bus.h>
+#include <proto/radius.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -20,7 +20,7 @@ class Playout
 	static constexpr int StarvationTimeoutMilliseconds = 250;
 	static constexpr uint64_t InterpolationLookaheadFrames = 2;
 	SpscQueue<Bus::AudioBlock, QueueCapacityBlocks> mQueue;
-	uint64_t mAcceptedEnd = 0, mCursor = 0;
+	uint64_t mNextExpectedAudioFrameIndex = 0, mCursor = 0;
 	size_t mOffset = 0;
 	int mRate, mTarget;
 	bool mPrimed = false, mStarved = false;
@@ -82,20 +82,20 @@ public:
 	{
 		if (!block.frames || block.frames > Bus::AudioFrames || block.watermark > UINT64_MAX - block.frames)
 			return false;
-		if (block.watermark < mAcceptedEnd)
+		if (block.watermark < mNextExpectedAudioFrameIndex)
 		{
 			++latePackets;
 			return false;
 		}
+		if (mNextExpectedAudioFrameIndex && block.watermark > mNextExpectedAudioFrameIndex)
+			lostFrames += block.watermark - mNextExpectedAudioFrameIndex;
+		mNextExpectedAudioFrameIndex = block.watermark + block.frames;
 		if (!mQueue.Push(block))
 		{
 			overflowFrames += block.frames;
 			return false;
 		}
-		if (mAcceptedEnd && block.watermark > mAcceptedEnd)
-			lostFrames += block.watermark - mAcceptedEnd;
-		mAcceptedEnd = block.watermark + block.frames;
-		mLatest.store(mAcceptedEnd, std::memory_order_release);
+		mLatest.store(mNextExpectedAudioFrameIndex, std::memory_order_release);
 		return true;
 	}
 
@@ -103,9 +103,13 @@ public:
 	{
 		// Correct slow device clock differences continuously. Large backlog is recovered
 		// explicitly, so a transient stall cannot turn into seconds of permanent latency.
-		if (mPrimed && mLatest.load() > mCursor + uint64_t(mTarget * LatencyRecoveryTargetMultiple))
+		const auto latest = mLatest.load();
+		const auto* first = mQueue.Front();
+		const auto bufferedStartFrame = mPrimed ? mCursor : (first ? first->watermark : latest);
+		if (latest > bufferedStartFrame &&
+		    latest - bufferedStartFrame > uint64_t(mTarget) * LatencyRecoveryTargetMultiple)
 		{
-			const auto keepFrom = mLatest.load() - mTarget;
+			const auto keepFrom = latest - mTarget;
 			while (auto* block = mQueue.Front())
 			{
 				if (block->watermark + block->frames >= keepFrom)
@@ -118,9 +122,9 @@ public:
 		}
 		if (!mPrimed)
 		{
-			const auto* first = mQueue.Front();
-			const auto latest = mLatest.load();
-			if (!first || latest < first->watermark || latest - first->watermark < uint64_t(mTarget))
+			first = mQueue.Front();
+			bufferedFrames = first && latest >= first->watermark ? static_cast<int>(latest - first->watermark) : 0;
+			if (bufferedFrames < mTarget)
 				return;
 			mCursor = first->watermark;
 			mPhase = 0;
@@ -129,7 +133,6 @@ public:
 			Take(mNext);
 			mPrimed = true;
 		}
-		const auto latest = mLatest.load();
 		const int fill = latest > mCursor ? static_cast<int>(latest - mCursor) : 0;
 		bufferedFrames = fill;
 		const double desired = 1.0 + std::clamp((fill - mTarget) / double(mRate) * ClockCorrectionGain,
@@ -146,7 +149,7 @@ public:
 			return;
 		}
 		for (size_t ch = 0; ch < Bus::Channels; ++ch)
-			output[ch] = mCurrent[ch] + float(mPhase) * (mNext[ch] - mCurrent[ch]);
+			output[ch] = static_cast<float>((1 - mPhase) * mCurrent[ch] + mPhase * mNext[ch]);
 		mPhase += mRatio;
 		while (mPhase >= 1)
 		{

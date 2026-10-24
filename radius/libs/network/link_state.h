@@ -1,9 +1,15 @@
 #pragma once
-#include <proto/bus.h>
+#include <proto/radius.h>
 #include <cstdint>
 #include <core/clock.h>
 
 namespace Radius {
+
+inline bool IsInputStale(uint64_t nowMilliseconds, uint64_t receivedAtMilliseconds, uint64_t timeoutMilliseconds)
+{
+	return !receivedAtMilliseconds ||
+	       (nowMilliseconds > receivedAtMilliseconds && nowMilliseconds - receivedAtMilliseconds > timeoutMilliseconds);
+}
 
 class LinkState
 {

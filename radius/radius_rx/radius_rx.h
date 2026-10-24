@@ -22,12 +22,11 @@ class RadiusRx : public App
 	SpscQueue<Bus::LightingFrame, DmxQueueCapacityPackets> mDmxQueue;
 	std::atomic<bool> mDmxConnected{false}, mDmxFailed{false};
 	std::atomic<uint64_t> mDmxFrames{0}, mDmxAt{0}, mAudioAt{0};
-	std::atomic<int64_t> mDmxLateness{0};
+	std::atomic<uint64_t> mDmxLateness{0};
 	uint64_t mHealthAt = 0, mDmxDrops = 0, mDmxLate = 0, mHeartbeatsSent = 0, mHeartbeatsReceived = 0;
 	uint64_t mAudioMaxGap = 0;
 	float mAudioPeak = 0;
-	uint32_t mLastDmxSequence = 0;
-	bool mHasDmxSequence = false;
+	std::optional<uint32_t> mLastDmxSequence;
 	ScopedHandler mPoll;
 	void Tick();
 	void StartDmx();

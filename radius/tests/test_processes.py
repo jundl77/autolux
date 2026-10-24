@@ -1,11 +1,12 @@
 """Exercise the actual native executables without requiring audio/USB hardware."""
 
 import json
-from pathlib import Path
 import socket
 import time
+from pathlib import Path
 
 import pytest
+
 from cli.native_runtime import NativeRuntime, NativeSpec, validate_native
 
 ROOT = Path(__file__).resolve().parents[2]

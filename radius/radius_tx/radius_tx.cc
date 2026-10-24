@@ -58,8 +58,8 @@ void RadiusTx::Tick()
 		if (!block)
 			break;
 		auto p = Bus::NewEnvelope(mConfig.mSession);
-		p.set_audio_frame_watermark(block->watermark);
-		p.set_sequence(++mAudioSequence);
+		p.set_audio_frame_position(block->watermark);
+		p.set_sequence_number(++mAudioSequence);
 		auto* audio = p.mutable_audio();
 		audio->set_sample_rate_hz(mConfig.mAudioSampleRate);
 		audio->set_channel_count(Bus::Channels);
@@ -71,8 +71,8 @@ void RadiusTx::Tick()
 	if (mConfig.mArtnetEnabled && now - mLastDmxSend >= DmxSendIntervalMilliseconds)
 	{
 		auto p = Bus::NewEnvelope(mConfig.mSession);
-		p.set_audio_frame_watermark(mAudio.watermark.load());
-		p.set_sequence(++mDmxSequence);
+		p.set_audio_frame_position(mAudio.watermark.load());
+		p.set_sequence_number(++mDmxSequence);
 		std::array<uint8_t, DmxFrameSize> frame{};
 		if (mDmxAt && now - mDmxAt < DmxInputTimeoutMilliseconds)
 			frame = mDmx.Compose();

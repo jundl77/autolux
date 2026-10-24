@@ -49,7 +49,7 @@ bool BusSocket::Send(const Bus::Envelope& packet)
 	if (!mConnected)
 		return false;
 	std::array<uint8_t, Bus::MaxDatagramBytes> bytes{};
-	const auto size = Bus::Encode(packet, bytes);
+	const auto size = Bus::SerializeEnvelope(packet, bytes);
 	if (!size || sendto(mSocket, reinterpret_cast<const char*>(bytes.data()), static_cast<int>(size), 0,
 	                    reinterpret_cast<const sockaddr*>(&mPeer), sizeof(mPeer)) != size)
 	{
@@ -84,7 +84,8 @@ void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Envel
 		}
 		Bus::Envelope packet;
 		if (source.sin_addr.s_addr != mPeer.sin_addr.s_addr || (mConnected && source.sin_port != mPeer.sin_port) ||
-		    !Bus::Decode(bytes.data(), size, session, packet) || (mReceiver && packet.has_receiver_telemetry()) ||
+		    !Bus::ParseEnvelope(bytes.data(), size, session, packet) ||
+		    (mReceiver && packet.has_receiver_telemetry()) ||
 		    (!mReceiver && (packet.has_audio() || packet.has_lighting())))
 		{
 			++invalidPackets;

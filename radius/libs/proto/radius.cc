@@ -1,4 +1,4 @@
-#include "bus.h"
+#include "radius.h"
 #include <cmath>
 
 namespace Radius::Bus {
@@ -9,6 +9,12 @@ Envelope NewEnvelope(uint64_t session)
 	packet.set_protocol_version(ProtocolVersion);
 	packet.set_session_id(session);
 	return packet;
+}
+
+bool IsNewerSequenceNumber(uint32_t incoming, std::optional<uint32_t> previous)
+{
+	// Modulo-2^32 ordering accepts forward distances below half the sequence range.
+	return !previous || static_cast<int32_t>(incoming - *previous) > 0;
 }
 
 bool IsValidEnvelope(const Envelope& packet, uint64_t expectedSession)
@@ -23,7 +29,7 @@ bool IsValidEnvelope(const Envelope& packet, uint64_t expectedSession)
 		const auto samples = audio.interleaved_samples_size();
 		if (audio.sample_rate_hz() != SampleRateHz || audio.channel_count() != Channels || samples <= 0 ||
 		    samples > AudioFrames * Channels || samples % Channels ||
-		    packet.audio_frame_watermark() > UINT64_MAX - samples / Channels)
+		    packet.audio_frame_position() > UINT64_MAX - samples / Channels)
 			return false;
 		for (float sample : audio.interleaved_samples())
 			if (!std::isfinite(sample))
@@ -33,13 +39,13 @@ bool IsValidEnvelope(const Envelope& packet, uint64_t expectedSession)
 	case Envelope::kLighting:
 		return packet.lighting().channels().size() == DmxFrameSize;
 	case Envelope::kHeartbeat:
-		return packet.audio_frame_watermark() == 0 && packet.sequence() == 0;
+		return packet.audio_frame_position() == 0 && packet.sequence_number() == 0;
 	case Envelope::kReceiverTelemetry: {
 		const auto& health = packet.receiver_telemetry();
 		const auto nonnegative = [](double value) {
 			return std::isfinite(value) && value >= 0;
 		};
-		return packet.audio_frame_watermark() == 0 && packet.sequence() == 0 && health.up() &&
+		return packet.audio_frame_position() == 0 && packet.sequence_number() == 0 && health.up() &&
 		       nonnegative(health.heartbeat_age_seconds()) && nonnegative(health.audio_buffer_seconds()) &&
 		       std::isfinite(health.buffer_target_seconds()) && health.buffer_target_seconds() > 0 &&
 		       nonnegative(health.dmx_lateness_seconds()) && nonnegative(health.audio_signal_peak()) &&
@@ -52,7 +58,7 @@ bool IsValidEnvelope(const Envelope& packet, uint64_t expectedSession)
 	}
 }
 
-size_t Encode(const Envelope& packet, std::array<uint8_t, MaxDatagramBytes>& bytes)
+size_t SerializeEnvelope(const Envelope& packet, std::array<uint8_t, MaxDatagramBytes>& bytes)
 {
 	if (!IsValidEnvelope(packet))
 		return 0;
@@ -62,7 +68,7 @@ size_t Encode(const Envelope& packet, std::array<uint8_t, MaxDatagramBytes>& byt
 	return size;
 }
 
-bool Decode(const void* data, size_t size, uint64_t expectedSession, Envelope& packet)
+bool ParseEnvelope(const void* data, size_t size, uint64_t expectedSession, Envelope& packet)
 {
 	if (!data || !size || size > MaxDatagramBytes)
 		return false;

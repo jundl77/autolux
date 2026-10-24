@@ -1,4 +1,4 @@
-#include <proto/bus.h>
+#include <proto/radius.h>
 #include <proto/dmx_state.h>
 #include <proto/artdmx.h>
 #include <network/link_state.h>
@@ -29,10 +29,29 @@ Bus::AudioBlock Block(uint64_t start)
 
 void CheckProtocol()
 {
+	constexpr uint32_t HalfSequenceRange = uint32_t(INT32_MAX) + 1;
+	Check(Bus::IsNewerSequenceNumber(0, std::nullopt), "initial zero sequence number accepted");
+	Check(Bus::IsNewerSequenceNumber(UINT32_MAX, std::nullopt), "initial maximum sequence number accepted");
+	Check(Bus::IsNewerSequenceNumber(0, UINT32_MAX), "sequence number wraps forward to zero");
+	Check(!Bus::IsNewerSequenceNumber(0, 0), "duplicate zero sequence number rejected");
+	Check(!Bus::IsNewerSequenceNumber(UINT32_MAX, 0), "late pre-wrap sequence number rejected");
+	Check(!Bus::IsNewerSequenceNumber(HalfSequenceRange, 0), "half-range sequence jump rejected");
+	Check(Bus::IsNewerSequenceNumber(HalfSequenceRange - 1, 0), "forward sequence number within half range");
+	constexpr uint64_t ReceivedAtMilliseconds = 100, InputTimeoutMilliseconds = 1000;
+	Check(IsInputStale(0, 0, InputTimeoutMilliseconds), "missing input is timed out");
+	Check(!IsInputStale(ReceivedAtMilliseconds + InputTimeoutMilliseconds, ReceivedAtMilliseconds,
+	                    InputTimeoutMilliseconds),
+	      "input timeout boundary remains fresh");
+	Check(IsInputStale(ReceivedAtMilliseconds + InputTimeoutMilliseconds + 1, ReceivedAtMilliseconds,
+	                   InputTimeoutMilliseconds),
+	      "input beyond timeout is stale");
+	Check(!IsInputStale(ReceivedAtMilliseconds - 1, ReceivedAtMilliseconds, InputTimeoutMilliseconds),
+	      "concurrent future input timestamp must not underflow into a timeout");
+	Check(!IsInputStale(0, UINT64_MAX, InputTimeoutMilliseconds), "full-range future input remains fresh");
 	constexpr uint64_t Session = UINT64_MAX;
 	auto packet = Bus::NewEnvelope(Session);
-	packet.set_audio_frame_watermark(UINT64_MAX - Bus::AudioFrames);
-	packet.set_sequence(UINT32_MAX);
+	packet.set_audio_frame_position(UINT64_MAX - Bus::AudioFrames);
+	packet.set_sequence_number(UINT32_MAX);
 	auto* audio = packet.mutable_audio();
 	audio->set_sample_rate_hz(Bus::SampleRateHz);
 	audio->set_channel_count(Bus::Channels);
@@ -41,12 +60,12 @@ void CheckProtocol()
 	for (size_t i = 0; i < Bus::AudioFrames * Bus::Channels; ++i)
 		audio->add_interleaved_samples(extremes[i % extremes.size()]);
 	std::array<uint8_t, Bus::MaxDatagramBytes> wire{};
-	const auto size = Bus::Encode(packet, wire);
+	const auto size = Bus::SerializeEnvelope(packet, wire);
 	Check(size > 0 && size <= Bus::MaxDatagramBytes, "audio MTU budget");
 	Bus::Envelope decoded;
-	Check(Bus::Decode(wire.data(), size, Session, decoded), "protobuf audio round trip");
-	Check(decoded.session_id() == Session && decoded.audio_frame_watermark() == packet.audio_frame_watermark() &&
-	          decoded.sequence() == UINT32_MAX,
+	Check(Bus::ParseEnvelope(wire.data(), size, Session, decoded), "protobuf audio round trip");
+	Check(decoded.session_id() == Session && decoded.audio_frame_position() == packet.audio_frame_position() &&
+	          decoded.sequence_number() == UINT32_MAX,
 	      "exact 64-bit identifiers and sequence");
 	Check(decoded.audio().sample_rate_hz() == Bus::SampleRateHz && decoded.audio().channel_count() == Bus::Channels &&
 	          decoded.audio().interleaved_samples_size() == Bus::AudioFrames * Bus::Channels,
@@ -55,19 +74,20 @@ void CheckProtocol()
 	                  Bus::AudioFrames * Bus::AudioBytesPerFrame) == 0,
 	      "IEEE float samples preserve bits");
 	for (size_t n = 0; n < size; ++n)
-		Check(!Bus::Decode(wire.data(), n, Session, decoded), "truncated protobuf accepted");
-	Check(!Bus::Decode(wire.data(), size, Session - 1, decoded), "wrong session accepted");
+		Check(!Bus::ParseEnvelope(wire.data(), n, Session, decoded), "truncated protobuf accepted");
+	Check(!Bus::ParseEnvelope(wire.data(), size, Session - 1, decoded), "wrong session accepted");
 	std::array<uint8_t, Bus::MaxDatagramBytes + 1> oversized{};
-	Check(!Bus::Decode(oversized.data(), oversized.size(), Session, decoded), "oversize datagram accepted");
+	Check(!Bus::ParseEnvelope(oversized.data(), oversized.size(), Session, decoded), "oversize datagram accepted");
 	const auto header = Bus::NewEnvelope(Session).SerializeAsString();
 	const auto unknownPayload = header + std::string("\x72\0", 2); // Unknown oneof field 14, empty message.
-	Check(!Bus::Decode(unknownPayload.data(), unknownPayload.size(), Session, decoded), "unknown kind accepted");
+	Check(!Bus::ParseEnvelope(unknownPayload.data(), unknownPayload.size(), Session, decoded), "unknown kind accepted");
 	const auto malformedLength = header + std::string("\x52\xff\xff\xff\xff\x07", 6);
-	Check(!Bus::Decode(malformedLength.data(), malformedLength.size(), Session, decoded), "malformed length accepted");
+	Check(!Bus::ParseEnvelope(malformedLength.data(), malformedLength.size(), Session, decoded),
+	      "malformed length accepted");
 	const auto rejects = [&](const Bus::Envelope& invalid) {
-		Check(Bus::Encode(invalid, wire) == 0, "invalid outgoing message accepted");
+		Check(Bus::SerializeEnvelope(invalid, wire) == 0, "invalid outgoing message accepted");
 		const auto raw = invalid.SerializeAsString();
-		Check(!Bus::Decode(raw.data(), raw.size(), Session, decoded), "invalid incoming message accepted");
+		Check(!Bus::ParseEnvelope(raw.data(), raw.size(), Session, decoded), "invalid incoming message accepted");
 	};
 	packet.set_protocol_version(Bus::ProtocolVersion + 1);
 	rejects(packet);
@@ -75,9 +95,9 @@ void CheckProtocol()
 	packet.set_session_id(0);
 	rejects(packet);
 	packet.set_session_id(Session);
-	packet.set_audio_frame_watermark(UINT64_MAX - Bus::AudioFrames + 1);
+	packet.set_audio_frame_position(UINT64_MAX - Bus::AudioFrames + 1);
 	rejects(packet);
-	packet.set_audio_frame_watermark(0);
+	packet.set_audio_frame_position(0);
 	audio->set_sample_rate_hz(Bus::SampleRateHz + 1);
 	rejects(packet);
 	audio->set_sample_rate_hz(Bus::SampleRateHz);
@@ -99,16 +119,16 @@ void CheckProtocol()
 	rejects(packet);
 	packet.mutable_heartbeat();
 	rejects(packet); // Media sequence is invalid on a heartbeat.
-	packet.set_sequence(0);
-	Check(Bus::Encode(packet, wire) > 0, "heartbeat payload presence");
-	packet.set_audio_frame_watermark(UINT64_MAX);
+	packet.set_sequence_number(0);
+	Check(Bus::SerializeEnvelope(packet, wire) > 0, "heartbeat payload presence");
+	packet.set_audio_frame_position(UINT64_MAX);
 	std::string dmx(DmxFrameSize, '\0');
 	for (size_t channel = 0; channel < dmx.size(); ++channel)
 		dmx[channel] = static_cast<char>(channel);
 	packet.mutable_lighting()->set_channels(dmx);
-	const auto lightingSize = Bus::Encode(packet, wire);
-	Check(lightingSize && Bus::Decode(wire.data(), lightingSize, Session, decoded) &&
-	          decoded.audio_frame_watermark() == UINT64_MAX && decoded.lighting().channels() == dmx,
+	const auto lightingSize = Bus::SerializeEnvelope(packet, wire);
+	Check(lightingSize && Bus::ParseEnvelope(wire.data(), lightingSize, Session, decoded) &&
+	          decoded.audio_frame_position() == UINT64_MAX && decoded.lighting().channels() == dmx,
 	      "lighting bytes and maximum watermark");
 	packet.mutable_lighting()->set_channels(dmx.substr(1));
 	rejects(packet);
@@ -138,8 +158,8 @@ void CheckProtocol()
 	health.set_dmx_dropped_total(UINT64_MAX);
 	health.set_invalid_packets_total(UINT64_MAX);
 	health.set_send_failures_total(UINT64_MAX);
-	auto telemetrySize = Bus::Encode(packet, wire);
-	Check(telemetrySize && Bus::Decode(wire.data(), telemetrySize, Session, decoded), "telemetry round trip");
+	auto telemetrySize = Bus::SerializeEnvelope(packet, wire);
+	Check(telemetrySize && Bus::ParseEnvelope(wire.data(), telemetrySize, Session, decoded), "telemetry round trip");
 	auto json = Bus::ReceiverTelemetryToJson(decoded.receiver_telemetry());
 	Check(json.size() == 24 && json["up"] == true && json["link_up"] == true && json["dmx_connected"] == false,
 	      "dashboard health schema");
@@ -157,8 +177,9 @@ void CheckProtocol()
 	      "telemetry units unchanged");
 	health.set_audio_input_age_seconds(0);
 	health.set_audio_max_gap_seconds(0);
-	telemetrySize = Bus::Encode(packet, wire);
-	Check(telemetrySize && Bus::Decode(wire.data(), telemetrySize, Session, decoded), "zero input age round trip");
+	telemetrySize = Bus::SerializeEnvelope(packet, wire);
+	Check(telemetrySize && Bus::ParseEnvelope(wire.data(), telemetrySize, Session, decoded),
+	      "zero input age round trip");
 	json = Bus::ReceiverTelemetryToJson(decoded.receiver_telemetry());
 	Check(json["audio_input_age_seconds"] == 0 && json["audio_max_gap_seconds"] == 0,
 	      "measured zero remains distinct from unavailable");
@@ -240,6 +261,40 @@ int main()
 	overflow->Frame(stereo);
 	overflow->BeginCallback();
 	Check(overflow->latencyTrims > 0, "latency recovery");
+	Check(overflow->Push(Block(257 * 128)) && overflow->lostFrames == 0,
+	      "receiver queue overflow must not count again as network loss");
+	constexpr int PrimingBlocks = 8;
+	auto boundary = std::make_unique<Playout>(Bus::SampleRateHz, 20);
+	for (uint64_t i = 0; i < PrimingBlocks; ++i)
+		Check(boundary->Push(Block(UINT64_MAX - (PrimingBlocks - i) * Bus::AudioFrames)),
+		      "valid audio near maximum watermark");
+	boundary->BeginCallback();
+	for (size_t frame = 0; frame < Bus::AudioFrames; ++frame)
+		boundary->Frame(stereo);
+	boundary->BeginCallback();
+	Check(boundary->latencyTrims == 0 && boundary->bufferedFrames > 0,
+	      "watermark addition must not wrap into false latency recovery");
+	auto gap = std::make_unique<Playout>(Bus::SampleRateHz, 20);
+	Check(gap->Push(Block(0)) && gap->Push(Block(uint64_t(INT32_MAX) + Bus::AudioFrames)), "large gap accepted");
+	gap->BeginCallback();
+	gap->Frame(stereo);
+	Check(gap->latencyTrims == 1 && gap->bufferedFrames == Bus::AudioFrames && gap->played == 0,
+	      "large initial gap must rebuffer without narrowing overflow or fabricated buffered audio");
+	auto extremes = std::make_unique<Playout>(Bus::SampleRateHz, 20);
+	for (uint64_t i = 0; i < PrimingBlocks; ++i)
+	{
+		auto block = Block(i * Bus::AudioFrames);
+		for (size_t frame = 0; frame < Bus::AudioFrames; ++frame)
+			block.samples[frame * Bus::Channels] = block.samples[frame * Bus::Channels + 1] =
+			    frame % 2 ? std::numeric_limits<float>::max() : std::numeric_limits<float>::lowest();
+		Check(extremes->Push(block), "finite sample limits accepted");
+	}
+	extremes->BeginCallback();
+	for (size_t frame = 0; frame < Bus::AudioFrames; ++frame)
+	{
+		extremes->Frame(stereo);
+		Check(std::isfinite(stereo[0]) && std::isfinite(stereo[1]), "interpolation of finite samples stays finite");
+	}
 	auto loss = std::make_unique<Playout>(44100, 20);
 	for (uint64_t i = 0; i < 20; ++i)
 		if (i != 5)
