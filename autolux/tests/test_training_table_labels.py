@@ -837,6 +837,20 @@ def test_two_different_uncommitted_edits_get_two_different_keys(tmp_path):
     assert "+dirty" in first and "+dirty" in second
 
 
+def test_pipeline_hash_reads_unicode_git_diffs_without_system_locale(tmp_path, monkeypatch):
+    import subprocess
+    from build_training_table import _git
+
+    staged_repo(tmp_path)
+    monkeypatch.setattr(subprocess, "_text_encoding", lambda: "cp1252")
+    source = tmp_path / "lib" / "engine.py"
+    source.write_text('label = "停止 → 音声"\n', encoding="utf-8")
+    assert "停止 → 音声" in _git(tmp_path, "diff", "HEAD")
+    first = pipeline_sha(tmp_path)
+    source.write_text('label = "停止 → 照明"\n', encoding="utf-8")
+    assert pipeline_sha(tmp_path) != first
+
+
 def test_the_dirty_key_returns_when_the_edit_does(tmp_path):
     staged_repo(tmp_path)
     source = tmp_path / "lib" / "engine.py"
