@@ -50,7 +50,10 @@ class AutoluxController:
         self.audio_client: PyAudioClient = PyAudioClient(
             SAMPLE_RATE, BUFFER_SIZE, input_device_index, output_device_index
         )
-        self.midi_client: MidiClient = MidiClient(midi_port_index)
+        # OS2L sends explicit play/stop; an additional MIDI toggle can pause playback.
+        self.midi_client: MidiClient = MidiClient(
+            midi_port_index, send_midi_play_pause_toggle=disable_os2l
+        )
         self.os2l_client: Os2lClient = Os2lClient(playback_delay_sec=PLAYBACK_DELAY_SEC)
         self.overlay_client: OverlayClient = OverlayClient(
             port=overlay_port,

@@ -1,6 +1,7 @@
 import pyaudio
 import numpy as np
 import logging
+from contextlib import ExitStack
 
 
 class PyAudioClient:
@@ -102,13 +103,11 @@ class PyAudioClient:
         self.stream_out.write(audio_buffer.tobytes())
 
     def close(self) -> None:
-        logging.info(f'[pyaudio] closing pyaudio')
-        if self.stream_in is not None:
-            self.stream_in.stop_stream()
-            self.stream_in.close()
+        logging.info('[pyaudio] closing pyaudio')
+        with ExitStack() as cleanup:
+            cleanup.callback(self.py_audio.terminate)
+            for stream in (self.stream_out, self.stream_in):
+                if stream is not None:
+                    cleanup.callback(stream.close)
             self.stream_in = None
-        if self.stream_out is not None:
-            self.stream_out.stop_stream()
-            self.stream_out.close()
             self.stream_out = None
-        self.py_audio.terminate()

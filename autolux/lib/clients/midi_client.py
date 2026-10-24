@@ -36,12 +36,13 @@ class DelayedEffect:
 
 
 class MidiClient:
-    def __init__(self, midi_port_index: int):
+    def __init__(self, midi_port_index: int, *, send_midi_play_pause_toggle: bool = True):
         self.midi_out = rtmidi.MidiOut()
         self.available_ports = self.midi_out.get_ports()
         self.midi_port_index: int = midi_port_index
         self.port_name: str = None
         self.soundswitch_is_paused: bool = True
+        self._send_midi_play_pause_toggle = send_midi_play_pause_toggle
         self._pending_effects: List[DelayedEffect] = list()
 
     def list_devices(self):
@@ -72,14 +73,20 @@ class MidiClient:
     def on_sound_start(self):
         self.set_all_intensities(1)
         if self.soundswitch_is_paused:
-            self.midi_out.send_message(mm.get_midi_msg_on(MidiChannel.PLAY_PAUSE))
+            if self._send_midi_play_pause_toggle:
+                self.midi_out.send_message(mm.get_midi_msg_on(MidiChannel.PLAY_PAUSE))
             self.soundswitch_is_paused = False
 
     def on_sound_stop(self):
         self.set_all_intensities(0)
+        for effect in self._pending_effects:
+            if effect.action == EffectAction.DEACTIVATE and not effect.is_done:
+                self.midi_out.send_message(mm.get_midi_msg_off(effect.effect))
+        self._pending_effects.clear()
         if not self.soundswitch_is_paused:
-            time.sleep(SETTLE_SEC)
-            self.midi_out.send_message(mm.get_midi_msg_on(MidiChannel.PLAY_PAUSE))
+            if self._send_midi_play_pause_toggle:
+                time.sleep(SETTLE_SEC)
+                self.midi_out.send_message(mm.get_midi_msg_on(MidiChannel.PLAY_PAUSE))
             self.soundswitch_is_paused = True
 
     async def on_100ms_callback(self):
