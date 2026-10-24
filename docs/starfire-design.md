@@ -33,6 +33,9 @@ Agreed constraints:
 - Starfire receives timing and lighting-control data, matching the current
   SoundSwitch integration's useful inputs. It does not receive or analyse audio.
 - Keep analysis, rendering, transport and hardware output separate.
+- Radius owns timestamping and synchronized audio/DMX playback. Audio-frame
+  watermarks and clock mapping are integration details, absent from Lua and the
+  operator interface. Starfire sequences use musical time.
 - Replace SoundSwitch-specific MIDI/OS2L control with a musical input contract.
 - Starfire owns the final lighting state. Retire the external overlay protocol
   and Radius's channel-range mixer when Starfire takes over those effects.
@@ -49,8 +52,8 @@ Agreed constraints:
 | Component | Owns |
 | --- | --- |
 | Autolux | Audio analysis, beat evidence, committed nine-class sections, named sequence selection, transition policies, timed show inputs |
-| Starfire | Show programs, musical timing interpretation, fixture properties, DMX frames for supplied audio positions |
-| Radius | Capture/playback timeline, audio transport, existing watermarks, synchronized receiver scheduling, hardware I/O |
+| Starfire | Lua sequences, musical timing interpretation, fixture properties, final DMX frames |
+| Radius | Capture/playback timeline, timestamping and clock mapping, synchronized audio/DMX transport and hardware output |
 | Existing webapp | Fixture setup, preview and existing system monitoring |
 | Root CLI | Configuration, process lifecycle and deployment |
 
@@ -83,9 +86,9 @@ discrete events. Input age, validity and source time travel with the values.
 | Input | Required semantics |
 | --- | --- |
 | Session and transport | Session identity, playing/silent state, discontinuities and reset behavior |
-| Timeline | Source audio position, sample rate, render target and configured show delay |
+| Musical timeline | Beat/time position, render position and explicit discontinuities |
 | Rhythm | Beat anchors, continuous beat phase, downbeat/bar information where known, tempo and validity |
-| Sequence selection | Bank and named sequence, command identity, effective audio position, parameters and transition policy |
+| Sequence selection | Bank and named sequence, command identity, effective musical position, parameters and transition policy |
 | Rig | Fixture/group identities, supported properties, geometry and calibration |
 | Show controls | Program parameters, master level, operator overrides and deterministic random seed |
 
@@ -124,7 +127,10 @@ snapshot and upcoming events without replaying expired section-entry accents.
 
 ## Time and synchronization
 
-This contract must be settled before effect APIs or networking code.
+Product boundary: Autolux supplies musical timing and timed sequence commands;
+Starfire renders them; Radius owns synchronized playback. Watermarks are not a
+script/API design task for show authors. The following engineering constraints
+must be resolved inside the Radius integration before changing the output path.
 
 1. Use an explicit audio timeline and session identity. Distinguish source audio
    position, the instant a decision becomes available, and room playback time.
@@ -156,11 +162,10 @@ Current integration facts to account for:
 - Python and Radius currently capture audio separately. Their stream origins
   cannot be assumed identical merely because their sample rates match.
 
-Proposed ownership: one audio timeline supplies the session identity and 64-bit
-frame positions. Autolux associates its musical evidence with that timeline;
-Starfire renders for a target position and attaches the corresponding watermark.
-Starfire must not invent a separate counter or derive positions from packet
-arrival times. The lighting program never owns clock synchronization.
+Radius's integration supplies one audio timeline, session identity and 64-bit
+frame positions, maps musical render positions onto it and attaches frame
+timestamps. Starfire does not invent a separate watermark counter or derive one
+from packet arrival times. Its programs never own clock synchronization.
 
 There are two distinct output integration choices:
 
@@ -328,9 +333,10 @@ modes explicit: annotated sections for judging rendering, and live predictions
 for judging the end-to-end system. An annotation-driven show is not evidence of
 classifier accuracy.
 
-Open decisions: Lua binding and sandbox API, clock source, input framing, sequence
+Open decisions: Lua binding and sandbox API, input framing, sequence
 composition/state, profile import subset, transition semantics and failure
-deadlines. Resolve these with examples and measurable budgets before creating
+deadlines. Clock mapping and timestamp preservation remain Radius implementation
+work. Resolve the contracts with examples and measurable budgets before creating
 the Rust package or changing the network path.
 
 ## References
