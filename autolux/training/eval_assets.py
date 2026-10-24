@@ -93,13 +93,13 @@ REPO_CORPUS_DIR = AUTOLUX_PACKAGE_ROOT / "training" / "data" / "raveform"
 
 # How many characters of the base64url digest name a file.  Changing this
 # renames every committed mp3, so it is a re-cut, not a tweak.
-NAME_CHARS = 10
+AUDIO_FILENAME_HASH_LENGTH = 10
 
 # The one-line spelling of the derivation, for the provenance block and for
 # every error message that has to tell a human where a file should have been.
-AUDIO_NAME_SCHEME = f"base64url(sha256(youtube_id))[:{NAME_CHARS}] + '.mp3'"
+AUDIO_NAME_SCHEME = f"base64url(sha256(youtube_id))[:{AUDIO_FILENAME_HASH_LENGTH}] + '.mp3'"
 
-LABELS_SCHEMA = 2
+LABELS_SCHEMA_VERSION = 2
 
 # The two annotators the same ten tracks can be read against.  PUBLISHED is the
 # Raveform annotation the eval set was frozen against; OWNER is that reading
@@ -131,7 +131,7 @@ def opaque_name(youtube_id: str) -> str:
     every platform this runs on.
     """
     digest = hashlib.sha256(youtube_id.encode("utf-8")).digest()
-    return base64.urlsafe_b64encode(digest).decode("ascii")[:NAME_CHARS]
+    return base64.urlsafe_b64encode(digest).decode("ascii")[:AUDIO_FILENAME_HASH_LENGTH]
 
 
 def committed_audio_path(youtube_id: str, audio_dir: Path | None = None) -> Path:
@@ -171,9 +171,9 @@ def load_labels(path: Path | None = None) -> dict:
     if not isinstance(document, dict) or not isinstance(document.get("tracks"), list):
         raise RuntimeError(f"{path} has no 'tracks' list -- it is not a label slice")
     schema = document.get("schema")
-    if schema != LABELS_SCHEMA:
+    if schema != LABELS_SCHEMA_VERSION:
         raise RuntimeError(
-            f"{path} is schema {schema!r}, not {LABELS_SCHEMA} -- a slice now "
+            f"{path} is schema {schema!r}, not {LABELS_SCHEMA_VERSION} -- a slice now "
             f"carries both annotators' readings of the frozen ten; re-cut it "
             f"with training/eval_assets.py --cut"
         )
@@ -235,7 +235,7 @@ def build_labels_document(
     files drift, and there is then no single artifact whose sha pins the pair.
     """
     return {
-        "schema": LABELS_SCHEMA,
+        "schema": LABELS_SCHEMA_VERSION,
         "truths": {
             PUBLISHED: {
                 "file": f"annotations/{SEGMENTS_FILE}",
@@ -317,8 +317,8 @@ def copy_audio(data_dir: Path, youtube_ids: list, audio_dir: Path | None = None)
     names = {opaque_name(youtube_id) for youtube_id in youtube_ids}
     if len(names) != len(set(youtube_ids)):
         raise RuntimeError(
-            f"two eval tracks derive the same name at {NAME_CHARS} characters "
-            f"-- widen NAME_CHARS and re-cut"
+            f"two eval tracks derive the same name at {AUDIO_FILENAME_HASH_LENGTH} characters "
+            f"-- widen AUDIO_FILENAME_HASH_LENGTH and re-cut"
         )
 
     copied = []

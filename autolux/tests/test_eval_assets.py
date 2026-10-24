@@ -27,8 +27,8 @@ from eval_assets import (  # noqa: E402  (needs the path insert above)
     AUDIO_NAME_SCHEME,
     EVAL_AUDIO_DIR,
     EVAL_LABELS_FILE,
-    LABELS_SCHEMA,
-    NAME_CHARS,
+    LABELS_SCHEMA_VERSION,
+    AUDIO_FILENAME_HASH_LENGTH,
     OVERRIDDEN,
     OWNER,
     PUBLISHED,
@@ -74,16 +74,16 @@ def test_opaque_name_is_the_documented_expression():
         digest = hashlib.sha256(youtube_id.encode("utf-8")).digest()
         assert (
             opaque_name(youtube_id)
-            == (base64.urlsafe_b64encode(digest).decode("ascii")[:NAME_CHARS])
+            == (base64.urlsafe_b64encode(digest).decode("ascii")[:AUDIO_FILENAME_HASH_LENGTH])
         )
-    assert f"[:{NAME_CHARS}]" in AUDIO_NAME_SCHEME
+    assert f"[:{AUDIO_FILENAME_HASH_LENGTH}]" in AUDIO_NAME_SCHEME
 
 
 def test_derived_names_are_filename_safe_and_unique():
     names = [committed_audio_path(youtube_id).name for youtube_id in EVAL_SET["youtube_ids"]]
     assert len(set(names)) == len(names)
     for name in names:
-        assert name.endswith(".mp3") and len(name) == NAME_CHARS + 4
+        assert name.endswith(".mp3") and len(name) == AUDIO_FILENAME_HASH_LENGTH + 4
         assert not set(name) & set('/\\:*?"<>| ')
 
 
@@ -323,7 +323,7 @@ def test_cut_labels_refuses_an_eval_track_with_no_annotation(tmp_path):
 
 def test_load_labels_rejects_a_document_that_is_not_a_slice(tmp_path):
     path = tmp_path / "labels.json"
-    path.write_text(json.dumps({"schema": LABELS_SCHEMA}), encoding="utf-8")
+    path.write_text(json.dumps({"schema": LABELS_SCHEMA_VERSION}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="not a label slice"):
         load_labels(path)
 
@@ -358,7 +358,7 @@ def test_build_labels_document_is_json_round_trippable():
         [{"key": "a.1", "sections": []}], "sha", 1, rulings={"a.1": {"ruling": UNREVIEWED}}
     )
     assert json.loads(json.dumps(document)) == document
-    assert document["schema"] == LABELS_SCHEMA
+    assert document["schema"] == LABELS_SCHEMA_VERSION
 
 
 # --------------------------------------------------------------------------- #
