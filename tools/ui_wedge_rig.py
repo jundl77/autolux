@@ -92,15 +92,21 @@ def profile(show: RiggedShow, ticks: int) -> None:
 
     from autolux.simulate import visualizer_app as V
 
-    for name in ('_build_timeline', '_build_stage', '_build_decoder', '_build_metrics', '_anchor'):
-        fn = getattr(V, name)
+    for fn in (
+        V._build_timeline,
+        V._build_stage,
+        V._build_decoder,
+        V._build_show_overview,
+        V._build_command_timing_row,
+        V._anchor,
+    ):
         samples = []
         for _ in range(ticks):
             at = time.perf_counter()
             fn(snap)
             samples.append((time.perf_counter() - at) * 1000)
         print(
-            f'  {name:<16} median {statistics.median(samples):7.2f} ms   max {max(samples):7.2f} ms'
+            f'  {fn.__name__:<26} median {statistics.median(samples):7.2f} ms   max {max(samples):7.2f} ms'
         )
 
     callbacks = _server_callbacks(app)
