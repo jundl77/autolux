@@ -13,7 +13,7 @@ from build_training_table import default_data_dir  # noqa: E402
 MODELS_DIR = "models"
 REPORT_FILE = "training_report.json"
 
-VOLATILE = frozenset(
+VOLATILE_REPORT_FIELDS = frozenset(
     {
         "wall_seconds",
         "steps_per_second",
@@ -27,11 +27,15 @@ VOLATILE = frozenset(
 )
 
 
-def strip(node):
+def remove_volatile_report_fields(node):
     if isinstance(node, dict):
-        return {key: strip(value) for key, value in node.items() if key not in VOLATILE}
+        return {
+            key: remove_volatile_report_fields(value)
+            for key, value in node.items()
+            if key not in VOLATILE_REPORT_FIELDS
+        }
     if isinstance(node, list):
-        return [strip(value) for value in node]
+        return [remove_volatile_report_fields(value) for value in node]
     return node
 
 
@@ -79,7 +83,7 @@ def compare(data_dir: Path, model_version: str, first: str, second: str, show: i
 
     steps = len(left["history"]["steps"])
     epochs = len(left["history"]["epochs"])
-    found = differences(strip(left), strip(right))
+    found = differences(remove_volatile_report_fields(left), remove_volatile_report_fields(right))
     print(f"compared {steps} steps and {epochs} epochs, plus config and summary")
     print(f"non-volatile differences: {len(found)}")
     for line in found[:show]:
