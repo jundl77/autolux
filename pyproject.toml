@@ -83,7 +83,7 @@ madmom = { git = "https://github.com/CPJKU/madmom.git", rev = "27f032e8947204902
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["autolux/tests", "cli/tests", "radius/tests"]
+testpaths = ["autolux/tests", "cli/tests", "radius/tests", "tools/tests"]
 pythonpath = ["."]
 markers = [
     "integration: full-pipeline simulation tests (slow, requires madmom)",

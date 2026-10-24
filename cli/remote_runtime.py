@@ -175,7 +175,15 @@ class RemoteRuntime:
                     '[prod] remote shutdown request failed; receiver heartbeat timeout remains active'
                 )
             try:
-                self.process.wait(timeout=8)
+                code = self.process.wait(timeout=8)
+                if code == 0:
+                    logging.info('[prod] receiver stopped on %s', self.host)
+                else:
+                    logging.warning(
+                        '[prod] receiver SSH exited with code %s; see %s',
+                        code,
+                        self.run_dir / 'receiver-ssh.log',
+                    )
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=5)

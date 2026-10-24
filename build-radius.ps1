@@ -2,6 +2,25 @@
 param([string]$CMake = '')
 
 $ErrorActionPreference = 'Stop'
+Push-Location $PSScriptRoot
+try {
+    # Native tools use stderr for normal progress on Windows PowerShell.
+    $ErrorActionPreference = 'Continue'
+    uv run --locked --extra dev ruff format autolux cli radius tools
+    if ($LASTEXITCODE -ne 0) { throw 'Python formatting failed.' }
+    $nativeSources = @(git -c core.quotepath=false ls-files --cached --others --exclude-standard -- radius |
+        Where-Object { $_ -match '\.(cc|cpp|h|hpp|proto)$' -and $_ -notmatch '^radius/(x_|cmake-build-)' } |
+        Sort-Object -Unique)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate native sources.' }
+    if ($nativeSources.Count -gt 0) {
+        uv run --locked --extra dev clang-format -i --style=file @nativeSources
+        if ($LASTEXITCODE -ne 0) { throw 'C++ formatting failed.' }
+    }
+}
+finally {
+    $ErrorActionPreference = 'Stop'
+    Pop-Location
+}
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio C++ Build Tools first.' }
 $vsRoot = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath

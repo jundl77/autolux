@@ -6,6 +6,45 @@ from cli import production
 from cli.native_runtime import NativeSpec
 
 
+def test_live_commands_offer_verbose_diagnostics():
+    from cli.main import build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(['prod', '--verbose']).verbose
+    assert parser.parse_args(['run', '1', '--verbose']).verbose
+    assert not parser.parse_args(['prod']).verbose
+
+
+@pytest.mark.parametrize('exit_code', [0, 7])
+async def test_full_check_delegates_to_tools_before_device_readiness(
+    tmp_path, monkeypatch, exit_code
+):
+    from types import SimpleNamespace
+
+    script = tmp_path / 'tools/validate.py'
+    script.parent.mkdir()
+    script.write_text('# validation fixture\n')
+    monkeypatch.setattr(production, 'ROOT', tmp_path)
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=exit_code)
+
+    def readiness(*args):
+        raise RuntimeError('readiness reached')
+
+    monkeypatch.setattr(production.subprocess, 'run', run)
+    monkeypatch.setattr(production, 'native_specs', readiness)
+    parser = argparse.ArgumentParser()
+    production.add_arguments(parser)
+    with pytest.raises(
+        RuntimeError, match='validation failed' if exit_code else 'readiness reached'
+    ):
+        await production.run(parser.parse_args(['--check']))
+    assert calls == [[production.sys.executable, '-X', 'utf8', str(script)]]
+
+
 @pytest.mark.parametrize('duration', ['0', '-1', 'nan', 'inf'])
 async def test_invalid_duration_is_rejected_before_startup(duration):
     parser = argparse.ArgumentParser()

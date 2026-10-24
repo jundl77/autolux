@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -20,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def add_arguments(parser):
+    parser.add_argument(
+        '--verbose', action='store_true', help='Include beat, note and protocol diagnostics'
+    )
     parser.add_argument('--radius-dir', type=Path, default=ROOT / 'radius')
     parser.add_argument('--tx-config', type=Path)
     parser.add_argument('--rx-config', type=Path)
@@ -34,7 +38,7 @@ def add_arguments(parser):
     parser.add_argument(
         '--check',
         action='store_true',
-        help='Validate configs, devices and SSH without starting a show',
+        help='Run all tests, builds, backtest, simulation and readiness checks without starting a show',
     )
     parser.add_argument('--no-ui', action='store_true')
     parser.add_argument('--ui-port', type=int, default=8050)
@@ -163,10 +167,21 @@ async def run(args):
         raise ValueError('duration must be finite and positive')
     if not 1024 <= args.ui_port < 65535:
         raise ValueError('ui-port must be 1024..65534')
+    if args.check:
+        validation_script = ROOT / 'tools/validate.py'
+        if not validation_script.is_file():
+            raise RuntimeError(
+                'Full validation requires the source checkout and development dependencies.'
+            )
+        validation = subprocess.run(
+            [sys.executable, '-X', 'utf8', str(validation_script)], cwd=ROOT
+        )
+        if validation.returncode:
+            raise RuntimeError('Full validation failed; see .live/validation for results.')
     from cli import main
     from cli.windows_runtime import RoleLock
     from cli.remote_runtime import RemoteRuntime
-    from cli.health_monitor import HealthMonitor
+    from cli.health_monitor import HealthMonitor, HealthLogger
     from contextlib import ExitStack
 
     tx, rx = native_specs(args, main.PLAYBACK_DELAY_SEC)
@@ -224,6 +239,7 @@ async def run(args):
             stack.enter_context(remote)
             native = stack.enter_context(NativeRuntime([tx], run_dir / 'local'))
             monitor = HealthMonitor(run_dir / 'local/radius_tx/health.json', tx.config['session'])
+            health_log = HealthLogger()
             if args.no_ui:
                 from autolux.lib.ui_bridge import SnapshotServer
 
@@ -238,7 +254,11 @@ async def run(args):
             def check_health():
                 native.check_health()
                 remote.check_health()
-                app.event_buffer.set_system_health(monitor.snapshot())
+                state = monitor.snapshot()
+                app.event_buffer.set_system_health(state)
+                health_log.update(
+                    state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)
+                )
                 if (run_dir / 'stop').exists() or (
                     args.duration and time.monotonic() - started >= args.duration
                 ):

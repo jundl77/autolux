@@ -88,7 +88,13 @@ class NativeRuntime:
         try:
             for name, process, _ in reversed(self.children):
                 try:
-                    process.wait(timeout=max(0, deadline - time.monotonic()))
+                    code = process.wait(timeout=max(0, deadline - time.monotonic()))
+                    logging.log(
+                        logging.INFO if code == 0 else logging.WARNING,
+                        '[prod] %s stopped (exit %s)',
+                        name,
+                        code,
+                    )
                 except subprocess.TimeoutExpired:
                     logging.warning('[prod] %s did not stop; terminating owned process', name)
                     process.kill()
