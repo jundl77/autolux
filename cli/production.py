@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import logging
 import math
+import multiprocessing
 import os
 from pathlib import Path
 import re
@@ -18,6 +19,8 @@ import uuid
 from cli.native_runtime import NativeRuntime, NativeSpec, validate_native
 
 ROOT = Path(__file__).resolve().parents[1]
+READINESS_TIMEOUT_SECONDS = 45
+READINESS_WORKER_EXIT_TIMEOUT_SECONDS = 2
 
 
 def add_arguments(parser):
@@ -35,8 +38,14 @@ def add_arguments(parser):
     parser.add_argument(
         '--known-hosts', type=Path, default=Path.home() / '.ssh/known_hosts_autolux'
     )
-    parser.add_argument(
+    checks = parser.add_mutually_exclusive_group()
+    checks.add_argument(
         '--check',
+        action='store_true',
+        help='Check devices, models, binaries and SSH in under 60 seconds without starting a show',
+    )
+    checks.add_argument(
+        '--check-full',
         action='store_true',
         help='Run all tests, builds, backtest, simulation and readiness checks without starting a show',
     )
@@ -167,7 +176,7 @@ async def run(args):
         raise ValueError('duration must be finite and positive')
     if not 1024 <= args.ui_port < 65535:
         raise ValueError('ui-port must be 1024..65534')
-    if args.check:
+    if args.check_full:
         validation_script = ROOT / 'tools/validate.py'
         if not validation_script.is_file():
             raise RuntimeError(
@@ -178,6 +187,50 @@ async def run(args):
         )
         if validation.returncode:
             raise RuntimeError('Full validation failed; see .live/validation for results.')
+    if args.check or args.check_full:
+        run_readiness_check(args)
+        return
+    await _run_session(args)
+
+
+def _readiness_worker(args, owned):
+    from autolux.lib.logging_config import configure_logging
+
+    owned.wait()
+    configure_logging(verbose=args.verbose)
+    try:
+        asyncio.run(_run_session(args, checking=True))
+    except (RuntimeError, OSError, ValueError) as error:
+        logging.error('[prod] readiness failed: %s', error)
+        raise SystemExit(1) from error
+
+
+def run_readiness_check(args):
+    from cli.windows_runtime import Job
+
+    context = multiprocessing.get_context('spawn')
+    owned = context.Event()
+    worker = context.Process(target=_readiness_worker, args=(args, owned))
+    job = Job()
+    try:
+        worker.start()
+        job.add(worker.pid)
+        owned.set()
+        worker.join(READINESS_TIMEOUT_SECONDS)
+        if worker.is_alive():
+            raise RuntimeError(f'Readiness check timed out after {READINESS_TIMEOUT_SECONDS}s.')
+        if worker.exitcode:
+            raise RuntimeError('Readiness check failed; see the reported problem above.')
+    finally:
+        job.close()
+        if worker.pid is not None:
+            if worker.is_alive():
+                worker.kill()
+            worker.join(READINESS_WORKER_EXIT_TIMEOUT_SECONDS)
+            worker.close()
+
+
+async def _run_session(args, *, checking=False):
     from cli import main
     from cli.windows_runtime import RoleLock
     from cli.remote_runtime import RemoteRuntime
@@ -200,7 +253,7 @@ async def run(args):
             raise RuntimeError(
                 'The shipped neural model is missing; refusing a degraded production show.'
             )
-        if not args.check and not any(p['Name'].casefold() == 'loopmidi.exe' for p in processes):
+        if not checking and not any(p['Name'].casefold() == 'loopmidi.exe' for p in processes):
             exe = Path(os.environ['ProgramFiles(x86)']) / 'Tobias Erichsen/loopMIDI/loopMIDI.exe'
             startup = subprocess.STARTUPINFO()
             startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -220,7 +273,7 @@ async def run(args):
             run_dir / 'remote',
         )
         remote.check_connection()
-        if args.check:
+        if checking:
             logging.info('[prod] configs, model, capture, MIDI and SSH checks passed')
             return
         app = main.AutoluxController(

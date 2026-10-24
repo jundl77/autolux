@@ -56,9 +56,11 @@ available on port 8051. Logs and generated configs are under `.live/`.
 
 ## Verify
 
-`uv run autolux --prod --check` runs formatting checks, the native and package
-builds, all tests, the full committed backtest, simulation and device/SSH readiness.
-It keeps the show stopped and writes results under `.live/validation/`.
+`uv run autolux --prod --check` checks configurations, binaries, models, capture,
+MIDI and SSH without starting a show. Readiness has a 45-second timeout.
+Use `uv run autolux --prod --check-full` for formatting, builds, the full test
+suite, committed backtest, simulation and readiness. Full validation takes several
+minutes and writes results under `.live/validation/`.
 For individual checks:
 
 ```powershell

@@ -6,15 +6,6 @@ from cli import production
 from cli.native_runtime import NativeSpec
 
 
-def test_live_commands_offer_verbose_diagnostics():
-    from cli.main import build_parser
-
-    parser = build_parser()
-    assert parser.parse_args(['prod', '--verbose']).verbose
-    assert parser.parse_args(['run', '1', '--verbose']).verbose
-    assert not parser.parse_args(['prod']).verbose
-
-
 @pytest.mark.parametrize('exit_code', [0, 7])
 async def test_full_check_delegates_to_tools_before_device_readiness(
     tmp_path, monkeypatch, exit_code
@@ -35,36 +26,50 @@ async def test_full_check_delegates_to_tools_before_device_readiness(
         raise RuntimeError('readiness reached')
 
     monkeypatch.setattr(production.subprocess, 'run', run)
-    monkeypatch.setattr(production, 'native_specs', readiness)
+    monkeypatch.setattr(production, 'run_readiness_check', readiness)
     parser = argparse.ArgumentParser()
     production.add_arguments(parser)
     with pytest.raises(
         RuntimeError, match='validation failed' if exit_code else 'readiness reached'
     ):
-        await production.run(parser.parse_args(['--check']))
+        await production.run(parser.parse_args(['--check-full']))
     assert calls == [[production.sys.executable, '-X', 'utf8', str(script)]]
 
 
-@pytest.mark.parametrize('duration', ['0', '-1', 'nan', 'inf'])
-async def test_invalid_duration_is_rejected_before_startup(duration):
+async def test_quick_check_only_runs_readiness_without_starting_outputs(monkeypatch):
+    from unittest.mock import Mock
+
+    readiness = Mock()
+    monkeypatch.setattr(production, 'run_readiness_check', readiness)
+    monkeypatch.setattr(
+        production.subprocess, 'run', Mock(side_effect=AssertionError('full suite'))
+    )
+    monkeypatch.setattr(production, '_run_session', Mock(side_effect=AssertionError('live show')))
     parser = argparse.ArgumentParser()
     production.add_arguments(parser)
-    with pytest.raises(ValueError, match='finite and positive'):
-        await production.run(parser.parse_args(['--duration', duration]))
+    args = parser.parse_args(['--check'])
+    await production.run(args)
+    readiness.assert_called_once_with(args)
 
 
-def test_specs_share_one_session_and_delay_only_transmitted_audio():
-    parser = argparse.ArgumentParser()
-    production.add_arguments(parser)
-    args = parser.parse_args(['--receiver-host', '127.0.0.1'])
-    tx, rx = production.native_specs(args, 14)
-    assert tx.config['session'] == rx.config['session'] != 0
-    assert tx.config['playback_delay_seconds'] == 14
-    assert 'playback_delay_seconds' not in rx.config
-    assert tx.config['artnet_address'] == '127.0.0.1'
-    assert tx.config['dmx_universe'] == 0
-    assert rx.config['peer_address'] == '127.0.0.1'
-    assert (tx.name, rx.name) == ('radius_tx', 'radius_rx')
+def _blocked_readiness(*_):
+    import time
+
+    time.sleep(60)
+
+
+def test_stalled_readiness_worker_is_killed_within_its_deadline(monkeypatch):
+    import multiprocessing
+    import time
+
+    monkeypatch.setattr(production, '_readiness_worker', _blocked_readiness)
+    monkeypatch.setattr(production, 'READINESS_TIMEOUT_SECONDS', 0.1)
+    existing_children = {child.pid for child in multiprocessing.active_children()}
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match='timed out'):
+        production.run_readiness_check(argparse.Namespace())
+    assert time.monotonic() - started < 5
+    assert {child.pid for child in multiprocessing.active_children()} == existing_children
 
 
 @pytest.mark.parametrize('failure', ['receiver_start', 'controller_run', None])

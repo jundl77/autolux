@@ -5,6 +5,9 @@ configuration, deploys the receiver, starts native processes and analysis, and
 cleans up both endpoints on shutdown. `autolux status` reports health;
 `autolux stop` requests a graceful stop.
 
+`autolux --prod --check` checks readiness without starting outputs and times out
+after 45 seconds. `--check-full` also runs builds, tests, backtest and simulation.
+
 ## Receiver setup
 
 Install Windows OpenSSH Server once on the receiver. From an elevated PowerShell,

@@ -1,7 +1,8 @@
 # Operating Autolux
 
-Start with `uv run autolux --prod`. Use `--check` for the full build/test/backtest
-suite plus model, device, configuration and SSH checks without starting a show. Stop with Ctrl-C or
+Start with `uv run autolux --prod`. Use `--check` for model, device, configuration
+and SSH readiness within 60 seconds, or `--check-full` for builds, all tests,
+backtest and simulation. Both leave outputs stopped. Stop a show with Ctrl-C or
 `uv run autolux stop`.
 
 ## Health
