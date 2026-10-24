@@ -3,6 +3,7 @@
 #include <core/njson.h>
 #include <core/throw_if.h>
 #include <fstream>
+#include <cmath>
 
 namespace DmxEnttecNode {
 
@@ -48,6 +49,12 @@ void LoadCommonAudioConfig(Config& config, njson& json)
 void LoadConfigAudioSender(Config& config, njson& json)
 {
 	LoadCommonAudioConfig(config, json);
+	config.mPlaybackDelaySeconds = json.value("playback_delay_seconds", 0.0);
+	THROW_IF(!std::isfinite(config.mPlaybackDelaySeconds) || config.mPlaybackDelaySeconds < 0 ||
+			 config.mPlaybackDelaySeconds > 120, "playback_delay_seconds must be between 0 and 120");
+	THROW_IF(config.mPlaybackDelaySeconds > 0 && config.mAudioFormat != "SoundIoFormatFloat32LE",
+			 "delayed playback requires SoundIoFormatFloat32LE");
+	LOG(LL_INFO, LM_CONFIG, "playback_delay_seconds: %.6f", config.mPlaybackDelaySeconds);
 
 	config.mAudioServerIpv4 = json["audio_server_ip"];
 	LOG(LL_INFO, LM_CONFIG, "audio_server_ip: %s", config.mAudioServerIpv4.c_str());

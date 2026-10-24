@@ -6,5 +6,6 @@
   "audio_server_port": 19002,
   "audio_device_id": "{0.0.1.00000000}.{d81e9c3d-c36d-4eef-ae2b-4f1ab90a5749}",
   "audio_format": "SoundIoFormatFloat32LE",
-  "audio_sample_rate": 44100
+  "audio_sample_rate": 44100,
+  "playback_delay_seconds": 14.0
 }

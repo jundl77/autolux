@@ -4,6 +4,7 @@
 #include <proto/soundio_proto.h>
 #include <core/throw_if.h>
 #include <core/logger.h>
+#include <algorithm>
 #include <string>
 
 namespace DmxEnttecNode {
@@ -25,10 +26,7 @@ void ReadCallback(SoundIoInStream* instream, int frameCountMin, int frameCountMa
 	int maxReadSize = writeFrames * instream->bytes_per_frame;
 
 	static std::vector<char> framesBuffer;
-	if (framesBuffer.capacity() < maxReadSize)
-	{
-		framesBuffer.reserve(maxReadSize * 16);
-	}
+	framesBuffer.resize(maxReadSize);
 	std::memset(framesBuffer.data(), 0, maxReadSize);
 	int framesBufferIndex = 0;
 
@@ -70,7 +68,7 @@ void ReadCallback(SoundIoInStream* instream, int frameCountMin, int frameCountMa
 	}
 
 	THROW_IF(framesBufferIndex > maxReadSize, "copied more bytes than we predicted, something is wrong");
-	sAudioSender->SendAudioBytes(framesBuffer.data(), maxReadSize);
+	sAudioSender->SendAudioBytes(framesBuffer.data(), framesBufferIndex);
 }
 
 void ErrorCallback(SoundIoInStream*, int err)
@@ -126,25 +124,28 @@ void AudioSender::StartAudioRecorder()
 	int err;
 	THROW_IF((err = soundio_instream_open(mInStream)),
 			 "unable to open input stream: " + std::string(soundio_strerror(err)));
+	mDelay.Reset(mConfig.mPlaybackDelaySeconds, mInStream->sample_rate, mInStream->bytes_per_frame);
+	LOG(LL_INFO, LM_SENDER, "audio delay: %.6f seconds (%zu frames); network receiver adds its normal device latency",
+		mConfig.mPlaybackDelaySeconds, mDelay.Frames());
 	THROW_IF((err = soundio_instream_start(mInStream)),
 			 "unable to start input device: " + std::string(soundio_strerror(err)));
 }
 
-void AudioSender::SendAudioBytes(const char* data, size_t size)
+void AudioSender::SendAudioBytes(char* data, size_t size)
 {
-	if (size > SOUNDIO_MAX_DATA_SIZE)
-	{
-		LOG(LL_INFO, LM_SENDER, "dropping data of size %d, because it is too big (max=%d)", size, SOUNDIO_MAX_DATA_SIZE);
-		return;
-	}
-
+	mDelay.Process(data, size);
+	const size_t packetCapacity = (SOUNDIO_MAX_DATA_SIZE / mInStream->bytes_per_frame) * mInStream->bytes_per_frame;
 	static SoundIoIdl::SoundIoData soundioData {};
-	soundioData.mSeqNum = ++mSeqNum;
-	soundioData.mSize = size;
-	std::memcpy(soundioData.mData, data, size);
-
-	mUdpClient.SendData(&soundioData, sizeof(SoundIoIdl::SoundIoData));
-	LOG(LL_DEBUG, LM_SENDER, "sent audio data, seqnum=%d, size=%d", soundioData.mSeqNum, sizeof(SoundIoIdl::SoundIoData));
+	while (size > 0)
+	{
+		const size_t packetSize = (std::min)(size, packetCapacity);
+		soundioData.mSeqNum = ++mSeqNum;
+		soundioData.mSize = static_cast<uint32_t>(packetSize);
+		std::memcpy(soundioData.mData, data, packetSize);
+		mUdpClient.SendData(&soundioData, sizeof(soundioData));
+		data += packetSize;
+		size -= packetSize;
+	}
 }
 
 void AudioSender::ResetAudioStream(const std::string& error)

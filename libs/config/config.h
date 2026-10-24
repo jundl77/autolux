@@ -37,6 +37,7 @@ public:
 	std::string mAudioDeviceId;
 	std::string mAudioFormat;
 	int mAudioSampleRate;
+	double mPlaybackDelaySeconds {0.0};
 };
 
 }
