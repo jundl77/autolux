@@ -4,6 +4,12 @@
   `radius/` owns transport and hardware output. Keep tests with each component.
 - Keep READMEs and AGENT files brief, describing current intent and contracts.
 - Fix discovered bugs and add meaningful regression tests.
+- Build scripts and pre-commit hooks run Ruff and clang-format directly using
+  the saved Python and C++ policy. Development helpers belong in root `tools/`,
+  never business packages; do not add unused scaffolding or boilerplate.
+- Review new or changed naming concepts with the personal `blind-naming-test`
+  skill: fresh low-effort reviewers see names only; compare their explanations
+  against the code, rename mismatches and retest without revealing the answer.
 
 ## Runtime
 

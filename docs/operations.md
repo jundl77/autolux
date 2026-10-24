@@ -1,15 +1,17 @@
 # Operating Autolux
 
-Start with `uv run autolux --prod`. Use `--check` to validate the model, devices,
-configuration and SSH access without starting a show. Stop with Ctrl-C or
+Start with `uv run autolux --prod`. Use `--check` for the full build/test/backtest
+suite plus model, device, configuration and SSH checks without starting a show. Stop with Ctrl-C or
 `uv run autolux stop`.
 
 ## Health
 
-The dashboard combines analysis and lighting with six system indicators:
-controller state, bidirectional link, recent audio glitches, buffered audio,
-lighting connectivity and lighting scheduling lateness. Glitch indicators cover
-the last ten seconds; lifetime counters remain available to Prometheus.
+The dashboard at `http://localhost:8050` groups playback, tempo, intent and effect
+above the show timeline. Transport charts retain five minutes of receiver buffer,
+audio level, interruptions, lost/dropped audio frames, scheduling error and DMX
+delivery. Counters appear as rates; missing reports and counter resets leave gaps.
+Analysis and per-command details are under **Analysis & command diagnostics**.
+Link, telemetry and hardware faults appear only when they need attention.
 
 - **No link:** check receiver power, SSH access and UDP 19002. Heartbeats run every
   ten seconds; missing heartbeats end the session after thirty seconds.
@@ -29,6 +31,11 @@ latency to audio and its watermarked lighting together. DMX scheduling lateness
 measures software scheduling, not the physical response time of fixtures.
 
 ## Metrics and logs
+
+Console logs show startup, lighting changes, a music summary every ten seconds,
+and system health every thirty seconds or when its state changes. HTTP access logs
+are suppressed; server errors and recovery messages remain visible.
+Use `uv run autolux --prod --verbose` for beat, note and protocol diagnostics.
 
 Prometheus scrapes `http://127.0.0.1:8050/metrics` (8051 with `--no-ui`). Use
 `docs/prometheus.yml` as a local scrape configuration, and point Grafana at that

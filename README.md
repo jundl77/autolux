@@ -10,6 +10,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
+| `tools/` | Development validation |
 | `loopMIDI/`, `docs/` | Shared setup and documentation |
 
 Tests live in `autolux/tests/`, `cli/tests/` and `radius/tests/`.
@@ -21,7 +22,8 @@ Windows, Python 3.11, uv and Visual Studio C++ Build Tools are required.
 ```powershell
 git submodule update --init --recursive
 uv sync --extra dev --extra visualizer
-.\build-radius.ps1
+uv run pre-commit install
+.\build.ps1
 ```
 
 Keep models and music under `autolux/training/data/raveform/`, or set
@@ -53,6 +55,11 @@ available on port 8051. Logs and generated configs are under `.live/`.
 
 ## Verify
 
+`uv run autolux --prod --check` runs formatting checks, the native and package
+builds, all tests, the full committed backtest, simulation and device/SSH readiness.
+It keeps the show stopped and writes results under `.live/validation/`.
+For individual checks:
+
 ```powershell
 uv run pytest
 .\build-radius.ps1
@@ -63,3 +70,15 @@ uv run autolux label path\to\track.mp3
 
 Backtests compare against committed baselines. Run GPU workloads serially.
 See [operations](docs/operations.md) and [Radius](radius/README.md).
+
+## Formatting
+
+Both build scripts format Python and C++ before building. Run
+`uv run ruff format --check autolux cli radius tools` to check Python without writing;
+use `uv run clang-format --dry-run --Werror <files>` for C++.
+Pre-commit hooks format staged source files; re-stage any changes they make.
+
+Python uses four spaces, a 100-column target and preserved quotes. C++ uses tabs
+at width four, a 120-column target, expanded function/control braces and blank
+lines between definitions. Settings live in `pyproject.toml`, `.clang-format`
+and `.editorconfig`. Dependencies, generated files and training data are excluded.
