@@ -20,6 +20,7 @@ report.json
 .live/
 dist/
 build/
+starfire/target/
 # The Raveform corpus: ~90 GB, machine-local, never committed.  The ten eval-set
 # tracks are the deliberate exception and live in training/eval_audio/.
 #

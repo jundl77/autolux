@@ -17,3 +17,10 @@ repos:
         files: ^(radius|proto)/
         exclude: ^radius/(x_|cmake-build-)
         require_serial: true
+      - id: rust-format
+        name: Rust formatting (rustfmt)
+        entry: cargo fmt --manifest-path starfire/Cargo.toml
+        language: system
+        files: ^(starfire/.*\.rs|rustfmt\.toml|rust-toolchain\.toml)$
+        pass_filenames: false
+        require_serial: true

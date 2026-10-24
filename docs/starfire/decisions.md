@@ -42,6 +42,31 @@ prototype assumptions can change after an offline review and hardware audition.
 | P12 | All overnight validation is offline or UDP loopback. | Real fixture colour, movement and timing remain a later audition; never wake the room with test output. |
 | P13 | Each sequence has a replay fixture and a checked full-frame DMX digest, plus semantic assertions. | Golden hashes alone are insufficient; assert expected light behaviour as well. |
 | P14 | Reuse the existing Python environment explicitly without installing an editable worktree over production. | Tests verify imports resolve to the worktree; no duplicate dataset/model copies. |
+| P15 | Embed a separate validated fixture-profile catalogue; rig files reference profile IDs. Preserve patch/group order. | Encoding performs no filesystem I/O. Verify nominal strobe-rate facts against manufacturer documentation. |
+| P16 | Lua returns semantic effects using `sf.scene`, `sf.dimmer`, `sf.colour`, `sf.pan_tilt`, groups and oscillators. | Authors can calculate their own curves; helpers do not limit creative effects. |
+| P17 | Bound each Lua VM to 16 MiB, 100,000 instructions per load/render, 128 KiB source and 512 effects per frame. | Named prototype limits; measure real sequences and adjust explicitly. No ambient clocks, I/O, imports or unseeded randomness. |
+| P18 | Clock integration changes on beat/control events, not on rendered frames. | Replay cadence cannot change integrated animation speed. Beat-anchor corrections are distinct from speed changes. |
+| P19 | Crossfade continuous semantic properties; switch discrete strobe to incoming value at fade completion. | Avoid invalid intermediate shutter functions. An interrupted fade captures its current baseline, bounding active VMs. |
+| P20 | A fault retains the selected sequence identity in stopped state; duplicate selection cannot retry it. | Explicit selection of a different sequence recovers. Fault output clears overrides/strobe and preserves last valid movement. |
+| P21 | Global animation speed and intensity multipliers accept 0..8; clamp composed intensity before the final master. | Named prototype bounds, separate from device-specific movement/strobe limits. |
+| P22 | Implement strobe as deterministic intensity gating in the renderer; leave hardware shutter in its verified open range. Limit to 10 Hz at default 40 Hz rendering. | Manufacturer channel ranges do not establish calibrated Hz transfer curves for every fixture. Four samples/cycle improves representability; physical fidelity still needs audition. |
+| P23 | Keep semantic requested state for diagnostics; encode a separate shutter-gated state. | Prevents diagnostics from confusing the requested strobe with a hardware rate byte. |
+| P24 | Art-Net output is an explicit-destination ArtDmx adapter; support the user's existing broadcast path as an explicit compatibility option. | It is not a full Art-Net discovery/subscription node; default output is offline and tests use loopback. |
+| P25 | Remove Lua `pcall`/`xpcall`, coroutines and debug access from authored sequences. | Scripts must not catch and indefinitely retry an instruction-budget failure. Catalogue limits: 256 sequences/4 MiB total; at most 512 resolved targets per render. |
+| P26 | Determinism covers identical scripts, rig, events and render cadence. Bundled sequences derive animation from supplied time and also pass cadence-invariance checks. | Arbitrary Lua can retain closure state; document pure time-based authoring instead of recreating a VM every frame. |
+| P27 | RGBW extracts the neutral RGB component; colour wheels use nearest normalized swatch and apply colour magnitude through the dimmer. | Physical colour balance remains subject to audition. Movement bounds and inversion are rig calibration. |
+| P28 | Paced replay drops stale frames instead of bursting them after a stall. Completion, interruption and send failure attempt fixture-aware blackout at the last emitted positions. | UDP cannot guarantee delivery; receiver watchdog remains necessary. Use the standard `ctrlc` host handler, separate from the deterministic engine. |
+| P29 | The first fixture tab edits and validates the patch only; audition and master controls remain CLI commands until a live renderer session exists. | Do not display inactive controls or create a second frontend. |
+| P30 | Convert reports to musical source time: beat `t`, intent `song_t`, falling back to intent `t` minus the recorded look-ahead once. | Simulation can clamp delayed delivery at EOF. This is intended musical replay, not a faithful record of delivery lateness. Reports omit accents and downbeat ordinals; do not invent them. |
+| P31 | Fixture edits validate through the Rust encoder before atomic replacement; revision checks reject stale browser edits. Changes apply on the next session. | Preserve group member ordering; no patch hot reload in the prototype. |
+| P32 | Build checks run rustfmt, locked Clippy/tests and release compilation. The short production readiness check remains separate. | Do not add long suites to `--prod --check`. |
+| P33 | Explicit network playback requires at least four frames per requested strobe cycle. | Lower-rate offline replays are sampling diagnostics; reject aliased physical strobe output. |
+| P34 | Report conversion infers beat ordinals from detections, skips zero-tempo warm-up and holds the last positive tempo afterward. Silence and EOF produce Stop. | Reports do not preserve true bar origin; exact beat/downbeat phase requires a richer live capture contract. |
+| P35 | Root CLI requests blackout using an owned stop-file signal before bounded child shutdown. Native Ctrl-C remains available. | Windows headless children cannot reliably receive console signals; force termination remains the final timeout fallback. |
+| P36 | Bound rig input to 1 MiB, fixture/group counts to 512 and identifiers to 128 bytes. Bound latched diagnostics to 1 KiB and replay diagnostic storage to 8 MiB. | Lua memory limits alone do not bound host copies of errors or rig identifiers; adversarial resource regressions cover these boundaries. |
+| P37 | Replay defaults to the dashboard's saved rig when present, otherwise the committed room rig; explicit paths win. | A custom fixture-store path requires the matching explicit replay rig. |
+| P38 | Beat corrections update authoritative musical position; animation phase integrates elapsed tempo/speed continuously and does not jump with corrections. | Speed-scaled phase corrections could make animation negative and visibly restart it. Authors can use beat_position for strict beat phase; a phase-lock/slew policy is a future review question. |
+| P39 | Blind naming review covers output stages, override lifetimes and the two sequence clocks. Rename ambiguous public frame fields and make the Lua speed-clock origin/units explicit. | See the naming review for exact reader predictions and retained contextual ambiguities; no exhaustive identifier pass. |
 
 ## Open questions and defaults
 
@@ -51,7 +76,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | Q02 | Should persistent manual colour overrides win over automatic accents? | Explicit priority; manual defaults above automatic on the same property. Unrelated intensity/strobe controls still combine. |
 | Q03 | Named calibrated movement targets or direct pan/tilt first? | Direct normalized pan/tilt with calibrated bounds; API leaves room for named positions without needing a 3D editor. |
 | Q04 | What are the exact CF805 and Mini Kinta IRC channel modes/calibrations? | Leave unverified hardware out of the audition patch; preserve addresses rather than guessing. |
-| Q05 | Which manual controls belong in the first webapp tab? | Patch/groups and basic audition, master brightness and blackout; no browser code editor. |
+| Q05 | Which manual controls belong in the first webapp tab? | Patch/groups now; live audition, master and blackout follow the live-session integration. No browser code editor. |
 | Q06 | Where does Art-Net sit when Radius preserves exact render targets? | Preserve existing local Art-Net ingress in the prototype; document measured scheduling limits. Clock mapping remains Radius implementation work. |
 | Q07 | Are multiple universes needed immediately? | Encoder/output support universe identity; current Radius deployment remains its existing configured universe. |
 
@@ -70,7 +95,29 @@ prototype assumptions can change after an offline review and hardware audition.
 
 These are design references, not newly adopted runtime dependencies.
 
+## API and composition details
+
+Lua provides the baseline. Autolux can set both expiring accents and persistent
+overrides on named groups or individual fixtures. An override changes only its
+specified properties: holding one fixture red preserves its baseline movement
+and brightness unless those are also overridden. Clearing the override reveals
+the continuing baseline; it never restarts a sequence. Held overrides survive
+sequence changes until cleared or stopped. Rust produces one composed DMX frame.
+
+Speed is a supplied animation control, not a transformation of already encoded
+DMX. Integrate animation beats continuously through speed changes while keeping
+the musical beatgrid unchanged. Per-group speed remains a later extension.
+
+The fixtures tab maps named roles to concrete fixtures. Sequence identity is a
+registered bank/name pair, never an arbitrary caller-provided file path.
+
 ## Validation and checkpoints
 
 Record each slice's checks and the 15-minute reviews here as implementation lands.
 Hardware audition is explicitly separate from deterministic offline validation.
+
+- 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
+  engine suites pass independently. Lead reviewed public boundaries and found
+  replay output needed safe shutdown and stale-frame skipping. Agents reassigned
+  to existing dashboard setup, Autolux report/CLI integration and build checks.
+  Real fixtures remain idle. Background 15-minute checkpoint timer is active.

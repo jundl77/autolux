@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {"id": "wash_left", "profile": "generic_rgb", "universe": 0, "address": 1},
+    {"id": "wash_right", "profile": "generic_rgbw", "universe": 0, "address": 4},
+    {"id": "spot_left", "profile": "generic_dimmer", "universe": 1, "address": 1},
+    {"id": "spot_right", "profile": "generic_dimmer", "universe": 1, "address": 2}
+  ],
+  "groups": {
+    "wash": ["wash_left", "wash_right"],
+    "movers": ["spot_left", "spot_right"]
+  }
+}

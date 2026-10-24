@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "generic_dimmer": {
+      "source": "Starfire generic intensity fixture",
+      "notes": "One linear dimmer channel.",
+      "safe_values": [0],
+      "dimmer": 0
+    },
+    "generic_rgb": {
+      "source": "Starfire generic RGB fixture",
+      "notes": "RGB channels; brightness multiplies colour components.",
+      "safe_values": [0, 0, 0],
+      "rgb": [0, 1, 2]
+    },
+    "generic_rgbw": {
+      "source": "Starfire generic RGBW fixture",
+      "notes": "RGBW channels; common RGB component becomes neutral white. Emitter calibration is fixture-dependent.",
+      "safe_values": [0, 0, 0, 0],
+      "rgb": [0, 1, 2],
+      "white": 3
+    },
+    "chauvet_intimidator_spot_110_12ch": {
+      "source": "QLC+ Chauvet/Chauvet-Intimidator-Spot-110.qxf; https://www.chauvetdj.com/wp-content/uploads/2018/08/Intimidator_Spot_110_UM_Rev3.pdf",
+      "notes": "12-channel mode. Shutter open, open gobo, fastest movement, no function or movement macro. Colour slots use QLC+ swatches; physical colours need audition. Hardware strobe is disabled; renderer supplies deterministic intensity pulses.",
+      "safe_values": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "dimmer": 7,
+      "pan": {"coarse": 0, "fine": 1},
+      "tilt": {"coarse": 2, "fine": 3},
+      "colour_wheel": {
+        "channel": 5,
+        "slots": [
+          {"value": 0, "colour": {"red": 1.0, "green": 1.0, "blue": 1.0}},
+          {"value": 32, "colour": {"red": 1.0, "green": 0.0, "blue": 0.0}},
+          {"value": 64, "colour": {"red": 0.0, "green": 1.0, "blue": 0.0}},
+          {"value": 96, "colour": {"red": 0.0, "green": 0.0, "blue": 1.0}},
+          {"value": 128, "colour": {"red": 1.0, "green": 1.0, "blue": 0.0}},
+          {"value": 160, "colour": {"red": 1.0, "green": 0.3333333333333333, "blue": 1.0}},
+          {"value": 192, "colour": {"red": 1.0, "green": 0.6666666666666666, "blue": 0.0}},
+          {"value": 224, "colour": {"red": 0.0, "green": 0.6666666666666666, "blue": 1.0}}
+        ]
+      }
+    },
+    "fun_generation_separ_quad_uv_8ch": {
+      "source": "QLC+ Fun-Generation/Fun-Generation-SePar-Quad-UV.qxf; https://images.thomann.de/pics/atg/atgdata/document/manual/399604_c_399539_399604_r4_en_online.pdf",
+      "notes": "8-channel mode. UV off, shutter open, colour/program 0 for direct RGB control and microphone/speed 0. Hardware strobe rate is uncalibrated; renderer supplies deterministic intensity pulses.",
+      "safe_values": [0, 0, 0, 0, 0, 0, 0, 0],
+      "rgb": [0, 1, 2],
+      "dimmer": 4
+    }
+  }
+}
