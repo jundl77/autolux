@@ -28,9 +28,8 @@ Agreed constraints:
 - Each bank represents a lighting category with interchangeable alternatives.
   Start with Atmospheric, Breakdown, Buildup and Drop banks. Bank identities are
   configuration, not hardcoded renderer or protocol categories.
-- A Lua failure permits Starfire to select another sequence in the same bank.
-  This is an explicit fault-handling exception to Autolux's normal selection
-  ownership. Report the actual selection and failure to Autolux and the webapp.
+- Keep script-failure handling simple. Automatic fallback selection and retries
+  are outside the initial scope; banks organize sequences for Autolux to select.
 - Starfire receives timing and lighting-control data, matching the current
   SoundSwitch integration's useful inputs. It does not receive or analyse audio.
 - Keep analysis, rendering, transport and hardware output separate.
@@ -234,8 +233,8 @@ by a stable registered name rather than a caller-supplied filesystem path.
 Each belongs to a bank and keeps running until replaced by a different sequence.
 Selecting it again does not restart it or replay entry effects. Pattern
 repetition also does not re-enter it. Shared Lua modules and Rust helpers avoid
-copying common effects. Banks group musically compatible alternatives. Fallback
-order and the behavior when no usable sequence remains are open decisions.
+copying common effects. Banks group musically compatible alternatives; they do
+not imply automatic failover behavior.
 
 Proposed API: Lua writes semantic fixture properties and can calculate arbitrary
 curves or choreography. Rust supplies groups, musical time, optional effect
@@ -297,12 +296,12 @@ bounded queues. Prefer a small runtime over an ECS or general job scheduler.
 Define how queued state updates coalesce and which events must be preserved.
 
 A stalled program must not leave a strobe latched. Accent expiry and master
-blackout must remain host-controlled. On a Lua fault, try another sequence from
-the same bank. Proposed safeguards: exclude the failed revision until replaced,
-bound fallback attempts, and suppress entry accents during fault recovery. The
-all-sequences-failed behavior remains to be agreed. Define bounded hold/fade
-behavior for lost timing, process exit and output loss separately. Keep the
-existing 10-second bidirectional Radius heartbeats and receiver failure policy.
+blackout must remain host-controlled. Proposed minimum fault path: stop lighting
+playback, cancel accents, apply a fixture-aware blackout and report the script
+error while audio continues. No automatic bank failover or retry system in the
+first version. Define bounded hold/fade behavior for lost timing, process exit
+and output loss separately. Keep the existing 10-second bidirectional Radius
+heartbeats and receiver failure policy.
 
 Use the existing dashboard and Prometheus path. Useful renderer measurements are
 render time, missed deadlines, input/clock age, late section events, output age
