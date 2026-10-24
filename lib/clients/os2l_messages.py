@@ -47,7 +47,7 @@ def song_loaded_message(time_elapsed_ms: int, beat_pos: float, first_beat_time_m
 {"evt":"subscribed","trigger":"deck 4 get_bpm","value":%f}
 {"evt":"subscribed","trigger":"deck 1 get_filepath","value":"C:\\\\Users\\\\User\\\\Music\\\\Avicii - Levels.mp3"}
 {"evt":"subscribed","trigger":"deck 3 get_filepath","value":"C:\\\\Users\\\\User\\\\Music\\\\Avicii - Levels.mp3"}
-{"evt":"subscribed","trigger":"deck 4 get_filepath","value":"C:\\\\Users\\\\User\\Music\\\\Avicii - Levels.mp3"}
+{"evt":"subscribed","trigger":"deck 4 get_filepath","value":"C:\\\\Users\\\\User\\\\Music\\\\Avicii - Levels.mp3"}
 {"evt":"subscribed","trigger":"deck 1 get_time elapsed absolute","value":%d}
 {"evt":"subscribed","trigger":"deck 3 get_time elapsed absolute","value":%d}
 {"evt":"subscribed","trigger":"deck 4 get_time elapsed absolute","value":%d}

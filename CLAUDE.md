@@ -1,4 +1,17 @@
-﻿# SoundSwitch Auto Pilot
+﻿# Autolux
+
+Autolux combines the SoundSwitch Auto Pilot Python application with the former
+dmx-enttec-node C++ project under `native/`, retaining both repository histories.
+The Python analyser/show controller, native audio sender, audio receiver and
+DMX receiver remain separate processes with their existing responsibilities.
+`start-show.ps1` resolves the sender inside this repository; `build-native.ps1`
+builds all three native applications and runs their tests. The Python console
+command is `autolux`, with `auto_pilot` retained for compatibility. Native
+dependencies are pinned submodules declared at the monorepo root.
+
+The unified repository keeps the validated audio delay and existing wire formats.
+The proposed shared eight-byte media watermark is deferred to a separate design:
+it needs an agreed timeline, session identity, buffering and late-packet policy.
 
 Intelligent DJ lighting automation system that synchronizes stage effects to live music in real time. A neural section classifier reads the music -- MERT encoder -> online student -> fixed-lag bar decoder -- and the decoder's per-bar decisions are the only thing permitted to say what the lights are doing. The show reaches SoundSwitch over MIDI and OS2L.
 
@@ -559,8 +572,14 @@ The rule engine ran *ahead* of the audience and `DelayedCommandQueue` held every
 command back by the whole look-ahead. The model runs *behind*, so the correct
 relation is `queue_delay = playback_delay - chain_latency`, and it must be >= 0.
 `PLAYBACK_DELAY_SEC` is **14.0 s** and must match `playback_delay_seconds` in
-dmx-enttec-node; it is defined in `lib/main.py` and mirrored in
-`simulate/runner.py`. Local debug playback is delayed by the same amount, so
+dmx-enttec-node's **audio sender**; it is defined in `lib/main.py` and mirrored in
+`simulate/runner.py`. `start-show.ps1` derives the sender's configuration from
+that setting on every launch, verifies both programs capture the same undelayed
+device, and refuses an old sender binary that cannot validate the new config.
+The sender delays complete stereo frames before UDP transmission; the remote
+receiver and DMX protocol stay compatible, with ordinary transport/device
+latency additional to the model's budget. The launcher owns the sender process
+and stops it when the show exits. Local debug playback is delayed by the same amount, so
 headphone monitoring stays in sync.
 
 - **`lag_bars = 2` is the chosen point on a measured curve, not a default.** The
@@ -603,11 +622,13 @@ headphone monitoring stays in sync.
   the bars are drawn on, so a run in which it changed measured something
   different, whatever the scores did.
 - **Everything the room can see waits; the engine's own bookkeeping does not.**
-  Song-boundary resets and the OS2L wire (which talks to a DJ's software, not to
-  the audience) happen immediately; MIDI, the overlay chase and the stage go
-  through the queue. Before that split the stage blacked out while the last
-  fourteen seconds of a track were still playing -- inaudible in every report,
-  unmissable in the venue.
+  Song-boundary resets happen immediately. MIDI and the overlay chase go through
+  the engine's queue. OS2L is consumed by SoundSwitch itself: its song boundaries
+  and periodic playhead snapshots now wait in the sender for the same room delay.
+  Beat messages already waited in the engine, so the sender sends those without
+  another delay. An ordered schedule lets a due beat pass a future playhead
+  snapshot. Previously the beat pulses described room audio while the continuously
+  published playhead and play/stop state described audio fourteen seconds ahead.
 
 ### Fast simulation and the cell cache
 
@@ -1030,6 +1051,19 @@ timer-throttling flags) restores the real behaviour rather than faking it, and
 
 ## Running
 
+For the installed Windows room setup, `./start-show.ps1 -CheckOnly` checks the
+devices, model and sender; `./start-show.ps1` starts the sender and live show
+together. SoundSwitch must be out of MIDI mapping mode. The launcher resolves
+device names rather than assuming stable numeric indices and starts loopMIDI
+when necessary. Music goes to CABLE Input; both consumers read CABLE Output.
+Sender logs and generated configuration live under the ignored `.live/` folder.
+The viewer's console startup message is ASCII so a redirected Windows console
+cannot terminate the separate viewer on a Unicode encoding error.
+OS2L discovery identifies a SoundSwitch instance by its advertised service name,
+not by how many local interface addresses it advertises. Ethernet, Hyper-V and
+VirtualBox addresses for one instance must not be mistaken for competing shows;
+repeat announcements update that instance's endpoint instead of duplicating it.
+
 ```bash
 # Install dependencies (requires uv: https://github.com/astral-sh/uv).
 # torch, transformers and onnxruntime are BASE dependencies now -- they run the
@@ -1368,7 +1402,7 @@ The simulation used to be judged against one bundled track and a plumbing-only P
 
 - **A benchmark that only runs on one laptop is not a benchmark.** The ten tracks' audio and labels are committed — the audio under names derived from the YouTube id (`training/eval_audio/`, opaque so a directory listing says nothing; derived so code finds a file with no lookup table to go stale), the labels as a verbatim, sha-pinned slice of the corpus annotation. Owner-authorised, and precisely these ten: the rest of the corpus stays gitignored and machine-local. A machine that has the corpus too still reads the committed copies, so every machine benchmarks the same bytes. `training/eval_assets.py` owns the derivation and re-cuts both after a re-freeze.
 - **A benchmark that follows the corpus is not a benchmark.** The set is frozen: the selector refuses to overwrite it without `--force`, and the baseline records the eval set's own checksum so a re-freeze fails loudly instead of silently re-scoring a different ten tracks. Re-cutting the set and re-cutting the baseline is one change, never two.
-- **That checksum is over the file's bytes, so the checkout must not rewrite them.** Git on Windows defaults to `core.autocrlf=true` and materialises LF as CRLF, which changes the hash while changing nothing about the benchmark — the guard then passed in the worktree the file was written in and failed in every fresh clone, making its verdict a fact about the machine. `.gitattributes` pins the frozen artifacts to `eol=lf` so every checkout agrees with the writers, which already emit LF unconditionally. An older clone made before that pin keeps its CRLF copies until they are re-checked-out; rewriting them to LF is the remedy and leaves the index untouched.
+- **That checksum is over the file's bytes, so the checkout must not rewrite them.** Git on Windows defaults to `core.autocrlf=true` and materialises LF as CRLF, which changes the hash while changing nothing about the benchmark — the guard then passed in the worktree the file was written in and failed in every fresh clone, making its verdict a fact about the machine. `.gitattributes` pins the frozen artifacts to `eol=lf` so every checkout agrees with the writers, which already emit LF unconditionally. An older clone made before that pin keeps its CRLF copies until they are rewritten, and `git status` calls the tree clean throughout — git normalises on read, so the only symptom is a provenance sha nobody can account for. Two things about the remedy are measured rather than obvious: `git checkout -- <path>` will not do it, because git believes the file matches and skips it (so do `checkout HEAD --` and `--force`), so the file has to be **deleted** first and checked out after; and the committed bytes were never wrong, so nothing is ever re-cut. The durable fix is `core.autocrlf=false` on the machine, which is why no rung was added for it — it is a per-checkout setting, not something this repo gets to decide.
 - **The benchmark is never learned from.** Neither the ten ids nor any track sharing an artist with one of them enters a training or validation split. This is stated twice on purpose — once here as policy, once in the split builder as code.
 - **Two gates, and they mean different things.** The *report checksum* says the pipeline's behaviour moved: a deterministic run over fixed audio can only change if the code did. The *label-aligned scores* say whether the show got better or worse. A deliberate improvement trips both, and that is the workflow — read the table, decide the change is wanted, re-cut the baseline in the same commit. A regression with no checksum change is impossible and would mean the determinism contract is broken. Beside the scores, the *count facts* each row records (beats detected, beats joined, label boundaries, seconds scored, intent changes committed, intent blocks that landed late, and blackout blocks by where they fell) are compared exactly — a score tolerance wide enough to be useful absorbs a run that measured a different number of things. The last three joined that list after the anchor re-cut moved lateness on four of ten tracks with nothing in the gate able to say so.
 - **Crispness@0.5 s is the fifth gated metric, and it is a headline rather than a diagnostic.** Boundary-F1 at the tightest tolerance the scorer computes asks whether the change landed *on* the section change, not merely near it — and it is the axis the shipped decoder was **selected** on. The 2.0 s lens it sits beside hides most of the spread: the post-decoder dwell configs that were rejected score 0.68 at 2 s and 0.01 at 0.5 s. A benchmark that cannot see the axis a model was chosen on cannot defend that choice. It is gated from its first cut with no historical value to compare against — the rule engine's baseline has no such column and one cannot be reconstructed, because the demolition's schema change makes those reports unreproducible — so the aggregate is a starting line.

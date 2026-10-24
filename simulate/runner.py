@@ -9,7 +9,7 @@ from lib.clock import Clock, SYSTEM_CLOCK, VirtualClock
 from simulate import cell_cache
 
 TIMING_TOLERANCE_SEC = 0.050
-# Must match lib/main.py's PLAYBACK_DELAY_SEC and dmx-enttec-node's playback_delay_seconds.
+# Must match lib/main.py's PLAYBACK_DELAY_SEC and the native audio sender's delay.
 PLAYBACK_DELAY_SEC = 14.0
 FAST_SIM_RANDOM_SEED = 1337
 

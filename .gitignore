@@ -17,6 +17,7 @@ spotify_details.json
 # The bar tracker's chunk cache, same rule again (simulate/tracker_cache.py).
 *.bartracker.npz
 report.json
+.live/
 # The Raveform corpus: ~90 GB, machine-local, never committed.  The ten eval-set
 # tracks are the deliberate exception and live in training/eval_audio/.
 #

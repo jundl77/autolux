@@ -1,0 +1,10 @@
+{
+  "log_level": "info",
+  "run_hot": false,
+  "core_affinity": 4,
+  "audio_server_ip": "127.0.0.1",
+  "audio_server_port": 19002,
+  "audio_device_id": "{0.0.0.00000000}.{75e827d5-9c89-4bdd-afbb-1d8b33015814}",
+  "audio_format": "SoundIoFormatFloat32LE",
+  "audio_sample_rate": 44100
+}

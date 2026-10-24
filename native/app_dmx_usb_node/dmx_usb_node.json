@@ -1,0 +1,7 @@
+{
+  "log_level": "debug",
+  "run_hot": false,
+  "core_affinity": 6,
+  "overlay_listen_port": 19001,
+  "dmx_universe": 0
+}
