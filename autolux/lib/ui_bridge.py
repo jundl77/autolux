@@ -15,7 +15,7 @@ from pathlib import Path
 from contextlib import contextmanager
 import socket
 
-DEFAULT_DASHBOARD_PORT = 7643
+DEFAULT_DASHBOARD_PORT = 8765
 DASHBOARD_MDNS_HOSTNAME = 'autolux.local.'
 DASHBOARD_BIND_ADDRESS = '0.0.0.0'
 DEFAULT_ROUTE_PROBE = ('192.0.2.1', 9)
