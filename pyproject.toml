@@ -3,11 +3,11 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["lib*", "simulate*"]
+include = ["cli*", "autolux*"]
+exclude = ["*.tests*", "autolux.training.data*"]
 
 [project.scripts]
-autolux = "lib.main:run_sync"
-auto_pilot = "lib.main:run_sync"
+autolux = "cli.main:run_sync"
 
 [project]
 name = "autolux"
@@ -26,6 +26,7 @@ dependencies = [
     "argcomplete",
     "zeroconf",
     "netifaces",
+    "prometheus-client>=0.21,<1",
     "setuptools<71",
     # torch stays at 2.11: only the legacy TorchScript ONNX exporter keeps a GRU's
     # time axis dynamic, and it is deprecated from 2.9. Pin provenance is the PR body.
@@ -79,7 +80,8 @@ madmom = { git = "https://github.com/CPJKU/madmom.git", rev = "27f032e8947204902
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["autolux/tests", "cli/tests", "radius/tests"]
+pythonpath = ["."]
 markers = [
     "integration: full-pipeline simulation tests (slow, requires madmom)",
 ]

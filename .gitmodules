@@ -1,6 +1,6 @@
 [submodule "autolux-json"]
-	path = native/x_njson
+	path = radius/x_njson
 	url = https://github.com/nlohmann/json.git
 [submodule "autolux-soundio"]
-	path = native/x_libsoundio
+	path = radius/x_libsoundio
 	url = https://github.com/andrewrk/libsoundio.git

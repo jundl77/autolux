@@ -1,0 +1,124 @@
+"""Small health summary and Prometheus export shared by the viewer and CLI."""
+import math
+import time
+
+from prometheus_client import CollectorRegistry, generate_latest
+from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+
+
+def health_summary(snapshot, *, now=None):
+    system = snapshot.get('system') or {}
+    if not system:
+        return {'state': 'unavailable', 'cards': []}
+    now = time.time() if now is None else now
+    age = max(0, now - system.get('updated_at', 0))
+    tx, rx = system.get('tx') or {}, system.get('rx') or {}
+    tx_age = system.get('tx_age_seconds')
+    rx_age = system.get('rx_age_seconds')
+    tx_fresh = tx_age is not None and tx_age + age < 3
+    rx_fresh = rx_age is not None and rx_age + age < 3
+    link = tx_fresh and rx_fresh and tx.get('link_up') and rx.get('link_up')
+    fault = (snapshot.get('shed') or {}).get('fault')
+    recent = system.get('recent') or {}
+    glitches = sum(recent.values())
+    audio_detail = (f"Last 10 s: {int(recent.get('underruns', 0))} underruns · "
+                    f"{int(recent.get('overruns', 0))} overruns · {int(recent.get('lost_frames', 0))} lost frames")
+    if recent.get('dropped_frames'):
+        audio_detail += f" · {int(recent['dropped_frames'])} dropped frames"
+    if recent.get('latency_recoveries'):
+        audio_detail += f" · {int(recent['latency_recoveries'])} latency recovery drops"
+    peak = rx.get('audio_signal_peak')
+    if peak is not None:
+        audio_detail += f" · peak {20*math.log10(peak):.0f} dBFS" if peak > 0 else ' · digital silence'
+    fill, target = rx.get('audio_buffer_seconds', 0), rx.get('buffer_target_seconds', .08)
+    input_age = rx.get('audio_input_age_seconds')
+    audio_fresh = rx_fresh and input_age is not None and input_age + age < 1
+    dmx_age = tx.get('dmx_input_age_seconds')
+    lights = link and rx.get('dmx_connected') and dmx_age is not None and dmx_age + age < 3
+    lateness = rx.get('dmx_lateness_seconds')
+    cards = [
+        ('Autolux', 'Stopped' if age >= 3 else 'Degraded' if fault else 'Running',
+         str(fault or 'Analysis and controller'), age < 3 and not fault),
+        ('Radius link', 'Connected' if link else 'Waiting / offline',
+         '10 s heartbeat in both directions', bool(link)),
+        ('Audio', 'No input' if not audio_fresh else 'Glitches' if glitches else 'Stable',
+         audio_detail, audio_fresh and not glitches),
+        ('Audio buffer', f'{fill*1000:.0f} ms' if rx_fresh else 'Unavailable',
+         f'Target {target*1000:.0f} ms · clock correction {rx.get("clock_correction_ppm", 0):.0f} ppm',
+         rx_fresh and target*.25 <= fill <= target*3),
+        ('Lighting', 'Ready' if lights else 'Waiting / offline',
+         'Enttec output and SoundSwitch input', bool(lights)),
+        ('Audio / lights', f'{lateness*1000:.0f} ms' if lights and lateness is not None else 'Unavailable',
+         'Lighting scheduling lateness', bool(lights and lateness is not None and lateness < .05)),
+    ]
+    return {'state': 'healthy' if all(c[3] for c in cards) else 'attention', 'cards': cards}
+
+
+# Explicit, bounded metric set. Native counters are cumulative for the process lifetime.
+GAUGES = {
+    'audio_signal_peak': 'Peak received audio amplitude during the receiver telemetry interval.',
+    'audio_max_gap_seconds': 'Largest audio delivery gap during the receiver telemetry interval.',
+    'audio_buffer_seconds': 'Queued audio duration.',
+    'buffer_target_seconds': 'Receiver jitter buffer target.',
+    'heartbeat_age_seconds': 'Time since the last peer heartbeat.',
+    'clock_correction_ppm': 'Playback sample clock correction in parts per million.',
+    'dmx_lateness_seconds': 'Lighting scheduling lateness against audible audio.',
+}
+COUNTERS = {
+    'capture_overruns_total': 'Capture device overruns.',
+    'queue_dropped_frames_total': 'Audio frames dropped by a full transmitter queue.',
+    'underruns_total': 'Receiver audio starvation episodes.',
+    'device_underruns_total': 'Audio output device underruns.',
+    'lost_frames_total': 'Missing audio frames observed at the receiver.',
+    'concealed_frames_total': 'Audio frames replaced with silence.',
+    'overflow_frames_total': 'Audio frames rejected by a full receiver queue.',
+    'late_packets_total': 'Audio packets arriving after their accepted media position.',
+    'latency_trims_total': 'Audio packets discarded to recover excessive latency.',
+    'send_failures_total': 'Failed UDP sends.',
+    'invalid_packets_total': 'Rejected bus datagrams.',
+    'dmx_dropped_total': 'Dropped or out-of-order lighting packets.',
+}
+
+
+class HealthCollector:
+    def __init__(self, source):
+        self.source = source
+
+    def collect(self):
+        snapshot = self.source.snapshot()
+        system = snapshot.get('system') or {}
+        age = max(0, time.time() - system.get('updated_at', 0))
+        yield GaugeMetricFamily('autolux_up', 'Controller health updates are fresh.', value=int(age < 3))
+        shed = snapshot.get('shed') or {}
+        yield GaugeMetricFamily('autolux_analysis_degraded', 'Analysis is recovering from a fault.', value=int(bool(shed.get('fault'))))
+        timing = (snapshot.get('timing_stats') or {}).get('mean_error_ms')
+        if timing is not None:
+            yield GaugeMetricFamily('autolux_command_timing_error_seconds', 'Mean absolute command scheduling error.', value=timing/1000)
+        up = GaugeMetricFamily('radius_up', 'Endpoint telemetry is fresh and its peer heartbeat is healthy.', labels=['node'])
+        for node in ('tx', 'rx'):
+            info = system.get(node) or {}
+            measured_age = system.get(f'{node}_age_seconds')
+            fresh = measured_age is not None and measured_age + age < 3
+            up.add_metric([node], int(fresh and bool(info.get('up')) and bool(info.get('link_up'))))
+        yield up
+        for mapping, factory in ((GAUGES, GaugeMetricFamily), (COUNTERS, CounterMetricFamily)):
+            for key, description in mapping.items():
+                metric = factory(f'radius_{key}', description, labels=['node'])
+                for node in ('tx', 'rx'):
+                    value = (system.get(node) or {}).get(key)
+                    measured_age = system.get(f'{node}_age_seconds')
+                    if measured_age is None or measured_age + age >= 3:
+                        continue  # Missing measurements must not look like healthy zeros.
+                    if isinstance(value, (int, float)) and math.isfinite(value):
+                        metric.add_metric([node], value)
+                yield metric
+
+
+def registry_for(source):
+    registry = CollectorRegistry()
+    registry.register(HealthCollector(source))
+    return registry
+
+
+def metrics(source):
+    return generate_latest(registry_for(source))

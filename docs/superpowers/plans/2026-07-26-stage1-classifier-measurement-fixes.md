@@ -4,7 +4,7 @@
 
 **Goal:** Un-invert the intent classifier by fixing five empirically proven measurement bugs, so that high-energy track sections classify as DROP/GROOVE and low-energy sections as BREAKDOWN/ATMOSPHERIC — the opposite of today's behavior.
 
-**Architecture:** All fixes are localized: feature measurement in `lib/analyser/music_analyser.py`, classification thresholds/branching in `lib/engine/light_engine.py`, and richer per-beat records flowing through `lib/engine/event_buffer.py` into the simulation report (which becomes the future training table). No new components, no pipeline changes. The deterministic fast sim (`auto_pilot simulate file`) is the measurement instrument for every fix.
+**Architecture:** All fixes are localized: feature measurement in `lib/analyser/music_analyser.py`, classification thresholds/branching in `lib/engine/light_engine.py`, and richer per-beat records flowing through `lib/engine/event_buffer.py` into the simulation report (which becomes the future training table). No new components, no pipeline changes. The deterministic fast sim (`autolux simulate file`) is the measurement instrument for every fix.
 
 **Tech Stack:** Python 3.12, aubio, numpy, pytest (async via existing conftest), uv.
 
@@ -12,8 +12,8 @@
 
 - Branch: `stage1_classifier_measurement_fixes` (already created off master). Never commit to `master`.
 - Every task ends with `uv run pytest -m "not integration"` green; the final task runs the full `uv run pytest`.
-- Determinism is inviolate: re-running `uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3` twice must print the same sha256. Report *content* will change with each fix (expected — the checksum value changes, but stays stable across reruns).
-- CLAUDE.md policy: intent/architecture only — no threshold values or signatures duplicated into CLAUDE.md files.
+- Determinism is inviolate: re-running `uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3` twice must print the same sha256. Report *content* will change with each fix (expected — the checksum value changes, but stays stable across reruns).
+- AGENT.md policy: intent/architecture only — no threshold values or signatures duplicated into AGENT.md files.
 - Commit after every task (small commits). Do NOT push until the final task.
 
 ## Empirical ground truth (sample track `samples/generate_eric_prydz_192k.mp3`, ~165 s)
@@ -232,7 +232,7 @@ Expected: PASS
 
 - [ ] **Step 5: Measure the fix on the sample track**
 
-Run: `uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3 --report report.json`
+Run: `uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3 --report report.json`
 Then read `report.json` and eyeball `metrics` — this is a smoke check only; full verification comes in Task 6 once beat records carry kick_strength.
 
 - [ ] **Step 6: Commit**
@@ -623,7 +623,7 @@ if __name__ == '__main__':
 - [ ] **Step 2: Run the calibration loop**
 
 ```bash
-uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3 --report report.json
+uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3 --report report.json
 uv run python training/inspect_report.py report.json
 ```
 
@@ -645,16 +645,16 @@ Iterate on the constants in `light_engine.py` until all eight hold. Record the f
 Run: `uv run pytest`
 Expected: PASS. The integration tests assert evaluator PASS, timing, flush, duration, speed, and determinism on the new behavior. If `test_sample_song_evaluation_passes` fails on `intent_changes_count`/`unique_intents_count`, the classifier changes have made the show *worse*, not better — go back to Step 2, do not loosen the evaluator.
 
-- [ ] **Step 4: Update the CLAUDE.md files (intent level only)**
+- [ ] **Step 4: Update the AGENT.md files (intent level only)**
 
-- `lib/analyser/CLAUDE.md`: kick strength paragraph — transient-peak capture over a short pre-beat window (not a single-buffer snapshot), silence gating; BPM section — octave folding rationale; classifier design — new priority order with the risers-strip-the-kick rationale; PEAK — now an engine-level temporal promotion, not a feature threshold; note that beat records in reports now carry the full feature row (the training table).
-- Root `CLAUDE.md`: Known Issues — delete the now-fixed bullets (“Sub-bass gate disabled … calibrate before enabling” stays; the beat-dropout and density-trend-warmup bullets stay); update the LightIntent table row for PEAK (“sustained DROP, promoted by dwell”); mention `training/inspect_report.py` in the analyser CLAUDE.md evaluation section.
+- `lib/analyser/AGENT.md`: kick strength paragraph — transient-peak capture over a short pre-beat window (not a single-buffer snapshot), silence gating; BPM section — octave folding rationale; classifier design — new priority order with the risers-strip-the-kick rationale; PEAK — now an engine-level temporal promotion, not a feature threshold; note that beat records in reports now carry the full feature row (the training table).
+- Root `AGENT.md`: Known Issues — delete the now-fixed bullets (“Sub-bass gate disabled … calibrate before enabling” stays; the beat-dropout and density-trend-warmup bullets stay); update the LightIntent table row for PEAK (“sustained DROP, promoted by dwell”); mention `training/inspect_report.py` in the analyser AGENT.md evaluation section.
 - Do NOT copy threshold numbers into either file.
 
 - [ ] **Step 5: Final commit**
 
 ```bash
-git add training/inspect_report.py CLAUDE.md lib/analyser/CLAUDE.md lib/engine/light_engine.py
+git add training/inspect_report.py AGENT.md lib/analyser/AGENT.md lib/engine/light_engine.py
 git commit -m "calibrate thresholds against reference structure; add report inspector; update docs"
 ```
 

@@ -13,7 +13,7 @@
 - Branch `downbeat_tracking` (create off `eval_pipeline` at its current head) in a NEW worktree `C:\Users\Julian\Projects\soundswitch-downbeat-worktree`. Never commit to master/eval_pipeline; no push until the coordinator says so. Data at the main-repo path as usual.
 - The v2 retrain chain runs concurrently in the eval worktree and OWNS the GPU during its training window — coordinate: your training runs are short (≤10 min); if `nvidia-smi` shows the GPU busy with a training process, wait for it rather than contending.
 - Splits: reuse `splits.json` exactly (train for fitting, val for any tuning, test read ONCE at the end). Eval-set ids/artists excluded already by construction.
-- Determinism, TDD, per-task commits, CLAUDE.md policy — all as established.
+- Determinism, TDD, per-task commits, AGENT.md policy — all as established.
 - `uv run pytest -m "not integration"` green at every task end (run from your worktree).
 
 ### Task 1: Grid targets + dataset extension
@@ -34,7 +34,7 @@
 
 ### Task 4: Verdict
 
-**Files:** `training/nn/evaluate_downbeat.py`, tests; docs (intent-level; the three CLAUDE.md touchpoints). FIRST: the aubio-vs-expert grid alignment analysis (per-track offsets, jitter, missed/extra beats) — corpus-wide from the report cache. Val (AUBIO-DRIVEN primary + expert-driven diagnostic): downbeat F1@±70ms, phase accuracy, flips/track; pick flip penalty + lag on val's aubio-driven numbers. TEST (once, both conditions): same metrics, PLUS the show ablation — section decoding on test tracks with the AUBIO-DRIVEN predicted grid vs the expert grid, boundary-F1/flicker delta. Synthetic discontinuity re-lock test (deck-transition proxy). STOP after the test read.
+**Files:** `training/nn/evaluate_downbeat.py`, tests; docs (intent-level; the three AGENT.md touchpoints). FIRST: the aubio-vs-expert grid alignment analysis (per-track offsets, jitter, missed/extra beats) — corpus-wide from the report cache. Val (AUBIO-DRIVEN primary + expert-driven diagnostic): downbeat F1@±70ms, phase accuracy, flips/track; pick flip penalty + lag on val's aubio-driven numbers. TEST (once, both conditions): same metrics, PLUS the show ablation — section decoding on test tracks with the AUBIO-DRIVEN predicted grid vs the expert grid, boundary-F1/flicker delta. Synthetic discontinuity re-lock test (deck-transition proxy). STOP after the test read.
 
 ---
 

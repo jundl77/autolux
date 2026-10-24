@@ -188,7 +188,7 @@ the corpus median bar (1.875 s, 128 BPM 4/4) that is 1.875 + 5.625 = **7.5 s**.
 `LOOK_AHEAD_SEC` on master is **2.5 s** (`lib/main.py:14`, mirrored in
 `simulate/runner.py:12`, matching `playback_delay_seconds` in dmx-enttec-node). The
 charter's brief said "8 s, playback_delay_seconds untouched"; production is at 2.5,
-and 8 would not be enough either. `lib/analyser/CLAUDE.md` already recorded this —
+and 8 would not be enough either. `lib/analyser/AGENT.md` already recorded this —
 "the show's look-ahead must grow to the decoder's budget… the two systems are not
 latency-matched today" — but the size of the gap had not been written down.
 
@@ -605,7 +605,7 @@ samples to the madmom migration's methodology (beat agreement, intent-block
 agreement, the timing distribution). Discrepancies explained, not tolerated.
 
 ### Task 18 — docs, grep proofs, PR — 4 h
-Root `CLAUDE.md` and `lib/analyser/CLAUDE.md` rewritten at intent level: the rule
+Root `AGENT.md` and `lib/analyser/AGENT.md` rewritten at intent level: the rule
 engine's whole section goes, replaced by the model + decoder story. The two grep
 proofs. PR body carries the census table, B1/B2 and how they were resolved, the
 crispness re-rank, the realtime numbers, the new anchors, the dependency diff, the

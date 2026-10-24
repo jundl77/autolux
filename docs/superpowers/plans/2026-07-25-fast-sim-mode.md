@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `auto_pilot simulate file <song>` run a full track in under 10 seconds, deterministically, with unchanged pipeline semantics; keep the real-time `--ui` visualization mode and `simulate realtime` untouched.
+**Goal:** Make `autolux simulate file <song>` run a full track in under 10 seconds, deterministically, with unchanged pipeline semantics; keep the real-time `--ui` visualization mode and `simulate realtime` untouched.
 
 **Architecture:** An injectable `Clock` abstraction (`SystemClock` default everywhere, `VirtualClock` in fast sim) replaces every direct `datetime.datetime.now()` / `time.monotonic()` call in the pipeline components that run in simulation. The sim runner advances the virtual clock by exactly one buffer duration (256/44100 s) per audio buffer, with no sleeps. Two hot-spot fixes in `MusicAnalyser` (vectorized silence check, deletion of dead vstack accumulation) raise throughput from ~14× to ~25-30× real-time.
 
@@ -1287,7 +1287,7 @@ and in `update_overlay_data` / `flush_messages`:
 
 ```python
 """
-Simulation runner for soundswitch-auto-pilot.
+Simulation runner for autolux.
 
 Replaces all hardware-touching clients with stubs and feeds synthetic or
 file-based audio through the full MusicAnalyser → LightEngine →
@@ -1305,10 +1305,10 @@ Two pacing modes, selected by the caller:
 
 Usage examples:
   # Fast headless evaluation (writes report.json, exits 0=PASS / 1=FAIL)
-  python auto_pilot simulate file samples/song.mp3
+  python autolux simulate file samples/song.mp3
 
   # Real music file with live Dash UI (real-time paced)
-  python auto_pilot simulate file samples/song.mp3 --ui
+  python autolux simulate file samples/song.mp3 --ui
 """
 
 import asyncio
@@ -1405,7 +1405,7 @@ def build_visualizer_simulation(audio_client, event_buffer, clock: Clock = SYSTE
 async def run_simulation(components: dict, duration_sec: float,
                          clock: Clock = SYSTEM_CLOCK,
                          pace_real_time: bool = False):
-    """Main simulation loop — mirrors SoundSwitchAutoPilot.run().
+    """Main simulation loop — mirrors AutoluxController.run().
 
     duration_sec is measured on `clock`: virtual (song) seconds under a
     VirtualClock, wall seconds otherwise. The loop also stops when the audio
@@ -1650,7 +1650,7 @@ Replace the whole file with:
 
 ```python
 """
-Simulation CLI handlers — wired into 'auto_pilot simulate' subcommand.
+Simulation CLI handlers — wired into 'autolux simulate' subcommand.
 
 MODES
   file            — FAST headless (default): run the whole file through the
@@ -1661,10 +1661,10 @@ MODES
   realtime        — capture from microphone in real time with Dash timeline.
 
 EXAMPLES
-  python auto_pilot simulate file samples/song.mp3
-  python auto_pilot simulate file samples/song.mp3 --report out.json
-  python auto_pilot simulate file samples/song.mp3 --ui --play-audio
-  python auto_pilot simulate realtime --device-index 1
+  python autolux simulate file samples/song.mp3
+  python autolux simulate file samples/song.mp3 --report out.json
+  python autolux simulate file samples/song.mp3 --ui --play-audio
+  python autolux simulate realtime --device-index 1
 """
 
 import asyncio
@@ -1854,7 +1854,7 @@ Replace the usage lines in the module docstring:
 Agentic evaluator: scores a simulation report against configurable criteria.
 
 Usage (headless / CI):
-  python auto_pilot simulate file song.mp3 --report report.json
+  python autolux simulate file song.mp3 --report report.json
   # exit code 0 = PASS, 1 = FAIL
 ```
 
@@ -1862,7 +1862,7 @@ Usage (headless / CI):
 
 - [ ] **Step 3: Verify the fast CLI end-to-end (acceptance run)**
 
-Run: `uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3`
+Run: `uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3`
 
 Expected:
 - Completes in **< 10 s wall time** on the first run (decode + pipeline), and faster on the second run (decode cache hit — look for `loading decode cache` in the log).
@@ -1871,12 +1871,12 @@ Expected:
 
 Run it twice and diff the reports:
 
-Run: `uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3 --report a.json; uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3 --report b.json`
+Run: `uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3 --report a.json; uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3 --report b.json`
 Then compare `a.json` and `b.json` — they must be byte-identical (determinism). Delete `a.json`/`b.json` afterwards.
 
 - [ ] **Step 4: Verify the `--ui` path still starts**
 
-Run: `uv run python auto_pilot simulate file samples/generate_eric_prydz_192k.mp3 --ui --port 8051` in the background; after ~5 s, `curl http://localhost:8051` (or `Invoke-WebRequest`) must return the Dash page HTML; then kill the process. This confirms the real-time path wires up (full visual check is manual).
+Run: `uv run python autolux simulate file samples/generate_eric_prydz_192k.mp3 --ui --port 8051` in the background; after ~5 s, `curl http://localhost:8051` (or `Invoke-WebRequest`) must return the Dash page HTML; then kill the process. This confirms the real-time path wires up (full visual check is manual).
 
 - [ ] **Step 5: Run the full suite**
 
@@ -1892,15 +1892,15 @@ git commit -m "make fast headless the default file-simulation mode, --ui opt-in"
 
 ---
 
-### Task 12: Documentation (CLAUDE.md policy) + final verification
+### Task 12: Documentation (AGENT.md policy) + final verification
 
 **Files:**
-- Modify: `CLAUDE.md` (root)
-- Modify: `lib/analyser/CLAUDE.md`
+- Modify: `AGENT.md` (root)
+- Modify: `lib/analyser/AGENT.md`
 
-**Interfaces:** none — documentation only, per the repo's CLAUDE.md policy (intent/meta level, no thresholds or signatures).
+**Interfaces:** none — documentation only, per the repo's AGENT.md policy (intent/meta level, no thresholds or signatures).
 
-- [ ] **Step 1: Update root `CLAUDE.md`**
+- [ ] **Step 1: Update root `AGENT.md`**
 
 Make these edits (intent-level, no code duplication):
 
@@ -1920,9 +1920,9 @@ and update the `simulate/runner.py` row description to:
 
 ```bash
 # Simulation (no hardware required)
-python auto_pilot simulate file samples/song.mp3          # fast headless: full song in seconds, report + evaluation
-python auto_pilot simulate file samples/song.mp3 --ui     # real-time paced with live Dash timeline
-python auto_pilot simulate realtime                       # microphone input with live Dash timeline
+python autolux simulate file samples/song.mp3          # fast headless: full song in seconds, report + evaluation
+python autolux simulate file samples/song.mp3 --ui     # real-time paced with live Dash timeline
+python autolux simulate realtime                       # microphone input with live Dash timeline
 ```
 
 3. Add a paragraph to the section describing simulation (near the LightIntent/look-ahead discussion), at intent level:
@@ -1944,7 +1944,7 @@ observable in `--ui` / realtime modes, which still run on the system clock.
 - **Decode cache**: `simulate file` writes `<song>.npy` beside the audio file (gitignored). Stale caches are detected by mtime; delete the `.npy` to force a re-decode.
 ```
 
-- [ ] **Step 2: Update `lib/analyser/CLAUDE.md`**
+- [ ] **Step 2: Update `lib/analyser/AGENT.md`**
 
 In the **Evaluation Strategy → Running a simulation** section, replace the command and add a sentence:
 
@@ -1952,7 +1952,7 @@ In the **Evaluation Strategy → Running a simulation** section, replace the com
 ### Running a simulation
 
 ```bash
-python auto_pilot simulate file samples/song.mp3 --report report.json
+python autolux simulate file samples/song.mp3 --report report.json
 ```
 
 Fast headless mode is the default: the full track runs through the identical
@@ -1972,8 +1972,8 @@ Expected: all pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CLAUDE.md lib/analyser/CLAUDE.md
-git commit -m "document fast simulation mode in CLAUDE.md"
+git add AGENT.md lib/analyser/AGENT.md
+git commit -m "document fast simulation mode in AGENT.md"
 ```
 
 - [ ] **Step 5: Clean up stray artifacts**

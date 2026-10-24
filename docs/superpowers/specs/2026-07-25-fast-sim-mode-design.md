@@ -5,7 +5,7 @@
 
 ## Goal
 
-`auto_pilot simulate file <song>` must complete in **under 10 seconds** for a typical
+`autolux simulate file <song>` must complete in **under 10 seconds** for a typical
 3-minute track, while remaining **deterministic** and **semantically identical to
 production** (sim/prod match). The existing real-time Dash visualization mode and the
 realtime microphone mode are preserved unchanged.
@@ -100,7 +100,7 @@ end-of-file.
   Visualization and prod keep unseeded randomness.
 - Report/event timestamps become **song-position seconds**, so the intent timeline
   aligns directly with track structure (improves the tuning workflow documented in
-  `lib/analyser/CLAUDE.md`).
+  `lib/analyser/AGENT.md`).
 
 Pacing responsibility moves out of the audio clients: the visualization path keeps
 real-time pacing (sleep against the wall clock) at the runner level, driven by the
@@ -158,9 +158,9 @@ rather than OS scheduler jitter. Real jitter remains observable in `--ui` and
 - The uncommitted Windows environment fixes (`pyproject.toml`/`uv.lock`) ride on this
   branch as a separate commit but are not part of this design.
 
-## Documentation impact (per CLAUDE.md policy)
+## Documentation impact (per AGENT.md policy)
 
-- Root `CLAUDE.md`: simulate usage (fast default, `--ui` mode), look-ahead note
+- Root `AGENT.md`: simulate usage (fast default, `--ui` mode), look-ahead note
   (`LOOK_AHEAD_SEC` definition sites unchanged), known-issues if any.
-- `lib/analyser/CLAUDE.md`: evaluation strategy section — report timestamps are now
+- `lib/analyser/AGENT.md`: evaluation strategy section — report timestamps are now
   song-position seconds; fast tuning loop.

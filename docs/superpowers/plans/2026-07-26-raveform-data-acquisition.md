@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Branch: `raveform_data_pipeline` (create off `master`). Never commit to `master`. You work in a git worktree — **all downloaded DATA must go to the main repository's absolute path** `C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform\`, NOT into the worktree (the worktree is temporary; the data must survive it). Code/scripts are committed in the worktree on the branch.
+- Branch: `raveform_data_pipeline` (create off `master`). Never commit to `master`. You work in a git worktree — **all downloaded DATA must go to the main repository's absolute path** `C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\`, NOT into the worktree (the worktree is temporary; the data must survive it). Code/scripts are committed in the worktree on the branch.
 - `training/data/` is gitignored (Task 1) — audio and annotations never enter git.
 - Be polite to YouTube: sequential downloads, sleep between videos, bounded retries. If yt-dlp reports bot-check / sign-in-required errors, do NOT use `--cookies-from-browser` or any credential workaround — record the failure and report it; the owner decides.
 - Personal research use on the owner's machine, standard MIR practice for YouTube-ID datasets (AudioSet-style). Download audio only (`-x`), never video.
@@ -57,7 +57,7 @@ git commit -m "gitignore training/data — raveform corpus lands there"
 
 **Files:**
 - Create: `training/raveform_fetch_annotations.py`
-- Data (main repo absolute path): `C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform\annotations\`
+- Data (main repo absolute path): `C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\annotations\`
 
 **Interfaces:**
 - Produces: annotation files on disk + a printed validation summary. Task 3 consumes the annotation directory layout this task discovers.
@@ -68,7 +68,7 @@ List the repo files: `https://huggingface.co/api/datasets/taejunkim/raveform/tre
 
 - [ ] **Step 2: Write the fetch script**
 
-`training/raveform_fetch_annotations.py`: stdlib-only (`urllib.request`, `zipfile`, `json`, `argparse`), with `--data-dir` defaulting to `<repo-root>/training/data/raveform` (derive repo root from `Path(__file__).resolve().parents[1]`) — **when you run it from the worktree, pass `--data-dir C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform` explicitly.** It downloads the annotation archive(s) to `<data-dir>/annotations/`, extracts if zipped, and is idempotent (skips files that already exist with non-zero size).
+`training/raveform_fetch_annotations.py`: stdlib-only (`urllib.request`, `zipfile`, `json`, `argparse`), with `--data-dir` defaulting to `<repo-root>/training/data/raveform` (derive repo root from `Path(__file__).resolve().parents[1]`) — **when you run it from the worktree, pass `--data-dir C:\Users\Julian\Projects\autolux\autolux\training\data\raveform` explicitly.** It downloads the annotation archive(s) to `<data-dir>/annotations/`, extracts if zipped, and is idempotent (skips files that already exist with non-zero size).
 
 Adapt the internals to the layout found in Step 1 — the script's contract, not its internals, is fixed: after running, `<data-dir>/annotations/` contains all annotation files, and the script prints how many tracks it found.
 
@@ -146,11 +146,11 @@ via `subprocess.run` (list-form args, never shell strings — IDs can start with
 
 - [ ] **Step 2: Pilot run — 10 tracks**
 
-Run: `uv run python training/raveform_download.py --data-dir C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform --limit 10`
+Run: `uv run python training/raveform_download.py --data-dir C:\Users\Julian\Projects\autolux\autolux\training\data\raveform --limit 10`
 
 Then verify quality, not just existence:
 - `librosa.load` the first 5 s of each downloaded mp3 (use the repo venv: `uv run python -c ...`) — nonzero samples, sane sample rate.
-- Run ONE downloaded track through the sim end-to-end from the **main repo checkout** (it has the fast sim on master): `uv run python auto_pilot simulate file <data-dir>/audio/<id>.mp3 --report <scratch>/pilot_report.json` — must exit 0 or 1 (evaluation verdict), not crash. Note: this writes a decode-cache `.npy` beside the mp3 — expected, gitignored.
+- Run ONE downloaded track through the sim end-to-end from the **main repo checkout** (it has the fast sim on master): `uv run python autolux simulate file <data-dir>/audio/<id>.mp3 --report <scratch>/pilot_report.json` — must exit 0 or 1 (evaluation verdict), not crash. Note: this writes a decode-cache `.npy` beside the mp3 — expected, gitignored.
 - Record pilot availability (n/10 succeeded) and mean seconds per track.
 
 - [ ] **Step 3: Commit**
@@ -177,9 +177,9 @@ From PowerShell, launch the full run detached from this session, stdout+stderr t
 
 ```powershell
 Start-Process -WindowStyle Hidden -FilePath "python" `
-  -ArgumentList "C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform\raveform_download.py","--data-dir","C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform" `
-  -RedirectStandardOutput "C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform\download.log" `
-  -RedirectStandardError "C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform\download.err.log"
+  -ArgumentList "C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\raveform_download.py","--data-dir","C:\Users\Julian\Projects\autolux\autolux\training\data\raveform" `
+  -RedirectStandardOutput "C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\download.log" `
+  -RedirectStandardError "C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\download.err.log"
 ```
 
 (Use the venv python if `librosa`-free; the downloader only needs stdlib + yt-dlp on PATH, so system `python` or the uv venv both work — state which you used.)

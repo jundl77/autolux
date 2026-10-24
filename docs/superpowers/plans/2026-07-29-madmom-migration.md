@@ -263,7 +263,7 @@ backlog, per-buffer p99/tail, and every shed/recover transition.
 
 ### Task 10 — docs, grep proof, PR
 
-- Root `CLAUDE.md` and `lib/analyser/CLAUDE.md`: aubio = spectral front-end,
+- Root `AGENT.md` and `lib/analyser/AGENT.md`: aubio = spectral front-end,
   madmom = rhythm. Intent level only — no thresholds, no signatures (policy).
 - `grep -rn aubio lib/` returns only filterbank-role lines.
 - PR vs master with: the license note (madmom CC BY-NC-SA accepted per #57;

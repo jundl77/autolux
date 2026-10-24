@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Branch `eval_pipeline`, worktree `C:\Users\Julian\Projects\soundswitch-eval-worktree`. Never commit to master; no push without the coordinator.
-- DATA at `C:\Users\Julian\Projects\soundswitch-auto-pilot\training\data\raveform\` (gitignored): model checkpoints under `models/`, posterior sidecars under `posteriors/`, splits file at `splits.json`. Committed code: `training/nn/` package + tests. No model binaries in git.
+- DATA at `C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\` (gitignored): model checkpoints under `models/`, posterior sidecars under `posteriors/`, splits file at `splits.json`. Committed code: `training/nn/` package + tests. No model binaries in git.
 - Dependencies: add a `[project.optional-dependencies] training = [...]` extra to pyproject (torch, onnx, onnxruntime pinned exact versions). `uv sync --extra training` documented. Nothing in the default deps changes; the live pipeline gains no new imports in this plan.
 - `lib/` and `simulate/` remain untouched (offline plan).
 - Determinism: training is seeded but only reproducible-ish (CUDA); everything AFTER the checkpoint is exact — ONNX inference single-threaded (`intra_op_num_threads=1`), posterior sidecars written once and content-hashed, decoder pure numpy. The eval chain must be byte-stable given the sidecars.
@@ -85,10 +85,10 @@
 
 ### Task 6: Test-split verdict + docs
 
-**Files:** Modify `CLAUDE.md` + `lib/analyser/CLAUDE.md` (intent-level: the NN v1 exists offline, where artifacts live, what gates shipping); create `training/nn/CLAUDE.md` (package intent map).
+**Files:** Modify `AGENT.md` + `lib/analyser/AGENT.md` (intent-level: the NN v1 exists offline, where artifacts live, what gates shipping); create `training/nn/AGENT.md` (package intent map).
 
 - [ ] ONE evaluation of the frozen (model, decoder_config) on the TEST split. Report the full table vs the rule baseline: macro-F1, boundary-F1@±0.5 s/±2 s, drop recall/precision, flicker rate, per-class F1. No tuning after this run — if it loses, that is the honest result and the next iteration is a new versioned model, not a re-tuned test.
-- [ ] Docs per CLAUDE.md policy (no hyperparameters in docs; point at `training/nn/`).
+- [ ] Docs per AGENT.md policy (no hyperparameters in docs; point at `training/nn/`).
 - [ ] Full `uv run pytest -m "not integration"` green (NN tests are unit-level; heavy steps live behind CLI scripts, not pytest).
 - [ ] Commit: `nn v1: test-split verdict + docs`
 

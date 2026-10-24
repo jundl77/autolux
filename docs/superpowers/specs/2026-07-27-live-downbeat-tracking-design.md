@@ -33,4 +33,4 @@ Truth is always the expert grid. The INPUT condition is what distinguishes hones
 
 ## Constraints inherited
 
-Deterministic everywhere post-checkpoint; no test-split contact before the one-shot verdict; frozen-split extension rules; audio never committed; CLAUDE.md intent-level docs; stacked branch `downbeat_tracking` off `eval_pipeline` in its own worktree (parallel with v2; merges after).
+Deterministic everywhere post-checkpoint; no test-split contact before the one-shot verdict; frozen-split extension rules; audio never committed; AGENT.md intent-level docs; stacked branch `downbeat_tracking` off `eval_pipeline` in its own worktree (parallel with v2; merges after).

@@ -1,0 +1,3 @@
+add_library(radius_artnet_lib artnet_server.cc)
+target_link_libraries(radius_artnet_lib PUBLIC radius_network_lib radius_config_lib)
+target_include_directories(radius_artnet_lib PUBLIC ..)

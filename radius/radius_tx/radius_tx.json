@@ -1,0 +1,15 @@
+{
+  "log_level": "info",
+  "peer_address": "192.168.178.245",
+  "bus_port": 19002,
+  "sample_rate": 44100,
+  "session": 1,
+  "network_core": 0,
+  "audio_core": 1,
+  "dmx_core": -1,
+  "dmx_universe": 0,
+  "audio_device_id": "{0.0.1.00000000}.{d81e9c3d-c36d-4eef-ae2b-4f1ab90a5749}",
+  "playback_delay_seconds": 14.0,
+  "overlay_port": 19001,
+  "artnet_address": "127.0.0.1"
+}

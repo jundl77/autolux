@@ -1,68 +1,65 @@
 # Autolux
 
-Live DJ lighting driven by musical structure. Audio passes through madmom beat
-tracking, MERT music features, the l9d section model and a bar-aligned decoder.
-Its nine section classes map to atmospheric, breakdown, buildup and drop looks,
-sent to SoundSwitch over MIDI with OS2L rhythm and UDP DMX overlays.
+Autolux turns live music into synchronized audio and SoundSwitch lighting.
+One command runs analysis, deploys the receiver and monitors the complete show.
 
-The room hears audio after a 14-second delay so the model can recognize a
-transition before the audience reaches it. The native **audio sender** supplies
-that delay before the network receiver.
-
-Autolux brings SoundSwitch Auto Pilot and dmx-enttec-node into one repository,
-preserving both Git histories. Their processes and responsibilities stay separate:
-
-| Location | Responsibility |
+| Directory | Responsibility |
 | --- | --- |
-| `lib/` | Python analysis, section decisions, scheduled MIDI/OS2L and overlays |
-| `simulate/`, `training/`, `tests/` | Replay, visualizer, model work and Python verification |
-| `native/app_audio_sender/` | C++ capture, playback delay and UDP transmission |
-| `native/app_audio_receiver/` | Network audio reception and speaker playback |
-| `native/app_dmx_usb_node/` | Art-Net and overlay reception, Enttec DMX output |
-| `native/libs/` | Native transport, audio, protocol and device libraries |
+| `cli/` | Startup, SSH deployment, supervision and shutdown |
+| `autolux/lib/` | Music analysis and lighting decisions |
+| `autolux/simulate/` | Replay, dashboard and evaluation |
+| `autolux/training/` | Data, models, labeling, training and backtests |
+| `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
+| `loopMIDI/`, `docs/` | Shared setup and documentation |
 
-Native packets remain compatible with the existing receiver. A shared 64-bit
-media timestamp protocol is deferred to a separate design change.
+Tests live in `autolux/tests/`, `cli/tests/` and `radius/tests/`.
 
-Install Python 3.11, uv and Visual Studio C++ Build Tools, then prepare a checkout:
+## Setup
+
+Windows, Python 3.11, uv and Visual Studio C++ Build Tools are required.
 
 ```powershell
 git submodule update --init --recursive
 uv sync --extra dev --extra visualizer
-.\build-native.ps1
+.\build-radius.ps1
 ```
 
-On the configured Windows setup, start SoundSwitch in Performance Mode with
-VirtualDJ/OS2L enabled, leave MIDI mapping mode, and run:
+Keep models and music under `autolux/training/data/raveform/`, or set
+`RAVEFORM_DATA_DIR`. Production requires the shipped model.
+
+Configure SoundSwitch for Performance Mode and VirtualDJ/OS2L, enable Art-Net
+output to localhost, and exit MIDI mapping mode. Use **loopMIDI Port 1** and route
+music to **CABLE Input**; analysis and Radius both capture **CABLE Output**.
+The receiver needs speakers, the Enttec USB device and key-based Windows SSH.
+See [receiver setup](cli/README.md).
+
+## Run
 
 ```powershell
-.\start-show.ps1 -CheckOnly
-.\start-show.ps1
-# If the standalone sender is already running:
-.\start-show.ps1 -ReplaceAudioSender
+uv run autolux --prod --check
+uv run autolux --prod
+uv run autolux status
+uv run autolux stop
 ```
 
-The launcher starts loopMIDI if necessary, resolves the MIDI and audio devices
-by name, checks the model and matching capture source, and starts the sender and
-autopilot together. It derives the sender delay from the autopilot setting on
-every launch. `-ReplaceAudioSender` restarts only a sender from this project's
-configured binary path; it refuses to stop one from another location.
+The CLI copies the receiver bundle over SCP, starts it over SSH, then starts
+Radius TX and Autolux. Ctrl-C stops the owned session at both ends. RDP is not
+needed during operation. Config templates live beside the two Radius apps;
+`--tx-config`, `--rx-config` and `--receiver-host` override them.
 
-Route the music to **CABLE Input**. Both programs capture the undelayed **CABLE
-Output**; only the sender delays audio. The receiver on `192.168.178.245` plays
-it, while SoundSwitch sends Art-Net to the DMX node on that machine. Network and
-audio-device latency remain in addition to the configured delay. Do not also
-monitor the cable directly to the room or add a second 14-second receiver delay.
+Open **http://127.0.0.1:8050** for analysis, lighting and system health.
+Prometheus metrics are at `/metrics` on the same address. `--no-ui` keeps metrics
+available on port 8051. Logs and generated configs are under `.live/`.
 
-The visualizer is at http://127.0.0.1:8050. Ctrl-C stops both programs. Sender
-logs and its generated configuration live under `.live/`. Use `-NoUi` to run
-without the visualizer, or `uv run autolux list` to inspect devices. The
-`auto_pilot` command remains available for existing scripts.
+## Verify
 
-Architecture and research history are in [CLAUDE.md](CLAUDE.md). The accepted
-system includes deterministic simulation, a ten-track benchmark, corpus and
-training tools, and a waveform labeler. Most trained models and corpus assets
-are local under `training/data/raveform`; they are not included in a clone.
-Linked worktrees find the main checkout's corpus automatically. On another
-machine, set `RAVEFORM_DATA_DIR` to the corpus directory. The original local
-checkouts and their research artifacts remain intact.
+```powershell
+uv run pytest
+.\build-radius.ps1
+uv run python autolux/training/run_eval_set.py
+uv run autolux simulate file path\to\track.mp3
+uv run autolux label path\to\track.mp3
+```
+
+Backtests compare against committed baselines. Run GPU workloads serially.
+See [operations](docs/operations.md) and [Radius](radius/README.md).
