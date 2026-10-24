@@ -26,6 +26,7 @@ def validation_steps(output_dir):
             python + ['-m', 'ruff', 'format', '--check', 'autolux', 'cli', 'radius', 'tools'],
         ),
         ('cpp-format', python + ['-m', 'pre_commit', 'run', 'cpp-format', '--all-files']),
+        ('rust-format', ['cargo', 'fmt', '--manifest-path', 'starfire/Cargo.toml', '--check']),
         (
             'build',
             ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'build.ps1')],

@@ -11,6 +11,7 @@ import pytest
 def test_build_accepts_normal_stderr_but_propagates_package_failure(tmp_path, exit_code):
     shutil.copyfile(Path(__file__).resolve().parents[2] / 'build.ps1', tmp_path / 'build.ps1')
     (tmp_path / 'build-radius.ps1').write_text("Write-Output 'native build fixture'\n")
+    (tmp_path / 'build-starfire.ps1').write_text("Write-Output 'Rust build fixture'\n")
     (tmp_path / 'uv.cmd').write_text(
         f'@echo off\necho package progress 1>&2\nexit /b {exit_code}\n'
     )
@@ -74,3 +75,37 @@ def test_native_formatting_skips_deleted_tracked_files(tmp_path, source_director
     invocations = (tmp_path / 'uv-invocations.txt').read_text()
     assert f'clang-format -i --style=file {source_directory}/radius.proto' in invocations
     assert 'old.proto' not in invocations
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows PowerShell build workflow')
+@pytest.mark.parametrize('failed_step', [None, 'fmt', 'test'])
+def test_starfire_build_stops_on_failure_and_accepts_progress_on_stderr(tmp_path, failed_step):
+    shutil.copyfile(
+        Path(__file__).resolve().parents[2] / 'build-starfire.ps1',
+        tmp_path / 'build-starfire.ps1',
+    )
+    cargo = tmp_path / 'cargo.cmd'
+    cargo.write_text(
+        '@echo off\n'
+        'echo %1>>"%~dp0cargo-invocations.txt"\n'
+        'echo compiler progress 1>&2\n'
+        f'if "%1" == "{failed_step}" exit /b 7\n'
+        'exit /b 0\n'
+    )
+    result = subprocess.run(
+        [
+            'powershell.exe',
+            '-NoProfile',
+            '-NonInteractive',
+            '-File',
+            str(tmp_path / 'build-starfire.ps1'),
+            '-Cargo',
+            str(cargo),
+        ],
+        capture_output=True,
+        timeout=30,
+    )
+    assert (result.returncode == 0) == (failed_step is None)
+    invocations = (tmp_path / 'cargo-invocations.txt').read_text().splitlines()
+    assert invocations[-1] == (failed_step or 'build')
+    assert b'compiler progress' in result.stderr
