@@ -1,0 +1,8 @@
+.idea/
+build/
+cmake-build-*
+*.zip
+__pycache__
+data/
+bridge.json
+*.stackdump
