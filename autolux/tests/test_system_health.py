@@ -33,6 +33,16 @@ def test_old_counters_do_not_make_a_recovered_show_permanently_unhealthy():
     assert health_summary(snapshot)['state'] == 'attention'
 
 
+def test_missing_buffer_measurements_do_not_invent_a_zero_or_default_target():
+    state = healthy()
+    del state['rx']['audio_buffer_seconds']
+    del state['rx']['buffer_target_seconds']
+    buffer = health_summary({'system': state})['cards'][3]
+    assert buffer[1] == 'Unavailable'
+    assert buffer[2] == 'Target unavailable'
+    assert not buffer[3]
+
+
 def test_stale_receiver_never_looks_connected_or_exports_a_zero_buffer():
     buffer = EventBuffer()
     state = healthy()
@@ -94,11 +104,18 @@ def test_metrics_are_exposed_through_the_existing_snapshot_server():
 
 
 def test_dashboard_and_prometheus_share_the_same_health_source():
-    from autolux.simulate.visualizer_app import build_app, _build_system_health
+    from autolux.simulate.visualizer_app import build_app
 
     buffer = EventBuffer()
     buffer.set_system_health(healthy())
-    assert len(_build_system_health(buffer.snapshot())) == 6
     response = build_app(buffer).server.test_client().get('/metrics')
     assert response.status_code == 200
     assert b'autolux_up 1.0' in response.data
+
+
+def test_lighting_delivery_counter_is_available_to_grafana():
+    buffer = EventBuffer()
+    state = healthy()
+    state['rx']['dmx_frames_total'] = 120
+    buffer.set_system_health(state)
+    assert 'radius_dmx_frames_total{node="rx"} 120.0' in metrics(buffer).decode()

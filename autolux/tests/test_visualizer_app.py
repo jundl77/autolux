@@ -63,6 +63,8 @@ def _spans(node) -> list:
     children = getattr(node, 'children', None)
     if isinstance(children, (list, tuple)):
         return _spans(children)
+    if children is not None and not isinstance(children, str):
+        return _spans(children)
     return [node]
 
 
@@ -110,13 +112,13 @@ def test_a_clock_under_a_minute_never_says_zero_minutes():
 
 
 def test_the_room_clock_reads_zero_until_the_playback_delay_has_elapsed():
-    early = V._build_metrics(
+    early = V._build_show_overview(
         _snapshot(now=9.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
     )
     assert _metric(early, 'room') == 'room 0sec'
     assert _metric(early, 'song') == 'song 9sec'
 
-    later = V._build_metrics(
+    later = V._build_show_overview(
         _snapshot(now=20.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
     )
     assert _metric(later, 'room') == 'room 6sec'
@@ -124,7 +126,7 @@ def test_the_room_clock_reads_zero_until_the_playback_delay_has_elapsed():
 
 
 def test_a_new_sound_start_restarts_both_clocks():
-    items = V._build_metrics(
+    items = V._build_show_overview(
         _snapshot(
             now=100.0,
             look_ahead_sec=14.0,
@@ -140,7 +142,7 @@ def test_a_new_sound_start_restarts_both_clocks():
 
 
 def test_both_clocks_are_blank_until_the_first_sound_start():
-    items = V._build_metrics(_snapshot(now=30.0, look_ahead_sec=14.0, sound_events=[]))
+    items = V._build_show_overview(_snapshot(now=30.0, look_ahead_sec=14.0, sound_events=[]))
     assert _metric(items, 'song') == 'song —'
     assert _metric(items, 'room') == 'room —'
 
@@ -286,7 +288,7 @@ def test_a_detected_stop_empties_the_timeline_and_zeroes_it():
 
 
 def test_both_clocks_go_blank_between_songs():
-    items = V._build_metrics(
+    items = V._build_show_overview(
         _snapshot(
             now=62.0,
             look_ahead_sec=14.0,
@@ -425,7 +427,7 @@ def _app(source=None):
 
 
 _ANCHOR = (
-    '..sync.data...metrics.children...stage.children...decoder.children...system-health.children..'
+    '..sync.data...metrics.children...stage.children...decoder.children...diagnostics.children..'
 )
 _VIEW = '..timeline.figure...drawn.data..'
 _GATE = '..gate.data...view-gate.data..'
@@ -566,7 +568,7 @@ def test_only_the_lamps_the_intent_lights_are_pulse_targets():
 def test_the_fps_readout_is_outside_every_callback_output():
     layout = _app().layout.children
     assert _find_by_id(layout, 'fps') is not None
-    assert _find_by_id(V._build_metrics(_snapshot()), 'fps') is None
+    assert _find_by_id(V._build_show_overview(_snapshot()), 'fps') is None
 
 
 def test_the_fps_readout_is_driven_by_the_frame_loop_once_a_second():
@@ -578,7 +580,7 @@ def test_the_fps_readout_is_driven_by_the_frame_loop_once_a_second():
 
 
 def test_the_clock_spans_are_addressable_by_the_browser():
-    ids = {getattr(span, 'id', None) for span in _spans(V._build_metrics(_snapshot()))}
+    ids = {getattr(span, 'id', None) for span in _spans(V._build_show_overview(_snapshot()))}
     assert {'room-clock', 'song-clock'} <= ids
 
 
@@ -657,11 +659,11 @@ def _mid_play(**overrides) -> dict:
 
 
 def test_the_show_stops_once_the_detected_silence_has_persisted():
-    assert 'PAUSED' in _metric(V._build_metrics(_stopping(now=62.0)), '◌')
+    assert 'PAUSED' in _metric(V._build_show_overview(_stopping(now=62.0)), '◌')
 
 
 def test_the_room_keeps_playing_the_tail_while_the_bypass_is_still_pending():
-    assert 'PLAYING' in _metric(V._build_metrics(_stopping(now=61.99)), '●')
+    assert 'PLAYING' in _metric(V._build_show_overview(_stopping(now=61.99)), '●')
 
 
 def test_the_timeline_resets_when_the_silence_persists_not_when_it_starts():
@@ -681,7 +683,7 @@ def test_a_gap_shorter_than_the_persistence_never_reaches_the_room_at_all():
     )
     assert [e['t'] for e in V._room_sound_events(seamless)] == [14.0]
     assert V._song_origin(seamless) == pytest.approx(14.0)
-    assert 'PLAYING' in _metric(V._build_metrics(seamless), '●')
+    assert 'PLAYING' in _metric(V._build_show_overview(seamless), '●')
 
 
 def test_the_room_holds_its_tail_through_the_window_before_a_resume_lands():
@@ -692,7 +694,7 @@ def test_the_room_holds_its_tail_through_the_window_before_a_resume_lands():
         sound_events=[{'t': 0.0, 'playing': True}, {'t': 100.0, 'playing': False}],
     )
     assert V._song_origin(mid_gap) == pytest.approx(14.0)
-    assert 'PLAYING' in _metric(V._build_metrics(mid_gap), '●')
+    assert 'PLAYING' in _metric(V._build_show_overview(mid_gap), '●')
 
 
 def _burst() -> dict:
@@ -711,7 +713,7 @@ def _burst() -> dict:
 def test_a_play_burst_shorter_than_the_look_ahead_never_reaches_the_room():
     assert [e['t'] for e in V._room_sound_events(_burst())] == [14.0, 62.0, 107.0]
     assert V._song_origin(_burst()) is None
-    assert 'PAUSED' in _metric(V._build_metrics(_burst()), '◌')
+    assert 'PAUSED' in _metric(V._build_show_overview(_burst()), '◌')
 
 
 def test_a_start_that_lands_before_the_bypass_is_heard_and_then_cut():
@@ -835,21 +837,21 @@ def test_the_beats_still_in_the_air_at_a_stop_are_never_heard():
         beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 55.0, 'bpm': 128.0}],
     )
     assert V._heard_beats(silenced) == []
-    assert _metric(V._build_metrics(silenced), '898') == '898 beats'
+    assert _metric(V._build_show_overview(silenced), '898') == '898 beats'
 
     aged_out = dict(silenced, now=110.0, beats=[])
-    assert _metric(V._build_metrics(aged_out), '898') == '898 beats'
+    assert _metric(V._build_show_overview(aged_out), '898') == '898 beats'
 
 
 def test_the_tempo_is_the_last_beat_the_room_heard():
-    items = V._build_metrics(
+    items = V._build_show_overview(
         _mid_play(now=70.0, bpm=0.0, beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 62.0, 'bpm': 174.0}])
     )
     assert _metric(items, '128') == '128 BPM'
 
 
 def test_the_beat_count_is_what_the_room_has_heard():
-    items = V._build_metrics(
+    items = V._build_show_overview(
         _mid_play(
             now=70.0,
             beats_detected=900,
@@ -985,7 +987,7 @@ def _timing_stats(**streams) -> dict:
 
 
 def test_timing_health_is_green_when_every_stream_matches_its_own_target():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(
             timing_stats=_timing_stats(
                 beat=(14.0, 3.0), intent=(0.31, 2.0), overlay=(14.0, 3.0), refresh=(6.02, 1.0)
@@ -996,7 +998,7 @@ def test_timing_health_is_green_when_every_stream_matches_its_own_target():
 
 
 def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(timing_stats=_timing_stats(beat=(14.0, 3.0), intent=(0.31, 310.0)))
     )
     assert _colour_of(items, 'cmd timing') == V.WARN_COLOR
@@ -1004,13 +1006,13 @@ def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
 
 
 def test_timing_health_does_not_depend_on_how_long_a_stream_waits():
-    slow = V._build_metrics(_snapshot(timing_stats=_timing_stats(beat=(14.0, 2.0))))
-    fast = V._build_metrics(_snapshot(timing_stats=_timing_stats(intent=(0.31, 2.0))))
+    slow = V._build_analysis_diagnostics(_snapshot(timing_stats=_timing_stats(beat=(14.0, 2.0))))
+    fast = V._build_analysis_diagnostics(_snapshot(timing_stats=_timing_stats(intent=(0.31, 2.0))))
     assert _colour_of(slow, 'cmd timing') == _colour_of(fast, 'cmd timing') == V.OK_COLOR
 
 
 def test_timing_health_is_muted_before_any_command_has_been_delivered():
-    assert _colour_of(V._build_metrics(_snapshot()), 'cmd timing') == V.MUTED
+    assert _colour_of(V._build_analysis_diagnostics(_snapshot()), 'cmd timing') == V.MUTED
 
 
 def test_the_event_buffer_splits_timing_by_stream():
@@ -1098,7 +1100,7 @@ def test_the_app_renders_every_panel_from_one_snapshot():
     assert V._build_timeline(snap) is not None
     assert len(V._build_stage(snap)) == len(V.SLOT_LABELS)
     assert _texts(V._build_decoder(snap))
-    assert _texts(V._build_metrics(snap))
+    assert _texts(V._build_show_overview(snap))
 
 
 def test_build_simulation_wires_the_chain_into_the_engine(monkeypatch):
@@ -1260,20 +1262,20 @@ def test_the_pill_leaves_playing_when_the_audio_runs_out():
     buffer.mark_end()
     clock.advance(3300.0)
 
-    pill = ''.join(_texts(V._build_metrics(buffer.snapshot())[0]))
+    pill = ''.join(_texts(V._build_show_overview(buffer.snapshot())[0]))
     assert 'PLAYING' not in pill, pill
     assert 'PAUSED' in pill, pill
 
 
 def test_a_run_with_no_watchdog_says_so_rather_than_claiming_health():
-    items = V._build_metrics(_snapshot(shed={}))
+    items = V._build_analysis_diagnostics(_snapshot(shed={}))
     assert _metric(items, 'health') == 'health: —'
     assert _colour_of(items, 'health') == V.MUTED
     assert _metric(items, 'sheds') == 'sheds: —'
 
 
 def test_a_healthy_chain_reads_live():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 0, 'sheds_per_min': 0})
     )
     assert _metric(items, 'health') == 'health: ● LIVE'
@@ -1282,7 +1284,7 @@ def test_a_healthy_chain_reads_live():
 
 
 def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(shed={'level': 'NN_SHED', 'fault': 'hung_pass', 'sheds': 3, 'sheds_per_min': 2})
     )
     pill = _metric(items, 'health')
@@ -1292,14 +1294,14 @@ def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
 
 
 def test_a_shed_with_no_named_fault_still_reads_degraded():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(shed={'level': 'NN_SHED', 'fault': None, 'sheds': 1, 'sheds_per_min': 1})
     )
     assert _metric(items, 'health') == 'health: ◆ DEGRADED — holding intent'
 
 
 def test_the_rate_and_the_run_total_are_both_readable():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 2})
     )
     assert _metric(items, 'sheds') == 'sheds 2/min  ·  9 this run'
@@ -1307,7 +1309,7 @@ def test_the_rate_and_the_run_total_are_both_readable():
 
 
 def test_a_run_that_settled_hours_ago_stops_shouting_about_it():
-    items = V._build_metrics(
+    items = V._build_analysis_diagnostics(
         _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 0})
     )
     assert _metric(items, 'sheds') == 'sheds 0/min  ·  9 this run'
@@ -1326,48 +1328,41 @@ def _degraded_strip() -> dict:
     )
 
 
-def test_the_strip_reads_as_grouped_rows_rather_than_one_line():
-    rows = [' '.join(_texts(row)) for row in V._build_metrics(_degraded_strip())]
-    transport, analysis, health, timing = rows
-
-    assert transport == '● PLAYING room 1min 59sec song 2min 13sec'
-    assert analysis == '140 BPM 0 beats intent: ATMOSPHERIC'
-    assert health == 'health: ◆ DEGRADED — holding intent sheds 4/min  ·  10 this run'
-    assert timing.startswith('cmd timing: on target')
-
-
-def test_every_row_is_a_line_of_its_own_that_wraps_on_its_own():
-    for row in V._build_metrics(_degraded_strip()):
-        assert row.style['display'] == 'flex'
-        assert row.style['flexWrap'] == 'wrap'
-        assert row.style['columnGap']
-
-
-def test_a_ticking_value_reserves_its_width_so_the_row_cannot_jitter():
-    rows = V._build_metrics(_degraded_strip())
-    assert all(row.style['fontVariantNumeric'] == 'tabular-nums' for row in rows)
-    for prefix in ('● PLAYING', 'room', 'song', '140 BPM', '0 beats', 'beat 14.01s'):
-        assert _span_of(rows, prefix).style['minWidth'], prefix
+def test_show_overview_groups_music_effect_and_playback_position():
+    items = V._build_show_overview(_degraded_strip())
+    text = ' '.join(_texts(items))
+    for value in [
+        'Playback',
+        '140 BPM',
+        'ATMOSPHERIC',
+        'Active effect',
+        'room 1min 59sec',
+        'song 2min 13sec',
+        '14 s',
+    ]:
+        assert value in text
+    assert 'health:' not in text and 'cmd timing:' not in text
 
 
-def test_the_health_verdict_is_the_prominent_reading():
-    health = _span_of(V._build_metrics(_degraded_strip()), 'health')
-    assert health.style['fontWeight'] == 'bold'
-    assert health.style['fontSize'] == V.HEALTH_FONT_SIZE
-    assert health.style['border'].endswith(V.WARN_COLOR)
-    assert int(V.HEALTH_FONT_SIZE.rstrip('px')) > int(V.TIMING_FONT_SIZE.rstrip('px'))
+def test_advanced_diagnostics_retain_timing_and_analysis_fault_details():
+    items = V._build_analysis_diagnostics(_degraded_strip())
+    assert 'holding intent' in _metric(items, 'health')
+    assert _colour_of(items, 'health') == V.WARN_COLOR
+    assert _texts(items[-1]) == ['cmd timing: on target', 'beat 14.01s ±9ms', 'intent 1.41s ±1ms']
 
 
-def test_the_command_timing_block_is_secondary_and_one_span_per_stream():
-    timing = V._build_metrics(_degraded_strip())[-1]
-    assert timing.style['fontSize'] == V.TIMING_FONT_SIZE
-    assert timing.style['borderTop'].endswith(V.BORDER)
-    assert _texts(timing) == ['cmd timing: on target', 'beat 14.01s ±9ms', 'intent 1.41s ±1ms']
+def test_no_tempo_or_effect_is_shown_as_unavailable():
+    items = V._build_show_overview(_snapshot(bpm=0))
+    assert '— BPM' in _texts(items)
+    assert 'No Effect Selected' in _texts(items)
+    assert _metric(V._build_analysis_diagnostics(_snapshot()), 'cmd timing') == 'cmd timing: —'
 
 
-def test_a_run_with_no_delivered_command_still_lays_out_four_rows():
-    assert len(V._build_metrics(_snapshot())) == 4
-    assert _metric(V._build_metrics(_snapshot()), 'cmd timing') == 'cmd timing: —'
+def test_analysis_details_are_collapsed_and_generic_status_cards_are_absent():
+    app = _app()
+    assert _find_by_id(app.layout, 'system-health') is None
+    assert _find_by_id(app.layout, 'diagnostics') is not None
+    assert _find_by_id(app.layout, 'metric-buffer') is not None
 
 
 def _gridded(bar_sec=2.0, bars=6, first_bar=0, **overrides):

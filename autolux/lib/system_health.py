@@ -5,6 +5,11 @@ import time
 
 from prometheus_client import CollectorRegistry, generate_latest
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
+
+MIN_BUFFER_TARGET_RATIO = 0.25
+MAX_BUFFER_TARGET_RATIO = 3
+MAX_DMX_LATENESS_SECONDS = 0.05
 
 
 def health_summary(snapshot, *, now=None):
@@ -16,8 +21,8 @@ def health_summary(snapshot, *, now=None):
     tx, rx = system.get('tx') or {}, system.get('rx') or {}
     tx_age = system.get('tx_age_seconds')
     rx_age = system.get('rx_age_seconds')
-    tx_fresh = tx_age is not None and tx_age + age < 3
-    rx_fresh = rx_age is not None and rx_age + age < 3
+    tx_fresh = finite(tx_age) and tx_age + age < TELEMETRY_STALE_SECONDS
+    rx_fresh = finite(rx_age) and rx_age + age < TELEMETRY_STALE_SECONDS
     link = tx_fresh and rx_fresh and tx.get('link_up') and rx.get('link_up')
     fault = (snapshot.get('shed') or {}).get('fault')
     recent = system.get('recent') or {}
@@ -35,7 +40,13 @@ def health_summary(snapshot, *, now=None):
         audio_detail += (
             f" · peak {20 * math.log10(peak):.0f} dBFS" if peak > 0 else ' · digital silence'
         )
-    fill, target = rx.get('audio_buffer_seconds', 0), rx.get('buffer_target_seconds', 0.08)
+    fill, target = rx.get('audio_buffer_seconds'), rx.get('buffer_target_seconds')
+    buffer_available = rx_fresh and finite(fill)
+    target_available = finite(target) and target > 0
+    buffer_detail = f'Target {target * 1000:.0f} ms' if target_available else 'Target unavailable'
+    correction = rx.get('clock_correction_ppm')
+    if finite(correction):
+        buffer_detail += f' · clock correction {correction:.0f} ppm'
     input_age = rx.get('audio_input_age_seconds')
     audio_fresh = rx_fresh and input_age is not None and input_age + age < 1
     dmx_age = tx.get('dmx_input_age_seconds')
@@ -62,9 +73,11 @@ def health_summary(snapshot, *, now=None):
         ),
         (
             'Audio buffer',
-            f'{fill * 1000:.0f} ms' if rx_fresh else 'Unavailable',
-            f'Target {target * 1000:.0f} ms · clock correction {rx.get("clock_correction_ppm", 0):.0f} ppm',
-            rx_fresh and target * 0.25 <= fill <= target * 3,
+            f'{fill * 1000:.0f} ms' if buffer_available else 'Unavailable',
+            buffer_detail,
+            buffer_available
+            and target_available
+            and target * MIN_BUFFER_TARGET_RATIO <= fill <= target * MAX_BUFFER_TARGET_RATIO,
         ),
         (
             'Lighting',
@@ -76,7 +89,7 @@ def health_summary(snapshot, *, now=None):
             'Audio / lights',
             f'{lateness * 1000:.0f} ms' if lights and lateness is not None else 'Unavailable',
             'Lighting scheduling lateness',
-            bool(lights and lateness is not None and lateness < 0.05),
+            bool(lights and finite(lateness) and lateness < MAX_DMX_LATENESS_SECONDS),
         ),
     ]
     return {'state': 'healthy' if all(c[3] for c in cards) else 'attention', 'cards': cards}
@@ -105,6 +118,7 @@ COUNTERS = {
     'send_failures_total': 'Failed UDP sends.',
     'invalid_packets_total': 'Rejected bus datagrams.',
     'dmx_dropped_total': 'Dropped or out-of-order lighting packets.',
+    'dmx_frames_total': 'Lighting frames written to the Enttec output.',
 }
 
 

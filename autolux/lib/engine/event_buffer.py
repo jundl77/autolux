@@ -5,6 +5,7 @@ import copy
 from collections import deque
 
 from autolux.lib.clock import Clock, SYSTEM_CLOCK
+from autolux.lib.telemetry_history import TelemetryHistory
 
 _UNMEASURED_BEAT_STRENGTH = 0.0
 
@@ -39,6 +40,7 @@ class EventBuffer:
         self._decoder_state: dict = {}
         self._shed_state: dict = {}
         self._system_health: dict = {}
+        self._system_history = TelemetryHistory()
 
     def start(self) -> None:
         with self._lock:
@@ -124,6 +126,7 @@ class EventBuffer:
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
+            self._system_history.append(state, self._timing_stats(self._timing_log))
 
     @staticmethod
     def _delivery(log: list[dict]) -> dict:
@@ -185,6 +188,7 @@ class EventBuffer:
                 'decoder': dict(self._decoder_state),
                 'shed': dict(self._shed_state),
                 'system': copy.deepcopy(self._system_health),
+                'system_history': self._system_history.snapshot(),
             }
 
     def to_report(self, timing_log: list[dict] | None = None) -> dict:
