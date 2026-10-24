@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5.1)
 
-project(dmx_enttec_node LANGUAGES C CXX)
+project(autolux_native LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX20_STANDARD_COMPILE_OPTION "-std:c++latest")

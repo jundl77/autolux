@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$DmxProject = (Join-Path (Split-Path $PSScriptRoot -Parent) 'dmx-enttec-node'),
+    [string]$DmxProject = (Join-Path $PSScriptRoot 'native'),
     [string]$MidiPort = 'loopMIDI Port',
     [string]$InputDevice = 'CABLE Output',
     [switch]$CheckOnly,
@@ -94,8 +94,13 @@ finally:
         $arguments = @('auto_pilot', 'run', [string]$devices.midi_index, '-i', [string]$devices.input_index)
         if (-not $NoUi) { $arguments += '--ui' }
         Write-Host 'Starting the show. Ctrl-C stops lighting and the audio sender.'
-        & $python @arguments
-        if ($LASTEXITCODE -ne 0) { throw "Autopilot exited with code $LASTEXITCODE." }
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $python @arguments
+            $showExit = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = 'Stop' }
+        if ($showExit -ne 0) { throw "Autopilot exited with code $showExit." }
     }
     finally {
         if (-not $sender.HasExited) { Stop-Process -Id $sender.Id }

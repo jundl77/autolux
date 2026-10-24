@@ -1,4 +1,6 @@
-# dmx-enttec-node
+# Autolux native transport
+
+The former dmx-enttec-node project, now maintained under `native/` in Autolux.
 
 A super simple artnet to Enttec DMX USB Pro application. Listen to artnet, and replay it into the Enttec DMX USB Pro.
 
@@ -6,8 +8,8 @@ Built for windows, but it shouldn't be too difficult to make it work on linux.
 
 ### Install
 
-1. Clone submodules: `git sm update --init`
-2. Build with cmake.
+1. From the Autolux root: `git submodule update --init --recursive`.
+2. Run `./build-native.ps1`, or build this directory with CMake.
 
 
 ### Dependencies
@@ -27,7 +29,7 @@ The buffer emits silence while filling, preserves channel order across callback
 boundaries, and is reset when the capture device is reopened. A missing delay
 setting keeps legacy immediate forwarding; delayed mode uses Float32LE.
 
-Use the sibling autopilot project's `start-show.ps1` to generate a sender
+Use the repository root's `start-show.ps1` to generate a sender
 configuration from its current delay and start both processes. Do not run a
 second sender alongside it or delay the receiver a second time.
 

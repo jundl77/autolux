@@ -1,4 +1,17 @@
-﻿# SoundSwitch Auto Pilot
+﻿# Autolux
+
+Autolux combines the SoundSwitch Auto Pilot Python application with the former
+dmx-enttec-node C++ project under `native/`, retaining both repository histories.
+The Python analyser/show controller, native audio sender, audio receiver and
+DMX receiver remain separate processes with their existing responsibilities.
+`start-show.ps1` resolves the sender inside this repository; `build-native.ps1`
+builds all three native applications and runs their tests. The Python console
+command is `autolux`, with `auto_pilot` retained for compatibility. Native
+dependencies are pinned submodules declared at the monorepo root.
+
+The unified repository keeps the validated audio delay and existing wire formats.
+The proposed shared eight-byte media watermark is deferred to a separate design:
+it needs an agreed timeline, session identity, buffering and late-packet policy.
 
 Intelligent DJ lighting automation system that synchronizes stage effects to live music in real time. A neural section classifier reads the music -- MERT encoder -> online student -> fixed-lag bar decoder -- and the decoder's per-bar decisions are the only thing permitted to say what the lights are doing. The show reaches SoundSwitch over MIDI and OS2L.
 

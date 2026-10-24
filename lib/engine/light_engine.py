@@ -321,7 +321,7 @@ class LightEngine(IMusicAnalyserHandler):
             f'({decoder.params.lag_bars} + 1 lag × {decoder.bar_sec:.3f}s bars) | '
             f'playback delay {self._playback_delay_sec:.2f}s → queue delay '
             f'{max(0.0, self._playback_delay_sec - latency):.2f}s — ensure '
-            f'dmx-enttec-node playback_delay_seconds matches')
+            f'native audio sender playback_delay_seconds matches')
 
     async def _commit_intent(self, intent: LightIntent, age_sec: float) -> None:
         self._floor_armed = False

@@ -1,6 +1,0 @@
-[submodule "x_njson"]
-	path = x_njson
-	url = git@github.com:nlohmann/json.git
-[submodule "x_libsoundio"]
-	path = x_libsoundio
-	url = git@github.com:andrewrk/libsoundio.git

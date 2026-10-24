@@ -118,6 +118,76 @@ wheels = [
 ]
 
 [[package]]
+name = "autolux"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "argcomplete", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "cython", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "librosa", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "madmom", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "netifaces", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "numpy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "onnxruntime", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "pyaudio", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "python-osc", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "python-rtmidi", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "scikit-learn", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "scipy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "setuptools", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "torch", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "transformers", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "zeroconf", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "jupyterlab", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "onnx", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "pytest", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "pytest-asyncio", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+]
+training = [
+    { name = "onnx", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "pillow", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "tensorboard", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+]
+visualizer = [
+    { name = "dash", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "sounddevice", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "argcomplete" },
+    { name = "cython" },
+    { name = "dash", marker = "extra == 'visualizer'", specifier = ">=2.14" },
+    { name = "jupyterlab", marker = "extra == 'dev'" },
+    { name = "librosa" },
+    { name = "madmom", git = "https://github.com/CPJKU/madmom.git?rev=27f032e8947204902c675e5e341a3faf5dc86dae" },
+    { name = "netifaces" },
+    { name = "numpy", specifier = ">=1.26,<2" },
+    { name = "onnx", marker = "extra == 'dev'", specifier = ">=1.22,<2" },
+    { name = "onnx", marker = "extra == 'training'", specifier = ">=1.22,<2" },
+    { name = "onnxruntime", specifier = ">=1.28,<2" },
+    { name = "pillow", marker = "extra == 'training'", specifier = ">=10" },
+    { name = "pyaudio" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "python-osc" },
+    { name = "python-rtmidi", specifier = ">=1.5,<2" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "setuptools", specifier = "<71" },
+    { name = "sounddevice", marker = "extra == 'visualizer'" },
+    { name = "tensorboard", marker = "extra == 'training'", specifier = ">=2.16" },
+    { name = "torch", specifier = ">=2.11,<2.12", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "transformers", specifier = ">=4.57,<5" },
+    { name = "zeroconf" },
+]
+provides-extras = ["dev", "visualizer", "training"]
+
+[[package]]
 name = "babel"
 version = "2.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1792,76 +1862,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/fe/df/8c11dc4dfceda14e3003bb81a0d0edcaaf0796dd7b4f826ea3e532146bba/soundfile-0.13.1-py2.py3-none-win32.whl", hash = "sha256:c734564fab7c5ddf8e9be5bf70bab68042cd17e9c214c06e365e20d64f9a69d5", size = 899881, upload-time = "2025-01-25T09:16:56.663Z" },
     { url = "https://files.pythonhosted.org/packages/14/e9/6b761de83277f2f02ded7e7ea6f07828ec78e4b229b80e4ca55dd205b9dc/soundfile-0.13.1-py2.py3-none-win_amd64.whl", hash = "sha256:1e70a05a0626524a69e9f0f4dd2ec174b4e9567f4d8b6c11d38b5c289be36ee9", size = 1019162, upload-time = "2025-01-25T09:16:59.573Z" },
 ]
-
-[[package]]
-name = "soundswitch-auto-pilot"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "argcomplete", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "cython", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "librosa", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "madmom", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "netifaces", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "numpy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "onnxruntime", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "pyaudio", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "python-osc", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "python-rtmidi", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "scikit-learn", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "scipy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "setuptools", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "torch", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "transformers", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "zeroconf", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "jupyterlab", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "onnx", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "pytest", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "pytest-asyncio", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-]
-training = [
-    { name = "onnx", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "pillow", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "tensorboard", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-]
-visualizer = [
-    { name = "dash", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "sounddevice", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "argcomplete" },
-    { name = "cython" },
-    { name = "dash", marker = "extra == 'visualizer'", specifier = ">=2.14" },
-    { name = "jupyterlab", marker = "extra == 'dev'" },
-    { name = "librosa" },
-    { name = "madmom", git = "https://github.com/CPJKU/madmom.git?rev=27f032e8947204902c675e5e341a3faf5dc86dae" },
-    { name = "netifaces" },
-    { name = "numpy", specifier = ">=1.26,<2" },
-    { name = "onnx", marker = "extra == 'dev'", specifier = ">=1.22,<2" },
-    { name = "onnx", marker = "extra == 'training'", specifier = ">=1.22,<2" },
-    { name = "onnxruntime", specifier = ">=1.28,<2" },
-    { name = "pillow", marker = "extra == 'training'", specifier = ">=10" },
-    { name = "pyaudio" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "python-osc" },
-    { name = "python-rtmidi", specifier = ">=1.5,<2" },
-    { name = "scikit-learn" },
-    { name = "scipy" },
-    { name = "setuptools", specifier = "<71" },
-    { name = "sounddevice", marker = "extra == 'visualizer'" },
-    { name = "tensorboard", marker = "extra == 'training'", specifier = ">=2.16" },
-    { name = "torch", specifier = ">=2.11,<2.12", index = "https://download.pytorch.org/whl/cu128" },
-    { name = "transformers", specifier = ">=4.57,<5" },
-    { name = "zeroconf" },
-]
-provides-extras = ["dev", "visualizer", "training"]
 
 [[package]]
 name = "soupsieve"

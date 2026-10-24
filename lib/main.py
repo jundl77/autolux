@@ -9,7 +9,7 @@ import datetime
 import time
 
 from lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
-# start-show.ps1 copies this to dmx-enttec-node's audio sender configuration.
+# start-show.ps1 copies this to the native audio sender configuration.
 # simulate/runner.py uses the same delay for replay.
 PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
