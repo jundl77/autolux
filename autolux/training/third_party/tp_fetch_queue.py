@@ -33,8 +33,12 @@ from typing import NamedTuple
 from urllib.parse import parse_qs, urlsplit
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"), str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -42,8 +46,15 @@ import tp_record  # noqa: E402
 from corpus_root import corpus_dir  # noqa: E402
 
 QUEUE_FILE = "fetch_queue.csv"
-QUEUE_HEADER = ("track_id", "source", "youtube_id", "title", "artist",
-                "annotation_duration_sec", "note")
+QUEUE_HEADER = (
+    "track_id",
+    "source",
+    "youtube_id",
+    "title",
+    "artist",
+    "annotation_duration_sec",
+    "note",
+)
 
 SALAMI_SOURCE = "salami"
 HARMONIX_SOURCE = "harmonix"
@@ -57,17 +68,19 @@ HARMONIX_DEFAULT_THRESHOLD = 0.95
 # "needs to be 2.45% sped-up"): the upload is not time-aligned to the
 # annotation without a speed correction we do not apply.  The DTW score cannot
 # see it -- a uniform offset is still a straight path -- so they go by name.
-HARMONIX_UNALIGNED = frozenset({
-    "0046_castlesmadeofsand",
-    "0218_policyoftruth",
-    "0541_youdroppedabombonme",
-    "0653_dynamite",
-    "0772_kissmebackcrytonight",
-    "0777_lebump",
-    "0913_somuchlove",
-    "0980_whenyouleave",
-    "0998_youregonnamissthis",
-})
+HARMONIX_UNALIGNED = frozenset(
+    {
+        "0046_castlesmadeofsand",
+        "0218_policyoftruth",
+        "0541_youdroppedabombonme",
+        "0653_dynamite",
+        "0772_kissmebackcrytonight",
+        "0777_lebump",
+        "0913_somuchlove",
+        "0980_whenyouleave",
+        "0998_youregonnamissthis",
+    }
+)
 
 SALAMI_PAIRINGS_FILE = "salami_youtube_pairings.csv"
 HARMONIX_URLS_FILE = "youtube_urls.csv"
@@ -98,8 +111,9 @@ def queue_path(corpus: Path) -> Path:
 
 
 def audio_path(corpus: Path, source: str, track_id: str) -> Path:
-    return (tp_record.third_party_dir(Path(corpus)) / tp_record.AUDIO_DIR
-            / source / f"{track_id}.mp3")
+    return (
+        tp_record.third_party_dir(Path(corpus)) / tp_record.AUDIO_DIR / source / f"{track_id}.mp3"
+    )
 
 
 def default_salami_dir() -> Path:
@@ -162,15 +176,17 @@ def salami_rows(corpus: Path, salami_dir: Path, pairings: Path) -> Tally:
         if not video_id:
             _bump(counts, "salami_no_video_id")
             continue
-        rows.append(QueueRow(
-            track_id=track_id,
-            source=SALAMI_SOURCE,
-            youtube_id=video_id,
-            title=(record.get("SONG_TITLE") or "").strip(),
-            artist=(record.get("ARTIST") or "").strip(),
-            annotation_duration_sec=(row.get("salami_length") or "").strip(),
-            note=f"coverage={coverage:.4f}",
-        ))
+        rows.append(
+            QueueRow(
+                track_id=track_id,
+                source=SALAMI_SOURCE,
+                youtube_id=video_id,
+                title=(record.get("SONG_TITLE") or "").strip(),
+                artist=(record.get("ARTIST") or "").strip(),
+                annotation_duration_sec=(row.get("salami_length") or "").strip(),
+                note=f"coverage={coverage:.4f}",
+            )
+        )
         _bump(counts, "salami_kept")
     return Tally(rows, counts)
 
@@ -182,8 +198,7 @@ def harmonix_rows(corpus: Path, harmonixset: Path, threshold: float) -> Tally:
         for row in _read_csv(dataset / HARMONIX_SCORES_FILE)
     }
     metadata = {
-        (row.get("File") or "").strip(): row
-        for row in _read_csv(dataset / HARMONIX_METADATA_FILE)
+        (row.get("File") or "").strip(): row for row in _read_csv(dataset / HARMONIX_METADATA_FILE)
     }
     counts: dict = {}
     rows: list = []
@@ -209,15 +224,17 @@ def harmonix_rows(corpus: Path, harmonixset: Path, threshold: float) -> Tally:
             _bump(counts, "harmonix_already_fetched")
             continue
         record = metadata.get(name, {})
-        rows.append(QueueRow(
-            track_id=track_id,
-            source=HARMONIX_SOURCE,
-            youtube_id=video_id,
-            title=(record.get("Title") or "").strip(),
-            artist=(record.get("Artist") or "").strip(),
-            annotation_duration_sec=(record.get("Duration") or "").strip(),
-            note=f"align={score:.4f}",
-        ))
+        rows.append(
+            QueueRow(
+                track_id=track_id,
+                source=HARMONIX_SOURCE,
+                youtube_id=video_id,
+                title=(record.get("Title") or "").strip(),
+                artist=(record.get("Artist") or "").strip(),
+                annotation_duration_sec=(record.get("Duration") or "").strip(),
+                note=f"align={score:.4f}",
+            )
+        )
         _bump(counts, "harmonix_kept")
     return Tally(rows, counts)
 
@@ -245,14 +262,13 @@ def read_queue(path: Path) -> list:
         reader = csv.DictReader(handle)
         missing = set(QUEUE_HEADER) - set(reader.fieldnames or ())
         if missing:
-            raise RuntimeError(
-                f"{path} is missing column(s): {', '.join(sorted(missing))}")
-        return [QueueRow(*(row.get(name) or "" for name in QUEUE_HEADER))
-                for row in reader]
+            raise RuntimeError(f"{path} is missing column(s): {', '.join(sorted(missing))}")
+        return [QueueRow(*(row.get(name) or "" for name in QUEUE_HEADER)) for row in reader]
 
 
-def build_queue(corpus: Path, salami_dir: Path, pairings: Path,
-                harmonixset: Path, threshold: float) -> Tally:
+def build_queue(
+    corpus: Path, salami_dir: Path, pairings: Path, harmonixset: Path, threshold: float
+) -> Tally:
     salami = salami_rows(corpus, salami_dir, pairings)
     harmonix = harmonix_rows(corpus, harmonixset, threshold)
     counts = dict(salami.counts)
@@ -262,22 +278,36 @@ def build_queue(corpus: Path, salami_dir: Path, pairings: Path,
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus dir)")
-    parser.add_argument("--harmonix-threshold", type=float,
-                        default=HARMONIX_DEFAULT_THRESHOLD,
-                        help="minimum DTW alignment score (default: %(default)s)")
-    parser.add_argument("--salami-dir", type=Path, default=None,
-                        help="salami-data-public checkout "
-                             "(default: <corpus>/../salami-data-public)")
-    parser.add_argument("--harmonixset", type=Path, default=DEFAULT_HARMONIXSET,
-                        help="harmonixset checkout (default: %(default)s)")
-    parser.add_argument("--matching-salami", type=Path,
-                        default=DEFAULT_MATCHING_SALAMI,
-                        help=f"directory holding {SALAMI_PAIRINGS_FILE} "
-                             "(default: %(default)s)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print the breakdown and write nothing")
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus dir)"
+    )
+    parser.add_argument(
+        "--harmonix-threshold",
+        type=float,
+        default=HARMONIX_DEFAULT_THRESHOLD,
+        help="minimum DTW alignment score (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--salami-dir",
+        type=Path,
+        default=None,
+        help="salami-data-public checkout (default: <corpus>/../salami-data-public)",
+    )
+    parser.add_argument(
+        "--harmonixset",
+        type=Path,
+        default=DEFAULT_HARMONIXSET,
+        help="harmonixset checkout (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--matching-salami",
+        type=Path,
+        default=DEFAULT_MATCHING_SALAMI,
+        help=f"directory holding {SALAMI_PAIRINGS_FILE} (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="print the breakdown and write nothing"
+    )
     args = parser.parse_args(argv)
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -288,8 +318,7 @@ def main(argv: list | None = None) -> int:
     pairings = Path(args.matching_salami).resolve() / SALAMI_PAIRINGS_FILE
     target = queue_path(corpus)
 
-    tally = build_queue(corpus, salami_dir, pairings, args.harmonixset,
-                        args.harmonix_threshold)
+    tally = build_queue(corpus, salami_dir, pairings, args.harmonixset, args.harmonix_threshold)
 
     print("third-party fetch queue")
     print(f"corpus          : {corpus}")
@@ -304,8 +333,7 @@ def main(argv: list | None = None) -> int:
         print(f"{source:9s} kept  : {kept}")
         for key in sorted(tally.counts):
             if key.startswith(f"{source}_") and not key.endswith("_kept"):
-                print(f"            rejected {key[len(source) + 1:]:22s} "
-                      f"{tally.counts[key]}")
+                print(f"            rejected {key[len(source) + 1 :]:22s} {tally.counts[key]}")
     print()
     print(f"queue rows      : {len(tally.rows)}")
     if args.dry_run:

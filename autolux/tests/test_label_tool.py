@@ -1,4 +1,5 @@
 """Tests for the hand-labelling tool (training/label_tool.py)."""
+
 import hashlib
 import json
 import os
@@ -47,8 +48,9 @@ SECTIONS = [
     {'start': 48.0, 'label': 'drop', 'strength': 'major'},
     {'start': 120.001, 'label': 'breakdown', 'strength': 'major'},
 ]
-MIXED = [dict(entry, strength='minor' if entry['label'] == 'buildup' else 'major')
-         for entry in SECTIONS]
+MIXED = [
+    dict(entry, strength='minor' if entry['label'] == 'buildup' else 'major') for entry in SECTIONS
+]
 
 
 _REAL_TMP_LABELS_DIR = label_tool.tmp_labels_dir
@@ -63,14 +65,13 @@ def scratch(tmp_path, monkeypatch):
 
 
 def test_all_major_stays_a_two_column_file():
-    assert format_csv(SECTIONS) == (
-        '0.000,intro\n31.250,buildup\n48.000,drop\n120.001,breakdown\n')
+    assert format_csv(SECTIONS) == ('0.000,intro\n31.250,buildup\n48.000,drop\n120.001,breakdown\n')
 
 
 def test_any_minor_writes_the_strength_column_on_every_row():
     assert format_csv(MIXED) == (
-        '0.000,intro,major\n31.250,buildup,minor\n'
-        '48.000,drop,major\n120.001,breakdown,major\n')
+        '0.000,intro,major\n31.250,buildup,minor\n48.000,drop,major\n120.001,breakdown,major\n'
+    )
 
 
 def test_two_column_rows_load_as_major():
@@ -124,10 +125,8 @@ def test_every_mutation_reaches_disk_before_the_next_one(tmp_path, scratch):
     step('mark', cursor=48.0, new_label='drop')
     step('mark', cursor=120.0, new_label='breakdown')
     step({'type': 'row-nudge', 'index': 2, 'delta': -0.5})
-    step({'type': 'row-label', 'index': 1},
-         row_labels=['intro', 'cooldown', 'drop', 'breakdown'])
-    step({'type': 'row-strength', 'index': 3},
-         row_strengths=['major', 'major', 'major', 'minor'])
+    step({'type': 'row-label', 'index': 1}, row_labels=['intro', 'cooldown', 'drop', 'breakdown'])
+    step({'type': 'row-strength', 'index': 3}, row_strengths=['major', 'major', 'major', 'minor'])
     step({'type': 'row-del', 'index': 2})
 
     assert [(s['start'], s['label'], s['strength']) for s in sections] == [
@@ -142,10 +141,8 @@ def test_a_no_op_edit_neither_rewrites_nor_reports(tmp_path):
     audio.write_bytes(b'')
     sections = load_labels(str(audio))
     apply_edit(str(audio), 'mark', sections, cursor=0.0, new_label='intro')
-    assert apply_edit(str(audio), 'mark', sections, cursor=0.0,
-                      new_label='intro') == (None, None)
-    assert apply_edit(str(audio), {'type': 'row-del', 'index': 9},
-                      sections) == (None, None)
+    assert apply_edit(str(audio), 'mark', sections, cursor=0.0, new_label='intro') == (None, None)
+    assert apply_edit(str(audio), {'type': 'row-del', 'index': 9}, sections) == (None, None)
 
 
 def _load_in_a_new_process(audio: Path, scratch: Path) -> list:
@@ -156,9 +153,11 @@ def _load_in_a_new_process(audio: Path, scratch: Path) -> list:
         'print(json.dumps(label_tool.load_labels(sys.argv[2])))'
     )
     finished = subprocess.run(
-        [sys.executable, '-c', source, str(TRAINING_DIR), str(audio),
-         str(scratch)],
-        capture_output=True, text=True, check=True)
+        [sys.executable, '-c', source, str(TRAINING_DIR), str(audio), str(scratch)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return json.loads(finished.stdout)
 
 
@@ -166,13 +165,15 @@ def test_load_seeds_an_opening_intro_when_no_file_exists(tmp_path):
     audio = tmp_path / 'song.mp3'
     audio.write_bytes(b'')
     assert load_labels(str(audio)) == [
-        {'start': 0.0, 'label': LABELS[0], 'strength': DEFAULT_STRENGTH}]
+        {'start': 0.0, 'label': LABELS[0], 'strength': DEFAULT_STRENGTH}
+    ]
 
 
 def test_every_label_in_the_vocabulary_round_trips():
-    sections = [{'start': index * 10.0, 'label': label,
-                 'strength': STRENGTHS[index % len(STRENGTHS)]}
-                for index, label in enumerate(LABELS)]
+    sections = [
+        {'start': index * 10.0, 'label': label, 'strength': STRENGTHS[index % len(STRENGTHS)]}
+        for index, label in enumerate(LABELS)
+    ]
     once = format_csv(sections)
     assert parse_csv(once) == normalise(sections)
     assert format_csv(parse_csv(once)) == once
@@ -216,36 +217,37 @@ def song_file(tmp_path):
     return audio
 
 
-def test_a_nudge_onto_another_boundary_is_refused_rather_than_deleting_it(
-        song_file):
+def test_a_nudge_onto_another_boundary_is_refused_rather_than_deleting_it(song_file):
     """The clamp at zero is how this is reached without aiming for it.
 
     Nudging a boundary at 0.3 s back by 0.5 s lands on 0.0, where the opening
     section already is -- and adding at an existing start replaces it.
     """
-    sections = normalise([{'start': 0.0, 'label': 'intro'},
-                          {'start': 0.3, 'label': 'buildup'}])
+    sections = normalise([{'start': 0.0, 'label': 'intro'}, {'start': 0.3, 'label': 'buildup'}])
     save_labels(str(song_file), sections)
 
     updated, status = apply_edit(
-        str(song_file), {'type': 'row-nudge', 'index': 1, 'delta': -0.5},
-        sections)
+        str(song_file), {'type': 'row-nudge', 'index': 1, 'delta': -0.5}, sections
+    )
 
     assert updated is None
     assert 'refused' in status and 'intro' in status
     assert load_labels(str(song_file)) == sections
 
 
-def test_a_nudge_onto_a_boundary_away_from_zero_is_refused_the_same_way(
-        song_file):
-    sections = normalise([{'start': 0.0, 'label': 'intro'},
-                          {'start': 30.0, 'label': 'buildup'},
-                          {'start': 30.5, 'label': 'drop'}])
+def test_a_nudge_onto_a_boundary_away_from_zero_is_refused_the_same_way(song_file):
+    sections = normalise(
+        [
+            {'start': 0.0, 'label': 'intro'},
+            {'start': 30.0, 'label': 'buildup'},
+            {'start': 30.5, 'label': 'drop'},
+        ]
+    )
     save_labels(str(song_file), sections)
 
     updated, status = apply_edit(
-        str(song_file), {'type': 'row-nudge', 'index': 1, 'delta': 0.5},
-        sections)
+        str(song_file), {'type': 'row-nudge', 'index': 1, 'delta': 0.5}, sections
+    )
 
     assert updated is None
     assert 'refused' in status and 'drop' in status
@@ -254,26 +256,25 @@ def test_a_nudge_onto_a_boundary_away_from_zero_is_refused_the_same_way(
 
 def test_a_nudge_past_the_end_of_the_track_stops_at_the_end(song_file):
     """A boundary past the duration is in the file and on screen nowhere."""
-    sections = normalise([{'start': 0.0, 'label': 'intro'},
-                          {'start': 100.0, 'label': 'drop'}])
+    sections = normalise([{'start': 0.0, 'label': 'intro'}, {'start': 100.0, 'label': 'drop'}])
     save_labels(str(song_file), sections)
 
     updated, _ = apply_edit(
-        str(song_file), {'type': 'row-nudge', 'index': 1, 'delta': 0.5},
-        sections, duration=100.2)
+        str(song_file), {'type': 'row-nudge', 'index': 1, 'delta': 0.5}, sections, duration=100.2
+    )
 
     assert [s['start'] for s in updated] == [0.0, 100.2]
 
 
 def test_a_mark_past_the_end_of_the_track_stops_at_the_end(song_file):
     sections = load_labels(str(song_file))
-    updated, _ = apply_edit(str(song_file), 'mark', sections, cursor=999.0,
-                            new_label='outro', duration=100.2)
+    updated, _ = apply_edit(
+        str(song_file), 'mark', sections, cursor=999.0, new_label='outro', duration=100.2
+    )
     assert [s['start'] for s in updated] == [0.0, 100.2]
 
 
-def test_an_edit_from_a_stale_page_is_refused_rather_than_overwriting_the_file(
-        song_file):
+def test_an_edit_from_a_stale_page_is_refused_rather_than_overwriting_the_file(song_file):
     """The file is the state, so a page disagreeing with it has lost the race.
 
     Two tabs, or one that reloaded before the fix below, hold sections from
@@ -283,12 +284,10 @@ def test_an_edit_from_a_stale_page_is_refused_rather_than_overwriting_the_file(
     stale = load_labels(str(song_file))
     sections = stale
     for cursor, label in ((31.25, 'buildup'), (48.0, 'drop')):
-        sections, _ = apply_edit(str(song_file), 'mark', sections,
-                                 cursor=cursor, new_label=label)
+        sections, _ = apply_edit(str(song_file), 'mark', sections, cursor=cursor, new_label=label)
     assert len(load_labels(str(song_file))) == 3
 
-    updated, status = apply_edit(str(song_file), 'mark', stale, cursor=90.0,
-                                 new_label='outro')
+    updated, status = apply_edit(str(song_file), 'mark', stale, cursor=90.0, new_label='outro')
 
     assert updated is None
     assert 'reload' in status
@@ -297,29 +296,33 @@ def test_an_edit_from_a_stale_page_is_refused_rather_than_overwriting_the_file(
 
 def test_a_stale_page_may_not_commit_or_save_either(song_file, corpus):
     stale = load_labels(str(song_file))
-    sections, _ = apply_edit(str(song_file), 'mark', stale, cursor=31.25,
-                             new_label='buildup')
+    sections, _ = apply_edit(str(song_file), 'mark', stale, cursor=31.25, new_label='buildup')
 
     for trigger in ('save', 'commit'):
-        updated, status = apply_edit(str(song_file), trigger, stale,
-                                     duration=214.842, title=TITLE)
+        updated, status = apply_edit(str(song_file), trigger, stale, duration=214.842, title=TITLE)
         assert updated is None
         assert 'reload' in status
     assert load_labels(str(song_file)) == sections
     assert list((corpus / 'annotations').glob('*.hand.json')) == []
 
 
-def test_a_tab_from_an_earlier_launch_is_refused_before_the_file_is_read(
-        song_file, corpus):
+def test_a_tab_from_an_earlier_launch_is_refused_before_the_file_is_read(song_file, corpus):
     """The launcher restarts the tool per song, so an old tab looks alive while
     its process is dead. With the server on another song, the sections-disagree
     guard would compare against the wrong file, so token identity runs first."""
     sections = load_labels(str(song_file))
     for trigger in ('mark', 'save', 'commit'):
         updated, status = apply_edit(
-            str(song_file), trigger, sections, cursor=31.25,
-            new_label='buildup', duration=214.842, title=TITLE,
-            page_token='launch-of-song-a', server_token='launch-of-song-b')
+            str(song_file),
+            trigger,
+            sections,
+            cursor=31.25,
+            new_label='buildup',
+            duration=214.842,
+            title=TITLE,
+            page_token='launch-of-song-a',
+            server_token='launch-of-song-b',
+        )
         assert updated is None
         assert 'no longer controls' in status
     assert not labels_path(str(song_file)).exists()
@@ -329,8 +332,14 @@ def test_a_tab_from_an_earlier_launch_is_refused_before_the_file_is_read(
 def test_a_matching_token_changes_nothing_about_an_edit(song_file):
     token = label_tool.launch_token(str(song_file))
     updated, status = apply_edit(
-        str(song_file), 'mark', load_labels(str(song_file)), cursor=31.25,
-        new_label='buildup', page_token=token, server_token=token)
+        str(song_file),
+        'mark',
+        load_labels(str(song_file)),
+        cursor=31.25,
+        new_label='buildup',
+        page_token=token,
+        server_token=token,
+    )
     assert updated is not None and 'saved' in status
 
 
@@ -341,13 +350,17 @@ def test_two_launches_of_the_same_file_mint_different_tokens(song_file):
 
 
 def test_refusals_render_red_and_successes_green():
-    for message in ('commit refused: a title is required',
-                    'edit refused: page is older than the labels on disk',
-                    label_tool.stale_token_refusal('old', 'new'),
-                    'committed ✓ ... admission FAILED (RuntimeError: x)'):
+    for message in (
+        'commit refused: a title is required',
+        'edit refused: page is older than the labels on disk',
+        label_tool.stale_token_refusal('old', 'new'),
+        'committed ✓ ... admission FAILED (RuntimeError: x)',
+    ):
         assert label_tool.status_style(message)['color'] == label_tool.STATUS_BAD
-    for message in ('saved ✓ 12:00:00 · 3 sections → x',
-                    'committed ✓ 4 sections · grid + manifest row added'):
+    for message in (
+        'saved ✓ 12:00:00 · 3 sections → x',
+        'committed ✓ 4 sections · grid + manifest row added',
+    ):
         assert label_tool.status_style(message)['color'] == label_tool.STATUS_OK
 
 
@@ -365,29 +378,24 @@ def test_a_labels_file_that_cannot_be_parsed_refuses_every_edit(song_file):
     save_labels(str(song_file), SECTIONS)
     labels_path(str(song_file)).write_text('start,label\n', encoding='utf-8')
 
-    updated, status = apply_edit(str(song_file), 'mark', SECTIONS, cursor=9.0,
-                                 new_label='drop')
+    updated, status = apply_edit(str(song_file), 'mark', SECTIONS, cursor=9.0, new_label='drop')
 
     assert updated is None
     assert 'unreadable' in status
-    assert labels_path(str(song_file)).read_text(
-        encoding='utf-8') == 'start,label\n'
+    assert labels_path(str(song_file)).read_text(encoding='utf-8') == 'start,label\n'
 
 
-def test_a_pasted_header_line_names_itself_instead_of_raising_a_value_error(
-        song_file):
+def test_a_pasted_header_line_names_itself_instead_of_raising_a_value_error(song_file):
     save_labels(str(song_file), SECTIONS)
     path = labels_path(str(song_file))
-    path.write_text('start,label\n' + path.read_text(encoding='utf-8'),
-                    encoding='utf-8')
+    path.write_text('start,label\n' + path.read_text(encoding='utf-8'), encoding='utf-8')
 
     with pytest.raises(label_tool.LabelFileError) as raised:
         load_labels(str(song_file))
     assert 'line 1' in str(raised.value) and 'start' in str(raised.value)
 
 
-def test_a_label_outside_the_vocabulary_is_refused_rather_than_loading_blank(
-        song_file):
+def test_a_label_outside_the_vocabulary_is_refused_rather_than_loading_blank(song_file):
     """A strength has a defined fallback; a label has none.
 
     An unknown strength renders as `major` and round-trips. An unknown label
@@ -395,21 +403,22 @@ def test_a_label_outside_the_vocabulary_is_refused_rather_than_loading_blank(
     blank back, so the file has to be refused instead.
     """
     labels_path(str(song_file)).parent.mkdir(parents=True, exist_ok=True)
-    labels_path(str(song_file)).write_text('0.000,intro\n48.000,chorus\n',
-                                           encoding='utf-8')
+    labels_path(str(song_file)).write_text('0.000,intro\n48.000,chorus\n', encoding='utf-8')
 
     with pytest.raises(label_tool.LabelFileError) as raised:
         load_labels(str(song_file))
     assert 'line 2' in str(raised.value) and 'chorus' in str(raised.value)
 
 
-def test_launch_names_the_broken_line_before_it_decodes_anything(
-        song_file, monkeypatch):
+def test_launch_names_the_broken_line_before_it_decodes_anything(song_file, monkeypatch):
     """A file the tool refuses to read is a file only this tool can repair."""
     labels_path(str(song_file)).parent.mkdir(parents=True, exist_ok=True)
     labels_path(str(song_file)).write_text('start,label\n', encoding='utf-8')
-    monkeypatch.setattr(label_tool, 'Track', lambda *_, **__: pytest.fail(
-        'decoded a whole track before reading the labels'))
+    monkeypatch.setattr(
+        label_tool,
+        'Track',
+        lambda *_, **__: pytest.fail('decoded a whole track before reading the labels'),
+    )
 
     with pytest.raises(SystemExit) as raised:
         label_tool.launch(str(song_file))
@@ -423,15 +432,18 @@ async def test_autolux_label_parses_and_dispatches(monkeypatch, tmp_path):
     from cli.main import build_parser, label_cmd
 
     song = tmp_path / 'song.mp3'
-    args = build_parser().parse_args(['label', str(song), '--port', '9001',
-                                      '--seed'])
+    args = build_parser().parse_args(['label', str(song), '--port', '9001', '--seed'])
     assert args.func is label_cmd
     assert (args.audio, args.port, args.seed) == (str(song), 9001, True)
 
     launched = {}
-    monkeypatch.setitem(sys.modules, 'label_tool', types.SimpleNamespace(
-        launch=lambda audio, port, seed: launched.update(
-            audio=audio, port=port, seed=seed)))
+    monkeypatch.setitem(
+        sys.modules,
+        'label_tool',
+        types.SimpleNamespace(
+            launch=lambda audio, port, seed: launched.update(audio=audio, port=port, seed=seed)
+        ),
+    )
     await label_cmd(args)
     assert launched == {'audio': str(song), 'port': 9001, 'seed': True}
     assert not build_parser().parse_args(['label', str(song)]).seed
@@ -474,8 +486,7 @@ ARTIST = 'Ferry Corsten'
 TRACK = 'Is It Beautiful'
 
 
-def test_the_working_file_lives_in_the_scratch_workspace_not_beside_the_audio(
-        song, scratch):
+def test_the_working_file_lives_in_the_scratch_workspace_not_beside_the_audio(song, scratch):
     path = labels_path(str(song))
     assert path.parent == scratch
     assert path.name == 'is_it_beautiful.kUP_iJuoq9g.mp3.labels.csv'
@@ -484,19 +495,18 @@ def test_the_working_file_lives_in_the_scratch_workspace_not_beside_the_audio(
     assert not song.with_name(song.name + '.labels.csv').exists()
 
 
-def test_working_state_follows_the_corpus_rather_than_the_checkout(
-        tmp_path, monkeypatch):
+def test_working_state_follows_the_corpus_rather_than_the_checkout(tmp_path, monkeypatch):
     elsewhere = tmp_path / 'main-checkout' / 'training' / 'data' / 'raveform'
     monkeypatch.setattr(label_tool, 'corpus_dir', lambda: elsewhere)
     monkeypatch.setattr(label_tool, 'tmp_labels_dir', _REAL_TMP_LABELS_DIR)
     scratch = label_tool.tmp_labels_dir()
     assert scratch == elsewhere / label_tool.TMP_LABELS_DIR_NAME
     assert scratch.parent == label_tool.hand_label_path('x').parent.parent, (
-        'the scratch file and the committed label must resolve to one corpus')
+        'the scratch file and the committed label must resolve to one corpus'
+    )
 
 
-def test_new_audio_is_content_addressed_and_never_looks_like_a_download(
-        tmp_path, corpus):
+def test_new_audio_is_content_addressed_and_never_looks_like_a_download(tmp_path, corpus):
     one = tmp_path / 'is_it_beautiful.kUP_iJuoq9g.mp3'
     one.write_bytes(b'the same bytes')
     renamed = tmp_path / 'totally different name.mp3'
@@ -508,9 +518,8 @@ def test_new_audio_is_content_addressed_and_never_looks_like_a_download(
     assert identity(one) == identity(renamed)
     assert identity(one) != identity(other)
     assert identity(one).startswith('hand-')
-    assert not _YOUTUBE_ID.match(identity(one)[len('hand-'):])
-    assert identity(one) == 'hand-' + hashlib.sha256(
-        b'the same bytes').hexdigest()[:12]
+    assert not _YOUTUBE_ID.match(identity(one)[len('hand-') :])
+    assert identity(one) == 'hand-' + hashlib.sha256(b'the same bytes').hexdigest()[:12]
     assert resolve_identity(str(one))[1] is None
 
 
@@ -521,8 +530,8 @@ def _publish(corpus, youtube_id, payload, record_checksum=True):
     audio.write_bytes(payload)
     if record_checksum:
         (corpus / label_tool.CHECKSUMS_FILE).write_text(
-            f'{hashlib.sha256(payload).hexdigest()}  audio/{youtube_id}.mp3\n',
-            encoding='utf-8')
+            f'{hashlib.sha256(payload).hexdigest()}  audio/{youtube_id}.mp3\n', encoding='utf-8'
+        )
     return audio
 
 
@@ -537,8 +546,9 @@ def test_audio_the_corpus_already_holds_keeps_its_native_id(song, corpus):
     assert result['copied'] is False
     assert result['labels'] == corpus / 'annotations' / 'kUP_iJuoq9g.hand.json'
     assert result['audio'] == published
-    assert sorted(p.name for p in (corpus / 'audio').iterdir()) == [
-        'kUP_iJuoq9g.mp3'], 'nothing was copied'
+    assert sorted(p.name for p in (corpus / 'audio').iterdir()) == ['kUP_iJuoq9g.mp3'], (
+        'nothing was copied'
+    )
     record = json.loads(result['labels'].read_text(encoding='utf-8'))
     assert record['id'] == 'kUP_iJuoq9g'
     assert record['audio'] == 'kUP_iJuoq9g.mp3'
@@ -554,8 +564,7 @@ def test_a_renamed_copy_of_a_corpus_track_is_still_that_track(tmp_path, corpus):
 
 
 def test_dedupe_falls_back_to_hashing_when_the_baseline_is_absent(song, corpus):
-    published = _publish(corpus, 'kUP_iJuoq9g', song.read_bytes(),
-                         record_checksum=False)
+    published = _publish(corpus, 'kUP_iJuoq9g', song.read_bytes(), record_checksum=False)
     assert not (corpus / label_tool.CHECKSUMS_FILE).exists()
 
     identifier, native = resolve_identity(str(song))
@@ -564,16 +573,15 @@ def test_dedupe_falls_back_to_hashing_when_the_baseline_is_absent(song, corpus):
 
 
 def test_a_stale_baseline_does_not_hide_a_track_it_never_recorded(song, corpus):
-    published = _publish(corpus, 'kUP_iJuoq9g', song.read_bytes(),
-                         record_checksum=False)
+    published = _publish(corpus, 'kUP_iJuoq9g', song.read_bytes(), record_checksum=False)
     (corpus / label_tool.CHECKSUMS_FILE).write_text(
-        f'{"0" * 64}  audio/somethingelse.mp3\n', encoding='utf-8')
+        f'{"0" * 64}  audio/somethingelse.mp3\n', encoding='utf-8'
+    )
 
     assert resolve_identity(str(song)) == ('kUP_iJuoq9g', published)
 
 
-def test_audio_of_the_same_size_but_different_bytes_is_not_the_same_track(
-        song, corpus):
+def test_audio_of_the_same_size_but_different_bytes_is_not_the_same_track(song, corpus):
     same_size = bytes(len(song.read_bytes()))
     _publish(corpus, 'kUP_iJuoq9g', same_size, record_checksum=False)
 
@@ -593,20 +601,19 @@ def test_the_title_prefill_drops_a_trailing_youtube_id():
 
 def test_the_committed_shape_is_the_corpus_section_shape_and_round_trips():
     """The published reader is the contract, so it has to accept a hand label."""
-    record = to_annotation(MIXED, 214.842, 'hand-abc123', 'hand-abc123.mp3',
-                           TITLE)
+    record = to_annotation(MIXED, 214.842, 'hand-abc123', 'hand-abc123.mp3', TITLE)
     assert record['sections'] == [
         {'name': 'intro', 'start': 0.0, 'end': 31.25, 'strength': 'major'},
         {'name': 'buildup', 'start': 31.25, 'end': 48.0, 'strength': 'minor'},
         {'name': 'drop', 'start': 48.0, 'end': 120.001, 'strength': 'major'},
-        {'name': 'breakdown', 'start': 120.001, 'end': 214.842,
-         'strength': 'major'},
+        {'name': 'breakdown', 'start': 120.001, 'end': 214.842, 'strength': 'major'},
     ]
     assert record['title'] == TITLE
     assert from_annotation(record) == normalise(MIXED)
 
     sys.path.insert(0, str(TRAINING_DIR / 'raveform'))
     from raveform_fetch_annotations import parse_sections
+
     assert parse_sections(record)[1] == (31.25, 48.0, 'buildup')
 
 
@@ -635,7 +642,9 @@ def test_commit_never_touches_the_published_annotation(song, corpus, song_id):
     commit_labels(str(song), load_labels(str(song)), 214.842, TITLE)
     assert segments.read_bytes() == before
     assert sorted(p.name for p in (corpus / 'annotations').iterdir()) == [
-        f'{song_id}.hand.json', 'segments.json']
+        f'{song_id}.hand.json',
+        'segments.json',
+    ]
 
 
 def test_committing_twice_overwrites_rather_than_accumulates(song, corpus):
@@ -648,8 +657,7 @@ def test_committing_twice_overwrites_rather_than_accumulates(song, corpus):
     assert again['labels'].read_bytes() == once
     assert not again['labels'].with_name(again['labels'].name + '.tmp').exists()
 
-    moved = commit_labels(str(song), add_boundary(sections, 12.0, 'drop'),
-                          214.842, TITLE)
+    moved = commit_labels(str(song), add_boundary(sections, 12.0, 'drop'), 214.842, TITLE)
     assert moved['labels'].read_bytes() != once
     assert len(list((corpus / 'annotations').glob('*.hand.json'))) == 1
 
@@ -666,19 +674,22 @@ def test_a_second_commit_of_new_audio_copies_nothing_further(song, corpus):
 
 def test_commit_reports_both_paths_through_the_dispatcher(song, corpus, song_id):
     sections = load_labels(str(song))
-    updated, status = apply_edit(str(song), 'commit', sections, duration=214.842,
-                                 artist=ARTIST, title=TRACK)
+    updated, status = apply_edit(
+        str(song), 'commit', sections, duration=214.842, artist=ARTIST, title=TRACK
+    )
     assert updated is None
     assert f'{song_id}.hand.json' in status and 'audio copied' in status
-    _, status = apply_edit(str(song), 'commit', sections, duration=214.842,
-                           artist=ARTIST, title=TRACK)
+    _, status = apply_edit(
+        str(song), 'commit', sections, duration=214.842, artist=ARTIST, title=TRACK
+    )
     assert 'audio already at' in status
 
 
 def test_commit_is_refused_without_a_title_and_writes_nothing(song, corpus):
     for blank in ('', '   ', None):
-        updated, status = apply_edit(str(song), 'commit', load_labels(str(song)),
-                                     duration=214.842, title=blank)
+        updated, status = apply_edit(
+            str(song), 'commit', load_labels(str(song)), duration=214.842, title=blank
+        )
         assert updated is None
         assert status.startswith('commit refused')
         assert 'artist guard' in status
@@ -688,8 +699,9 @@ def test_commit_is_refused_without_a_title_and_writes_nothing(song, corpus):
 
 def test_an_empty_artist_is_refused_by_name_and_writes_nothing(song, corpus):
     """The prefill for the owner's first real file was exactly this shape."""
-    updated, status = apply_edit(str(song), 'commit', load_labels(str(song)),
-                                 duration=214.842, title='is it beautiful')
+    updated, status = apply_edit(
+        str(song), 'commit', load_labels(str(song)), duration=214.842, title='is it beautiful'
+    )
     assert updated is None
     assert status.startswith('commit refused')
     assert 'artist field' in status
@@ -698,52 +710,65 @@ def test_an_empty_artist_is_refused_by_name_and_writes_nothing(song, corpus):
     assert not (corpus / 'audio').exists()
 
 
-def test_a_release_with_genuinely_no_artist_goes_through_the_override(
-        song, corpus, song_id):
-    _, status = apply_edit(str(song), 'commit', load_labels(str(song)),
-                           duration=214.842, title='is it beautiful',
-                           no_artist=True)
+def test_a_release_with_genuinely_no_artist_goes_through_the_override(song, corpus, song_id):
+    _, status = apply_edit(
+        str(song),
+        'commit',
+        load_labels(str(song)),
+        duration=214.842,
+        title='is it beautiful',
+        no_artist=True,
+    )
     assert 'committed' in status
     assert 'NO artist' in status
 
-    record = json.loads(
-        (corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
+    record = json.loads((corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
     assert record['title'] == 'is it beautiful'
     assert record['artist'] is None, 'absent honestly, not absent by omission'
 
 
-def test_commit_composes_the_stored_title_the_guard_will_read(song, corpus,
-                                                              song_id):
-    apply_edit(str(song), 'commit', load_labels(str(song)), duration=214.842,
-               artist=ARTIST, title=TRACK)
-    record = json.loads(
-        (corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
+def test_commit_composes_the_stored_title_the_guard_will_read(song, corpus, song_id):
+    apply_edit(
+        str(song), 'commit', load_labels(str(song)), duration=214.842, artist=ARTIST, title=TRACK
+    )
+    record = json.loads((corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
     assert record['title'] == TITLE
     assert record['artist'] == 'Ferry Corsten'
 
     sys.path.insert(0, str(TRAINING_DIR))
     from select_eval_set import artist_of
+
     assert artist_of(record['title']) == artist_of('Ferry Corsten - anything')
 
 
 def test_pasted_unicode_dashes_are_stored_as_plain_ones(song, corpus, song_id):
-    apply_edit(str(song), 'commit', load_labels(str(song)), duration=214.842,
-               artist='K‐nflict', title='Beck−ning – VIP')
-    record = json.loads(
-        (corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
+    apply_edit(
+        str(song),
+        'commit',
+        load_labels(str(song)),
+        duration=214.842,
+        artist='K‐nflict',
+        title='Beck−ning – VIP',
+    )
+    record = json.loads((corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
     assert record['artist'] == 'K-nflict'
     assert record['title'] == 'K-nflict - Beck-ning - VIP'
 
 
 def test_the_override_is_not_needed_when_the_artist_is_filled(song, corpus):
-    _, status = apply_edit(str(song), 'commit', load_labels(str(song)),
-                           duration=214.842, artist=ARTIST, title=TRACK,
-                           no_artist=False)
+    _, status = apply_edit(
+        str(song),
+        'commit',
+        load_labels(str(song)),
+        duration=214.842,
+        artist=ARTIST,
+        title=TRACK,
+        no_artist=False,
+    )
     assert 'committed' in status
 
 
-def test_commit_still_places_the_files_when_no_admission_step_exists(
-        song, corpus, monkeypatch):
+def test_commit_still_places_the_files_when_no_admission_step_exists(song, corpus, monkeypatch):
     # This branch has the admission step, so its absence is simulated: a None
     # sys.modules entry makes the import raise, which is the pre-admission state.
     monkeypatch.setitem(sys.modules, label_tool.ADMISSION_MODULE, None)
@@ -754,30 +779,34 @@ def test_commit_still_places_the_files_when_no_admission_step_exists(
     assert result['labels'].exists() and result['audio'].exists()
 
 
-def test_commit_calls_the_admission_step_when_the_branch_has_one(
-        song, corpus, monkeypatch):
+def test_commit_calls_the_admission_step_when_the_branch_has_one(song, corpus, monkeypatch):
     seen = {}
 
     def admit(track_id, audio, labels, corpus):
         seen.update(track_id=track_id, audio=audio, labels=labels, corpus=corpus)
         return 'grid + manifest row added'
 
-    monkeypatch.setitem(sys.modules, label_tool.ADMISSION_MODULE,
-                        types.SimpleNamespace(admit=admit))
+    monkeypatch.setitem(
+        sys.modules, label_tool.ADMISSION_MODULE, types.SimpleNamespace(admit=admit)
+    )
     result = commit_labels(str(song), load_labels(str(song)), 214.842, TITLE)
     assert result['admitted'] is True
     assert result['admission'] == 'grid + manifest row added'
-    assert seen == {'track_id': result['audio'].stem, 'audio': result['audio'],
-                    'labels': result['labels'], 'corpus': corpus}
+    assert seen == {
+        'track_id': result['audio'].stem,
+        'audio': result['audio'],
+        'labels': result['labels'],
+        'corpus': corpus,
+    }
 
 
-def test_a_raising_admission_is_reported_and_never_swallowed(
-        song, corpus, monkeypatch):
+def test_a_raising_admission_is_reported_and_never_swallowed(song, corpus, monkeypatch):
     def admit(**_):
         raise RuntimeError('madmom is not installed')
 
-    monkeypatch.setitem(sys.modules, label_tool.ADMISSION_MODULE,
-                        types.SimpleNamespace(admit=admit))
+    monkeypatch.setitem(
+        sys.modules, label_tool.ADMISSION_MODULE, types.SimpleNamespace(admit=admit)
+    )
     result = commit_labels(str(song), load_labels(str(song)), 214.842, TITLE)
     assert result['admitted'] is False
     assert 'admission FAILED' in result['admission']
@@ -791,8 +820,7 @@ def test_a_generated_beat_grid_is_read_when_present(song, corpus, song_id):
     beats = corpus / 'annotations' / 'beats'
     beats.mkdir(parents=True)
     grid = beats / f'{song_id}.hand.beat.csv'
-    grid.write_text('time,downbeat,section\n0.5,1,intro\n1.0,0,intro\n',
-                    encoding='utf-8')
+    grid.write_text('time,downbeat,section\n0.5,1,intro\n1.0,0,intro\n', encoding='utf-8')
     assert beat_grid(str(song)) == [(0.5, 1), (1.0, 0)]
 
     grid.write_text('nonsense\n', encoding='utf-8')
@@ -801,8 +829,11 @@ def test_a_generated_beat_grid_is_read_when_present(song, corpus, song_id):
 
 def _track(duration: float = 214.842):
     return types.SimpleNamespace(
-        duration=duration, times=np.linspace(0.0, duration, 32),
-        envelope=np.zeros(32), flux=np.zeros(32))
+        duration=duration,
+        times=np.linspace(0.0, duration, 32),
+        envelope=np.zeros(32),
+        flux=np.zeros(32),
+    )
 
 
 def _find(component, target: str):
@@ -819,8 +850,7 @@ def _find(component, target: str):
     raise AssertionError(f'no component with id {target!r} in the layout')
 
 
-def test_a_page_reload_serves_the_labels_on_disk_not_the_ones_from_launch(
-        song_file):
+def test_a_page_reload_serves_the_labels_on_disk_not_the_ones_from_launch(song_file):
     """A static layout is a launch-time snapshot that never expires.
 
     Dash serves `app.layout` on every page load, so a single component instance
@@ -832,11 +862,15 @@ def test_a_page_reload_serves_the_labels_on_disk_not_the_ones_from_launch(
     app = label_tool.build_app(str(song_file), track)
 
     sections = load_labels(str(song_file))
-    for cursor, label in ((31.25, 'buildup'), (48.0, 'drop'),
-                          (120.0, 'breakdown')):
-        sections, _ = apply_edit(str(song_file), 'mark', sections,
-                                 cursor=cursor, new_label=label,
-                                 duration=track.duration)
+    for cursor, label in ((31.25, 'buildup'), (48.0, 'drop'), (120.0, 'breakdown')):
+        sections, _ = apply_edit(
+            str(song_file),
+            'mark',
+            sections,
+            cursor=cursor,
+            new_label=label,
+            duration=track.duration,
+        )
     assert len(sections) == 4
 
     assert callable(app.layout), 'a layout built once cannot see a later edit'
@@ -844,8 +878,14 @@ def test_a_page_reload_serves_the_labels_on_disk_not_the_ones_from_launch(
     assert _find(served, 'sections').data == sections
     assert len(_find(served, 'table').children[0].children) == len(sections) + 1
 
-    apply_edit(str(song_file), 'mark', _find(served, 'sections').data,
-               cursor=200.0, new_label='outro', duration=track.duration)
+    apply_edit(
+        str(song_file),
+        'mark',
+        _find(served, 'sections').data,
+        cursor=200.0,
+        new_label='outro',
+        duration=track.duration,
+    )
     assert len(load_labels(str(song_file))) == 5
 
 
@@ -864,13 +904,13 @@ def test_the_page_carries_its_launch_token_and_the_server_serves_it(tmp_path):
     assert _find(served, 'stale-banner').style['display'] == 'none'
 
     other = label_tool.build_app(str(audio), _track())
-    assert other.server.test_client().get('/token').get_data(
-        as_text=True) != token, 'a relaunch mints a new token'
+    assert other.server.test_client().get('/token').get_data(as_text=True) != token, (
+        'a relaunch mints a new token'
+    )
 
     spec = next(v for k, v in app.callback_map.items() if 'sections.data' in k)
     assert any(s['id'] == 'launch-token' for s in spec['state'])
-    assert 'status.style' in next(k for k in app.callback_map
-                                  if 'sections.data' in k)
+    assert 'status.style' in next(k for k in app.callback_map if 'sections.data' in k)
 
 
 def test_a_commit_click_immediately_shows_a_pending_status(tmp_path):
@@ -881,20 +921,24 @@ def test_a_commit_click_immediately_shows_a_pending_status(tmp_path):
     audio.write_bytes(b'')
     app = label_tool.build_app(str(audio), _track())
 
-    entry = next(c for c in app._callback_list
-                 if c.get('clientside_function')
-                 and 'status.children@' in c['output'])
+    entry = next(
+        c
+        for c in app._callback_list
+        if c.get('clientside_function') and 'status.children@' in c['output']
+    )
     assert 'status.style@' in entry['output']
     assert entry['inputs'] == [{'id': 'commit', 'property': 'n_clicks'}]
     assert entry['prevent_initial_call'] is True
 
-    js = next(s for s in app._inline_scripts if 'window.__stale' in s
-              and json.dumps(label_tool.COMMIT_PENDING_TEXT) in s)
+    js = next(
+        s
+        for s in app._inline_scripts
+        if 'window.__stale' in s and json.dumps(label_tool.COMMIT_PENDING_TEXT) in s
+    )
     assert json.dumps(label_tool.COMMIT_PENDING_STYLE) in js
 
 
-def test_the_playhead_row_highlight_rides_the_cursor_store_not_a_new_poll(
-        tmp_path):
+def test_the_playhead_row_highlight_rides_the_cursor_store_not_a_new_poll(tmp_path):
     """The playhead already reaches the page every tick via the cursor store,
     so the row highlight hangs off that write -- no new interval, no server
     round-trip, and the header row can never be the highlighted one."""
@@ -904,9 +948,11 @@ def test_the_playhead_row_highlight_rides_the_cursor_store_not_a_new_poll(
     audio.write_bytes(b'')
     app = label_tool.build_app(str(audio), _track())
 
-    entry = next(c for c in app._callback_list
-                 if c.get('clientside_function')
-                 and 'playhead-echo.data' in c['output'])
+    entry = next(
+        c
+        for c in app._callback_list
+        if c.get('clientside_function') and 'playhead-echo.data' in c['output']
+    )
     assert entry['inputs'] == [{'id': 'cursor', 'property': 'data'}]
     assert entry['state'] == [{'id': 'sections', 'property': 'data'}]
     assert any('playhead-row' in s for s in app._inline_scripts)
@@ -934,16 +980,26 @@ def test_spacebar_play_pause_binds_once_and_leaves_form_fields_alone(tmp_path):
     audio.write_bytes(b'')
     app = label_tool.build_app(str(audio), _track())
 
-    entry = next(c for c in app._callback_list
-                 if c.get('clientside_function')
-                 and 'space-echo.data' in c['output'])
+    entry = next(
+        c
+        for c in app._callback_list
+        if c.get('clientside_function') and 'space-echo.data' in c['output']
+    )
     assert entry['inputs'] == [{'id': 'tick', 'property': 'n_intervals'}]
 
     js = label_tool.SPACE_PLAY_JS
     assert any('__spaceBound' in s for s in app._inline_scripts)
-    for guarded in ('INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'AUDIO',
-                    'isContentEditable', 'event.repeat', 'preventDefault',
-                    '__spaceBound'):
+    for guarded in (
+        'INPUT',
+        'TEXTAREA',
+        'SELECT',
+        'BUTTON',
+        'AUDIO',
+        'isContentEditable',
+        'event.repeat',
+        'preventDefault',
+        '__spaceBound',
+    ):
         assert guarded in js
     _find(app.layout(), 'space-echo')
 
@@ -957,6 +1013,7 @@ def test_the_pending_style_is_neither_the_success_nor_the_refusal_style():
 
 def test_the_audio_route_names_the_type_the_file_actually_is(tmp_path):
     """Any input ffmpeg can decode is accepted, so the type is not a constant."""
+
     def served(name: str) -> str:
         audio = tmp_path / name
         audio.write_bytes(b'\0' * 64)
@@ -975,14 +1032,14 @@ def test_an_edit_reships_the_spans_and_never_the_full_track_traces():
     figure = label_tool.build_figure(track, SECTIONS)
     assert len(figure.data) == 3
 
-    operations = label_tool.render_patch(track, SECTIONS).to_plotly_json()[
-        'operations']
+    operations = label_tool.render_patch(track, SECTIONS).to_plotly_json()['operations']
 
-    assert [op['location'] for op in operations] == [['layout', 'shapes'],
-                                                     ['layout', 'annotations']]
+    assert [op['location'] for op in operations] == [
+        ['layout', 'shapes'],
+        ['layout', 'annotations'],
+    ]
     assert len(operations[0]['params']['value']) == len(figure.layout.shapes)
-    assert len(operations[1]['params']['value']) == len(
-        figure.layout.annotations)
+    assert len(operations[1]['params']['value']) == len(figure.layout.annotations)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1000,8 +1057,7 @@ MUST_STAY_IGNORED = (
 def _is_ignored(path: str) -> bool:
     """Without -v: a path matching a NEGATED pattern is not reported, which is
     the only reading of check-ignore that answers "is this ignored" for both."""
-    return subprocess.run(['git', 'check-ignore', '-q', path],
-                          cwd=REPO_ROOT).returncode == 0
+    return subprocess.run(['git', 'check-ignore', '-q', path], cwd=REPO_ROOT).returncode == 0
 
 
 def test_the_corpus_stays_out_of_git_apart_from_hand_labels():
@@ -1012,18 +1068,18 @@ def test_the_corpus_stays_out_of_git_apart_from_hand_labels():
 
 
 def test_a_hand_label_is_the_one_thing_git_will_take():
-    assert not _is_ignored(
-        'training/data/raveform/annotations/hand-0123456789ab.hand.json')
-    assert not _is_ignored(
-        'training/data/raveform/annotations/anything.hand.json')
+    assert not _is_ignored('training/data/raveform/annotations/hand-0123456789ab.hand.json')
+    assert not _is_ignored('training/data/raveform/annotations/anything.hand.json')
 
 
 def test_the_hole_is_exactly_one_suffix_in_exactly_one_directory():
-    for near_miss in ('training/data/raveform/hand-abc.hand.json',
-                      'training/data/hand-abc.hand.json',
-                      'training/data/raveform/annotations/beats/x.hand.json',
-                      'training/data/raveform/annotations/x.hand.json.bak',
-                      'training/data/tmp_labels/song.mp3.labels.csv'):
+    for near_miss in (
+        'training/data/raveform/hand-abc.hand.json',
+        'training/data/hand-abc.hand.json',
+        'training/data/raveform/annotations/beats/x.hand.json',
+        'training/data/raveform/annotations/x.hand.json.bak',
+        'training/data/tmp_labels/song.mp3.labels.csv',
+    ):
         assert _is_ignored(near_miss), f'{near_miss} escaped the corpus rule'
 
 
@@ -1046,8 +1102,9 @@ def test_the_handler_still_stops_a_running_show(monkeypatch):
     from cli import main
 
     stopped = []
-    monkeypatch.setattr(main, 'global_app',
-                        types.SimpleNamespace(stop=lambda: stopped.append(True)))
+    monkeypatch.setattr(
+        main, 'global_app', types.SimpleNamespace(stop=lambda: stopped.append(True))
+    )
     main.death_handler(signal.SIGINT, None)
     assert stopped == [True]
 
@@ -1063,10 +1120,12 @@ def _console_signals_are_deliverable() -> bool:
     if os.name != 'nt':
         return False
     control = subprocess.Popen(
-        [sys.executable, '-c', "import sys,time\nprint('READY', flush=True)\n"
-                               "time.sleep(30)\n"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        [sys.executable, '-c', "import sys,time\nprint('READY', flush=True)\ntime.sleep(30)\n"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
     try:
         if not control.stdout.readline().startswith('READY'):
             return False
@@ -1078,8 +1137,7 @@ def _console_signals_are_deliverable() -> bool:
             return False
     finally:
         if control.poll() is None:
-            subprocess.run(['taskkill', '/PID', str(control.pid), '/T', '/F'],
-                           capture_output=True)
+            subprocess.run(['taskkill', '/PID', str(control.pid), '/T', '/F'], capture_output=True)
 
 
 _CTRL_C_HARNESS = """import sys,time
@@ -1090,22 +1148,40 @@ time.sleep(120)
 
 def test_one_ctrl_c_ends_the_labeller(tmp_path):
     if not _console_signals_are_deliverable():
-        pytest.skip('this runner has no console, so CTRL_C_EVENT reaches nothing '
-                    '-- run the suite from a terminal to exercise the interrupt')
+        pytest.skip(
+            'this runner has no console, so CTRL_C_EVENT reaches nothing '
+            '-- run the suite from a terminal to exercise the interrupt'
+        )
 
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
         port = probe.getsockname()[1]
 
     tone = tmp_path / 'tone.wav'
-    subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi',
-                    '-i', 'sine=frequency=440:duration=2', str(tone)],
-                   check=True, stdin=subprocess.DEVNULL)
+    subprocess.run(
+        [
+            'ffmpeg',
+            '-y',
+            '-v',
+            'error',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440:duration=2',
+            str(tone),
+        ],
+        check=True,
+        stdin=subprocess.DEVNULL,
+    )
 
     process = subprocess.Popen(
         [sys.executable, '-m', 'autolux', 'label', str(tone), '--port', str(port)],
-        cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
     try:
         deadline = time.time() + 180
         while time.time() < deadline:
@@ -1127,43 +1203,46 @@ def test_one_ctrl_c_ends_the_labeller(tmp_path):
             assert probe.connect_ex(('127.0.0.1', port)) != 0, 'port still bound'
     finally:
         if process.poll() is None:
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
-                           capture_output=True)
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
             process.wait(timeout=10)
 
 
 def test_a_labelling_with_no_genre_omits_the_key_rather_than_guessing():
-    record = to_annotation(SECTIONS, 214.842, 'hand-abc123', 'hand-abc123.mp3',
-                           TITLE)
+    record = to_annotation(SECTIONS, 214.842, 'hand-abc123', 'hand-abc123.mp3', TITLE)
     assert 'genre' not in record
 
 
 def test_a_labelling_records_the_genre_the_owner_typed():
-    record = to_annotation(SECTIONS, 214.842, 'hand-abc123', 'hand-abc123.mp3',
-                           TITLE, genre='Techno')
+    record = to_annotation(
+        SECTIONS, 214.842, 'hand-abc123', 'hand-abc123.mp3', TITLE, genre='Techno'
+    )
     assert record['genre'] == 'Techno'
 
 
 def test_a_blank_genre_is_no_genre():
-    record = to_annotation(SECTIONS, 214.842, 'hand-abc123', 'hand-abc123.mp3',
-                           TITLE, genre='   ')
+    record = to_annotation(SECTIONS, 214.842, 'hand-abc123', 'hand-abc123.mp3', TITLE, genre='   ')
     assert 'genre' not in record
 
 
 def test_commit_writes_the_genre_through_the_dispatcher(song, corpus, song_id):
-    apply_edit(str(song), 'commit', load_labels(str(song)), duration=214.842,
-               artist=ARTIST, title=TRACK, genre='Drum & Bass')
-    record = json.loads(
-        (corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
+    apply_edit(
+        str(song),
+        'commit',
+        load_labels(str(song)),
+        duration=214.842,
+        artist=ARTIST,
+        title=TRACK,
+        genre='Drum & Bass',
+    )
+    record = json.loads((corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
     assert record['genre'] == 'Drum & Bass'
 
 
-def test_commit_without_a_genre_writes_a_record_that_has_none(song, corpus,
-                                                              song_id):
-    apply_edit(str(song), 'commit', load_labels(str(song)), duration=214.842,
-               artist=ARTIST, title=TRACK)
-    record = json.loads(
-        (corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
+def test_commit_without_a_genre_writes_a_record_that_has_none(song, corpus, song_id):
+    apply_edit(
+        str(song), 'commit', load_labels(str(song)), duration=214.842, artist=ARTIST, title=TRACK
+    )
+    record = json.loads((corpus / 'annotations' / f'{song_id}.hand.json').read_text('utf-8'))
     assert 'genre' not in record
 
 
@@ -1178,49 +1257,67 @@ def test_known_metadata_walks_the_precedence_ladder(corpus):
     payload = b'the same recording everywhere'
     audio = _third_party_song(corpus, payload)
     _publish(corpus, 'kUP_iJuoq9g', payload)
-    (corpus / 'annotations' / 'segments.json').write_text(json.dumps(
-        [{'id': 'kUP_iJuoq9g', 'title': 'Published Title', 'genre': 'Trance',
-          'sections': []}]), encoding='utf-8')
+    (corpus / 'annotations' / 'segments.json').write_text(
+        json.dumps(
+            [{'id': 'kUP_iJuoq9g', 'title': 'Published Title', 'genre': 'Trance', 'sections': []}]
+        ),
+        encoding='utf-8',
+    )
     source = corpus / 'annotations' / 'hx-0001_12step.harmonix.json'
-    source.write_text(json.dumps({'title': '1, 2 Step', 'artist': 'Ciara',
-                                  'genre': 'R&B'}), encoding='utf-8')
+    source.write_text(
+        json.dumps({'title': '1, 2 Step', 'artist': 'Ciara', 'genre': 'R&B'}), encoding='utf-8'
+    )
     hand = corpus / 'annotations' / 'kUP_iJuoq9g.hand.json'
-    hand.write_text(json.dumps({'title': 'Owner - Corrected', 'genre': 'DnB'}),
-                    encoding='utf-8')
+    hand.write_text(json.dumps({'title': 'Owner - Corrected', 'genre': 'DnB'}), encoding='utf-8')
 
     assert label_tool.known_metadata(str(audio)) == {
-        'artist': 'Owner', 'title': 'Corrected', 'genre': 'DnB'}
+        'artist': 'Owner',
+        'title': 'Corrected',
+        'genre': 'DnB',
+    }
     hand.unlink()
     assert label_tool.known_metadata(str(audio)) == {
-        'artist': 'Ciara', 'title': '1, 2 Step', 'genre': 'R&B'}
+        'artist': 'Ciara',
+        'title': '1, 2 Step',
+        'genre': 'R&B',
+    }
     source.unlink()
     assert label_tool.known_metadata(str(audio)) == {
-        'artist': None, 'title': 'Published Title', 'genre': 'Trance'}
-    (corpus / 'annotations' / 'segments.json').write_text('[]',
-                                                          encoding='utf-8')
+        'artist': None,
+        'title': 'Published Title',
+        'genre': 'Trance',
+    }
+    (corpus / 'annotations' / 'segments.json').write_text('[]', encoding='utf-8')
     assert label_tool.known_metadata(str(audio)) == {
-        'artist': None, 'title': default_title(str(audio)), 'genre': None}
+        'artist': None,
+        'title': default_title(str(audio)),
+        'genre': None,
+    }
 
 
 def test_known_metadata_finds_the_hand_label_of_new_audio_by_its_id(corpus):
     audio = _third_party_song(corpus)
     identifier = resolve_identity(str(audio))[0]
     (corpus / 'annotations' / f'{identifier}.hand.json').write_text(
-        json.dumps({'title': 'Owner - Redo'}), encoding='utf-8')
+        json.dumps({'title': 'Owner - Redo'}), encoding='utf-8'
+    )
     (corpus / 'annotations' / 'hx-0001_12step.harmonix.json').write_text(
-        json.dumps({'title': '1, 2 Step', 'artist': 'Ciara', 'genre': 'R&B'}),
-        encoding='utf-8')
+        json.dumps({'title': '1, 2 Step', 'artist': 'Ciara', 'genre': 'R&B'}), encoding='utf-8'
+    )
 
     assert identifier.startswith('hand-')
     assert label_tool.known_metadata(str(audio)) == {
-        'artist': 'Owner', 'title': 'Redo', 'genre': 'R&B'}
+        'artist': 'Owner',
+        'title': 'Redo',
+        'genre': 'R&B',
+    }
 
 
 def test_known_metadata_strips_the_artist_out_of_a_composed_title(corpus):
     audio = _third_party_song(corpus)
     (corpus / 'annotations' / 'hx-0001_12step.harmonix.json').write_text(
-        json.dumps({'title': 'Ciara - 1, 2 Step', 'artist': 'Ciara'}),
-        encoding='utf-8')
+        json.dumps({'title': 'Ciara - 1, 2 Step', 'artist': 'Ciara'}), encoding='utf-8'
+    )
 
     known = label_tool.known_metadata(str(audio))
     assert known['artist'] == 'Ciara'
@@ -1229,22 +1326,30 @@ def test_known_metadata_strips_the_artist_out_of_a_composed_title(corpus):
 
 def test_known_metadata_never_raises(tmp_path, monkeypatch):
     assert label_tool.known_metadata(str(tmp_path / 'ghost.mp3')) == {
-        'artist': None, 'title': 'ghost', 'genre': None}
+        'artist': None,
+        'title': 'ghost',
+        'genre': None,
+    }
 
     song = tmp_path / 'a_song.mp3'
     song.write_bytes(b'bytes')
+
     def broken():
         raise OSError('no corpus on this machine')
+
     monkeypatch.setattr(label_tool, 'corpus_dir', broken)
     assert label_tool.known_metadata(str(song)) == {
-        'artist': None, 'title': 'a song', 'genre': None}
+        'artist': None,
+        'title': 'a song',
+        'genre': None,
+    }
 
 
-def test_the_layout_prefills_artist_title_and_genre_from_known_metadata(
-        song, corpus):
+def test_the_layout_prefills_artist_title_and_genre_from_known_metadata(song, corpus):
     _publish(corpus, 'kUP_iJuoq9g', song.read_bytes())
     (corpus / 'annotations' / 'kUP_iJuoq9g.hand.json').write_text(
-        json.dumps({'title': TITLE, 'genre': 'Trance'}), encoding='utf-8')
+        json.dumps({'title': TITLE, 'genre': 'Trance'}), encoding='utf-8'
+    )
 
     served = label_tool.build_app(str(song), _track()).layout()
     assert _find(served, 'artist').value == ARTIST
@@ -1262,29 +1367,39 @@ def test_the_layout_falls_back_to_the_filename_prefill(song_file, corpus):
 def _publish_with_sections(corpus, youtube_id, sections, payload=b'seed me'):
     audio = _publish(corpus, youtube_id, payload)
     (corpus / 'annotations' / 'segments.json').write_text(
-        json.dumps([{'id': youtube_id, 'title': 'A - B', 'sections': sections}]),
-        encoding='utf-8')
+        json.dumps([{'id': youtube_id, 'title': 'A - B', 'sections': sections}]), encoding='utf-8'
+    )
     return audio
 
 
-def test_the_seed_keeps_the_published_boundaries_and_drops_the_end_sentinel(
-        corpus):
-    audio = _publish_with_sections(corpus, 'kUP_iJuoq9g', [
-        {'name': 'intro', 'start': 0.11, 'end': 30.5},
-        {'name': 'breakdown', 'start': 30.5, 'end': 97.25},
-        {'name': 'drop', 'start': 97.25, 'end': 180.0},
-        {'name': 'end', 'start': 180.0, 'end': 190.0}])
+def test_the_seed_keeps_the_published_boundaries_and_drops_the_end_sentinel(corpus):
+    audio = _publish_with_sections(
+        corpus,
+        'kUP_iJuoq9g',
+        [
+            {'name': 'intro', 'start': 0.11, 'end': 30.5},
+            {'name': 'breakdown', 'start': 30.5, 'end': 97.25},
+            {'name': 'drop', 'start': 97.25, 'end': 180.0},
+            {'name': 'end', 'start': 180.0, 'end': 190.0},
+        ],
+    )
 
     assert label_tool.published_seed(str(audio)) == [
         {'start': 0.0, 'label': 'intro', 'strength': 'major'},
         {'start': 30.5, 'label': 'breakdown', 'strength': 'major'},
-        {'start': 97.25, 'label': 'drop', 'strength': 'major'}]
+        {'start': 97.25, 'label': 'drop', 'strength': 'major'},
+    ]
 
 
 def test_a_seed_the_tool_wrote_is_one_the_tool_can_read_back(corpus):
-    audio = _publish_with_sections(corpus, 'kUP_iJuoq9g', [
-        {'name': 'intro', 'start': 0.11, 'end': 30.5},
-        {'name': 'end', 'start': 30.5, 'end': 40.0}])
+    audio = _publish_with_sections(
+        corpus,
+        'kUP_iJuoq9g',
+        [
+            {'name': 'intro', 'start': 0.11, 'end': 30.5},
+            {'name': 'end', 'start': 30.5, 'end': 40.0},
+        ],
+    )
 
     label_tool.seed_from_published(str(audio))
 
@@ -1292,36 +1407,47 @@ def test_a_seed_the_tool_wrote_is_one_the_tool_can_read_back(corpus):
 
 
 def test_a_published_start_past_the_tolerance_gains_an_anchor(corpus):
-    audio = _publish_with_sections(corpus, 'kUP_iJuoq9g', [
-        {'name': 'drop', 'start': 12.0, 'end': 30.5}])
+    audio = _publish_with_sections(
+        corpus, 'kUP_iJuoq9g', [{'name': 'drop', 'start': 12.0, 'end': 30.5}]
+    )
 
     assert label_tool.published_seed(str(audio)) == [
         {'start': 0.0, 'label': 'intro', 'strength': 'major'},
-        {'start': 12.0, 'label': 'drop', 'strength': 'major'}]
+        {'start': 12.0, 'label': 'drop', 'strength': 'major'},
+    ]
 
 
-def test_a_start_inside_the_tolerance_moves_rather_than_gaining_a_sliver(
-        corpus):
-    audio = _publish_with_sections(corpus, 'kUP_iJuoq9g', [
-        {'name': 'altintro', 'start': 0.663, 'end': 22.8},
-        {'name': 'drop', 'start': 22.8, 'end': 60.0}])
+def test_a_start_inside_the_tolerance_moves_rather_than_gaining_a_sliver(corpus):
+    audio = _publish_with_sections(
+        corpus,
+        'kUP_iJuoq9g',
+        [
+            {'name': 'altintro', 'start': 0.663, 'end': 22.8},
+            {'name': 'drop', 'start': 22.8, 'end': 60.0},
+        ],
+    )
 
     assert label_tool.published_seed(str(audio)) == [
         {'start': 0.0, 'label': 'altintro', 'strength': 'major'},
-        {'start': 22.8, 'label': 'drop', 'strength': 'major'}]
+        {'start': 22.8, 'label': 'drop', 'strength': 'major'},
+    ]
 
 
 def test_seeding_never_overwrites_work_already_on_disk(corpus):
-    audio = _publish_with_sections(corpus, 'kUP_iJuoq9g', [
-        {'name': 'intro', 'start': 0.0, 'end': 30.5},
-        {'name': 'drop', 'start': 30.5, 'end': 60.0}])
+    audio = _publish_with_sections(
+        corpus,
+        'kUP_iJuoq9g',
+        [
+            {'name': 'intro', 'start': 0.0, 'end': 30.5},
+            {'name': 'drop', 'start': 30.5, 'end': 60.0},
+        ],
+    )
     label_tool.save_labels(str(audio), [{'start': 0.0, 'label': 'buildup'}])
 
     message = label_tool.seed_from_published(str(audio))
 
     assert 'left alone' in message
-    assert load_labels(str(audio)) == [
-        {'start': 0.0, 'label': 'buildup', 'strength': 'major'}]
+    assert load_labels(str(audio)) == [{'start': 0.0, 'label': 'buildup', 'strength': 'major'}]
 
 
 def test_audio_the_corpus_does_not_hold_seeds_nothing(song, corpus):
@@ -1333,22 +1459,20 @@ def test_audio_the_corpus_does_not_hold_seeds_nothing(song, corpus):
 def _beat_file(corpus, name, rows):
     path = corpus / 'annotations' / 'beats' / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('time,downbeat\n' + ''.join(f'{t},{d}\n' for t, d in rows),
-                    encoding='utf-8')
+    path.write_text('time,downbeat\n' + ''.join(f'{t},{d}\n' for t, d in rows), encoding='utf-8')
     return path
 
 
 def test_a_published_grid_numbers_the_bar_and_is_read_as_one_downbeat(corpus):
     audio = _publish(corpus, 'kUP_iJuoq9g', b'gridded')
-    _beat_file(corpus, '1723.kUP_iJuoq9g.beat.csv',
-               [(0.1, 1), (0.6, 2), (1.1, 3), (1.6, 4), (2.1, 1)])
+    _beat_file(
+        corpus, '1723.kUP_iJuoq9g.beat.csv', [(0.1, 1), (0.6, 2), (1.1, 3), (1.6, 4), (2.1, 1)]
+    )
 
-    assert label_tool.beat_grid(str(audio)) == [
-        (0.1, 1), (0.6, 0), (1.1, 0), (1.6, 0), (2.1, 1)]
+    assert label_tool.beat_grid(str(audio)) == [(0.1, 1), (0.6, 0), (1.1, 0), (1.6, 0), (2.1, 1)]
 
 
-def test_a_generated_grid_wins_over_the_published_one_for_the_same_track(
-        corpus):
+def test_a_generated_grid_wins_over_the_published_one_for_the_same_track(corpus):
     audio = _publish(corpus, 'kUP_iJuoq9g', b'gridded')
     _beat_file(corpus, '1723.kUP_iJuoq9g.beat.csv', [(0.1, 1), (0.6, 2)])
     _beat_file(corpus, 'kUP_iJuoq9g.hand.beat.csv', [(0.2, 1), (0.7, 0)])

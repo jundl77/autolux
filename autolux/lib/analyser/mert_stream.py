@@ -1,4 +1,5 @@
 """The live MERT feature stage: 44.1 kHz in, pooled label cells out."""
+
 from __future__ import annotations
 
 import hashlib
@@ -19,8 +20,10 @@ ENCODER_RECEPTIVE_FIELD = 400
 
 
 def encoder_samples(seconds: float, sample_rate: int = ENCODER_SAMPLE_RATE) -> int:
-    return int(math.floor(seconds * sample_rate / ENCODER_SAMPLES_PER_FRAME)) \
+    return (
+        int(math.floor(seconds * sample_rate / ENCODER_SAMPLES_PER_FRAME))
         * ENCODER_SAMPLES_PER_FRAME
+    )
 
 
 def encoder_frames(n_samples: int) -> int:
@@ -29,16 +32,22 @@ def encoder_frames(n_samples: int) -> int:
     return 1 + (int(n_samples) - ENCODER_RECEPTIVE_FIELD) // ENCODER_SAMPLES_PER_FRAME
 
 
-def encoder_frame_times(n_frames: int, *, offset_samples: int,
-                        sample_rate: int = ENCODER_SAMPLE_RATE) -> np.ndarray:
+def encoder_frame_times(
+    n_frames: int, *, offset_samples: int, sample_rate: int = ENCODER_SAMPLE_RATE
+) -> np.ndarray:
     starts = np.arange(int(n_frames), dtype=np.float64) * ENCODER_SAMPLES_PER_FRAME
     return (offset_samples + starts + ENCODER_RECEPTIVE_FIELD / 2.0) / float(sample_rate)
 
 
-def frame_selection(n_frames: int, *, offset_samples: int, lo_sec: float,
-                    hi_sec: float, sample_rate: int = ENCODER_SAMPLE_RATE):
-    times = encoder_frame_times(n_frames, offset_samples=offset_samples,
-                                sample_rate=sample_rate)
+def frame_selection(
+    n_frames: int,
+    *,
+    offset_samples: int,
+    lo_sec: float,
+    hi_sec: float,
+    sample_rate: int = ENCODER_SAMPLE_RATE,
+):
+    times = encoder_frame_times(n_frames, offset_samples=offset_samples, sample_rate=sample_rate)
     keep = np.flatnonzero((times >= lo_sec) & (times < hi_sec))
     return times[keep], keep
 
@@ -48,13 +57,13 @@ _CONTEXT_BLOCKS = 2
 _WORK_BLOCKS = 20
 
 
-class Flushed(RuntimeError):
-    ...
+class Flushed(RuntimeError): ...
 
 
 class StreamingResampler:
-    def __init__(self, source_rate: int = SOURCE_SAMPLE_RATE,
-                 target_rate: int = ENCODER_SAMPLE_RATE) -> None:
+    def __init__(
+        self, source_rate: int = SOURCE_SAMPLE_RATE, target_rate: int = ENCODER_SAMPLE_RATE
+    ) -> None:
         divisor = math.gcd(int(source_rate), int(target_rate))
         self.up = int(target_rate) // divisor
         self.down = int(source_rate) // divisor
@@ -87,8 +96,7 @@ class StreamingResampler:
         remaining = len(self._pending) - self._context
         take = int(math.ceil(remaining / self.down)) * self.down
         pad = take - remaining + self._context
-        self._pending = np.concatenate(
-            [self._pending, np.zeros(max(pad, 0), dtype=np.float32)])
+        self._pending = np.concatenate([self._pending, np.zeros(max(pad, 0), dtype=np.float32)])
         out = self._emit(self.down, exact=remaining)
         self._flushed = True
         return out
@@ -98,17 +106,19 @@ class StreamingResampler:
         take = (usable // block) * block
         if take <= 0:
             return np.zeros(0, dtype=np.float32)
-        window = self._pending[:take + 2 * self._context]
+        window = self._pending[: take + 2 * self._context]
         filtered = resample_poly(window, self.up, self.down)
         head = self._context * self.up // self.down
-        count = (take * self.up // self.down if exact is None
-                 else int(math.ceil(exact * self.up / self.down)))
+        count = (
+            take * self.up // self.down
+            if exact is None
+            else int(math.ceil(exact * self.up / self.down))
+        )
         self._pending = self._pending[take:]
-        return np.ascontiguousarray(filtered[head:head + count], dtype=np.float32)
+        return np.ascontiguousarray(filtered[head : head + count], dtype=np.float32)
 
 
-class RingOverrun(RuntimeError):
-    ...
+class RingOverrun(RuntimeError): ...
 
 
 class SampleRing:
@@ -149,13 +159,14 @@ class SampleRing:
         else:
             split = capacity - head
             self._buffer[head:] = block[:split]
-            self._buffer[:end - capacity] = block[split:]
+            self._buffer[: end - capacity] = block[split:]
         self._written = self._reserved
 
     def snapshot(self, start: int, end: int) -> np.ndarray:
         if end > self._written:
-            raise ValueError(f"samples [{start}, {end}) are not written yet "
-                             f"({self._written} so far)")
+            raise ValueError(
+                f"samples [{start}, {end}) are not written yet ({self._written} so far)"
+            )
         if start < 0 or end < start:
             raise ValueError(f"bad span [{start}, {end})")
         self._still_held(start)
@@ -163,19 +174,22 @@ class SampleRing:
         head = start % capacity
         count = end - start
         if head + count <= capacity:
-            out = np.array(self._buffer[head:head + count], dtype=np.float32)
+            out = np.array(self._buffer[head : head + count], dtype=np.float32)
         else:
             split = capacity - head
-            out = np.concatenate([self._buffer[head:],
-                                  self._buffer[:count - split]]).astype(np.float32)
+            out = np.concatenate([self._buffer[head:], self._buffer[: count - split]]).astype(
+                np.float32
+            )
         self._still_held(start)
         return out
 
     def _still_held(self, start: int) -> None:
         if self._reserved - start > self.capacity:
-            raise RingOverrun(f"samples from {start} have been overwritten; the "
-                              f"ring holds {self.capacity} and is at "
-                              f"{self._reserved}")
+            raise RingOverrun(
+                f"samples from {start} have been overwritten; the "
+                f"ring holds {self.capacity} and is at "
+                f"{self._reserved}"
+            )
 
 
 def pass_schedule(n_samples: int, *, length: int, hop: int, margin: int):
@@ -222,14 +236,12 @@ class CellAccumulator:
         self._last = None
         return skipped
 
-    def add(self, stacked: np.ndarray, times: np.ndarray, lo_sec: float,
-            hi_sec: float) -> None:
+    def add(self, stacked: np.ndarray, times: np.ndarray, lo_sec: float, hi_sec: float) -> None:
         keep = (times >= lo_sec) & (times < hi_sec)
         if not keep.any():
             return
         rows = np.asarray(stacked)[keep].astype(np.float64)
-        cell = np.floor(np.asarray(times)[keep]
-                        / self._label_frame_sec).astype(np.int64)
+        cell = np.floor(np.asarray(times)[keep] / self._label_frame_sec).astype(np.int64)
         inside = cell >= self._next
         if not inside.any():
             return
@@ -313,44 +325,57 @@ class StreamGeometry:
         return self.margin_sec + self.hop_sec
 
 
-def load_stream_geometry(affine_path, *, label_frame_sec: float,
-                         model_id: str = DEFAULT_MODEL_ID,
-                         revision: str = DEFAULT_MODEL_REVISION,
-                         encoder_sha: str | None = DEFAULT_ENCODER_SHA
-                         ) -> StreamGeometry:
+def load_stream_geometry(
+    affine_path,
+    *,
+    label_frame_sec: float,
+    model_id: str = DEFAULT_MODEL_ID,
+    revision: str = DEFAULT_MODEL_REVISION,
+    encoder_sha: str | None = DEFAULT_ENCODER_SHA,
+) -> StreamGeometry:
     with np.load(affine_path) as archive:
         if "geometry" not in archive.files:
             raise ValueError(f"{affine_path} carries no geometry record")
         record = json.loads(str(archive["geometry"]))
-        layers = tuple(int(layer) for layer in archive["layers"]) \
-            if "layers" in archive.files else ()
+        layers = (
+            tuple(int(layer) for layer in archive["layers"]) if "layers" in archive.files else ()
+        )
     if not record:
         raise ValueError(f"{affine_path} carries an empty geometry record")
     if int(record.get("causal", 0)) != 1:
         raise ValueError(f"{affine_path} was fitted on non-causal features")
     if not layers:
         raise ValueError(f"{affine_path} names no encoder layers")
-    return StreamGeometry(model_id=model_id, layers=layers,
-                          margin_sec=float(record["margin_sec"]),
-                          hop_sec=float(record["hop_sec"]),
-                          buffer_sec=float(record["buffer_sec"]),
-                          label_frame_sec=float(label_frame_sec),
-                          encoder_sha=encoder_sha, revision=revision)
+    return StreamGeometry(
+        model_id=model_id,
+        layers=layers,
+        margin_sec=float(record["margin_sec"]),
+        hop_sec=float(record["hop_sec"]),
+        buffer_sec=float(record["buffer_sec"]),
+        label_frame_sec=float(label_frame_sec),
+        encoder_sha=encoder_sha,
+        revision=revision,
+    )
 
 
 def load_input_affine(affine_path):
     with np.load(affine_path) as archive:
-        return (np.asarray(archive["mean"], dtype=np.float32),
-                np.asarray(archive["std"], dtype=np.float32))
+        return (
+            np.asarray(archive["mean"], dtype=np.float32),
+            np.asarray(archive["std"], dtype=np.float32),
+        )
 
 
 def check_encoder_sha(actual: str, expected: str | None) -> None:
     if not expected:
-        raise ValueError("refusing an unpinned encoder: there is no weights "
-                         "hash to check the fetched model against")
+        raise ValueError(
+            "refusing an unpinned encoder: there is no weights "
+            "hash to check the fetched model against"
+        )
     if actual != expected:
-        raise RuntimeError(f"encoder weights hash {actual} is not the "
-                           f"{expected} the features were extracted with")
+        raise RuntimeError(
+            f"encoder weights hash {actual} is not the {expected} the features were extracted with"
+        )
 
 
 def best_device() -> str:
@@ -368,8 +393,9 @@ def state_dict_sha(model) -> str:
 
 
 class MertEncoder:
-    def __init__(self, model, extractor, model_sha: str, layers, *,
-                 device: str, fp16: bool) -> None:
+    def __init__(
+        self, model, extractor, model_sha: str, layers, *, device: str, fp16: bool
+    ) -> None:
         import torch
 
         self._model = model
@@ -385,8 +411,7 @@ class MertEncoder:
     def n_layers(self) -> int:
         return len(self.layers)
 
-    def encode(self, segment, *, offset_samples: int, lo_sec: float,
-               hi_sec: float):
+    def encode(self, segment, *, offset_samples: int, lo_sec: float, hi_sec: float):
         import torch
 
         segment = np.ascontiguousarray(segment, dtype=np.float32)
@@ -400,41 +425,56 @@ class MertEncoder:
                 raise RuntimeError(
                     f"the encoder produced {n_frames} frames for "
                     f"{len(segment)} samples, not the "
-                    f"{encoder_frames(len(segment))} its conv stack implies")
+                    f"{encoder_frames(len(segment))} its conv stack implies"
+                )
             times, keep = frame_selection(
-                n_frames, offset_samples=offset_samples, lo_sec=lo_sec,
-                hi_sec=hi_sec, sample_rate=self.sample_rate)
+                n_frames,
+                offset_samples=offset_samples,
+                lo_sec=lo_sec,
+                hi_sec=hi_sec,
+                sample_rate=self.sample_rate,
+            )
             index = torch.from_numpy(keep).to(self.device)
-            stacked = torch.stack(
-                [hidden[layer][0].index_select(0, index)
-                 for layer in self.layers], dim=1).float().cpu().numpy()
+            stacked = (
+                torch.stack(
+                    [hidden[layer][0].index_select(0, index) for layer in self.layers], dim=1
+                )
+                .float()
+                .cpu()
+                .numpy()
+            )
             del hidden, x
         return stacked, times
 
 
-def load_encoder(geometry: StreamGeometry, *, device: str, fp16: bool = True,
-                 expected_sha: str | None = None) -> MertEncoder:
+def load_encoder(
+    geometry: StreamGeometry, *, device: str, fp16: bool = True, expected_sha: str | None = None
+) -> MertEncoder:
     from transformers import AutoModel, Wav2Vec2FeatureExtractor
 
-    model = AutoModel.from_pretrained(geometry.model_id,
-                                      revision=geometry.revision,
-                                      trust_remote_code=True)
+    model = AutoModel.from_pretrained(
+        geometry.model_id, revision=geometry.revision, trust_remote_code=True
+    )
     extractor = Wav2Vec2FeatureExtractor.from_pretrained(
-        geometry.model_id, revision=geometry.revision, trust_remote_code=True)
+        geometry.model_id, revision=geometry.revision, trust_remote_code=True
+    )
     model.eval()
     model_sha = state_dict_sha(model)
     check_encoder_sha(model_sha, expected_sha or geometry.encoder_sha)
     if fp16:
         model = model.half()
-    return MertEncoder(model.to(device), extractor, model_sha, geometry.layers,
-                       device=device, fp16=fp16)
+    return MertEncoder(
+        model.to(device), extractor, model_sha, geometry.layers, device=device, fp16=fp16
+    )
 
 
 def _checked_encoder(encoder):
     if int(encoder.sample_rate) != ENCODER_SAMPLE_RATE:
-        raise ValueError(f"the encoder speaks {encoder.sample_rate} Hz while "
-                         f"the geometry sizes the ring, the hop and the margin "
-                         f"at {ENCODER_SAMPLE_RATE}")
+        raise ValueError(
+            f"the encoder speaks {encoder.sample_rate} Hz while "
+            f"the geometry sizes the ring, the hop and the margin "
+            f"at {ENCODER_SAMPLE_RATE}"
+        )
     return encoder
 
 
@@ -457,26 +497,27 @@ class Resync(NamedTuple):
 
 
 class MertStream:
-    def __init__(self, encoder, *, geometry: StreamGeometry,
-                 source_rate: int = SOURCE_SAMPLE_RATE) -> None:
+    def __init__(
+        self, encoder, *, geometry: StreamGeometry, source_rate: int = SOURCE_SAMPLE_RATE
+    ) -> None:
         self.geometry = geometry
         self._encoder = _checked_encoder(encoder)
         self._resampler = StreamingResampler(source_rate, encoder.sample_rate)
         self._ring = SampleRing(geometry.buffer_samples + geometry.hop_samples)
-        self._cells = CellAccumulator(encoder.n_layers, encoder.dim,
-                                      geometry.label_frame_sec)
+        self._cells = CellAccumulator(encoder.n_layers, encoder.dim, geometry.label_frame_sec)
         self._passes = 0
         self._lo = 0
         self._flushed = False
 
     def set_encoder(self, encoder) -> None:
         encoder = _checked_encoder(encoder)
-        if (encoder.n_layers, encoder.dim) != (self._encoder.n_layers,
-                                               self._encoder.dim):
-            raise ValueError(f"the replacement encoder emits "
-                             f"{encoder.n_layers}x{encoder.dim} features, not "
-                             f"the {self._encoder.n_layers}x{self._encoder.dim} "
-                             f"the accumulator and the student were built for")
+        if (encoder.n_layers, encoder.dim) != (self._encoder.n_layers, self._encoder.dim):
+            raise ValueError(
+                f"the replacement encoder emits "
+                f"{encoder.n_layers}x{encoder.dim} features, not "
+                f"the {self._encoder.n_layers}x{self._encoder.dim} "
+                f"the accumulator and the student were built for"
+            )
         self._encoder = encoder
 
     @property
@@ -497,13 +538,14 @@ class MertStream:
 
     def push_audio(self, samples) -> None:
         if self._flushed:
-            raise Flushed("the stage was flushed at a song boundary; reset it "
-                          "before pushing the next song's audio")
+            raise Flushed(
+                "the stage was flushed at a song boundary; reset it "
+                "before pushing the next song's audio"
+            )
         self._ring.write(self._resampler.push(samples))
 
     def due(self) -> bool:
-        return (not self._flushed
-                and self._ring.written >= self._next_end())
+        return not self._flushed and self._ring.written >= self._next_end()
 
     def run_pass(self) -> list:
         end = self._next_end()
@@ -515,16 +557,16 @@ class MertStream:
 
     def resync(self) -> Resync:
         if self._flushed:
-            raise Flushed("the stage was flushed; there is no live edge to "
-                          "rejoin until it is reset")
+            raise Flushed(
+                "the stage was flushed; there is no live edge to rejoin until it is reset"
+            )
         hop = self.geometry.hop_samples
         passes = max(0, self._ring.written // hop - 1)
         end = (passes + 1) * hop
         rate = float(self._encoder.sample_rate)
         lo = max(self._lo, end - self.geometry.margin_samples - hop, 0)
         lost = lo - self._lo
-        skipped = self._cells.skip_to(
-            math.ceil(lo / rate / self.geometry.label_frame_sec))
+        skipped = self._cells.skip_to(math.ceil(lo / rate / self.geometry.label_frame_sec))
         self._passes = passes
         self._lo = lo
         return Resync(lost, lost / rate, self._cells.next_index, skipped)
@@ -548,13 +590,19 @@ class MertStream:
         if hi > self._lo:
             segment = self._ring.snapshot(start, end)
             stacked, times = self._encoder.encode(
-                segment, offset_samples=start, lo_sec=self._lo / rate,
-                hi_sec=hi / rate)
+                segment, offset_samples=start, lo_sec=self._lo / rate, hi_sec=hi / rate
+            )
             self._cells.add(stacked, times, self._lo / rate, hi / rate)
             self._lo = hi
-        return [self._cell(index, row, end / rate)
-                for index, row in self._cells.drain(hi / rate, final=final)]
+        return [
+            self._cell(index, row, end / rate)
+            for index, row in self._cells.drain(hi / rate, final=final)
+        ]
 
     def _cell(self, index: int, row: np.ndarray, seen_sec: float) -> Cell:
-        return Cell(index, (index + 1) * self.geometry.label_frame_sec,
-                    _at_offline_sidecar_precision(row), seen_sec)
+        return Cell(
+            index,
+            (index + 1) * self.geometry.label_frame_sec,
+            _at_offline_sidecar_precision(row),
+            seen_sec,
+        )

@@ -59,8 +59,8 @@ UDP_PORT = 19001
 
 overlays = DmxOverlays()
 overlays.add_overlay(0, 512, [0] * 512)
-#overlays.add_overlay(65, 31, [128] * 31)
-#overlays.add_overlay(0, 12, [0] * 12)
+# overlays.add_overlay(65, 31, [128] * 31)
+# overlays.add_overlay(0, 12, [0] * 12)
 MESSAGE = create_message(0, overlays)
 
 print("UDP target IP: %s" % UDP_IP)

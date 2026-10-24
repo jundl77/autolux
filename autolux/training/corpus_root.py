@@ -1,4 +1,5 @@
 """Where the Raveform corpus is on this machine, and nothing else."""
+
 from __future__ import annotations
 
 import os
@@ -30,13 +31,14 @@ def corpus_dir() -> Path:
     local = default_data_dir()
     if is_corpus(local):
         return local
-    main_checkout_git_dir = _git("rev-parse", "--path-format=absolute",
-                                 "--git-common-dir")
+    main_checkout_git_dir = _git("rev-parse", "--path-format=absolute", "--git-common-dir")
     if main_checkout_git_dir:
         main = Path(main_checkout_git_dir).parent
         # Resolve shared assets from the primary checkout.
-        for shared in (main / 'autolux' / local.relative_to(REPO_ROOT),
-                       main / local.relative_to(REPO_ROOT)):
+        for shared in (
+            main / 'autolux' / local.relative_to(REPO_ROOT),
+            main / local.relative_to(REPO_ROOT),
+        ):
             if is_corpus(shared):
                 return shared
     return local
@@ -46,7 +48,10 @@ def _git(*args: str) -> str | None:
     try:
         proc = subprocess.run(
             ["git", "-C", str(REPO_ROOT), *args],
-            capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return None

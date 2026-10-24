@@ -16,6 +16,7 @@ target at the wrong frame teaches the decoder to fire early.  Neither shows up
 as an error -- only as a slightly worse model -- so they are asserted directly
 against hand-built section lists.
 """
+
 import collections
 import json
 import math
@@ -65,12 +66,12 @@ from nn.dataset import (  # noqa: E402
 def test_window_geometry_matches_the_spec():
     """~16 s of ~46 ms frames, poolable to the ~10 Hz label head."""
     assert FRAME_SEC == pytest.approx(8 * 256 / 44100)
-    assert WINDOW_FRAMES == 348                       # 16 s / 46.4 ms, aligned up
-    assert WINDOW_FRAMES * FRAME_SEC >= WINDOW_SEC    # covers the window, never short
+    assert WINDOW_FRAMES == 348  # 16 s / 46.4 ms, aligned up
+    assert WINDOW_FRAMES * FRAME_SEC >= WINDOW_SEC  # covers the window, never short
     assert WINDOW_FRAMES % LABEL_POOL == 0
     assert LABEL_FRAMES == WINDOW_FRAMES // LABEL_POOL
     label_rate = 1.0 / (FRAME_SEC * LABEL_POOL)
-    assert 9.0 <= label_rate <= 12.0                  # "~10 Hz" label head
+    assert 9.0 <= label_rate <= 12.0  # "~10 Hz" label head
 
 
 # --------------------------------------------------------------------------- #
@@ -78,16 +79,18 @@ def test_window_geometry_matches_the_spec():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("title, expected", [
-    ("Greg Downey Feat. Bo Bruce - Come To Me [Kearnage]",
-     {"greg downey", "bo bruce"}),
-    ("[79:26] DJ Misjah & DJ Tim - Access [X-Trax]", {"dj misjah", "dj tim"}),
-    ("+ Konflict - Beckoning [Renegade Hardware]", {"konflict"}),
-    ("[78] Oxia - Domino [Kompakt Extra]", {"oxia"}),
-    ("Noisia vs. The Upbeats - Dead Limit [Vision]", {"noisia", "the upbeats"}),
-    ("Sub Focus ft Culture Shock - Vibration [Ram]", {"sub focus", "culture shock"}),
-    ("Andy C - Roll On [Ram]", {"andy c"}),
-])
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        ("Greg Downey Feat. Bo Bruce - Come To Me [Kearnage]", {"greg downey", "bo bruce"}),
+        ("[79:26] DJ Misjah & DJ Tim - Access [X-Trax]", {"dj misjah", "dj tim"}),
+        ("+ Konflict - Beckoning [Renegade Hardware]", {"konflict"}),
+        ("[78] Oxia - Domino [Kompakt Extra]", {"oxia"}),
+        ("Noisia vs. The Upbeats - Dead Limit [Vision]", {"noisia", "the upbeats"}),
+        ("Sub Focus ft Culture Shock - Vibration [Ram]", {"sub focus", "culture shock"}),
+        ("Andy C - Roll On [Ram]", {"andy c"}),
+    ],
+)
 def test_artist_participants_splits_collaborations(title, expected):
     assert artist_participants(title) == expected
 
@@ -100,10 +103,12 @@ def test_solo_artist_matches_their_collaboration():
 
 
 def test_excluded_artist_names_unions_every_participant():
-    names = excluded_artist_names([
-        {"title": "Greg Downey Feat. Bo Bruce - Come To Me"},
-        {"title": "Andy C - Roll On"},
-    ])
+    names = excluded_artist_names(
+        [
+            {"title": "Greg Downey Feat. Bo Bruce - Come To Me"},
+            {"title": "Andy C - Roll On"},
+        ]
+    )
     assert names == {"greg downey", "bo bruce", "andy c"}
 
 
@@ -117,7 +122,7 @@ def test_assign_split_is_deterministic_and_seed_dependent():
     ids = [f"id{index:08d}" for index in range(500)]
     with_seed_a = [assign_split(i, 1337) for i in ids]
     with_seed_b = [assign_split(i, 7331) for i in ids]
-    assert with_seed_a != with_seed_b            # the seed actually moves tracks
+    assert with_seed_a != with_seed_b  # the seed actually moves tracks
 
 
 def test_assign_split_hits_the_70_15_15_ratios():
@@ -132,8 +137,7 @@ def test_assign_split_hits_the_70_15_15_ratios():
 
 def refs(count, start=0, title="Someone - Track"):
     return [
-        TrackRef(track_id=f"{index:04d}.id{index:08d}",
-                 youtube_id=f"id{index:08d}", title=title)
+        TrackRef(track_id=f"{index:04d}.id{index:08d}", youtube_id=f"id{index:08d}", title=title)
         for index in range(start, start + count)
     ]
 
@@ -141,8 +145,9 @@ def refs(count, start=0, title="Someone - Track"):
 def test_partition_extension_never_reshuffles_existing_assignments():
     """The 1,423-track retrain must extend this file, not regenerate it."""
     first = partition(refs(200), eval_ids=frozenset(), artist_names=frozenset(), seed=1337)
-    grown = partition(refs(400), eval_ids=frozenset(), artist_names=frozenset(),
-                      seed=1337, existing=first)
+    grown = partition(
+        refs(400), eval_ids=frozenset(), artist_names=frozenset(), seed=1337, existing=first
+    )
 
     for split in ("train", "val", "test"):
         assert set(first[split]) <= set(grown[split])
@@ -172,9 +177,11 @@ def test_partition_excludes_eval_ids_and_artist_matches():
         TrackRef("0004.cleanaaaaaa", "cleanaaaaaa", "Unrelated Artist - Track"),
     ]
     eval_ids = frozenset({"evalaaaaaaa"})
-    artist_names = excluded_artist_names([
-        {"title": "Greg Downey Feat. Bo Bruce - Come To Me"},
-    ])
+    artist_names = excluded_artist_names(
+        [
+            {"title": "Greg Downey Feat. Bo Bruce - Come To Me"},
+        ]
+    )
 
     result = partition(candidates, eval_ids=eval_ids, artist_names=artist_names, seed=1337)
 
@@ -190,8 +197,13 @@ def test_partition_prefers_the_frozen_file_over_the_hash():
     natural = assign_split(ref.youtube_id, 1337)
     other = next(name for name in ("train", "val", "test") if name != natural)
 
-    result = partition([ref], eval_ids=frozenset(), artist_names=frozenset(),
-                       seed=1337, existing={other: [ref.youtube_id]})
+    result = partition(
+        [ref],
+        eval_ids=frozenset(),
+        artist_names=frozenset(),
+        seed=1337,
+        existing={other: [ref.youtube_id]},
+    )
 
     assert result[other] == [ref.youtube_id]
     assert result[natural] == []
@@ -202,8 +214,10 @@ def test_partition_exclusions_win_over_a_stale_assignment():
     stale = {"train": ["evalaaaaaaa"], "val": [], "test": []}
     result = partition(
         [TrackRef("0001.evalaaaaaaa", "evalaaaaaaa", "A - B")],
-        eval_ids=frozenset({"evalaaaaaaa"}), artist_names=frozenset(),
-        seed=1337, existing=stale,
+        eval_ids=frozenset({"evalaaaaaaa"}),
+        artist_names=frozenset(),
+        seed=1337,
+        existing=stale,
     )
     assert result["train"] == []
     assert result["excluded_eval_set"] == ["evalaaaaaaa"]
@@ -229,8 +243,10 @@ def fake_corpus(tmp_path, tracks, frames=400):
     (data_dir / "features").mkdir(parents=True, exist_ok=True)
 
     with open(data_dir / "clean_manifest.csv", "w", encoding="utf-8", newline="") as handle:
-        handle.write("track_id,youtube_id,mp3_path,ffprobe_duration_sec,"
-                     "decoded_duration_sec,annotation_duration_sec,status,detail\n")
+        handle.write(
+            "track_id,youtube_id,mp3_path,ffprobe_duration_sec,"
+            "decoded_duration_sec,annotation_duration_sec,status,detail\n"
+        )
         for track_id, youtube, _title in tracks:
             handle.write(f"{track_id},{youtube},x.mp3,150.0,150.0,150.0,ok,\n")
 
@@ -244,21 +260,28 @@ def fake_corpus(tmp_path, tracks, frames=400):
     rng = np.random.default_rng(0)
     for _track_id, youtube, _title in tracks:
         mel = rng.random((frames, 40), dtype=np.float32)
-        write_feature_sidecar(data_dir / "features" / f"{youtube}.npz",
-                              mel, FRAME_SEC, FRAME_SEC)
+        write_feature_sidecar(data_dir / "features" / f"{youtube}.npz", mel, FRAME_SEC, FRAME_SEC)
 
     eval_set = tmp_path / "eval_set.json"
     with open(eval_set, "w", encoding="utf-8") as handle:
-        json.dump({"youtube_ids": [tracks[0][1]],
-                   "tracks": [{"youtube_id": tracks[0][1], "title": tracks[0][2]}]}, handle)
+        json.dump(
+            {
+                "youtube_ids": [tracks[0][1]],
+                "tracks": [{"youtube_id": tracks[0][1], "title": tracks[0][2]}],
+            },
+            handle,
+        )
     return data_dir, eval_set
 
 
 def corpus_tracks(count, titles=None):
     titles = titles or {}
     return [
-        (f"{index:04d}.id{index:08d}", f"id{index:08d}",
-         titles.get(index, f"Artist {index} - Track"))
+        (
+            f"{index:04d}.id{index:08d}",
+            f"id{index:08d}",
+            titles.get(index, f"Artist {index} - Track"),
+        )
         for index in range(count)
     ]
 
@@ -276,11 +299,14 @@ def test_make_splits_writes_and_reuses_the_frozen_file(tmp_path):
 
 
 def test_make_splits_excludes_the_eval_set_and_its_artists(tmp_path):
-    tracks = corpus_tracks(40, titles={
-        0: "Greg Downey Feat. Bo Bruce - Come To Me",   # the eval track
-        1: "Greg Downey - Rewired",                     # solo, must be dropped
-        2: "Bo Bruce - Alone",                          # featured, must be dropped
-    })
+    tracks = corpus_tracks(
+        40,
+        titles={
+            0: "Greg Downey Feat. Bo Bruce - Come To Me",  # the eval track
+            1: "Greg Downey - Rewired",  # solo, must be dropped
+            2: "Bo Bruce - Alone",  # featured, must be dropped
+        },
+    )
     data_dir, eval_set = fake_corpus(tmp_path, tracks)
 
     result = make_splits(data_dir, eval_set_path=eval_set)
@@ -364,8 +390,8 @@ def test_leading_offset_is_masked_for_both_heads():
     targets = targets_for([(20.0, 60.0, "intro"), (60.0, 120.0, "drop")])
 
     last_leading = frame_of(19.0)
-    assert not targets.label_mask[:last_leading + 1].any()
-    assert not targets.boundary_mask[:last_leading + 1].any()
+    assert not targets.label_mask[: last_leading + 1].any()
+    assert not targets.boundary_mask[: last_leading + 1].any()
     inside = frame_of(40.0)
     assert targets.label_mask[inside]
     assert targets.boundary_mask[inside]
@@ -381,10 +407,14 @@ def test_trailing_audio_past_the_last_section_is_masked():
 
 def test_every_published_label_keeps_its_own_name():
     """The four labels the retired folds used to absorb are now classes of their own."""
-    targets = targets_for([
-        (0.0, 30.0, "altintro"), (30.0, 60.0, "bridge"),
-        (60.0, 90.0, "cooldown"), (90.0, 120.0, "altoutro"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "altintro"),
+            (30.0, 60.0, "bridge"),
+            (60.0, 90.0, "cooldown"),
+            (90.0, 120.0, "altoutro"),
+        ]
+    )
     at = lambda t: targets.label_frame[frame_of(t)]
     assert at(15.0) == LABEL_INDEX["altintro"]
     assert at(45.0) == LABEL_INDEX["bridge"]
@@ -393,15 +423,16 @@ def test_every_published_label_keeps_its_own_name():
 
 
 def test_label_spans_carry_the_published_label_verbatim():
-    assert label_spans([(0.0, 10.0, "altintro"), (10.0, 20.0, "end"),
-                        (20.0, 30.0, "cooldown")]) == [
-        (0.0, 10.0, "altintro"), (20.0, 30.0, "cooldown")]
+    assert label_spans(
+        [(0.0, 10.0, "altintro"), (10.0, 20.0, "end"), (20.0, 30.0, "cooldown")]
+    ) == [(0.0, 10.0, "altintro"), (20.0, 30.0, "cooldown")]
 
 
 def test_the_dataset_targets_span_the_whole_published_vocabulary():
     """Every class the annotator can write is a class the label head can emit."""
-    spans = [(30.0 * index, 30.0 * (index + 1), label)
-             for index, label in enumerate(SECTION_LABELS)]
+    spans = [
+        (30.0 * index, 30.0 * (index + 1), label) for index, label in enumerate(SECTION_LABELS)
+    ]
     targets = targets_for(spans, duration=30.0 * len(SECTION_LABELS) + 30.0)
     supervised = targets.label_frame[targets.label_mask]
     assert set(supervised.tolist()) == set(range(NUM_SECTION_CLASSES))
@@ -421,10 +452,14 @@ def test_boundary_target_peaks_at_the_boundary_frame():
 
 
 def test_boundary_targets_sit_at_every_label_change():
-    targets = targets_for([
-        (0.0, 30.0, "intro"), (30.0, 60.0, "buildup"),
-        (60.0, 120.0, "drop"), (120.0, 150.0, "outro"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "intro"),
+            (30.0, 60.0, "buildup"),
+            (60.0, 120.0, "drop"),
+            (120.0, 150.0, "outro"),
+        ]
+    )
     for boundary in (30.0, 60.0, 120.0):
         assert targets.boundary[frame_of(boundary)] == pytest.approx(1.0, abs=0.01)
 
@@ -434,10 +469,14 @@ def test_a_former_fold_join_is_taught_as_a_boundary():
     one run, so its join was deleted from the boundary mask as unknowable; the
     same goes for the ``altintro`` -> ``intro`` beat-in.  With no folds both are
     published section changes like any other."""
-    targets = targets_for([
-        (0.0, 30.0, "altintro"), (30.0, 60.0, "intro"),
-        (60.0, 90.0, "breakdown"), (90.0, 150.0, "cooldown"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "altintro"),
+            (30.0, 60.0, "intro"),
+            (60.0, 90.0, "breakdown"),
+            (90.0, 150.0, "cooldown"),
+        ]
+    )
     for join in (30.0, 60.0, 90.0):
         assert targets.boundary_mask[frame_of(join)]
         assert targets.boundary[frame_of(join)] == pytest.approx(1.0, abs=0.01)
@@ -446,9 +485,13 @@ def test_a_former_fold_join_is_taught_as_a_boundary():
 def test_two_adjacent_sections_of_the_same_label_still_carry_a_boundary():
     """Nothing merges them here, and a published boundary stands on its own --
     so the boundary head is taught it even though the label head sees no change."""
-    targets = targets_for([
-        (0.0, 30.0, "intro"), (30.0, 60.0, "drop"), (60.0, 90.0, "drop"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "intro"),
+            (30.0, 60.0, "drop"),
+            (60.0, 90.0, "drop"),
+        ]
+    )
     repeat = frame_of(60.0)
     assert targets.boundary_mask[repeat]
     assert targets.boundary[repeat] == pytest.approx(1.0, abs=0.01)
@@ -457,20 +500,28 @@ def test_two_adjacent_sections_of_the_same_label_still_carry_a_boundary():
 
 def test_a_gap_in_the_annotation_is_deleted_from_the_boundary_mask():
     """A hole carries no boundary truth: neither of its edges is a known event."""
-    targets = targets_for([
-        (0.0, 30.0, "intro"), (30.0, 40.0, "end"), (40.0, 90.0, "drop"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "intro"),
+            (30.0, 40.0, "end"),
+            (40.0, 90.0, "drop"),
+        ]
+    )
     radius = int(BOUNDARY_MASK_RADIUS_SEC / FRAME_SEC)
     for edge in (frame_of(30.0), frame_of(40.0)):
-        assert not targets.boundary_mask[edge - radius + 1:edge + radius - 1].any()
+        assert not targets.boundary_mask[edge - radius + 1 : edge + radius - 1].any()
 
 
 def test_a_real_boundary_beside_a_deleted_gap_keeps_its_target():
     """Deletion is for ambiguity; it must not swallow a genuine transition."""
-    targets = targets_for([
-        (0.0, 30.0, "intro"), (30.0, 30.2, "end"),
-        (30.2, 31.0, "breakdown"), (31.0, 90.0, "drop"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "intro"),
+            (30.0, 30.2, "end"),
+            (30.2, 31.0, "breakdown"),
+            (31.0, 90.0, "drop"),
+        ]
+    )
     assert targets.boundary_mask[frame_of(31.0)]
     assert targets.boundary[frame_of(31.0)] == pytest.approx(1.0, abs=0.01)
     assert not targets.boundary_mask[frame_of(29.5)]
@@ -478,9 +529,13 @@ def test_a_real_boundary_beside_a_deleted_gap_keeps_its_target():
 
 def test_dropped_end_sentinel_leaves_an_unlabeled_gap():
     """``end`` is not a section; its time must not be re-attributed to a neighbour."""
-    targets = targets_for([
-        (0.0, 30.0, "intro"), (30.0, 40.0, "end"), (40.0, 90.0, "drop"),
-    ])
+    targets = targets_for(
+        [
+            (0.0, 30.0, "intro"),
+            (30.0, 40.0, "end"),
+            (40.0, 90.0, "drop"),
+        ]
+    )
     assert not targets.label_mask[frame_of(35.0)]
     assert not targets.boundary_mask[frame_of(35.0)]
     assert targets.label_frame[frame_of(20.0)] == LABEL_INDEX["intro"]
@@ -488,8 +543,7 @@ def test_dropped_end_sentinel_leaves_an_unlabeled_gap():
 
 
 def test_negative_length_sections_are_clamped_not_crashed():
-    targets = targets_for([(0.0, 30.0, "intro"), (60.0, 45.0, "buildup"),
-                           (60.0, 120.0, "drop")])
+    targets = targets_for([(0.0, 30.0, "intro"), (60.0, 45.0, "buildup"), (60.0, 120.0, "drop")])
     assert targets.label_frame[frame_of(90.0)] == LABEL_INDEX["drop"]
 
 
@@ -519,28 +573,41 @@ def test_boundary_targets_and_label_transitions_agree():
     where nothing happens; a label change with no boundary target teaches it to
     hold through a real one.  Neither is visible in either head alone.
     """
-    targets = targets_for([
-        (0.0, 30.0, "intro"), (30.0, 60.0, "buildup"), (60.0, 120.0, "drop"),
-        (120.0, 150.0, "breakdown"), (150.0, 180.0, "cooldown"),
-        (180.0, 210.0, "outro"),
-    ], duration=240.0)
+    targets = targets_for(
+        [
+            (0.0, 30.0, "intro"),
+            (30.0, 60.0, "buildup"),
+            (60.0, 120.0, "drop"),
+            (120.0, 150.0, "breakdown"),
+            (150.0, 180.0, "cooldown"),
+            (180.0, 210.0, "outro"),
+        ],
+        duration=240.0,
+    )
 
     labeled = targets.label_mask[:-1] & targets.label_mask[1:]
     changes = np.flatnonzero(labeled & (targets.label_frame[:-1] != targets.label_frame[1:]))
-    assert len(changes) == 5                       # 30, 60, 120, 150, 180
+    assert len(changes) == 5  # 30, 60, 120, 150, 180
 
     # Every label change carries a boundary peak within a frame of it.
     for change in changes:
-        assert targets.boundary[change - 1:change + 2].max() > 0.9
+        assert targets.boundary[change - 1 : change + 2].max() > 0.9
 
     # ...and every frame carrying boundary mass sits close to one of them.
     for peak in np.flatnonzero(targets.boundary > 0.9):
         assert float(np.abs(changes - peak).min()) * FRAME_SEC <= 0.35
 
 
-@pytest.mark.parametrize("name", [
-    "V1_ORDER", "NUM_CLASSES", "CLASS_INDEX", "v1_spans", "_boundaries_and_joins",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "V1_ORDER",
+        "NUM_CLASSES",
+        "CLASS_INDEX",
+        "v1_spans",
+        "_boundaries_and_joins",
+    ],
+)
 def test_the_folded_label_space_is_gone_from_the_module(name):
     """Retired, not merely unused: a surviving alias is a second vocabulary."""
     assert not hasattr(nn_dataset, name)
@@ -576,13 +643,16 @@ def test_window_dataset_yields_the_documented_shapes_and_dtypes(tmp_path):
     assert boundary_mask.shape == (WINDOW_FRAMES,) and boundary_mask.dtype == np.bool_
 
 
-@pytest.mark.parametrize("frames", [
-    3000,                    # ragged: 8 whole windows plus a 216-frame remainder
-    WINDOW_FRAMES,           # exactly one window
-    WINDOW_FRAMES + 2,       # one window plus a two-frame tail
-    5 * WINDOW_FRAMES,       # an exact multiple: no extra slot needed
-    WINDOW_FRAMES // 2,      # shorter than a window
-])
+@pytest.mark.parametrize(
+    "frames",
+    [
+        3000,  # ragged: 8 whole windows plus a 216-frame remainder
+        WINDOW_FRAMES,  # exactly one window
+        WINDOW_FRAMES + 2,  # one window plus a two-frame tail
+        5 * WINDOW_FRAMES,  # an exact multiple: no extra slot needed
+        WINDOW_FRAMES // 2,  # shorter than a window
+    ],
+)
 def test_eval_mode_windows_cover_every_usable_frame(tmp_path, frames):
     """No usable frame is unreachable in eval mode.
 
@@ -604,7 +674,7 @@ def test_eval_mode_windows_cover_every_usable_frame(tmp_path, frames):
         covered = np.zeros(usable, dtype=bool)
         for offset in offsets:
             assert offset + WINDOW_FRAMES <= max(usable, WINDOW_FRAMES)
-            covered[offset:offset + WINDOW_FRAMES] = True
+            covered[offset : offset + WINDOW_FRAMES] = True
         uncovered = int((~covered).sum())
         assert not uncovered, f"{uncovered} of {usable} frames unreachable"
 
@@ -620,13 +690,13 @@ def test_augmentation_moves_the_window_and_the_gain(tmp_path):
     plain = dataset(tmp_path, augment=False)
     jittered = dataset(tmp_path, augment=True)
     windows = {jittered.window_offset(index) for index in range(len(jittered))}
-    assert len(windows) > 1                                   # offsets really vary
+    assert len(windows) > 1  # offsets really vary
 
     jittered.set_epoch(1)
     epoch_one = jittered.window_offset(0)
     jittered.set_epoch(2)
     assert isinstance(epoch_one, int)
-    assert not np.array_equal(plain[0][0], jittered[0][0])     # gain and/or offset moved
+    assert not np.array_equal(plain[0][0], jittered[0][0])  # gain and/or offset moved
 
 
 def test_gain_jitter_stays_within_the_documented_range_and_is_non_negative(tmp_path):
@@ -636,13 +706,13 @@ def test_gain_jitter_stays_within_the_documented_range_and_is_non_negative(tmp_p
 
     for index in range(len(data)):
         offset = data.window_offset(index)
-        assert offset % LABEL_POOL == 0                        # pooled slices stay aligned
+        assert offset % LABEL_POOL == 0  # pooled slices stay aligned
         mel = data[index][0]
-        assert (mel >= 0.0).all()                              # log1p output is non-negative
+        assert (mel >= 0.0).all()  # log1p output is non-negative
         reference = plain.window(index, offset)[0]
         delta = mel[reference > limit] - reference[reference > limit]
         if delta.size:
-            assert abs(float(delta.max()) - float(delta.min())) < 1e-4   # one gain per window
+            assert abs(float(delta.max()) - float(delta.min())) < 1e-4  # one gain per window
             assert abs(float(delta[0])) <= limit + 1e-6
 
 
@@ -658,9 +728,9 @@ def test_short_track_is_padded_and_the_padding_is_masked(tmp_path):
     mel, _labels, label_mask, _boundary, boundary_mask = data[0]
 
     assert mel.shape == (WINDOW_FRAMES, 40)
-    assert (mel[WINDOW_FRAMES // 2:] == 0.0).all()
-    assert not boundary_mask[WINDOW_FRAMES // 2:].any()
-    assert not label_mask[WINDOW_FRAMES // 2 // LABEL_POOL:].any()
+    assert (mel[WINDOW_FRAMES // 2 :] == 0.0).all()
+    assert not boundary_mask[WINDOW_FRAMES // 2 :].any()
+    assert not label_mask[WINDOW_FRAMES // 2 // LABEL_POOL :].any()
 
 
 def test_dataset_refuses_a_track_with_nothing_to_supervise(tmp_path):
@@ -668,15 +738,20 @@ def test_dataset_refuses_a_track_with_nothing_to_supervise(tmp_path):
     tracks = corpus_tracks(1)
     data_dir, _eval_set = fake_corpus(tmp_path, tracks, frames=1000)
     with pytest.raises(RuntimeError, match="labelled sections"):
-        WindowDataset(data_dir, [tracks[0][1]],
-                      sections_by_youtube_id={tracks[0][1]: [(0.0, 30.0, "end")]})
+        WindowDataset(
+            data_dir, [tracks[0][1]], sections_by_youtube_id={tracks[0][1]: [(0.0, 30.0, "end")]}
+        )
 
 
 def test_dataset_refuses_a_sidecar_with_a_foreign_frame_rate(tmp_path):
     tracks = corpus_tracks(1)
     data_dir, _eval_set = fake_corpus(tmp_path, tracks, frames=1000)
-    write_feature_sidecar(data_dir / "features" / f"{tracks[0][1]}.npz",
-                          np.zeros((1000, 40), dtype=np.float32), 0.01, 0.01)
+    write_feature_sidecar(
+        data_dir / "features" / f"{tracks[0][1]}.npz",
+        np.zeros((1000, 40), dtype=np.float32),
+        0.01,
+        0.01,
+    )
     data = WindowDataset(data_dir, [tracks[0][1]])
     with pytest.raises(RuntimeError, match="frame_sec"):
         _ = data[0]
@@ -686,8 +761,12 @@ def test_dataset_refuses_a_sidecar_stamped_on_a_foreign_frame_origin(tmp_path):
     """A shifted t0 would offset every target against the audio, silently."""
     tracks = corpus_tracks(1)
     data_dir, _eval_set = fake_corpus(tmp_path, tracks, frames=1000)
-    write_feature_sidecar(data_dir / "features" / f"{tracks[0][1]}.npz",
-                          np.zeros((1000, 40), dtype=np.float32), FRAME_SEC, 0.0)
+    write_feature_sidecar(
+        data_dir / "features" / f"{tracks[0][1]}.npz",
+        np.zeros((1000, 40), dtype=np.float32),
+        FRAME_SEC,
+        0.0,
+    )
     data = WindowDataset(data_dir, [tracks[0][1]])
     with pytest.raises(RuntimeError, match="t0"):
         _ = data[0]

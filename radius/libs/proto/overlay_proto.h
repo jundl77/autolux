@@ -20,7 +20,7 @@ struct DmxOverlay
 
 struct OverlayMessage
 {
-	uint32_t mProtocolId {OVERLAY_PROTOCOL_ID};
+	uint32_t mProtocolId{OVERLAY_PROTOCOL_ID};
 	uint8_t mUniverse;
 	uint16_t mNumOverlays;
 	DmxOverlay mOverlays[100];
@@ -37,4 +37,4 @@ struct OverlayMessage
 std::string ToString(std::span<DmxOverlay, 100> overlays);
 std::string ToString(OverlayMessage& msg);
 
-}
+} // namespace Radius::OverlayIdl

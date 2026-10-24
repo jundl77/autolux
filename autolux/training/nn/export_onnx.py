@@ -34,6 +34,7 @@ rather than a convention every caller has to remember.  Parallelism downstream
 is per-*track*, across sessions -- which changes nothing about any single
 track's numbers.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -150,8 +151,7 @@ def declared_axes(path) -> dict:
     axes: dict = {}
     for value in list(graph.input) + list(graph.output):
         axes[value.name] = [
-            dim.dim_param or dim.dim_value
-            for dim in value.type.tensor_type.shape.dim
+            dim.dim_param or dim.dim_value for dim in value.type.tensor_type.shape.dim
         ]
     return axes
 
@@ -169,8 +169,10 @@ def export_model(model: SectionCRNN, path, *, window_frames: int = WINDOW_FRAMES
     tmp = path.with_suffix(path.suffix + ".part")
     try:
         torch.onnx.export(
-            model, (dummy,), str(tmp),
-            dynamo=False,                 # see the module docstring; not a default
+            model,
+            (dummy,),
+            str(tmp),
+            dynamo=False,  # see the module docstring; not a default
             opset_version=OPSET,
             input_names=[INPUT_NAME],
             output_names=[LABEL_OUTPUT, BOUNDARY_OUTPUT],
@@ -259,8 +261,7 @@ def session_options() -> ort.SessionOptions:
 
 def session(path) -> ort.InferenceSession:
     """An onnxruntime session on the CPU EP under the pinned options."""
-    return ort.InferenceSession(str(path), session_options(),
-                                providers=["CPUExecutionProvider"])
+    return ort.InferenceSession(str(path), session_options(), providers=["CPUExecutionProvider"])
 
 
 def run_window(sess: ort.InferenceSession, mel: np.ndarray) -> tuple:
@@ -282,13 +283,20 @@ def run_window(sess: ort.InferenceSession, mel: np.ndarray) -> tuple:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
-    parser.add_argument("--checkpoint", type=Path, default=None,
-                        help=f"training checkpoint (default: "
-                             f"<data-dir>/{MODELS_DIR}/{MODEL_VERSION}/{DEFAULT_RUN}/"
-                             f"{CHECKPOINT_FILE})")
-    parser.add_argument("--out", type=Path, default=None,
-                        help=f"output graph (default: <data-dir>/{MODELS_DIR}/"
-                             f"{MODEL_VERSION}/{MODEL_FILE})")
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help=f"training checkpoint (default: "
+        f"<data-dir>/{MODELS_DIR}/{MODEL_VERSION}/{DEFAULT_RUN}/"
+        f"{CHECKPOINT_FILE})",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"output graph (default: <data-dir>/{MODELS_DIR}/{MODEL_VERSION}/{MODEL_FILE})",
+    )
     return parser
 
 

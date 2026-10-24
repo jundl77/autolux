@@ -1,4 +1,5 @@
 """Corpus splits and the windowed, loss-masked training set for the CRNN."""
+
 from __future__ import annotations
 
 import csv
@@ -30,6 +31,7 @@ from select_eval_set import EVAL_SET_FILE, artist_of, load_eval_set  # noqa: E40
 try:
     from torch.utils.data import Dataset as _TorchDataset
 except ImportError:  # pragma: no cover
+
     class _TorchDataset:  # type: ignore[no-redef]
         pass
 
@@ -90,8 +92,9 @@ def assign_split(youtube_id: str, seed: int = SPLIT_SEED) -> str:
     return "test"
 
 
-def partition(candidates, *, eval_ids, artist_names, seed: int = SPLIT_SEED,
-              existing: dict | None = None) -> dict:
+def partition(
+    candidates, *, eval_ids, artist_names, seed: int = SPLIT_SEED, existing: dict | None = None
+) -> dict:
     frozen = {}
     for split in SPLIT_NAMES:
         for youtube_id in (existing or {}).get(split) or []:
@@ -122,9 +125,7 @@ def partition(candidates, *, eval_ids, artist_names, seed: int = SPLIT_SEED,
 def _clean_manifest_rows(data_dir: Path) -> list:
     path = Path(data_dir) / CLEAN_MANIFEST_FILE
     if not path.exists():
-        raise RuntimeError(
-            f"missing {path} -- run training/raveform/build_clean_manifest.py first"
-        )
+        raise RuntimeError(f"missing {path} -- run training/raveform/build_clean_manifest.py first")
     with open(path, "r", encoding="utf-8", newline="") as handle:
         return [row for row in csv.DictReader(handle) if row.get("status") == STATUS_OK]
 
@@ -151,8 +152,9 @@ def candidate_tracks(data_dir: Path) -> tuple:
     return candidates, sorted(no_annotation), sorted(unlabeled)
 
 
-def make_splits(data_dir, seed: int = SPLIT_SEED, *,
-                eval_set_path=EVAL_SET_FILE, write: bool = True) -> dict:
+def make_splits(
+    data_dir, seed: int = SPLIT_SEED, *, eval_set_path=EVAL_SET_FILE, write: bool = True
+) -> dict:
     data_dir = Path(data_dir)
     path = data_dir / SPLITS_FILE
 
@@ -161,10 +163,13 @@ def make_splits(data_dir, seed: int = SPLIT_SEED, *,
     document = load_eval_set(Path(eval_set_path))
     eval_ids = frozenset(str(i) for i in document["youtube_ids"])
 
-    titles = {str(track.get("id")): str(track.get("title", ""))
-              for track in load_all_tracks(data_dir)}
-    recorded = {str(track.get("youtube_id")): str(track.get("title", ""))
-                for track in document.get("tracks") or []}
+    titles = {
+        str(track.get("id")): str(track.get("title", "")) for track in load_all_tracks(data_dir)
+    }
+    recorded = {
+        str(track.get("youtube_id")): str(track.get("title", ""))
+        for track in document.get("tracks") or []
+    }
     eval_titles = {}
     unresolved = []
     for youtube_id in sorted(eval_ids):
@@ -178,8 +183,7 @@ def make_splits(data_dir, seed: int = SPLIT_SEED, *,
             f"annotations or in {eval_set_path} -- the artist exclusion would be "
             f"silently weakened, so the split is refused"
         )
-    artist_names = excluded_artist_names(
-        [{"title": title} for title in eval_titles.values()])
+    artist_names = excluded_artist_names([{"title": title} for title in eval_titles.values()])
 
     existing = None
     if path.exists():
@@ -200,19 +204,23 @@ def make_splits(data_dir, seed: int = SPLIT_SEED, *,
                 f"change; delete the file to regenerate deliberately"
             )
 
-    splits = partition(candidates, eval_ids=eval_ids, artist_names=artist_names,
-                       seed=seed, existing=existing)
-    splits.update({
-        "seed": seed,
-        "ratios": dict(zip(SPLIT_NAMES, SPLIT_RATIOS)),
-        "eval_set": sorted(eval_ids),
-        "excluded_artist_names": sorted(artist_names),
-        "skipped_no_annotation": no_annotation,
-        "skipped_unlabeled": unlabeled,
-        "candidates": len(candidates),
-        "written_at": datetime.datetime.now(datetime.timezone.utc)
-                              .replace(microsecond=0).isoformat(),
-    })
+    splits = partition(
+        candidates, eval_ids=eval_ids, artist_names=artist_names, seed=seed, existing=existing
+    )
+    splits.update(
+        {
+            "seed": seed,
+            "ratios": dict(zip(SPLIT_NAMES, SPLIT_RATIOS)),
+            "eval_set": sorted(eval_ids),
+            "excluded_artist_names": sorted(artist_names),
+            "skipped_no_annotation": no_annotation,
+            "skipped_unlabeled": unlabeled,
+            "candidates": len(candidates),
+            "written_at": datetime.datetime.now(datetime.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat(),
+        }
+    )
 
     if write:
         tmp = path.with_suffix(".json.part")
@@ -291,8 +299,9 @@ def _pool_labels(label_frame: np.ndarray, pool: int = LABEL_POOL) -> tuple:
     return pooled, mask
 
 
-def track_targets(sections: list, n_frames: int, frame_sec: float = FRAME_SEC,
-                  t0: float | None = None) -> TrackTargets:
+def track_targets(
+    sections: list, n_frames: int, frame_sec: float = FRAME_SEC, t0: float | None = None
+) -> TrackTargets:
     t0 = frame_sec if t0 is None else t0
     times = t0 + np.arange(n_frames, dtype=np.float64) * frame_sec
     spans = label_spans(sections)
@@ -328,8 +337,9 @@ def track_targets(sections: list, n_frames: int, frame_sec: float = FRAME_SEC,
         boundary[~boundary_mask] = 0.0
 
     label_pooled, label_pooled_mask = _pool_labels(label_frame)
-    return TrackTargets(label_frame, label_mask, boundary, boundary_mask,
-                        label_pooled, label_pooled_mask)
+    return TrackTargets(
+        label_frame, label_mask, boundary, boundary_mask, label_pooled, label_pooled_mask
+    )
 
 
 def sidecar_shape(path) -> tuple:
@@ -382,14 +392,19 @@ class _Track(NamedTuple):
 
 
 class WindowDataset(_TorchDataset):
-    def __init__(self, data_dir, youtube_ids, *, augment: bool = False,
-                 seed: int = SPLIT_SEED, window_frames: int = WINDOW_FRAMES,
-                 gain_jitter_db: float = GAIN_JITTER_DB,
-                 sections_by_youtube_id: dict | None = None) -> None:
+    def __init__(
+        self,
+        data_dir,
+        youtube_ids,
+        *,
+        augment: bool = False,
+        seed: int = SPLIT_SEED,
+        window_frames: int = WINDOW_FRAMES,
+        gain_jitter_db: float = GAIN_JITTER_DB,
+        sections_by_youtube_id: dict | None = None,
+    ) -> None:
         if window_frames % LABEL_POOL:
-            raise ValueError(
-                f"window_frames {window_frames} must be a multiple of {LABEL_POOL}"
-            )
+            raise ValueError(f"window_frames {window_frames} must be a multiple of {LABEL_POOL}")
         self.data_dir = Path(data_dir)
         self.augment = bool(augment)
         self.window_frames = int(window_frames)
@@ -450,8 +465,7 @@ class WindowDataset(_TorchDataset):
     def gain_db(self, index: int) -> float:
         if not self.augment or self.gain_jitter_db <= 0.0:
             return 0.0
-        return float(self._rng(index, 1).uniform(-self.gain_jitter_db,
-                                                 self.gain_jitter_db))
+        return float(self._rng(index, 1).uniform(-self.gain_jitter_db, self.gain_jitter_db))
 
     def mel_window(self, index: int, offset: int, gain_db: float = 0.0) -> np.ndarray:
         track = self._tracks[self._slots[index][0]]
@@ -483,7 +497,7 @@ class WindowDataset(_TorchDataset):
     def _mel(self, track: _Track) -> np.ndarray:
         mel = self._mel_cache.get(track.youtube_id)
         if mel is None:
-            mel = load_sidecar(track.path)[:track.usable]
+            mel = load_sidecar(track.path)[: track.usable]
             self._mel_cache[track.youtube_id] = mel
         return mel
 
@@ -500,5 +514,5 @@ def _take(source: np.ndarray, offset: int, length: int, fill) -> np.ndarray:
     out = np.full(shape, fill, dtype=source.dtype)
     end = min(offset + length, len(source))
     if end > offset:
-        out[:end - offset] = source[offset:end]
+        out[: end - offset] = source[offset:end]
     return out

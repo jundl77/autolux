@@ -43,7 +43,8 @@ def test_the_show_declares_the_stack_it_runs_on():
     base = _names(_pyproject()["project"]["dependencies"])
     assert {"torch", "transformers", "onnxruntime"} <= base, (
         "the model, its encoder and its inference session run the lights -- an "
-        "undeclared dependency on the live path is one a fresh clone does not get")
+        "undeclared dependency on the live path is one a fresh clone does not get"
+    )
 
 
 def test_no_extra_re_pins_what_base_already_declares():
@@ -71,9 +72,11 @@ def test_the_live_path_imports_neither_tensorflow_nor_aubio():
 
 
 def _live_modules() -> list:
-    return sorted(".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
-                  for path in LIVE_PATH.rglob("*.py")
-                  if path.name != "__init__.py")
+    return sorted(
+        ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+        for path in LIVE_PATH.rglob("*.py")
+        if path.name != "__init__.py"
+    )
 
 
 _probe_result: list = []
@@ -87,9 +90,15 @@ def _load_the_live_path():
             f"[importlib.import_module(name) for name in {_live_modules()!r}];"
             f"print(','.join(sorted(m for m in {watched!r} if m in sys.modules)))"
         )
-        _probe_result.append(subprocess.run(
-            [sys.executable, "-c", probe], cwd=REPO_ROOT,
-            capture_output=True, text=True, timeout=600))
+        _probe_result.append(
+            subprocess.run(
+                [sys.executable, "-c", probe],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+        )
     return _probe_result[0]
 
 

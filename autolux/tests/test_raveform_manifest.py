@@ -19,8 +19,12 @@ from raveform_manifest import (  # noqa: E402
 
 
 def _track(key="0001.aaa", youtube="aaa", duration=150.0, **extra) -> dict:
-    record = {"key": key, "id": youtube, "duration": duration,
-              "sections": [{"name": "intro", "start": 0.0, "end": duration}]}
+    record = {
+        "key": key,
+        "id": youtube,
+        "duration": duration,
+        "sections": [{"name": "intro", "start": 0.0, "end": duration}],
+    }
     record.update(extra)
     return record
 
@@ -65,8 +69,7 @@ def test_a_formerly_folded_label_survives_as_itself(label):
 
 
 def test_the_fold_machinery_is_gone_not_merely_unused():
-    for retired in ("CANONICAL_MAP", "CANONICAL_ORDER", "CANONICAL_DROP",
-                    "canonical_runs"):
+    for retired in ("CANONICAL_MAP", "CANONICAL_ORDER", "CANONICAL_DROP", "canonical_runs"):
         assert not hasattr(raveform_manifest, retired), retired
 
 
@@ -117,7 +120,7 @@ def test_merged_run_joins_across_a_dropped_sentinel():
 
 def test_merged_duration_sums_members_and_excludes_the_dropped_span():
     sections = [(0.0, 10.0, "drop"), (10.0, 12.0, "end"), (12.0, 20.0, "drop")]
-    (start, end, label, duration), = section_runs(sections)
+    ((start, end, label, duration),) = section_runs(sections)
     assert (start, end, label) == (0.0, 20.0, "drop")
     assert duration == 18.0
     assert duration != end - start
@@ -125,12 +128,12 @@ def test_merged_duration_sums_members_and_excludes_the_dropped_span():
 
 def test_merged_duration_ignores_a_negative_member():
     sections = [(0.0, 10.0, "drop"), (10.0, 9.9994, "drop")]
-    (_start, _end, _label, duration), = section_runs(sections)
+    ((_start, _end, _label, duration),) = section_runs(sections)
     assert duration == 10.0
 
 
 def test_unmerged_run_duration_matches_its_span():
-    (start, end, _label, duration), = section_runs([(3.0, 11.0, "drop")])
+    ((start, end, _label, duration),) = section_runs([(3.0, 11.0, "drop")])
     assert duration == end - start == 8.0
 
 
@@ -152,21 +155,19 @@ def test_raw_runs_clamps_negative_lengths_too():
 
 
 def test_the_manifest_carries_the_published_genre():
-    row, = build_manifest_rows([_track(genre="Techno")])
+    (row,) = build_manifest_rows([_track(genre="Techno")])
     assert row[MANIFEST_HEADER.index("genre")] == "Techno"
 
 
 def test_a_track_with_no_genre_manifests_an_empty_cell():
-    row, = build_manifest_rows([_track()])
+    (row,) = build_manifest_rows([_track()])
     assert row[MANIFEST_HEADER.index("genre")] == ""
 
 
 def test_genre_is_appended_so_the_existing_columns_do_not_move():
-    assert MANIFEST_HEADER == ("track_id", "youtube_id", "n_sections",
-                               "total_sec", "genre")
+    assert MANIFEST_HEADER == ("track_id", "youtube_id", "n_sections", "total_sec", "genre")
 
 
 def test_every_manifest_row_is_the_width_of_the_header():
-    rows = build_manifest_rows([_track(genre="Trance"), _track(key="0002.bbb",
-                                                               youtube="bbb")])
+    rows = build_manifest_rows([_track(genre="Trance"), _track(key="0002.bbb", youtube="bbb")])
     assert all(len(row) == len(MANIFEST_HEADER) for row in rows)

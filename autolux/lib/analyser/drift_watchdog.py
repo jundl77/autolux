@@ -24,8 +24,9 @@ class ShedLevel(IntEnum):
 
 
 class DriftWatchdog:
-    def __init__(self, buffer_sec: float, clock: Clock = SYSTEM_CLOCK,
-                 window_sec: float = _WINDOW_SEC):
+    def __init__(
+        self, buffer_sec: float, clock: Clock = SYSTEM_CLOCK, window_sec: float = _WINDOW_SEC
+    ):
         self._buffer_sec = buffer_sec
         self._clock = clock
         self._window_sec = window_sec
@@ -78,8 +79,7 @@ class DriftWatchdog:
         if self._fault != kind:
             was = self._fault
             self._fault = kind
-            self._settle(f'stage fault: {kind}' if was is None
-                         else f'stage fault: {was} -> {kind}')
+            self._settle(f'stage fault: {kind}' if was is None else f'stage fault: {was} -> {kind}')
         return self._level
 
     def report_healthy(self) -> ShedLevel:
@@ -115,9 +115,11 @@ class DriftWatchdog:
             self._calm_since = None
             if not self._drift_shed:
                 self._drift_shed = True
-                self._settle(f'drift {self._drift_sec:+.3f}s over a '
-                             f'{self._window_sec:.0f}s window, peak '
-                             f'{self.peak_drift_sec:.3f}s')
+                self._settle(
+                    f'drift {self._drift_sec:+.3f}s over a '
+                    f'{self._window_sec:.0f}s window, peak '
+                    f'{self.peak_drift_sec:.3f}s'
+                )
         elif self._drift_shed:
             if self._drift_sec >= _EXIT_SEC:
                 self._calm_since = None
@@ -130,13 +132,11 @@ class DriftWatchdog:
 
     def _settle(self, reason: str) -> None:
         with self._settling:
-            target = (ShedLevel.NN_SHED if self._drift_shed or self._fault
-                      else ShedLevel.NONE)
+            target = ShedLevel.NN_SHED if self._drift_shed or self._fault else ShedLevel.NONE
             if target is self._level:
                 return
             direction = 'degrading' if target > self._level else 'recovering'
-            message = (f'[drift] {direction}: {self._level.name} -> '
-                       f'{target.name} ({reason})')
+            message = f'[drift] {direction}: {self._level.name} -> {target.name} ({reason})'
             self._level = target
             now = self._clock.monotonic()
             if target is not ShedLevel.NONE:
@@ -150,5 +150,4 @@ class DriftWatchdog:
                 return
             self._said[direction] = now
             more = self._suppressed.pop(direction, 0)
-            logging.warning(message + (f' [+{more} more since the last line]'
-                                       if more else ''))
+            logging.warning(message + (f' [+{more} more since the last line]' if more else ''))

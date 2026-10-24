@@ -17,8 +17,7 @@ def test_timestamps_use_injected_clock():
 
 def _ui_session(minutes: float, look_ahead_sec: float = 14.0):
     clock = VirtualClock()
-    buffer = EventBuffer(window_sec=float('inf'), clock=clock,
-                         look_ahead_sec=look_ahead_sec)
+    buffer = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=look_ahead_sec)
     buffer.start()
     buffer.set_playing(True)
     for step in range(int(minutes * 120)):
@@ -112,9 +111,11 @@ def _stop_start_hour():
 
 def test_the_payload_stops_at_the_window_and_the_start_the_origin_hangs_on():
     buf = _stop_start_hour()
-    assert buf.snapshot()['sound_events'] == [{'t': 3540.0, 'playing': True},
-                                              {'t': 3570.0, 'playing': False},
-                                              {'t': 3600.0, 'playing': True}]
+    assert buf.snapshot()['sound_events'] == [
+        {'t': 3540.0, 'playing': True},
+        {'t': 3570.0, 'playing': False},
+        {'t': 3600.0, 'playing': True},
+    ]
 
 
 def test_the_storage_keeps_every_sound_event_the_payload_leaves_behind():
@@ -261,8 +262,9 @@ def test_every_intent_block_carries_a_trigger():
         buf.set_intent(intent)
     clock.advance(1.0)
     buf.set_intent('atmospheric', trigger='silence')
-    assert [block['trigger'] for block in buf.to_report()['intents']] == \
-        ['classifier'] * 3 + ['silence']
+    assert [block['trigger'] for block in buf.to_report()['intents']] == ['classifier'] * 3 + [
+        'silence'
+    ]
 
 
 def test_a_trigger_flip_opens_a_new_block_even_when_the_intent_repeats():
@@ -273,8 +275,7 @@ def test_a_trigger_flip_opens_a_new_block_even_when_the_intent_repeats():
     clock.advance(5.0)
     buf.set_intent('atmospheric', trigger='silence')
     blocks = buf.to_report()['intents']
-    assert [(b['t'], b['trigger']) for b in blocks] == \
-        [(0.0, 'classifier'), (5.0, 'silence')]
+    assert [(b['t'], b['trigger']) for b in blocks] == [(0.0, 'classifier'), (5.0, 'silence')]
 
 
 def test_a_classifier_commit_after_a_blackout_is_not_absorbed_into_it():
@@ -327,11 +328,14 @@ def test_the_shed_state_reaches_the_payload_and_stays_out_of_the_report():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=float('inf'), clock=clock)
     buf.start()
-    buf.set_shed_state(level='NN_SHED', fault='hung_pass',
-                       sheds=2, sheds_per_min=1, drift_sec=0.31)
-    assert buf.snapshot()['shed'] == {'level': 'NN_SHED', 'fault': 'hung_pass',
-                                      'sheds': 2, 'sheds_per_min': 1,
-                                      'drift_sec': 0.31}
+    buf.set_shed_state(level='NN_SHED', fault='hung_pass', sheds=2, sheds_per_min=1, drift_sec=0.31)
+    assert buf.snapshot()['shed'] == {
+        'level': 'NN_SHED',
+        'fault': 'hung_pass',
+        'sheds': 2,
+        'sheds_per_min': 1,
+        'drift_sec': 0.31,
+    }
     assert 'shed' not in buf.to_report()
     assert 'shed' not in buf.to_report()['metrics']
 

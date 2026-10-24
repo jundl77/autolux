@@ -23,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_viewer_disconnect_does_not_escape_the_request_handler(monkeypatch, error):
     def disconnected(_):
         raise error('viewer closed')
+
     monkeypatch.setattr(ui_bridge.BaseHTTPRequestHandler, 'handle', disconnected)
     handler = object.__new__(ui_bridge._Handler)
     handler.handle()
@@ -31,8 +32,7 @@ def test_viewer_disconnect_does_not_escape_the_request_handler(monkeypatch, erro
 @pytest.fixture
 def served():
     clock = VirtualClock()
-    buffer = EventBuffer(window_sec=float('inf'), clock=clock,
-                         look_ahead_sec=14.0)
+    buffer = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     buffer.start()
     server = ui_bridge.SnapshotServer(buffer, 0)
     server.start()
@@ -58,8 +58,7 @@ def _bound(port: int) -> bool:
 
 
 def _get(port: int, path: str = ui_bridge.SNAPSHOT_PATH):
-    connection = http.client.HTTPConnection(ui_bridge.SNAPSHOT_HOST, port,
-                                            timeout=5)
+    connection = http.client.HTTPConnection(ui_bridge.SNAPSHOT_HOST, port, timeout=5)
     try:
         connection.request('GET', path)
         response = connection.getresponse()
@@ -79,10 +78,15 @@ def test_the_endpoint_serves_exactly_what_the_buffer_snapshots(served):
     buffer.add_beat(bpm=128.0, change=False)
     clock.advance(1.0)
     buffer.set_intent('drop', song_sec=1.0)
-    buffer.set_decoder_state(classes=['drop'], posterior=[1.0],
-                             observed_bar=3, committed_bar=2,
-                             committed_label='drop', lag_bars=1,
-                             chain_latency_sec=13.66)
+    buffer.set_decoder_state(
+        classes=['drop'],
+        posterior=[1.0],
+        observed_bar=3,
+        committed_bar=2,
+        committed_label='drop',
+        lag_bars=1,
+        chain_latency_sec=13.66,
+    )
 
     status, body = _get(server.port)
     assert status == 200
@@ -99,8 +103,7 @@ def test_every_field_the_panels_read_survives_the_json_round_trip(served):
     buffer.set_playing(True)
     buffer.add_beat(bpm=127.5, change=True, rms=0.1234)
     clock.advance(2.0)
-    buffer.set_timing_log([{'label': 'beat', 'target_delta_sec': 14.0,
-                            'actual_delta_sec': 14.004}])
+    buffer.set_timing_log([{'label': 'beat', 'target_delta_sec': 14.0, 'actual_delta_sec': 14.004}])
 
     served_snapshot = json.loads(_get(server.port)[1])
     assert served_snapshot == buffer.snapshot()
@@ -130,8 +133,7 @@ def test_a_viewer_that_outlives_the_show_holds_its_last_frame(served, caplog):
     with caplog.at_level(logging.WARNING):
         assert poller.snapshot() == held
         assert poller.snapshot() == held
-    assert sum('stopped answering' in record.message
-               for record in caplog.records) == 1
+    assert sum('stopped answering' in record.message for record in caplog.records) == 1
 
 
 def test_a_viewer_that_starts_before_the_show_renders_a_blank_frame():
@@ -161,18 +163,21 @@ def test_killing_the_viewer_kills_the_whole_tree(tmp_path):
     # terminate leaves the real viewer running and invisible.
     port = _free_port()
     child = tmp_path / 'child.py'
-    child.write_text('import socket, sys\n'
-                     's = socket.socket()\n'
-                     's.bind(("127.0.0.1", int(sys.argv[1])))\n'
-                     's.listen(64)\n'
-                     'while True:\n'
-                     '    s.accept()[0].close()\n')
+    child.write_text(
+        'import socket, sys\n'
+        's = socket.socket()\n'
+        's.bind(("127.0.0.1", int(sys.argv[1])))\n'
+        's.listen(64)\n'
+        'while True:\n'
+        '    s.accept()[0].close()\n'
+    )
     parent_py = tmp_path / 'parent.py'
-    parent_py.write_text('import subprocess, sys, time\n'
-                         'subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]])\n'
-                         'time.sleep(120)\n')
-    parent = subprocess.Popen(
-        [sys.executable, str(parent_py), str(child), str(port)])
+    parent_py.write_text(
+        'import subprocess, sys, time\n'
+        'subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]])\n'
+        'time.sleep(120)\n'
+    )
+    parent = subprocess.Popen([sys.executable, str(parent_py), str(child), str(port)])
     deadline = time.monotonic() + 20
     while not _bound(port) and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -193,8 +198,7 @@ def test_killing_a_viewer_that_already_died_is_not_an_error():
     ui_bridge.kill_tree(process)
 
 
-def test_a_port_the_show_cannot_bind_costs_it_the_viewer_and_nothing_else(
-        served, caplog):
+def test_a_port_the_show_cannot_bind_costs_it_the_viewer_and_nothing_else(served, caplog):
     _, server, _ = served
     with caplog.at_level(logging.WARNING):
         assert ui_bridge.start(object(), server.port - 1) is None
@@ -202,20 +206,17 @@ def test_a_port_the_show_cannot_bind_costs_it_the_viewer_and_nothing_else(
     assert _get(server.port)[0] == 200
 
 
-def test_a_viewer_that_will_not_start_costs_the_show_nothing(monkeypatch,
-                                                             caplog):
-    monkeypatch.setattr(ui_bridge, 'viewer_command',
-                        lambda port: ['this-command-does-not-exist'])
+def test_a_viewer_that_will_not_start_costs_the_show_nothing(monkeypatch, caplog):
+    monkeypatch.setattr(ui_bridge, 'viewer_command', lambda port: ['this-command-does-not-exist'])
     with caplog.at_level(logging.WARNING):
         assert ui_bridge.start(object(), _free_ui_port()) is None
     assert 'did not start' in caplog.text
 
 
-def test_a_viewer_dying_on_its_own_is_reported_once_and_the_show_runs_on(
-        monkeypatch, caplog):
+def test_a_viewer_dying_on_its_own_is_reported_once_and_the_show_runs_on(monkeypatch, caplog):
     monkeypatch.setattr(
-        ui_bridge, 'viewer_command',
-        lambda port: [sys.executable, '-c', 'raise SystemExit(3)'])
+        ui_bridge, 'viewer_command', lambda port: [sys.executable, '-c', 'raise SystemExit(3)']
+    )
     clock = VirtualClock()
     buffer = EventBuffer(clock=clock)
     buffer.start()
@@ -233,11 +234,12 @@ def test_a_viewer_dying_on_its_own_is_reported_once_and_the_show_runs_on(
         bridge.stop()
 
 
-def test_stopping_the_show_takes_the_viewer_and_the_endpoint_with_it(
-        monkeypatch):
+def test_stopping_the_show_takes_the_viewer_and_the_endpoint_with_it(monkeypatch):
     monkeypatch.setattr(
-        ui_bridge, 'viewer_command',
-        lambda port: [sys.executable, '-c', 'import time; time.sleep(120)'])
+        ui_bridge,
+        'viewer_command',
+        lambda port: [sys.executable, '-c', 'import time; time.sleep(120)'],
+    )
     clock = VirtualClock()
     buffer = EventBuffer(clock=clock)
     buffer.start()
@@ -284,8 +286,11 @@ def test_one_ctrl_c_tears_the_viewer_down_instead_of_waiting_on_it():
     harness = _INTERRUPT_HARNESS.format(root=str(REPO_ROOT))
     process = subprocess.Popen(
         [sys.executable, '-c', harness],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
     try:
         line = process.stdout.readline()
         assert line.startswith('READY'), line
@@ -304,14 +309,12 @@ def test_one_ctrl_c_tears_the_viewer_down_instead_of_waiting_on_it():
         assert not _alive(child_pid), 'the viewer was orphaned'
     finally:
         if process.poll() is None:
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
-                           capture_output=True)
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
             process.wait(timeout=10)
 
 
 def _alive(pid: int) -> bool:
-    found = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'],
-                           capture_output=True, text=True)
+    found = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], capture_output=True, text=True)
     return str(pid) in found.stdout
 
 
@@ -333,8 +336,7 @@ async def test_an_interrupted_run_still_writes_the_report_it_was_asked_for(tmp_p
         report = tmp_path / 'report.json'
 
         with pytest.raises(KeyboardInterrupt):
-            await cli._run_pipeline({}, 1.0, buffer, DelayedCommandQueue(14.0),
-                                    True, str(report))
+            await cli._run_pipeline({}, 1.0, buffer, DelayedCommandQueue(14.0), True, str(report))
     finally:
         runner.run_simulation = original
 

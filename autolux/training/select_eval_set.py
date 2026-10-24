@@ -125,12 +125,12 @@ class Candidate(NamedTuple):
     youtube_id: str
     duration_sec: float
     bpm: float
-    boundaries: int          # section transitions: len(runs) - 1
-    classes: frozenset       # section labels present in the track
+    boundaries: int  # section transitions: len(runs) - 1
+    classes: frozenset  # section labels present in the track
     genre: str
     title: str
     artist: str
-    family: str              # track_id index block
+    family: str  # track_id index block
 
 
 # --------------------------------------------------------------------------- #
@@ -203,18 +203,20 @@ def build_candidates(data_dir: Path, ok_rows: list, tracks: list) -> list:
             continue
         runs = section_runs(parse_sections(track))
         title = str(track.get("title", ""))
-        candidates.append(Candidate(
-            track_id=row["track_id"],
-            youtube_id=row["youtube_id"],
-            duration_sec=float(row["decoded_duration_sec"]),
-            bpm=bpm,
-            boundaries=max(0, len(runs) - 1),
-            classes=frozenset(label for _s, _e, label, _duration in runs),
-            genre=str(track.get("genre", "")),
-            title=title,
-            artist=artist_of(title),
-            family=family_of(row["track_id"]),
-        ))
+        candidates.append(
+            Candidate(
+                track_id=row["track_id"],
+                youtube_id=row["youtube_id"],
+                duration_sec=float(row["decoded_duration_sec"]),
+                bpm=bpm,
+                boundaries=max(0, len(runs) - 1),
+                classes=frozenset(label for _s, _e, label, _duration in runs),
+                genre=str(track.get("genre", "")),
+                title=title,
+                artist=artist_of(title),
+                family=family_of(row["track_id"]),
+            )
+        )
     candidates.sort(key=lambda candidate: candidate.track_id)
     return candidates
 
@@ -373,19 +375,25 @@ def select(candidates: list, size: int = DEFAULT_SIZE, seed: int = DEFAULT_SEED)
         if len(picks) >= size:
             break
         centre = (band[0] + band[1]) / 2.0
-        members, relaxed = viable([
-            candidate for candidate in eligible
-            if _in_bin(candidate, band, index == len(bands) - 1)
-        ])
+        members, relaxed = viable(
+            [
+                candidate
+                for candidate in eligible
+                if _in_bin(candidate, band, index == len(bands) - 1)
+            ]
+        )
         if members:
             reason = f"BPM band {band[0]:.1f}-{band[1]:.1f}"
-            take(min(members, key=lambda c: rank_key(c, seed, centre)),
-                 reason + " (block reused)" if relaxed else reason)
+            take(
+                min(members, key=lambda c: rank_key(c, seed, centre)),
+                reason + " (block reused)" if relaxed else reason,
+            )
 
     chosen = {pick.candidate.youtube_id for pick in picks}
     while len(picks) < size:
         pool = [
-            candidate for candidate in eligible
+            candidate
+            for candidate in eligible
             if candidate.youtube_id not in chosen and allowed(candidate)
         ]
         if not pool:
@@ -393,7 +401,8 @@ def select(candidates: list, size: int = DEFAULT_SIZE, seed: int = DEFAULT_SEED)
         taken_bpms = [pick.candidate.bpm for pick in picks]
         widest = max(gap_bucket(tempo_gap(candidate, taken_bpms)) for candidate in pool)
         contenders = [
-            candidate for candidate in pool
+            candidate
+            for candidate in pool
             if gap_bucket(tempo_gap(candidate, taken_bpms)) == widest
         ]
         members, relaxed = viable(contenders)
@@ -498,8 +507,9 @@ def verify_inputs(document: dict, data_dir: Path, only: tuple | None = None) -> 
     return drift
 
 
-def build_document(picks: list, data_dir: Path, clean_rows: int, candidates: int,
-                   eligible: int, seed: int) -> dict:
+def build_document(
+    picks: list, data_dir: Path, clean_rows: int, candidates: int, eligible: int, seed: int
+) -> dict:
     """The committed eval-set record: ids, provenance, and the reasoning."""
     return {
         "youtube_ids": [pick.candidate.youtube_id for pick in picks],
@@ -512,22 +522,17 @@ def build_document(picks: list, data_dir: Path, clean_rows: int, candidates: int
                 "duration_sec": [MIN_DURATION_SEC, MAX_DURATION_SEC],
                 "min_boundaries": MIN_BOUNDARIES,
                 "classes": list(SECTION_LABELS),
-                "prefer_unique_track_id_block": True,   # yields to BPM coverage
-                "unique_artist": True,                  # absolute
+                "prefer_unique_track_id_block": True,  # yields to BPM coverage
+                "unique_artist": True,  # absolute
             },
-            "inputs": {
-                name: sha256_of(path)
-                for name, path in input_paths(data_dir).items()
-            },
+            "inputs": {name: sha256_of(path) for name, path in input_paths(data_dir).items()},
         },
         # What is committed alongside this file, and how its filenames are
         # derived -- the scheme, never a mapping (see eval_assets).  A re-freeze
         # rewrites this document, so it has to be emitted, not hand-added, or
         # the first --force would drop it.
         "artifacts": artifacts_block(),
-        "rationale": {
-            pick.candidate.youtube_id: rationale_line(pick) for pick in picks
-        },
+        "rationale": {pick.candidate.youtube_id: rationale_line(pick) for pick in picks},
         "tracks": [
             {
                 "track_id": pick.candidate.track_id,
@@ -537,8 +542,7 @@ def build_document(picks: list, data_dir: Path, clean_rows: int, candidates: int
                 "bpm": round(pick.candidate.bpm, 2),
                 "duration_sec": round(pick.candidate.duration_sec, 3),
                 "boundaries": pick.candidate.boundaries,
-                "classes": [label for label in SECTION_LABELS
-                            if label in pick.candidate.classes],
+                "classes": [label for label in SECTION_LABELS if label in pick.candidate.classes],
             }
             for pick in picks
         ],
@@ -564,12 +568,13 @@ def print_table(picks: list) -> None:
     """The per-track rationale table the plan asks the selector to print."""
     print()
     print("selected eval set")
-    print(f"  {'track_id':<20}{'youtube_id':<14}{'bpm':>7}{'min':>6}{'bnd':>5}"
-          f"  {'classes':<52}{'genre':<20}{'why':<34}title")
+    print(
+        f"  {'track_id':<20}{'youtube_id':<14}{'bpm':>7}{'min':>6}{'bnd':>5}"
+        f"  {'classes':<52}{'genre':<20}{'why':<34}title"
+    )
     for pick in picks:
         candidate = pick.candidate
-        classes = "/".join(label for label in SECTION_LABELS
-                           if label in candidate.classes)
+        classes = "/".join(label for label in SECTION_LABELS if label in candidate.classes)
         print(
             f"  {candidate.track_id:<20}{candidate.youtube_id:<14}"
             f"{candidate.bpm:>7.1f}{candidate.duration_sec / 60.0:>6.1f}"
@@ -590,17 +595,24 @@ def print_summary(picks: list, clean_rows: int, candidates: int, eligible: int) 
     print(f"  with annotation + beats  : {candidates}")
     print(f"  eligible (all hard gates): {eligible}")
     print(f"  selected                 : {len(picks)}")
-    print(f"  BPM spread               : {bpms[0]:.1f} - {bpms[-1]:.1f}  "
-          f"({', '.join(f'{value:.0f}' for value in bpms)})")
-    print(f"  duration spread          : {durations[0] / 60.0:.1f} - "
-          f"{durations[-1] / 60.0:.1f} min  "
-          f"(total {sum(durations) / 60.0:.1f} min)")
-    print("  class coverage           : "
-          + "  ".join(f"{label} {covered.get(label, 0)}/{len(picks)}"
-                      for label in SECTION_LABELS))
-    print(f"  distinct genres          : "
-          f"{len({pick.candidate.genre for pick in picks})}  "
-          f"({', '.join(sorted({pick.candidate.genre for pick in picks}))})")
+    print(
+        f"  BPM spread               : {bpms[0]:.1f} - {bpms[-1]:.1f}  "
+        f"({', '.join(f'{value:.0f}' for value in bpms)})"
+    )
+    print(
+        f"  duration spread          : {durations[0] / 60.0:.1f} - "
+        f"{durations[-1] / 60.0:.1f} min  "
+        f"(total {sum(durations) / 60.0:.1f} min)"
+    )
+    print(
+        "  class coverage           : "
+        + "  ".join(f"{label} {covered.get(label, 0)}/{len(picks)}" for label in SECTION_LABELS)
+    )
+    print(
+        f"  distinct genres          : "
+        f"{len({pick.candidate.genre for pick in picks})}  "
+        f"({', '.join(sorted({pick.candidate.genre for pick in picks}))})"
+    )
     print(f"  distinct track_id blocks : {len({pick.candidate.family for pick in picks})}")
     print(f"  distinct artists         : {len({pick.candidate.artist for pick in picks})}")
 
@@ -614,9 +626,7 @@ def load_ok_rows(data_dir: Path) -> list:
     """``status == ok`` rows of ``clean_manifest.csv``, sorted by track_id."""
     path = data_dir / CLEAN_MANIFEST_FILE
     if not path.exists():
-        raise RuntimeError(
-            f"missing {path} -- run training/raveform/build_clean_manifest.py first"
-        )
+        raise RuntimeError(f"missing {path} -- run training/raveform/build_clean_manifest.py first")
     with open(path, "r", encoding="utf-8", newline="") as handle:
         rows = [row for row in csv.DictReader(handle) if row["status"] == STATUS_OK]
     if not rows:
@@ -641,14 +651,14 @@ def _describe_frozen(path: Path, data_dir: Path) -> list:
         document = load_eval_set(path)
     except RuntimeError as exc:
         return [f"  (unreadable: {exc})"]
-    lines.append(f"  {len(document['youtube_ids'])} track(s): "
-                 f"{', '.join(document['youtube_ids'])}")
+    lines.append(f"  {len(document['youtube_ids'])} track(s): {', '.join(document['youtube_ids'])}")
     drift = verify_inputs(document, data_dir)
     if drift:
         lines.append("  selection inputs have MOVED since the freeze:")
         lines.extend(f"    - {entry}" for entry in drift)
-        lines.append("  (expected as the corpus grows -- the benchmark does not "
-                     "follow it, by design)")
+        lines.append(
+            "  (expected as the corpus grows -- the benchmark does not follow it, by design)"
+        )
     else:
         lines.append("  selection inputs still match the corpus on disk")
     return lines
@@ -689,20 +699,32 @@ def warn_refreeze(path: Path, data_dir: Path) -> None:
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--data-dir", type=Path, default=default_data_dir(),
+        "--data-dir",
+        type=Path,
+        default=default_data_dir(),
         help="corpus root; reads clean_manifest.csv + annotations/ (default: %(default)s)",
     )
     # No --out and no --size.  The output path IS the benchmark's identity (a
     # committed baseline, a test that reads EVAL_SET_FILE, and the NN splits all
     # name it), and the size is what the baseline was cut over; a flag for
     # either is a way to produce a file that looks frozen and gates nothing.
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
-                        help="tiebreak seed, recorded in the output (default: %(default)s)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="print the table and summary without writing the file")
-    parser.add_argument("--force", action="store_true",
-                        help="RE-FREEZE: overwrite an existing eval set. Changes the "
-                             "benchmark and desynchronizes any committed baseline")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help="tiebreak seed, recorded in the output (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the table and summary without writing the file",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="RE-FREEZE: overwrite an existing eval set. Changes the "
+        "benchmark and desynchronizes any committed baseline",
+    )
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir.resolve()
@@ -720,13 +742,17 @@ def main(argv: list | None = None) -> int:
         # Loud and specific: an empty selection means the gate or the fetch has
         # not run, not that the corpus is merely thin.  Crashing in the summary
         # printer would hide which of the two it was.
-        print(f"ERROR: no track in {len(candidates)} candidate(s) satisfies the "
-              f"criteria (duration {MIN_DURATION_SEC:.0f}-{MAX_DURATION_SEC:.0f} s, "
-              f">= {MIN_BOUNDARIES} boundaries) -- nothing written")
+        print(
+            f"ERROR: no track in {len(candidates)} candidate(s) satisfies the "
+            f"criteria (duration {MIN_DURATION_SEC:.0f}-{MAX_DURATION_SEC:.0f} s, "
+            f">= {MIN_BOUNDARIES} boundaries) -- nothing written"
+        )
         return 1
     if len(picks) < DEFAULT_SIZE:
-        print(f"WARNING: only {len(picks)}/{DEFAULT_SIZE} tracks satisfy the criteria "
-              f"-- the corpus is too small or too uniform for this size")
+        print(
+            f"WARNING: only {len(picks)}/{DEFAULT_SIZE} tracks satisfy the criteria "
+            f"-- the corpus is too small or too uniform for this size"
+        )
 
     print_table(picks)
     print_summary(picks, len(ok_rows), len(candidates), len(eligible))
@@ -739,8 +765,9 @@ def main(argv: list | None = None) -> int:
     if EVAL_SET_FILE.exists():
         warn_refreeze(EVAL_SET_FILE, data_dir)
 
-    document = build_document(picks, data_dir, len(ok_rows), len(candidates),
-                              len(eligible), args.seed)
+    document = build_document(
+        picks, data_dir, len(ok_rows), len(candidates), len(eligible), args.seed
+    )
     path = write_eval_set(EVAL_SET_FILE, document)
     print()
     print(f"eval set: {path}")

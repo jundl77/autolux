@@ -20,4 +20,4 @@ void LogSupportedSampleRates(const LogModule&, SoundIoDevice*);
 std::string SoundIoFormatToString(SoundIoFormat);
 SoundIoFormat SoundIoFormatFromString(const std::string&);
 
-}
+} // namespace Radius

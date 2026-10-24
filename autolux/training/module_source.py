@@ -12,6 +12,7 @@ states which checkout it means and is held to it.
 submodule under it comes from the one directory the package resolved to.  One
 check on the package therefore covers the whole of it.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -24,4 +25,5 @@ def require(package: str, root: Path) -> None:
         raise RuntimeError(
             f"{package} resolved to {where}, which is not under {root}. "
             f"Something on sys.path -- or an earlier import -- decided that, "
-            f"not this script; fix the path setup rather than the symptom.")
+            f"not this script; fix the path setup rather than the symptom."
+        )

@@ -47,9 +47,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"),
-              str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -148,8 +151,7 @@ def beats_path(dataset: Path, native: str) -> Path:
 
 
 def corpus_audio_path(corpus: Path, native: str) -> Path:
-    return (third_party_dir(corpus) / AUDIO_DIR / SOURCE
-            / f"{track_id(native)}{AUDIO_SUFFIX}")
+    return third_party_dir(corpus) / AUDIO_DIR / SOURCE / f"{track_id(native)}{AUDIO_SUFFIX}"
 
 
 def _now_utc() -> str:
@@ -165,8 +167,9 @@ def sha256(path: Path) -> str:
 
 
 def _lines(text: str) -> list:
-    return [line for line in text.replace("\r\n", "\n").replace("\r", "\n")
-            .split("\n") if line.strip()]
+    return [
+        line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n") if line.strip()
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -180,14 +183,14 @@ def segment_rows(text: str) -> list:
         fields = line.strip().split(" ")
         if len(fields) != 2:
             raise ConvertError(
-                f"segments line {number}: {len(fields)} space-separated "
-                f"fields, want 2")
+                f"segments line {number}: {len(fields)} space-separated fields, want 2"
+            )
         try:
             time = float(fields[0])
         except ValueError:
             raise ConvertError(
-                f"segments line {number}: time {fields[0]!r} is not a "
-                f"number") from None
+                f"segments line {number}: time {fields[0]!r} is not a number"
+            ) from None
         if time < 0.0:
             raise ConvertError(f"segments line {number}: time {time!r} is negative")
         if not fields[1]:
@@ -199,7 +202,8 @@ def segment_rows(text: str) -> list:
         if after[0] <= before[0]:
             raise ConvertError(
                 f"segments line {index}: time {after[0]!r} does not advance on "
-                f"line {index - 1}'s {before[0]!r}")
+                f"line {index - 1}'s {before[0]!r}"
+            )
     return rows
 
 
@@ -217,8 +221,7 @@ def parse_segments(text: str, duration: float) -> Parse:
     end_source = END_FROM_SENTINEL
     if pending is not None:
         end_source = END_FROM_DURATION
-        sections.append(Section(pending[1], pending[0],
-                                max(duration, pending[0] + MIN_SPAN_SEC)))
+        sections.append(Section(pending[1], pending[0], max(duration, pending[0] + MIN_SPAN_SEC)))
     if not sections:
         raise ConvertError("no section survives the end sentinel")
     return Parse(sections, end_source, duplicate_end)
@@ -233,13 +236,13 @@ def read_segments(path: Path, duration: float) -> Parse:
 
 
 def section_dicts(sections: list) -> list:
-    return [{"name": section.name, "start": section.start, "end": section.end}
-            for section in sections]
+    return [
+        {"name": section.name, "start": section.start, "end": section.end} for section in sections
+    ]
 
 
 def adjacent_identical(sections: list) -> int:
-    return sum(1 for before, after in zip(sections, sections[1:])
-               if before.name == after.name)
+    return sum(1 for before, after in zip(sections, sections[1:]) if before.name == after.name)
 
 
 # --------------------------------------------------------------------------- #
@@ -252,18 +255,16 @@ def parse_beats(text: str) -> list:
     for number, line in enumerate(_lines(text), 1):
         fields = line.rstrip().split("\t")
         if len(fields) != 3:
-            raise ConvertError(
-                f"beats line {number}: {len(fields)} tab-separated fields, "
-                f"want 3")
+            raise ConvertError(f"beats line {number}: {len(fields)} tab-separated fields, want 3")
         try:
             time, position = float(fields[0]), int(fields[1])
         except ValueError:
             raise ConvertError(
                 f"beats line {number}: {fields[0]!r} {fields[1]!r} are not a "
-                f"time and a bar position") from None
+                f"time and a bar position"
+            ) from None
         if position < 1:
-            raise ConvertError(
-                f"beats line {number}: bar position {position} is not 1-based")
+            raise ConvertError(f"beats line {number}: bar position {position} is not 1-based")
         beats.append((time, position))
     if not beats:
         raise ConvertError("no beat lines")
@@ -271,7 +272,8 @@ def parse_beats(text: str) -> list:
         if after[0] <= before[0]:
             raise ConvertError(
                 f"beats line {index}: time {after[0]!r} does not advance on "
-                f"line {index - 1}'s {before[0]!r}")
+                f"line {index - 1}'s {before[0]!r}"
+            )
     return beats
 
 
@@ -319,8 +321,7 @@ def _number(text: str, field: str) -> float:
     try:
         return float(text)
     except (TypeError, ValueError) as error:
-        raise ConvertError(
-            f"metadata {field} is not a number: {text!r}") from error
+        raise ConvertError(f"metadata {field} is not a number: {text!r}") from error
 
 
 def _optional(text: str) -> float | None:
@@ -405,8 +406,7 @@ def convert_track(native: str, sources: Sources, corpus: Path) -> Verdict:
             "time_signature": (row.get("Time Signature") or "").strip(),
             "ratio_bars_in_4": _optional(row.get("Ratio Bars in 4", "")),
             "dtw_score": score,
-            "youtube_id": youtube_id(
-                (sources.urls.get(native) or {}).get("URL", "")),
+            "youtube_id": youtube_id((sources.urls.get(native) or {}).get("URL", "")),
             "license": LICENSE,
         },
     }
@@ -429,7 +429,9 @@ def convert_track(native: str, sources: Sources, corpus: Path) -> Verdict:
         adjacent_identical(parse.sections),
         beats[0][1],
         max(position for _time, position in beats),
-        parse.end_source, parse.duplicate_end, score,
+        parse.end_source,
+        parse.duplicate_end,
+        score,
         sum(section.end - section.start for section in parse.sections),
         duration,
     )
@@ -440,15 +442,16 @@ def convert_track(native: str, sources: Sources, corpus: Path) -> Verdict:
 # --------------------------------------------------------------------------- #
 
 
-def eligible(sources: Sources, corpus: Path, ids: list | None,
-             require_audio: bool) -> tuple:
+def eligible(sources: Sources, corpus: Path, ids: list | None, require_audio: bool) -> tuple:
     wanted = ids if ids is not None else list(sources.metadata)
     convertible, no_annotation, no_audio, unknown = [], [], [], []
     for native in wanted:
         if native not in sources.metadata:
             unknown.append(native)
-        elif not (segments_path(sources.dataset, native).exists()
-                  and beats_path(sources.dataset, native).exists()):
+        elif not (
+            segments_path(sources.dataset, native).exists()
+            and beats_path(sources.dataset, native).exists()
+        ):
             no_annotation.append(native)
         elif require_audio and not corpus_audio_path(corpus, native).exists():
             no_audio.append(native)
@@ -457,8 +460,7 @@ def eligible(sources: Sources, corpus: Path, ids: list | None,
     return convertible, no_annotation, no_audio, unknown
 
 
-def report_file(ids: list | None, limit: int | None,
-                require_audio: bool) -> str:
+def report_file(ids: list | None, limit: int | None, require_audio: bool) -> str:
     """A restricted run must not land where a whole-set report belongs.
 
     A twenty-five track report sitting at the full name silently stops covering
@@ -466,9 +468,11 @@ def report_file(ids: list | None, limit: int | None,
     dataset is simply missing does not restrict the run: it is inside the set
     and named in a bucket, so the report still accounts for it.
     """
-    return (PARTIAL_REPORT_FILE
-            if ids is not None or limit is not None or require_audio
-            else REPORT_FILE)
+    return (
+        PARTIAL_REPORT_FILE
+        if ids is not None or limit is not None or require_audio
+        else REPORT_FILE
+    )
 
 
 def _at(ordered: list, fraction: float):
@@ -490,8 +494,9 @@ def _distribution(values: list) -> dict:
     }
 
 
-def _report(verdicts: list, failures: list, buckets: tuple, requested: int,
-            report_name: str) -> dict:
+def _report(
+    verdicts: list, failures: list, buckets: tuple, requested: int, report_name: str
+) -> dict:
     labels: dict = {}
     odd_meter = []
     mid_bar = []
@@ -499,14 +504,11 @@ def _report(verdicts: list, failures: list, buckets: tuple, requested: int,
         for name in verdict.names:
             labels[name] = labels.get(name, 0) + 1
         if verdict.max_position > NOMINAL_BAR:
-            odd_meter.append({"id": verdict.track_id,
-                              "max_position": verdict.max_position})
+            odd_meter.append({"id": verdict.track_id, "max_position": verdict.max_position})
         if verdict.first_position != DOWNBEAT_POSITION:
-            mid_bar.append({"id": verdict.track_id,
-                            "first_position": verdict.first_position})
+            mid_bar.append({"id": verdict.track_id, "first_position": verdict.first_position})
     no_annotation, no_audio, unknown = buckets
-    scores = [verdict.dtw_score for verdict in verdicts
-              if verdict.dtw_score is not None]
+    scores = [verdict.dtw_score for verdict in verdicts if verdict.dtw_score is not None]
     return {
         "converter": CONVERTER,
         "source": SOURCE,
@@ -515,8 +517,7 @@ def _report(verdicts: list, failures: list, buckets: tuple, requested: int,
         "tracks_requested": requested,
         "converted": len(verdicts),
         "failed": len(failures),
-        "failures": [{"id": identifier, "reason": reason}
-                     for identifier, reason in failures],
+        "failures": [{"id": identifier, "reason": reason} for identifier, reason in failures],
         "no_annotation": len(no_annotation),
         "no_annotation_ids": no_annotation,
         "no_audio": len(no_audio),
@@ -524,18 +525,18 @@ def _report(verdicts: list, failures: list, buckets: tuple, requested: int,
         "not_in_metadata": unknown,
         "labels": dict(sorted(labels.items())),
         "label_count": len(labels),
-        "adjacent_identical_pairs": sum(verdict.adjacent_identical
-                                        for verdict in verdicts),
+        "adjacent_identical_pairs": sum(verdict.adjacent_identical for verdict in verdicts),
         "tracks_with_adjacent_identical": sum(
-            1 for verdict in verdicts if verdict.adjacent_identical),
+            1 for verdict in verdicts if verdict.adjacent_identical
+        ),
         "odd_meter_count": len(odd_meter),
         "odd_meter_tracks": odd_meter,
         "mid_bar_start_count": len(mid_bar),
         "mid_bar_start_tracks": mid_bar,
-        "duplicate_end_ids": [verdict.track_id for verdict in verdicts
-                              if verdict.duplicate_end],
-        "no_end_sentinel_ids": [verdict.track_id for verdict in verdicts
-                                if verdict.end_source == END_FROM_DURATION],
+        "duplicate_end_ids": [verdict.track_id for verdict in verdicts if verdict.duplicate_end],
+        "no_end_sentinel_ids": [
+            verdict.track_id for verdict in verdicts if verdict.end_source == END_FROM_DURATION
+        ],
         "dtw_score": _distribution(scores),
         "dtw_score_missing": len(verdicts) - len(scores),
         "labelled_sec": round(sum(v.labelled_sec for v in verdicts), 3),
@@ -559,45 +560,58 @@ def write_report(corpus: Path, report: dict) -> Path:
 
 
 def print_report(report: dict) -> None:
-    print(f"converted {report['converted']}/{report['tracks_requested']}, "
-          f"failed {report['failed']}")
+    print(
+        f"converted {report['converted']}/{report['tracks_requested']}, failed {report['failed']}"
+    )
     for failure in report["failures"]:
         print(f"  FAIL {failure['id']}: {failure['reason']}")
-    print(f"no annotation: {report['no_annotation']}; no audio yet: "
-          f"{report['no_audio']}; not in metadata: "
-          f"{len(report['not_in_metadata'])}")
-    print(f"labels ({report['label_count']} distinct): " + ", ".join(
-        f"{name}={count}" for name, count in report["labels"].items()))
-    print(f"adjacent identical pairs: {report['adjacent_identical_pairs']} "
-          f"over {report['tracks_with_adjacent_identical']} track(s) -- kept, "
-          f"not merged")
-    print(f"beat positions above {NOMINAL_BAR}: {report['odd_meter_count']} "
-          f"track(s)")
+    print(
+        f"no annotation: {report['no_annotation']}; no audio yet: "
+        f"{report['no_audio']}; not in metadata: "
+        f"{len(report['not_in_metadata'])}"
+    )
+    print(
+        f"labels ({report['label_count']} distinct): "
+        + ", ".join(f"{name}={count}" for name, count in report["labels"].items())
+    )
+    print(
+        f"adjacent identical pairs: {report['adjacent_identical_pairs']} "
+        f"over {report['tracks_with_adjacent_identical']} track(s) -- kept, "
+        f"not merged"
+    )
+    print(f"beat positions above {NOMINAL_BAR}: {report['odd_meter_count']} track(s)")
     for track in report["odd_meter_tracks"]:
         print(f"  {track['id']} max position {track['max_position']}")
     print(f"starting mid-bar: {report['mid_bar_start_count']} track(s)")
     for track in report["mid_bar_start_tracks"]:
         print(f"  {track['id']} first position {track['first_position']}")
-    print(f"duplicated end sentinel: {len(report['duplicate_end_ids'])} "
-          f"track(s) {report['duplicate_end_ids']}")
-    print(f"no end sentinel (final end from metadata duration): "
-          f"{len(report['no_end_sentinel_ids'])} track(s) "
-          f"{report['no_end_sentinel_ids']}")
-    print(f"dtw score: {report['dtw_score']} (missing "
-          f"{report['dtw_score_missing']})")
-    print(f"labelled {report['labelled_sec']:.3f} s of "
-          f"{report['audio_sec']:.3f} s of audio")
-    print(f"report written to {report['report_file']}"
-          + (" (partial run)" if report["partial"] else ""))
+    print(
+        f"duplicated end sentinel: {len(report['duplicate_end_ids'])} "
+        f"track(s) {report['duplicate_end_ids']}"
+    )
+    print(
+        f"no end sentinel (final end from metadata duration): "
+        f"{len(report['no_end_sentinel_ids'])} track(s) "
+        f"{report['no_end_sentinel_ids']}"
+    )
+    print(f"dtw score: {report['dtw_score']} (missing {report['dtw_score_missing']})")
+    print(f"labelled {report['labelled_sec']:.3f} s of {report['audio_sec']:.3f} s of audio")
+    print(
+        f"report written to {report['report_file']}"
+        + (" (partial run)" if report["partial"] else "")
+    )
 
 
-def convert(harmonixset: Path, corpus: Path, ids: list | None = None,
-            limit: int | None = None, require_audio: bool = False) -> dict:
+def convert(
+    harmonixset: Path,
+    corpus: Path,
+    ids: list | None = None,
+    limit: int | None = None,
+    require_audio: bool = False,
+) -> dict:
     dataset = dataset_dir(harmonixset)
-    sources = Sources(dataset, load_metadata(dataset), load_urls(dataset),
-                      load_scores(dataset))
-    convertible, no_annotation, no_audio, unknown = eligible(
-        sources, corpus, ids, require_audio)
+    sources = Sources(dataset, load_metadata(dataset), load_urls(dataset), load_scores(dataset))
+    convertible, no_annotation, no_audio, unknown = eligible(sources, corpus, ids, require_audio)
     if limit is not None:
         convertible = convertible[:limit]
 
@@ -606,33 +620,55 @@ def convert(harmonixset: Path, corpus: Path, ids: list | None = None,
         try:
             verdicts.append(convert_track(native, sources, corpus))
         except (ConvertError, OSError) as error:
-            reason = (str(error) if isinstance(error, ConvertError)
-                      else f"{type(error).__name__}: {error}")
+            reason = (
+                str(error)
+                if isinstance(error, ConvertError)
+                else f"{type(error).__name__}: {error}"
+            )
             failures.append((track_id(native), reason))
-    report = _report(verdicts, failures,
-                     (no_annotation, no_audio, unknown), len(convertible),
-                     report_file(ids, limit, require_audio))
+    report = _report(
+        verdicts,
+        failures,
+        (no_annotation, no_audio, unknown),
+        len(convertible),
+        report_file(ids, limit, require_audio),
+    )
     write_report(corpus, report)
     return report
 
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--harmonixset", type=Path, required=True,
-                        help="the harmonixset repository root (holds dataset/)")
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus)")
-    parser.add_argument("--ids", nargs="+", default=None,
-                        help="explicit Harmonix track ids (e.g. 0001_12step)")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="convert only the first N eligible tracks")
-    parser.add_argument("--require-audio", action="store_true",
-                        help="convert only tracks whose fetched mp3 has landed")
+    parser.add_argument(
+        "--harmonixset",
+        type=Path,
+        required=True,
+        help="the harmonixset repository root (holds dataset/)",
+    )
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus)"
+    )
+    parser.add_argument(
+        "--ids", nargs="+", default=None, help="explicit Harmonix track ids (e.g. 0001_12step)"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None, help="convert only the first N eligible tracks"
+    )
+    parser.add_argument(
+        "--require-audio",
+        action="store_true",
+        help="convert only tracks whose fetched mp3 has landed",
+    )
     args = parser.parse_args(argv)
 
     corpus = args.data_dir.resolve() if args.data_dir else corpus_dir()
-    report = convert(args.harmonixset.resolve(), corpus, ids=args.ids,
-                     limit=args.limit, require_audio=args.require_audio)
+    report = convert(
+        args.harmonixset.resolve(),
+        corpus,
+        ids=args.ids,
+        limit=args.limit,
+        require_audio=args.require_audio,
+    )
     print_report(report)
     return 1 if report["failed"] else 0
 

@@ -25,6 +25,7 @@ CORE_SHARE_BAR_PCT = 20.0
 def _load(path: str, seconds: float) -> np.ndarray:
     from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
     from autolux.simulate.fake_audio_client import FileAudioClient
+
     client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, path)
     client.start_streams()
     wanted = int(seconds * SR / BUFFER)
@@ -47,17 +48,19 @@ def _stats(label: str, times_ms: np.ndarray, budget_ms: float = BUDGET_MS) -> di
         'realtime_factor': float(budget_ms / times_ms.mean()),
         'over_budget_pct': float(100 * (times_ms > budget_ms).mean()),
     }
-    print(f'{label:26s} mean {row["mean_ms"]:6.3f}  p50 {row["p50_ms"]:6.3f}  '
-          f'p90 {row["p90_ms"]:6.3f}  p99 {row["p99_ms"]:7.3f}  '
-          f'max {row["max_ms"]:8.3f} ms | {row["core_share_pct"]:5.1f}% of a core '
-          f'| {row["realtime_factor"]:6.1f}x realtime')
+    print(
+        f'{label:26s} mean {row["mean_ms"]:6.3f}  p50 {row["p50_ms"]:6.3f}  '
+        f'p90 {row["p90_ms"]:6.3f}  p99 {row["p99_ms"]:7.3f}  '
+        f'max {row["max_ms"]:8.3f} ms | {row["core_share_pct"]:5.1f}% of a core '
+        f'| {row["realtime_factor"]:6.1f}x realtime'
+    )
     return row
 
 
 def _time_each(audio: np.ndarray, step) -> np.ndarray:
     times = []
     for i in range(0, len(audio) - BUFFER, BUFFER):
-        buf = audio[i:i + BUFFER]
+        buf = audio[i : i + BUFFER]
         start = time.perf_counter()
         step(buf)
         times.append((time.perf_counter() - start) * 1000.0)
@@ -90,8 +93,7 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
     from autolux.lib.engine.effect_controller import EffectController
     from autolux.lib.engine.light_engine import LightEngine
     from autolux.lib.main import PLAYBACK_DELAY_SEC
-    from autolux.simulate.stub_clients import (StubMidiClient, StubOs2lClient,
-                                       StubOverlayClient)
+    from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
     from autolux.lib import section_chain
 
     watchdog = DriftWatchdog(BUFFER / SR)
@@ -113,11 +115,17 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
 
     midi, os2l, overlay = StubMidiClient(), StubOs2lClient(), StubOverlayClient()
     queue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
-    engine = LightEngine(midi, os2l, overlay, EffectController(midi), queue,
-                         playback_delay_sec=PLAYBACK_DELAY_SEC,
-                         section_chain=chain.stream,
-                         section_decoder=chain.decoder,
-                         watchdog=watchdog)
+    engine = LightEngine(
+        midi,
+        os2l,
+        overlay,
+        EffectController(midi),
+        queue,
+        playback_delay_sec=PLAYBACK_DELAY_SEC,
+        section_chain=chain.stream,
+        section_decoder=chain.decoder,
+        watchdog=watchdog,
+    )
     analyser = MusicAnalyser(SR, BUFFER, engine, watchdog=watchdog)
     engine.set_analyser(analyser)
     os2l.set_analyser(analyser)
@@ -140,7 +148,7 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
             time.sleep(slack)
         pacing_ms.append((time.perf_counter() - deadline) * 1000.0)
 
-        buf = audio[index * BUFFER:(index + 1) * BUFFER]
+        buf = audio[index * BUFFER : (index + 1) * BUFFER]
         depths.append(stage.queued)
 
         top = time.perf_counter()
@@ -157,8 +165,7 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
         loop_ms.append((end - top) * 1000.0)
 
         if index % 1000 == 0:
-            reserved.append({'audio_sec': round(index * period, 1),
-                             'bytes': reserved_bytes()})
+            reserved.append({'audio_sec': round(index * period, 1), 'bytes': reserved_bytes()})
 
     elapsed = time.perf_counter() - started
     chain.stop()
@@ -181,8 +188,9 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
         'gpu_overflows': int(stage.overflows),
         'gpu_reinits': int(stage.reinits),
         'gpu_resyncs': int(stage.resyncs),
-        'tracker_pass_ms': (spread(list(tracker.pass_sec), 1000.0)
-                            if tracker is not None else None),
+        'tracker_pass_ms': (
+            spread(list(tracker.pass_sec), 1000.0) if tracker is not None else None
+        ),
         'tracker_passes': (int(tracker.passes) if tracker is not None else 0),
         'tracker_alive': (bool(tracker.alive) if tracker is not None else None),
         'tracker_stride_ms': 2500.0,
@@ -200,13 +208,18 @@ def main() -> None:
     ap.add_argument('track')
     ap.add_argument('--seconds', type=float, default=120.0)
     ap.add_argument('--out', default=None)
-    ap.add_argument('--front-end-only', action='store_true',
-                    help='time madmom alone and skip the paced loop (no GPU)')
+    ap.add_argument(
+        '--front-end-only',
+        action='store_true',
+        help='time madmom alone and skip the paced loop (no GPU)',
+    )
     args = ap.parse_args()
 
     audio = _load(args.track, args.seconds)
-    print(f'{len(audio)/SR:.1f}s of audio, buffer {BUFFER} '
-          f'({BUDGET_MS:.3f} ms budget), single thread\n')
+    print(
+        f'{len(audio) / SR:.1f}s of audio, buffer {BUFFER} '
+        f'({BUDGET_MS:.3f} ms budget), single thread\n'
+    )
     rows = []
 
     from autolux.lib.analyser.madmom_rhythm import MadmomRhythm
@@ -217,8 +230,10 @@ def main() -> None:
 
     paced = None
     if not args.front_end_only:
-        print(f'\npacing {args.seconds:.0f}s of audio through the production '
-              f'wiring at real time (this takes that long)\n')
+        print(
+            f'\npacing {args.seconds:.0f}s of audio through the production '
+            f'wiring at real time (this takes that long)\n'
+        )
         paced = asyncio.run(_paced_loop(audio, rows))
 
     reference = paced['loop'] if paced else rows[0]
@@ -226,37 +241,53 @@ def main() -> None:
     print(f'\naudio loop: {reference["mean_ms"]:.3f} ms per buffer')
     print(f'  as a share of one core : {share:.1f}%')
     print(f'  headroom               : {BUDGET_MS / reference["mean_ms"]:.1f}x real time')
-    print(f'  decision #18 bar (<= {CORE_SHARE_BAR_PCT:.0f}% of a core): '
-          f'{verdict(share)}')
+    print(f'  decision #18 bar (<= {CORE_SHARE_BAR_PCT:.0f}% of a core): {verdict(share)}')
 
     if paced:
         gpu = paced['gpu_pass_ms']
-        print(f'\nGPU thread: {paced["gpu_passes"]} passes, '
-              f'mean {gpu["mean"]:.1f} ms  p99 {gpu["p99"]:.1f} ms  '
-              f'max {gpu["max"]:.1f} ms  '
-              f'({100 * gpu["mean"] / paced["gpu_hop_ms"]:.1f}% of the '
-              f'{paced["gpu_hop_ms"]:.0f} ms hop)')
+        print(
+            f'\nGPU thread: {paced["gpu_passes"]} passes, '
+            f'mean {gpu["mean"]:.1f} ms  p99 {gpu["p99"]:.1f} ms  '
+            f'max {gpu["max"]:.1f} ms  '
+            f'({100 * gpu["mean"] / paced["gpu_hop_ms"]:.1f}% of the '
+            f'{paced["gpu_hop_ms"]:.0f} ms hop)'
+        )
         if paced['tracker_pass_ms']:
             tracker_row = paced['tracker_pass_ms']
-            print(f'bar tracker: {paced["tracker_passes"]} passes, '
-                  f'mean {tracker_row["mean"]:.1f} ms  '
-                  f'p99 {tracker_row["p99"]:.1f} ms  '
-                  f'max {tracker_row["max"]:.1f} ms  '
-                  f'({100 * tracker_row["mean"] / paced["tracker_stride_ms"]:.1f}% '
-                  f'of the {paced["tracker_stride_ms"]:.0f} ms stride, '
-                  f'alive={paced["tracker_alive"]})')
+            print(
+                f'bar tracker: {paced["tracker_passes"]} passes, '
+                f'mean {tracker_row["mean"]:.1f} ms  '
+                f'p99 {tracker_row["p99"]:.1f} ms  '
+                f'max {tracker_row["max"]:.1f} ms  '
+                f'({100 * tracker_row["mean"] / paced["tracker_stride_ms"]:.1f}% '
+                f'of the {paced["tracker_stride_ms"]:.0f} ms stride, '
+                f'alive={paced["tracker_alive"]})'
+            )
         depth = paced['queue_depth']
-        print(f'hand-off  : depth mean {depth["mean"]:.3f}  max {depth["max"]:.0f} '
-              f'of {paced["queue_capacity"]}, {paced["gpu_overflows"]} overflow(s)')
-        print(f'peak drift: {paced["peak_drift_sec"]:+.3f}s, '
-              f'shed level at end {paced["shed_level_at_end"]}')
+        print(
+            f'hand-off  : depth mean {depth["mean"]:.3f}  max {depth["max"]:.0f} '
+            f'of {paced["queue_capacity"]}, {paced["gpu_overflows"]} overflow(s)'
+        )
+        print(
+            f'peak drift: {paced["peak_drift_sec"]:+.3f}s, '
+            f'shed level at end {paced["shed_level_at_end"]}'
+        )
 
     if args.out:
-        Path(args.out).write_text(json.dumps(
-            {'buffer_budget_ms': BUDGET_MS, 'track': args.track,
-             'rows': rows, 'paced': paced,
-             'core_share_pct': share, 'verdict': verdict(share)},
-            indent=2) + '\n')
+        Path(args.out).write_text(
+            json.dumps(
+                {
+                    'buffer_budget_ms': BUDGET_MS,
+                    'track': args.track,
+                    'rows': rows,
+                    'paced': paced,
+                    'core_share_pct': share,
+                    'verdict': verdict(share),
+                },
+                indent=2,
+            )
+            + '\n'
+        )
         print(f'wrote {args.out}')
 
 

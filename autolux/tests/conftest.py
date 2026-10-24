@@ -47,5 +47,7 @@ def nn_artifacts():
     from autolux.lib import section_chain
 
     if not section_chain.artifacts_present():
-        pytest.skip('the shipped NN artifacts are absent -- they live in the '
-                    'gitignored corpus directory, not in the repository')
+        pytest.skip(
+            'the shipped NN artifacts are absent -- they live in the '
+            'gitignored corpus directory, not in the repository'
+        )

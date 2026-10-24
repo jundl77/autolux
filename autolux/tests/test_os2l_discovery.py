@@ -10,8 +10,11 @@ from autolux.lib.clients import os2l_client as discovery
 def isolated_discovery(monkeypatch):
     monkeypatch.setattr(discovery, 'global_services', [])
     monkeypatch.setattr(discovery, 'service_discovery_error', '')
-    monkeypatch.setattr(discovery, 'get_ip_addresses_for_all_interfaces',
-                        lambda: ['192.168.178.22', '192.168.56.1', '172.19.144.1'])
+    monkeypatch.setattr(
+        discovery,
+        'get_ip_addresses_for_all_interfaces',
+        lambda: ['192.168.178.22', '192.168.56.1', '172.19.144.1'],
+    )
 
 
 def announce(addresses, name='SoundSwitch._os2l._tcp.local.', state=ServiceStateChange.Added):

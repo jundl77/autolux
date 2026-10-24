@@ -1,4 +1,5 @@
 """#142 retired the engine's classifier: decoder decisions alone drive the lights."""
+
 import logging
 from collections import deque
 
@@ -36,6 +37,7 @@ class FakeAnalyser:
 
     def get_song_current_duration(self):
         import datetime
+
         return datetime.timedelta(seconds=1.0)
 
 
@@ -103,32 +105,38 @@ class FakeDecoder:
         self.cold_starts.append(cold_start)
 
 
-def engine(*, decoder=None, chain=None, playback_delay_sec=14.0, clock=None,
-           queue=True, events=False):
+def engine(
+    *, decoder=None, chain=None, playback_delay_sec=14.0, clock=None, queue=True, events=False
+):
     clock = clock or VirtualClock()
     midi = StubMidiClient(clock=clock)
-    command_queue = DelayedCommandQueue(playback_delay_sec, clock=clock) \
-        if queue else None
+    command_queue = DelayedCommandQueue(playback_delay_sec, clock=clock) if queue else None
     buffer = None
     if events:
         from autolux.lib.engine.event_buffer import EventBuffer
-        buffer = EventBuffer(window_sec=float('inf'), clock=clock,
-                             look_ahead_sec=playback_delay_sec)
+
+        buffer = EventBuffer(
+            window_sec=float('inf'), clock=clock, look_ahead_sec=playback_delay_sec
+        )
         buffer.start()
-    light = LightEngine(midi, StubOs2lClient(clock=clock),
-                        StubOverlayClient(clock=clock),
-                        EffectController(midi, clock=clock, event_buffer=buffer),
-                        command_queue, event_buffer=buffer,
-                        playback_delay_sec=playback_delay_sec,
-                        section_chain=chain, section_decoder=decoder,
-                        clock=clock)
+    light = LightEngine(
+        midi,
+        StubOs2lClient(clock=clock),
+        StubOverlayClient(clock=clock),
+        EffectController(midi, clock=clock, event_buffer=buffer),
+        command_queue,
+        event_buffer=buffer,
+        playback_delay_sec=playback_delay_sec,
+        section_chain=chain,
+        section_decoder=decoder,
+        clock=clock,
+    )
     light.set_analyser(FakeAnalyser())
     return light, command_queue, clock, midi
 
 
 def decisions(*labels, start=0):
-    return [BarDecision(start + i, label, (start + i) * 1.9)
-            for i, label in enumerate(labels)]
+    return [BarDecision(start + i, label, (start + i) * 1.9) for i, label in enumerate(labels)]
 
 
 async def elapse(light, clock, sec: float) -> None:
@@ -136,8 +144,7 @@ async def elapse(light, clock, sec: float) -> None:
     clock.advance(sec)
 
 
-async def hold_silence(light, clock,
-                       sec: float = STOP_PERSISTENCE_SEC + 0.1) -> None:
+async def hold_silence(light, clock, sec: float = STOP_PERSISTENCE_SEC + 0.1) -> None:
     remaining = sec
     while remaining > 1e-9:
         step = min(0.1, remaining)
@@ -176,13 +183,16 @@ async def settle(light, clock, queue, sec=20.0, step=0.25):
         await queue.drain()
 
 
-@pytest.mark.parametrize('label,intent', [
-    ('intro', LightIntent.ATMOSPHERIC),
-    ('outro', LightIntent.ATMOSPHERIC),
-    ('buildup', LightIntent.BUILDUP),
-    ('breakdown', LightIntent.BREAKDOWN),
-    ('drop', LightIntent.DROP),
-])
+@pytest.mark.parametrize(
+    'label,intent',
+    [
+        ('intro', LightIntent.ATMOSPHERIC),
+        ('outro', LightIntent.ATMOSPHERIC),
+        ('buildup', LightIntent.BUILDUP),
+        ('breakdown', LightIntent.BREAKDOWN),
+        ('drop', LightIntent.DROP),
+    ],
+)
 async def test_a_decision_commits_the_intent_its_class_maps_to(label, intent):
     decoder = FakeDecoder()
     light, queue, clock, _ = engine(decoder=decoder)
@@ -198,8 +208,7 @@ async def test_the_same_class_twice_does_not_re_roll_the_effect():
     await elapse(light, clock, 20.0)
     await bars(light, decoder, clock, 'drop', 'drop', 'drop')
     await settle(light, clock, queue)
-    lit = [e for e in midi.events
-           if e['label'] in ('set_autoloop', 'set_special_effect')]
+    lit = [e for e in midi.events if e['label'] in ('set_autoloop', 'set_special_effect')]
     assert len(lit) == 1
     assert light.intent_commits == 1
 
@@ -218,6 +227,7 @@ async def test_a_sustained_drop_stays_drop_with_no_engine_derived_promotion():
 
 async def test_the_peak_promotion_is_gone_not_merely_unreachable():
     import autolux.lib.engine.light_engine as light_engine
+
     assert not hasattr(light_engine, 'PEAK_PROMOTION_BARS')
     assert not hasattr(LightIntent, 'PEAK')
     assert 'peak' not in {intent.value for intent in LightIntent}
@@ -250,9 +260,10 @@ async def test_a_gap_from_the_feature_stage_clears_the_decoder_before_it_is_fed(
     await light.on_audio(np.zeros(256, dtype=np.float32))
     assert decoder.resets == 1
     assert decoder.cells == [(0.9288, 0.3)]
-    assert decoder.cold_starts == [False], \
-        'the feature stage gapped, not the beat source: madmom kept running and ' \
+    assert decoder.cold_starts == [False], (
+        'the feature stage gapped, not the beat source: madmom kept running and '
         'pays no warm-up, so the grid must not re-apply the first-beat anchor'
+    )
 
 
 async def test_a_shed_and_unshed_cycle_leaves_the_grid_on_the_phase_it_had():
@@ -274,9 +285,9 @@ async def test_a_shed_and_unshed_cycle_leaves_the_grid_on_the_phase_it_had():
     for beat in pushed:
         uninterrupted.push_beat(beat)
 
-    assert live.bar_edges == [pytest.approx(line)
-                              for line in uninterrupted.bar_edges
-                              if line > pushed[5]]
+    assert live.bar_edges == [
+        pytest.approx(line) for line in uninterrupted.bar_edges if line > pushed[5]
+    ]
 
 
 async def test_a_beat_inside_the_sound_start_margin_leaves_the_anchor_alone():
@@ -347,8 +358,9 @@ async def test_a_chain_slower_than_the_budget_fires_at_once_and_says_so(caplog):
     intent = [e for e in queue._queue if e[4] == 'intent'][0]
     assert intent[3] == 0.0
     assert 'late' in caplog.text.lower()
-    assert len([r for r in caplog.records if 'late' in r.message.lower()]) == 1, \
+    assert len([r for r in caplog.records if 'late' in r.message.lower()]) == 1, (
         'one line per transition, not one per bar'
+    )
 
 
 def test_the_startup_line_names_both_halves_of_the_measured_chain(caplog):
@@ -402,8 +414,9 @@ async def test_a_stale_silence_atmospheric_cannot_take_a_stage_the_decoder_owns(
     for _ in range(40):
         await elapse(light, clock, 0.5)
         await queue.drain()
-    assert light.current_intent is LightIntent.DROP, \
+    assert light.current_intent is LightIntent.DROP, (
         'the timer clobbered the stage the committer owns'
+    )
     assert queued_intents(queue) == []
 
 
@@ -411,8 +424,9 @@ async def test_a_run_of_real_intent_changes_is_not_swallowed_by_superseding():
     decoder = FakeDecoder()
     light, queue, clock, midi = engine(decoder=decoder)
     await elapse(light, clock, 30.0)
-    decoder._script.append([BarDecision(0, 'breakdown', 30.0 - 13.9),
-                            BarDecision(1, 'drop', 30.0 - 12.0)])
+    decoder._script.append(
+        [BarDecision(0, 'breakdown', 30.0 - 13.9), BarDecision(1, 'drop', 30.0 - 12.0)]
+    )
     await light.on_beat(1, 128.0, False)
     assert len(queued_intents(queue)) == 2, 'a later bar cancelled an earlier one'
 
@@ -420,8 +434,7 @@ async def test_a_run_of_real_intent_changes_is_not_swallowed_by_superseding():
     for _ in range(30):
         await elapse(light, clock, 0.25)
         await queue.drain()
-        if light.current_intent is not None and (
-                not seen or seen[-1] is not light.current_intent):
+        if light.current_intent is not None and (not seen or seen[-1] is not light.current_intent):
             seen.append(light.current_intent)
     assert seen == [LightIntent.BREAKDOWN, LightIntent.DROP]
 
@@ -446,9 +459,9 @@ async def test_the_stage_goes_dark_once_the_detected_silence_has_persisted():
 
     await hold_silence(light, clock)
     await queue.drain()
-    assert blackout == [
-        pytest.approx(at_stop + STOP_PERSISTENCE_SEC, abs=0.2)], \
+    assert blackout == [pytest.approx(at_stop + STOP_PERSISTENCE_SEC, abs=0.2)], (
         'the blackout did not wait for the silence, or waited for the room'
+    )
 
 
 async def test_the_engines_own_bookkeeping_at_a_boundary_is_not_delayed():
@@ -461,15 +474,13 @@ async def test_the_engines_own_bookkeeping_at_a_boundary_is_not_delayed():
 
 async def test_the_overlay_light_bar_is_room_aligned_like_everything_seen():
     light, queue, clock, _ = engine(decoder=FakeDecoder())
-    chase = [e for e in light.overlay_client.events
-             if e['label'] == 'overlay_update']
+    chase = [e for e in light.overlay_client.events if e['label'] == 'overlay_update']
     await light.on_note()
     assert chase == [], 'the chase ran fourteen seconds early'
 
     await elapse(light, clock, 14.1)
     await queue.drain()
-    assert len([e for e in light.overlay_client.events
-                if e['label'] == 'overlay_update']) == 1
+    assert len([e for e in light.overlay_client.events if e['label'] == 'overlay_update']) == 1
 
 
 async def test_a_block_records_the_song_instant_it_describes():
@@ -500,6 +511,7 @@ class SettlingMidi(StubMidiClient):
 
     def on_sound_stop(self):
         import time
+
         time.sleep(self.SETTLE_SEC)
         super().on_sound_stop()
 
@@ -518,11 +530,16 @@ async def test_the_midi_settle_is_forgiven_where_it_actually_runs():
 
     watchdog = ForgivingWatchdog()
     midi = SettlingMidi(clock=SYSTEM_CLOCK)
-    light = LightEngine(midi, StubOs2lClient(clock=SYSTEM_CLOCK),
-                        StubOverlayClient(clock=SYSTEM_CLOCK),
-                        EffectController(midi, clock=SYSTEM_CLOCK),
-                        None, playback_delay_sec=0.0, watchdog=watchdog,
-                        clock=SYSTEM_CLOCK)
+    light = LightEngine(
+        midi,
+        StubOs2lClient(clock=SYSTEM_CLOCK),
+        StubOverlayClient(clock=SYSTEM_CLOCK),
+        EffectController(midi, clock=SYSTEM_CLOCK),
+        None,
+        playback_delay_sec=0.0,
+        watchdog=watchdog,
+        clock=SYSTEM_CLOCK,
+    )
     light.set_analyser(FakeAnalyser())
 
     light.on_sound_stop()
@@ -537,11 +554,16 @@ async def test_the_sound_start_settle_is_forgiven_too():
 
     watchdog = ForgivingWatchdog()
     midi = SettlingMidi(clock=SYSTEM_CLOCK)
-    light = LightEngine(midi, StubOs2lClient(clock=SYSTEM_CLOCK),
-                        StubOverlayClient(clock=SYSTEM_CLOCK),
-                        EffectController(midi, clock=SYSTEM_CLOCK),
-                        None, playback_delay_sec=0.0, watchdog=watchdog,
-                        clock=SYSTEM_CLOCK)
+    light = LightEngine(
+        midi,
+        StubOs2lClient(clock=SYSTEM_CLOCK),
+        StubOverlayClient(clock=SYSTEM_CLOCK),
+        EffectController(midi, clock=SYSTEM_CLOCK),
+        None,
+        playback_delay_sec=0.0,
+        watchdog=watchdog,
+        clock=SYSTEM_CLOCK,
+    )
     light.set_analyser(FakeAnalyser())
 
     light.on_sound_start()
@@ -554,10 +576,16 @@ async def test_the_settle_is_forgiven_from_the_queue_not_from_the_handler():
     watchdog = ForgivingWatchdog()
     midi = StubMidiClient(clock=clock)
     queue = DelayedCommandQueue(14.0, clock=clock)
-    light = LightEngine(midi, StubOs2lClient(clock=clock),
-                        StubOverlayClient(clock=clock),
-                        EffectController(midi, clock=clock), queue,
-                        playback_delay_sec=14.0, watchdog=watchdog, clock=clock)
+    light = LightEngine(
+        midi,
+        StubOs2lClient(clock=clock),
+        StubOverlayClient(clock=clock),
+        EffectController(midi, clock=clock),
+        queue,
+        playback_delay_sec=14.0,
+        watchdog=watchdog,
+        clock=clock,
+    )
     light.set_analyser(FakeAnalyser())
 
     light.on_sound_stop()
@@ -573,13 +601,19 @@ async def test_two_clamped_decisions_both_reach_the_stage():
     light, queue, clock, midi = engine(decoder=decoder, events=True)
     await elapse(light, clock, 40.0)
 
-    decoder._script.append([BarDecision(10, 'drop', light.audio_sec - 15.6),
-                            BarDecision(11, 'breakdown', light.audio_sec - 15.2)])
+    decoder._script.append(
+        [
+            BarDecision(10, 'drop', light.audio_sec - 15.6),
+            BarDecision(11, 'breakdown', light.audio_sec - 15.2),
+        ]
+    )
     await light.on_beat(1, 128.0, False)
     await settle(light, clock, queue)
 
-    assert [block['intent'] for block
-            in light.event_buffer.snapshot()['intents']] == ['drop', 'breakdown']
+    assert [block['intent'] for block in light.event_buffer.snapshot()['intents']] == [
+        'drop',
+        'breakdown',
+    ]
 
 
 async def test_a_clamped_pair_is_delivered_in_commit_order():
@@ -587,8 +621,12 @@ async def test_a_clamped_pair_is_delivered_in_commit_order():
     light, queue, clock, midi = engine(decoder=decoder, events=True)
     await elapse(light, clock, 40.0)
 
-    decoder._script.append([BarDecision(10, 'drop', light.audio_sec - 15.6),
-                            BarDecision(11, 'breakdown', light.audio_sec - 15.2)])
+    decoder._script.append(
+        [
+            BarDecision(10, 'drop', light.audio_sec - 15.6),
+            BarDecision(11, 'breakdown', light.audio_sec - 15.2),
+        ]
+    )
     await light.on_beat(1, 128.0, False)
     await settle(light, clock, queue)
 
@@ -623,13 +661,11 @@ async def test_a_committer_that_never_speaks_still_lights_the_rig():
 
     decoder = FakeDecoder()
     light, queue, clock, midi = engine(decoder=decoder, events=True)
-    await tick_100ms(light, clock,
-                     decoder.chain_latency_sec + COLD_START_FLOOR_MARGIN_SEC + 1.0)
+    await tick_100ms(light, clock, decoder.chain_latency_sec + COLD_START_FLOOR_MARGIN_SEC + 1.0)
     await settle(light, clock, queue)
 
     assert light.current_intent is LightIntent.ATMOSPHERIC
-    assert [e['label'] for e in midi.events
-            if e['label'] == 'set_autoloop'], 'the rig stayed dark'
+    assert [e['label'] for e in midi.events if e['label'] == 'set_autoloop'], 'the rig stayed dark'
 
 
 async def test_the_floor_fires_once_and_not_once_per_callback():
@@ -657,8 +693,7 @@ async def test_the_floor_describes_the_audio_the_room_is_hearing_now():
 
     decoder = FakeDecoder()
     light, queue, clock, midi = engine(decoder=decoder, events=True)
-    await tick_100ms(light, clock,
-                     decoder.chain_latency_sec + COLD_START_FLOOR_MARGIN_SEC + 0.5)
+    await tick_100ms(light, clock, decoder.chain_latency_sec + COLD_START_FLOOR_MARGIN_SEC + 0.5)
 
     pending = queued_intents(queue)
     assert len(pending) == 1
@@ -694,14 +729,12 @@ async def test_a_machine_with_no_committer_at_all_lights_the_floor_too():
 async def boundary(light, chain, clock, score, *, age_sec=8.0, sec=0.5):
     from autolux.lib.analyser.section_model import Posterior
 
-    chain.pending.append(Posterior(0, light.audio_sec + sec - age_sec,
-                                   np.zeros(5), score))
+    chain.pending.append(Posterior(0, light.audio_sec + sec - age_sec, np.zeros(5), score))
     await elapse(light, clock, sec)
 
 
 def autoloops(midi):
-    return [e for e in midi.events
-            if e['label'] in ('set_autoloop', 'set_special_effect')]
+    return [e for e in midi.events if e['label'] in ('set_autoloop', 'set_special_effect')]
 
 
 async def held(light, decoder, chain, clock, queue, label='drop'):
@@ -758,8 +791,7 @@ async def test_a_refresh_re_rolls_from_the_intent_the_stage_is_showing():
     await boundary(light, chain, clock, 1.0)
     await settle(light, clock, queue)
 
-    pool = {effect.midi_channel.name
-            for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]}
+    pool = {effect.midi_channel.name for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]}
     assert autoloops(midi)[-1]['channel'] in pool
 
 
@@ -885,12 +917,13 @@ def test_the_refresh_threshold_was_priced_against_the_retired_ceiling():
     import json
     from pathlib import Path
 
-    from autolux.lib.engine.light_engine import (BOUNDARY_REFRESH_SCORE,
-                                         REFRESH_COOLDOWN_SEC)
+    from autolux.lib.engine.light_engine import BOUNDARY_REFRESH_SCORE, REFRESH_COOLDOWN_SEC
 
     record = json.loads(
-        (Path(__file__).resolve().parents[1] / 'training'
-         / 'nn_boundary_refresh_rate.json').read_text(encoding='utf-8'))
+        (
+            Path(__file__).resolve().parents[1] / 'training' / 'nn_boundary_refresh_rate.json'
+        ).read_text(encoding='utf-8')
+    )
 
     assert record['chosen_threshold'] == BOUNDARY_REFRESH_SCORE
     assert record['cooldown_sec'] == REFRESH_COOLDOWN_SEC
@@ -907,7 +940,8 @@ async def test_the_decoder_state_reaches_the_event_buffer():
     decoder = FakeDecoder()
     light, _, clock, _ = engine(decoder=decoder, events=True)
     decoder.recent_observations.append(
-        BarObservation(7, 13.2, 15.1, np.array([0.05, 0.1, 0.1, 0.7, 0.05]), 0.62))
+        BarObservation(7, 13.2, 15.1, np.array([0.05, 0.1, 0.1, 0.7, 0.05]), 0.62)
+    )
 
     await elapse(light, clock, 20.0)
     await commit(light, decoder, clock, 'drop', bar=5)
@@ -924,8 +958,7 @@ async def test_the_decoder_state_reaches_the_event_buffer():
 async def test_a_bar_with_no_evidence_says_so_rather_than_reading_as_silence():
     decoder = FakeDecoder()
     light, _, clock, _ = engine(decoder=decoder, events=True)
-    decoder.recent_observations.append(
-        BarObservation(7, 13.2, 15.1, None, float('nan')))
+    decoder.recent_observations.append(BarObservation(7, 13.2, 15.1, None, float('nan')))
 
     await elapse(light, clock, 20.0)
     await commit(light, decoder, clock, 'drop', bar=5)
@@ -936,8 +969,7 @@ async def test_a_bar_with_no_evidence_says_so_rather_than_reading_as_silence():
 async def test_the_decoder_state_stays_out_of_the_report():
     decoder = FakeDecoder()
     light, _, clock, _ = engine(decoder=decoder, events=True)
-    decoder.recent_observations.append(
-        BarObservation(7, 13.2, 15.1, np.array([0.2] * 5), 0.1))
+    decoder.recent_observations.append(BarObservation(7, 13.2, 15.1, np.array([0.2] * 5), 0.1))
 
     await elapse(light, clock, 20.0)
     await commit(light, decoder, clock, 'drop', bar=5)
@@ -950,8 +982,7 @@ async def test_the_decoder_state_stays_out_of_the_report():
 async def test_a_song_boundary_forgets_the_commit_cursor():
     decoder = FakeDecoder()
     light, _, clock, _ = engine(decoder=decoder, events=True)
-    decoder.recent_observations.append(
-        BarObservation(7, 13.2, 15.1, np.array([0.2] * 5), 0.1))
+    decoder.recent_observations.append(BarObservation(7, 13.2, 15.1, np.array([0.2] * 5), 0.1))
     await elapse(light, clock, 20.0)
     await commit(light, decoder, clock, 'drop', bar=5)
 
@@ -968,8 +999,7 @@ async def test_a_feature_gap_forgets_the_commit_cursor():
     decoder = FakeDecoder()
     chain = FakeChain()
     light, _, clock, _ = engine(decoder=decoder, chain=chain, events=True)
-    decoder.recent_observations.append(
-        BarObservation(34, 60.0, 62.0, np.array([0.2] * 5), 0.1))
+    decoder.recent_observations.append(BarObservation(34, 60.0, 62.0, np.array([0.2] * 5), 0.1))
     await elapse(light, clock, 60.0)
     await commit(light, decoder, clock, 'breakdown', bar=32)
     assert light.event_buffer.snapshot()['decoder']['committed_bar'] == 32
@@ -1019,8 +1049,10 @@ async def test_a_refresh_sharing_an_intent_change_s_fire_time_is_dropped():
     before = len(autoloops(midi))
 
     beyond_the_playback_delay = light.audio_sec - 20.0
-    chain.pending = [Posterior(0, beyond_the_playback_delay, np.zeros(5), 1.0),
-                     Posterior(1, beyond_the_playback_delay, np.zeros(5), 0.0)]
+    chain.pending = [
+        Posterior(0, beyond_the_playback_delay, np.zeros(5), 1.0),
+        Posterior(1, beyond_the_playback_delay, np.zeros(5), 0.0),
+    ]
     decoder._script = [[], [BarDecision(9, 'breakdown', beyond_the_playback_delay)]]
     await elapse(light, clock, 0.5)
 
@@ -1051,10 +1083,11 @@ async def test_the_deliberate_stall_forgives_the_settle_and_not_the_rest():
 def test_the_grid_never_tears_itself_down_before_the_show_has_gone_quiet():
     from autolux.lib.engine import light_engine, section_decoder
 
-    assert section_decoder._BEAT_GAP_SEC > light_engine._BEAT_ABSENCE_SEC, \
-        'the bar grid re-anchors while the engine still believes a section is ' \
-        'playing: the decisions either side of the gap would name bars on two ' \
+    assert section_decoder._BEAT_GAP_SEC > light_engine._BEAT_ABSENCE_SEC, (
+        'the bar grid re-anchors while the engine still believes a section is '
+        'playing: the decisions either side of the gap would name bars on two '
         'different grids with nothing on screen saying the beat had stopped'
+    )
 
 
 async def test_a_persistent_stop_silences_the_monitor_without_waiting_for_the_room():
@@ -1086,10 +1119,12 @@ async def test_a_gap_between_songs_never_cuts_the_tail_the_room_is_hearing():
     await hold_silence(light, clock, 30.0)
     await queue.drain()
 
-    assert (blackout, cut) == ([], []), \
+    assert (blackout, cut) == ([], []), (
         'an inter-song gap cut the tail the room had not reached yet'
-    assert [b for b in light.event_buffer.to_report()['intents']
-            if b['trigger'] == SILENCE_TRIGGER] == []
+    )
+    assert [
+        b for b in light.event_buffer.to_report()['intents'] if b['trigger'] == SILENCE_TRIGGER
+    ] == []
 
 
 async def test_a_resume_inside_the_window_cancels_the_pending_bypass():
@@ -1125,8 +1160,7 @@ async def test_the_whole_bypass_package_waits_on_the_same_gate():
     await hold_silence(light, clock, 0.2)
     await queue.drain()
     assert fired == ['monitor', 'floor']
-    assert [b['trigger'] for b in light.event_buffer.to_report()['intents']] \
-        == [SILENCE_TRIGGER]
+    assert [b['trigger'] for b in light.event_buffer.to_report()['intents']] == [SILENCE_TRIGGER]
 
 
 async def test_a_detected_stop_drops_the_lighting_the_room_has_not_seen():
@@ -1168,8 +1202,7 @@ async def test_the_quiet_floor_is_recorded_as_an_operator_action_not_a_classific
     light.on_sound_stop()
     await hold_silence(light, clock)
     blocks = light.event_buffer.to_report()['intents']
-    assert [(b['intent'], b['trigger']) for b in blocks] == \
-        [('atmospheric', 'silence')]
+    assert [(b['intent'], b['trigger']) for b in blocks] == [('atmospheric', 'silence')]
 
 
 async def test_the_quiet_floor_records_the_song_instant_it_happened_at():
@@ -1233,8 +1266,10 @@ async def test_the_grid_is_published_on_the_clock_the_beats_are_stamped_on():
     light._publish_decoder_state(None)
 
     published = light.event_buffer.snapshot()['decoder']['bar_edges']
-    assert published == [pytest.approx(beat_at - 4.0, abs=0.05),
-                         pytest.approx(beat_at - 2.0, abs=0.05)]
+    assert published == [
+        pytest.approx(beat_at - 4.0, abs=0.05),
+        pytest.approx(beat_at - 2.0, abs=0.05),
+    ]
 
 
 async def test_the_grid_travels_with_the_bar_numbers_that_name_it():

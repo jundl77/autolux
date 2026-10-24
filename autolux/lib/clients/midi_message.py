@@ -32,7 +32,7 @@ class MidiChannel(Enum):
     COLOR_OVERRIDE_7 = 24
     COLOR_OVERRIDE_8 = 25
     COLOR_OVERRIDE_9 = 26
-    
+
     AUTOLOOP_BANK_1A = 27
     AUTOLOOP_BANK_1B = 28
     AUTOLOOP_BANK_1C = 29
@@ -99,18 +99,25 @@ class MidiChannel(Enum):
     STATIC_LOOK_31 = 89
     STATIC_LOOK_32 = 90
 
+
 # .__members__ and not iteration: iterating an Enum coalesces duplicates, defeating the assert below.
 ALL_MIDI_CHANNEL_VALUES = [value.value for name, value in MidiChannel.__members__.items()]
-assert len(set(ALL_MIDI_CHANNEL_VALUES)) == len(ALL_MIDI_CHANNEL_VALUES), "duplicate values found in MidiChannel enum"
+assert len(set(ALL_MIDI_CHANNEL_VALUES)) == len(ALL_MIDI_CHANNEL_VALUES), (
+    "duplicate values found in MidiChannel enum"
+)
 
 
 def get_midi_msg_on(channel: MidiChannel):
-    assert isinstance(channel, MidiChannel), f"midi channel '{channel}' is not a valid channel, channel has to be of type MidiChannel"
+    assert isinstance(channel, MidiChannel), (
+        f"midi channel '{channel}' is not a valid channel, channel has to be of type MidiChannel"
+    )
     return [NOTE_ON, channel.value, 1]
 
 
 def get_midi_msg_off(channel: MidiChannel):
-    assert isinstance(channel, MidiChannel), f"midi channel '{channel}' is not a valid channel, channel has to be of type MidiChannel"
+    assert isinstance(channel, MidiChannel), (
+        f"midi channel '{channel}' is not a valid channel, channel has to be of type MidiChannel"
+    )
     return [NOTE_OFF, channel.value, 0]
 
 

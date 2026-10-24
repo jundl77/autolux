@@ -22,11 +22,10 @@ class RhythmEvents:
 
 class _BeatStage:
     def __init__(self):
-        from madmom.features.beats import (DBNBeatTrackingProcessor,
-                                           RNNBeatProcessor)
+        from madmom.features.beats import DBNBeatTrackingProcessor, RNNBeatProcessor
         from madmom.processors import BufferProcessor
-        self._rnn = RNNBeatProcessor(online=True, origin='stream',
-                                     num_frames=1, fps=FPS)
+
+        self._rnn = RNNBeatProcessor(online=True, origin='stream', num_frames=1, fps=FPS)
         self._dbn = DBNBeatTrackingProcessor(fps=FPS, online=True)
         self._buffer = BufferProcessor(buffer_size=FRAME_SIZE)
         self.reset()
@@ -52,7 +51,8 @@ class MadmomRhythm:
         if sample_rate != SAMPLE_RATE:
             raise ValueError(
                 f'madmom online models are trained at {SAMPLE_RATE} Hz; '
-                f'refusing sample rate {sample_rate} rather than resampling')
+                f'refusing sample rate {sample_rate} rather than resampling'
+            )
         self._beats = beat_stage if beat_stage is not None else _BeatStage()
         self._pending = np.zeros(0, dtype=np.float32)
         self._hops = 0
@@ -72,8 +72,11 @@ class MadmomRhythm:
         """Feed one audio buffer; return whatever fired inside it."""
         from madmom.audio.signal import Signal
 
-        self._pending = (audio_buffer.astype(np.float32) if len(self._pending) == 0
-                         else np.concatenate((self._pending, audio_buffer)))
+        self._pending = (
+            audio_buffer.astype(np.float32)
+            if len(self._pending) == 0
+            else np.concatenate((self._pending, audio_buffer))
+        )
         events = RhythmEvents()
         while len(self._pending) >= HOP_SIZE:
             hop, self._pending = self._pending[:HOP_SIZE], self._pending[HOP_SIZE:]

@@ -65,23 +65,27 @@ _TRANSIENT_PATTERNS = (
     ("http_403", ("http error 403", "403: forbidden")),
 )
 
-_REASON_PATTERNS = _PERMANENT_PATTERNS + _TRANSIENT_PATTERNS + (
-    (
-        "unavailable",
+_REASON_PATTERNS = (
+    _PERMANENT_PATTERNS
+    + _TRANSIENT_PATTERNS
+    + (
         (
-            "video unavailable",
-            "this video is not available",
-            "private video",
-            "this video is private",
-            "has been removed",
-            "account associated with this video has been terminated",
-            "video has been removed",
-            "unavailable in your",
-            "no longer available",
-            "does not exist",
+            "unavailable",
+            (
+                "video unavailable",
+                "this video is not available",
+                "private video",
+                "this video is private",
+                "has been removed",
+                "account associated with this video has been terminated",
+                "video has been removed",
+                "unavailable in your",
+                "no longer available",
+                "does not exist",
+            ),
         ),
-    ),
-    ("copyright", ("copyright",)),
+        ("copyright", ("copyright",)),
+    )
 )
 
 INTERRUPT_REASON = "interrupted"
@@ -241,15 +245,22 @@ def build_command(data_dir: Path, youtube_id: str) -> list[str]:
     # otherwise be parsed as an option.
     return [
         "yt-dlp",
-        "-f", "bestaudio",
+        "-f",
+        "bestaudio",
         "-x",
-        "--audio-format", AUDIO_EXT,
-        "--audio-quality", "192K",
+        "--audio-format",
+        AUDIO_EXT,
+        "--audio-quality",
+        "192K",
         "--no-playlist",
-        "--retries", "3",
-        "--socket-timeout", "30",
-        "--download-archive", str(archive_path(data_dir)),
-        "-o", str(audio_dir(data_dir) / "%(id)s.%(ext)s"),
+        "--retries",
+        "3",
+        "--socket-timeout",
+        "30",
+        "--download-archive",
+        str(archive_path(data_dir)),
+        "-o",
+        str(audio_dir(data_dir) / "%(id)s.%(ext)s"),
         "--",
         youtube_id,
     ]

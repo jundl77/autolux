@@ -18,8 +18,7 @@ CLASSES = 5
 
 
 def _softmax(x):
-    shifted = np.exp(np.asarray(x, dtype=np.float32)
-                     - np.asarray(x, dtype=np.float32).max())
+    shifted = np.exp(np.asarray(x, dtype=np.float32) - np.asarray(x, dtype=np.float32).max())
     return (shifted / shifted.sum()).astype(np.float32)
 
 
@@ -40,18 +39,21 @@ class FakeSession:
         self.carry = rng.normal(size=(HIDDEN, HIDDEN)).astype(np.float32) * 0.6
         self.label = rng.normal(size=(HIDDEN, CLASSES)).astype(np.float32)
         self.edge = rng.normal(size=(HIDDEN, 1)).astype(np.float32)
-        self.weights = np.linspace(0.1, 1.0, WINDOW,
-                                   dtype=np.float32).reshape(1, WINDOW, 1)
+        self.weights = np.linspace(0.1, 1.0, WINDOW, dtype=np.float32).reshape(1, WINDOW, 1)
         self.calls = 0
 
     def get_inputs(self):
-        return [_Port(S.FRAMES_INPUT, ["batch", WINDOW, DIM]),
-                _Port(S.STATE_INPUT, [1, "batch", HIDDEN])]
+        return [
+            _Port(S.FRAMES_INPUT, ["batch", WINDOW, DIM]),
+            _Port(S.STATE_INPUT, [1, "batch", HIDDEN]),
+        ]
 
     def get_outputs(self):
-        return [_Port(S.LABEL_OUTPUT, ["batch", CLASSES]),
-                _Port(S.BOUNDARY_OUTPUT, ["batch", 1]),
-                _Port(S.STATE_OUTPUT, [1, "batch", HIDDEN])]
+        return [
+            _Port(S.LABEL_OUTPUT, ["batch", CLASSES]),
+            _Port(S.BOUNDARY_OUTPUT, ["batch", 1]),
+            _Port(S.STATE_OUTPUT, [1, "batch", HIDDEN]),
+        ]
 
     def run(self, names, feeds):
         assert names == [S.LABEL_OUTPUT, S.BOUNDARY_OUTPUT, S.STATE_OUTPUT]
@@ -62,19 +64,23 @@ class FakeSession:
         self.calls += 1
         pooled = (frames * self.weights).sum(axis=1)
         hidden = np.tanh(pooled @ self.into + state[0] @ self.carry)
-        return [hidden @ self.label, hidden @ self.edge,
-                hidden[None].astype(np.float32)]
+        return [hidden @ self.label, hidden @ self.edge, hidden[None].astype(np.float32)]
 
 
 @pytest.fixture
 def tiny(tmp_path):
     path = tmp_path / "tiny_step.onnx"
     path.write_bytes(b"not a real graph, but a real sha")
-    meta = {"sha256": S.sha256_file(path), "window_cells": WINDOW,
-            "input_dim": DIM, "rnn_hidden": HIDDEN, "future_cells": FUTURE,
-            "future_sec": FUTURE * 0.25, "label_frame_sec": 0.25}
-    Path(str(path) + ".json").write_text(json.dumps(meta, indent=2),
-                                         encoding="utf-8")
+    meta = {
+        "sha256": S.sha256_file(path),
+        "window_cells": WINDOW,
+        "input_dim": DIM,
+        "rnn_hidden": HIDDEN,
+        "future_cells": FUTURE,
+        "future_sec": FUTURE * 0.25,
+        "label_frame_sec": 0.25,
+    }
+    Path(str(path) + ".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return path
 
 
@@ -85,7 +91,7 @@ def geometry(tiny):
 
 @pytest.fixture
 def mean():
-    return (np.arange(DIM, dtype=np.float32) * 0.3 - 0.5)
+    return np.arange(DIM, dtype=np.float32) * 0.3 - 0.5
 
 
 def _model(tiny, mean, **kwargs):
@@ -94,26 +100,29 @@ def _model(tiny, mean, **kwargs):
 
 
 def _cells(count, seed=1):
-    return np.random.default_rng(seed).normal(
-        size=(count, DIM)).astype(np.float32)
+    return np.random.default_rng(seed).normal(size=(count, DIM)).astype(np.float32)
 
 
 def _reference(path, geometry, cells, mean, session=None):
     session = session or S.session(path)
     reach = geometry.conv_reach_cells
-    padded = np.concatenate([np.repeat(np.asarray(mean)[None], reach, axis=0),
-                             cells,
-                             np.repeat(np.asarray(mean)[None],
-                                       geometry.future_cells, axis=0)])
+    padded = np.concatenate(
+        [
+            np.repeat(np.asarray(mean)[None], reach, axis=0),
+            cells,
+            np.repeat(np.asarray(mean)[None], geometry.future_cells, axis=0),
+        ]
+    )
     state = np.zeros((1, 1, geometry.rnn_hidden), dtype=np.float32)
     out = []
     for index in range(len(cells)):
         frames = np.ascontiguousarray(
-            padded[index:index + geometry.window_cells][None],
-            dtype=np.float32)
+            padded[index : index + geometry.window_cells][None], dtype=np.float32
+        )
         label, boundary, state = session.run(
             [S.LABEL_OUTPUT, S.BOUNDARY_OUTPUT, S.STATE_OUTPUT],
-            {S.FRAMES_INPUT: frames, S.STATE_INPUT: state})
+            {S.FRAMES_INPUT: frames, S.STATE_INPUT: state},
+        )
         out.append((_softmax(label[0]), _sigmoid(boundary.reshape(-1)[0])))
     return out
 
@@ -128,8 +137,7 @@ def _stream(model, cells):
     return out
 
 
-def test_the_streaming_posteriors_reproduce_the_offline_windowed_pass(
-        tiny, geometry, mean):
+def test_the_streaming_posteriors_reproduce_the_offline_windowed_pass(tiny, geometry, mean):
     cells = _cells(60)
     live = _stream(_model(tiny, mean), cells)
     offline = _reference(tiny, geometry, cells, mean, FakeSession())
@@ -151,17 +159,14 @@ def test_the_forward_state_is_carried_across_steps(tiny, geometry, mean):
     assert np.abs(carried[-1].posterior - cold[-1].posterior).max() > 1e-4
 
 
-def test_the_feature_ring_is_primed_from_the_corpus_mean_not_zeros(
-        tiny, geometry, mean):
+def test_the_feature_ring_is_primed_from_the_corpus_mean_not_zeros(tiny, geometry, mean):
     cells = _cells(30)
     primed = _stream(_model(tiny, mean), cells)
-    zeroed = _reference(tiny, geometry, cells,
-                        np.zeros(DIM, dtype=np.float32), FakeSession())
+    zeroed = _reference(tiny, geometry, cells, np.zeros(DIM, dtype=np.float32), FakeSession())
     assert np.abs(primed[0].posterior - zeroed[0][0]).max() > 1e-5
 
 
-def test_no_posterior_is_emitted_until_the_future_window_has_arrived(
-        tiny, mean):
+def test_no_posterior_is_emitted_until_the_future_window_has_arrived(tiny, mean):
     model = _model(tiny, mean)
     cells = _cells(FUTURE + 3)
     emitted = [model.push(row) is not None for row in cells]
@@ -202,12 +207,10 @@ def test_reset_returns_the_model_to_its_cold_state(tiny, mean):
 def test_posteriors_are_stamped_at_the_end_of_their_cell(tiny, geometry, mean):
     live = _stream(_model(tiny, mean), _cells(25))
     for item in live:
-        assert item.time_sec == pytest.approx((item.index + 1)
-                                              * geometry.label_frame_sec)
+        assert item.time_sec == pytest.approx((item.index + 1) * geometry.label_frame_sec)
 
 
-def test_a_posterior_is_a_distribution_and_the_boundary_a_probability(
-        tiny, mean):
+def test_a_posterior_is_a_distribution_and_the_boundary_a_probability(tiny, mean):
     for item in _stream(_model(tiny, mean), _cells(25)):
         assert item.posterior.shape == (CLASSES,)
         assert item.posterior.dtype == np.float32
@@ -219,18 +222,15 @@ def test_a_posterior_carries_the_index_of_the_cell_it_decided(tiny, mean):
     model = _model(tiny, mean)
     cells = _cells(FUTURE + 5)
     live = [model.push(row, index=400 + n) for n, row in enumerate(cells)]
-    assert [item.index for item in live if item is not None] \
-        == [400, 401, 402, 403, 404]
+    assert [item.index for item in live if item is not None] == [400, 401, 402, 403, 404]
 
 
-def test_a_skipped_cell_run_does_not_slide_the_posterior_clock(
-        tiny, geometry, mean):
+def test_a_skipped_cell_run_does_not_slide_the_posterior_clock(tiny, geometry, mean):
     model = _model(tiny, mean)
     for n, row in enumerate(_cells(FUTURE + 5)):
         model.push(row, index=n)
     model.reset()
-    live = [model.push(row, index=900 + n)
-            for n, row in enumerate(_cells(FUTURE + 2, seed=7))]
+    live = [model.push(row, index=900 + n) for n, row in enumerate(_cells(FUTURE + 2, seed=7))]
     emitted = [item for item in live if item is not None]
     assert [item.index for item in emitted] == [900, 901]
     assert emitted[0].time_sec == pytest.approx(901 * geometry.label_frame_sec)
@@ -240,8 +240,7 @@ def test_the_flushed_tail_carries_on_from_the_last_cell_pushed(tiny, mean):
     model = _model(tiny, mean)
     for n, row in enumerate(_cells(20)):
         model.push(row, index=500 + n)
-    assert [item.index for item in model.flush()] \
-        == list(range(500 + 20 - FUTURE, 520))
+    assert [item.index for item in model.flush()] == list(range(500 + 20 - FUTURE, 520))
 
 
 def test_the_head_geometry_is_read_from_the_shipped_json(geometry):
@@ -257,14 +256,12 @@ def test_the_conv_reach_is_derived_from_the_window_not_retyped(geometry):
     assert geometry.conv_reach_cells == 2
 
 
-def test_a_graph_whose_bytes_do_not_match_the_recorded_sha_is_refused(
-        tiny, mean):
+def test_a_graph_whose_bytes_do_not_match_the_recorded_sha_is_refused(tiny, mean):
     with pytest.raises(RuntimeError, match="graph"):
         _model(tiny, mean, expected_sha="0" * 64)
 
 
-def test_the_recorded_sha_is_checked_against_the_file_at_startup(
-        tmp_path, tiny, mean):
+def test_the_recorded_sha_is_checked_against_the_file_at_startup(tmp_path, tiny, mean):
     copy = tmp_path / "tampered.onnx"
     copy.write_bytes(Path(tiny).read_bytes() + b"\x00")
     meta = json.loads(Path(str(tiny) + ".json").read_text(encoding="utf-8"))
@@ -293,33 +290,27 @@ def _retyped(tmp_path, tiny, **changes):
     return copy
 
 
-def test_a_window_the_graph_does_not_declare_is_refused_at_startup(
-        tmp_path, tiny, mean):
+def test_a_window_the_graph_does_not_declare_is_refused_at_startup(tmp_path, tiny, mean):
     with pytest.raises(ValueError, match="window_cells"):
         _model(_retyped(tmp_path, tiny, window_cells=WINDOW - 1), mean)
 
 
-def test_a_state_width_the_graph_does_not_declare_is_refused_at_startup(
-        tmp_path, tiny, mean):
+def test_a_state_width_the_graph_does_not_declare_is_refused_at_startup(tmp_path, tiny, mean):
     with pytest.raises(ValueError, match="rnn_hidden"):
         _model(_retyped(tmp_path, tiny, rnn_hidden=HIDDEN + 1), mean)
 
 
-def test_a_future_window_that_contradicts_its_own_seconds_is_refused(
-        tmp_path, tiny, mean):
+def test_a_future_window_that_contradicts_its_own_seconds_is_refused(tmp_path, tiny, mean):
     with pytest.raises(ValueError, match="future_sec"):
         _model(_retyped(tmp_path, tiny, future_cells=FUTURE - 2), mean)
 
 
-def test_a_window_that_cannot_hold_its_own_future_is_refused(
-        tmp_path, tiny, mean):
+def test_a_window_that_cannot_hold_its_own_future_is_refused(tmp_path, tiny, mean):
     with pytest.raises(ValueError, match="conv reach"):
-        _model(_retyped(tmp_path, tiny, window_cells=FUTURE,
-                        future_cells=FUTURE), mean)
+        _model(_retyped(tmp_path, tiny, window_cells=FUTURE, future_cells=FUTURE), mean)
 
 
-def test_a_session_that_cannot_describe_itself_is_a_failure_not_a_skip(
-        tiny, mean):
+def test_a_session_that_cannot_describe_itself_is_a_failure_not_a_skip(tiny, mean):
     class _Mute(FakeSession):
         get_inputs = None
         get_outputs = None
@@ -346,8 +337,7 @@ def test_the_session_is_pinned_to_one_thread_and_sequential_execution():
     assert options.execution_mode == ort.ExecutionMode.ORT_SEQUENTIAL
 
 
-SHIPPED_ONNX_SHA = ("a5c07427a2e91ce6564bccc83d189021b9357438"
-                    "aa8d6f3783e3f78ace0c047a")
+SHIPPED_ONNX_SHA = "a5c07427a2e91ce6564bccc83d189021b9357438aa8d6f3783e3f78ace0c047a"
 
 
 def _shipped():
@@ -355,8 +345,10 @@ def _shipped():
 
     found = artifacts()
     if found.missing():
-        pytest.skip(f"shipping artifacts absent: {', '.join(found.missing())} "
-                    f"-- they live in the gitignored corpus data directory")
+        pytest.skip(
+            f"shipping artifacts absent: {', '.join(found.missing())} "
+            f"-- they live in the gitignored corpus data directory"
+        )
     return found.graph, found.affine
 
 
@@ -381,11 +373,9 @@ def test_the_shipped_student_streams_exactly_the_offline_windowed_pass():
     onnx, affine = _shipped()
     head = S.load_head_geometry(onnx)
     mean, _std = M.load_input_affine(affine)
-    cells = np.random.default_rng(11).normal(
-        size=(120, head.input_dim)).astype(np.float32)
+    cells = np.random.default_rng(11).normal(size=(120, head.input_dim)).astype(np.float32)
 
-    live = _stream(S.SectionModel(onnx, mean=mean, expected_sha=SHIPPED_ONNX_SHA),
-                   cells)
+    live = _stream(S.SectionModel(onnx, mean=mean, expected_sha=SHIPPED_ONNX_SHA), cells)
     offline = _reference(onnx, head, cells, mean)
     assert len(live) == len(cells)
     for item, (posterior, boundary) in zip(live, offline):
@@ -400,8 +390,7 @@ def test_the_shipped_student_is_deterministic_across_two_runs_in_one_process():
 
     head = S.load_head_geometry(onnx)
     mean, _std = M.load_input_affine(affine)
-    cells = np.random.default_rng(3).normal(
-        size=(90, head.input_dim)).astype(np.float32)
+    cells = np.random.default_rng(3).normal(size=(90, head.input_dim)).astype(np.float32)
     runs = [_stream(S.SectionModel(onnx, mean=mean), cells) for _ in range(2)]
     for a, b in zip(*runs):
         assert np.array_equal(a.posterior, b.posterior)

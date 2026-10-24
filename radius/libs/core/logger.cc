@@ -18,12 +18,16 @@ std::string LogLevelToString(int logLevel)
 {
 	switch (logLevel)
 	{
-		case LL_DEBUG: return "Debug";
-		case LL_INFO: return "Info";
-		case LL_WARN: return "Warn";
-		case LL_ERROR: return "Error";
+	case LL_DEBUG:
+		return "Debug";
+	case LL_INFO:
+		return "Info";
+	case LL_WARN:
+		return "Warn";
+	case LL_ERROR:
+		return "Error";
 	}
 	throw std::runtime_error("unknown log-level: " + std::to_string(logLevel));
 }
 
-}
+} // namespace Radius

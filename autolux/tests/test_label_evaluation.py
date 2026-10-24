@@ -13,6 +13,7 @@ synthetic timelines where the right answer is obvious by inspection:
 
 No corpus, no audio, no simulation.
 """
+
 import gzip
 import math
 import sys
@@ -73,8 +74,7 @@ def track(times, intents, labels, track_id="t"):
         track_id=track_id,
         times=tuple(float(t) for t in times),
         intents=tuple(intents),
-        labels={name: tuple(spec.view(label) for label in labels)
-                for name, spec in SPACES.items()},
+        labels={name: tuple(spec.view(label) for label in labels) for name, spec in SPACES.items()},
     )
 
 
@@ -102,15 +102,13 @@ def test_exactly_two_spaces_exist_and_the_raw_nine_is_primary():
 
 
 def test_the_legacy_space_is_the_retired_five_class_vocabulary():
-    assert SPACES[LEGACY_V1].labels == ("intro", "buildup", "breakdown",
-                                        "drop", "outro")
+    assert SPACES[LEGACY_V1].labels == ("intro", "buildup", "breakdown", "drop", "outro")
 
 
 def test_a_space_is_a_view_over_the_one_label_column_not_a_column_of_its_own():
     """There is one label column now, so a space cannot be keyed on a column."""
     assert LABEL_COLUMN in TABLE_HEADER
-    assert [column for column in TABLE_HEADER
-            if column.startswith("label")] == [LABEL_COLUMN]
+    assert [column for column in TABLE_HEADER if column.startswith("label")] == [LABEL_COLUMN]
     for spec in SPACES.values():
         assert not hasattr(spec, "column")
         assert callable(spec.view)
@@ -160,8 +158,7 @@ def test_the_legacy_fold_is_a_pure_function_nothing_downstream_stores():
     the data, which is exactly what ruling #264 retired.
     """
     assert fold_to_legacy_v1("cooldown") == fold_to_legacy_v1("cooldown")
-    for name in ("label_v1", "V1_ORDER", "V1_MAP", "CANONICAL_ORDER",
-                 "canonical_coverage"):
+    for name in ("label_v1", "V1_ORDER", "V1_MAP", "CANONICAL_ORDER", "canonical_coverage"):
         assert not hasattr(build_training_table, name), name
 
 
@@ -198,9 +195,9 @@ def test_the_raw_claim_map_is_the_inverse_of_the_shows_own_class_to_intent_map()
     inverse: dict = {}
     for label in SECTION_LABELS:
         inverse.setdefault(SECTION_CLASS_INTENTS[label].value, []).append(label)
-    assert {intent: per_space[RAW9]
-            for intent, per_space in INTENT_TO_LABELS.items()} == \
-        {intent: tuple(labels) for intent, labels in inverse.items()}
+    assert {intent: per_space[RAW9] for intent, per_space in INTENT_TO_LABELS.items()} == {
+        intent: tuple(labels) for intent, labels in inverse.items()
+    }
 
 
 def test_the_live_intent_alphabet_carries_no_retired_intent():
@@ -213,14 +210,12 @@ def test_the_scored_alphabet_is_exactly_the_shows_own_alphabet():
     state like PEAK survives, so an intent the evaluator scores that the enum
     cannot commit (or the reverse) is a bug in one of the two."""
     assert set(INTENT_TO_LABELS) == {intent.value for intent in LightIntent}
-    assert set(INTENT_TO_LABELS) == {intent.value
-                                     for intent in SECTION_CLASS_INTENTS.values()}
+    assert set(INTENT_TO_LABELS) == {intent.value for intent in SECTION_CLASS_INTENTS.values()}
 
 
 def test_atmospheric_is_position_blind_and_matches_any_quiet_class():
     """An intent cannot know track position, so quiet == intro OR outro."""
-    assert INTENT_TO_LABELS["atmospheric"][RAW9] == (
-        "intro", "altintro", "outro", "altoutro")
+    assert INTENT_TO_LABELS["atmospheric"][RAW9] == ("intro", "altintro", "outro", "altoutro")
     assert INTENT_TO_LABELS["atmospheric"][LEGACY_V1] == ("intro", "outro")
 
 
@@ -230,8 +225,7 @@ def test_breakdown_claims_the_three_stripped_classes_in_the_raw_space():
 
 
 def test_the_legacy_claims_are_the_historical_ones():
-    assert {intent: per_space[LEGACY_V1]
-            for intent, per_space in INTENT_TO_LABELS.items()} == {
+    assert {intent: per_space[LEGACY_V1] for intent, per_space in INTENT_TO_LABELS.items()} == {
         "atmospheric": ("intro", "outro"),
         "breakdown": ("breakdown",),
         "buildup": ("buildup",),
@@ -310,7 +304,7 @@ def test_the_legacy_view_collapses_the_new_classes_onto_their_retired_homes():
 
 def test_a_constant_drop_timeline_scores_the_exact_degenerate_values():
     """All-DROP lights: perfect drop recall, precision == the drop time share."""
-    times = steady(4)                       # 0.5 s each, 2.0 s total
+    times = steady(4)  # 0.5 s each, 2.0 s total
     labels = ["drop", "drop", "breakdown", "intro"]
     score = score_track(track(times, ["drop"] * 4, labels), RAW9)
     precision, recall, f1 = prf(*score.counts["drop"])
@@ -324,7 +318,7 @@ def test_a_constant_drop_timeline_scores_the_exact_degenerate_values():
 
 def test_the_confusion_matrix_is_in_seconds_not_beats():
     """Uneven beats: a slow stretch must outweigh a fast one, beat counts equal."""
-    times = [0.0, 0.25, 0.5, 1.5]           # 0.25, 0.25, 1.0 s
+    times = [0.0, 0.25, 0.5, 1.5]  # 0.25, 0.25, 1.0 s
     labels = ["drop", "drop", "breakdown", "breakdown"]
     score = score_track(track(times, ["drop"] * 4, labels), RAW9)
     assert score.confusion["drop"]["drop"] == pytest.approx(0.5)
@@ -338,24 +332,29 @@ def test_beats_with_no_committed_intent_are_counted_but_never_scored():
     assert score.no_intent_sec == pytest.approx(1.0)
     assert score.no_intent_rows == 2
     assert sum(sum(row.values()) for row in score.confusion.values()) == pytest.approx(1.0)
-    assert score.accuracy == pytest.approx(1.0)     # judged on predictions only
+    assert score.accuracy == pytest.approx(1.0)  # judged on predictions only
 
 
 def test_unpredicted_beats_are_located_relative_to_the_committed_ones():
     """An INTERIOR gap silently bridges the change stream, so it must be visible."""
     times = steady(6)
     labels = ["drop"] * 6
-    score = score_track(
-        track(times, ["", "drop", "", "drop", "breakdown", ""], labels), RAW9)
-    assert (score.no_intent_leading, score.no_intent_interior,
-            score.no_intent_trailing) == (1, 1, 1)
+    score = score_track(track(times, ["", "drop", "", "drop", "breakdown", ""], labels), RAW9)
+    assert (score.no_intent_leading, score.no_intent_interior, score.no_intent_trailing) == (
+        1,
+        1,
+        1,
+    )
     assert score.no_intent_rows == 3
 
 
 def test_a_track_that_never_commits_counts_every_beat_as_leading():
     score = score_track(track(steady(3), ["", "", ""], ["drop"] * 3), RAW9)
-    assert (score.no_intent_leading, score.no_intent_interior,
-            score.no_intent_trailing) == (3, 0, 0)
+    assert (score.no_intent_leading, score.no_intent_interior, score.no_intent_trailing) == (
+        3,
+        0,
+        0,
+    )
 
 
 def test_atmospheric_is_credited_against_intro_and_against_outro():
@@ -371,7 +370,7 @@ def test_a_wrong_atmospheric_splits_its_false_positive_across_the_quiet_classes(
     """No single class may absorb the blame for an ambiguous prediction."""
     score = score_track(track(steady(2), ["atmospheric"] * 2, ["drop"] * 2), RAW9)
     claimed = INTENT_TO_LABELS["atmospheric"][RAW9]
-    assert score.counts["drop"][2] == pytest.approx(1.0)        # fn
+    assert score.counts["drop"][2] == pytest.approx(1.0)  # fn
     for label in claimed:
         assert score.counts[label][1] == pytest.approx(1.0 / len(claimed))
     assert score.accuracy == pytest.approx(0.0)
@@ -398,11 +397,11 @@ def test_the_achievable_macro_f1_is_below_the_naive_upper_bound():
     """The unreachable mass has to be predicted as SOMETHING, so it lands as
     false positives on the classes that do exist.  A bound that ignores that is
     not a target anything can reach."""
-    support = {"a": 1.0, "b": 1.0, "c": 2.0}            # c unreachable, U = 2
+    support = {"a": 1.0, "b": 1.0, "c": 2.0}  # c unreachable, U = 2
     # optimum concentrates the damage: one class keeps F1 1.0, the other takes
     # all 2.0 of it -> 2*1/(2*1+2) = 0.5.  Mean over all three classes.
     assert best_achievable_macro_f1(support, ["c"]) == pytest.approx(1.5 / 3)
-    assert 0.5 < 2 / 3                                  # the naive bound
+    assert 0.5 < 2 / 3  # the naive bound
 
 
 def test_with_nothing_unreachable_the_two_bounds_agree():
@@ -425,7 +424,7 @@ def test_the_achievable_allocation_beats_every_other_allocation():
         x_b = extra - x_a
         rival = (2 * 1.0 / (2 * 1.0 + x_a) + 2 * 3.0 / (2 * 3.0 + x_b)) / 3
         assert best >= rival - 1e-12
-    assert best == pytest.approx((1.0 + 6 / 10) / 3)    # all 4.0 onto b
+    assert best == pytest.approx((1.0 + 6 / 10) / 3)  # all 4.0 onto b
 
 
 def test_an_unknown_label_is_refused_rather_than_silently_dropped():
@@ -468,8 +467,7 @@ def test_label_boundaries_use_the_same_first_beat_convention_as_predictions():
     times = [0.0, 1.0, 2.0, 3.0]
     labels = ["intro", "intro", "drop", "drop"]
     assert label_boundaries(times, labels) == [(2.0, "drop")]
-    assert intent_changes(times,
-                          ["atmospheric", "atmospheric", "drop", "drop"])[0][0] == 2.0
+    assert intent_changes(times, ["atmospheric", "atmospheric", "drop", "drop"])[0][0] == 2.0
 
 
 def test_the_intent_stream_and_the_class_stream_are_now_the_same_stream():
@@ -479,8 +477,7 @@ def test_the_intent_stream_and_the_class_stream_are_now_the_same_stream():
     computed independently, and printing one number twice would look like
     corroboration."""
     times = steady(8)
-    intents = (["atmospheric"] * 2 + ["buildup"] * 2 + ["drop"] * 2
-               + ["breakdown"] * 2)
+    intents = ["atmospheric"] * 2 + ["buildup"] * 2 + ["drop"] * 2 + ["breakdown"] * 2
     labels = ["intro"] * 8
     for space in SPACES:
         claims = [INTENT_TO_LABELS[intent][space] for intent in INTENT_TO_LABELS]
@@ -489,8 +486,7 @@ def test_the_intent_stream_and_the_class_stream_are_now_the_same_stream():
     assert len(intent_changes(times, intents)) == 3
     assert [t for t, _ in class_changes(times, intents, RAW9)] == [1.0, 2.0, 3.0]
     for tol in TOLERANCES_SEC:
-        assert (score.boundary["intent"][tol]["overall"]
-                == score.boundary["class"][tol]["overall"])
+        assert score.boundary["intent"][tol]["overall"] == score.boundary["class"][tol]["overall"]
         assert score.flicker["intent"][tol] == score.flicker["class"][tol]
 
 
@@ -570,15 +566,18 @@ def test_a_perfect_timeline_has_boundary_f1_one_at_every_tolerance():
     for stream in STREAM_ORDER:
         for tol in TOLERANCES_SEC:
             overall = score.boundary[stream][tol]["overall"]
-            assert prf(overall["matched"],
-                       overall["n_pred"] - overall["matched"],
-                       overall["n_truth"] - overall["matched"])[2] == pytest.approx(1.0)
+            assert prf(
+                overall["matched"],
+                overall["n_pred"] - overall["matched"],
+                overall["n_truth"] - overall["matched"],
+            )[2] == pytest.approx(1.0)
 
 
 def test_events_never_match_across_track_boundaries():
     """Two tracks each starting at t=0 must not shadow each other's boundaries."""
-    a = track(steady(4), ["breakdown"] * 2 + ["drop"] * 2,
-              ["breakdown"] * 2 + ["drop"] * 2, track_id="a")
+    a = track(
+        steady(4), ["breakdown"] * 2 + ["drop"] * 2, ["breakdown"] * 2 + ["drop"] * 2, track_id="a"
+    )
     b = track(steady(4), ["drop"] * 4, ["drop"] * 4, track_id="b")
     corpus = aggregate([score_track(a, RAW9), score_track(b, RAW9)])
     assert corpus.boundary["intent"][2.0]["overall"]["n_truth"] == 1
@@ -607,10 +606,14 @@ def test_typed_counts_partition_the_overall_counts():
     silently counts one change twice.  ATMOSPHERIC is in the timeline precisely
     because it claims four classes."""
     times = steady(15)
-    labels = (["intro"] * 3 + ["buildup"] * 3 + ["drop"] * 3
-              + ["cooldown"] * 3 + ["altoutro"] * 3)
-    intents = (["atmospheric"] * 3 + ["buildup"] * 3 + ["drop"] * 3
-               + ["breakdown"] * 3 + ["atmospheric"] * 3)
+    labels = ["intro"] * 3 + ["buildup"] * 3 + ["drop"] * 3 + ["cooldown"] * 3 + ["altoutro"] * 3
+    intents = (
+        ["atmospheric"] * 3
+        + ["buildup"] * 3
+        + ["drop"] * 3
+        + ["breakdown"] * 3
+        + ["atmospheric"] * 3
+    )
     score = score_track(track(times, intents, labels), RAW9)
     for stream in STREAM_ORDER:
         for tol in TOLERANCES_SEC:
@@ -626,11 +629,13 @@ def test_an_ambiguous_change_is_one_prediction_credited_to_one_class():
     claimed = INTENT_TO_LABELS["atmospheric"][RAW9]
     changes = [(10.0, claimed)]
     near_intro = typed_predictions(
-        changes, {**empty_buckets(), "intro": [10.5], "altoutro": [40.0]})
+        changes, {**empty_buckets(), "intro": [10.5], "altoutro": [40.0]}
+    )
     assert near_intro["intro"] == [10.0]
     assert near_intro["altoutro"] == []
     near_outro = typed_predictions(
-        changes, {**empty_buckets(), "intro": [40.0], "altoutro": [10.5]})
+        changes, {**empty_buckets(), "intro": [40.0], "altoutro": [10.5]}
+    )
     assert near_outro["altoutro"] == [10.0]
     assert near_outro["intro"] == []
     for buckets in (near_intro, near_outro):
@@ -640,7 +645,7 @@ def test_an_ambiguous_change_is_one_prediction_credited_to_one_class():
 def test_an_ambiguous_change_with_nothing_to_match_still_lands_somewhere_once():
     changes = [(10.0, INTENT_TO_LABELS["atmospheric"][RAW9])]
     buckets = typed_predictions(changes, empty_buckets())
-    assert buckets["intro"] == [10.0]           # deterministic: first claimed
+    assert buckets["intro"] == [10.0]  # deterministic: first claimed
     assert sum(len(bucket) for bucket in buckets.values()) == 1
 
 
@@ -660,11 +665,11 @@ def test_flicker_forgives_a_double_change_at_one_boundary_that_precision_punishe
     truth = [10.0]
     pred = [9.5, 10.5]
     assert flicker_instants(pred, truth, 2.0) == []
-    assert match_events(truth, pred, 2.0) == 1      # precision still 0.5
+    assert match_events(truth, pred, 2.0) == 1  # precision still 0.5
 
 
 def test_flicker_rate_is_per_minute_of_evaluated_time():
-    times = steady(240, step=0.5)                   # 120 s of beats
+    times = steady(240, step=0.5)  # 120 s of beats
     labels = ["drop"] * 240
     intents = ["drop" if i % 2 else "breakdown" for i in range(240)]
     score = score_track(track(times, intents, labels), RAW9)
@@ -672,21 +677,22 @@ def test_flicker_rate_is_per_minute_of_evaluated_time():
     assert corpus.exposure_sec == pytest.approx(120.0)
     rate = corpus.flicker["intent"][2.0] / (corpus.exposure_sec / 60.0)
     assert rate == pytest.approx(corpus.flicker_per_minute["intent"][2.0])
-    assert corpus.flicker_per_minute["intent"][2.0] > 100   # 239 changes in 2 min
+    assert corpus.flicker_per_minute["intent"][2.0] > 100  # 239 changes in 2 min
 
 
 def test_the_flicker_denominator_is_show_time_not_predicted_time():
     """Using scored time would make the rate creep up as coverage falls."""
     times = steady(4)
-    score = score_track(
-        track(times, ["", "drop", "breakdown", "drop"], ["drop"] * 4), RAW9)
+    score = score_track(track(times, ["", "drop", "breakdown", "drop"], ["drop"] * 4), RAW9)
     assert score.exposure_sec > score.scored_sec > 0
     loose = score.flicker["intent"][2.0]
     assert loose > 0
     assert score.flicker_per_minute["intent"][2.0] == pytest.approx(
-        loose / (score.exposure_sec / 60.0))
+        loose / (score.exposure_sec / 60.0)
+    )
     assert score.flicker_per_minute["intent"][2.0] != pytest.approx(
-        loose / (score.scored_sec / 60.0))
+        loose / (score.scored_sec / 60.0)
+    )
 
 
 def test_a_stable_correct_timeline_never_flickers():
@@ -705,12 +711,12 @@ def test_a_stable_correct_timeline_never_flickers():
 
 def test_corpus_counts_are_the_sum_of_the_song_counts():
     a = score_track(track(steady(4), ["drop"] * 4, ["drop"] * 4, track_id="a"), RAW9)
-    b = score_track(track(steady(4), ["breakdown"] * 4, ["drop"] * 4, track_id="b"),
-                    RAW9)
+    b = score_track(track(steady(4), ["breakdown"] * 4, ["drop"] * 4, track_id="b"), RAW9)
     corpus = aggregate([a, b])
     for index in range(3):
         assert corpus.counts["drop"][index] == pytest.approx(
-            a.counts["drop"][index] + b.counts["drop"][index])
+            a.counts["drop"][index] + b.counts["drop"][index]
+        )
     assert corpus.exposure_sec == pytest.approx(a.exposure_sec + b.exposure_sec)
 
 
@@ -747,14 +753,19 @@ def _write_table(path, rows):
 
 def test_load_tracks_groups_by_track_and_keeps_beat_order(tmp_path):
     path = tmp_path / "training_table.csv.gz"
-    _write_table(path, [
-        {"track_id": "a", "t_song": "0.0", "intent_at_beat": "drop",
-         LABEL_COLUMN: "drop"},
-        {"track_id": "a", "t_song": "0.5", "intent_at_beat": "",
-         LABEL_COLUMN: "drop"},
-        {"track_id": "b", "t_song": "1.0", "intent_at_beat": "breakdown",
-         LABEL_COLUMN: "cooldown"},
-    ])
+    _write_table(
+        path,
+        [
+            {"track_id": "a", "t_song": "0.0", "intent_at_beat": "drop", LABEL_COLUMN: "drop"},
+            {"track_id": "a", "t_song": "0.5", "intent_at_beat": "", LABEL_COLUMN: "drop"},
+            {
+                "track_id": "b",
+                "t_song": "1.0",
+                "intent_at_beat": "breakdown",
+                LABEL_COLUMN: "cooldown",
+            },
+        ],
+    )
     tracks = load_tracks(path)
     assert [t.track_id for t in tracks] == ["a", "b"]
     assert tracks[0].times == (0.0, 0.5)
@@ -765,15 +776,21 @@ def test_load_tracks_groups_by_track_and_keeps_beat_order(tmp_path):
 
 def test_load_tracks_derives_every_space_from_the_one_column(tmp_path):
     path = tmp_path / "training_table.csv.gz"
-    _write_table(path, [
-        {"track_id": "a", "t_song": f"{index}.0", "intent_at_beat": "atmospheric",
-         LABEL_COLUMN: label}
-        for index, label in enumerate(SECTION_LABELS)
-    ])
+    _write_table(
+        path,
+        [
+            {
+                "track_id": "a",
+                "t_song": f"{index}.0",
+                "intent_at_beat": "atmospheric",
+                LABEL_COLUMN: label,
+            }
+            for index, label in enumerate(SECTION_LABELS)
+        ],
+    )
     loaded = load_tracks(path)[0]
     assert loaded.labels[RAW9] == SECTION_LABELS
-    assert loaded.labels[LEGACY_V1] == tuple(
-        fold_to_legacy_v1(label) for label in SECTION_LABELS)
+    assert loaded.labels[LEGACY_V1] == tuple(fold_to_legacy_v1(label) for label in SECTION_LABELS)
 
 
 def test_evaluate_reports_both_spaces_and_a_renderable_report():
@@ -785,10 +802,9 @@ def test_evaluate_reports_both_spaces_and_a_renderable_report():
     assert result["spaces"][RAW9]["macro_f1"] <= 1.0
     assert result["coverage"]["rows"] == 12
     text = render_report(result)
-    for heading in ("CONFUSION", "PER-CLASS", "BOUNDARY", "FLICKER",
-                    "ATMOSPHERIC", "WORST"):
+    for heading in ("CONFUSION", "PER-CLASS", "BOUNDARY", "FLICKER", "ATMOSPHERIC", "WORST"):
         assert heading in text.upper()
-    assert text.isascii()                   # pasteable into any console/report
+    assert text.isascii()  # pasteable into any console/report
 
 
 def test_the_report_names_the_raw_space_first_because_it_is_primary():
@@ -801,7 +817,8 @@ def test_evaluate_survives_a_corpus_with_nothing_to_score():
     result = evaluate([track([0.0], [""], ["drop"], track_id="empty")])
     assert result["spaces"][RAW9]["macro_f1"] == 0.0
     assert math.isfinite(
-        result["spaces"][RAW9]["streams"]["intent"]["flicker_per_audience_minute"]["2.0"])
+        result["spaces"][RAW9]["streams"]["intent"]["flicker_per_audience_minute"]["2.0"]
+    )
     assert render_report(result)
 
 
@@ -813,8 +830,7 @@ def test_atmospheric_absence_is_reported_as_a_structural_finding():
     result = evaluate([track(times, intents, labels)])
     structural = result["spaces"][RAW9]["structural"]
     assert structural["observed_intents"] == ["breakdown", "buildup", "drop"]
-    assert structural["unreachable_classes"] == ["intro", "altintro", "outro",
-                                                 "altoutro"]
+    assert structural["unreachable_classes"] == ["intro", "altintro", "outro", "altoutro"]
     assert structural["unreachable_label_share"] == pytest.approx(1 / 3)
     assert structural["macro_f1_upper_bound"] == pytest.approx(5 / 9)
     assert structural["macro_f1_best_achievable"] < structural["macro_f1_upper_bound"]

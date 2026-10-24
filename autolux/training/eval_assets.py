@@ -111,9 +111,9 @@ TRUTHS = (OWNER, PUBLISHED)
 # What the owner has said about one frozen track.  Coverage is "how many has he
 # ruled on", not "how many did he relabel": for a track he listens to and
 # agrees with, ACCEPTED is the decision, and it is worth recording as one.
-OVERRIDDEN = "overridden"     # he relabelled it -- a committed *.hand.json
-ACCEPTED = "accepted"         # he ruled the published label correct
-UNREVIEWED = "unreviewed"     # he has not ruled
+OVERRIDDEN = "overridden"  # he relabelled it -- a committed *.hand.json
+ACCEPTED = "accepted"  # he ruled the published label correct
+UNREVIEWED = "unreviewed"  # he has not ruled
 RULINGS = (OVERRIDDEN, ACCEPTED, UNREVIEWED)
 
 
@@ -165,9 +165,7 @@ def load_labels(path: Path | None = None) -> dict:
         with open(path, "r", encoding="utf-8") as handle:
             document = json.load(handle)
     except FileNotFoundError:
-        raise RuntimeError(
-            f"missing {path} -- cut it with training/eval_assets.py --cut"
-        ) from None
+        raise RuntimeError(f"missing {path} -- cut it with training/eval_assets.py --cut") from None
     except ValueError as exc:
         raise RuntimeError(f"{path} is not valid JSON: {exc}") from None
     if not isinstance(document, dict) or not isinstance(document.get("tracks"), list):
@@ -177,7 +175,8 @@ def load_labels(path: Path | None = None) -> dict:
         raise RuntimeError(
             f"{path} is schema {schema!r}, not {LABELS_SCHEMA} -- a slice now "
             f"carries both annotators' readings of the frozen ten; re-cut it "
-            f"with training/eval_assets.py --cut")
+            f"with training/eval_assets.py --cut"
+        )
     return document
 
 
@@ -202,8 +201,9 @@ def sections_by_truth(document: dict) -> dict:
     """
     published = sections_by_track(document)
     owner = dict(published)
-    owner.update({str(track["key"]): parse_sections(track)
-                  for track in document.get("owner_tracks") or []})
+    owner.update(
+        {str(track["key"]): parse_sections(track) for track in document.get("owner_tracks") or []}
+    )
     return {PUBLISHED: published, OWNER: owner}
 
 
@@ -222,9 +222,13 @@ def owner_rulings(document: dict) -> dict:
     return (((document.get("truths") or {}).get(OWNER)) or {}).get("rulings") or {}
 
 
-def build_labels_document(records: list, source_sha: str, source_tracks: int,
-                          rulings: dict | None = None,
-                          owner_records: list | None = None) -> dict:
+def build_labels_document(
+    records: list,
+    source_sha: str,
+    source_tracks: int,
+    rulings: dict | None = None,
+    owner_records: list | None = None,
+) -> dict:
     """The committed label slice: both annotators, then the records.
 
     One file rather than two because the pair has to be re-cut atomically -- two
@@ -299,8 +303,7 @@ def corpus_audio_path(data_dir: Path, youtube_id: str) -> Path:
     return Path(data_dir) / AUDIO_DIR / f"{youtube_id}.mp3"
 
 
-def copy_audio(data_dir: Path, youtube_ids: list,
-               audio_dir: Path | None = None) -> list:
+def copy_audio(data_dir: Path, youtube_ids: list, audio_dir: Path | None = None) -> list:
     """Copy each track's mp3 into the committed dir under its derived name.
 
     Returns ``[(youtube_id, destination, sha256)]``.  Every copy is re-hashed
@@ -315,7 +318,8 @@ def copy_audio(data_dir: Path, youtube_ids: list,
     if len(names) != len(set(youtube_ids)):
         raise RuntimeError(
             f"two eval tracks derive the same name at {NAME_CHARS} characters "
-            f"-- widen NAME_CHARS and re-cut")
+            f"-- widen NAME_CHARS and re-cut"
+        )
 
     copied = []
     for youtube_id in youtube_ids:
@@ -328,13 +332,15 @@ def copy_audio(data_dir: Path, youtube_ids: list,
         if source_sha != destination_sha:
             raise RuntimeError(
                 f"{destination.name}: copy does not match {source} "
-                f"({destination_sha[:12]}... vs {source_sha[:12]}...)")
+                f"({destination_sha[:12]}... vs {source_sha[:12]}...)"
+            )
         copied.append((youtube_id, destination, destination_sha))
     return copied
 
 
-def cut_labels(data_dir: Path, eval_set: dict, path: Path | None = None,
-               hand_root: Path | None = None) -> dict:
+def cut_labels(
+    data_dir: Path, eval_set: dict, path: Path | None = None, hand_root: Path | None = None
+) -> dict:
     """Write the label slice for the eval set out of the corpus annotations.
 
     The published records go in VERBATIM.  Re-deriving them into a tidier shape
@@ -353,8 +359,8 @@ def cut_labels(data_dir: Path, eval_set: dict, path: Path | None = None,
     found = {str(record["key"]) for record in records}
     if found != wanted:
         raise RuntimeError(
-            f"{SEGMENTS_FILE} has no annotation for: "
-            f"{', '.join(sorted(wanted - found))}")
+            f"{SEGMENTS_FILE} has no annotation for: {', '.join(sorted(wanted - found))}"
+        )
 
     records = sorted(records, key=lambda record: str(record["key"]))
     by_key = {str(record["key"]): record for record in records}
@@ -396,8 +402,7 @@ def cut_labels(data_dir: Path, eval_set: dict, path: Path | None = None,
 # --------------------------------------------------------------------------- #
 
 
-def verify(eval_set: dict, audio_dir: Path | None = None,
-           labels_path: Path | None = None) -> list:
+def verify(eval_set: dict, audio_dir: Path | None = None, labels_path: Path | None = None) -> list:
     """Everything about the committed artifacts that is wrong, one line each."""
     problems = []
     for youtube_id in eval_set["youtube_ids"]:
@@ -413,7 +418,8 @@ def verify(eval_set: dict, audio_dir: Path | None = None,
     if have != want:
         problems.append(
             f"the label slice covers {len(have)} of {len(want)} eval tracks; "
-            f"missing {', '.join(sorted(want - have)) or '(none)'}")
+            f"missing {', '.join(sorted(want - have)) or '(none)'}"
+        )
     if not labels_source_sha(document):
         problems.append("the label slice records no source sha256")
     ruled = set(owner_rulings(document))
@@ -421,7 +427,8 @@ def verify(eval_set: dict, audio_dir: Path | None = None,
         problems.append(
             f"the owner rulings name {len(ruled)} of {len(want)} eval tracks; "
             f"missing {', '.join(sorted(want - ruled)) or '(none)'} -- every "
-            f"frozen track carries a ruling, even an unreviewed one")
+            f"frozen track carries a ruling, even an unreviewed one"
+        )
     return problems
 
 
@@ -429,11 +436,16 @@ def main(argv: list | None = None) -> int:
     from select_eval_set import EVAL_SET_FILE, load_eval_set
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root to cut from (default: the resolved one)")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="corpus root to cut from (default: the resolved one)",
+    )
     parser.add_argument("--eval-set", type=Path, default=EVAL_SET_FILE)
-    parser.add_argument("--cut", action="store_true",
-                        help="re-copy the audio and re-cut the label slice")
+    parser.add_argument(
+        "--cut", action="store_true", help="re-copy the audio and re-cut the label slice"
+    )
     args = parser.parse_args(argv)
 
     eval_set = load_eval_set(Path(args.eval_set))
@@ -446,11 +458,14 @@ def main(argv: list | None = None) -> int:
         for youtube_id, path, sha in copy_audio(data_dir, eval_set["youtube_ids"]):
             print(f"  {youtube_id:<14} -> {path.name}  {sha[:16]}...")
         document = cut_labels(data_dir, eval_set)
-        print(f"labels: {EVAL_LABELS_FILE.name} "
-              f"({len(document['tracks'])} tracks, source "
-              f"{labels_source_sha(document)[:16]}...)")
-        tally = collections.Counter(str(ruling.get("ruling"))
-                                    for ruling in owner_rulings(document).values())
+        print(
+            f"labels: {EVAL_LABELS_FILE.name} "
+            f"({len(document['tracks'])} tracks, source "
+            f"{labels_source_sha(document)[:16]}...)"
+        )
+        tally = collections.Counter(
+            str(ruling.get("ruling")) for ruling in owner_rulings(document).values()
+        )
         print(f"owner : {', '.join(f'{tally[name]} {name}' for name in RULINGS)}")
 
     problems = verify(eval_set)

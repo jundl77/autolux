@@ -10,27 +10,33 @@ def report_checksum(report: dict) -> str:
 
 DEFAULT_CRITERIA: dict = {
     'timing_error_mean_ms': {
-        'max': 15.0, 'weight': 0.20,
+        'max': 15.0,
+        'weight': 0.20,
         'description': 'Mean delay error (ms)',
     },
     'beat_detection_rate': {
-        'min': 10.0, 'weight': 0.20,
+        'min': 10.0,
+        'weight': 0.20,
         'description': 'Beats detected per minute',
     },
     'unique_effects_count': {
-        'min': 2, 'weight': 0.10,
+        'min': 2,
+        'weight': 0.10,
         'description': 'Distinct MIDI channels used',
     },
     'effect_changes_count': {
-        'min': 1, 'weight': 0.10,
+        'min': 1,
+        'weight': 0.10,
         'description': 'Total effect changes observed',
     },
     'intent_changes_count': {
-        'min': 2, 'weight': 0.20,
+        'min': 2,
+        'weight': 0.20,
         'description': 'Intent transitions detected',
     },
     'unique_intents_count': {
-        'min': 2, 'weight': 0.20,
+        'min': 2,
+        'weight': 0.20,
         'description': 'Distinct intents classified',
     },
 }
@@ -43,7 +49,7 @@ def evaluate(report: dict, criteria: dict | None = None) -> dict:
 
     derived: dict[str, float] = {
         'timing_error_mean_ms': m['timing_error_mean_ms'],
-        'beat_detection_rate':  m['beats_detected'] / duration_min,
+        'beat_detection_rate': m['beats_detected'] / duration_min,
         'unique_effects_count': float(m['unique_effects_count']),
         'effect_changes_count': float(m['effect_changes_count']),
         'intent_changes_count': float(m.get('intent_changes_count', 0)),
@@ -86,10 +92,12 @@ def print_evaluation(result: dict) -> None:
     print(f'  EVALUATION   score={result["score"]:.2f}   {verdict}')
     print(f'{"─" * w}')
     print(f'  {"criterion":<32} {"value":>10}  {"threshold":>12}  {"ok":>4}')
-    print(f'  {"─"*32} {"─"*10}  {"─"*12}  {"─"*4}')
+    print(f'  {"─" * 32} {"─" * 10}  {"─" * 12}  {"─" * 4}')
     for key, r in result['criteria'].items():
         spec = r['spec']
         threshold = f'≤ {spec["max"]}' if 'max' in spec else f'≥ {spec["min"]}'
         desc = spec.get('description', key)
-        print(f'  {desc:<32} {r["value"]:>10.2f}  {threshold:>12}  {"✓" if r["passed"] else "✗":>4}')
+        print(
+            f'  {desc:<32} {r["value"]:>10.2f}  {threshold:>12}  {"✓" if r["passed"] else "✗":>4}'
+        )
     print(f'{"─" * w}\n')

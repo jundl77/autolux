@@ -50,8 +50,10 @@ def test_the_system_clock_can_resolve_a_single_audio_buffer():
         raise AssertionError(
             f'system clock produced only {len(samples)} distinct value(s) in '
             f'20000 reads — it is quantised far coarser than the '
-            f'{buffer_sec * 1000:.3f} ms audio buffer it has to time')
+            f'{buffer_sec * 1000:.3f} ms audio buffer it has to time'
+        )
     granularity = min(b - a for a, b in zip(samples, samples[1:]))
     assert granularity < buffer_sec / 10, (
         f'system clock granularity {granularity * 1000:.3f} ms cannot resolve a '
-        f'{buffer_sec * 1000:.3f} ms audio buffer')
+        f'{buffer_sec * 1000:.3f} ms audio buffer'
+    )

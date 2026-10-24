@@ -9,6 +9,7 @@ fixed width.  The first section does not always start at zero, RWC-Pop is not
 always 4/4, and the CHORUS files are an exact partition -- so a gap or an
 overlap is damaged input rather than something to smooth over.
 """
+
 import csv
 import json
 import sys
@@ -17,8 +18,7 @@ from pathlib import Path
 import pytest
 
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
-for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"),
-              str(TRAINING_DIR / "third_party")):
+for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"), str(TRAINING_DIR / "third_party")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -39,8 +39,7 @@ METADATA_HEADER = (
     "CompositionType;GenreMain;GenreSub;audio_start;audio_end;duration"
 )
 
-DEFAULT_BEATS = [(0.02, 1), (0.5, 2), (10.5, 3), (11.0, 4), (25.0, 1),
-                 (39.5, 2)]
+DEFAULT_BEATS = [(0.02, 1), (0.5, 2), (10.5, 3), (11.0, 4), (25.0, 1), (39.5, 2)]
 
 
 def chorus_text(lines, terminator="\r\n"):
@@ -54,20 +53,44 @@ def write_chorus(archive, number, lines, terminator="\r\n"):
     return path
 
 
-def metadata_row(number, title="Eien no replica", artist="Kazuo Nishi",
-                 genre="J-pop", tempo="135", duration="40.0"):
-    return ";".join([
-        rwc_convert.native_id(number), "RWC-MDB-P-2001", str(number), "1",
-        str(number), title, artist, "male", "japanese", tempo, "", "drums",
-        "real", "A Composer", "popular", "Popular Music", genre, "0.0",
-        duration, duration])
+def metadata_row(
+    number,
+    title="Eien no replica",
+    artist="Kazuo Nishi",
+    genre="J-pop",
+    tempo="135",
+    duration="40.0",
+):
+    return ";".join(
+        [
+            rwc_convert.native_id(number),
+            "RWC-MDB-P-2001",
+            str(number),
+            "1",
+            str(number),
+            title,
+            artist,
+            "male",
+            "japanese",
+            tempo,
+            "",
+            "drums",
+            "real",
+            "A Composer",
+            "popular",
+            "Popular Music",
+            genre,
+            "0.0",
+            duration,
+            duration,
+        ]
+    )
 
 
 def write_metadata(preprocessed, rows):
     path = rwc_convert.metadata_path(preprocessed)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join([METADATA_HEADER, *rows]) + "\n",
-                    encoding="utf-8")
+    path.write_text("\n".join([METADATA_HEADER, *rows]) + "\n", encoding="utf-8")
     return path
 
 
@@ -95,8 +118,7 @@ def make_rig(tmp_path, lines=None, beats=None, number=1, duration="40.0"):
 
     write_chorus(archive, number, lines if lines is not None else P001_HEAD)
     write_metadata(preprocessed, [metadata_row(number, duration=duration)])
-    write_beats(preprocessed, number,
-                beats if beats is not None else DEFAULT_BEATS)
+    write_beats(preprocessed, number, beats if beats is not None else DEFAULT_BEATS)
     write_audio(audio, number)
     return archive, preprocessed, audio, corpus
 
@@ -104,28 +126,36 @@ def make_rig(tmp_path, lines=None, beats=None, number=1, duration="40.0"):
 def run(rig, extra=()):
     archive, preprocessed, audio, corpus = rig
     pieces = [] if "--pieces" in extra else ["--pieces", "1"]
-    return rwc_convert.main([
-        "--archive", str(archive), "--preprocessed", str(preprocessed),
-        "--audio", str(audio), "--data-dir", str(corpus), *pieces, *extra])
+    return rwc_convert.main(
+        [
+            "--archive",
+            str(archive),
+            "--preprocessed",
+            str(preprocessed),
+            "--audio",
+            str(audio),
+            "--data-dir",
+            str(corpus),
+            *pieces,
+            *extra,
+        ]
+    )
 
 
 def load_record(corpus, number=1):
-    path = tp_record.annotation_path(corpus, rwc_convert.track_id(number),
-                                     "rwc")
+    path = tp_record.annotation_path(corpus, rwc_convert.track_id(number), "rwc")
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def load_report(corpus, name=rwc_convert.PARTIAL_REPORT_FILE):
     # Every rig here names its pieces, so every rig here is a partial run.
-    with open(tp_record.third_party_dir(corpus) / name, "r",
-              encoding="utf-8") as handle:
+    with open(tp_record.third_party_dir(corpus) / name, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def beat_grid_rows(corpus, number=1):
-    path = (corpus / "annotations" / "beats"
-            / f"{rwc_convert.track_id(number)}.beat.csv")
+    path = corpus / "annotations" / "beats" / f"{rwc_convert.track_id(number)}.beat.csv"
     with open(path, "r", encoding="utf-8", newline="") as handle:
         return list(csv.reader(handle))
 
@@ -134,7 +164,9 @@ def snapshot(corpus):
     files = {}
     for path in sorted(corpus.rglob("*")):
         if not path.is_file() or path.name in (
-                rwc_convert.REPORT_FILE, rwc_convert.PARTIAL_REPORT_FILE):
+            rwc_convert.REPORT_FILE,
+            rwc_convert.PARTIAL_REPORT_FILE,
+        ):
             continue
         name = path.relative_to(corpus).as_posix()
         if name.endswith(".rwc.json"):
@@ -154,8 +186,7 @@ def snapshot(corpus):
 def test_the_first_lines_of_rm_p001_parse_as_hundredths_of_a_second():
     sections = rwc_convert.parse_chorus(chorus_text(P001_HEAD))
 
-    assert [(section.name, section.start, section.end)
-            for section in sections] == [
+    assert [(section.name, section.start, section.end) for section in sections] == [
         ("intro", 0.04, 10.26),
         ("chorus A", 10.26, 23.15),
         ("chorus B", 23.15, 36.04),
@@ -163,8 +194,7 @@ def test_the_first_lines_of_rm_p001_parse_as_hundredths_of_a_second():
 
 
 def test_a_first_start_of_seventy_nine_frames_is_preserved_not_zeroed():
-    sections = rwc_convert.parse_chorus(chorus_text([
-        '79\t1000\t"intro"', '1000\t2000\t"verse A"']))
+    sections = rwc_convert.parse_chorus(chorus_text(['79\t1000\t"intro"', '1000\t2000\t"verse A"']))
 
     assert sections[0].start == 0.79
 
@@ -183,12 +213,11 @@ def test_a_key_shift_is_a_signed_int_and_absent_from_a_three_field_line():
 
 
 def test_the_quotes_are_stripped_and_an_interior_space_survives_verbatim():
-    sections = rwc_convert.parse_chorus(chorus_text([
-        '0\t100\t"pre-chorus"', '100\t200\t"chorus A"',
-        '200\t300\t"nothing"']))
+    sections = rwc_convert.parse_chorus(
+        chorus_text(['0\t100\t"pre-chorus"', '100\t200\t"chorus A"', '200\t300\t"nothing"'])
+    )
 
-    assert [section.name for section in sections] == [
-        "pre-chorus", "chorus A", "nothing"]
+    assert [section.name for section in sections] == ["pre-chorus", "chorus A", "nothing"]
 
 
 def test_crlf_input_with_a_trailing_blank_line_parses_cleanly():
@@ -196,20 +225,19 @@ def test_crlf_input_with_a_trailing_blank_line_parses_cleanly():
 
 
 def test_lf_input_parses_the_same_as_crlf():
-    assert (rwc_convert.parse_chorus(chorus_text(P001_HEAD, "\n"))
-            == rwc_convert.parse_chorus(chorus_text(P001_HEAD, "\r\n")))
+    assert rwc_convert.parse_chorus(chorus_text(P001_HEAD, "\n")) == rwc_convert.parse_chorus(
+        chorus_text(P001_HEAD, "\r\n")
+    )
 
 
 def test_a_gap_in_the_partition_is_refused():
     with pytest.raises(rwc_convert.ConvertError, match="gap"):
-        rwc_convert.parse_chorus(chorus_text([
-            '0\t100\t"intro"', '150\t200\t"verse A"']))
+        rwc_convert.parse_chorus(chorus_text(['0\t100\t"intro"', '150\t200\t"verse A"']))
 
 
 def test_an_overlap_in_the_partition_is_refused():
     with pytest.raises(rwc_convert.ConvertError, match="overlap"):
-        rwc_convert.parse_chorus(chorus_text([
-            '0\t100\t"intro"', '80\t200\t"verse A"']))
+        rwc_convert.parse_chorus(chorus_text(['0\t100\t"intro"', '80\t200\t"verse A"']))
 
 
 def test_a_zero_length_span_is_refused():
@@ -243,11 +271,11 @@ def test_a_key_shift_without_parentheses_is_refused():
 
 
 def test_repeated_intro_lines_are_kept_as_the_file_states_them():
-    sections = rwc_convert.parse_chorus(chorus_text([
-        '0\t100\t"intro"', '100\t200\t"verse A"', '200\t300\t"intro"']))
+    sections = rwc_convert.parse_chorus(
+        chorus_text(['0\t100\t"intro"', '100\t200\t"verse A"', '200\t300\t"intro"'])
+    )
 
-    assert [section.name for section in sections] == [
-        "intro", "verse A", "intro"]
+    assert [section.name for section in sections] == ["intro", "verse A", "intro"]
 
 
 # --------------------------------------------------------------------------- #
@@ -275,8 +303,7 @@ def test_a_converted_piece_emits_a_record_that_validates(tmp_path):
     assert record["label_vocabulary"] == "rwc_aist_chorus"
     assert record["beats"] == "rwc_preprocessed"
     assert record["masked"] == []
-    assert record["sections"][0] == {"name": "intro", "start": 0.04,
-                                     "end": 10.26}
+    assert record["sections"][0] == {"name": "intro", "start": 0.04, "end": 10.26}
     assert record["sections"][1]["key_shift"] == 1
 
 
@@ -307,9 +334,19 @@ def test_the_audio_is_copied_under_the_track_id(tmp_path):
 def test_no_audio_skips_the_copy_and_still_emits_the_record(tmp_path):
     archive, preprocessed, _audio, corpus = make_rig(tmp_path)
 
-    code = rwc_convert.main([
-        "--archive", str(archive), "--preprocessed", str(preprocessed),
-        "--data-dir", str(corpus), "--pieces", "1", "--no-audio"])
+    code = rwc_convert.main(
+        [
+            "--archive",
+            str(archive),
+            "--preprocessed",
+            str(preprocessed),
+            "--data-dir",
+            str(corpus),
+            "--pieces",
+            "1",
+            "--no-audio",
+        ]
+    )
 
     assert code == 0
     assert load_record(corpus)["audio"] == "rwc-p001.wav"
@@ -369,16 +406,14 @@ def test_the_beat_grid_is_the_published_three_column_format(tmp_path):
 
 
 def test_a_beat_position_of_five_survives_and_is_counted(tmp_path):
-    rig = make_rig(tmp_path, beats=[(0.02, 1), (0.5, 2), (10.5, 3),
-                                    (11.0, 4), (25.0, 5)])
+    rig = make_rig(tmp_path, beats=[(0.02, 1), (0.5, 2), (10.5, 3), (11.0, 4), (25.0, 5)])
     corpus = rig[3]
     run(rig)
 
     assert beat_grid_rows(corpus)[5] == ["25", "5", "chorus B"]
     report = load_report(corpus)
     assert report["odd_meter_count"] == 1
-    assert report["odd_meter_pieces"] == [
-        {"id": "rwc-p001", "max_position": 5}]
+    assert report["odd_meter_pieces"] == [{"id": "rwc-p001", "max_position": 5}]
 
 
 def test_a_four_four_track_is_not_counted_as_odd_meter(tmp_path):
@@ -398,8 +433,7 @@ def test_an_existing_beat_grid_is_kept(tmp_path):
 
     run(rig)
 
-    assert grid.read_text(encoding="utf-8") == (
-        "time,downbeat,section\n0.25,1,intro\n")
+    assert grid.read_text(encoding="utf-8") == ("time,downbeat,section\n0.25,1,intro\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -408,9 +442,15 @@ def test_an_existing_beat_grid_is_kept(tmp_path):
 
 
 def test_the_report_counts_labels_seconds_and_nothing_sections(tmp_path):
-    rig = make_rig(tmp_path, lines=['0\t1000\t"intro"', '1000\t2000\t"chorus A"',
-                                    '2000\t2001\t"nothing"',
-                                    '2001\t4000\t"chorus A"'])
+    rig = make_rig(
+        tmp_path,
+        lines=[
+            '0\t1000\t"intro"',
+            '1000\t2000\t"chorus A"',
+            '2000\t2001\t"nothing"',
+            '2001\t4000\t"chorus A"',
+        ],
+    )
     run(rig)
 
     report = load_report(rig[3])
@@ -449,8 +489,7 @@ def test_limit_converts_only_the_first_n_pieces(tmp_path):
     assert not (corpus / "annotations" / "rwc-p003.rwc.json").exists()
 
 
-def test_an_os_error_on_one_piece_is_recorded_and_the_batch_continues(
-        tmp_path, monkeypatch):
+def test_an_os_error_on_one_piece_is_recorded_and_the_batch_continues(tmp_path, monkeypatch):
     rig = make_rig(tmp_path)
     archive, preprocessed, audio, corpus = rig
     write_chorus(archive, 2, P001_HEAD)
@@ -478,8 +517,7 @@ def test_an_os_error_on_one_piece_is_recorded_and_the_batch_continues(
     assert (corpus / "annotations" / "rwc-p002.rwc.json").exists()
 
 
-def test_a_second_conversion_leaves_the_record_byte_identical(
-        tmp_path, monkeypatch):
+def test_a_second_conversion_leaves_the_record_byte_identical(tmp_path, monkeypatch):
     rig = make_rig(tmp_path)
     corpus = rig[3]
     monkeypatch.setattr(rwc_convert, "_now_utc", lambda: "2026-01-01T00:00:00Z")
@@ -491,8 +529,7 @@ def test_a_second_conversion_leaves_the_record_byte_identical(
     assert run(rig) == 0
 
     assert path.read_bytes() == before
-    assert json.loads(before)["provenance"]["converted_utc"] == (
-        "2026-01-01T00:00:00Z")
+    assert json.loads(before)["provenance"]["converted_utc"] == ("2026-01-01T00:00:00Z")
 
 
 def test_a_changed_record_takes_the_fresh_timestamp(tmp_path, monkeypatch):
@@ -510,8 +547,7 @@ def test_a_changed_record_takes_the_fresh_timestamp(tmp_path, monkeypatch):
     assert record["provenance"]["converted_utc"] == "2027-02-03T04:05:06Z"
 
 
-def test_a_limited_run_writes_the_partial_report_and_spares_the_full_one(
-        tmp_path):
+def test_a_limited_run_writes_the_partial_report_and_spares_the_full_one(tmp_path):
     rig = make_rig(tmp_path)
     corpus = rig[3]
     full = tp_record.third_party_dir(corpus) / rwc_convert.REPORT_FILE
@@ -528,8 +564,10 @@ def test_a_limited_run_writes_the_partial_report_and_spares_the_full_one(
 
 
 def test_the_whole_set_writes_the_full_report_name():
-    assert rwc_convert.report_file(
-        list(range(1, rwc_convert.PIECE_COUNT + 1))) == rwc_convert.REPORT_FILE
+    assert (
+        rwc_convert.report_file(list(range(1, rwc_convert.PIECE_COUNT + 1)))
+        == rwc_convert.REPORT_FILE
+    )
     assert rwc_convert.report_file([1, 2, 3]) == rwc_convert.PARTIAL_REPORT_FILE
 
 
@@ -545,8 +583,15 @@ def test_conversion_is_idempotent(tmp_path):
     second = load_report(corpus)
 
     assert snapshot(corpus) == before
-    for key in ("converted", "failed", "labels", "labelled_sec", "audio_sec",
-                "nothing_sections", "odd_meter_pieces"):
+    for key in (
+        "converted",
+        "failed",
+        "labels",
+        "labelled_sec",
+        "audio_sec",
+        "nothing_sections",
+        "odd_meter_pieces",
+    ):
         assert first[key] == second[key]
 
 

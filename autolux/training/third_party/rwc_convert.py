@@ -32,9 +32,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"),
-              str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -65,8 +68,7 @@ ALL_PIECES = tuple(range(1, PIECE_COUNT + 1))
 FRAME_RATE = 100.0
 LABEL_VOCABULARY = "rwc_aist_chorus"
 BEATS_SOURCE = "rwc_preprocessed"
-LICENSE = ("CC BY-NC 4.0; AIST README: research use only, "
-           "do not redistribute")
+LICENSE = "CC BY-NC 4.0; AIST README: research use only, do not redistribute"
 
 AUDIO_SUFFIXES = (".wav", ".aiff")
 BEAT_CSV_FIELDS = ["t", "beat"]
@@ -146,21 +148,17 @@ def _chorus_rows(text: str) -> list:
             continue
         fields = line.split("\t")
         if len(fields) not in (3, 4):
-            raise ConvertError(
-                f"line {number}: {len(fields)} tab-separated fields, want 3 or 4")
+            raise ConvertError(f"line {number}: {len(fields)} tab-separated fields, want 3 or 4")
         start, end, label = fields[0], fields[1], fields[2]
         if not _FRAMES.fullmatch(start) or not _FRAMES.fullmatch(end):
-            raise ConvertError(
-                f"line {number}: frame times {start!r} {end!r} are not integers")
+            raise ConvertError(f"line {number}: frame times {start!r} {end!r} are not integers")
         if len(label) < 2 or not label.startswith('"') or not label.endswith('"'):
-            raise ConvertError(
-                f"line {number}: label {label!r} is not double-quote wrapped")
+            raise ConvertError(f"line {number}: label {label!r} is not double-quote wrapped")
         shift = None
         if len(fields) == 4:
             found = _KEY_SHIFT.fullmatch(fields[3].strip())
             if found is None:
-                raise ConvertError(
-                    f"line {number}: key shift {fields[3]!r} is not (+n) or (-n)")
+                raise ConvertError(f"line {number}: key shift {fields[3]!r} is not (+n) or (-n)")
             shift = int(found.group(1))
         rows.append((int(start), int(end), label[1:-1], shift))
     if not rows:
@@ -172,21 +170,22 @@ def _check_partition(rows: list) -> None:
     previous_end = None
     for index, (start, end, _name, _shift) in enumerate(rows, 1):
         if end <= start:
-            raise ConvertError(
-                f"line {index}: empty or reversed span {start}..{end} frames")
+            raise ConvertError(f"line {index}: empty or reversed span {start}..{end} frames")
         if previous_end is not None and start != previous_end:
             gap = "gap" if start > previous_end else "overlap"
             raise ConvertError(
-                f"line {index}: {gap} -- starts at {start} frames, previous "
-                f"ended at {previous_end}")
+                f"line {index}: {gap} -- starts at {start} frames, previous ended at {previous_end}"
+            )
         previous_end = end
 
 
 def parse_chorus(text: str) -> list:
     rows = _chorus_rows(text)
     _check_partition(rows)
-    return [Section(name, start / FRAME_RATE, end / FRAME_RATE, shift)
-            for start, end, name, shift in rows]
+    return [
+        Section(name, start / FRAME_RATE, end / FRAME_RATE, shift)
+        for start, end, name, shift in rows
+    ]
 
 
 def read_chorus(path: Path) -> list:
@@ -200,8 +199,7 @@ def read_chorus(path: Path) -> list:
 def section_dicts(sections: list) -> list:
     out = []
     for section in sections:
-        entry = {"name": section.name, "start": section.start,
-                 "end": section.end}
+        entry = {"name": section.name, "start": section.start, "end": section.end}
         if section.key_shift is not None:
             entry["key_shift"] = section.key_shift
         out.append(entry)
@@ -217,8 +215,7 @@ def load_metadata(path: Path) -> dict:
     if not path.exists():
         raise SystemExit(f"no metadata at {path}")
     with open(path, "r", encoding="utf-8", newline="") as handle:
-        return {row["RWCID"]: row
-                for row in csv.DictReader(handle, delimiter=";")}
+        return {row["RWCID"]: row for row in csv.DictReader(handle, delimiter=";")}
 
 
 def _number(text: str, field: str) -> float:
@@ -234,9 +231,7 @@ def read_beats(path: Path) -> list:
     with open(path, "r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter=";")
         if reader.fieldnames != BEAT_CSV_FIELDS:
-            raise ConvertError(
-                f"{path.name}: header {reader.fieldnames} is not "
-                f"{BEAT_CSV_FIELDS}")
+            raise ConvertError(f"{path.name}: header {reader.fieldnames} is not {BEAT_CSV_FIELDS}")
         rows = list(reader)
     beats = []
     for index, row in enumerate(rows, 2):
@@ -296,8 +291,9 @@ def carry_timestamp(path: Path, record: dict) -> dict:
     return record
 
 
-def convert_piece(number: int, sources: Sources, metadata: dict,
-                  audio_files: dict, corpus: Path, copy: bool) -> Verdict:
+def convert_piece(
+    number: int, sources: Sources, metadata: dict, audio_files: dict, corpus: Path, copy: bool
+) -> Verdict:
     identifier = track_id(number)
     native = native_id(number)
     chorus = chorus_path(sources.archive, number)
@@ -363,7 +359,8 @@ def convert_piece(number: int, sources: Sources, metadata: dict,
     write_record(target, carry_timestamp(target, record))
 
     return Verdict(
-        identifier, "",
+        identifier,
+        "",
         tuple(section.name for section in sections),
         max(position for _time, position in beats),
         sum(section.end - section.start for section in sections),
@@ -392,8 +389,7 @@ def _report(verdicts: list, failures: list, pieces: list) -> dict:
         for name in verdict.names:
             labels[name] = labels.get(name, 0) + 1
         if verdict.max_position > NOMINAL_BAR:
-            odd_meter.append({"id": verdict.track_id,
-                              "max_position": verdict.max_position})
+            odd_meter.append({"id": verdict.track_id, "max_position": verdict.max_position})
     name = report_file(pieces)
     return {
         "converter": CONVERTER,
@@ -403,8 +399,7 @@ def _report(verdicts: list, failures: list, pieces: list) -> dict:
         "pieces_requested": len(pieces),
         "converted": len(verdicts),
         "failed": len(failures),
-        "failures": [{"id": identifier, "reason": reason}
-                     for identifier, reason in failures],
+        "failures": [{"id": identifier, "reason": reason} for identifier, reason in failures],
         "labels": dict(sorted(labels.items())),
         "nothing_sections": labels.get("nothing", 0),
         "odd_meter_count": len(odd_meter),
@@ -430,38 +425,42 @@ def write_report(corpus: Path, report: dict) -> Path:
 
 
 def print_report(report: dict) -> None:
-    print(f"converted {report['converted']}/{report['pieces_requested']}, "
-          f"failed {report['failed']}")
+    print(
+        f"converted {report['converted']}/{report['pieces_requested']}, failed {report['failed']}"
+    )
     for failure in report["failures"]:
         print(f"  FAIL {failure['id']}: {failure['reason']}")
-    print(f"labels ({len(report['labels'])} distinct): " + ", ".join(
-        f"{name}={count}" for name, count in report["labels"].items()))
+    print(
+        f"labels ({len(report['labels'])} distinct): "
+        + ", ".join(f"{name}={count}" for name, count in report["labels"].items())
+    )
     print(f"'nothing' sections: {report['nothing_sections']}")
-    print(f"beat positions above {NOMINAL_BAR}: {report['odd_meter_count']} "
-          f"piece(s)")
+    print(f"beat positions above {NOMINAL_BAR}: {report['odd_meter_count']} piece(s)")
     for piece in report["odd_meter_pieces"]:
         print(f"  {piece['id']} max position {piece['max_position']}")
-    print(f"labelled {report['labelled_sec']:.3f} s of "
-          f"{report['audio_sec']:.3f} s of audio")
-    print(f"report written to {report['report_file']}"
-          + (" (partial run)" if report["partial"] else ""))
+    print(f"labelled {report['labelled_sec']:.3f} s of {report['audio_sec']:.3f} s of audio")
+    print(
+        f"report written to {report['report_file']}"
+        + (" (partial run)" if report["partial"] else "")
+    )
 
 
-def convert(sources: Sources, corpus: Path, pieces: list,
-            copy: bool = True) -> dict:
+def convert(sources: Sources, corpus: Path, pieces: list, copy: bool = True) -> dict:
     metadata = load_metadata(metadata_path(sources.preprocessed))
     audio_files = audio_index(sources.audio)
     verdicts = []
     failures = []
     for number in pieces:
         try:
-            verdicts.append(convert_piece(number, sources, metadata,
-                                          audio_files, corpus, copy))
+            verdicts.append(convert_piece(number, sources, metadata, audio_files, corpus, copy))
         except (ConvertError, OSError) as error:
             # An I/O failure on one piece -- an unreadable csv, a copy that runs
             # out of disk -- is that piece's failure, not the batch's.
-            reason = (str(error) if isinstance(error, ConvertError)
-                      else f"{type(error).__name__}: {error}")
+            reason = (
+                str(error)
+                if isinstance(error, ConvertError)
+                else f"{type(error).__name__}: {error}"
+            )
             failures.append((track_id(number), reason))
     report = _report(verdicts, failures, pieces)
     write_report(corpus, report)
@@ -470,21 +469,28 @@ def convert(sources: Sources, corpus: Path, pieces: list,
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--archive", type=Path, required=True,
-                        help="the AIST annotation archive root")
-    parser.add_argument("--preprocessed", type=Path, required=True,
-                        help="the preprocessed annotation root (metadata.csv, "
-                             "01_annotations_preprocessed/)")
-    parser.add_argument("--audio", type=Path, default=None,
-                        help="root the RWC-P wavs were extracted to")
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus)")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="convert only the first N pieces")
-    parser.add_argument("--pieces", type=int, nargs="+", default=None,
-                        help="explicit piece numbers")
-    parser.add_argument("--no-audio", action="store_true",
-                        help="convert annotations only, skip the audio copy")
+    parser.add_argument(
+        "--archive", type=Path, required=True, help="the AIST annotation archive root"
+    )
+    parser.add_argument(
+        "--preprocessed",
+        type=Path,
+        required=True,
+        help="the preprocessed annotation root (metadata.csv, 01_annotations_preprocessed/)",
+    )
+    parser.add_argument(
+        "--audio", type=Path, default=None, help="root the RWC-P wavs were extracted to"
+    )
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus)"
+    )
+    parser.add_argument("--limit", type=int, default=None, help="convert only the first N pieces")
+    parser.add_argument(
+        "--pieces", type=int, nargs="+", default=None, help="explicit piece numbers"
+    )
+    parser.add_argument(
+        "--no-audio", action="store_true", help="convert annotations only, skip the audio copy"
+    )
     args = parser.parse_args(argv)
 
     if args.audio is None and not args.no_audio:
@@ -492,13 +498,19 @@ def main(argv: list | None = None) -> int:
 
     pieces = args.pieces or list(range(1, PIECE_COUNT + 1))
     if args.limit is not None:
-        pieces = pieces[:args.limit]
+        pieces = pieces[: args.limit]
 
     corpus = args.data_dir.resolve() if args.data_dir else corpus_dir()
     report = convert(
-        Sources(args.archive.resolve(), args.preprocessed.resolve(),
-                args.audio.resolve() if args.audio else None),
-        corpus, pieces, copy=not args.no_audio)
+        Sources(
+            args.archive.resolve(),
+            args.preprocessed.resolve(),
+            args.audio.resolve() if args.audio else None,
+        ),
+        corpus,
+        pieces,
+        copy=not args.no_audio,
+    )
     print_report(report)
     return 1 if report["failed"] else 0
 

@@ -7,12 +7,23 @@ from autolux.lib.ui_bridge import SnapshotServer
 
 
 def healthy():
-    return {'updated_at': time.time(), 'tx_age_seconds': .1, 'rx_age_seconds': .3,
-            'tx': {'up': True, 'link_up': True, 'dmx_input_age_seconds': .01},
-            'rx': {'up': True, 'link_up': True, 'audio_buffer_seconds': .08,
-                   'buffer_target_seconds': .08, 'audio_input_age_seconds': .01,
-                   'dmx_connected': True, 'dmx_lateness_seconds': .006,
-                   'underruns_total': 2}, 'recent': {}}
+    return {
+        'updated_at': time.time(),
+        'tx_age_seconds': 0.1,
+        'rx_age_seconds': 0.3,
+        'tx': {'up': True, 'link_up': True, 'dmx_input_age_seconds': 0.01},
+        'rx': {
+            'up': True,
+            'link_up': True,
+            'audio_buffer_seconds': 0.08,
+            'buffer_target_seconds': 0.08,
+            'audio_input_age_seconds': 0.01,
+            'dmx_connected': True,
+            'dmx_lateness_seconds': 0.006,
+            'underruns_total': 2,
+        },
+        'recent': {},
+    }
 
 
 def test_old_counters_do_not_make_a_recovered_show_permanently_unhealthy():
@@ -57,7 +68,7 @@ def test_health_snapshot_is_detached_from_mutating_callers():
 def test_audio_delivery_gaps_remain_distinct_from_lost_packets():
     buffer = EventBuffer()
     state = healthy()
-    state['rx'].update(audio_max_gap_seconds=.125, lost_frames_total=0, audio_signal_peak=.5)
+    state['rx'].update(audio_max_gap_seconds=0.125, lost_frames_total=0, audio_signal_peak=0.5)
     buffer.set_system_health(state)
     text = metrics(buffer).decode()
     assert 'radius_audio_max_gap_seconds{node="rx"} 0.125' in text
@@ -68,6 +79,7 @@ def test_audio_delivery_gaps_remain_distinct_from_lost_packets():
 
 def test_metrics_are_exposed_through_the_existing_snapshot_server():
     import urllib.request
+
     buffer = EventBuffer()
     buffer.set_system_health(healthy())
     server = SnapshotServer(buffer, 0)
@@ -83,6 +95,7 @@ def test_metrics_are_exposed_through_the_existing_snapshot_server():
 
 def test_dashboard_and_prometheus_share_the_same_health_source():
     from autolux.simulate.visualizer_app import build_app, _build_system_health
+
     buffer = EventBuffer()
     buffer.set_system_health(healthy())
     assert len(_build_system_health(buffer.snapshot())) == 6

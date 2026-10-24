@@ -15,8 +15,11 @@ class FileAudioClient:
         self._audio: np.ndarray | None = None
         self._pos = 0
 
-    def list_devices(self): pass
-    def support_output(self) -> bool: return False
+    def list_devices(self):
+        pass
+
+    def support_output(self) -> bool:
+        return False
 
     def start_streams(self, start_stream_out: bool = False):
         if self._audio is not None:
@@ -29,6 +32,7 @@ class FileAudioClient:
             self._audio = np.load(cache_path)
         else:
             import librosa
+
             log.info(f'[fake_audio] decoding {self.path} ...')
             audio, _ = librosa.load(self.path, sr=self.sample_rate, mono=True)
             self._audio = audio.astype(np.float32)
@@ -37,8 +41,11 @@ class FileAudioClient:
         self._pos = 0
         log.info(f'[fake_audio] loaded {len(self._audio) / self.sample_rate:.1f}s of audio')
 
-    def play(self, audio_buffer: np.ndarray): pass
-    def close(self): pass
+    def play(self, audio_buffer: np.ndarray):
+        pass
+
+    def close(self):
+        pass
 
     @property
     def exhausted(self) -> bool:
@@ -50,9 +57,9 @@ class FileAudioClient:
             buf = np.zeros(self.buffer_size, dtype=np.float32)
             remaining = len(self._audio) - self._pos
             if remaining > 0:
-                buf[:remaining] = self._audio[self._pos:]
+                buf[:remaining] = self._audio[self._pos :]
         else:
-            buf = self._audio[self._pos:end].copy()
+            buf = self._audio[self._pos : end].copy()
         self._pos = min(end, len(self._audio))
         return buf
 

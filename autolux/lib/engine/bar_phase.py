@@ -18,6 +18,7 @@ a beat-gap re-anchor takes the coin-toss uniform prior, and a tracker outage
 position it holds — today's counting rule exactly — with a resume rebirth that
 carries that position and lets evidence refuse it forward-only.
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,13 +27,14 @@ from pathlib import Path
 
 import numpy as np
 
-_PHASE_TRACKING_DIR = str(Path(__file__).resolve().parents[2] / "training"
-                          / "phase_tracking")
+_PHASE_TRACKING_DIR = str(Path(__file__).resolve().parents[2] / "training" / "phase_tracking")
 if _PHASE_TRACKING_DIR not in sys.path:
     sys.path.insert(0, _PHASE_TRACKING_DIR)
 
-from phase_tracking import (LIVE_START_PRIOR,  # noqa: E402
-                            advance_log_weights)
+from phase_tracking import (
+    LIVE_START_PRIOR,  # noqa: E402
+    advance_log_weights,
+)
 
 from autolux.lib.analyser.bar_tracker import FPS  # noqa: E402
 
@@ -76,8 +78,9 @@ class _IntervalRatios:
             return float("nan")
         span = at_sec - self._last
         self._last = at_sec
-        period = (float(np.median(self._history))
-                  if len(self._history) >= _RATIO_MIN_HISTORY else 0.0)
+        period = (
+            float(np.median(self._history)) if len(self._history) >= _RATIO_MIN_HISTORY else 0.0
+        )
         ratio = span / period if period > 0.0 else float("nan")
         if period <= 0.0 or _RATIO_CLEAN_LO <= span / period <= _RATIO_CLEAN_HI:
             self._history.append(span)
@@ -93,13 +96,11 @@ class _Trellis:
         self._delta: np.ndarray | None = None
         self._back: deque = deque(maxlen=self._lag)
         self._step = -1
-        rotation = (np.arange(_POSITIONS)[:, None]
-                    - np.arange(_POSITIONS)[None, :]) % _POSITIONS
+        rotation = (np.arange(_POSITIONS)[:, None] - np.arange(_POSITIONS)[None, :]) % _POSITIONS
         self._rotation = rotation
         self._residue = np.arange(MAX_ADVANCE + 1) % _POSITIONS
 
-    def push(self, emission_row: np.ndarray,
-             transition_row: np.ndarray | None):
+    def push(self, emission_row: np.ndarray, transition_row: np.ndarray | None):
         """Advance one beat; return the state decided for step - lag, or None."""
         self._step += 1
         if self._delta is None:
@@ -113,13 +114,12 @@ class _Trellis:
             candidate = self._delta[None, :] + best_by_residue[self._rotation]
             back_row = np.argmax(candidate, axis=1)
             self._back.append(back_row)
-            self._delta = (candidate[np.arange(_POSITIONS), back_row]
-                           + emission_row)
+            self._delta = candidate[np.arange(_POSITIONS), back_row] + emission_row
             self._delta -= self._delta.max()
         if self._step < self._lag:
             return None
         state = int(np.argmax(self._delta))
-        for row in reversed(list(self._back)[-self._lag:] or []):
+        for row in reversed(list(self._back)[-self._lag :] or []):
             state = int(row[state])
         return state
 
@@ -156,7 +156,7 @@ class BarPhaseFusion:
         self._pending: deque = deque()
         self._votes: list = []
         self._active = self._evidence_live()
-        self._trellis = (_Trellis(prior, LAG_BEATS) if self._active else None)
+        self._trellis = _Trellis(prior, LAG_BEATS) if self._active else None
         self._trellis_start = 0
 
     def _evidence_live(self) -> bool:
@@ -186,8 +186,7 @@ class BarPhaseFusion:
     def push_chunk(self, chunk) -> None:
         frames = np.arange(chunk.frame_lo, chunk.frame_hi)
         slots = frames % _FRAME_STORE
-        self._logit_store[slots] = np.asarray(chunk.db_logits,
-                                              dtype=np.float32)
+        self._logit_store[slots] = np.asarray(chunk.db_logits, dtype=np.float32)
         self._avail_store[slots] = float(chunk.avail_sec)
         self._frame_id[slots] = frames
         self._frontier = max(self._frontier, int(chunk.frame_hi))
@@ -208,12 +207,10 @@ class BarPhaseFusion:
         hi = frame + AGG_HALFWIDTH + 1
         frames = np.arange(lo, hi)
         slots = frames % _FRAME_STORE
-        held = (self._frame_id[slots] == frames) \
-            & np.isfinite(self._avail_store[slots])
+        held = (self._frame_id[slots] == frames) & np.isfinite(self._avail_store[slots])
         if not held.any():
             return None
-        logits = np.clip(self._logit_store[slots[held]].astype(np.float64),
-                         -30.0, 30.0)
+        logits = np.clip(self._logit_store[slots[held]].astype(np.float64), -30.0, 30.0)
         p = float((1.0 / (1.0 + np.exp(-logits))).max())
         if p < GATE_T:
             return None
@@ -246,15 +243,16 @@ class BarPhaseFusion:
             transition = None
             if local > 0:
                 transition = advance_log_weights(
-                    np.array([self._prev_ratio, ratio]), sigma=SIGMA, eta=ETA,
-                    max_advance=MAX_ADVANCE)[1]
+                    np.array([self._prev_ratio, ratio]),
+                    sigma=SIGMA,
+                    eta=ETA,
+                    max_advance=MAX_ADVANCE,
+                )[1]
             decided = self._trellis.push(emission, transition)
             if decided is not None:
-                target = (self._trellis_start + local - LAG_BEATS
-                          + self._offset) % _POSITIONS
+                target = (self._trellis_start + local - LAG_BEATS + self._offset) % _POSITIONS
                 if decided != target:
-                    self._offset = (self._offset + decided - target) \
-                        % _POSITIONS
+                    self._offset = (self._offset + decided - target) % _POSITIONS
                     self.corrections += 1
             frame = int(np.round(at_sec * FPS))
             self._pending.append((local, at_sec, frame))

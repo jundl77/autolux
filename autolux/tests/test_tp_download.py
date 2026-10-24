@@ -11,14 +11,19 @@ copy-paste fails here instead of stranding recoverable failures in the field.
 
 No test touches the network: yt-dlp is a monkeypatched ``subprocess.run``.
 """
+
 import json
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAINING_DIR = REPO_ROOT / "training"
-for _path in (str(REPO_ROOT), str(TRAINING_DIR), str(TRAINING_DIR / "raveform"),
-              str(TRAINING_DIR / "third_party")):
+for _path in (
+    str(REPO_ROOT),
+    str(TRAINING_DIR),
+    str(TRAINING_DIR / "raveform"),
+    str(TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -28,8 +33,9 @@ import tp_fetch_queue as queue  # noqa: E402
 import tp_supervisor as supervisor  # noqa: E402
 
 BOT_CHECK_TEXT = "ERROR: Sign in to confirm you're not a bot"
-PRIVATE_TEXT = ("ERROR: Private video. Sign in if you've been granted access. "
-                "Use --cookies-from-browser")
+PRIVATE_TEXT = (
+    "ERROR: Private video. Sign in if you've been granted access. Use --cookies-from-browser"
+)
 AGE_TEXT = "ERROR: Sign in to confirm your age. This video may be inappropriate"
 
 
@@ -47,9 +53,15 @@ def make_corpus(tmp_path: Path) -> Path:
 
 
 def make_row(track_id="hx-0001_a", source="harmonix", video="AAA"):
-    return queue.QueueRow(track_id=track_id, source=source, youtube_id=video,
-                          title="Title", artist="Artist",
-                          annotation_duration_sec="142.47", note="align=0.99")
+    return queue.QueueRow(
+        track_id=track_id,
+        source=source,
+        youtube_id=video,
+        title="Title",
+        artist="Artist",
+        annotation_duration_sec="142.47",
+        note="align=0.99",
+    )
 
 
 def make_queue(tmp_path: Path, corpus: Path, rows) -> Path:
@@ -81,8 +93,9 @@ def read_failures(corpus: Path) -> list:
     path = download.failed_path(corpus)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def run_main(corpus: Path, *extra) -> int:
@@ -104,10 +117,14 @@ def test_a_successful_download_lands_the_mp3_and_records_the_track_id(tmp_path, 
 
 def test_two_tracks_sharing_one_video_are_both_downloaded(tmp_path, monkeypatch):
     corpus = make_corpus(tmp_path)
-    make_queue(tmp_path, corpus, [
-        make_row("hx-0001_a", video="SHARED"),
-        make_row("hx-0002_b", video="SHARED"),
-    ])
+    make_queue(
+        tmp_path,
+        corpus,
+        [
+            make_row("hx-0001_a", video="SHARED"),
+            make_row("hx-0002_b", video="SHARED"),
+        ],
+    )
     attempts = []
     stub_yt_dlp(monkeypatch, "ok", attempts)
 
@@ -142,8 +159,7 @@ def test_a_permanent_refusal_outranks_the_transient_text_it_carries():
 
 def test_a_permanent_failure_does_not_count_toward_the_refusal_wall(tmp_path, monkeypatch):
     corpus = make_corpus(tmp_path)
-    make_queue(tmp_path, corpus, [make_row(f"hx-000{n}_x", video=f"V{n}")
-                                  for n in range(1, 5)])
+    make_queue(tmp_path, corpus, [make_row(f"hx-000{n}_x", video=f"V{n}") for n in range(1, 5)])
     attempts = []
     stub_yt_dlp(monkeypatch, PRIVATE_TEXT, attempts)
 
@@ -154,8 +170,7 @@ def test_a_permanent_failure_does_not_count_toward_the_refusal_wall(tmp_path, mo
 
 def test_a_wall_of_consecutive_refusals_aborts_the_run(tmp_path, monkeypatch):
     corpus = make_corpus(tmp_path)
-    make_queue(tmp_path, corpus, [make_row(f"hx-000{n}_x", video=f"V{n}")
-                                  for n in range(1, 6)])
+    make_queue(tmp_path, corpus, [make_row(f"hx-000{n}_x", video=f"V{n}") for n in range(1, 6)])
     attempts = []
     stub_yt_dlp(monkeypatch, BOT_CHECK_TEXT, attempts)
 
@@ -168,12 +183,9 @@ def test_a_wall_of_consecutive_refusals_aborts_the_run(tmp_path, monkeypatch):
 
 def test_a_success_resets_the_consecutive_refusal_counter(tmp_path, monkeypatch):
     corpus = make_corpus(tmp_path)
-    make_queue(tmp_path, corpus, [make_row(f"hx-000{n}_x", video=f"V{n}")
-                                  for n in range(1, 5)])
+    make_queue(tmp_path, corpus, [make_row(f"hx-000{n}_x", video=f"V{n}") for n in range(1, 5)])
     attempts = []
-    stub_yt_dlp(monkeypatch,
-                lambda video: "ok" if video == "V2" else BOT_CHECK_TEXT,
-                attempts)
+    stub_yt_dlp(monkeypatch, lambda video: "ok" if video == "V2" else BOT_CHECK_TEXT, attempts)
 
     assert run_main(corpus, "--max-consecutive-failures", "2") == 2
     assert attempts == ["V1", "V2", "V3", "V4"]
@@ -181,8 +193,9 @@ def test_a_success_resets_the_consecutive_refusal_counter(tmp_path, monkeypatch)
 
 def test_a_re_run_skips_the_tracks_already_downloaded(tmp_path, monkeypatch):
     corpus = make_corpus(tmp_path)
-    make_queue(tmp_path, corpus, [make_row("hx-0001_a", video="AAA"),
-                                  make_row("hx-0002_b", video="BBB")])
+    make_queue(
+        tmp_path, corpus, [make_row("hx-0001_a", video="AAA"), make_row("hx-0002_b", video="BBB")]
+    )
     attempts = []
     stub_yt_dlp(monkeypatch, "ok", attempts)
     assert run_main(corpus, "--limit", "1") == 0
@@ -293,8 +306,11 @@ def test_the_supervisor_writes_a_fresh_cycle_log_per_relaunch(tmp_path, monkeypa
     for cycle in (1, 2, 3):
         supervisor.run_cycle(command, corpus, cycle, log_path, state_path)
 
-    assert launched == ["tp_download.cycle1.log", "tp_download.cycle2.log",
-                        "tp_download.cycle3.log"]
+    assert launched == [
+        "tp_download.cycle1.log",
+        "tp_download.cycle2.log",
+        "tp_download.cycle3.log",
+    ]
     assert len(set(launched)) == 3
 
 

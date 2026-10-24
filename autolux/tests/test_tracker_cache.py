@@ -1,13 +1,21 @@
 """The tracker chunk cache: record, replay, and named misses."""
+
 import numpy as np
 import pytest
 
 from autolux.lib.analyser.bar_tracker import TrackerChunk
 from autolux.simulate import tracker_cache
 
-RECORD = {"sha256": "f313307e" * 8,
-          "geometry": {"sample_rate": 22050, "fps": 50, "chunk_frames": 1500,
-                       "margin_frames": 6, "stride_sec": 2.5}}
+RECORD = {
+    "sha256": "f313307e" * 8,
+    "geometry": {
+        "sample_rate": 22050,
+        "fps": 50,
+        "chunk_frames": 1500,
+        "margin_frames": 6,
+        "stride_sec": 2.5,
+    },
+}
 
 
 class _FakeTracker:
@@ -32,10 +40,9 @@ class _FakeTracker:
         p = self.passes
         self.passes += 1
         if p == 1:
-            return []          # a pass that emitted nothing
+            return []  # a pass that emitted nothing
         lo, hi = p * 10, p * 10 + 10
-        return [TrackerChunk(lo, hi,
-                             np.arange(lo, hi, dtype=np.float32), p + 0.5)]
+        return [TrackerChunk(lo, hi, np.arange(lo, hi, dtype=np.float32), p + 0.5)]
 
     def reset(self):
         self.resets += 1
@@ -48,8 +55,12 @@ def _key(tmp_path):
     audio = tmp_path / "song.mp3"
     audio.write_bytes(b"x" * 100)
     return audio, tracker_cache.cache_key(
-        RECORD, source_rate=44100, audio_path=audio, decode_path="librosa",
-        backend={"device": "cpu", "precision": "fp32"})
+        RECORD,
+        source_rate=44100,
+        audio_path=audio,
+        decode_path="librosa",
+        backend={"device": "cpu", "precision": "fp32"},
+    )
 
 
 def _record_session(path, key):
@@ -77,8 +88,7 @@ def test_replay_reproduces_the_recorded_chunks_at_the_recorded_triggers(tmp_path
             got.extend(replay.run_pass())
     assert len(got) == len(produced)
     for a, b in zip(got, produced):
-        assert (a.frame_lo, a.frame_hi, a.avail_sec) == \
-            (b.frame_lo, b.frame_hi, b.avail_sec)
+        assert (a.frame_lo, a.frame_hi, a.avail_sec) == (b.frame_lo, b.frame_hi, b.avail_sec)
         assert np.array_equal(a.db_logits, b.db_logits)
     assert replay.alive
 
@@ -97,8 +107,7 @@ def test_misses_are_named(tmp_path):
     assert tracker_cache.open_replay(path, changed)[1] == "miss_decode_path"
     changed = dict(key, backend={"device": "cuda", "precision": "fp32"})
     assert tracker_cache.open_replay(path, changed)[1] == "miss_backend"
-    assert tracker_cache.open_replay(path, key,
-                                     expected_samples=9999)[1] == "miss_truncated"
+    assert tracker_cache.open_replay(path, key, expected_samples=9999)[1] == "miss_truncated"
 
 
 def test_a_truncated_recording_refuses_to_overrun(tmp_path):

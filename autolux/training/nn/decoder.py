@@ -1,4 +1,5 @@
 """Fixed-lag HSMM committer over bars; the live engine imports this, not a copy."""
+
 from __future__ import annotations
 
 import csv
@@ -75,7 +76,8 @@ def decoder_config_classes(path) -> tuple:
     if not space:
         raise ValueError(
             f"{path}: decoder config records no class_space -- without it the "
-            f"space it was swept in cannot be checked against the vocabulary")
+            f"space it was swept in cannot be checked against the vocabulary"
+        )
     return tuple(space)
 
 
@@ -89,7 +91,8 @@ def load_decoder_config(path) -> DecodeParams:
             f"{path}: decoder config names {', '.join(unknown)}, which "
             f"DecodeParams does not have -- dropping them would decode with a "
             f"different decoder than the one this config was measured on. "
-            f"Known knobs: {', '.join(sorted(known))}")
+            f"Known knobs: {', '.join(sorted(known))}"
+        )
     return DecodeParams(**chosen)
 
 
@@ -110,24 +113,30 @@ def trellis_knobs(params: DecodeParams) -> dict:
     them -- a decoder built from a config it did not honour, silently. A knob
     this misses now reaches FixedLagViterbi as an unexpected keyword and raises.
     """
-    return {field.name: getattr(params, field.name)
-            for field in dataclasses.fields(params)
-            if field.name not in OBSERVATION_KNOBS}
+    return {
+        field.name: getattr(params, field.name)
+        for field in dataclasses.fields(params)
+        if field.name not in OBSERVATION_KNOBS
+    }
 
 
 class FixedLagViterbi:
-    def __init__(self, priors: Priors, lag_bars: int = DEFAULT_LAG_BARS,
-                 class_prior_division: bool = True,
-                 drop_miss_cost: float = DEFAULT_DROP_MISS_COST, *,
-                 prior_strength: float = DEFAULT_PRIOR_STRENGTH,
-                 boundary_weight: float = DEFAULT_BOUNDARY_WEIGHT,
-                 boundary_ref: float = DEFAULT_BOUNDARY_REF,
-                 floor_scale: float = 1.0,
-                 floor_bars=None,
-                 outro_escape: float = DEFAULT_OUTRO_ESCAPE,
-                 buildup_drop_bonus: float = DEFAULT_BUILDUP_DROP_BONUS,
-                 buildup_entry_bonus: float = DEFAULT_BUILDUP_ENTRY_BONUS,
-                 ) -> None:
+    def __init__(
+        self,
+        priors: Priors,
+        lag_bars: int = DEFAULT_LAG_BARS,
+        class_prior_division: bool = True,
+        drop_miss_cost: float = DEFAULT_DROP_MISS_COST,
+        *,
+        prior_strength: float = DEFAULT_PRIOR_STRENGTH,
+        boundary_weight: float = DEFAULT_BOUNDARY_WEIGHT,
+        boundary_ref: float = DEFAULT_BOUNDARY_REF,
+        floor_scale: float = 1.0,
+        floor_bars=None,
+        outro_escape: float = DEFAULT_OUTRO_ESCAPE,
+        buildup_drop_bonus: float = DEFAULT_BUILDUP_DROP_BONUS,
+        buildup_entry_bonus: float = DEFAULT_BUILDUP_ENTRY_BONUS,
+    ) -> None:
         if int(lag_bars) < 0:
             raise ValueError(f"lag_bars must be >= 0, got {lag_bars}")
         if float(floor_scale) <= 0.0:
@@ -138,13 +147,12 @@ class FixedLagViterbi:
             raise ValueError(
                 f"outro_escape must lie in [0, 0.5) -- got {outro_escape}; it is "
                 f"a per-bar probability and TWO targets are opened, so the stay "
-                f"probability is 1 - 2 * escape")
+                f"probability is 1 - 2 * escape"
+            )
         if not math.isfinite(float(buildup_drop_bonus)):
-            raise ValueError(
-                f"buildup_drop_bonus must be finite, got {buildup_drop_bonus}")
+            raise ValueError(f"buildup_drop_bonus must be finite, got {buildup_drop_bonus}")
         if not math.isfinite(float(buildup_entry_bonus)):
-            raise ValueError(
-                f"buildup_entry_bonus must be finite, got {buildup_entry_bonus}")
+            raise ValueError(f"buildup_entry_bonus must be finite, got {buildup_entry_bonus}")
 
         self.priors = priors
         self.classes = tuple(priors.classes)
@@ -167,7 +175,8 @@ class FixedLagViterbi:
         if not np.all((hazard > 0.0) & (hazard < 1.0)):
             raise ValueError(
                 f"every class hazard must lie in (0, 1) -- got {hazard.tolist()}; "
-                f"0 makes a class unleavable and 1 caps every run at its floor")
+                f"0 makes a class unleavable and 1 caps every run at its floor"
+            )
 
         if self.floor_bars is not None:
             if len(self.floor_bars) != len(self.classes):
@@ -175,13 +184,16 @@ class FixedLagViterbi:
                     f"floor_bars has {len(self.floor_bars)} entries for "
                     f"{len(self.classes)} classes {self.classes} -- a floor "
                     f"vector silently misaligned by one would apply drop's floor "
-                    f"to breakdown and never raise")
-            self._floors = np.maximum(
-                1, np.asarray(self.floor_bars, dtype=np.int64))
+                    f"to breakdown and never raise"
+                )
+            self._floors = np.maximum(1, np.asarray(self.floor_bars, dtype=np.int64))
         else:
             self._floors = np.maximum(
-                1, np.rint(np.asarray(priors.floor_bars, dtype=np.float64)
-                           * self.floor_scale).astype(np.int64))
+                1,
+                np.rint(np.asarray(priors.floor_bars, dtype=np.float64) * self.floor_scale).astype(
+                    np.int64
+                ),
+            )
         self._emission_bonus = self._class_bonus()
         self._entry_bonus = self._commit_bonus()
         self._build_states()
@@ -190,8 +202,11 @@ class FixedLagViterbi:
     def _build_states(self) -> None:
         floors = self._floors
         self._state_class = np.concatenate(
-            [np.full(int(floor), class_index, dtype=np.int64)
-             for class_index, floor in enumerate(floors)])
+            [
+                np.full(int(floor), class_index, dtype=np.int64)
+                for class_index, floor in enumerate(floors)
+            ]
+        )
         class_offsets = np.concatenate([[0], np.cumsum(floors)])
         self._entry_state = class_offsets[:-1].copy()
         self._final_state = class_offsets[1:] - 1
@@ -219,7 +234,8 @@ class FixedLagViterbi:
                     transition[state, target] = (
                         log_leave[class_index]
                         + log_transition[class_index, next_class]
-                        + self._entry_bonus[next_class])
+                        + self._entry_bonus[next_class]
+                    )
                     switch[state, target] = True
 
         self._apply_outro_escape(transition, switch)
@@ -229,8 +245,7 @@ class FixedLagViterbi:
         self._transition = transition
         self._switch = switch
         self._cold_initial = np.full(n_states, -np.inf, dtype=np.float64)
-        self._cold_initial[self._entry_state] = (self.priors.log_initial
-                                                 + self._entry_bonus)
+        self._cold_initial[self._entry_state] = self.priors.log_initial + self._entry_bonus
 
     ESCAPE_TARGETS = ("breakdown", "drop")
 
@@ -239,8 +254,7 @@ class FixedLagViterbi:
             return
         source_class = self.classes.index("outro")
         source = int(self._final_state[source_class])
-        targets = [self.classes.index(name) for name in self.ESCAPE_TARGETS
-                   if name in self.classes]
+        targets = [self.classes.index(name) for name in self.ESCAPE_TARGETS if name in self.classes]
         if not targets:
             return
 
@@ -248,8 +262,9 @@ class FixedLagViterbi:
         transition[source, source] = math.log(stay) if stay > 0.0 else -np.inf
         for target_class in targets:
             entry = int(self._entry_state[target_class])
-            transition[source, entry] = (math.log(self.outro_escape)
-                                         + self._entry_bonus[target_class])
+            transition[source, entry] = (
+                math.log(self.outro_escape) + self._entry_bonus[target_class]
+            )
             switch[source, entry] = True
 
     def _apply_buildup_drop_bonus(self, transition: np.ndarray) -> None:
@@ -269,8 +284,7 @@ class FixedLagViterbi:
         target = int(self._entry_state[self.classes.index("drop")])
         transition[source, target] += self.buildup_drop_bonus
 
-    def _apply_buildup_entry_bonus(self, transition: np.ndarray,
-                                   switch: np.ndarray) -> None:
+    def _apply_buildup_entry_bonus(self, transition: np.ndarray, switch: np.ndarray) -> None:
         """A log-domain preference on entering buildup FROM ANY class.
 
         On the transition edges only, and deliberately NOT on the cold start:
@@ -292,8 +306,7 @@ class FixedLagViterbi:
     def _class_bonus(self) -> np.ndarray:
         bonus = np.zeros(len(self.classes), dtype=np.float64)
         if self.class_prior_division and self.prior_strength:
-            prior = np.clip(np.asarray(self.priors.class_prior, dtype=np.float64),
-                            EPS, None)
+            prior = np.clip(np.asarray(self.priors.class_prior, dtype=np.float64), EPS, None)
             bonus -= self.prior_strength * np.log(prior)
         return bonus
 
@@ -333,8 +346,7 @@ class FixedLagViterbi:
         if carried is None:
             initial[final] = self.priors.log_initial + self._entry_bonus
         else:
-            initial[final[carried]] = (self.priors.log_initial[carried]
-                                       + self._entry_bonus[carried])
+            initial[final[carried]] = self.priors.log_initial[carried] + self._entry_bonus[carried]
         self._log_initial = initial
 
     def _carryable(self, carried: int | None) -> int | None:
@@ -353,7 +365,8 @@ class FixedLagViterbi:
         logging.warning(
             f'[decoder] the priors give {self.classes[carried]!r} no way to '
             f'start a track, so a birth cannot carry it -- spreading the '
-            f'start-of-track prior instead')
+            f'start-of-track prior instead'
+        )
         return None
 
     @property
@@ -370,7 +383,8 @@ class FixedLagViterbi:
                 f"bar {bar}'s backtrace has been evicted from a ring of "
                 f"{len(self._psi)} -- the commit rule reached further back than "
                 f"the fixed lag allows, which means a decision was about to be "
-                f"read off whatever the modulo landed on")
+                f"read off whatever the modulo landed on"
+            )
         return entry[1]
 
     def push(self, posterior, boundary=None) -> list:
@@ -403,12 +417,11 @@ class FixedLagViterbi:
         posteriors = np.asarray(posteriors, dtype=np.float64)
         if posteriors.ndim != 2 or posteriors.shape[1] != len(self.classes):
             raise ValueError(
-                f"posteriors must be [bars, {len(self.classes)}], got "
-                f"{posteriors.shape}")
+                f"posteriors must be [bars, {len(self.classes)}], got {posteriors.shape}"
+            )
         scores = None if boundary is None else np.asarray(boundary, dtype=np.float64)
         if scores is not None and len(scores) != len(posteriors):
-            raise ValueError(
-                f"boundary has {len(scores)} entries for {len(posteriors)} bars")
+            raise ValueError(f"boundary has {len(scores)} entries for {len(posteriors)} bars")
 
         decisions: list = []
         for bar, row in enumerate(posteriors):
@@ -422,8 +435,7 @@ class FixedLagViterbi:
             return np.zeros(n_states, dtype=np.float64)
         row = np.asarray(posterior, dtype=np.float64).reshape(-1)
         if row.size != len(self.classes):
-            raise ValueError(
-                f"posterior must have {len(self.classes)} entries, got {row.size}")
+            raise ValueError(f"posterior must have {len(self.classes)} entries, got {row.size}")
         if np.any(row < 0.0):
             raise ValueError(f"posterior has negative entries: {row.tolist()}")
         total = row.sum()
@@ -458,8 +470,8 @@ class FixedLagViterbi:
         final_ancestor = ancestors[target - self._next_commit]
         committed_class = int(self._state_class[final_ancestor[best_state]])
         self._delta = np.where(
-            self._state_class[final_ancestor] == committed_class,
-            self._delta, -np.inf)
+            self._state_class[final_ancestor] == committed_class, self._delta, -np.inf
+        )
         self._next_commit = target + 1
         return decisions
 
@@ -485,12 +497,14 @@ def segments(decisions) -> list:
 def bar_grid(beat_csv_path) -> np.ndarray:
     path = Path(beat_csv_path)
     with open(path, "r", encoding="utf-8", newline="") as handle:
-        downbeats = [float(row["time"]) for row in csv.DictReader(handle)
-                     if int(row["downbeat"]) == 1]
+        downbeats = [
+            float(row["time"]) for row in csv.DictReader(handle) if int(row["downbeat"]) == 1
+        ]
     if len(downbeats) < 2:
         raise RuntimeError(
             f"{path}: fewer than two downbeat rows -- there is no bar grid to "
-            f"decode on (the decoder runs at bar rate by design)")
+            f"decode on (the decoder runs at bar rate by design)"
+        )
     edges = np.asarray(sorted(downbeats), dtype=np.float64)
     median_bar_sec = float(np.median(np.diff(edges)))
     return np.append(edges, edges[-1] + median_bar_sec)
@@ -506,9 +520,14 @@ def temper(label_post: np.ndarray, temperature: float) -> np.ndarray:
     return powered / powered.sum(axis=-1, keepdims=True)
 
 
-def bar_observations(posterior_npz, edges, *, min_coverage: int = DEFAULT_MIN_COVERAGE,
-                     boundary_tolerance_sec: float = DEFAULT_BOUNDARY_TOLERANCE_SEC,
-                     temperature: float = DEFAULT_TEMPERATURE) -> tuple:
+def bar_observations(
+    posterior_npz,
+    edges,
+    *,
+    min_coverage: int = DEFAULT_MIN_COVERAGE,
+    boundary_tolerance_sec: float = DEFAULT_BOUNDARY_TOLERANCE_SEC,
+    temperature: float = DEFAULT_TEMPERATURE,
+) -> tuple:
     with np.load(posterior_npz) as archive:
         label_post = np.asarray(archive["label_post"], dtype=np.float64)
         boundary = np.asarray(archive["boundary"], dtype=np.float64)
@@ -527,9 +546,9 @@ def bar_observations(posterior_npz, edges, *, min_coverage: int = DEFAULT_MIN_CO
     n_bars = edges.size - 1
 
     label_times = label_t0 + np.arange(len(label_post)) * label_frame_sec
-    label_ok = coverage[::label_pool][:len(label_post)] >= int(min_coverage)
+    label_ok = coverage[::label_pool][: len(label_post)] >= int(min_coverage)
     frame_times = t0 + np.arange(len(boundary)) * frame_sec
-    frame_ok = coverage[:len(boundary)] >= int(min_coverage)
+    frame_ok = coverage[: len(boundary)] >= int(min_coverage)
 
     if not label_ok.any():
         raise RuntimeError(
@@ -537,7 +556,8 @@ def bar_observations(posterior_npz, edges, *, min_coverage: int = DEFAULT_MIN_CO
             f"(max is {int(coverage.max()) if coverage.size else 0}) -- every "
             f"bar would decode from the duration prior alone. Either these "
             f"sidecars were written by a single-pass model (coverage 1) and the "
-            f"config wants overlap-averaged ones, or the two were mispaired")
+            f"config wants overlap-averaged ones, or the two were mispaired"
+        )
 
     posteriors = np.full((n_bars, label_post.shape[1]), np.nan, dtype=np.float64)
     scores = np.full(n_bars, np.nan, dtype=np.float64)
@@ -545,30 +565,29 @@ def bar_observations(posterior_npz, edges, *, min_coverage: int = DEFAULT_MIN_CO
     lo = np.searchsorted(label_times, edges[:-1], side="left")
     hi = np.searchsorted(label_times, edges[1:], side="left")
     for bar in range(n_bars):
-        usable = label_ok[lo[bar]:hi[bar]]
+        usable = label_ok[lo[bar] : hi[bar]]
         if usable.any():
-            posteriors[bar] = label_post[lo[bar]:hi[bar]][usable].mean(axis=0)
+            posteriors[bar] = label_post[lo[bar] : hi[bar]][usable].mean(axis=0)
 
     downbeats = edges[:-1]
     starts = np.searchsorted(frame_times, downbeats - boundary_tolerance_sec, "left")
     ends = np.searchsorted(frame_times, downbeats + boundary_tolerance_sec, "right")
     for bar in range(n_bars):
-        usable = frame_ok[starts[bar]:ends[bar]]
+        usable = frame_ok[starts[bar] : ends[bar]]
         if usable.any():
-            scores[bar] = boundary[starts[bar]:ends[bar]][usable].max()
+            scores[bar] = boundary[starts[bar] : ends[bar]][usable].max()
     return posteriors, scores
 
 
-def build_decoder(priors: Priors,
-                  params: DecodeParams | None = None) -> FixedLagViterbi:
+def build_decoder(priors: Priors, params: DecodeParams | None = None) -> FixedLagViterbi:
     return FixedLagViterbi(priors, **trellis_knobs(params or DecodeParams()))
 
 
-def decode_track(posterior_npz, beat_csv, params: DecodeParams | None = None, *,
-                 priors: Priors) -> list:
+def decode_track(
+    posterior_npz, beat_csv, params: DecodeParams | None = None, *, priors: Priors
+) -> list:
     params = params or DecodeParams()
     edges = bar_grid(beat_csv)
-    posteriors, boundary = bar_observations(posterior_npz, edges,
-                                            **observation_knobs(params))
+    posteriors, boundary = bar_observations(posterior_npz, edges, **observation_knobs(params))
     decisions = build_decoder(priors, params).decode(posteriors, boundary)
     return [(float(edges[d.bar]), d.label) for d in decisions]

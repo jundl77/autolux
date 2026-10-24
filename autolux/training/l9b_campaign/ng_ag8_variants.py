@@ -9,6 +9,7 @@ audio_map_ag8.json in the exact format stream_extract's --ids-file and
 --audio-map consume.  Campaign-local only: corpus audio/ is never touched.
 Resumable: an existing WAV of the right sample count is kept.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -29,8 +30,7 @@ except Exception:  # noqa: BLE001
     pass
 
 SAMPLE_RATE = 44100
-SHIFTS = (("m3", -3), ("m2", -2), ("m1", -1),
-          ("p1", 1), ("p2", 2), ("p3", 3), ("p4", 4))
+SHIFTS = (("m3", -3), ("m2", -2), ("m1", -1), ("p1", 1), ("p2", 2), ("p3", 3), ("p4", 4))
 AUG_DIR = CAMP / "aug_audio"
 FEAT_ROOT = CAMP / "features_ag8_root" / "MERT-v1-330M_L6-22_F3_hop1"
 
@@ -41,9 +41,25 @@ def variant_id(base: str, suffix: str) -> str:
 
 def decode(path) -> np.ndarray:
     out = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le",
-         "-acodec", "pcm_f32le", "-ac", "1", "-ar", str(SAMPLE_RATE), "-"],
-        capture_output=True, check=True)
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "-ac",
+            "1",
+            "-ar",
+            str(SAMPLE_RATE),
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
     return np.frombuffer(out.stdout, dtype=np.float32)
 
 
@@ -70,35 +86,43 @@ def main() -> int:
                 if info.frames == len(y) and info.samplerate == SAMPLE_RATE:
                     print(f"{vid}: kept existing WAV ({info.frames} samples)")
                 else:
-                    raise SystemExit(f"{wav} exists with wrong geometry "
-                                     f"({info.frames} vs {len(y)}) -- refusing")
+                    raise SystemExit(
+                        f"{wav} exists with wrong geometry ({info.frames} vs {len(y)}) -- refusing"
+                    )
             else:
                 if y is None:
                     y = decode(mp3)
-                shifted = librosa.effects.pitch_shift(
-                    y, sr=SAMPLE_RATE, n_steps=steps)
+                shifted = librosa.effects.pitch_shift(y, sr=SAMPLE_RATE, n_steps=steps)
                 if len(shifted) != len(y):
-                    raise SystemExit(f"{vid}: pitch_shift moved the sample "
-                                     f"count {len(y)} -> {len(shifted)}")
-                sf.write(str(wav), shifted.astype(np.float32), SAMPLE_RATE,
-                         subtype="FLOAT")
+                    raise SystemExit(
+                        f"{vid}: pitch_shift moved the sample count {len(y)} -> {len(shifted)}"
+                    )
+                sf.write(str(wav), shifted.astype(np.float32), SAMPLE_RATE, subtype="FLOAT")
                 peak = float(np.abs(shifted).max())
-                print(f"{vid}: {len(shifted)} samples "
-                      f"({len(shifted) / SAMPLE_RATE:.1f} s), peak {peak:.3f}",
-                      flush=True)
+                print(
+                    f"{vid}: {len(shifted)} samples "
+                    f"({len(shifted) / SAMPLE_RATE:.1f} s), peak {peak:.3f}",
+                    flush=True,
+                )
             total_sec += len(y) / SAMPLE_RATE
             audio_map[vid] = str(wav.resolve())
             if not (FEAT_ROOT / f"{vid}.npz").exists():
                 to_extract.append(vid)
 
-    lines = ["# ARM H-AG8 (#343): pitch-shift variants missing an F3 sidecar",
-             "# consumed by training.nn.ceiling.stream_extract --ids-file"]
+    lines = [
+        "# ARM H-AG8 (#343): pitch-shift variants missing an F3 sidecar",
+        "# consumed by training.nn.ceiling.stream_extract --ids-file",
+    ]
     (CAMP / "extract_ids_ag8.txt").write_text(
-        "\n".join(lines + to_extract) + "\n", encoding="utf-8")
+        "\n".join(lines + to_extract) + "\n", encoding="utf-8"
+    )
     (CAMP / "audio_map_ag8.json").write_text(
-        json.dumps(audio_map, indent=2) + "\n", encoding="utf-8")
-    print(f"\n{len(audio_map)} variants, {total_sec:.0f} s of audio; "
-          f"{len(to_extract)} still need F3 sidecars")
+        json.dumps(audio_map, indent=2) + "\n", encoding="utf-8"
+    )
+    print(
+        f"\n{len(audio_map)} variants, {total_sec:.0f} s of audio; "
+        f"{len(to_extract)} still need F3 sidecars"
+    )
     print(f"wrote {CAMP / 'extract_ids_ag8.txt'}")
     print(f"wrote {CAMP / 'audio_map_ag8.json'}")
     return 0

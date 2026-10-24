@@ -1,19 +1,32 @@
 """Windows process ownership. No handles are inherited by child processes."""
+
 import ctypes
 from ctypes import wintypes as w
 
 
 class _Limits(ctypes.Structure):
-    _fields_ = [('process_time', ctypes.c_int64), ('job_time', ctypes.c_int64),
-                ('flags', w.DWORD), ('min_working_set', ctypes.c_size_t),
-                ('max_working_set', ctypes.c_size_t), ('active_processes', w.DWORD),
-                ('affinity', ctypes.c_size_t), ('priority', w.DWORD), ('scheduling', w.DWORD)]
+    _fields_ = [
+        ('process_time', ctypes.c_int64),
+        ('job_time', ctypes.c_int64),
+        ('flags', w.DWORD),
+        ('min_working_set', ctypes.c_size_t),
+        ('max_working_set', ctypes.c_size_t),
+        ('active_processes', w.DWORD),
+        ('affinity', ctypes.c_size_t),
+        ('priority', w.DWORD),
+        ('scheduling', w.DWORD),
+    ]
 
 
 class _ExtendedLimits(ctypes.Structure):
-    _fields_ = [('basic', _Limits), ('io', ctypes.c_uint64 * 6),
-                ('process_memory', ctypes.c_size_t), ('job_memory', ctypes.c_size_t),
-                ('peak_process_memory', ctypes.c_size_t), ('peak_job_memory', ctypes.c_size_t)]
+    _fields_ = [
+        ('basic', _Limits),
+        ('io', ctypes.c_uint64 * 6),
+        ('process_memory', ctypes.c_size_t),
+        ('job_memory', ctypes.c_size_t),
+        ('peak_process_memory', ctypes.c_size_t),
+        ('peak_job_memory', ctypes.c_size_t),
+    ]
 
 
 def _kernel():
@@ -36,6 +49,7 @@ class Job:
 
     https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
     """
+
     def __init__(self):
         self.api = _kernel()
         self.handle = self.api.CreateJobObjectW(None, None)
@@ -43,7 +57,9 @@ class Job:
             raise ctypes.WinError(ctypes.get_last_error())
         limits = _ExtendedLimits()
         limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        if not self.api.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        if not self.api.SetInformationJobObject(
+            self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
             error = ctypes.WinError(ctypes.get_last_error())
             self.close()
             raise error

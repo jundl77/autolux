@@ -17,9 +17,13 @@ def _snapshot(**overrides) -> dict:
         'beats_detected': 0,
         'intent': 'drop',
         'look_ahead_sec': 0.0,
-        'timing_stats': {'samples': 0, 'mean_delta_sec': None,
-                         'mean_error_ms': None, 'max_error_ms': None,
-                         'by_label': {}},
+        'timing_stats': {
+            'samples': 0,
+            'mean_delta_sec': None,
+            'mean_error_ms': None,
+            'max_error_ms': None,
+            'by_label': {},
+        },
         'decoder': {},
     }
     snap.update(overrides)
@@ -66,8 +70,10 @@ def _span_of(items, prefix: str):
     for span in _spans(items):
         if ''.join(_texts(span)).startswith(prefix):
             return span
-    raise AssertionError(f'no metric strip item starts with {prefix!r}: '
-                         f'{[".".join(_texts(i)) for i in _spans(items)]}')
+    raise AssertionError(
+        f'no metric strip item starts with {prefix!r}: '
+        f'{[".".join(_texts(i)) for i in _spans(items)]}'
+    )
 
 
 def _colour_of(items, prefix: str) -> str:
@@ -79,8 +85,7 @@ def _metric(items, prefix: str) -> str:
 
 
 def test_the_figure_never_draws_beats_because_the_browser_owns_them():
-    fig = V._build_timeline(_snapshot(
-        beats=[{'t': 9.0, 'bpm': 128.0, 'strength': 0.0}]))
+    fig = V._build_timeline(_snapshot(beats=[{'t': 9.0, 'bpm': 128.0, 'strength': 0.0}]))
     assert fig.data == ()
 
 
@@ -90,8 +95,7 @@ def test_the_marker_css_carries_the_size_the_figure_used_to():
 
 
 def test_the_anchor_ships_beats_when_the_strength_channel_is_gone():
-    anchor = V._anchor(_snapshot(
-        beats=[{'t': 9.0, 'bpm': 128.0}, {'t': 9.5, 'bpm': 128.0}]))
+    anchor = V._anchor(_snapshot(beats=[{'t': 9.0, 'bpm': 128.0}, {'t': 9.5, 'bpm': 128.0}]))
     assert anchor['beats'] == [9.0, 9.5]
 
 
@@ -106,89 +110,102 @@ def test_a_clock_under_a_minute_never_says_zero_minutes():
 
 
 def test_the_room_clock_reads_zero_until_the_playback_delay_has_elapsed():
-    early = V._build_metrics(_snapshot(
-        now=9.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}]))
+    early = V._build_metrics(
+        _snapshot(now=9.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
+    )
     assert _metric(early, 'room') == 'room 0sec'
     assert _metric(early, 'song') == 'song 9sec'
 
-    later = V._build_metrics(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}]))
+    later = V._build_metrics(
+        _snapshot(now=20.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
+    )
     assert _metric(later, 'room') == 'room 6sec'
     assert _metric(later, 'song') == 'song 20sec'
 
 
 def test_a_new_sound_start_restarts_both_clocks():
-    items = V._build_metrics(_snapshot(
-        now=100.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True},
-                      {'t': 60.0, 'playing': False},
-                      {'t': 80.0, 'playing': True}]))
+    items = V._build_metrics(
+        _snapshot(
+            now=100.0,
+            look_ahead_sec=14.0,
+            sound_events=[
+                {'t': 0.0, 'playing': True},
+                {'t': 60.0, 'playing': False},
+                {'t': 80.0, 'playing': True},
+            ],
+        )
+    )
     assert _metric(items, 'song') == 'song 20sec'
     assert _metric(items, 'room') == 'room 6sec'
 
 
 def test_both_clocks_are_blank_until_the_first_sound_start():
-    items = V._build_metrics(_snapshot(now=30.0, look_ahead_sec=14.0,
-                                       sound_events=[]))
+    items = V._build_metrics(_snapshot(now=30.0, look_ahead_sec=14.0, sound_events=[]))
     assert _metric(items, 'song') == 'song —'
     assert _metric(items, 'room') == 'room —'
 
 
 def test_a_beat_is_anchored_at_the_moment_the_room_hears_it():
-    anchor = V._anchor(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        beats=[{'t': 3.0, 'bpm': 128.0}]))
+    anchor = V._anchor(_snapshot(now=20.0, look_ahead_sec=14.0, beats=[{'t': 3.0, 'bpm': 128.0}]))
     assert anchor['beats'] == [17.0]
 
 
 def test_a_beat_inside_the_drawn_lead_is_shipped_before_the_room_hears_it():
     # The browser withholds nothing: the marker sits past the cursor and
     # crosses it at its room instant, so the future strip must carry it.
-    anchor = V._anchor(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        beats=[{'t': 3.0, 'bpm': 128.0}, {'t': 7.0, 'bpm': 128.0}]))
+    anchor = V._anchor(
+        _snapshot(
+            now=20.0,
+            look_ahead_sec=14.0,
+            beats=[{'t': 3.0, 'bpm': 128.0}, {'t': 7.0, 'bpm': 128.0}],
+        )
+    )
     assert anchor['beats'] == [17.0, 21.0]
 
 
 def test_a_beat_past_the_drawn_strip_is_not_shipped_yet():
-    anchor = V._anchor(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        beats=[{'t': 3.0, 'bpm': 128.0}, {'t': 12.0, 'bpm': 128.0}]))
+    anchor = V._anchor(
+        _snapshot(
+            now=20.0,
+            look_ahead_sec=14.0,
+            beats=[{'t': 3.0, 'bpm': 128.0}, {'t': 12.0, 'bpm': 128.0}],
+        )
+    )
     assert anchor['beats'] == [17.0]
 
 
 def test_the_song_zero_is_the_start_on_the_room_clock_not_the_detectors():
-    assert V._song_origin(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 1.0, 'playing': True}])) == pytest.approx(15.0)
+    assert V._song_origin(
+        _snapshot(now=20.0, look_ahead_sec=14.0, sound_events=[{'t': 1.0, 'playing': True}])
+    ) == pytest.approx(15.0)
 
 
 def test_the_start_marker_sits_on_the_zero_it_defines():
-    fig = V._build_timeline(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 1.0, 'playing': True}]))
+    fig = V._build_timeline(
+        _snapshot(now=20.0, look_ahead_sec=14.0, sound_events=[{'t': 1.0, 'playing': True}])
+    )
     assert [a.x for a in fig.layout.annotations if 'START' in a.text] == [0.0]
 
 
 def test_an_intent_block_is_already_room_fired_and_is_not_shifted_again():
-    fig = V._build_timeline(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        intents=[{'t': 5.0, 'intent': 'drop', 'end': 10.0}]))
+    fig = V._build_timeline(
+        _snapshot(
+            now=20.0, look_ahead_sec=14.0, intents=[{'t': 5.0, 'intent': 'drop', 'end': 10.0}]
+        )
+    )
     rect = next(s for s in fig.layout.shapes if s.type == 'rect')
     assert (rect.x0, rect.x1) == (5.0, 10.0)
 
 
 def test_the_anchor_puts_beats_on_the_room_clock():
-    anchor = V._anchor(_snapshot(now=20.0, look_ahead_sec=14.0,
-                                 beats=[{'t': 3.0, 'bpm': 128.0}]))
+    anchor = V._anchor(_snapshot(now=20.0, look_ahead_sec=14.0, beats=[{'t': 3.0, 'bpm': 128.0}]))
     assert anchor['beats'] == [17.0]
 
 
 def test_the_anchor_carries_both_clocks_and_the_axis_they_are_read_against():
-    anchor = V._anchor(_snapshot(now=20.0, look_ahead_sec=14.0,
-                                 sound_events=[{'t': 0.0, 'playing': True}]))
+    anchor = V._anchor(
+        _snapshot(now=20.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
+    )
     assert (anchor['now'], anchor['song'], anchor['room']) == (6.0, 20.0, 6.0)
 
 
@@ -198,19 +215,22 @@ def test_the_anchor_leaves_the_clocks_blank_before_the_first_sound_start():
 
 
 def _two_songs(**overrides) -> dict:
-    return _snapshot(look_ahead_sec=14.0,
-                     sound_events=[{'t': 0.0, 'playing': True},
-                                   {'t': 60.0, 'playing': False},
-                                   {'t': 80.0, 'playing': True}],
-                     **overrides)
+    return _snapshot(
+        look_ahead_sec=14.0,
+        sound_events=[
+            {'t': 0.0, 'playing': True},
+            {'t': 60.0, 'playing': False},
+            {'t': 80.0, 'playing': True},
+        ],
+        **overrides,
+    )
 
 
 def _axis(fig) -> tuple:
     return tuple(fig.layout.xaxis.range)
 
 
-_ZEROED_AXIS = (-V.TIMELINE_WINDOW_SEC,
-                V.TIMELINE_LEAD_SEC + V.TIMELINE_PAD_SEC)
+_ZEROED_AXIS = (-V.TIMELINE_WINDOW_SEC, V.TIMELINE_LEAD_SEC + V.TIMELINE_PAD_SEC)
 
 
 def test_a_run_that_never_claimed_a_boundary_plots_on_the_session_clock():
@@ -218,37 +238,47 @@ def test_a_run_that_never_claimed_a_boundary_plots_on_the_session_clock():
 
 
 def test_the_timeline_counts_from_the_instant_the_room_heard_the_song_start():
-    fig = V._build_timeline(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}],
-        beats=[{'t': 3.0, 'bpm': 128.0}]))
+    fig = V._build_timeline(
+        _snapshot(
+            now=20.0,
+            look_ahead_sec=14.0,
+            sound_events=[{'t': 0.0, 'playing': True}],
+            beats=[{'t': 3.0, 'bpm': 128.0}],
+        )
+    )
     assert _axis(fig) == pytest.approx(
-        (6.0 - V.TIMELINE_WINDOW_SEC, 6.0 + V.TIMELINE_LEAD_SEC + V.TIMELINE_PAD_SEC))
-    assert V._anchor(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}],
-        beats=[{'t': 3.0, 'bpm': 128.0}]))['beats'] == [3.0]
+        (6.0 - V.TIMELINE_WINDOW_SEC, 6.0 + V.TIMELINE_LEAD_SEC + V.TIMELINE_PAD_SEC)
+    )
+    assert V._anchor(
+        _snapshot(
+            now=20.0,
+            look_ahead_sec=14.0,
+            sound_events=[{'t': 0.0, 'playing': True}],
+            beats=[{'t': 3.0, 'bpm': 128.0}],
+        )
+    )['beats'] == [3.0]
 
 
 def test_the_axis_is_the_room_clock_so_the_two_can_never_disagree():
-    snap = _snapshot(now=20.0, look_ahead_sec=14.0,
-                     sound_events=[{'t': 0.0, 'playing': True}])
+    snap = _snapshot(now=20.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
     assert V._anchor(snap)['now'] == pytest.approx(V._song_and_room(snap)[1])
 
 
 def test_the_first_song_holds_the_axis_at_zero_until_the_room_reaches_it():
-    fig = V._build_timeline(_snapshot(
-        now=9.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}]))
+    fig = V._build_timeline(
+        _snapshot(now=9.0, look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}])
+    )
     assert _axis(fig) == pytest.approx(_ZEROED_AXIS)
 
 
 def test_a_detected_stop_empties_the_timeline_and_zeroes_it():
     snap = _snapshot(
-        now=62.0, look_ahead_sec=14.0,
+        now=62.0,
+        look_ahead_sec=14.0,
         sound_events=[{'t': 0.0, 'playing': True}, {'t': 60.0, 'playing': False}],
         beats=[{'t': 40.0, 'bpm': 128.0}],
-        intents=[{'t': 50.0, 'intent': 'drop'}])
+        intents=[{'t': 50.0, 'intent': 'drop'}],
+    )
     fig = V._build_timeline(snap)
     assert _axis(fig) == pytest.approx(_ZEROED_AXIS)
     assert fig.layout.shapes == ()
@@ -256,18 +286,24 @@ def test_a_detected_stop_empties_the_timeline_and_zeroes_it():
 
 
 def test_both_clocks_go_blank_between_songs():
-    items = V._build_metrics(_snapshot(
-        now=62.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}, {'t': 60.0, 'playing': False}]))
+    items = V._build_metrics(
+        _snapshot(
+            now=62.0,
+            look_ahead_sec=14.0,
+            sound_events=[{'t': 0.0, 'playing': True}, {'t': 60.0, 'playing': False}],
+        )
+    )
     assert _metric(items, 'song') == 'song —'
     assert _metric(items, 'room') == 'room —'
 
 
 def test_the_old_song_ends_at_the_stop_rather_than_playing_out():
     snap = _snapshot(
-        now=70.0, look_ahead_sec=14.0,
+        now=70.0,
+        look_ahead_sec=14.0,
         sound_events=[{'t': 0.0, 'playing': True}, {'t': 60.0, 'playing': False}],
-        beats=[{'t': 55.0, 'bpm': 128.0}])
+        beats=[{'t': 55.0, 'bpm': 128.0}],
+    )
     assert V._anchor(snap)['beats'] == []
     assert _axis(V._build_timeline(snap)) == pytest.approx(_ZEROED_AXIS)
 
@@ -279,35 +315,41 @@ def test_a_start_the_room_has_not_reached_does_not_end_the_gap():
 
 
 def test_the_new_song_begins_the_moment_the_room_reaches_it():
-    assert V._song_and_room(_two_songs(now=94.0)) == (pytest.approx(14.0),
-                                                      pytest.approx(0.0))
+    assert V._song_and_room(_two_songs(now=94.0)) == (pytest.approx(14.0), pytest.approx(0.0))
 
 
 def test_the_previous_songs_beats_do_not_cross_the_reset():
-    anchor = V._anchor(_two_songs(
-        now=100.0, beats=[{'t': 40.0, 'bpm': 128.0}, {'t': 85.0, 'bpm': 128.0}]))
+    anchor = V._anchor(
+        _two_songs(now=100.0, beats=[{'t': 40.0, 'bpm': 128.0}, {'t': 85.0, 'bpm': 128.0}])
+    )
     assert anchor['beats'] == [5.0]
 
 
 def test_a_beat_is_placed_in_the_song_the_room_heard_it_in_not_the_one_it_was_detected_in():
-    anchor = V._anchor(_two_songs(now=100.0,
-                                  beats=[{'t': 85.0, 'bpm': 128.0}]))
+    anchor = V._anchor(_two_songs(now=100.0, beats=[{'t': 85.0, 'bpm': 128.0}]))
     assert anchor['beats'] == [5.0]
 
 
 def test_the_previous_songs_intent_block_does_not_reach_back_past_zero():
-    fig = V._build_timeline(_two_songs(
-        now=100.0, intents=[{'t': 50.0, 'intent': 'drop', 'end': 70.0},
-                            {'t': 96.0, 'intent': 'peak'}]))
+    fig = V._build_timeline(
+        _two_songs(
+            now=100.0,
+            intents=[{'t': 50.0, 'intent': 'drop', 'end': 70.0}, {'t': 96.0, 'intent': 'peak'}],
+        )
+    )
     rects = [s for s in fig.layout.shapes if s.type == 'rect']
     assert [r.x0 for r in rects] == [2.0]
 
 
 def test_the_anchor_publishes_the_axis_and_the_beats_in_song_time():
-    anchor = V._anchor(_snapshot(
-        now=20.0, look_ahead_sec=14.0,
-        sound_events=[{'t': 0.0, 'playing': True}],
-        beats=[{'t': 3.0, 'bpm': 128.0}]))
+    anchor = V._anchor(
+        _snapshot(
+            now=20.0,
+            look_ahead_sec=14.0,
+            sound_events=[{'t': 0.0, 'playing': True}],
+            beats=[{'t': 3.0, 'bpm': 128.0}],
+        )
+    )
     assert anchor['now'] == pytest.approx(6.0)
     assert anchor['beats'] == [pytest.approx(3.0)]
 
@@ -320,21 +362,24 @@ def test_the_anchor_holds_the_axis_still_between_songs():
 
 def test_the_browser_re_seats_a_backward_re_base_instead_of_extrapolating_it():
     assert 'sync.now < a.now' in V.ANIMATION_JS
-    scroll = V.ANIMATION_JS[V.ANIMATION_JS.index('const scroll'):
-                            V.ANIMATION_JS.index('const pulse')]
+    scroll = V.ANIMATION_JS[
+        V.ANIMATION_JS.index('const scroll') : V.ANIMATION_JS.index('const pulse')
+    ]
     assert 'dx < 0' in scroll
 
 
 def test_the_glow_re_arms_across_a_song_boundary():
-    pulse = V.ANIMATION_JS[V.ANIMATION_JS.index('const pulse'):
-                           V.ANIMATION_JS.index('const meter')]
+    pulse = V.ANIMATION_JS[
+        V.ANIMATION_JS.index('const pulse') : V.ANIMATION_JS.index('const meter')
+    ]
     assert 'a.pulsed = null' in pulse
 
 
 def test_the_glow_fires_when_the_room_clock_crosses_the_beat():
     # Firing on anchor arrival instead cost a measured median 154 ms of lag.
-    pulse = V.ANIMATION_JS[V.ANIMATION_JS.index('const pulse'):
-                           V.ANIMATION_JS.index('const meter')]
+    pulse = V.ANIMATION_JS[
+        V.ANIMATION_JS.index('const pulse') : V.ANIMATION_JS.index('const meter')
+    ]
     assert 'a.markerList' in pulse
     assert 'beats[i] <= now' in pulse
 
@@ -352,10 +397,10 @@ def test_the_browser_owns_the_beat_markers_and_seats_them_off_the_live_range():
     js = V.ANIMATION_JS
     assert "getElementById('beat-layer')" in js
     assert 'ss-beat' in js
-    seat = js[js.index('const seatBeats'):js.index('const scroll')]
+    seat = js[js.index('const seatBeats') : js.index('const scroll')]
     assert 'xaxis.range' in seat
     assert 'a.seatedAt === stamp' in seat
-    frame = js[js.index('const frame'):]
+    frame = js[js.index('const frame') :]
     assert 'syncBeats();' in frame and 'seatBeats(' in frame
 
 
@@ -379,8 +424,9 @@ def _app(source=None):
     return V.build_app(source)
 
 
-_ANCHOR = ('..sync.data...metrics.children...stage.children...'
-           'decoder.children...system-health.children..')
+_ANCHOR = (
+    '..sync.data...metrics.children...stage.children...decoder.children...system-health.children..'
+)
 _VIEW = '..timeline.figure...drawn.data..'
 _GATE = '..gate.data...view-gate.data..'
 
@@ -389,8 +435,7 @@ def test_the_app_reads_its_data_through_a_snapshot_call_and_nothing_else():
     poller = _FakePoller(_snapshot(bpm=131.0, beats_detected=7))
     app = _app(poller)
 
-    anchor, metrics, stage, decoder, health = app.callback_map[
-        _ANCHOR]['callback'].__wrapped__(1)
+    anchor, metrics, stage, decoder, health = app.callback_map[_ANCHOR]['callback'].__wrapped__(1)
 
     assert poller.reads == 1
     assert '131 BPM' in ''.join(_texts(metrics))
@@ -496,7 +541,7 @@ def test_the_scroll_translates_per_frame_and_re_seats_the_axis_rarely():
     js = V.ANIMATION_JS
     assert 'translate3d' in js
     assert 'RESEAT_PX' in js
-    scroll = js[js.index('const scroll'):js.index('const pulse')]
+    scroll = js[js.index('const scroll') : js.index('const pulse')]
     assert scroll.index('translate3d') > scroll.index('RESEAT_PX')
 
 
@@ -505,8 +550,7 @@ def test_the_stylesheet_animates_the_beat_glow_instead_of_the_server():
 
 
 def test_the_lamps_hand_the_stylesheet_the_glow_it_animates():
-    lamp = next(style for style in _styles(V._build_stage(_snapshot()))
-                if '--ss-peak' in style)
+    lamp = next(style for style in _styles(V._build_stage(_snapshot())) if '--ss-peak' in style)
     assert lamp['--ss-decay'] == '0.12s'
     assert lamp['--ss-lamp'] == V.INTENT_CONFIG['drop']['primary']
     assert 'boxShadow' not in lamp
@@ -516,8 +560,7 @@ def test_only_the_lamps_the_intent_lights_are_pulse_targets():
     slots = V._build_stage(_snapshot(intent='atmospheric'))
     lit = [name for name in _classes(slots) if 'ss-on' in name]
     assert len(lit) == len(V.INTENT_CONFIG['atmospheric']['slots'])
-    assert len([name for name in _classes(slots) if 'ss-lamp' in name]) \
-        == len(V.SLOT_LABELS)
+    assert len([name for name in _classes(slots) if 'ss-lamp' in name]) == len(V.SLOT_LABELS)
 
 
 def test_the_fps_readout_is_outside_every_callback_output():
@@ -528,15 +571,14 @@ def test_the_fps_readout_is_outside_every_callback_output():
 
 def test_the_fps_readout_is_driven_by_the_frame_loop_once_a_second():
     js = V.ANIMATION_JS
-    meter = js[js.index('const meter'):js.index('const frame')]
+    meter = js[js.index('const meter') : js.index('const frame')]
     assert "getElementById('fps')" in meter
     assert 'span < 1000' in meter
-    assert 'meter();' in js[js.index('const frame'):]
+    assert 'meter();' in js[js.index('const frame') :]
 
 
 def test_the_clock_spans_are_addressable_by_the_browser():
-    ids = {getattr(span, 'id', None)
-           for span in _spans(V._build_metrics(_snapshot()))}
+    ids = {getattr(span, 'id', None) for span in _spans(V._build_metrics(_snapshot()))}
     assert {'room-clock', 'song-clock'} <= ids
 
 
@@ -587,33 +629,31 @@ def test_the_second_grid_is_an_axis_setting_not_thirty_shapes():
 def test_the_running_intent_block_reaches_the_edge_the_browser_scrolls_to():
     # Out to the pad, not just the lead: the pad is the strip the transform
     # translates in, so a block stopping at the lead would open a gap there.
-    fig = V._build_timeline(_snapshot(
-        now=20.0, intents=[{'t': 5.0, 'intent': 'drop'}]))
+    fig = V._build_timeline(_snapshot(now=20.0, intents=[{'t': 5.0, 'intent': 'drop'}]))
     rect = next(s for s in fig.layout.shapes if s.type == 'rect')
-    assert rect.x1 == pytest.approx(
-        20.0 + V.TIMELINE_LEAD_SEC + V.TIMELINE_PAD_SEC)
+    assert rect.x1 == pytest.approx(20.0 + V.TIMELINE_LEAD_SEC + V.TIMELINE_PAD_SEC)
 
 
 def test_the_snapshot_carries_the_delay_the_display_shifts_by():
     from autolux.lib.clock import VirtualClock
     from autolux.lib.engine.event_buffer import EventBuffer
 
-    buffer = EventBuffer(window_sec=float('inf'), clock=VirtualClock(),
-                         look_ahead_sec=14.0)
+    buffer = EventBuffer(window_sec=float('inf'), clock=VirtualClock(), look_ahead_sec=14.0)
     buffer.start()
     assert buffer.snapshot()['look_ahead_sec'] == pytest.approx(14.0)
 
 
 def _stopping(**overrides) -> dict:
-    return _snapshot(look_ahead_sec=14.0, is_playing=False,
-                     sound_events=[{'t': 0.0, 'playing': True},
-                                   {'t': 60.0, 'playing': False}],
-                     **overrides)
+    return _snapshot(
+        look_ahead_sec=14.0,
+        is_playing=False,
+        sound_events=[{'t': 0.0, 'playing': True}, {'t': 60.0, 'playing': False}],
+        **overrides,
+    )
 
 
 def _mid_play(**overrides) -> dict:
-    return _snapshot(look_ahead_sec=14.0,
-                     sound_events=[{'t': 0.0, 'playing': True}], **overrides)
+    return _snapshot(look_ahead_sec=14.0, sound_events=[{'t': 0.0, 'playing': True}], **overrides)
 
 
 def test_the_show_stops_once_the_detected_silence_has_persisted():
@@ -630,29 +670,42 @@ def test_the_timeline_resets_when_the_silence_persists_not_when_it_starts():
 
 
 def test_a_gap_shorter_than_the_persistence_never_reaches_the_room_at_all():
-    seamless = _snapshot(now=200.0, look_ahead_sec=14.0,
-                         sound_events=[{'t': 0.0, 'playing': True},
-                                       {'t': 100.0, 'playing': False},
-                                       {'t': 101.5, 'playing': True}])
+    seamless = _snapshot(
+        now=200.0,
+        look_ahead_sec=14.0,
+        sound_events=[
+            {'t': 0.0, 'playing': True},
+            {'t': 100.0, 'playing': False},
+            {'t': 101.5, 'playing': True},
+        ],
+    )
     assert [e['t'] for e in V._room_sound_events(seamless)] == [14.0]
     assert V._song_origin(seamless) == pytest.approx(14.0)
     assert 'PLAYING' in _metric(V._build_metrics(seamless), '●')
 
 
 def test_the_room_holds_its_tail_through_the_window_before_a_resume_lands():
-    mid_gap = _snapshot(now=100.5, look_ahead_sec=14.0, is_playing=False,
-                        sound_events=[{'t': 0.0, 'playing': True},
-                                      {'t': 100.0, 'playing': False}])
+    mid_gap = _snapshot(
+        now=100.5,
+        look_ahead_sec=14.0,
+        is_playing=False,
+        sound_events=[{'t': 0.0, 'playing': True}, {'t': 100.0, 'playing': False}],
+    )
     assert V._song_origin(mid_gap) == pytest.approx(14.0)
     assert 'PLAYING' in _metric(V._build_metrics(mid_gap), '●')
 
 
 def _burst() -> dict:
-    return _snapshot(now=130.0, look_ahead_sec=14.0,
-                     sound_events=[{'t': 0.0, 'playing': True},
-                                   {'t': 60.0, 'playing': False},
-                                   {'t': 100.0, 'playing': True},
-                                   {'t': 105.0, 'playing': False}])
+    return _snapshot(
+        now=130.0,
+        look_ahead_sec=14.0,
+        sound_events=[
+            {'t': 0.0, 'playing': True},
+            {'t': 60.0, 'playing': False},
+            {'t': 100.0, 'playing': True},
+            {'t': 105.0, 'playing': False},
+        ],
+    )
 
 
 def test_a_play_burst_shorter_than_the_look_ahead_never_reaches_the_room():
@@ -662,31 +715,47 @@ def test_a_play_burst_shorter_than_the_look_ahead_never_reaches_the_room():
 
 
 def test_a_start_that_lands_before_the_bypass_is_heard_and_then_cut():
-    brief = _snapshot(now=30.0, look_ahead_sec=14.0,
-                      sound_events=[{'t': 1.0, 'playing': True},
-                                    {'t': 15.0, 'playing': False}])
+    brief = _snapshot(
+        now=30.0,
+        look_ahead_sec=14.0,
+        sound_events=[{'t': 1.0, 'playing': True}, {'t': 15.0, 'playing': False}],
+    )
     assert [e['t'] for e in V._room_sound_events(brief)] == [15.0, 17.0]
     assert V._song_origin(dict(brief, now=16.0)) == pytest.approx(15.0)
     assert V._song_origin(brief) is None
 
 
 def test_room_time_and_list_order_agree_once_one_rule_decides_both():
-    resuming = _snapshot(now=94.0, look_ahead_sec=14.0,
-                         sound_events=[{'t': 0.0, 'playing': True},
-                                       {'t': 60.0, 'playing': False},
-                                       {'t': 80.0, 'playing': True}])
-    for snapshot in (_burst(), resuming, _stopping(now=60.0),
-                     _stopping(now=70.0), _mid_play(now=70.0)):
+    resuming = _snapshot(
+        now=94.0,
+        look_ahead_sec=14.0,
+        sound_events=[
+            {'t': 0.0, 'playing': True},
+            {'t': 60.0, 'playing': False},
+            {'t': 80.0, 'playing': True},
+        ],
+    )
+    for snapshot in (
+        _burst(),
+        resuming,
+        _stopping(now=60.0),
+        _stopping(now=70.0),
+        _mid_play(now=70.0),
+    ):
         heard = V._room_sound_events(snapshot)
         assert V._last_heard(snapshot) == heard[-1]
         assert heard == sorted(heard, key=lambda event: event['t'])
 
 
 def test_a_start_still_waits_for_the_room_although_a_stop_does_not():
-    resuming = _snapshot(look_ahead_sec=14.0,
-                         sound_events=[{'t': 0.0, 'playing': True},
-                                       {'t': 60.0, 'playing': False},
-                                       {'t': 80.0, 'playing': True}])
+    resuming = _snapshot(
+        look_ahead_sec=14.0,
+        sound_events=[
+            {'t': 0.0, 'playing': True},
+            {'t': 60.0, 'playing': False},
+            {'t': 80.0, 'playing': True},
+        ],
+    )
     assert V._song_origin(dict(resuming, now=93.99)) is None
     assert V._song_origin(dict(resuming, now=94.0)) == pytest.approx(94.0)
 
@@ -702,8 +771,7 @@ def test_a_stop_still_travelling_is_drawn_where_the_room_will_hear_it():
     stops = _stop_annotations(fig)
     assert [a.x for a in stops] == [pytest.approx(48.0)]
     assert stops[0].xanchor == 'right'
-    line = next(s for s in fig.layout.shapes
-                if s.type == 'line' and s.line.dash == 'dash')
+    line = next(s for s in fig.layout.shapes if s.type == 'line' and s.line.dash == 'dash')
     assert line.x0 == pytest.approx(48.0)
 
 
@@ -721,12 +789,21 @@ def test_a_heard_stop_is_not_double_counted_as_pending():
 
 
 def test_a_resume_inside_the_window_leaves_no_stop_marker_at_all():
-    pending = _snapshot(now=100.6, look_ahead_sec=14.0, is_playing=False,
-                        sound_events=[{'t': 0.0, 'playing': True},
-                                      {'t': 100.0, 'playing': False}])
-    resumed = _snapshot(now=101.6, look_ahead_sec=14.0, sound_events=[
-        {'t': 0.0, 'playing': True}, {'t': 100.0, 'playing': False},
-        {'t': 101.5, 'playing': True}])
+    pending = _snapshot(
+        now=100.6,
+        look_ahead_sec=14.0,
+        is_playing=False,
+        sound_events=[{'t': 0.0, 'playing': True}, {'t': 100.0, 'playing': False}],
+    )
+    resumed = _snapshot(
+        now=101.6,
+        look_ahead_sec=14.0,
+        sound_events=[
+            {'t': 0.0, 'playing': True},
+            {'t': 100.0, 'playing': False},
+            {'t': 101.5, 'playing': True},
+        ],
+    )
     assert (102.0, False) in V._room_markers(pending)
     assert _stop_annotations(V._build_timeline(pending)) != []
     assert V._room_markers(resumed) == [(14.0, True)]
@@ -751,9 +828,12 @@ def test_the_start_marker_scrolls_out_with_the_window():
 
 
 def test_the_beats_still_in_the_air_at_a_stop_are_never_heard():
-    silenced = _stopping(now=70.0, beats_detected=900, beats_cut=2,
-                         beats=[{'t': 50.0, 'bpm': 128.0},
-                                {'t': 55.0, 'bpm': 128.0}])
+    silenced = _stopping(
+        now=70.0,
+        beats_detected=900,
+        beats_cut=2,
+        beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 55.0, 'bpm': 128.0}],
+    )
     assert V._heard_beats(silenced) == []
     assert _metric(V._build_metrics(silenced), '898') == '898 beats'
 
@@ -762,17 +842,20 @@ def test_the_beats_still_in_the_air_at_a_stop_are_never_heard():
 
 
 def test_the_tempo_is_the_last_beat_the_room_heard():
-    items = V._build_metrics(_mid_play(
-        now=70.0, bpm=0.0,
-        beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 62.0, 'bpm': 174.0}]))
+    items = V._build_metrics(
+        _mid_play(now=70.0, bpm=0.0, beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 62.0, 'bpm': 174.0}])
+    )
     assert _metric(items, '128') == '128 BPM'
 
 
 def test_the_beat_count_is_what_the_room_has_heard():
-    items = V._build_metrics(_mid_play(
-        now=70.0, beats_detected=900,
-        beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 62.0, 'bpm': 128.0},
-               {'t': 64.0, 'bpm': 128.0}]))
+    items = V._build_metrics(
+        _mid_play(
+            now=70.0,
+            beats_detected=900,
+            beats=[{'t': 50.0, 'bpm': 128.0}, {'t': 62.0, 'bpm': 128.0}, {'t': 64.0, 'bpm': 128.0}],
+        )
+    )
     assert _metric(items, '898') == '898 beats'
 
 
@@ -783,7 +866,6 @@ def test_the_payload_window_stays_wider_than_the_span_it_has_to_fill():
 
 
 class _FakeConnection:
-
     live = []
 
     def __init__(self, *args, **kwargs):
@@ -808,8 +890,7 @@ def _poller(monkeypatch):
     return V.SnapshotPoller(port=1)
 
 
-def test_a_poll_survives_a_sibling_dropping_the_connection_underneath_it(
-        monkeypatch):
+def test_a_poll_survives_a_sibling_dropping_the_connection_underneath_it(monkeypatch):
     poller = _poller(monkeypatch)
     poller.snapshot()
     poller._connection.interfere = lambda: setattr(poller, '_connection', None)
@@ -869,12 +950,12 @@ def test_intent_config_covers_exactly_the_intents_the_show_can_enter():
 
 def test_the_legend_advertises_only_reachable_intents():
     assert set(_texts(V._build_legend())) - {V.TITLE} == {
-        f'■ {intent.name}' for intent in LightIntent}
+        f'■ {intent.name}' for intent in LightIntent
+    }
 
 
 def test_the_legend_pin_bites_on_an_intent_no_class_produces(monkeypatch):
-    monkeypatch.setitem(V.INTENT_CONFIG, 'groove', dict(V._DEFAULT_CONFIG,
-                                                        label='GROOVE'))
+    monkeypatch.setitem(V.INTENT_CONFIG, 'groove', dict(V._DEFAULT_CONFIG, label='GROOVE'))
     assert '■ GROOVE' in _texts(V._build_legend())
     assert set(V.INTENT_CONFIG) != {intent.value for intent in LightIntent}
 
@@ -885,25 +966,39 @@ def test_every_reachable_intent_lights_a_slot():
 
 
 def _timing_stats(**streams) -> dict:
-    by_label = {label: {'samples': 8, 'mean_delta_sec': delay,
-                        'mean_error_ms': error, 'max_error_ms': error * 2}
-                for label, (delay, error) in streams.items()}
-    return {'samples': 8 * len(streams), 'mean_delta_sec': 0.0,
-            'mean_error_ms': max(e for _, e in streams.values()),
-            'max_error_ms': max(e for _, e in streams.values()) * 2,
-            'by_label': by_label}
+    by_label = {
+        label: {
+            'samples': 8,
+            'mean_delta_sec': delay,
+            'mean_error_ms': error,
+            'max_error_ms': error * 2,
+        }
+        for label, (delay, error) in streams.items()
+    }
+    return {
+        'samples': 8 * len(streams),
+        'mean_delta_sec': 0.0,
+        'mean_error_ms': max(e for _, e in streams.values()),
+        'max_error_ms': max(e for _, e in streams.values()) * 2,
+        'by_label': by_label,
+    }
 
 
 def test_timing_health_is_green_when_every_stream_matches_its_own_target():
-    items = V._build_metrics(_snapshot(timing_stats=_timing_stats(
-        beat=(14.0, 3.0), intent=(0.31, 2.0),
-        overlay=(14.0, 3.0), refresh=(6.02, 1.0))))
+    items = V._build_metrics(
+        _snapshot(
+            timing_stats=_timing_stats(
+                beat=(14.0, 3.0), intent=(0.31, 2.0), overlay=(14.0, 3.0), refresh=(6.02, 1.0)
+            )
+        )
+    )
     assert _colour_of(items, 'cmd timing') == V.OK_COLOR
 
 
 def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
-    items = V._build_metrics(_snapshot(timing_stats=_timing_stats(
-        beat=(14.0, 3.0), intent=(0.31, 310.0))))
+    items = V._build_metrics(
+        _snapshot(timing_stats=_timing_stats(beat=(14.0, 3.0), intent=(0.31, 310.0)))
+    )
     assert _colour_of(items, 'cmd timing') == V.WARN_COLOR
     assert 'intent' in ''.join(_texts(items))
 
@@ -911,8 +1006,7 @@ def test_timing_health_is_amber_when_one_stream_misses_its_own_target():
 def test_timing_health_does_not_depend_on_how_long_a_stream_waits():
     slow = V._build_metrics(_snapshot(timing_stats=_timing_stats(beat=(14.0, 2.0))))
     fast = V._build_metrics(_snapshot(timing_stats=_timing_stats(intent=(0.31, 2.0))))
-    assert (_colour_of(slow, 'cmd timing')
-            == _colour_of(fast, 'cmd timing') == V.OK_COLOR)
+    assert _colour_of(slow, 'cmd timing') == _colour_of(fast, 'cmd timing') == V.OK_COLOR
 
 
 def test_timing_health_is_muted_before_any_command_has_been_delivered():
@@ -924,11 +1018,13 @@ def test_the_event_buffer_splits_timing_by_stream():
     from autolux.lib.engine.event_buffer import EventBuffer
 
     buffer = EventBuffer(clock=VirtualClock())
-    buffer.set_timing_log([
-        {'label': 'beat', 'target_delta_sec': 14.0, 'actual_delta_sec': 14.004},
-        {'label': 'beat', 'target_delta_sec': 14.0, 'actual_delta_sec': 13.998},
-        {'label': 'intent', 'target_delta_sec': 0.31, 'actual_delta_sec': 0.316},
-    ])
+    buffer.set_timing_log(
+        [
+            {'label': 'beat', 'target_delta_sec': 14.0, 'actual_delta_sec': 14.004},
+            {'label': 'beat', 'target_delta_sec': 14.0, 'actual_delta_sec': 13.998},
+            {'label': 'intent', 'target_delta_sec': 0.31, 'actual_delta_sec': 0.316},
+        ]
+    )
     by_label = buffer.snapshot()['timing_stats']['by_label']
     assert set(by_label) == {'beat', 'intent'}
     assert by_label['beat']['samples'] == 2
@@ -955,8 +1051,9 @@ def test_the_decoder_row_shows_one_bar_per_class():
     texts = _texts(row)
     for name in _decoder_state()['classes']:
         assert name in texts
-    widths = [style['width'] for style in _styles(row)
-              if style.get('background') == V.POSTERIOR_FILL]
+    widths = [
+        style['width'] for style in _styles(row) if style.get('background') == V.POSTERIOR_FILL
+    ]
     assert widths == ['5.0%', '10.0%', '70.0%', '10.0%', '5.0%']
 
 
@@ -969,9 +1066,17 @@ def test_the_decoder_row_shows_the_committed_cursor_and_its_lag():
 
 
 def test_the_decoder_row_says_a_stuck_decoder_is_not_a_quiet_passage():
-    text = ' '.join(_texts(V._build_decoder(_snapshot(
-        decoder=_decoder_state(posterior=None, committed_bar=None,
-                               committed_label=None, lag_bars=None)))))
+    text = ' '.join(
+        _texts(
+            V._build_decoder(
+                _snapshot(
+                    decoder=_decoder_state(
+                        posterior=None, committed_bar=None, committed_label=None, lag_bars=None
+                    )
+                )
+            )
+        )
+    )
     assert 'no evidence' in text
 
 
@@ -1007,8 +1112,7 @@ def test_build_simulation_wires_the_chain_into_the_engine(monkeypatch):
         decoder = FakeDecoder()
 
     monkeypatch.setattr(runner, 'load_section_chain', lambda **kwargs: Chain())
-    components, _ = runner.build_simulation(
-        FileAudioClient.__new__(FileAudioClient))
+    components, _ = runner.build_simulation(FileAudioClient.__new__(FileAudioClient))
     engine = components['light_engine']
     assert engine.section_chain is Chain.stream
     assert engine.section_decoder is Chain.decoder
@@ -1034,8 +1138,7 @@ def test_the_gpu_thread_runs_under_real_time_pacing(nn_artifacts, anchor_mp3):
     from autolux.simulate.runner import PLAYBACK_DELAY_SEC, build_simulation, run_simulation
 
     audio = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, anchor_mp3)
-    buffer = EventBuffer(window_sec=float('inf'),
-                         look_ahead_sec=PLAYBACK_DELAY_SEC)
+    buffer = EventBuffer(window_sec=float('inf'), look_ahead_sec=PLAYBACK_DELAY_SEC)
     components, queue = build_simulation(audio, buffer, threaded=True)
     assert components['section'] is not None
     buffer.start()
@@ -1065,11 +1168,14 @@ def test_a_ui_session_leaves_the_report_it_committed(tmp_path, monkeypatch):
     buffer.set_intent('drop', song_sec=1.0)
     report = tmp_path / 'session.json'
 
-    asyncio.run(cli._run_pipeline(
-        {}, 1.0, buffer, DelayedCommandQueue(14.0, clock=clock), False,
-        report_path=str(report)))
+    asyncio.run(
+        cli._run_pipeline(
+            {}, 1.0, buffer, DelayedCommandQueue(14.0, clock=clock), False, report_path=str(report)
+        )
+    )
 
     import json
+
     assert [b['intent'] for b in json.loads(report.read_text())['intents']] == ['drop']
 
 
@@ -1101,8 +1207,7 @@ def _viewer_session(monkeypatch, pipeline):
     return ui, session
 
 
-def test_the_ui_session_runs_the_pipeline_on_the_loop_it_was_called_from(
-        monkeypatch):
+def test_the_ui_session_runs_the_pipeline_on_the_loop_it_was_called_from(monkeypatch):
     # The pipeline has the main thread now, so it must join the loop already
     # running there rather than start one of its own.
     import asyncio
@@ -1140,8 +1245,7 @@ def test_a_ui_file_session_keeps_the_whole_track():
     clock.advance(400.0)
     buffer.set_intent('drop', song_sec=401.0)
 
-    assert [b['intent'] for b in buffer.to_report()['intents']] \
-        == ['breakdown', 'drop']
+    assert [b['intent'] for b in buffer.to_report()['intents']] == ['breakdown', 'drop']
 
 
 def test_the_pill_leaves_playing_when_the_audio_runs_out():
@@ -1169,17 +1273,18 @@ def test_a_run_with_no_watchdog_says_so_rather_than_claiming_health():
 
 
 def test_a_healthy_chain_reads_live():
-    items = V._build_metrics(_snapshot(
-        shed={'level': 'NONE', 'fault': None, 'sheds': 0, 'sheds_per_min': 0}))
+    items = V._build_metrics(
+        _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 0, 'sheds_per_min': 0})
+    )
     assert _metric(items, 'health') == 'health: ● LIVE'
     assert _colour_of(items, 'health') == V.OK_COLOR
     assert _metric(items, 'sheds') == 'sheds 0/min'
 
 
 def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
-    items = V._build_metrics(_snapshot(
-        shed={'level': 'NN_SHED', 'fault': 'hung_pass',
-              'sheds': 3, 'sheds_per_min': 2}))
+    items = V._build_metrics(
+        _snapshot(shed={'level': 'NN_SHED', 'fault': 'hung_pass', 'sheds': 3, 'sheds_per_min': 2})
+    )
     pill = _metric(items, 'health')
     assert 'DEGRADED' in pill and 'holding intent' in pill
     assert 'hung_pass' in pill
@@ -1187,33 +1292,38 @@ def test_a_shed_chain_names_the_held_intent_and_the_fault_that_holds_it():
 
 
 def test_a_shed_with_no_named_fault_still_reads_degraded():
-    items = V._build_metrics(_snapshot(
-        shed={'level': 'NN_SHED', 'fault': None,
-              'sheds': 1, 'sheds_per_min': 1}))
+    items = V._build_metrics(
+        _snapshot(shed={'level': 'NN_SHED', 'fault': None, 'sheds': 1, 'sheds_per_min': 1})
+    )
     assert _metric(items, 'health') == 'health: ◆ DEGRADED — holding intent'
 
 
 def test_the_rate_and_the_run_total_are_both_readable():
-    items = V._build_metrics(_snapshot(
-        shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 2}))
+    items = V._build_metrics(
+        _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 2})
+    )
     assert _metric(items, 'sheds') == 'sheds 2/min  ·  9 this run'
     assert _colour_of(items, 'sheds') == V.WARN_COLOR
 
 
 def test_a_run_that_settled_hours_ago_stops_shouting_about_it():
-    items = V._build_metrics(_snapshot(
-        shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 0}))
+    items = V._build_metrics(
+        _snapshot(shed={'level': 'NONE', 'fault': None, 'sheds': 9, 'sheds_per_min': 0})
+    )
     assert _metric(items, 'sheds') == 'sheds 0/min  ·  9 this run'
     assert _colour_of(items, 'sheds') == V.MUTED
 
 
 def _degraded_strip() -> dict:
     return _snapshot(
-        now=133.0, look_ahead_sec=14.0, bpm=140.0, intent='atmospheric',
+        now=133.0,
+        look_ahead_sec=14.0,
+        bpm=140.0,
+        intent='atmospheric',
         sound_events=[{'t': 0.0, 'playing': True}],
-        shed={'level': 'NN_SHED', 'fault': None,
-              'sheds': 10, 'sheds_per_min': 4},
-        timing_stats=_timing_stats(beat=(14.01, 9.0), intent=(1.41, 1.0)))
+        shed={'level': 'NN_SHED', 'fault': None, 'sheds': 10, 'sheds_per_min': 4},
+        timing_stats=_timing_stats(beat=(14.01, 9.0), intent=(1.41, 1.0)),
+    )
 
 
 def test_the_strip_reads_as_grouped_rows_rather_than_one_line():
@@ -1236,8 +1346,7 @@ def test_every_row_is_a_line_of_its_own_that_wraps_on_its_own():
 def test_a_ticking_value_reserves_its_width_so_the_row_cannot_jitter():
     rows = V._build_metrics(_degraded_strip())
     assert all(row.style['fontVariantNumeric'] == 'tabular-nums' for row in rows)
-    for prefix in ('● PLAYING', 'room', 'song', '140 BPM', '0 beats',
-                   'beat 14.01s'):
+    for prefix in ('● PLAYING', 'room', 'song', '140 BPM', '0 beats', 'beat 14.01s'):
         assert _span_of(rows, prefix).style['minWidth'], prefix
 
 
@@ -1246,16 +1355,14 @@ def test_the_health_verdict_is_the_prominent_reading():
     assert health.style['fontWeight'] == 'bold'
     assert health.style['fontSize'] == V.HEALTH_FONT_SIZE
     assert health.style['border'].endswith(V.WARN_COLOR)
-    assert (int(V.HEALTH_FONT_SIZE.rstrip('px'))
-            > int(V.TIMING_FONT_SIZE.rstrip('px')))
+    assert int(V.HEALTH_FONT_SIZE.rstrip('px')) > int(V.TIMING_FONT_SIZE.rstrip('px'))
 
 
 def test_the_command_timing_block_is_secondary_and_one_span_per_stream():
     timing = V._build_metrics(_degraded_strip())[-1]
     assert timing.style['fontSize'] == V.TIMING_FONT_SIZE
     assert timing.style['borderTop'].endswith(V.BORDER)
-    assert _texts(timing) == ['cmd timing: on target',
-                              'beat 14.01s ±9ms', 'intent 1.41s ±1ms']
+    assert _texts(timing) == ['cmd timing: on target', 'beat 14.01s ±9ms', 'intent 1.41s ±1ms']
 
 
 def test_a_run_with_no_delivered_command_still_lays_out_four_rows():
@@ -1265,17 +1372,18 @@ def test_a_run_with_no_delivered_command_still_lays_out_four_rows():
 
 def _gridded(bar_sec=2.0, bars=6, first_bar=0, **overrides):
     edges = [10.0 + index * bar_sec for index in range(bars)]
-    snap = _snapshot(now=40.0, look_ahead_sec=14.0,
-                     sound_events=[{'t': 0.0, 'playing': True}],
-                     decoder={'bar_edges': edges, 'first_bar': first_bar,
-                              'bar_sec': bar_sec, 'classes': []})
+    snap = _snapshot(
+        now=40.0,
+        look_ahead_sec=14.0,
+        sound_events=[{'t': 0.0, 'playing': True}],
+        decoder={'bar_edges': edges, 'first_bar': first_bar, 'bar_sec': bar_sec, 'classes': []},
+    )
     snap.update(overrides)
     return snap
 
 
 def _lines(fig, colour):
-    return [s for s in fig.layout.shapes
-            if s.type == 'line' and s.line.color == colour]
+    return [s for s in fig.layout.shapes if s.type == 'line' and s.line.color == colour]
 
 
 def test_the_timeline_draws_the_decoders_own_downbeats():

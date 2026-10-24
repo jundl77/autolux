@@ -8,6 +8,7 @@ CAMP/audio_map.json in the exact format stream_extract's --ids-file and
 --audio-map consume.  --post-extract re-checks that every F3 sidecar exists
 and is a loadable npz with the F3/hop1 geometry.  Never touches the GPU.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,8 +57,9 @@ def check_id(corpus: Path, track_id: str, rows: dict) -> dict:
     except (OSError, ValueError) as error:
         state["hand_json"] = f"UNREADABLE ({error})"
     state["audio"] = "ok" if (corpus / "audio" / f"{track_id}.mp3").exists() else "MISSING"
-    state["beat_grid"] = ("ok" if (corpus / "annotations" / "beats"
-                                   / f"{track_id}.beat.csv").exists() else "MISSING")
+    state["beat_grid"] = (
+        "ok" if (corpus / "annotations" / "beats" / f"{track_id}.beat.csv").exists() else "MISSING"
+    )
     row = rows.get(track_id)
     if row is None:
         state["clean_row"] = "MISSING"
@@ -79,10 +81,19 @@ def admit(corpus: Path, track_id: str) -> None:
     flags = 0x00004000 if sys.platform == "win32" else 0
     print(f"\nadmitting {track_id} via training/hand_label_admission.py ...", flush=True)
     result = subprocess.run(
-        [str(VENV_PY), str(REPO / "training" / "hand_label_admission.py"),
-         track_id, "--data-dir", str(corpus)],
-        capture_output=True, text=True, cwd=str(REPO), creationflags=flags,
-        timeout=1800)
+        [
+            str(VENV_PY),
+            str(REPO / "training" / "hand_label_admission.py"),
+            track_id,
+            "--data-dir",
+            str(corpus),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO),
+        creationflags=flags,
+        timeout=1800,
+    )
     sys.stdout.write(result.stdout)
     if result.returncode != 0:
         sys.stderr.write(result.stderr)
@@ -92,18 +103,19 @@ def admit(corpus: Path, track_id: str) -> None:
 def write_extraction_inputs(corpus: Path, camp: Path, ids: list) -> list:
     camp.mkdir(parents=True, exist_ok=True)
     missing = [i for i in ids if not (F3_DIR / f"{i}.npz").exists()]
-    lines = ["# l9b campaign (decision #341): new hand tracks missing an F3 sidecar",
-             "# consumed by training.nn.ceiling.stream_extract --ids-file"]
-    (camp / "extract_ids.txt").write_text("\n".join(lines + missing) + "\n",
-                                          encoding="utf-8")
+    lines = [
+        "# l9b campaign (decision #341): new hand tracks missing an F3 sidecar",
+        "# consumed by training.nn.ceiling.stream_extract --ids-file",
+    ]
+    (camp / "extract_ids.txt").write_text("\n".join(lines + missing) + "\n", encoding="utf-8")
     audio_map = {i: str((corpus / "audio" / f"{i}.mp3").resolve()) for i in missing}
-    (camp / "audio_map.json").write_text(
-        json.dumps(audio_map, indent=2) + "\n", encoding="utf-8")
+    (camp / "audio_map.json").write_text(json.dumps(audio_map, indent=2) + "\n", encoding="utf-8")
     return missing
 
 
 def post_extract(corpus: Path, ids: list) -> None:
     import numpy as np
+
     rows = clean_rows(corpus)
     failures = []
     for track_id in ids:
@@ -111,9 +123,11 @@ def post_extract(corpus: Path, ids: list) -> None:
         try:
             with np.load(path) as archive:
                 emb = archive["emb"]
-                geometry = (int(archive["stream_causal"]),
-                            float(archive["stream_margin_sec"]),
-                            float(archive["stream_hop_sec"]))
+                geometry = (
+                    int(archive["stream_causal"]),
+                    float(archive["stream_margin_sec"]),
+                    float(archive["stream_hop_sec"]),
+                )
                 cell_sec = float(archive["label_frame_sec"])
             if emb.ndim != 3 or emb.shape[1] != 2 or emb.shape[2] != 1024 or emb.shape[0] < 1:
                 raise RuntimeError(f"emb shape {emb.shape}")
@@ -147,8 +161,7 @@ def main(argv: list | None = None) -> int:
     states = [check_id(corpus, i, clean_rows(corpus)) for i in ids]
     print_table(states)
 
-    needs = [s["id"] for s in states
-             if s["beat_grid"] == "MISSING" or s["clean_row"] != "ok"]
+    needs = [s["id"] for s in states if s["beat_grid"] == "MISSING" or s["clean_row"] != "ok"]
     for track_id in needs:
         admit(corpus, track_id)
     if needs:
@@ -156,9 +169,16 @@ def main(argv: list | None = None) -> int:
         print()
         print_table(states)
 
-    broken = [s["id"] for s in states
-              if not (s["hand_json"] == "ok" and s["audio"] == "ok"
-                      and s["beat_grid"] == "ok" and s["clean_row"] == "ok")]
+    broken = [
+        s["id"]
+        for s in states
+        if not (
+            s["hand_json"] == "ok"
+            and s["audio"] == "ok"
+            and s["beat_grid"] == "ok"
+            and s["clean_row"] == "ok"
+        )
+    ]
     if broken:
         raise SystemExit(f"still not fully admitted after admission: {broken}")
 

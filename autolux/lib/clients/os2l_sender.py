@@ -76,8 +76,9 @@ class Os2lSender:
     def send_message(self, message: str, delay_sec: float = 0.0):
         self.check_health()
         try:
-            self.message_queue.put_nowait((self._clock.monotonic() + delay_sec,
-                                          next(self._message_sequence), message))
+            self.message_queue.put_nowait(
+                (self._clock.monotonic() + delay_sec, next(self._message_sequence), message)
+            )
         except Full:
             raise RuntimeError('OS2L output queue is full') from None
 
@@ -150,8 +151,10 @@ class Os2lSender:
             beat_position: float = self.analyser.get_beat_position()
             time_elapsed: datetime.timedelta = self.analyser.get_song_current_duration()
             time_elapsed_ms: int = int(time_elapsed.total_seconds() * 1000)
-            self.send_message(os2l_messages.update_message(beat_position, time_elapsed_ms),
-                              delay_sec=self._playback_delay_sec)
+            self.send_message(
+                os2l_messages.update_message(beat_position, time_elapsed_ms),
+                delay_sec=self._playback_delay_sec,
+            )
             self.last_update_sent = now
 
     def _send_message(self, message: str):

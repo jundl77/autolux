@@ -9,26 +9,33 @@ threshold = 0.5
 
 previous_embedding = None
 
-click_sound: float = 0.7 * np.sin(2. * np.pi * np.arange(block_size) / block_size * sample_rate / 3000.)
+click_sound: float = 0.7 * np.sin(
+    2.0 * np.pi * np.arange(block_size) / block_size * sample_rate / 3000.0
+)
 
 p = pyaudio.PyAudio()
-stream_out = p.open(format=pyaudio.paFloat32,
-                    channels=1,
-                    output_device_index=12,
-                    rate=sample_rate,
-                    output=True,
-                    frames_per_buffer=block_size)
+stream_out = p.open(
+    format=pyaudio.paFloat32,
+    channels=1,
+    output_device_index=12,
+    rate=sample_rate,
+    output=True,
+    frames_per_buffer=block_size,
+)
 
-model = openl3.models.load_audio_embedding_model(input_repr="linear", content_type="env",
-                                                 embedding_size=512)
+model = openl3.models.load_audio_embedding_model(
+    input_repr="linear", content_type="env", embedding_size=512
+)
+
 
 def audio_callback(in_data, frame_count, time_info, status):
     global previous_embedding
 
     audio_data = np.frombuffer(in_data, dtype=np.float32)
 
-    embeddings, _ = openl3.get_audio_embedding(audio_data, sample_rate, model=model,
-                               input_repr="linear", embedding_size=512)
+    embeddings, _ = openl3.get_audio_embedding(
+        audio_data, sample_rate, model=model, input_repr="linear", embedding_size=512
+    )
 
     if previous_embedding is not None:
         similarity = cosine_similarity(previous_embedding.reshape(1, -1), embeddings.reshape(1, -1))
@@ -43,13 +50,15 @@ def audio_callback(in_data, frame_count, time_info, status):
     return None, pyaudio.paContinue
 
 
-stream = p.open(format=pyaudio.paFloat32,
-                channels=1,
-                input_device_index=4,
-                rate=sample_rate,
-                input=True,
-                frames_per_buffer=block_size,
-                stream_callback=audio_callback)
+stream = p.open(
+    format=pyaudio.paFloat32,
+    channels=1,
+    input_device_index=4,
+    rate=sample_rate,
+    input=True,
+    frames_per_buffer=block_size,
+    stream_callback=audio_callback,
+)
 
 stream.start_stream()
 stream_out.start_stream()

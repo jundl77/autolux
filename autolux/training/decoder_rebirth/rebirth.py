@@ -23,6 +23,7 @@ decoder produces comes from ``FixedLagViterbi`` unchanged; the policy is applied
 by rewriting the initial distribution at birth, which is the one thing the
 principle is about.
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,13 +59,23 @@ R3 = Rebirth(False, False, True)
 R1_R2 = Rebirth(True, True, False)
 FULL = Rebirth(True, True, True)
 
-ARMS = {"shipped": SHIPPED, "R1_carry": R1, "R2_preaged": R2, "R3_preroll": R3,
-        "R1_R2": R1_R2, "full_R1_R2_R3": FULL}
+ARMS = {
+    "shipped": SHIPPED,
+    "R1_carry": R1,
+    "R2_preaged": R2,
+    "R3_preroll": R3,
+    "R1_R2": R1_R2,
+    "full_R1_R2_R3": FULL,
+}
 
 
-def live_grid(beats, *, anchor: int = FIRST_BEAT_BAR_POSITION,
-              gap_sec: float = BEAT_GAP_SEC,
-              re_anchor_position: int = RE_ANCHOR_BAR_POSITION) -> LiveGrid:
+def live_grid(
+    beats,
+    *,
+    anchor: int = FIRST_BEAT_BAR_POSITION,
+    gap_sec: float = BEAT_GAP_SEC,
+    re_anchor_position: int = RE_ANCHOR_BAR_POSITION,
+) -> LiveGrid:
     """``SectionDecoder.push_beat``'s grid, reproduced offline.
 
     ``orphans`` are the bars the runtime never observes: a re-anchor sets the
@@ -89,15 +100,15 @@ def live_grid(beats, *, anchor: int = FIRST_BEAT_BAR_POSITION,
     if edges.size < 2:
         raise RuntimeError(f"{edges.size} bar lines -- there is no grid to decode on")
     closed = np.append(edges, edges[-1] + float(np.median(np.diff(edges))))
-    return LiveGrid(closed, tuple(re_anchors),
-                    tuple(bar - 1 for bar in re_anchors if bar >= 1))
+    return LiveGrid(closed, tuple(re_anchors), tuple(bar - 1 for bar in re_anchors if bar >= 1))
 
 
 class LiveCommitter:
     """One ``FixedLagViterbi`` across a track's whole lifecycle of births."""
 
-    def __init__(self, viterbi, policy: Rebirth = SHIPPED, *,
-                 carry_override: int | None = None) -> None:
+    def __init__(
+        self, viterbi, policy: Rebirth = SHIPPED, *, carry_override: int | None = None
+    ) -> None:
         self._viterbi = viterbi
         self._policy = policy
         self._override = carry_override
@@ -120,21 +131,26 @@ class LiveCommitter:
             logging.warning(
                 f'[rebirth] the priors give {viterbi.classes[carried]!r} no way '
                 f'to start a track, so a birth cannot carry it -- spreading the '
-                f'start-of-track prior instead')
+                f'start-of-track prior instead'
+            )
             carried = None
         states = viterbi._final_state if self._policy.preaged else viterbi._entry_state
         initial = np.full(len(viterbi._state_class), -np.inf, dtype=np.float64)
         if carried is None:
             initial[states] = viterbi.priors.log_initial + viterbi._entry_bonus
         else:
-            initial[states[carried]] = (viterbi.priors.log_initial[carried]
-                                        + viterbi._entry_bonus[carried])
+            initial[states[carried]] = (
+                viterbi.priors.log_initial[carried] + viterbi._entry_bonus[carried]
+            )
         viterbi._log_initial = initial
         self._base = int(first_bar)
         self._offset = 0
-        self.births.append({"bar": int(first_bar),
-                            "carried": None if carried is None
-                            else viterbi.classes[carried]})
+        self.births.append(
+            {
+                "bar": int(first_bar),
+                "carried": None if carried is None else viterbi.classes[carried],
+            }
+        )
         if self._policy.preroll:
             viterbi.push(None, None)
             self._offset = 1
@@ -156,8 +172,15 @@ class LiveCommitter:
         return self._emit(self._viterbi.flush())
 
 
-def decode_live(grid: LiveGrid, posteriors, boundary, viterbi,
-                policy: Rebirth = SHIPPED, *, carry_override: int | None = None) -> tuple:
+def decode_live(
+    grid: LiveGrid,
+    posteriors,
+    boundary,
+    viterbi,
+    policy: Rebirth = SHIPPED,
+    *,
+    carry_override: int | None = None,
+) -> tuple:
     """``(label per bar, birth records)``; ``UNDECODED`` where nothing committed.
 
     A bar is undecoded for exactly the two reasons the runtime produces one: it

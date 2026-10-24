@@ -1,4 +1,5 @@
 """Assembling the show's NN path out of the shipped artifacts."""
+
 from __future__ import annotations
 
 import logging
@@ -67,8 +68,7 @@ class SectionStream:
             self.tracker.feed(samples)
 
     def due(self) -> bool:
-        return (self.posteriors.due()
-                or (self.tracker is not None and self.tracker.due()))
+        return self.posteriors.due() or (self.tracker is not None and self.tracker.due())
 
     def run_pass(self) -> list:
         if self.posteriors.due():
@@ -112,17 +112,21 @@ def corpus_dir() -> Path:
 def artifacts(data_dir=None) -> Artifacts:
     root = Path(data_dir) if data_dir is not None else corpus_dir()
     generation = root / "models" / _GENERATION
-    return Artifacts(affine=generation / _AFFINE,
-                     graph=generation / MODEL_VERSION / _GRAPH,
-                     priors=generation / _PRIORS)
+    return Artifacts(
+        affine=generation / _AFFINE,
+        graph=generation / MODEL_VERSION / _GRAPH,
+        priors=generation / _PRIORS,
+    )
 
 
 def artifacts_present(data_dir=None) -> bool:
     try:
         return not artifacts(data_dir).missing()
     except (OSError, ValueError) as error:
-        logging.warning(f'[chain] cannot resolve the corpus directory '
-                        f'({error!r}) — treating the model as absent')
+        logging.warning(
+            f'[chain] cannot resolve the corpus directory '
+            f'({error!r}) — treating the model as absent'
+        )
         return False
 
 
@@ -156,10 +160,10 @@ def read_geometry(data_dir=None) -> Geometry:
         raise FileNotFoundError(
             f"the shipped model artifacts are missing: {', '.join(absent)} -- "
             f"they live in the gitignored corpus directory, not in the "
-            f"repository (see $RAVEFORM_DATA_DIR)")
+            f"repository (see $RAVEFORM_DATA_DIR)"
+        )
     head = load_head_geometry(found.graph)
-    stream = M.load_stream_geometry(found.affine,
-                                    label_frame_sec=head.label_frame_sec)
+    stream = M.load_stream_geometry(found.affine, label_frame_sec=head.label_frame_sec)
     mean, _ = M.load_input_affine(found.affine)
     return Geometry(stream, head, mean)
 
@@ -167,8 +171,7 @@ def read_geometry(data_dir=None) -> Geometry:
 def resolve_backend(device: str | None = None, fp16: bool = True) -> dict:
     from autolux.lib.analyser import mert_stream as M
 
-    return {"device": device or M.best_device(),
-            "precision": "fp16" if fp16 else "fp32"}
+    return {"device": device or M.best_device(), "precision": "fp16" if fp16 else "fp32"}
 
 
 def _check_class_space(priors, model_classes, config_classes) -> None:
@@ -189,31 +192,43 @@ def _check_class_space(priors, model_classes, config_classes) -> None:
         raise ValueError(
             f"the decoder priors name {len(priors.classes)} classes "
             f"({', '.join(priors.classes)}), not the full vocabulary "
-            f"({', '.join(expected)}) the show decodes")
+            f"({', '.join(expected)}) the show decodes"
+        )
     if tuple(config_classes) != expected:
         raise ValueError(
             f"the decoder config's class_space is {', '.join(config_classes)}, "
             f"not the vocabulary {', '.join(expected)} -- it was swept in a "
-            f"different space than the one it would decode")
+            f"different space than the one it would decode"
+        )
     if model_classes != len(expected):
         raise ValueError(
             f"the model's label head is "
             f"{'undeclared' if model_classes is None else f'{model_classes}-wide'}"
             f" against the vocabulary's {len(expected)} classes -- the graph "
-            f"and the priors would disagree about what each column means")
+            f"and the priors would disagree about what each column means"
+        )
     for name in expected:
         intent_for_class(name)
 
 
-def build_section_chain(data_dir=None, *, device: str | None = None,
-                        fp16: bool = True, watchdog=None,
-                        extractor=None, tracker=None) -> SectionChain:
+def build_section_chain(
+    data_dir=None,
+    *,
+    device: str | None = None,
+    fp16: bool = True,
+    watchdog=None,
+    extractor=None,
+    tracker=None,
+) -> SectionChain:
     from autolux.lib.analyser import mert_stream as M
     from autolux.lib.analyser.section_model import PosteriorStream, SectionModel
-    from autolux.lib.engine.section_decoder import (SHIPPING_DECODER_CONFIG, Priors,
-                                            SectionDecoder,
-                                            decoder_config_classes,
-                                            load_decoder_config)
+    from autolux.lib.engine.section_decoder import (
+        SHIPPING_DECODER_CONFIG,
+        Priors,
+        SectionDecoder,
+        decoder_config_classes,
+        load_decoder_config,
+    )
 
     found = artifacts(data_dir)
     geometry, head, mean = read_geometry(data_dir)
@@ -223,8 +238,7 @@ def build_section_chain(data_dir=None, *, device: str | None = None,
     model = SectionModel(found.graph, mean=mean, geometry=head)
     priors = Priors.load(found.priors)
     params = load_decoder_config(SHIPPING_DECODER_CONFIG)
-    _check_class_space(priors, model.num_classes,
-                       decoder_config_classes(SHIPPING_DECODER_CONFIG))
+    _check_class_space(priors, model.num_classes, decoder_config_classes(SHIPPING_DECODER_CONFIG))
 
     stage = None if extractor is None else extractor(geometry)
     build_encoder = None
@@ -252,16 +266,15 @@ def build_section_chain(data_dir=None, *, device: str | None = None,
 
         phase = BarPhaseFusion(tracker, watchdog)
 
-    feature_latency_sec = (geometry.margin_sec + geometry.hop_sec
-                           + head.future_sec)
-    decoder = SectionDecoder(priors, params,
-                             feature_latency_sec=feature_latency_sec,
-                             phase=phase)
-    logging.info(f'[chain] {MODEL_VERSION} on {_where(stage)} | '
-                 f'feature latency {feature_latency_sec:.4f}s '
-                 f'(F {geometry.margin_sec:g} + hop {geometry.hop_sec:g} + '
-                 f'head {head.future_sec:g}) | bar grid: '
-                 f'{"counting" if tracker is None else "fused tracker"}')
+    feature_latency_sec = geometry.margin_sec + geometry.hop_sec + head.future_sec
+    decoder = SectionDecoder(priors, params, feature_latency_sec=feature_latency_sec, phase=phase)
+    logging.info(
+        f'[chain] {MODEL_VERSION} on {_where(stage)} | '
+        f'feature latency {feature_latency_sec:.4f}s '
+        f'(F {geometry.margin_sec:g} + hop {geometry.hop_sec:g} + '
+        f'head {head.future_sec:g}) | bar grid: '
+        f'{"counting" if tracker is None else "fused tracker"}'
+    )
     return SectionChain(stream, decoder, feature_latency_sec)
 
 
@@ -272,8 +285,7 @@ def _build_tracker(data_dir, device):
 
     generation = generation_dir(data_dir)
     if not bar_tracker.tracker_present(generation):
-        logging.info('[chain] no bar tracker artifacts — the bar grid is the '
-                     'counting rule')
+        logging.info('[chain] no bar tracker artifacts — the bar grid is the counting rule')
         return None
     return bar_tracker.load_bar_tracker(generation, device=device)
 

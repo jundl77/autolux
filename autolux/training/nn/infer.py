@@ -51,6 +51,7 @@ contents.  The rest follows the session pinning in ``export_onnx.session``:
 windows are summed in a fixed order into float64, and parallelism is per
 *track* -- no track's numbers depend on how many workers ran.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -102,8 +103,8 @@ def _aligned(seconds: float, *, up: bool) -> int:
     return LABEL_POOL * (math.ceil(groups) if up else max(1, round(groups)))
 
 
-HOP_FRAMES = _aligned(HOP_SEC, up=False)        # 2 frames, 92.9 ms
-EDGE_FRAMES = _aligned(EDGE_SEC, up=True)       # 22 frames, 1.02 s
+HOP_FRAMES = _aligned(HOP_SEC, up=False)  # 2 frames, 92.9 ms
+EDGE_FRAMES = _aligned(EDGE_SEC, up=True)  # 22 frames, 1.02 s
 
 # A window contributes only its interior; a hop wider than that interior would
 # leave frames no window votes on.
@@ -133,8 +134,9 @@ def usable_frames(n_frames: int) -> int:
     return (int(n_frames) // LABEL_POOL) * LABEL_POOL
 
 
-def window_offsets(n_frames: int, *, window_frames: int = WINDOW_FRAMES,
-                   hop_frames: int = HOP_FRAMES) -> list:
+def window_offsets(
+    n_frames: int, *, window_frames: int = WINDOW_FRAMES, hop_frames: int = HOP_FRAMES
+) -> list:
     """Start frame of every window, ending exactly at the end of the track.
 
     The last offset is clamped to ``n_frames - window_frames`` whether or not
@@ -149,9 +151,15 @@ def window_offsets(n_frames: int, *, window_frames: int = WINDOW_FRAMES,
     return offsets
 
 
-def contribution_span(offset: int, *, n_frames: int, first: bool, last: bool,
-                      window_frames: int = WINDOW_FRAMES,
-                      edge_frames: int = EDGE_FRAMES) -> tuple:
+def contribution_span(
+    offset: int,
+    *,
+    n_frames: int,
+    first: bool,
+    last: bool,
+    window_frames: int = WINDOW_FRAMES,
+    edge_frames: int = EDGE_FRAMES,
+) -> tuple:
     """``[lo, hi)`` frames of the track this window is allowed to vote on.
 
     The interior of the window, except at the two ends of the track where no
@@ -196,9 +204,9 @@ class TrackPosteriors(NamedTuple):
     would read a 200 ms hop as a 93 ms one with nothing to notice.
     """
 
-    label_post: np.ndarray      # [n // LABEL_POOL, NUM_SECTION_CLASSES] float32
-    boundary: np.ndarray        # [n] float32, mean of the per-window sigmoids
-    coverage: np.ndarray        # [n] uint16, windows that voted on each frame
+    label_post: np.ndarray  # [n // LABEL_POOL, NUM_SECTION_CLASSES] float32
+    boundary: np.ndarray  # [n] float32, mean of the per-window sigmoids
+    coverage: np.ndarray  # [n] uint16, windows that voted on each frame
     n_frames: int
     windows: int
     window_frames: int
@@ -206,9 +214,14 @@ class TrackPosteriors(NamedTuple):
     edge_frames: int
 
 
-def infer_track(sess, mel: np.ndarray, *, window_frames: int = WINDOW_FRAMES,
-                hop_frames: int = HOP_FRAMES,
-                edge_frames: int = EDGE_FRAMES) -> TrackPosteriors:
+def infer_track(
+    sess,
+    mel: np.ndarray,
+    *,
+    window_frames: int = WINDOW_FRAMES,
+    hop_frames: int = HOP_FRAMES,
+    edge_frames: int = EDGE_FRAMES,
+) -> TrackPosteriors:
     """Whole-track posteriors by sliding ``sess``'s graph over ``mel``.
 
     ``mel`` is ``[n, n_mels]`` as written by the batch sim.  Returns the label
@@ -222,8 +235,11 @@ def infer_track(sess, mel: np.ndarray, *, window_frames: int = WINDOW_FRAMES,
     # of the window's output instead of resampled, so it is checked rather than
     # asserted in a comment: an unaligned window or hop silently shifts every
     # label posterior by half a pooled frame.
-    for name, value in (("window_frames", window_frames), ("hop_frames", hop_frames),
-                        ("edge_frames", edge_frames)):
+    for name, value in (
+        ("window_frames", window_frames),
+        ("hop_frames", hop_frames),
+        ("edge_frames", edge_frames),
+    ):
         if int(value) % LABEL_POOL:
             raise ValueError(
                 f"{name}={value} is not a multiple of the label pooling factor "
@@ -246,33 +262,38 @@ def infer_track(sess, mel: np.ndarray, *, window_frames: int = WINDOW_FRAMES,
     boundary_sum = np.zeros(n_frames, dtype=np.float64)
     coverage = np.zeros(n_frames, dtype=np.int32)
 
-    offsets = window_offsets(n_frames, window_frames=window_frames,
-                             hop_frames=hop_frames)
-    if any(offset % LABEL_POOL for offset in offsets):   # pragma: no cover
+    offsets = window_offsets(n_frames, window_frames=window_frames, hop_frames=hop_frames)
+    if any(offset % LABEL_POOL for offset in offsets):  # pragma: no cover
         raise ValueError(
             f"window offsets {[o for o in offsets if o % LABEL_POOL][:4]} are not "
             f"pool-aligned despite aligned inputs -- window_offsets has changed"
         )
     for index, offset in enumerate(offsets):
         label_logits, boundary_logits = run_window(
-            sess, padded[offset:offset + window_frames][None])
+            sess, padded[offset : offset + window_frames][None]
+        )
         label = _softmax(label_logits[0])
         boundary = _sigmoid(boundary_logits[0])
 
         lo, hi = contribution_span(
-            offset, n_frames=n_frames, first=index == 0,
+            offset,
+            n_frames=n_frames,
+            first=index == 0,
             last=index == len(offsets) - 1,
-            window_frames=window_frames, edge_frames=edge_frames)
-        if hi <= lo:                                   # pragma: no cover
+            window_frames=window_frames,
+            edge_frames=edge_frames,
+        )
+        if hi <= lo:  # pragma: no cover
             continue
-        boundary_sum[lo:hi] += boundary[lo - offset:hi - offset]
+        boundary_sum[lo:hi] += boundary[lo - offset : hi - offset]
         coverage[lo:hi] += 1
         # Frame spans are pool-aligned because offset, edge and window all are
         # (checked above), so the pooled slice is exact rather than rounded.
-        label_sum[lo // LABEL_POOL:hi // LABEL_POOL] += \
-            label[(lo - offset) // LABEL_POOL:(hi - offset) // LABEL_POOL]
+        label_sum[lo // LABEL_POOL : hi // LABEL_POOL] += label[
+            (lo - offset) // LABEL_POOL : (hi - offset) // LABEL_POOL
+        ]
 
-    if not coverage.all():                             # pragma: no cover
+    if not coverage.all():  # pragma: no cover
         raise RuntimeError(
             f"{int((coverage == 0).sum())} frames were covered by no window -- "
             f"the hop/edge geometry leaves holes"
@@ -281,9 +302,16 @@ def infer_track(sess, mel: np.ndarray, *, window_frames: int = WINDOW_FRAMES,
     pooled_coverage = coverage[::LABEL_POOL].astype(np.float64)
     label_post = (label_sum / pooled_coverage[:, None]).astype(np.float32)
     boundary_mean = (boundary_sum / coverage).astype(np.float32)
-    return TrackPosteriors(label_post, boundary_mean, coverage.astype(np.uint16),
-                           n_frames, len(offsets), int(window_frames),
-                           int(hop_frames), int(edge_frames))
+    return TrackPosteriors(
+        label_post,
+        boundary_mean,
+        coverage.astype(np.uint16),
+        n_frames,
+        len(offsets),
+        int(window_frames),
+        int(hop_frames),
+        int(edge_frames),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -339,8 +367,7 @@ def save_posteriors(path, arrays: dict) -> None:
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
         for name, value in arrays.items():
             member = io.BytesIO()
-            np.lib.format.write_array(member, np.asanyarray(value),
-                                      allow_pickle=False)
+            np.lib.format.write_array(member, np.asanyarray(value), allow_pickle=False)
             info = zipfile.ZipInfo(f"{name}.npy", date_time=_ZIP_EPOCH)
             info.compress_type = zipfile.ZIP_STORED
             info.external_attr = 0o600 << 16
@@ -368,10 +395,12 @@ def sidecar_is_current(path, model_sha: str) -> bool:
         return False
     try:
         with np.load(path) as archive:
-            return (str(archive["model_sha"]) == model_sha
-                    and int(archive["window_frames"]) == WINDOW_FRAMES
-                    and int(archive["hop_frames"]) == HOP_FRAMES
-                    and int(archive["edge_frames"]) == EDGE_FRAMES)
+            return (
+                str(archive["model_sha"]) == model_sha
+                and int(archive["window_frames"]) == WINDOW_FRAMES
+                and int(archive["hop_frames"]) == HOP_FRAMES
+                and int(archive["edge_frames"]) == EDGE_FRAMES
+            )
     except (OSError, KeyError, ValueError, zipfile.BadZipFile):
         return False
 
@@ -393,9 +422,16 @@ def track_ids(data_dir) -> list:
     return sorted(ref.youtube_id for ref in candidates)
 
 
-def generate(data_dir, *, model_path=None, out_dir=None, ids=None,
-             workers: int = 1, force: bool = False,
-             progress_every: int = 25) -> dict:
+def generate(
+    data_dir,
+    *,
+    model_path=None,
+    out_dir=None,
+    ids=None,
+    workers: int = 1,
+    force: bool = False,
+    progress_every: int = 25,
+) -> dict:
     """Write a posterior sidecar for every id; returns the run manifest."""
     data_dir = Path(data_dir)
     model_path = Path(model_path) if model_path else model_dir(data_dir) / MODEL_FILE
@@ -420,8 +456,7 @@ def generate(data_dir, *, model_path=None, out_dir=None, ids=None,
     def one(youtube_id: str) -> dict:
         path = out_dir / f"{youtube_id}.npz"
         if not force and sidecar_is_current(path, model_sha):
-            return {"youtube_id": youtube_id, "cached": True,
-                    "bytes": path.stat().st_size}
+            return {"youtube_id": youtube_id, "cached": True, "bytes": path.stat().st_size}
         clock = time.perf_counter()
         try:
             mel = load_sidecar(features / f"{youtube_id}.npz")
@@ -444,15 +479,24 @@ def generate(data_dir, *, model_path=None, out_dir=None, ids=None,
             stale = path.exists() and not sidecar_is_current(path, model_sha)
             if stale:
                 path.unlink(missing_ok=True)
-            print(f"  FAILED {youtube_id}: {error!r}"
-                  f"{' (removed stale sidecar)' if stale else ''}", flush=True)
-            return {"youtube_id": youtube_id, "cached": False,
-                    "removed_stale": stale,
-                    "error": f"{type(error).__name__}: {error}"}
-        return {"youtube_id": youtube_id, "cached": False,
-                "frames": track.n_frames, "windows": track.windows,
-                "bytes": path.stat().st_size,
-                "seconds": round(time.perf_counter() - clock, 3)}
+            print(
+                f"  FAILED {youtube_id}: {error!r}{' (removed stale sidecar)' if stale else ''}",
+                flush=True,
+            )
+            return {
+                "youtube_id": youtube_id,
+                "cached": False,
+                "removed_stale": stale,
+                "error": f"{type(error).__name__}: {error}",
+            }
+        return {
+            "youtube_id": youtube_id,
+            "cached": False,
+            "frames": track.n_frames,
+            "windows": track.windows,
+            "bytes": path.stat().st_size,
+            "seconds": round(time.perf_counter() - clock, 3),
+        }
 
     def report(record: dict) -> dict:
         done["count"] += 1
@@ -461,9 +505,11 @@ def generate(data_dir, *, model_path=None, out_dir=None, ids=None,
             elapsed = time.perf_counter() - started
             rate = index / elapsed if elapsed else 0.0
             eta = (len(ids) - index) / rate if rate else 0.0
-            print(f"  {index}/{len(ids)}  {elapsed / 60:.1f} min elapsed, "
-                  f"{eta / 60:.1f} min left  ({rate * 60:.1f} tracks/min)",
-                  flush=True)
+            print(
+                f"  {index}/{len(ids)}  {elapsed / 60:.1f} min elapsed, "
+                f"{eta / 60:.1f} min left  ({rate * 60:.1f} tracks/min)",
+                flush=True,
+            )
         return record
 
     if workers > 1:
@@ -512,19 +558,30 @@ def generate(data_dir, *, model_path=None, out_dir=None, ids=None,
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
-    parser.add_argument("--model", type=Path, default=None,
-                        help=f"exported graph (default: <data-dir>/models/v1/{MODEL_FILE})")
-    parser.add_argument("--out-dir", type=Path, default=None,
-                        help=f"default: <data-dir>/{POSTERIORS_DIR}")
-    parser.add_argument("--ids", nargs="*", default=None,
-                        help="youtube ids (default: every clean track)")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="stop after N ids (0 = all)")
-    parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 4),
-                        help="concurrent single-threaded sessions (default: %(default)s)")
-    parser.add_argument("--force", action="store_true",
-                        help="recompute even where the sidecar already matches "
-                             "this model and geometry")
+    parser.add_argument(
+        "--model",
+        type=Path,
+        default=None,
+        help=f"exported graph (default: <data-dir>/models/v1/{MODEL_FILE})",
+    )
+    parser.add_argument(
+        "--out-dir", type=Path, default=None, help=f"default: <data-dir>/{POSTERIORS_DIR}"
+    )
+    parser.add_argument(
+        "--ids", nargs="*", default=None, help="youtube ids (default: every clean track)"
+    )
+    parser.add_argument("--limit", type=int, default=0, help="stop after N ids (0 = all)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, (os.cpu_count() or 2) - 4),
+        help="concurrent single-threaded sessions (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="recompute even where the sidecar already matches this model and geometry",
+    )
     parser.add_argument("--progress-every", type=int, default=25)
     return parser
 
@@ -533,21 +590,34 @@ def main(argv: list | None = None) -> int:
     args = build_parser().parse_args(argv)
     ids = args.ids if args.ids is not None else track_ids(args.data_dir)
     if args.limit:
-        ids = ids[:args.limit]
+        ids = ids[: args.limit]
 
-    manifest = generate(args.data_dir, model_path=args.model, out_dir=args.out_dir,
-                        ids=ids, workers=args.workers, force=args.force,
-                        progress_every=args.progress_every)
-    print(f"{manifest['tracks']} tracks "
-          f"({manifest['computed']} computed, {manifest['cached']} cached) "
-          f"in {manifest['wall_seconds'] / 60:.1f} min")
-    print(f"  {manifest['windows']} windows over {manifest['frames']} frames "
-          f"({manifest['frames'] * FRAME_SEC / 3600:.1f} audio hours)")
-    print(f"  {manifest['bytes'] / (1 << 20):.1f} MiB of sidecars, "
-          f"model {manifest['model_sha'][:16]}")
+    manifest = generate(
+        args.data_dir,
+        model_path=args.model,
+        out_dir=args.out_dir,
+        ids=ids,
+        workers=args.workers,
+        force=args.force,
+        progress_every=args.progress_every,
+    )
+    print(
+        f"{manifest['tracks']} tracks "
+        f"({manifest['computed']} computed, {manifest['cached']} cached) "
+        f"in {manifest['wall_seconds'] / 60:.1f} min"
+    )
+    print(
+        f"  {manifest['windows']} windows over {manifest['frames']} frames "
+        f"({manifest['frames'] * FRAME_SEC / 3600:.1f} audio hours)"
+    )
+    print(
+        f"  {manifest['bytes'] / (1 << 20):.1f} MiB of sidecars, model {manifest['model_sha'][:16]}"
+    )
     if manifest["failed"]:
-        print(f"  {manifest['failed']} FAILED -- see "
-              f"{MANIFEST_FILE}; rerun to retry (finished tracks are cached)")
+        print(
+            f"  {manifest['failed']} FAILED -- see "
+            f"{MANIFEST_FILE}; rerun to retry (finished tracks are cached)"
+        )
     return 1 if manifest["failed"] else 0
 
 

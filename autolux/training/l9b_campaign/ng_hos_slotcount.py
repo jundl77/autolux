@@ -7,6 +7,7 @@ the epoch slots per track id.  The claim under test: a track listed N times
 yields N x crops_per_track slots -- oversampling by duplication, no dedup
 anywhere on the path.  Run under the exp-ceiling venv; CPU only.
 """
+
 import argparse
 import collections
 import ctypes
@@ -25,8 +26,14 @@ except Exception:  # noqa: BLE001
 PHASE_B = Path(r"C:\Users\Julian\Projects\soundswitch-phase-b-worktree")
 DATA = Path(__file__).resolve().parents[1] / "data" / "raveform"
 CAMP = DATA / "models" / "l9b_campaign"
-SIX = ("hand-65cb8c94812d", "hand-8339586c555a", "hand-1b57bc38e8e4",
-       "hand-33d3513481ac", "hand-b7d98ca02e86", "hand-52973d7b1767")
+SIX = (
+    "hand-65cb8c94812d",
+    "hand-8339586c555a",
+    "hand-1b57bc38e8e4",
+    "hand-33d3513481ac",
+    "hand-b7d98ca02e86",
+    "hand-52973d7b1767",
+)
 
 sys.path.insert(0, str(PHASE_B))
 sys.path.append(str(Path(__file__).resolve().parents[1]))
@@ -50,19 +57,26 @@ def main() -> int:
         label_space=DATA / "models" / "l9" / "priors.json",
         arm="online_crnn",
         splits_file=CAMP / "splits_hos.json",
-        demote_drops=None, mask_labels=None, limit_tracks=None,
+        demote_drops=None,
+        mask_labels=None,
+        limit_tracks=None,
         teacher_dir=None,
-        seed=1234, crop_sec=300.0, crops_per_track=3,
+        seed=1234,
+        crop_sec=300.0,
+        crops_per_track=3,
         cache_bytes=0,
     )
     sections = DD.merged_sections(args.data_dir)
     train, val, _, _ = build_datasets(args, sections)
 
     per_id = collections.Counter(train.ids[index] for index, _ in train._slots)
-    baseline = collections.Counter(v for k, v in per_id.items()
-                                   if k not in SIX).most_common(1)[0][0]
-    print(f"train entries: {len(train.ids)}   slots/epoch: {len(train._slots)}"
-          f"   val tracks: {len(val.ids)}")
+    baseline = collections.Counter(v for k, v in per_id.items() if k not in SIX).most_common(1)[0][
+        0
+    ]
+    print(
+        f"train entries: {len(train.ids)}   slots/epoch: {len(train._slots)}"
+        f"   val tracks: {len(val.ids)}"
+    )
     print(f"baseline slots per non-oversampled track: {baseline}")
     ok = True
     for track_id in SIX:
@@ -72,10 +86,15 @@ def main() -> int:
         ok = ok and factor == 16
         print(f"  {track_id}: {n} slots ({factor:.0f}x baseline) {verdict}")
     document = json.loads((CAMP / "splits_hos.json").read_text("utf-8"))
-    print(f"splits_hos train list: {len(document['train'])} entries "
-          f"(969 unique + 6 ids x15 extra copies)")
-    print("MECHANISM VERIFIED: duplicated ids multiply sampler slots"
-          if ok else "MECHANISM NOT VERIFIED")
+    print(
+        f"splits_hos train list: {len(document['train'])} entries "
+        f"(969 unique + 6 ids x15 extra copies)"
+    )
+    print(
+        "MECHANISM VERIFIED: duplicated ids multiply sampler slots"
+        if ok
+        else "MECHANISM NOT VERIFIED"
+    )
     return 0 if ok else 1
 
 

@@ -21,6 +21,7 @@ Runs BEFORE training, CPU only.  Checks, per variant:
 
 Writes CAMP/ag8_proof.json.  Any violation exits nonzero and the arm holds.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -75,12 +76,10 @@ def main() -> int:
     corpus_splits = json.loads((CORPUS / "splits.json").read_text("utf-8"))
     splits = json.loads((CAMP / "splits_ag8.json").read_text("utf-8"))
     tier = json.loads((CAMP / "mapped_tier_ag8.json").read_text("utf-8"))
-    variants = [variant_id(base, suffix)
-                for base in NEW_HAND_IDS for suffix, _ in SHIFTS]
+    variants = [variant_id(base, suffix) for base in NEW_HAND_IDS for suffix, _ in SHIFTS]
 
     if splits["train"] != list(map(str, corpus_splits["train"])) + variants:
-        failures.append("splits_ag8 train is not corpus train + the 42 "
-                        "variants in order")
+        failures.append("splits_ag8 train is not corpus train + the 42 variants in order")
     if splits["val"] != list(map(str, corpus_splits["val"])):
         failures.append("splits_ag8 val is not byte-equal to the corpus val")
     if sorted(tier["tracks"]) != sorted(variants):
@@ -90,9 +89,10 @@ def main() -> int:
     sections = DD.merged_sections(CORPUS)
     pre_bases = {b: list(sections[b]) for b in NEW_HAND_IDS}
     for track_id, record in tier["tracks"].items():
-        sections.setdefault(str(track_id), [
-            (float(s["start"]), float(s["end"]), str(s["name"]))
-            for s in record["sections"]])
+        sections.setdefault(
+            str(track_id),
+            [(float(s["start"]), float(s["end"]), str(s["name"])) for s in record["sections"]],
+        )
     for base in NEW_HAND_IDS:
         if list(sections[base]) != pre_bases[base]:
             failures.append(f"{base}: the tier moved a corpus record")
@@ -100,8 +100,7 @@ def main() -> int:
     per_variant: dict = {}
     for base in NEW_HAND_IDS:
         base_frames = frames_for(base)
-        base_targets = track_targets(sections[base], base_frames,
-                                     classes=classes)
+        base_targets = track_targets(sections[base], base_frames, classes=classes)
         for suffix, steps in SHIFTS:
             vid = variant_id(base, suffix)
             state: dict = {"base": base, "n_steps": steps}
@@ -110,59 +109,75 @@ def main() -> int:
                 failures.append(f"{vid}: no sidecar at {path}")
                 continue
             geometry = read_stream_geometry(path)
-            if (geometry is None or geometry["causal"] != 1
-                    or geometry["margin_sec"] != 3.0
-                    or geometry["hop_sec"] != 1.0):
-                failures.append(f"{vid}: stream geometry {geometry} is not "
-                                f"(causal, F3, hop1)")
+            if (
+                geometry is None
+                or geometry["causal"] != 1
+                or geometry["margin_sec"] != 3.0
+                or geometry["hop_sec"] != 1.0
+            ):
+                failures.append(f"{vid}: stream geometry {geometry} is not (causal, F3, hop1)")
             frames = frames_for(vid)
             state["n_frames"] = frames
             if frames != base_frames:
-                failures.append(f"{vid}: {frames} frames vs base's "
-                                f"{base_frames} -- time preservation broken")
+                failures.append(
+                    f"{vid}: {frames} frames vs base's {base_frames} -- time preservation broken"
+                )
                 continue
-            if list(map(tuple, sections[vid])) != \
-                    list(map(tuple, sections[base])):
+            if list(map(tuple, sections[vid])) != list(map(tuple, sections[base])):
                 failures.append(f"{vid}: post-seam sections != base sections")
             targets = track_targets(sections[vid], frames, classes=classes)
-            for channel in ("label_frame", "label_pooled", "label_pooled_mask",
-                            "boundary", "boundary_mask"):
-                if not np.array_equal(getattr(targets, channel),
-                                      getattr(base_targets, channel)):
+            for channel in (
+                "label_frame",
+                "label_pooled",
+                "label_pooled_mask",
+                "boundary",
+                "boundary_mask",
+            ):
+                if not np.array_equal(getattr(targets, channel), getattr(base_targets, channel)):
                     failures.append(f"{vid}: {channel} != base's")
             state["supervised_cells"] = int(targets.label_pooled_mask.sum())
             per_variant[vid] = state
 
     # Through FullTrackDataset itself, exactly as the online_crnn arm builds it.
-    common = dict(feature_dir=FEAT_ROOT, layers=LAYERS, augment=False,
-                  sections_by_youtube_id=sections, classes=classes,
-                  normalise=False, store_fp16=True, cache_bytes=0)
+    common = dict(
+        feature_dir=FEAT_ROOT,
+        layers=LAYERS,
+        augment=False,
+        sections_by_youtube_id=sections,
+        classes=classes,
+        normalise=False,
+        store_fp16=True,
+        cache_bytes=0,
+    )
     base_set = D.FullTrackDataset(CORPUS, list(NEW_HAND_IDS), **common)
     var_set = D.FullTrackDataset(CORPUS, variants, **common)
-    base_samples = {s.youtube_id: s for s in (base_set[i]
-                                              for i in range(len(base_set)))}
+    base_samples = {s.youtube_id: s for s in (base_set[i] for i in range(len(base_set)))}
     checked = distinct = 0
     for index in range(len(var_set)):
         sample = var_set[index]
         base = per_variant[sample.youtube_id]["base"]
         ref = base_samples[base]
-        if not (np.array_equal(sample.labels, ref.labels)
-                and np.array_equal(sample.label_mask, ref.label_mask)
-                and np.array_equal(sample.boundary, ref.boundary)
-                and np.array_equal(sample.boundary_mask, ref.boundary_mask)):
-            failures.append(f"{sample.youtube_id}: dataset Sample targets != "
-                            f"base's")
+        if not (
+            np.array_equal(sample.labels, ref.labels)
+            and np.array_equal(sample.label_mask, ref.label_mask)
+            and np.array_equal(sample.boundary, ref.boundary)
+            and np.array_equal(sample.boundary_mask, ref.boundary_mask)
+        ):
+            failures.append(f"{sample.youtube_id}: dataset Sample targets != base's")
         if sample.x.shape != ref.x.shape:
-            failures.append(f"{sample.youtube_id}: feature shape "
-                            f"{sample.x.shape} != base's {ref.x.shape}")
+            failures.append(
+                f"{sample.youtube_id}: feature shape {sample.x.shape} != base's {ref.x.shape}"
+            )
         elif np.array_equal(sample.x, ref.x):
-            failures.append(f"{sample.youtube_id}: features are byte-equal to "
-                            f"the base's -- a copy, not a variant")
+            failures.append(
+                f"{sample.youtube_id}: features are byte-equal to "
+                f"the base's -- a copy, not a variant"
+            )
         else:
             distinct += 1
             per_variant[sample.youtube_id]["mean_abs_feature_delta"] = round(
-                float(np.mean(np.abs(sample.x.astype(np.float32)
-                                     - ref.x.astype(np.float32)))), 4)
+                float(np.mean(np.abs(sample.x.astype(np.float32) - ref.x.astype(np.float32)))), 4
+            )
         checked += 1
         if checked % 10 == 0:
             print(f"  dataset check {checked}/{len(var_set)}", flush=True)
@@ -174,13 +189,14 @@ def main() -> int:
         "features_distinct_from_base": distinct,
         "per_variant": per_variant,
         "failures": failures,
-        "verdict": ("AG8 WIRING PROVEN: 42 variants, each trained on its "
-                    "base's exact targets over acoustically distinct features"
-                    if not failures and checked == 42 and distinct == 42
-                    else "AG8 WIRING NOT PROVEN"),
+        "verdict": (
+            "AG8 WIRING PROVEN: 42 variants, each trained on its "
+            "base's exact targets over acoustically distinct features"
+            if not failures and checked == 42 and distinct == 42
+            else "AG8 WIRING NOT PROVEN"
+        ),
     }
-    (CAMP / "ag8_proof.json").write_text(json.dumps(proof, indent=2) + "\n",
-                                         encoding="utf-8")
+    (CAMP / "ag8_proof.json").write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
     print(proof["verdict"])
     for line in failures[:20]:
         print(f"  FAIL: {line}")

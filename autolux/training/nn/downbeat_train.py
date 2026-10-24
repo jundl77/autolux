@@ -1,4 +1,5 @@
 """Train ``DownbeatCRNN`` on the expert beat grids."""
+
 from __future__ import annotations
 
 import argparse
@@ -93,8 +94,7 @@ def accumulate_downbeat_stats(targets_iterable) -> DownbeatStats:
         valid += supervised
         frames += int(len(targets.downbeat))
         per_track.append(mass / supervised if supervised else 0.0)
-    return DownbeatStats(positive, valid, frames,
-                         np.asarray(per_track, dtype=np.float64))
+    return DownbeatStats(positive, valid, frames, np.asarray(per_track, dtype=np.float64))
 
 
 def load_downbeat_stats(data_dir, youtube_ids, grids_by_youtube_id) -> DownbeatStats:
@@ -104,8 +104,9 @@ def load_downbeat_stats(data_dir, youtube_ids, grids_by_youtube_id) -> DownbeatS
         for youtube_id in youtube_ids:
             frames = sidecar_shape(data_dir / FEATURES_DIR / f"{youtube_id}.npz")[0]
             usable = (frames // LABEL_POOL) * LABEL_POOL
-            yield track_downbeat_targets(grids_by_youtube_id[youtube_id], usable,
-                                         FRAME_SEC, FRAME_SEC)
+            yield track_downbeat_targets(
+                grids_by_youtube_id[youtube_id], usable, FRAME_SEC, FRAME_SEC
+            )
 
     return accumulate_downbeat_stats(targets())
 
@@ -137,12 +138,13 @@ def peak_candidates(scores: np.ndarray, min_distance: int) -> np.ndarray:
         if blocked[index]:
             continue
         taken.append(int(index))
-        blocked[max(0, index - min_distance):index + min_distance + 1] = True
+        blocked[max(0, index - min_distance) : index + min_distance + 1] = True
     return np.array(sorted(taken), dtype=np.int64)
 
 
-def match_events(predicted: np.ndarray, reference: np.ndarray,
-                 tolerance: float = TOLERANCE_SEC) -> tuple:
+def match_events(
+    predicted: np.ndarray, reference: np.ndarray, tolerance: float = TOLERANCE_SEC
+) -> tuple:
     predicted = np.asarray(predicted, dtype=np.float64)
     reference = np.asarray(reference, dtype=np.float64)
     index = other = 0
@@ -164,18 +166,24 @@ def prf(tp: int, fp: int, fn: int) -> dict:
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return {"precision": float(precision), "recall": float(recall), "f1": float(f1),
-            "tp": int(tp), "fp": int(fp), "fn": int(fn)}
+    return {
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "tp": int(tp),
+        "fp": int(fp),
+        "fn": int(fn),
+    }
 
 
-def frame_times(frames, frame_sec: float = FRAME_SEC,
-                t0: float | None = None) -> np.ndarray:
+def frame_times(frames, frame_sec: float = FRAME_SEC, t0: float | None = None) -> np.ndarray:
     t0 = frame_sec if t0 is None else t0
     return t0 + np.asarray(frames, dtype=np.float64) * frame_sec
 
 
-def sweep_peak_f1(per_track: list, thresholds=PEAK_THRESHOLDS,
-                  tolerance: float = TOLERANCE_SEC) -> dict:
+def sweep_peak_f1(
+    per_track: list, thresholds=PEAK_THRESHOLDS, tolerance: float = TOLERANCE_SEC
+) -> dict:
     curve: dict = {}
     for threshold in thresholds:
         tp = fp = fn = 0
@@ -205,23 +213,30 @@ def deweighted(probs: np.ndarray, pos_weight: float) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-logits))
 
 
-def stitch(dataset: DownbeatWindowDataset, rows: np.ndarray, start: int,
-           sums: dict, counts: dict) -> int:
+def stitch(
+    dataset: DownbeatWindowDataset, rows: np.ndarray, start: int, sums: dict, counts: dict
+) -> int:
     index = start
     for row in rows:
         youtube_id = dataset.track_id_of(index)
         offset = dataset.window_offset(index)
         end = min(offset + dataset.window_frames, len(sums[youtube_id]))
         if end > offset:
-            sums[youtube_id][offset:end] += row[:end - offset]
+            sums[youtube_id][offset:end] += row[: end - offset]
             counts[youtube_id][offset:end] += 1
         index += 1
     return index
 
 
-def evaluate(model: nn.Module, loader: DataLoader, dataset: DownbeatWindowDataset,
-             device: torch.device, *, pos_weight: float,
-             min_distance: int) -> dict:
+def evaluate(
+    model: nn.Module,
+    loader: DataLoader,
+    dataset: DownbeatWindowDataset,
+    device: torch.device,
+    *,
+    pos_weight: float,
+    min_distance: int,
+) -> dict:
     model.eval()
     sums = {}
     counts = {}
@@ -242,8 +257,9 @@ def evaluate(model: nn.Module, loader: DataLoader, dataset: DownbeatWindowDatase
             logits = model(mel)
             total += float(masked_bce(logits, target, mask, pos_weight=pos_weight))
             batches += 1
-            index = stitch(dataset, torch.sigmoid(logits).float().cpu().numpy(),
-                           index, sums, counts)
+            index = stitch(
+                dataset, torch.sigmoid(logits).float().cpu().numpy(), index, sums, counts
+            )
 
     per_track: list = []
     scores: list = []
@@ -260,8 +276,7 @@ def evaluate(model: nn.Module, loader: DataLoader, dataset: DownbeatWindowDatase
         scores.append(activation[live])
         labels.append(targets.downbeat[live] >= POSITIVE_THRESHOLD)
 
-        picked = peak_candidates(np.where(live, activation, UNSUPERVISED_SCORE),
-                                 min_distance)
+        picked = peak_candidates(np.where(live, activation, UNSUPERVISED_SCORE), min_distance)
         picked = picked[live[picked]] if picked.size else picked
         is_downbeat = targets.beat_phase == 1
         beat_frame = targets.beat_frame
@@ -297,8 +312,18 @@ def evaluate(model: nn.Module, loader: DataLoader, dataset: DownbeatWindowDatase
 def log_epoch(writer, epoch: int, record: dict, metrics: dict) -> None:
     if writer is None:
         return
-    for key in ("f1", "precision", "recall", "f1_at_half", "pr_auc", "ece",
-                "ece_deweighted", "best_threshold", "mean_prob", "loss"):
+    for key in (
+        "f1",
+        "precision",
+        "recall",
+        "f1_at_half",
+        "pr_auc",
+        "ece",
+        "ece_deweighted",
+        "best_threshold",
+        "mean_prob",
+        "loss",
+    ):
         writer.add_scalar(f"val/{key}", metrics[key], epoch)
     writer.add_scalar("epoch/train_loss", record["train"], epoch)
     writer.flush()
@@ -316,8 +341,10 @@ def train(config: dict) -> dict:
     splits = make_splits(data_dir, write=False)
     track_ids = {ref.youtube_id: ref.track_id for ref in candidate_tracks(data_dir)[0]}
     sections = {str(track.get("id")): parse_sections(track) for track in load_tracks(data_dir)}
-    chosen = {name: select_smoke_subset(splits[name], track_ids, config["smoke_tracks"])
-              for name in ("train", "val")}
+    chosen = {
+        name: select_smoke_subset(splits[name], track_ids, config["smoke_tracks"])
+        for name in ("train", "val")
+    }
 
     grids, missing = load_beat_grids(data_dir, chosen["train"] + chosen["val"])
     if missing:
@@ -327,35 +354,48 @@ def train(config: dict) -> dict:
         )
 
     config = dict(config)
-    config["tracks"] = {name: [[track_ids[i], i] for i in ids]
-                        for name, ids in chosen.items()}
+    config["tracks"] = {name: [[track_ids[i], i] for i in ids] for name, ids in chosen.items()}
 
-    train_set = DownbeatWindowDataset(data_dir, chosen["train"], augment=True,
-                                      seed=config["seed"],
-                                      sections_by_youtube_id=sections,
-                                      grids_by_youtube_id=grids)
-    val_set = DownbeatWindowDataset(data_dir, chosen["val"], augment=False,
-                                    seed=config["seed"],
-                                    sections_by_youtube_id=sections,
-                                    grids_by_youtube_id=grids)
+    train_set = DownbeatWindowDataset(
+        data_dir,
+        chosen["train"],
+        augment=True,
+        seed=config["seed"],
+        sections_by_youtube_id=sections,
+        grids_by_youtube_id=grids,
+    )
+    val_set = DownbeatWindowDataset(
+        data_dir,
+        chosen["val"],
+        augment=False,
+        seed=config["seed"],
+        sections_by_youtube_id=sections,
+        grids_by_youtube_id=grids,
+    )
 
     stats = load_downbeat_stats(data_dir, chosen["train"], grids)
-    pos_weight = (float(config["pos_weight"]) if config["pos_weight"] > 0
-                  else sparsity_pos_weight(stats.positive, stats.valid))
+    pos_weight = (
+        float(config["pos_weight"])
+        if config["pos_weight"] > 0
+        else sparsity_pos_weight(stats.positive, stats.valid)
+    )
     min_distance = max(1, int(round(config["min_peak_distance"] / FRAME_SEC)))
 
-    model = DownbeatCRNN(rnn_hidden=config["rnn_hidden"],
-                         rnn_layers=config["rnn_layers"],
-                         conv1d_channels=config["conv1d_channels"],
-                         dropout=config["dropout"]).to(device)
+    model = DownbeatCRNN(
+        rnn_hidden=config["rnn_hidden"],
+        rnn_layers=config["rnn_layers"],
+        conv1d_channels=config["conv1d_channels"],
+        dropout=config["dropout"],
+    ).to(device)
     params = count_parameters(model)
     if params > PARAM_BUDGET:
         raise RuntimeError(
             f"{params} parameters exceeds the {PARAM_BUDGET} budget the spec sets "
             f"for this head -- widen deliberately, in the spec, not by accident"
         )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"],
-                                  weight_decay=config["weight_decay"])
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
+    )
 
     steps_per_epoch = max(1, math.ceil(len(train_set) / config["batch_size"]))
     total_steps = steps_per_epoch * config["epochs"]
@@ -407,32 +447,50 @@ def train(config: dict) -> dict:
     writer = None
     if config["tensorboard"]:
         from torch.utils.tensorboard import SummaryWriter
+
         writer = SummaryWriter(str(tb_dir))
     if config["launch_tensorboard"]:
         logdir = data_dir / MODELS_DIR
-        started = ensure_tensorboard(logdir, config["tensorboard_port"],
-                                     logdir / "tensorboard.log")
-        print(f"tensorboard {'started' if started else 'already running'}: "
-              f"http://localhost:{config['tensorboard_port']}", flush=True)
+        started = ensure_tensorboard(logdir, config["tensorboard_port"], logdir / "tensorboard.log")
+        print(
+            f"tensorboard {'started' if started else 'already running'}: "
+            f"http://localhost:{config['tensorboard_port']}",
+            flush=True,
+        )
 
     mass = stats.track_mass
-    print(f"{config['run_name']}: {params} params (budget {PARAM_BUDGET}) | "
-          f"{len(train_set)} train windows / {len(val_set)} val windows | "
-          f"{steps_per_epoch} steps/epoch x {config['epochs']} epochs | device {device}",
-          flush=True)
-    print(f"target mass {stats.positive / max(stats.valid, 1):.4f}/frame over "
-          f"{stats.valid} supervised frames -> pos_weight {pos_weight:.3f} | "
-          f"per-track mass p05 {np.percentile(mass, 5):.4f} median "
-          f"{np.median(mass):.4f} p95 {np.percentile(mass, 95):.4f} "
-          f"max {mass.max():.4f}", flush=True)
+    print(
+        f"{config['run_name']}: {params} params (budget {PARAM_BUDGET}) | "
+        f"{len(train_set)} train windows / {len(val_set)} val windows | "
+        f"{steps_per_epoch} steps/epoch x {config['epochs']} epochs | device {device}",
+        flush=True,
+    )
+    print(
+        f"target mass {stats.positive / max(stats.valid, 1):.4f}/frame over "
+        f"{stats.valid} supervised frames -> pos_weight {pos_weight:.3f} | "
+        f"per-track mass p05 {np.percentile(mass, 5):.4f} median "
+        f"{np.median(mass):.4f} p95 {np.percentile(mass, 95):.4f} "
+        f"max {mass.max():.4f}",
+        flush=True,
+    )
 
     generator = torch.Generator()
-    val_loader = build_loader(val_set, batch_size=config["batch_size"], shuffle=False,
-                              num_workers=config["num_workers"],
-                              pin_memory=device.type == "cuda", generator=None)
-    train_loader = build_loader(train_set, batch_size=config["batch_size"], shuffle=True,
-                                num_workers=config["num_workers"],
-                                pin_memory=device.type == "cuda", generator=generator)
+    val_loader = build_loader(
+        val_set,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        num_workers=config["num_workers"],
+        pin_memory=device.type == "cuda",
+        generator=None,
+    )
+    train_loader = build_loader(
+        train_set,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        num_workers=config["num_workers"],
+        pin_memory=device.type == "cuda",
+        generator=generator,
+    )
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -468,16 +526,18 @@ def train(config: dict) -> dict:
             scheduler.step()
 
             running += value
-            history["steps"].append({"step": step, "epoch": epoch,
-                                     "lr": learning_rate, "loss": value})
+            history["steps"].append(
+                {"step": step, "epoch": epoch, "lr": learning_rate, "loss": value}
+            )
             trained_steps += 1
             if writer is not None:
                 writer.add_scalar("train/loss", value, step)
                 writer.add_scalar("train/lr", learning_rate, step)
 
         batches = max(1, index + 1)
-        metrics = evaluate(model, val_loader, val_set, device,
-                           pos_weight=pos_weight, min_distance=min_distance)
+        metrics = evaluate(
+            model, val_loader, val_set, device, pos_weight=pos_weight, min_distance=min_distance
+        )
         record = {
             "epoch": epoch,
             "train": running / batches,
@@ -489,36 +549,51 @@ def train(config: dict) -> dict:
         history["epochs"].append(record)
         log_epoch(writer, epoch, record, metrics)
 
-        print(f"epoch {epoch:3d} | train {record['train']:.4f} | "
-              f"val {metrics['loss']:.4f} F1@{TOLERANCE_SEC * 1000:.0f}ms "
-              f"{metrics['f1']:.4f} (P {metrics['precision']:.3f} R "
-              f"{metrics['recall']:.3f} @{metrics['best_threshold']:.2f}) "
-              f"PR-AUC {metrics['pr_auc']:.4f} ECE {metrics['ece']:.4f}"
-              f"/{metrics['ece_deweighted']:.4f} | {record['seconds']:.1f}s",
-              flush=True)
+        print(
+            f"epoch {epoch:3d} | train {record['train']:.4f} | "
+            f"val {metrics['loss']:.4f} F1@{TOLERANCE_SEC * 1000:.0f}ms "
+            f"{metrics['f1']:.4f} (P {metrics['precision']:.3f} R "
+            f"{metrics['recall']:.3f} @{metrics['best_threshold']:.2f}) "
+            f"PR-AUC {metrics['pr_auc']:.4f} ECE {metrics['ece']:.4f}"
+            f"/{metrics['ece_deweighted']:.4f} | {record['seconds']:.1f}s",
+            flush=True,
+        )
 
         if metrics["f1"] > best["f1"]:
-            best = {"f1": float(metrics["f1"]), "epoch": epoch,
-                    "metrics": {key: value for key, value in metrics.items()
-                                if key != "f1_curve"}}
-            torch.save({"model": model.state_dict(), "arch": model.arch(),
-                        "config": config, "epoch": epoch, "f1": best["f1"],
-                        "metrics": best["metrics"], "pos_weight": pos_weight},
-                       run_dir / BEST_CHECKPOINT)
+            best = {
+                "f1": float(metrics["f1"]),
+                "epoch": epoch,
+                "metrics": {key: value for key, value in metrics.items() if key != "f1_curve"},
+            }
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "arch": model.arch(),
+                    "config": config,
+                    "epoch": epoch,
+                    "f1": best["f1"],
+                    "metrics": best["metrics"],
+                    "pos_weight": pos_weight,
+                },
+                run_dir / BEST_CHECKPOINT,
+            )
 
-        torch.save({
-            "epoch": epoch,
-            "model": model.state_dict(),
-            "arch": model.arch(),
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "history": history,
-            "best": best,
-            "rng": capture_rng(),
-            "config": config,
-            "config_fingerprint": fingerprint,
-            "pos_weight": pos_weight,
-        }, checkpoint_path)
+        torch.save(
+            {
+                "epoch": epoch,
+                "model": model.state_dict(),
+                "arch": model.arch(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "history": history,
+                "best": best,
+                "rng": capture_rng(),
+                "config": config,
+                "config_fingerprint": fingerprint,
+                "pos_weight": pos_weight,
+            },
+            checkpoint_path,
+        )
 
         if config["crash_after_epoch"] and epoch >= config["crash_after_epoch"]:
             print(f"crash-after-epoch {epoch}: exiting hard", flush=True)
@@ -526,8 +601,7 @@ def train(config: dict) -> dict:
             os._exit(17)
 
         if epoch - best["epoch"] >= config["patience"]:
-            print(f"early stop: no val F1 improvement in {config['patience']} epochs",
-                  flush=True)
+            print(f"early stop: no val F1 improvement in {config['patience']} epochs", flush=True)
             stopped_early = True
             break
 
@@ -556,10 +630,12 @@ def train(config: dict) -> dict:
         "weight_hash": weight_hash(model.state_dict()),
         "wall_seconds": wall,
         "steps_per_second": trained_steps / wall if wall > 0 else 0.0,
-        "gpu_peak_alloc_mb": (torch.cuda.max_memory_allocated(device) / 2 ** 20
-                              if device.type == "cuda" else None),
-        "gpu_peak_reserved_mb": (torch.cuda.max_memory_reserved(device) / 2 ** 20
-                                 if device.type == "cuda" else None),
+        "gpu_peak_alloc_mb": (
+            torch.cuda.max_memory_allocated(device) / 2**20 if device.type == "cuda" else None
+        ),
+        "gpu_peak_reserved_mb": (
+            torch.cuda.max_memory_reserved(device) / 2**20 if device.type == "cuda" else None
+        ),
     }
     with open(run_dir / REPORT_FILE, "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, sort_keys=True, default=str)
@@ -568,21 +644,31 @@ def train(config: dict) -> dict:
     if writer is not None:
         writer.close()
 
-    print(f"done: best val F1 {best['f1']:.4f} @ epoch {best['epoch']} | "
-          f"weights {report['weight_hash'][:16]} | {wall:.1f}s "
-          f"({report['steps_per_second']:.1f} steps/s)", flush=True)
+    print(
+        f"done: best val F1 {best['f1']:.4f} @ epoch {best['epoch']} | "
+        f"weights {report['weight_hash'][:16]} | {wall:.1f}s "
+        f"({report['steps_per_second']:.1f} steps/s)",
+        flush=True,
+    )
     return report
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=default_data_dir(),
-                        help="corpus root; checkpoints land in "
-                             f"<data-dir>/{MODELS_DIR}/{MODEL_VERSION}/<run-name> "
-                             "(default: %(default)s)")
-    parser.add_argument("--run-name", default="downbeat_v1",
-                        help="run directory name; keep the downbeat_ prefix so "
-                             "the shared TensorBoard logdir stays readable")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=default_data_dir(),
+        help="corpus root; checkpoints land in "
+        f"<data-dir>/{MODELS_DIR}/{MODEL_VERSION}/<run-name> "
+        "(default: %(default)s)",
+    )
+    parser.add_argument(
+        "--run-name",
+        default="downbeat_v1",
+        help="run directory name; keep the downbeat_ prefix so "
+        "the shared TensorBoard logdir stays readable",
+    )
     parser.add_argument("--epochs", type=int, default=40)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -592,31 +678,60 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rnn-hidden", type=int, default=96)
     parser.add_argument("--rnn-layers", type=int, default=1)
     parser.add_argument("--conv1d-channels", type=int, default=64)
-    parser.add_argument("--pos-weight", type=float, default=0.0,
-                        help="override the weight derived from train-split target "
-                             "sparsity (0 = derive it, the default)")
-    parser.add_argument("--min-peak-distance", type=float, default=MIN_PEAK_DISTANCE_SEC,
-                        help="non-maximum suppression radius, seconds")
-    parser.add_argument("--patience", type=int, default=8,
-                        help="early stop after N epochs without a val F1 gain")
+    parser.add_argument(
+        "--pos-weight",
+        type=float,
+        default=0.0,
+        help="override the weight derived from train-split target "
+        "sparsity (0 = derive it, the default)",
+    )
+    parser.add_argument(
+        "--min-peak-distance",
+        type=float,
+        default=MIN_PEAK_DISTANCE_SEC,
+        help="non-maximum suppression radius, seconds",
+    )
+    parser.add_argument(
+        "--patience", type=int, default=8, help="early stop after N epochs without a val F1 gain"
+    )
     parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--num-workers", type=int, default=0,
-                        help="DataLoader workers; 0 (default) is fastest for this "
-                             "corpus and the only mode that re-rolls augmentation "
-                             "every epoch -- see train.build_loader")
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers; 0 (default) is fastest for this "
+        "corpus and the only mode that re-rolls augmentation "
+        "every epoch -- see train.build_loader",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--smoke-tracks", type=int, default=0,
-                        help="limit train and val to the first N tracks of each "
-                             "split by corpus track id (0 = the whole split)")
-    parser.add_argument("--resume", action="store_true",
-                        help=f"continue from <run-dir>/{LAST_CHECKPOINT}")
-    parser.add_argument("--crash-after-epoch", type=int, default=0,
-                        help="resume drill: exit hard right after epoch N's "
-                             "checkpoint is written (0 = never)")
-    parser.add_argument("--no-tensorboard", dest="tensorboard", action="store_false",
-                        help="skip the event writer entirely")
-    parser.add_argument("--no-tensorboard-server", dest="launch_tensorboard",
-                        action="store_false", help="do not start a TensorBoard process")
+    parser.add_argument(
+        "--smoke-tracks",
+        type=int,
+        default=0,
+        help="limit train and val to the first N tracks of each "
+        "split by corpus track id (0 = the whole split)",
+    )
+    parser.add_argument(
+        "--resume", action="store_true", help=f"continue from <run-dir>/{LAST_CHECKPOINT}"
+    )
+    parser.add_argument(
+        "--crash-after-epoch",
+        type=int,
+        default=0,
+        help="resume drill: exit hard right after epoch N's checkpoint is written (0 = never)",
+    )
+    parser.add_argument(
+        "--no-tensorboard",
+        dest="tensorboard",
+        action="store_false",
+        help="skip the event writer entirely",
+    )
+    parser.add_argument(
+        "--no-tensorboard-server",
+        dest="launch_tensorboard",
+        action="store_false",
+        help="do not start a TensorBoard process",
+    )
     parser.add_argument("--tensorboard-port", type=int, default=TENSORBOARD_PORT)
     return parser
 

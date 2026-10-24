@@ -145,16 +145,18 @@ def fold_to_legacy_v1(label: str) -> str:
 class SpaceSpec:
     name: str
     labels: tuple[str, ...]
-    view: object         # str -> str, applied to the one label column
+    view: object  # str -> str, applied to the one label column
     caption: str
 
 
 SPACES: dict[str, SpaceSpec] = {
-    RAW9: SpaceSpec(RAW9, SECTION_LABELS, raw_label,
-                    "primary -- the corpus vocabulary, unfolded"),
-    LEGACY_V1: SpaceSpec(LEGACY_V1, LEGACY_V1_LABELS, fold_to_legacy_v1,
-                         "diagnostic -- the retired 5-class fold, so the "
-                         "banked record stays comparable"),
+    RAW9: SpaceSpec(RAW9, SECTION_LABELS, raw_label, "primary -- the corpus vocabulary, unfolded"),
+    LEGACY_V1: SpaceSpec(
+        LEGACY_V1,
+        LEGACY_V1_LABELS,
+        fold_to_legacy_v1,
+        "diagnostic -- the retired 5-class fold, so the banked record stays comparable",
+    ),
 }
 
 # --------------------------------------------------------------------------- #
@@ -173,12 +175,13 @@ SPACES: dict[str, SpaceSpec] = {
 # track and `outro` at the end, and an intent cannot know track position.
 INTENT_TO_LABELS: dict[str, dict[str, tuple[str, ...]]] = {
     #  intent          raw9 (primary)                              legacy_v1 (diagnostic)
-    "atmospheric": {RAW9: ("intro", "altintro", "outro", "altoutro"),
-                    LEGACY_V1: ("intro", "outro")},
-    "buildup":     {RAW9: ("buildup",),                   LEGACY_V1: ("buildup",)},
-    "breakdown":   {RAW9: ("breakdown", "bridge", "cooldown"),
-                    LEGACY_V1: ("breakdown",)},
-    "drop":        {RAW9: ("drop",),                      LEGACY_V1: ("drop",)},
+    "atmospheric": {
+        RAW9: ("intro", "altintro", "outro", "altoutro"),
+        LEGACY_V1: ("intro", "outro"),
+    },
+    "buildup": {RAW9: ("buildup",), LEGACY_V1: ("buildup",)},
+    "breakdown": {RAW9: ("breakdown", "bridge", "cooldown"), LEGACY_V1: ("breakdown",)},
+    "drop": {RAW9: ("drop",), LEGACY_V1: ("drop",)},
 }
 
 INTENT_ORDER = ("atmospheric", "breakdown", "buildup", "drop")
@@ -227,10 +230,11 @@ WORST_SONGS = 15
 @dataclasses.dataclass(frozen=True)
 class TrackBeats:
     """One track's beats: parallel arrays, ordered by song time."""
+
     track_id: str
     times: tuple[float, ...]
     intents: tuple[str, ...]
-    labels: dict[str, tuple[str, ...]]      # space name -> per-beat labels
+    labels: dict[str, tuple[str, ...]]  # space name -> per-beat labels
 
 
 def load_tracks(table_path: Path) -> list[TrackBeats]:
@@ -320,10 +324,12 @@ def class_changes(times, intents, space: str) -> list[tuple[float, tuple]]:
     though the lights changed.  This is the stream a model predicting in the
     label space can produce, and therefore the only fair comparand for one.
     """
-    claims = [(t, INTENT_TO_LABELS[intent][space])
-              for t, intent in zip(times, intents) if intent != NO_INTENT]
-    return [claims[i] for i in range(1, len(claims))
-            if claims[i][1] != claims[i - 1][1]]
+    claims = [
+        (t, INTENT_TO_LABELS[intent][space])
+        for t, intent in zip(times, intents)
+        if intent != NO_INTENT
+    ]
+    return [claims[i] for i in range(1, len(claims)) if claims[i][1] != claims[i - 1][1]]
 
 
 def label_boundaries(times, labels) -> list[tuple[float, str]]:
@@ -333,11 +339,7 @@ def label_boundaries(times, labels) -> list[tuple[float, str]]:
     carrying the new value", so beat quantisation cancels when the classifier
     is right.
     """
-    return [
-        (times[i], labels[i])
-        for i in range(1, len(labels))
-        if labels[i] != labels[i - 1]
-    ]
+    return [(times[i], labels[i]) for i in range(1, len(labels)) if labels[i] != labels[i - 1]]
 
 
 def match_events(truth, pred, tolerance: float) -> int:
@@ -354,7 +356,7 @@ def match_events(truth, pred, tolerance: float) -> int:
     index = 0
     for instant in truth_sorted:
         while index < len(pred_sorted) and pred_sorted[index] < instant - tolerance:
-            index += 1                              # too early for this and every later truth
+            index += 1  # too early for this and every later truth
         if index < len(pred_sorted) and pred_sorted[index] <= instant + tolerance:
             matched += 1
             index += 1
@@ -407,7 +409,7 @@ def flicker_instants(pred, truth, tolerance: float) -> list[float]:
     for instant in pred:
         index = bisect.bisect_left(truth_sorted, instant)
         near = False
-        for candidate in truth_sorted[max(0, index - 1): index + 1]:
+        for candidate in truth_sorted[max(0, index - 1) : index + 1]:
             if abs(candidate - instant) <= tolerance:
                 near = True
                 break
@@ -434,8 +436,7 @@ def _empty_boundary(labels) -> dict:
         stream: {
             tolerance: {
                 "overall": {"n_truth": 0, "n_pred": 0, "matched": 0},
-                "by_type": {label: {"n_truth": 0, "n_pred": 0, "matched": 0}
-                            for label in labels},
+                "by_type": {label: {"n_truth": 0, "n_pred": 0, "matched": 0} for label in labels},
             }
             for tolerance in TOLERANCES_SEC
         }
@@ -444,8 +445,7 @@ def _empty_boundary(labels) -> dict:
 
 
 def _empty_flicker() -> dict:
-    return {stream: {tolerance: 0 for tolerance in TOLERANCES_SEC}
-            for stream in STREAM_ORDER}
+    return {stream: {tolerance: 0 for tolerance in TOLERANCES_SEC} for stream in STREAM_ORDER}
 
 
 @dataclasses.dataclass
@@ -456,12 +456,13 @@ class Score:
     its songs (``aggregate``) and cannot drift from the per-song numbers
     printed beside it.
     """
+
     space: str
     track_id: str = "(corpus)"
     tracks: int = 1
     rows: int = 0
-    confusion: dict = dataclasses.field(default_factory=dict)   # intent -> label -> sec
-    counts: dict = dataclasses.field(default_factory=dict)      # label -> [tp, fp, fn]
+    confusion: dict = dataclasses.field(default_factory=dict)  # intent -> label -> sec
+    counts: dict = dataclasses.field(default_factory=dict)  # label -> [tp, fp, fn]
     no_intent_by_label: dict = dataclasses.field(default_factory=dict)
     no_intent_sec: float = 0.0
     no_intent_rows: int = 0
@@ -499,7 +500,8 @@ class Score:
     def macro_classes(self) -> tuple[str, ...]:
         """Classes that were present in the truth or claimed by a prediction."""
         return tuple(
-            label for label in self.labels
+            label
+            for label in self.labels
             if (self.counts[label][0] + self.counts[label][2]) > 0
             or (self.counts[label][0] + self.counts[label][1]) > 0
         )
@@ -545,13 +547,17 @@ class Score:
             for stream, per_tolerance in self.flicker.items()
         }
 
-    def boundary_prf(self, stream: str, tolerance: float, kind: str = "overall",
-                     label: str | None = None) -> tuple[float, float, float]:
-        cell = (self.boundary[stream][tolerance]["overall"] if kind == "overall"
-                else self.boundary[stream][tolerance]["by_type"][label])
-        return prf(cell["matched"],
-                   cell["n_pred"] - cell["matched"],
-                   cell["n_truth"] - cell["matched"])
+    def boundary_prf(
+        self, stream: str, tolerance: float, kind: str = "overall", label: str | None = None
+    ) -> tuple[float, float, float]:
+        cell = (
+            self.boundary[stream][tolerance]["overall"]
+            if kind == "overall"
+            else self.boundary[stream][tolerance]["by_type"][label]
+        )
+        return prf(
+            cell["matched"], cell["n_pred"] - cell["matched"], cell["n_truth"] - cell["matched"]
+        )
 
 
 def score_track(track: TrackBeats, space: str) -> Score:
@@ -564,8 +570,7 @@ def score_track(track: TrackBeats, space: str) -> Score:
         space=space,
         track_id=track.track_id,
         rows=len(track.times),
-        confusion={intent: {label: 0.0 for label in spec.labels}
-                   for intent in INTENT_ORDER},
+        confusion={intent: {label: 0.0 for label in spec.labels} for intent in INTENT_ORDER},
         counts={label: [0.0, 0.0, 0.0] for label in spec.labels},
         no_intent_by_label={label: 0.0 for label in spec.labels},
         clamped_sec=clamped,
@@ -575,8 +580,7 @@ def score_track(track: TrackBeats, space: str) -> Score:
 
     for intent, label, weight in zip(track.intents, labels, weights):
         if label not in score.counts:
-            raise ValueError(f"unknown label {label!r} in space {space!r} "
-                             f"(track {track.track_id})")
+            raise ValueError(f"unknown label {label!r} in space {space!r} (track {track.track_id})")
         score.weight_total_sec += weight
         if intent == NO_INTENT:
             score.no_intent_sec += weight
@@ -590,15 +594,14 @@ def score_track(track: TrackBeats, space: str) -> Score:
         score.confusion[intent][label] += weight
         claimed = INTENT_TO_LABELS[intent][space]
         if label in claimed:
-            score.counts[label][0] += weight                    # tp
+            score.counts[label][0] += weight  # tp
         else:
-            score.counts[label][2] += weight                    # fn
+            score.counts[label][2] += weight  # fn
             share = weight / len(claimed)
             for target in claimed:
-                score.counts[target][1] += share                # fp, split if ambiguous
+                score.counts[target][1] += share  # fp, split if ambiguous
 
-    committed = [index for index, intent in enumerate(track.intents)
-                 if intent != NO_INTENT]
+    committed = [index for index, intent in enumerate(track.intents) if intent != NO_INTENT]
     first, last = (committed[0], committed[-1]) if committed else (len(track.intents), -1)
     for index, intent in enumerate(track.intents):
         if intent != NO_INTENT:
@@ -612,15 +615,16 @@ def score_track(track: TrackBeats, space: str) -> Score:
 
     truth = label_boundaries(track.times, labels)
     truth_times = [t for t, _ in truth]
-    truth_by_label = {label: [t for t, new in truth if new == label]
-                      for label in spec.labels}
+    truth_by_label = {label: [t for t, new in truth if new == label] for label in spec.labels}
 
     # Both streams carry (instant, claimed labels), so the typed split below is
     # written once.  The intent stream maps AFTER differencing, the class stream
     # maps BEFORE it -- that difference is the whole point (see STREAM_ORDER).
     streams = {
-        "intent": [(t, INTENT_TO_LABELS[intent][space])
-                   for t, intent in intent_changes(track.times, track.intents)],
+        "intent": [
+            (t, INTENT_TO_LABELS[intent][space])
+            for t, intent in intent_changes(track.times, track.intents)
+        ],
         "class": class_changes(track.times, track.intents, space),
     }
 
@@ -638,11 +642,11 @@ def score_track(track: TrackBeats, space: str) -> Score:
                 cell["by_type"][label] = {
                     "n_truth": len(truth_by_label[label]),
                     "n_pred": len(buckets[label]),
-                    "matched": match_events(truth_by_label[label],
-                                            buckets[label], tolerance),
+                    "matched": match_events(truth_by_label[label], buckets[label], tolerance),
                 }
             score.flicker[stream][tolerance] = len(
-                flicker_instants(change_times, truth_times, tolerance))
+                flicker_instants(change_times, truth_times, tolerance)
+            )
     return score
 
 
@@ -655,8 +659,7 @@ def aggregate(scores: list[Score]) -> Score:
     total = Score(
         space=space,
         tracks=len(scores),
-        confusion={intent: {label: 0.0 for label in spec.labels}
-                   for intent in INTENT_ORDER},
+        confusion={intent: {label: 0.0 for label in spec.labels} for intent in INTENT_ORDER},
         counts={label: [0.0, 0.0, 0.0] for label in spec.labels},
         no_intent_by_label={label: 0.0 for label in spec.labels},
         boundary=_empty_boundary(spec.labels),
@@ -686,11 +689,13 @@ def aggregate(scores: list[Score]) -> Score:
         for stream in STREAM_ORDER:
             for tolerance in TOLERANCES_SEC:
                 for key in ("n_truth", "n_pred", "matched"):
-                    total.boundary[stream][tolerance]["overall"][key] += \
-                        score.boundary[stream][tolerance]["overall"][key]
+                    total.boundary[stream][tolerance]["overall"][key] += score.boundary[stream][
+                        tolerance
+                    ]["overall"][key]
                     for label in spec.labels:
-                        total.boundary[stream][tolerance]["by_type"][label][key] += \
-                            score.boundary[stream][tolerance]["by_type"][label][key]
+                        total.boundary[stream][tolerance]["by_type"][label][key] += score.boundary[
+                            stream
+                        ][tolerance]["by_type"][label][key]
                 total.flicker[stream][tolerance] += score.flicker[stream][tolerance]
     return total
 
@@ -725,17 +730,22 @@ def _boundary_table(score: Score, stream: str) -> dict:
         precision, recall, f1 = score.boundary_prf(stream, tolerance)
         cell = score.boundary[stream][tolerance]["overall"]
         entry = {
-            "overall": {**cell, "precision": _round(precision),
-                        "recall": _round(recall), "f1": _round(f1)},
+            "overall": {
+                **cell,
+                "precision": _round(precision),
+                "recall": _round(recall),
+                "f1": _round(f1),
+            },
             "by_type": {},
         }
         for label in score.labels:
             typed = score.boundary[stream][tolerance]["by_type"][label]
-            tprecision, trecall, tf1 = score.boundary_prf(
-                stream, tolerance, "type", label)
+            tprecision, trecall, tf1 = score.boundary_prf(stream, tolerance, "type", label)
             entry["by_type"][label] = {
-                **typed, "precision": _round(tprecision),
-                "recall": _round(trecall), "f1": _round(tf1),
+                **typed,
+                "precision": _round(tprecision),
+                "recall": _round(trecall),
+                "f1": _round(tf1),
             }
         out[f"{tolerance}"] = entry
     return out
@@ -743,11 +753,9 @@ def _boundary_table(score: Score, stream: str) -> dict:
 
 def _stream_block(score: Score, stream: str) -> dict:
     return {
-        "changes_total":
-            score.boundary[stream][PRIMARY_TOLERANCE_SEC]["overall"]["n_pred"],
+        "changes_total": score.boundary[stream][PRIMARY_TOLERANCE_SEC]["overall"]["n_pred"],
         "boundary": _boundary_table(score, stream),
-        "flicker": {f"{tolerance}": count
-                    for tolerance, count in score.flicker[stream].items()},
+        "flicker": {f"{tolerance}": count for tolerance, count in score.flicker[stream].items()},
         "flicker_per_audience_minute": {
             f"{tolerance}": _round(rate, 4)
             for tolerance, rate in score.flicker_per_minute[stream].items()
@@ -805,27 +813,25 @@ def _structural(score: Score) -> dict:
         for label in INTENT_TO_LABELS[intent][score.space]
     }
     unreachable = [label for label in spec.labels if label not in reachable]
-    truth_sec = {label: score.counts[label][0] + score.counts[label][2]
-                 for label in spec.labels}
+    truth_sec = {label: score.counts[label][0] + score.counts[label][2] for label in spec.labels}
     total_truth = sum(truth_sec.values())
     unreachable_sec = sum(truth_sec[label] for label in unreachable)
-    silent_intents = [intent for intent in INTENT_ORDER
-                      if intent not in score.observed_intents]
+    silent_intents = [intent for intent in INTENT_ORDER if intent not in score.observed_intents]
     return {
         "observed_intents": sorted(score.observed_intents),
         "never_observed_intents": silent_intents,
         "unreachable_classes": unreachable,
         "unreachable_label_sec": _round(unreachable_sec, 3),
         "unreachable_label_share": _round(
-            unreachable_sec / total_truth if total_truth > 0 else 0.0),
+            unreachable_sec / total_truth if total_truth > 0 else 0.0
+        ),
         # A bound that CANNOT BE EXCEEDED, not a target: it ignores where the
         # unreachable mass has to go.
         "macro_f1_upper_bound": _round(
-            (len(spec.labels) - len(unreachable)) / len(spec.labels)
-            if spec.labels else 0.0),
+            (len(spec.labels) - len(unreachable)) / len(spec.labels) if spec.labels else 0.0
+        ),
         # The number to actually aim a comparison at.
-        "macro_f1_best_achievable": _round(
-            best_achievable_macro_f1(truth_sec, unreachable)),
+        "macro_f1_best_achievable": _round(best_achievable_macro_f1(truth_sec, unreachable)),
     }
 
 
@@ -839,24 +845,23 @@ def _song_entry(score: Score) -> dict:
         "accuracy": _round(score.accuracy),
         "f1": {label: _round(score.f1(label)) for label in score.macro_classes},
         "boundary_f1": {
-            stream: {f"{tolerance}": _round(score.boundary_prf(stream, tolerance)[2])
-                     for tolerance in TOLERANCES_SEC}
+            stream: {
+                f"{tolerance}": _round(score.boundary_prf(stream, tolerance)[2])
+                for tolerance in TOLERANCES_SEC
+            }
             for stream in STREAM_ORDER
         },
         "flicker_per_audience_minute": {
-            stream: {f"{tolerance}": _round(rate, 3)
-                     for tolerance, rate in per_tolerance.items()}
+            stream: {f"{tolerance}": _round(rate, 3) for tolerance, rate in per_tolerance.items()}
             for stream, per_tolerance in score.flicker_per_minute.items()
         },
         "changes": {
             stream: score.boundary[stream][PRIMARY_TOLERANCE_SEC]["overall"]["n_pred"]
             for stream in STREAM_ORDER
         },
-        "label_boundaries":
-            score.boundary["intent"][PRIMARY_TOLERANCE_SEC]["overall"]["n_truth"],
+        "label_boundaries": score.boundary["intent"][PRIMARY_TOLERANCE_SEC]["overall"]["n_truth"],
         "confusion_sec": {
-            intent: {label: _round(seconds, 3)
-                     for label, seconds in row.items() if seconds > 0}
+            intent: {label: _round(seconds, 3) for label, seconds in row.items() if seconds > 0}
             for intent, row in score.confusion.items()
             if any(seconds > 0 for seconds in row.values())
         },
@@ -867,13 +872,15 @@ def evaluate(tracks: list[TrackBeats], worst: int = WORST_SONGS) -> dict:
     """Score every track in every space and assemble the JSON-ready result."""
     result: dict = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc)
-                                .replace(microsecond=0).isoformat(),
+        .replace(microsecond=0)
+        .isoformat(),
         "tolerances_sec": list(TOLERANCES_SEC),
         "primary_tolerance_sec": PRIMARY_TOLERANCE_SEC,
         "max_gap_factor": MAX_GAP_FACTOR,
-        "intent_to_labels": {intent: {space: list(labels)
-                                      for space, labels in per_space.items()}
-                             for intent, per_space in INTENT_TO_LABELS.items()},
+        "intent_to_labels": {
+            intent: {space: list(labels) for space, labels in per_space.items()}
+            for intent, per_space in INTENT_TO_LABELS.items()
+        },
         "spaces": {},
     }
 
@@ -881,7 +888,8 @@ def evaluate(tracks: list[TrackBeats], worst: int = WORST_SONGS) -> dict:
     beat_intervals: list[float] = []
     for track in tracks:
         beat_intervals.extend(
-            track.times[i + 1] - track.times[i] for i in range(len(track.times) - 1))
+            track.times[i + 1] - track.times[i] for i in range(len(track.times) - 1)
+        )
 
     for space in SPACES:
         songs = [score_track(track, space) for track in tracks]
@@ -903,13 +911,12 @@ def evaluate(tracks: list[TrackBeats], worst: int = WORST_SONGS) -> dict:
                 for intent, row in corpus.confusion.items()
             },
             "no_intent_by_label_sec": {
-                label: _round(seconds, 3)
-                for label, seconds in corpus.no_intent_by_label.items()
+                label: _round(seconds, 3) for label, seconds in corpus.no_intent_by_label.items()
             },
-            "streams": {stream: _stream_block(corpus, stream)
-                        for stream in STREAM_ORDER},
-            "label_boundaries_total":
-                corpus.boundary["intent"][PRIMARY_TOLERANCE_SEC]["overall"]["n_truth"],
+            "streams": {stream: _stream_block(corpus, stream) for stream in STREAM_ORDER},
+            "label_boundaries_total": corpus.boundary["intent"][PRIMARY_TOLERANCE_SEC]["overall"][
+                "n_truth"
+            ],
             "structural": _structural(corpus),
             "worst_songs": [_song_entry(score) for score in ranked[:worst]],
             "per_song": per_song,
@@ -931,10 +938,13 @@ def evaluate(tracks: list[TrackBeats], worst: int = WORST_SONGS) -> dict:
         "no_intent_trailing_rows": reference.no_intent_trailing,
         "no_intent_share": _round(
             reference.no_intent_sec / reference.weight_total_sec
-            if reference.weight_total_sec > 0 else 0.0),
+            if reference.weight_total_sec > 0
+            else 0.0
+        ),
         "clamped_sec": _round(reference.clamped_sec, 3),
         "median_beat_interval_sec": _round(
-            statistics.median(beat_intervals) if beat_intervals else 0.0),
+            statistics.median(beat_intervals) if beat_intervals else 0.0
+        ),
     }
     return result
 
@@ -954,12 +964,10 @@ def _heading(text: str, char: str = "=") -> list[str]:
     return [_rule(char), f"  {text}", _rule(char)]
 
 
-def _matrix_block(space_result: dict, no_intent: dict, unit: float,
-                  suffix: str) -> list[str]:
+def _matrix_block(space_result: dict, no_intent: dict, unit: float, suffix: str) -> list[str]:
     labels = space_result["labels"]
     confusion = space_result["confusion_sec"]
-    header = f'  {"intent":<12}' + "".join(f"{label:>11}" for label in labels) \
-        + f'{"total":>11}'
+    header = f'  {"intent":<12}' + "".join(f"{label:>11}" for label in labels) + f'{"total":>11}'
     lines = [header, "  " + "-" * (len(header) - 2)]
     for intent in INTENT_ORDER:
         row = confusion[intent]
@@ -969,17 +977,20 @@ def _matrix_block(space_result: dict, no_intent: dict, unit: float,
         lines.append(f'  {intent:<12}{cells}{total / unit:>11.1f}{mark}')
     lines.append("  " + "-" * (len(header) - 2))
     no_intent_total = sum(no_intent.values())
-    lines.append(f'  {"(no intent)":<12}'
-                 + "".join(f"{no_intent[label] / unit:>11.1f}" for label in labels)
-                 + f"{no_intent_total / unit:>11.1f}"
-                 + "  excluded from every score")
+    lines.append(
+        f'  {"(no intent)":<12}'
+        + "".join(f"{no_intent[label] / unit:>11.1f}" for label in labels)
+        + f"{no_intent_total / unit:>11.1f}"
+        + "  excluded from every score"
+    )
     column_total = {
-        label: sum(confusion[intent][label] for intent in INTENT_ORDER)
-        for label in labels
+        label: sum(confusion[intent][label] for intent in INTENT_ORDER) for label in labels
     }
-    lines.append(f'  {"label total":<12}'
-                 + "".join(f"{column_total[label] / unit:>11.1f}" for label in labels)
-                 + f"{sum(column_total.values()) / unit:>11.1f}")
+    lines.append(
+        f'  {"label total":<12}'
+        + "".join(f"{column_total[label] / unit:>11.1f}" for label in labels)
+        + f"{sum(column_total.values()) / unit:>11.1f}"
+    )
     lines.append(f"  values in {suffix}; '*' marks an intent the engine never committed")
     return lines
 
@@ -1018,22 +1029,29 @@ def _per_class_block(space_result: dict) -> list[str]:
             f'{entry["precision"]:>11.3f}{entry["recall"]:>9.3f}{entry["f1"]:>8.3f}'
         )
     lines.append("  " + "-" * 67)
-    lines.append(f'  macro-F1 over {len(space_result["macro_classes"])} classes'
-                 f'{space_result["macro_f1"]:>44.3f}')
-    lines.append(f'  macro-F1 over the {len(space_result["expressible_classes"])} '
-                 f'classes the observed intents can express'
-                 f'{space_result["macro_f1_expressible"]:>17.3f}')
+    lines.append(
+        f'  macro-F1 over {len(space_result["macro_classes"])} classes'
+        f'{space_result["macro_f1"]:>44.3f}'
+    )
+    lines.append(
+        f'  macro-F1 over the {len(space_result["expressible_classes"])} '
+        f'classes the observed intents can express'
+        f'{space_result["macro_f1_expressible"]:>17.3f}'
+    )
     lines.append(f'  time-weighted accuracy{space_result["accuracy"]:>45.3f}')
     drop = per_class["drop"]
     lines.append("")
-    lines.append(f'  DROP specifically -- the show-critical class: '
-                 f'recall {drop["recall"]:.3f} '
-                 f'(the lights are in DROP for {100.0 * drop["recall"]:.1f}% of')
-    lines.append(f'  real drop time), precision {drop["precision"]:.3f} '
-                 f'(they are wrong {100.0 * (1 - drop["precision"]):.1f}% of the time '
-                 f'they claim it),')
-    lines.append(f'  F1 {drop["f1"]:.3f} on {drop["support_sec"] / 60.0:.1f} min of '
-                 f'ground truth.')
+    lines.append(
+        f'  DROP specifically -- the show-critical class: '
+        f'recall {drop["recall"]:.3f} '
+        f'(the lights are in DROP for {100.0 * drop["recall"]:.1f}% of'
+    )
+    lines.append(
+        f'  real drop time), precision {drop["precision"]:.3f} '
+        f'(they are wrong {100.0 * (1 - drop["precision"]):.1f}% of the time '
+        f'they claim it),'
+    )
+    lines.append(f'  F1 {drop["f1"]:.3f} on {drop["support_sec"] / 60.0:.1f} min of ground truth.')
     return lines
 
 
@@ -1055,18 +1073,19 @@ def _boundary_block(space_result: dict) -> list[str]:
             lines.append(
                 f'  {stream:<8}{"all boundaries":<16}{f"+/-{tolerance}s":>7}'
                 f'{cell["n_truth"]:>9}{cell["n_pred"]:>9}{cell["matched"]:>9}'
-                f'{cell["precision"]:>11.3f}{cell["recall"]:>9.3f}{cell["f1"]:>8.3f}')
+                f'{cell["precision"]:>11.3f}{cell["recall"]:>9.3f}{cell["f1"]:>8.3f}'
+            )
     lines.append("  " + "-" * 84)
     for label in space_result["labels"]:
         for stream in STREAM_ORDER:
             for tolerance in TOLERANCES_SEC:
-                cell = (space_result["streams"][stream]["boundary"]
-                        [f"{tolerance}"]["by_type"][label])
+                cell = space_result["streams"][stream]["boundary"][f"{tolerance}"]["by_type"][label]
                 lines.append(
                     f'  {stream:<8}{"-> " + label:<16}{f"+/-{tolerance}s":>7}'
                     f'{cell["n_truth"]:>9}{cell["n_pred"]:>9}{cell["matched"]:>9}'
                     f'{cell["precision"]:>11.3f}{cell["recall"]:>9.3f}'
-                    f'{cell["f1"]:>8.3f}')
+                    f'{cell["f1"]:>8.3f}'
+                )
         lines.append("")
     lines.append("  typed rows pair boundaries INTO a class with changes into a state that")
     lines.append("  claims that class; '-> drop' is the show-critical row.  A change that")
@@ -1089,20 +1108,28 @@ def _flicker_block(space_result: dict) -> list[str]:
             lines.append(
                 f'  {stream:<8}{f"+/-{tolerance}s":<11}{block["flicker"][key]:>15}'
                 f'{100.0 * block["flicker"][key] / total_changes:>16.1f}%'
-                f'{block["flicker_per_audience_minute"][key]:>22.2f}')
-        per_song = sorted(song["flicker_per_audience_minute"][stream]
-                          [f"{PRIMARY_TOLERANCE_SEC}"]
-                          for song in space_result["per_song"])
+                f'{block["flicker_per_audience_minute"][key]:>22.2f}'
+            )
+        per_song = sorted(
+            song["flicker_per_audience_minute"][stream][f"{PRIMARY_TOLERANCE_SEC}"]
+            for song in space_result["per_song"]
+        )
         if per_song:
+
             def _quantile(fraction: float) -> float:
                 return per_song[min(len(per_song) - 1, int(fraction * len(per_song)))]
-            lines.append(f'           per-song at +/-{PRIMARY_TOLERANCE_SEC}s: '
-                         f'median {_quantile(0.5):.2f}, p90 {_quantile(0.9):.2f}, '
-                         f'max {per_song[-1]:.2f} changes/min '
-                         f'({block["changes_total"]} changes total)')
+
+            lines.append(
+                f'           per-song at +/-{PRIMARY_TOLERANCE_SEC}s: '
+                f'median {_quantile(0.5):.2f}, p90 {_quantile(0.9):.2f}, '
+                f'max {per_song[-1]:.2f} changes/min '
+                f'({block["changes_total"]} changes total)'
+            )
         lines.append("")
-    lines.append(f'  against {space_result["label_boundaries_total"]} real label '
-                 f'boundaries.  Flicker asks "was there any musical reason NEAR this')
+    lines.append(
+        f'  against {space_result["label_boundaries_total"]} real label '
+        f'boundaries.  Flicker asks "was there any musical reason NEAR this'
+    )
     lines.append('  change" (proximity); boundary precision additionally punishes a')
     lines.append('  correctly-placed decision made twice.  An audience notices the first.')
     return lines
@@ -1114,8 +1141,7 @@ def _structural_block(space_result: dict) -> list[str]:
     silent = structural["never_observed_intents"]
     lines = [
         f'  intents the engine committed : {", ".join(structural["observed_intents"])}',
-        f'  intents NEVER committed      : '
-        f'{", ".join(silent) if silent else "(none)"}',
+        f'  intents NEVER committed      : {", ".join(silent) if silent else "(none)"}',
         f'  label classes therefore out of reach: '
         f'{", ".join(unreachable) if unreachable else "(none)"}',
         f'  ground truth sitting in those classes: '
@@ -1126,10 +1152,8 @@ def _structural_block(space_result: dict) -> list[str]:
         f'  best macro-F1 actually achievable    : '
         f'{structural["macro_f1_best_achievable"]:.3f}  (the unreachable time still '
         f'has to be',
-        "                                                predicted as something, so it "
-        "lands as",
-        "                                                false positives on the "
-        "reachable classes)",
+        "                                                predicted as something, so it lands as",
+        "                                                false positives on the reachable classes)",
     ]
     if silent:
         lines += [
@@ -1167,7 +1191,8 @@ def _worst_block(space_result: dict) -> list[str]:
             f'{song["boundary_f1"]["intent"][tol]:>8.3f}'
             f'{song["flicker_per_audience_minute"]["intent"][tol]:>11.2f}'
             f'{changes:>10}{song["label_boundaries"]:>8}'
-            f'{song["exposure_sec"] / 60.0:>7.1f}')
+            f'{song["exposure_sec"] / 60.0:>7.1f}'
+        )
         cells = []
         for intent, row in song["confusion_sec"].items():
             for label, seconds in row.items():
@@ -1181,8 +1206,7 @@ def _worst_block(space_result: dict) -> list[str]:
                 line = "     "
             line += "  " + text
         lines.append(line)
-    lines.append("  every non-zero confusion cell, minutes, largest first; "
-                 "'=' correct, '>' wrong")
+    lines.append("  every non-zero confusion cell, minutes, largest first; '=' correct, '>' wrong")
     return lines
 
 
@@ -1213,16 +1237,19 @@ def render_report(result: dict) -> str:
     ]
     for intent in INTENT_ORDER:
         per_space = result["intent_to_labels"][intent]
-        lines.append(f'    {intent:<12}' + "  ".join(
-            f'{space}: {"|".join(per_space[space])}' for space in SPACES))
+        lines.append(
+            f'    {intent:<12}'
+            + "  ".join(f'{space}: {"|".join(per_space[space])}' for space in SPACES)
+        )
     lines.append("")
 
     for space in SPACES:
         space_result = result["spaces"][space]
         lines += _heading(f'{space.upper()} SPACE ({space_result["caption"]})')
         lines += ["", "  CONFUSION MATRIX -- intent (rows) x label (columns), minutes", ""]
-        lines += _matrix_block(space_result, space_result["no_intent_by_label_sec"],
-                               60.0, "minutes of show")
+        lines += _matrix_block(
+            space_result, space_result["no_intent_by_label_sec"], 60.0, "minutes of show"
+        )
         lines += ["", "  CONFUSION MATRIX -- row-normalised, %", ""]
         lines += _row_percent_block(space_result)
         lines += ["", "  PER-CLASS PRECISION / RECALL / F1 (time-weighted)", ""]
@@ -1251,9 +1278,9 @@ def default_data_dir() -> Path:
 def git_sha() -> str:
     try:
         return subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, check=True,
-            capture_output=True, text=True).stdout.strip()
-    except Exception:                                           # pragma: no cover
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip()
+    except Exception:  # pragma: no cover
         return "unknown"
 
 
@@ -1275,15 +1302,24 @@ def write_json(path: Path, payload: dict) -> None:
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=default_data_dir(),
-                        help="corpus root holding training_table.csv.gz "
-                             "(default: %(default)s)")
-    parser.add_argument("--out", type=Path, default=None,
-                        help=f"result JSON (default: <data-dir>/{OUT_FILE})")
-    parser.add_argument("--worst", type=int, default=WORST_SONGS,
-                        help="how many worst songs to list (default: %(default)s)")
-    parser.add_argument("--report", type=Path, default=None,
-                        help="also write the printed report to this file")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=default_data_dir(),
+        help="corpus root holding training_table.csv.gz (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--out", type=Path, default=None, help=f"result JSON (default: <data-dir>/{OUT_FILE})"
+    )
+    parser.add_argument(
+        "--worst",
+        type=int,
+        default=WORST_SONGS,
+        help="how many worst songs to list (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--report", type=Path, default=None, help="also write the printed report to this file"
+    )
     args = parser.parse_args(argv)
 
     data_dir = args.data_dir.resolve()

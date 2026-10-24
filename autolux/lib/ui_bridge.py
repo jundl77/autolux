@@ -38,6 +38,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == '/metrics':
             from prometheus_client import CONTENT_TYPE_LATEST
             from autolux.lib.system_health import metrics
+
             body = metrics(self.server.event_buffer)
             self.send_response(200)
             self.send_header('Content-Type', CONTENT_TYPE_LATEST)
@@ -69,8 +70,9 @@ class SnapshotServer:
     def __init__(self, event_buffer, port: int):
         self._http = _Http((SNAPSHOT_HOST, port), _Handler)
         self._http.event_buffer = event_buffer
-        self._thread = threading.Thread(target=self._http.serve_forever,
-                                        name='snapshot-server', daemon=True)
+        self._thread = threading.Thread(
+            target=self._http.serve_forever, name='snapshot-server', daemon=True
+        )
 
     @property
     def port(self) -> int:
@@ -85,14 +87,23 @@ class SnapshotServer:
 
 
 def viewer_command(ui_port: int) -> list:
-    return [sys.executable, '-m', VIEWER_MODULE,
-            '--port', str(ui_port),
-            '--snapshot-port', str(snapshot_port(ui_port))]
+    return [
+        sys.executable,
+        '-m',
+        VIEWER_MODULE,
+        '--port',
+        str(ui_port),
+        '--snapshot-port',
+        str(snapshot_port(ui_port)),
+    ]
 
 
 def _spawn(command: list) -> subprocess.Popen:
-    detach = ({'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
-              if os.name == 'nt' else {'start_new_session': True})
+    detach = (
+        {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == 'nt'
+        else {'start_new_session': True}
+    )
     return subprocess.Popen(command, cwd=str(_REPO_ROOT), **detach)
 
 
@@ -102,8 +113,7 @@ def kill_tree(process: subprocess.Popen) -> None:
         return
     try:
         if os.name == 'nt':
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
-                           capture_output=True)
+            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
         else:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
     except OSError as error:
@@ -115,14 +125,12 @@ def kill_tree(process: subprocess.Popen) -> None:
 
 
 class UiBridge:
-    def __init__(self, server: SnapshotServer, viewer: subprocess.Popen,
-                 ui_port: int):
+    def __init__(self, server: SnapshotServer, viewer: subprocess.Popen, ui_port: int):
         self._server = server
         self._viewer = viewer
         self._ui_port = ui_port
         self._stopping = False
-        self._watcher = threading.Thread(target=self._watch,
-                                         name='viewer-watch', daemon=True)
+        self._watcher = threading.Thread(target=self._watch, name='viewer-watch', daemon=True)
         self._watcher.start()
 
     @property
@@ -132,9 +140,11 @@ class UiBridge:
     def _watch(self) -> None:
         code = self._viewer.wait()
         if not self._stopping:
-            logging.warning(f'[ui] the viewer process exited ({code}) — the '
-                            f'show is unaffected; relaunch it with '
-                            f'`python -m {VIEWER_MODULE} --port {self._ui_port}`')
+            logging.warning(
+                f'[ui] the viewer process exited ({code}) — the '
+                f'show is unaffected; relaunch it with '
+                f'`python -m {VIEWER_MODULE} --port {self._ui_port}`'
+            )
 
     def wait(self) -> None:
         while self._viewer.poll() is None:
@@ -151,17 +161,22 @@ def start(event_buffer, ui_port: int) -> UiBridge | None:
         server = SnapshotServer(event_buffer, snapshot_port(ui_port))
         server.start()
     except OSError as error:
-        logging.warning(f'[ui] no snapshot endpoint on port '
-                        f'{snapshot_port(ui_port)} ({error!r}) — the show runs '
-                        f'without a viewer')
+        logging.warning(
+            f'[ui] no snapshot endpoint on port '
+            f'{snapshot_port(ui_port)} ({error!r}) — the show runs '
+            f'without a viewer'
+        )
         return None
     try:
         viewer = _spawn(viewer_command(ui_port))
     except OSError as error:
-        logging.warning(f'[ui] the viewer process did not start ({error!r}) — '
-                        f'the show runs without it')
+        logging.warning(
+            f'[ui] the viewer process did not start ({error!r}) — the show runs without it'
+        )
         server.stop()
         return None
-    logging.info(f'[ui] visualizer → http://localhost:{ui_port} '
-                 f'(pid {viewer.pid}, reading :{server.port}{SNAPSHOT_PATH})')
+    logging.info(
+        f'[ui] visualizer → http://localhost:{ui_port} '
+        f'(pid {viewer.pid}, reading :{server.port}{SNAPSHOT_PATH})'
+    )
     return UiBridge(server, viewer, ui_port)

@@ -1,4 +1,5 @@
 """Small health summary and Prometheus export shared by the viewer and CLI."""
+
 import math
 import time
 
@@ -21,35 +22,62 @@ def health_summary(snapshot, *, now=None):
     fault = (snapshot.get('shed') or {}).get('fault')
     recent = system.get('recent') or {}
     glitches = sum(recent.values())
-    audio_detail = (f"Last 10 s: {int(recent.get('underruns', 0))} underruns · "
-                    f"{int(recent.get('overruns', 0))} overruns · {int(recent.get('lost_frames', 0))} lost frames")
+    audio_detail = (
+        f"Last 10 s: {int(recent.get('underruns', 0))} underruns · "
+        f"{int(recent.get('overruns', 0))} overruns · {int(recent.get('lost_frames', 0))} lost frames"
+    )
     if recent.get('dropped_frames'):
         audio_detail += f" · {int(recent['dropped_frames'])} dropped frames"
     if recent.get('latency_recoveries'):
         audio_detail += f" · {int(recent['latency_recoveries'])} latency recovery drops"
     peak = rx.get('audio_signal_peak')
     if peak is not None:
-        audio_detail += f" · peak {20*math.log10(peak):.0f} dBFS" if peak > 0 else ' · digital silence'
-    fill, target = rx.get('audio_buffer_seconds', 0), rx.get('buffer_target_seconds', .08)
+        audio_detail += (
+            f" · peak {20 * math.log10(peak):.0f} dBFS" if peak > 0 else ' · digital silence'
+        )
+    fill, target = rx.get('audio_buffer_seconds', 0), rx.get('buffer_target_seconds', 0.08)
     input_age = rx.get('audio_input_age_seconds')
     audio_fresh = rx_fresh and input_age is not None and input_age + age < 1
     dmx_age = tx.get('dmx_input_age_seconds')
     lights = link and rx.get('dmx_connected') and dmx_age is not None and dmx_age + age < 3
     lateness = rx.get('dmx_lateness_seconds')
     cards = [
-        ('Autolux', 'Stopped' if age >= 3 else 'Degraded' if fault else 'Running',
-         str(fault or 'Analysis and controller'), age < 3 and not fault),
-        ('Radius link', 'Connected' if link else 'Waiting / offline',
-         '10 s heartbeat in both directions', bool(link)),
-        ('Audio', 'No input' if not audio_fresh else 'Glitches' if glitches else 'Stable',
-         audio_detail, audio_fresh and not glitches),
-        ('Audio buffer', f'{fill*1000:.0f} ms' if rx_fresh else 'Unavailable',
-         f'Target {target*1000:.0f} ms · clock correction {rx.get("clock_correction_ppm", 0):.0f} ppm',
-         rx_fresh and target*.25 <= fill <= target*3),
-        ('Lighting', 'Ready' if lights else 'Waiting / offline',
-         'Enttec output and SoundSwitch input', bool(lights)),
-        ('Audio / lights', f'{lateness*1000:.0f} ms' if lights and lateness is not None else 'Unavailable',
-         'Lighting scheduling lateness', bool(lights and lateness is not None and lateness < .05)),
+        (
+            'Autolux',
+            'Stopped' if age >= 3 else 'Degraded' if fault else 'Running',
+            str(fault or 'Analysis and controller'),
+            age < 3 and not fault,
+        ),
+        (
+            'Radius link',
+            'Connected' if link else 'Waiting / offline',
+            '10 s heartbeat in both directions',
+            bool(link),
+        ),
+        (
+            'Audio',
+            'No input' if not audio_fresh else 'Glitches' if glitches else 'Stable',
+            audio_detail,
+            audio_fresh and not glitches,
+        ),
+        (
+            'Audio buffer',
+            f'{fill * 1000:.0f} ms' if rx_fresh else 'Unavailable',
+            f'Target {target * 1000:.0f} ms · clock correction {rx.get("clock_correction_ppm", 0):.0f} ppm',
+            rx_fresh and target * 0.25 <= fill <= target * 3,
+        ),
+        (
+            'Lighting',
+            'Ready' if lights else 'Waiting / offline',
+            'Enttec output and SoundSwitch input',
+            bool(lights),
+        ),
+        (
+            'Audio / lights',
+            f'{lateness * 1000:.0f} ms' if lights and lateness is not None else 'Unavailable',
+            'Lighting scheduling lateness',
+            bool(lights and lateness is not None and lateness < 0.05),
+        ),
     ]
     return {'state': 'healthy' if all(c[3] for c in cards) else 'attention', 'cards': cards}
 
@@ -88,13 +116,27 @@ class HealthCollector:
         snapshot = self.source.snapshot()
         system = snapshot.get('system') or {}
         age = max(0, time.time() - system.get('updated_at', 0))
-        yield GaugeMetricFamily('autolux_up', 'Controller health updates are fresh.', value=int(age < 3))
+        yield GaugeMetricFamily(
+            'autolux_up', 'Controller health updates are fresh.', value=int(age < 3)
+        )
         shed = snapshot.get('shed') or {}
-        yield GaugeMetricFamily('autolux_analysis_degraded', 'Analysis is recovering from a fault.', value=int(bool(shed.get('fault'))))
+        yield GaugeMetricFamily(
+            'autolux_analysis_degraded',
+            'Analysis is recovering from a fault.',
+            value=int(bool(shed.get('fault'))),
+        )
         timing = (snapshot.get('timing_stats') or {}).get('mean_error_ms')
         if timing is not None:
-            yield GaugeMetricFamily('autolux_command_timing_error_seconds', 'Mean absolute command scheduling error.', value=timing/1000)
-        up = GaugeMetricFamily('radius_up', 'Endpoint telemetry is fresh and its peer heartbeat is healthy.', labels=['node'])
+            yield GaugeMetricFamily(
+                'autolux_command_timing_error_seconds',
+                'Mean absolute command scheduling error.',
+                value=timing / 1000,
+            )
+        up = GaugeMetricFamily(
+            'radius_up',
+            'Endpoint telemetry is fresh and its peer heartbeat is healthy.',
+            labels=['node'],
+        )
         for node in ('tx', 'rx'):
             info = system.get(node) or {}
             measured_age = system.get(f'{node}_age_seconds')

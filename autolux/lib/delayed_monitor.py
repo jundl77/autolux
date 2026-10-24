@@ -42,6 +42,7 @@ class DelayedMonitor:
             return
         if not self._started:
             self._started = True
-            logging.info(f'[monitor] {self._delay_sec:.1f}s buffered — the '
-                         f'headphones join the room')
+            logging.info(
+                f'[monitor] {self._delay_sec:.1f}s buffered — the headphones join the room'
+            )
         self._play(self._buffered.popleft())

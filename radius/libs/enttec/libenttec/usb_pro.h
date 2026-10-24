@@ -16,20 +16,19 @@ void FTDI_ClosePort();
  **/
 int FTDI_ListDevices();
 
-
 /* Function : FTDI_SendData
  * Author	: ENTTEC
  * Purpose  : Send Data (DMX or other packets) to the PRO
  * Parameters: Label, Pointer to Data Structure, Length of Data
  **/
-int FTDI_SendData(int label, unsigned char *data, int length);
+int FTDI_SendData(int label, unsigned char* data, int length);
 
 /* Function : FTDI_ReceiveData
  * Author	: ENTTEC
  * Purpose  : Receive Data (DMX or other packets) from the PRO
  * Parameters: Label, Pointer to Data Structure, Length of Data
  **/
-int FTDI_ReceiveData(int label, unsigned char *data, unsigned int expected_length);
+int FTDI_ReceiveData(int label, unsigned char* data, unsigned int expected_length);
 
 /* Function : FTDI_PurgeBuffer
  * Author	: ENTTEC
@@ -41,6 +40,6 @@ void FTDI_PurgeBuffer();
 /* Function : FTDI_OpenDevice
  * Author	: ENTTEC
  * Purpose  : Opens the PRO; Tests various parameters; outputs info
- * Parameters: device num (returned by the List Device fuc), Fw Version MSB, Fw Version LSB 
+ * Parameters: device num (returned by the List Device fuc), Fw Version MSB, Fw Version LSB
  **/
 uint16_t FTDI_OpenDevice(int device_num);

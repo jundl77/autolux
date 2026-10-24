@@ -8,6 +8,7 @@ Usage:
 Every call stamps UTC time and the kernel nonpaged pool reading (the leak the
 charter gates GPU launches on: STOP new GPU stages past 8 GB).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,9 +41,15 @@ STAGES = [
 def pool_gb() -> float:
     try:
         out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(Get-Counter '\\Memory\\Pool Nonpaged Bytes').CounterSamples[0].CookedValue"],
-            capture_output=True, text=True, timeout=60,
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(Get-Counter '\\Memory\\Pool Nonpaged Bytes').CounterSamples[0].CookedValue",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
         ).stdout.strip()
         return round(float(out) / 1e9, 3)
     except Exception:

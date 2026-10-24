@@ -24,25 +24,24 @@ def test_the_retired_five_class_priors_are_refused_at_chain_construction():
     with pytest.raises(ValueError, match='full vocabulary'):
         _check_class_space(
             _priors('intro', 'buildup', 'breakdown', 'drop', 'outro'),
-            NUM_SECTION_CLASSES, SECTION_LABELS)
+            NUM_SECTION_CLASSES,
+            SECTION_LABELS,
+        )
 
 
 def test_a_class_outside_the_vocabulary_is_refused():
     with pytest.raises(ValueError, match='chorus'):
-        _check_class_space(_priors('intro', 'chorus'),
-                           NUM_SECTION_CLASSES, SECTION_LABELS)
+        _check_class_space(_priors('intro', 'chorus'), NUM_SECTION_CLASSES, SECTION_LABELS)
 
 
 def test_a_space_in_the_wrong_order_is_refused_rather_than_decoded_shifted():
     with pytest.raises(ValueError, match='order'):
-        _check_class_space(_priors('drop', 'intro', 'outro'),
-                           NUM_SECTION_CLASSES, SECTION_LABELS)
+        _check_class_space(_priors('drop', 'intro', 'outro'), NUM_SECTION_CLASSES, SECTION_LABELS)
 
 
 def test_a_duplicated_class_is_refused():
     with pytest.raises(ValueError, match='duplicate'):
-        _check_class_space(_priors('intro', 'intro'),
-                           NUM_SECTION_CLASSES, SECTION_LABELS)
+        _check_class_space(_priors('intro', 'intro'), NUM_SECTION_CLASSES, SECTION_LABELS)
 
 
 def test_a_model_head_of_the_wrong_width_is_refused():
@@ -57,14 +56,14 @@ def test_a_graph_that_will_not_declare_its_class_axis_is_refused():
 
 def test_a_config_swept_in_another_space_is_refused():
     with pytest.raises(ValueError, match='swept'):
-        _check_class_space(_full(), NUM_SECTION_CLASSES,
-                           ('intro', 'buildup', 'breakdown', 'drop', 'outro'))
+        _check_class_space(
+            _full(), NUM_SECTION_CLASSES, ('intro', 'buildup', 'breakdown', 'drop', 'outro')
+        )
 
 
 def test_the_shipping_config_and_priors_pass_the_gate_off_their_own_records():
     """The committed config carries its space; the gate reads it, not a copy."""
-    from autolux.lib.engine.section_decoder import (SHIPPING_DECODER_CONFIG,
-                                            decoder_config_classes)
+    from autolux.lib.engine.section_decoder import SHIPPING_DECODER_CONFIG, decoder_config_classes
 
     assert decoder_config_classes(SHIPPING_DECODER_CONFIG) == SECTION_LABELS
 

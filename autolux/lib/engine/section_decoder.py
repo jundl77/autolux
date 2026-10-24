@@ -10,6 +10,7 @@ carries the class the show was already in, is born already old, and is preceded
 by one virtual bar so the belief it carries can be refused on the first real
 bar.  The three are one change: models/phase_b/decoder_rebirth/rebirth_gate.json.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,14 +26,28 @@ _TRAINING_DIR = str(Path(__file__).resolve().parents[2] / "training")
 if _TRAINING_DIR not in sys.path:
     sys.path.insert(0, _TRAINING_DIR)
 
-from nn.decoder import (DecodeParams, SHIPPING_DECODER_CONFIG,  # noqa: E402
-                        build_decoder, decoder_config_classes,
-                        load_decoder_config, temper)
+from nn.decoder import (
+    DecodeParams,
+    SHIPPING_DECODER_CONFIG,  # noqa: E402
+    build_decoder,
+    decoder_config_classes,
+    load_decoder_config,
+    temper,
+)
 from nn.priors import Priors  # noqa: E402
 
-__all__ = ["BEATS_PER_BAR", "NOMINAL_BAR_SEC", "BarDecision", "BarObservation",
-           "SectionDecoder", "DecodeParams", "Priors", "SHIPPING_DECODER_CONFIG",
-           "decoder_config_classes", "load_decoder_config"]
+__all__ = [
+    "BEATS_PER_BAR",
+    "NOMINAL_BAR_SEC",
+    "BarDecision",
+    "BarObservation",
+    "SectionDecoder",
+    "DecodeParams",
+    "Priors",
+    "SHIPPING_DECODER_CONFIG",
+    "decoder_config_classes",
+    "load_decoder_config",
+]
 
 BEATS_PER_BAR = 4
 
@@ -72,8 +87,14 @@ class BarObservation(NamedTuple):
 
 
 class SectionDecoder:
-    def __init__(self, priors: Priors, params: DecodeParams | None = None, *,
-                 feature_latency_sec: float = 0.0, phase=None) -> None:
+    def __init__(
+        self,
+        priors: Priors,
+        params: DecodeParams | None = None,
+        *,
+        feature_latency_sec: float = 0.0,
+        phase=None,
+    ) -> None:
         self._phase = phase
         self.params = params or DecodeParams()
         if self.params.min_coverage > 1:
@@ -81,17 +102,16 @@ class SectionDecoder:
                 f"this config wants frames covered by {self.params.min_coverage} "
                 f"windows; the live stage runs ONE pass per cell, so every cell "
                 f"has coverage 1 and every bar would decode from the duration "
-                f"prior with nothing to say so")
+                f"prior with nothing to say so"
+            )
         self.feature_latency_sec = float(feature_latency_sec)
         self._decoder = build_decoder(priors, self.params)
         self._n_classes = len(priors.classes)
-        self.recent_observations: deque = deque(
-            maxlen=self.params.lag_bars + 2)
+        self.recent_observations: deque = deque(maxlen=self.params.lag_bars + 2)
         self.reset()
 
     def reset(self, *, cold_start: bool = True) -> None:
-        self._edges: deque = deque(maxlen=max(_EDGE_RETAIN_BARS,
-                                              self.params.lag_bars + 4))
+        self._edges: deque = deque(maxlen=max(_EDGE_RETAIN_BARS, self.params.lag_bars + 4))
         self._edge_base: int = 0
         if cold_start:
             self._bar_position: int = _FIRST_BEAT_BAR_POSITION
@@ -114,8 +134,10 @@ class SectionDecoder:
 
     def _edge(self, bar: int) -> float:
         if not self._have_edge(bar):
-            raise KeyError(f"bar {bar}'s line is no longer held; the grid keeps "
-                           f"{self._edges.maxlen} and is at {self._edge_base}")
+            raise KeyError(
+                f"bar {bar}'s line is no longer held; the grid keeps "
+                f"{self._edges.maxlen} and is at {self._edge_base}"
+            )
         return self._edges[bar - self._edge_base]
 
     def _have_edge(self, bar: int) -> bool:
@@ -151,8 +173,7 @@ class SectionDecoder:
 
     @property
     def chain_latency_sec(self) -> float:
-        return self.feature_latency_sec + \
-            (self.params.lag_bars + 1) * self.bar_sec
+        return self.feature_latency_sec + (self.params.lag_bars + 1) * self.bar_sec
 
     def push_beat(self, at_sec: float) -> list:
         at_sec = float(at_sec)
@@ -186,14 +207,14 @@ class SectionDecoder:
             self._phase.push_chunk(chunk)
 
     def _re_anchoring(self, at_sec: float) -> bool:
-        return (self._last_beat_sec is not None
-                and at_sec - self._last_beat_sec > _BEAT_GAP_SEC)
+        return self._last_beat_sec is not None and at_sec - self._last_beat_sec > _BEAT_GAP_SEC
 
     def _re_anchor(self, at_sec: float) -> None:
         logging.warning(
             f'[decoder] {at_sec - self._last_beat_sec:.1f}s without a beat — '
             f're-anchoring the bar grid at {at_sec:.2f}s and dropping '
-            f'{len(self._cells)} pending cells')
+            f'{len(self._cells)} pending cells'
+        )
         self._append_edge(at_sec)
         self._bar_position = _RE_ANCHOR_BAR_POSITION
         self._cells.clear()
@@ -202,8 +223,9 @@ class SectionDecoder:
     def push_posterior(self, at_sec: float, posterior, boundary: float) -> list:
         row = np.asarray(posterior, dtype=np.float64).reshape(-1)
         if row.size != self._n_classes:
-            raise ValueError(f"a cell carries {row.size} classes, the priors "
-                             f"name {self._n_classes}")
+            raise ValueError(
+                f"a cell carries {row.size} classes, the priors name {self._n_classes}"
+            )
         self._cells.append((float(at_sec), row, float(boundary)))
         self._newest_cell_sec = float(at_sec)
         return self._advance()
@@ -215,15 +237,13 @@ class SectionDecoder:
             observation = self._observe(self._next_bar)
             self.recent_observations.append(observation)
             self._next_bar += 1
-            for decision in self._decoder.push(observation.posterior,
-                                               observation.boundary):
+            for decision in self._decoder.push(observation.posterior, observation.boundary):
                 lived = decision.bar - self._virtual_bars
                 if lived < 0:
                     continue
                 bar = self._bar_offset + lived
                 self._committed_class = decision.class_index
-                decisions.append(BarDecision(bar, decision.label,
-                                             self._edge(bar)))
+                decisions.append(BarDecision(bar, decision.label, self._edge(bar)))
         self._prune()
         return decisions
 
@@ -235,7 +255,8 @@ class SectionDecoder:
             f'[decoder] the beat grid has run {self._edge_base - oldest} bars '
             f'past the oldest line the committer can still name (cursor '
             f'{self._next_bar}, grid holds from {self._edge_base}) — '
-            f'restarting the committer')
+            f'restarting the committer'
+        )
         self._restart_committer_at(max(self._next_bar, self._edge_base))
 
     def _restart_committer_at(self, bar: int) -> None:
@@ -251,22 +272,22 @@ class SectionDecoder:
     def _observable(self, bar: int) -> bool:
         if not self._have_edge(bar + 1):
             return False
-        reach = max(self._edge(bar + 1),
-                    self._edge(bar) + self.params.boundary_tolerance_sec)
+        reach = max(self._edge(bar + 1), self._edge(bar) + self.params.boundary_tolerance_sec)
         return self._newest_cell_sec >= reach
 
     def _observe(self, bar: int) -> BarObservation:
         lo, hi = self._edge(bar), self._edge(bar + 1)
         tolerance = self.params.boundary_tolerance_sec
         rows = [row for when, row, _ in self._cells if lo <= when < hi]
-        scores = [score for when, _, score in self._cells
-                  if lo - tolerance <= when <= lo + tolerance]
+        scores = [
+            score for when, _, score in self._cells if lo - tolerance <= when <= lo + tolerance
+        ]
         posterior = None
         if rows:
-            posterior = temper(np.asarray(rows, dtype=np.float64),
-                               self.params.temperature).mean(axis=0)
-        return BarObservation(bar, lo, hi, posterior,
-                              max(scores) if scores else float("nan"))
+            posterior = temper(np.asarray(rows, dtype=np.float64), self.params.temperature).mean(
+                axis=0
+            )
+        return BarObservation(bar, lo, hi, posterior, max(scores) if scores else float("nan"))
 
     def _prune(self) -> None:
         if self._have_edge(self._next_bar):

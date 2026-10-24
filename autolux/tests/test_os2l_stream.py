@@ -1,4 +1,5 @@
 """Actual TCP boundaries, disconnects and failed startup must be observable."""
+
 import json
 import socket
 import threading
@@ -26,7 +27,9 @@ def stream():
 
 def test_split_utf8_and_coalesced_messages_are_not_treated_as_datagrams(stream):
     client, peer = stream
-    message = json.dumps({'evt': 'subscribe', 'frequency': '25', 'name': 'é'}, ensure_ascii=False).encode()
+    message = json.dumps(
+        {'evt': 'subscribe', 'frequency': '25', 'name': 'é'}, ensure_ascii=False
+    ).encode()
     cut = message.index('é'.encode()) + 1
     peer.sendall(message[:cut])
     client._poll_socket()
@@ -79,10 +82,12 @@ def test_disconnect_after_subscription_stops_the_show_via_health_check():
     listener.bind(('127.0.0.1', 0))
     listener.listen()
     disconnect = threading.Event()
+
     def serve():
         with listener.accept()[0] as connection:
             connection.sendall(b'{"evt":"subscribe","frequency":"25"}')
             disconnect.wait(3)
+
     server = threading.Thread(target=serve)
     server.start()
     client = Os2lSender()

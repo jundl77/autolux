@@ -1,4 +1,5 @@
 """The live MERT extractor's geometry -- the part a show has to obey."""
+
 from __future__ import annotations
 
 import json
@@ -22,8 +23,14 @@ def _samples(seconds: float) -> int:
 
 
 def _schedule(track_sec, *, margin=3.0, hop_sec=1.0, buffer_sec=30.0):
-    return list(M.pass_schedule(_samples(track_sec), length=_samples(buffer_sec),
-                                hop=_samples(hop_sec), margin=_samples(margin)))
+    return list(
+        M.pass_schedule(
+            _samples(track_sec),
+            length=_samples(buffer_sec),
+            hop=_samples(hop_sec),
+            margin=_samples(margin),
+        )
+    )
 
 
 def _noise(n, seed=0):
@@ -33,7 +40,7 @@ def _noise(n, seed=0):
 def test_the_streaming_resampler_reproduces_a_whole_array_resample():
     audio = _noise(44100 * 7 + 913)
     resampler = M.StreamingResampler()
-    out = [resampler.push(audio[i:i + 256]) for i in range(0, len(audio), 256)]
+    out = [resampler.push(audio[i : i + 256]) for i in range(0, len(audio), 256)]
     out.append(resampler.flush())
     live = np.concatenate(out)
     offline = resample_poly(audio, resampler.up, resampler.down).astype(np.float32)
@@ -45,10 +52,9 @@ def test_the_streaming_resampler_reproduces_a_whole_array_resample():
 def test_the_resampler_is_indifferent_to_how_the_audio_is_chopped(block):
     audio = _noise(44100 * 3 + 77, seed=block)
     resampler = M.StreamingResampler()
-    parts = [resampler.push(audio[i:i + block]) for i in range(0, len(audio), block)]
+    parts = [resampler.push(audio[i : i + block]) for i in range(0, len(audio), block)]
     parts.append(resampler.flush())
-    assert np.array_equal(np.concatenate(parts),
-                          resample_poly(audio, 80, 147).astype(np.float32))
+    assert np.array_equal(np.concatenate(parts), resample_poly(audio, 80, 147).astype(np.float32))
 
 
 def test_the_resampler_never_emits_audio_it_has_not_been_given():
@@ -70,7 +76,8 @@ def test_reset_restores_the_head_of_stream_padding():
     second = M.StreamingResampler()
     assert np.array_equal(
         np.concatenate([first.push(audio), first.flush()]),
-        np.concatenate([second.push(audio), second.flush()]))
+        np.concatenate([second.push(audio), second.flush()]),
+    )
 
 
 def test_the_resampler_ratio_comes_from_the_two_rates():
@@ -90,7 +97,7 @@ def test_the_ring_returns_the_samples_written_at_an_absolute_span():
     ring = M.SampleRing(1000)
     data = np.arange(2500, dtype=np.float32)
     for start in range(0, len(data), 137):
-        ring.write(data[start:start + 137])
+        ring.write(data[start : start + 137])
     assert np.array_equal(ring.snapshot(1600, 2500), data[1600:2500])
 
 
@@ -169,9 +176,9 @@ def test_a_write_is_published_before_it_touches_the_buffer():
 def test_a_write_landing_inside_a_snapshot_copy_is_refused_not_returned_torn():
     ring = M.SampleRing(1000)
     ring.write(np.zeros(1000, dtype=np.float32))
-    ring._buffer = _Probe(ring._buffer,
-                          lambda: ring.write(np.ones(600, dtype=np.float32)),
-                          on_read=True)
+    ring._buffer = _Probe(
+        ring._buffer, lambda: ring.write(np.ones(600, dtype=np.float32)), on_read=True
+    )
     with pytest.raises(M.RingOverrun):
         ring.snapshot(0, 1000)
 
@@ -179,14 +186,13 @@ def test_a_write_landing_inside_a_snapshot_copy_is_refused_not_returned_torn():
 def test_a_snapshot_the_concurrent_write_did_not_reach_still_returns():
     ring = M.SampleRing(1000)
     ring.write(np.arange(1000, dtype=np.float32))
-    ring._buffer = _Probe(ring._buffer,
-                          lambda: ring.write(np.ones(100, dtype=np.float32)),
-                          on_read=True)
+    ring._buffer = _Probe(
+        ring._buffer, lambda: ring.write(np.ones(100, dtype=np.float32)), on_read=True
+    )
     assert np.array_equal(ring.snapshot(200, 1000), np.arange(200, 1000))
 
 
-@pytest.mark.parametrize("margin,hop", [(3.0, 1.0), (2.0, 2.5), (5.0, 1.0),
-                                        (0.0, 1.0)])
+@pytest.mark.parametrize("margin,hop", [(3.0, 1.0), (2.0, 2.5), (5.0, 1.0), (0.0, 1.0)])
 def test_no_emitted_cell_sees_more_future_than_margin_plus_hop(margin, hop):
     schedule = _schedule(300.0, margin=margin, hop_sec=hop)
     n = _samples(300.0)
@@ -323,12 +329,22 @@ class FakeEncoder:
 
     def encode(self, segment, *, offset_samples, lo_sec, hi_sec):
         n = M.encoder_frames(len(segment))
-        times, keep = M.frame_selection(n, offset_samples=offset_samples,
-                                        lo_sec=lo_sec, hi_sec=hi_sec,
-                                        sample_rate=self.sample_rate)
+        times, keep = M.frame_selection(
+            n,
+            offset_samples=offset_samples,
+            lo_sec=lo_sec,
+            hi_sec=hi_sec,
+            sample_rate=self.sample_rate,
+        )
         rate = self.sample_rate
-        self.passes.append((offset_samples, offset_samples + len(segment),
-                            round(lo_sec * rate), round(hi_sec * rate)))
+        self.passes.append(
+            (
+                offset_samples,
+                offset_samples + len(segment),
+                round(lo_sec * rate),
+                round(hi_sec * rate),
+            )
+        )
         return self.frames(segment, offset_samples, keep), times
 
     def frames(self, segment, offset_samples, keep):
@@ -337,27 +353,44 @@ class FakeEncoder:
         keep = np.asarray(keep, dtype=np.int64)
         starts = (offset_samples + keep * step) / 1e5
         digest = float(np.abs(segment).mean()) if len(segment) else 0.0
-        local = np.array([segment[i * step:i * step + M.ENCODER_RECEPTIVE_FIELD]
-                          .mean() for i in keep], dtype=np.float64) \
-            if len(keep) else np.zeros(0)
-        stacked = (starts[:, None, None] + digest + local[:, None, None]
-                   + np.arange(self.n_layers)[None, :, None] * 0.5
-                   + np.arange(self.dim)[None, None, :] * 0.25)
+        local = (
+            np.array(
+                [segment[i * step : i * step + M.ENCODER_RECEPTIVE_FIELD].mean() for i in keep],
+                dtype=np.float64,
+            )
+            if len(keep)
+            else np.zeros(0)
+        )
+        stacked = (
+            starts[:, None, None]
+            + digest
+            + local[:, None, None]
+            + np.arange(self.n_layers)[None, :, None] * 0.5
+            + np.arange(self.dim)[None, None, :] * 0.25
+        )
         return stacked.astype(np.float32)
 
 
-def _stream(encoder, *, margin=3.0, hop=1.0, buffer=30.0, cell=CELL,
-            rate=M.SOURCE_SAMPLE_RATE):
-    return M.MertStream(encoder, geometry=M.StreamGeometry(
-        model_id="fake", layers=(6, 22), margin_sec=margin, hop_sec=hop,
-        buffer_sec=buffer, label_frame_sec=cell), source_rate=rate)
+def _stream(encoder, *, margin=3.0, hop=1.0, buffer=30.0, cell=CELL, rate=M.SOURCE_SAMPLE_RATE):
+    return M.MertStream(
+        encoder,
+        geometry=M.StreamGeometry(
+            model_id="fake",
+            layers=(6, 22),
+            margin_sec=margin,
+            hop_sec=hop,
+            buffer_sec=buffer,
+            label_frame_sec=cell,
+        ),
+        source_rate=rate,
+    )
 
 
 def _feed(stream, seconds, *, block=256):
     audio = np.zeros(int(seconds * M.SOURCE_SAMPLE_RATE), dtype=np.float32)
     cells = []
     for start in range(0, len(audio), block):
-        stream.push_audio(audio[start:start + block])
+        stream.push_audio(audio[start : start + block])
         while stream.due():
             cells.extend(stream.run_pass())
     return cells
@@ -370,8 +403,7 @@ def _live_form(offline, *, n_samples, hop, margin):
     # A track ending exactly on a hop boundary repeats its final pass, because
     # the driver already ran that buffer before the flush asked for the margin.
     start, end, lo, hi = flat[-1]
-    return flat[:-1] + [(start, end, lo, hi - margin),
-                        (start, end, hi - margin, hi)]
+    return flat[:-1] + [(start, end, lo, hi - margin), (start, end, hi - margin, hi)]
 
 
 @pytest.mark.parametrize("track_sec", [40.0, 40.3, 45.0, 9.5])
@@ -380,11 +412,14 @@ def test_the_live_driver_reproduces_the_offline_pass_schedule(track_sec):
     stream = _stream(encoder, rate=SR)
     _drive(stream, track_sec)
     stream.flush()
-    offline = list(M.pass_schedule(stream.samples_seen, length=_samples(30.0),
-                                   hop=_samples(1.0), margin=_samples(3.0)))
+    offline = list(
+        M.pass_schedule(
+            stream.samples_seen, length=_samples(30.0), hop=_samples(1.0), margin=_samples(3.0)
+        )
+    )
     assert encoder.passes == _live_form(
-        offline, n_samples=stream.samples_seen, hop=_samples(1.0),
-        margin=_samples(3.0))
+        offline, n_samples=stream.samples_seen, hop=_samples(1.0), margin=_samples(3.0)
+    )
 
 
 def _cell_horizons(n_samples, *, margin=3.0, hop=1.0, buffer=30.0, cell=CELL):
@@ -392,10 +427,9 @@ def _cell_horizons(n_samples, *, margin=3.0, hop=1.0, buffer=30.0, cell=CELL):
     # driver whose spans drifted still meets the budget on different audio.
     horizons: dict = {}
     for _start, end, (lo, hi) in M.pass_schedule(
-            n_samples, length=_samples(buffer), hop=_samples(hop),
-            margin=_samples(margin)):
-        for index in range(int(math.floor(lo / SR / cell)),
-                           int(math.ceil(hi / SR / cell))):
+        n_samples, length=_samples(buffer), hop=_samples(hop), margin=_samples(margin)
+    ):
+        for index in range(int(math.floor(lo / SR / cell)), int(math.ceil(hi / SR / cell))):
             horizons[index] = max(horizons.get(index, 0), end)
     return horizons
 
@@ -410,7 +444,7 @@ def _run_cells(audio):
     stream = _stream(FakeEncoder(), rate=SR)
     cells = []
     for start in range(0, len(audio), SR // 10):
-        stream.push_audio(audio[start:start + SR // 10])
+        stream.push_audio(audio[start : start + SR // 10])
         while stream.due():
             cells.extend(stream.run_pass())
     cells.extend(stream.flush())
@@ -481,8 +515,7 @@ def test_features_are_quantised_to_the_grid_the_student_trained_on():
     cells = _feed(stream, 10.0)
     assert cells
     for cell in cells[:20]:
-        assert np.array_equal(cell.features,
-                              cell.features.astype(np.float16).astype(np.float32))
+        assert np.array_equal(cell.features, cell.features.astype(np.float16).astype(np.float32))
 
 
 def test_reset_clears_the_ring_and_the_accumulator():
@@ -510,8 +543,7 @@ def test_the_stream_flushes_the_tail_at_a_song_boundary():
     cells = _feed(stream, 9.5)
     tail = stream.flush()
     assert tail
-    assert [cell.index for cell in tail] == list(
-        range(len(cells), len(cells) + len(tail)))
+    assert [cell.index for cell in tail] == list(range(len(cells), len(cells) + len(tail)))
 
 
 def test_a_flush_is_terminal_until_the_stream_is_reset():
@@ -529,50 +561,57 @@ def test_a_flush_is_terminal_until_the_stream_is_reset():
     stream.push_audio(np.zeros(256, dtype=np.float32))
 
 
-_SWEEP = [(track, margin, hop, buffer)
-          for track in (0.4, 3.0, 9.5, 30.0, 40.0, 47.3)
-          for margin in (0.0, 2.0, 3.0, 5.0)
-          for hop, buffer in ((1.0, 30.0), (2.5, 5.0))]
+_SWEEP = [
+    (track, margin, hop, buffer)
+    for track in (0.4, 3.0, 9.5, 30.0, 40.0, 47.3)
+    for margin in (0.0, 2.0, 3.0, 5.0)
+    for hop, buffer in ((1.0, 30.0), (2.5, 5.0))
+]
 
 
-def test_the_schedule_generator_is_the_offline_one(
-        ):
+def test_the_schedule_generator_is_the_offline_one():
     for n_samples in (9600, 228000, 720000, 967200, 1135040):
         for margin in (0.0, 3.0, 5.0):
-            mine = list(M.pass_schedule(n_samples, length=_samples(30.0),
-                                        hop=_samples(1.0),
-                                        margin=_samples(margin)))
-            theirs = [(start, end, spans[float(margin)]) for start, end, spans
-                      in OFFLINE.pass_schedule(
-                          n_samples, length=OFFLINE.chunk_samples(30.0),
-                          hop=OFFLINE.chunk_samples(1.0),
-                          margin_samples={float(margin):
-                                          OFFLINE.chunk_samples(margin)})]
+            mine = list(
+                M.pass_schedule(
+                    n_samples, length=_samples(30.0), hop=_samples(1.0), margin=_samples(margin)
+                )
+            )
+            theirs = [
+                (start, end, spans[float(margin)])
+                for start, end, spans in OFFLINE.pass_schedule(
+                    n_samples,
+                    length=OFFLINE.chunk_samples(30.0),
+                    hop=OFFLINE.chunk_samples(1.0),
+                    margin_samples={float(margin): OFFLINE.chunk_samples(margin)},
+                )
+            ]
             assert mine == theirs, (n_samples, margin)
 
 
 @pytest.mark.parametrize("track_sec,margin,hop,buffer", _SWEEP)
-def test_the_live_stage_pools_the_cells_the_offline_extractor_pools(
-        track_sec, margin, hop, buffer):
+def test_the_live_stage_pools_the_cells_the_offline_extractor_pools(track_sec, margin, hop, buffer):
     cell = OFFLINE.LABEL_FRAME_SEC
     audio = _noise(int(track_sec * SR), seed=int(track_sec * 10 + margin))
-    stream = _stream(FakeEncoder(), margin=margin, hop=hop, buffer=buffer,
-                     cell=cell, rate=SR)
+    stream = _stream(FakeEncoder(), margin=margin, hop=hop, buffer=buffer, cell=cell, rate=SR)
     cells = []
     for start in range(0, len(audio), SR // 10):
-        stream.push_audio(audio[start:start + SR // 10])
+        stream.push_audio(audio[start : start + SR // 10])
         while stream.due():
             cells.extend(stream.run_pass())
     cells.extend(stream.flush())
 
     pooled = OFFLINE.extract(
-        FakeEncoder(), audio, margin_sec=margin, hop_sec=hop,
+        FakeEncoder(),
+        audio,
+        margin_sec=margin,
+        hop_sec=hop,
         buffer_sec=buffer,
-        n_pooled=int(math.ceil(len(audio) / SR / cell)) + 4)
+        n_pooled=int(math.ceil(len(audio) / SR / cell)) + 4,
+    )
     assert cells
     for item in cells:
-        expected = pooled[item.index].reshape(-1) \
-            .astype(np.float16).astype(np.float32)
+        expected = pooled[item.index].reshape(-1).astype(np.float16).astype(np.float32)
         assert np.array_equal(item.features, expected), item.index
 
 
@@ -581,7 +620,7 @@ def _drive(stream, seconds, *, rate=SR, block=None):
     block = block or rate // 10
     cells = []
     for start in range(0, len(audio), block):
-        stream.push_audio(audio[start:start + block])
+        stream.push_audio(audio[start : start + block])
         while stream.due():
             cells.extend(stream.run_pass())
     return cells
@@ -647,8 +686,7 @@ def test_the_gap_a_resync_skipped_is_never_filled_from_later_audio():
     stalled.resync()
     recovered = stalled.run_pass()
 
-    healthy = {cell.index: cell for cell in _drive(_stream(FakeEncoder(), rate=SR),
-                                                   40.0)}
+    healthy = {cell.index: cell for cell in _drive(_stream(FakeEncoder(), rate=SR), 40.0)}
     assert recovered[0].index > 300
     for cell in recovered:
         assert np.array_equal(cell.features, healthy[cell.index].features)
@@ -662,39 +700,51 @@ def test_a_resync_leaves_the_stream_running_the_ordinary_schedule():
     cells = stream.run_pass()
     cells.extend(_drive(stream, 5.0))
     assert [cell.index for cell in cells] == list(
-        range(cells[0].index, cells[0].index + len(cells)))
+        range(cells[0].index, cells[0].index + len(cells))
+    )
 
 
 def _affine(tmp_path, *, geometry, dim=8, layers=(6, 22)):
     path = tmp_path / "affine.npz"
-    np.savez(path, mean=np.zeros(dim, np.float32), std=np.ones(dim, np.float32),
-             dim=np.int32(dim), layers=np.asarray(layers, np.int32),
-             geometry=np.str_(json.dumps(geometry, sort_keys=True)))
+    np.savez(
+        path,
+        mean=np.zeros(dim, np.float32),
+        std=np.ones(dim, np.float32),
+        dim=np.int32(dim),
+        layers=np.asarray(layers, np.int32),
+        geometry=np.str_(json.dumps(geometry, sort_keys=True)),
+    )
     return path
 
 
 def test_the_stream_geometry_is_read_from_the_shipped_affine(tmp_path):
-    path = _affine(tmp_path, geometry={"causal": 1, "margin_sec": 3.0,
-                                       "hop_sec": 1.0, "buffer_sec": 30.0})
+    path = _affine(
+        tmp_path, geometry={"causal": 1, "margin_sec": 3.0, "hop_sec": 1.0, "buffer_sec": 30.0}
+    )
     geometry = M.load_stream_geometry(path, label_frame_sec=0.25)
-    assert (geometry.margin_sec, geometry.hop_sec, geometry.buffer_sec) == (
-        3.0, 1.0, 30.0)
+    assert (geometry.margin_sec, geometry.hop_sec, geometry.buffer_sec) == (3.0, 1.0, 30.0)
     assert geometry.layers == (6, 22)
     assert geometry.label_frame_sec == 0.25
 
 
 def test_a_non_causal_affine_is_refused(tmp_path):
-    path = _affine(tmp_path, geometry={"causal": 0, "margin_sec": 3.0,
-                                       "hop_sec": 1.0, "buffer_sec": 30.0})
+    path = _affine(
+        tmp_path, geometry={"causal": 0, "margin_sec": 3.0, "hop_sec": 1.0, "buffer_sec": 30.0}
+    )
     with pytest.raises(ValueError, match="causal"):
         M.load_stream_geometry(path, label_frame_sec=0.25)
 
 
 def test_an_affine_that_names_no_encoder_layers_is_refused(tmp_path):
     path = tmp_path / "nolayers.npz"
-    np.savez(path, mean=np.zeros(4, np.float32), std=np.ones(4, np.float32),
-             geometry=np.str_(json.dumps({"causal": 1, "margin_sec": 3.0,
-                                          "hop_sec": 1.0, "buffer_sec": 30.0})))
+    np.savez(
+        path,
+        mean=np.zeros(4, np.float32),
+        std=np.ones(4, np.float32),
+        geometry=np.str_(
+            json.dumps({"causal": 1, "margin_sec": 3.0, "hop_sec": 1.0, "buffer_sec": 30.0})
+        ),
+    )
     with pytest.raises(ValueError, match="layers"):
         M.load_stream_geometry(path, label_frame_sec=CELL)
 
@@ -750,26 +800,33 @@ def _stub_transformers(monkeypatch, calls):
     class _Loader:
         @staticmethod
         def from_pretrained(model_id, **kwargs):
-            calls.append((model_id, kwargs.get("revision"),
-                          kwargs.get("trust_remote_code")))
+            calls.append((model_id, kwargs.get("revision"), kwargs.get("trust_remote_code")))
             return _StubEncoder()
 
-    monkeypatch.setitem(sys.modules, "transformers", types.SimpleNamespace(
-        AutoModel=_Loader, Wav2Vec2FeatureExtractor=_Loader))
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        types.SimpleNamespace(AutoModel=_Loader, Wav2Vec2FeatureExtractor=_Loader),
+    )
 
 
 def _pinned_geometry(**kwargs):
-    return M.StreamGeometry(model_id="stub/encoder", layers=(0,), margin_sec=3.0,
-                            hop_sec=1.0, buffer_sec=30.0, label_frame_sec=CELL,
-                            **kwargs)
+    return M.StreamGeometry(
+        model_id="stub/encoder",
+        layers=(0,),
+        margin_sec=3.0,
+        hop_sec=1.0,
+        buffer_sec=30.0,
+        label_frame_sec=CELL,
+        **kwargs,
+    )
 
 
 def test_the_encoder_is_fetched_at_the_pinned_revision(monkeypatch):
     calls: list = []
     _stub_transformers(monkeypatch, calls)
     sha = M.state_dict_sha(_StubEncoder())
-    encoder = M.load_encoder(_pinned_geometry(encoder_sha=sha), device="cpu",
-                             fp16=False)
+    encoder = M.load_encoder(_pinned_geometry(encoder_sha=sha), device="cpu", fp16=False)
     assert calls == [("stub/encoder", M.DEFAULT_MODEL_REVISION, True)] * 2
     assert encoder.model_sha == sha
 
@@ -777,13 +834,13 @@ def test_the_encoder_is_fetched_at_the_pinned_revision(monkeypatch):
 def test_an_encoder_whose_weights_are_not_the_pinned_ones_never_loads(monkeypatch):
     _stub_transformers(monkeypatch, [])
     with pytest.raises(RuntimeError, match="encoder weights"):
-        M.load_encoder(_pinned_geometry(encoder_sha="0" * 16), device="cpu",
-                       fp16=False)
+        M.load_encoder(_pinned_geometry(encoder_sha="0" * 16), device="cpu", fp16=False)
 
 
 def test_the_shipped_geometry_carries_the_encoder_pin(tmp_path):
-    path = _affine(tmp_path, geometry={"causal": 1, "margin_sec": 3.0,
-                                       "hop_sec": 1.0, "buffer_sec": 30.0})
+    path = _affine(
+        tmp_path, geometry={"causal": 1, "margin_sec": 3.0, "hop_sec": 1.0, "buffer_sec": 30.0}
+    )
     geometry = M.load_stream_geometry(path, label_frame_sec=CELL)
     assert geometry.model_id == M.DEFAULT_MODEL_ID
     assert geometry.revision == M.DEFAULT_MODEL_REVISION
@@ -806,8 +863,10 @@ def _require_artifacts():
 
     found = artifacts()
     if found.missing():
-        pytest.skip(f"shipping artifacts absent: {', '.join(found.missing())} "
-                    f"-- they live in the gitignored corpus data directory")
+        pytest.skip(
+            f"shipping artifacts absent: {', '.join(found.missing())} "
+            f"-- they live in the gitignored corpus data directory"
+        )
     return found.affine, found.graph
 
 
@@ -817,8 +876,7 @@ def test_the_shipped_geometry_fits_the_eight_second_budget():
 
     affine, onnx = _require_artifacts()
     head = S.load_head_geometry(onnx)
-    geometry = M.load_stream_geometry(affine,
-                                      label_frame_sec=head.label_frame_sec)
+    geometry = M.load_stream_geometry(affine, label_frame_sec=head.label_frame_sec)
     total = geometry.margin_sec + geometry.hop_sec + head.future_sec
     assert total <= 8.0, total
     assert 8.0 - total < head.label_frame_sec
@@ -829,15 +887,18 @@ def _sidecar_track(geometry):
 
     corpus = Path(run_eval_set.corpus_dir())
     tag = "-".join(str(int(layer)) for layer in geometry.layers)
-    directory = (corpus / "features_stream"
-                 / f"{geometry.model_id.split('/')[-1]}_L{tag}"
-                   f"_F{geometry.margin_sec:g}_hop{geometry.hop_sec:g}")
+    directory = (
+        corpus / "features_stream" / f"{geometry.model_id.split('/')[-1]}_L{tag}"
+        f"_F{geometry.margin_sec:g}_hop{geometry.hop_sec:g}"
+    )
     for path in sorted(directory.glob("*.npz")):
         audio = corpus / "audio" / f"{path.stem}.mp3"
         if audio.exists():
             return path, audio
-    pytest.skip(f"no stream sidecar with its audio under {directory} -- both "
-                f"live in the gitignored corpus data directory")
+    pytest.skip(
+        f"no stream sidecar with its audio under {directory} -- both "
+        f"live in the gitignored corpus data directory"
+    )
 
 
 @pytest.mark.integration
@@ -846,7 +907,8 @@ def test_the_pinned_encoder_hash_is_the_one_the_sidecars_were_cut_with():
     from autolux.lib.analyser import section_model as S
 
     geometry = M.load_stream_geometry(
-        affine, label_frame_sec=S.load_head_geometry(onnx).label_frame_sec)
+        affine, label_frame_sec=S.load_head_geometry(onnx).label_frame_sec
+    )
     sidecar, _audio = _sidecar_track(geometry)
     with np.load(sidecar) as archive:
         assert str(archive["model_sha"]) == M.DEFAULT_ENCODER_SHA
@@ -863,17 +925,15 @@ def real_stack():
 
     affine, onnx = _require_artifacts()
     head = S.load_head_geometry(onnx)
-    geometry = M.load_stream_geometry(affine,
-                                      label_frame_sec=head.label_frame_sec)
+    geometry = M.load_stream_geometry(affine, label_frame_sec=head.label_frame_sec)
     return M.load_encoder(geometry, device=M.best_device(), fp16=True), geometry, head
 
 
 @pytest.mark.integration
-def test_the_real_encoder_streams_the_same_cells_twice_in_one_process(
-        real_stack, anchor_mp3):
+def test_the_real_encoder_streams_the_same_cells_twice_in_one_process(real_stack, anchor_mp3):
     encoder, geometry, head = real_stack
 
-    audio = _source_audio(anchor_mp3)[:int(20.0 * M.SOURCE_SAMPLE_RATE)]
+    audio = _source_audio(anchor_mp3)[: int(20.0 * M.SOURCE_SAMPLE_RATE)]
     runs = [_run_stream(encoder, geometry, audio) for _ in range(2)]
 
     assert len(runs[0]) == len(runs[1]) > 0
@@ -884,29 +944,31 @@ def test_the_real_encoder_streams_the_same_cells_twice_in_one_process(
 
 
 @pytest.mark.integration
-def test_the_live_stage_reproduces_a_corpus_sidecar_for_a_track_prefix(
-        real_stack, capsys):
+def test_the_live_stage_reproduces_a_corpus_sidecar_for_a_track_prefix(real_stack, capsys):
     encoder, geometry, _head = real_stack
     sidecar, audio_path = _sidecar_track(geometry)
     with np.load(sidecar) as archive:
         emb = np.asarray(archive["emb"], dtype=np.float32)
 
-    audio = _ffmpeg_audio(audio_path, M.ENCODER_SAMPLE_RATE)[:60 * M.ENCODER_SAMPLE_RATE]
-    cells = _run_stream(encoder, geometry, audio,
-                        source_rate=M.ENCODER_SAMPLE_RATE)
+    audio = _ffmpeg_audio(audio_path, M.ENCODER_SAMPLE_RATE)[: 60 * M.ENCODER_SAMPLE_RATE]
+    cells = _run_stream(encoder, geometry, audio, source_rate=M.ENCODER_SAMPLE_RATE)
     limit = 500
-    deltas = [float(np.abs(cell.features - emb[cell.index].reshape(-1)).max())
-              for cell in cells if cell.index < limit]
+    deltas = [
+        float(np.abs(cell.features - emb[cell.index].reshape(-1)).max())
+        for cell in cells
+        if cell.index < limit
+    ]
     with capsys.disabled():
-        print(f"\nsidecar reproduction ({sidecar.stem}, {len(deltas)} cells): "
-              f"max abs delta {max(deltas):g}")
+        print(
+            f"\nsidecar reproduction ({sidecar.stem}, {len(deltas)} cells): "
+            f"max abs delta {max(deltas):g}"
+        )
     assert len(deltas) >= 400
     assert max(deltas) == 0.0
 
 
 @pytest.mark.integration
-def test_the_live_resampler_reproduces_the_offline_ffmpeg_cells(
-        real_stack, anchor_mp3, capsys):
+def test_the_live_resampler_reproduces_the_offline_ffmpeg_cells(real_stack, anchor_mp3, capsys):
     encoder, geometry, _head = real_stack
     affine, onnx = _require_artifacts()
     mean, std = M.load_input_affine(affine)
@@ -915,29 +977,36 @@ def test_the_live_resampler_reproduces_the_offline_ffmpeg_cells(
     take24 = int(seconds * M.ENCODER_SAMPLE_RATE)
     take441 = int(seconds * M.SOURCE_SAMPLE_RATE)
     reference = _run_stream(
-        encoder, geometry, _ffmpeg_audio(anchor_mp3, M.ENCODER_SAMPLE_RATE)[:take24],
-        source_rate=M.ENCODER_SAMPLE_RATE)
+        encoder,
+        geometry,
+        _ffmpeg_audio(anchor_mp3, M.ENCODER_SAMPLE_RATE)[:take24],
+        source_rate=M.ENCODER_SAMPLE_RATE,
+    )
     resampled = _run_stream(
-        encoder, geometry,
-        _ffmpeg_audio(anchor_mp3, M.SOURCE_SAMPLE_RATE)[:take441])
+        encoder, geometry, _ffmpeg_audio(anchor_mp3, M.SOURCE_SAMPLE_RATE)[:take441]
+    )
     simulated = _run_stream(encoder, geometry, _source_audio(anchor_mp3)[:take441])
 
     baseline = np.stack([cell.features for cell in reference])
     adjacent = np.median(np.abs(np.diff(baseline, axis=0)) / std[None, :])
     decided = _decisions(onnx, mean, reference)
     arms = {}
-    for name, cells in (("resampler_only_ffmpeg_44k1", resampled),
-                        ("simulation_path_librosa_44k1", simulated)):
-        arms[name] = _cell_delta(np.stack([cell.features for cell in cells]),
-                                 baseline, std, adjacent)
+    for name, cells in (
+        ("resampler_only_ffmpeg_44k1", resampled),
+        ("simulation_path_librosa_44k1", simulated),
+    ):
+        arms[name] = _cell_delta(
+            np.stack([cell.features for cell in cells]), baseline, std, adjacent
+        )
         arms[name].update(_decision_delta(_decisions(onnx, mean, cells), decided))
     with capsys.disabled():
-        print(f"\nD4 parity ({len(baseline)} cells, median adjacent-cell "
-              f"distance {adjacent:.4f} affine std):\n{json.dumps(arms, indent=2)}")
+        print(
+            f"\nD4 parity ({len(baseline)} cells, median adjacent-cell "
+            f"distance {adjacent:.4f} affine std):\n{json.dumps(arms, indent=2)}"
+        )
 
     resampler = arms["resampler_only_ffmpeg_44k1"]
-    assert resampler["class_argmax_disagreements"] <= 0.01 * resampler["class_cells"], \
-        resampler
+    assert resampler["class_argmax_disagreements"] <= 0.01 * resampler["class_cells"], resampler
     # The near-tie bound follows the shipped student: under ng_N (l9c) the one
     # anchor flip sits at gap 0.0205 where earlier students kept it under 0.01;
     # the feature-side gates below are the resampler's own and did not move.
@@ -958,19 +1027,19 @@ def _decisions(onnx, mean, cells) -> dict:
 def _decision_delta(arm: dict, reference: dict) -> dict:
     shared = sorted(set(arm) & set(reference))
     assert shared
-    flipped = [i for i in shared
-               if np.argmax(arm[i].posterior) != np.argmax(reference[i].posterior)]
+    flipped = [
+        i for i in shared if np.argmax(arm[i].posterior) != np.argmax(reference[i].posterior)
+    ]
     return {
         "class_cells": len(shared),
         "class_argmax_disagreements": len(flipped),
         "flip_reference_top_two_gap": [
-            round(float(np.diff(np.sort(reference[i].posterior)[-2:])[0]), 5)
-            for i in flipped],
+            round(float(np.diff(np.sort(reference[i].posterior)[-2:])[0]), 5) for i in flipped
+        ],
         "max_abs_posterior_delta": max(
-            float(np.abs(arm[i].posterior - reference[i].posterior).max())
-            for i in shared),
-        "max_abs_boundary_delta": max(
-            abs(arm[i].boundary - reference[i].boundary) for i in shared),
+            float(np.abs(arm[i].posterior - reference[i].posterior).max()) for i in shared
+        ),
+        "max_abs_boundary_delta": max(abs(arm[i].boundary - reference[i].boundary) for i in shared),
     }
 
 
@@ -987,11 +1056,14 @@ def _cell_delta(a, b, std, adjacent):
         "max_delta_in_affine_std": float(normalised.max()),
         "share_of_adjacent_cell_distance": float(median / adjacent),
         "feature_argmax_disagreements": int(
-            (a[:shared].argmax(axis=1) != b[:shared].argmax(axis=1)).sum()),
-        "min_cosine": float(np.min(
-            (a[:shared] * b[:shared]).sum(1)
-            / (np.linalg.norm(a[:shared], axis=1)
-               * np.linalg.norm(b[:shared], axis=1) + 1e-12))),
+            (a[:shared].argmax(axis=1) != b[:shared].argmax(axis=1)).sum()
+        ),
+        "min_cosine": float(
+            np.min(
+                (a[:shared] * b[:shared]).sum(1)
+                / (np.linalg.norm(a[:shared], axis=1) * np.linalg.norm(b[:shared], axis=1) + 1e-12)
+            )
+        ),
     }
 
 
@@ -999,7 +1071,7 @@ def _run_stream(encoder, geometry, audio, *, source_rate=M.SOURCE_SAMPLE_RATE):
     stream = M.MertStream(encoder, geometry=geometry, source_rate=source_rate)
     cells = []
     for start in range(0, len(audio), source_rate // 10):
-        stream.push_audio(audio[start:start + source_rate // 10])
+        stream.push_audio(audio[start : start + source_rate // 10])
         while stream.due():
             cells.extend(stream.run_pass())
     cells.extend(stream.flush())
@@ -1017,7 +1089,23 @@ def _ffmpeg_audio(path: str, rate: int) -> np.ndarray:
     import subprocess
 
     out = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le",
-         "-acodec", "pcm_f32le", "-ac", "1", "-ar", str(rate), "-"],
-        capture_output=True, check=True)
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "-ac",
+            "1",
+            "-ar",
+            str(rate),
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
     return np.frombuffer(out.stdout, dtype=np.float32)

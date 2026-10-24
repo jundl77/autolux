@@ -2,8 +2,7 @@ import logging
 
 import pytest
 
-from autolux.lib.analyser.drift_watchdog import (SHED_RATE_WINDOW_SEC, DriftWatchdog,
-                                        ShedLevel)
+from autolux.lib.analyser.drift_watchdog import SHED_RATE_WINDOW_SEC, DriftWatchdog, ShedLevel
 
 
 class FakeClock:
@@ -110,8 +109,9 @@ def test_peak_and_total_drift_are_reported_for_the_soak_run():
     clock.advance(1.5)
     dog.observe()
     assert dog.peak_drift_sec >= 1.4
-    assert dog.total_drift_sec == pytest.approx(1.5, abs=0.01), \
+    assert dog.total_drift_sec == pytest.approx(1.5, abs=0.01), (
         'total is cumulative and never forgets'
+    )
 
 
 def test_total_drift_is_a_difference_of_totals_not_a_sum_of_excesses():
@@ -124,8 +124,7 @@ def test_total_drift_is_a_difference_of_totals_not_a_sum_of_excesses():
         dog.observe()
         clock.advance(BUF * 2)
         dog.observe()
-    assert abs(dog.total_drift_sec) < 0.05, \
-        f'jitter must cancel, got {dog.total_drift_sec:.3f}s'
+    assert abs(dog.total_drift_sec) < 0.05, f'jitter must cancel, got {dog.total_drift_sec:.3f}s'
 
 
 def test_reset_returns_it_to_the_constructed_state():

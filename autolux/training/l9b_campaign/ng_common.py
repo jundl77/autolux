@@ -1,4 +1,5 @@
 """Shared paths and identities for the l9b retrain campaign's PREP stage."""
+
 from __future__ import annotations
 
 import sys

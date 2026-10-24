@@ -9,14 +9,14 @@
 
 namespace Radius {
 
-static const LogModule LM_OVERLAY {"OVERLAY"};
+static const LogModule LM_OVERLAY{"OVERLAY"};
 static const size_t sOverlayRecvBufferSize = 4096;
 
 OverlayServer::OverlayServer(const Config& config, EventLoop& loop, IOverlayHandler& handler)
-	: mConfig(config)
-	, mEventLoop(loop)
-	, mHandler(handler)
-	, mUdpServer(LM_OVERLAY, mEventLoop, *this, sOverlayRecvBufferSize)
+    : mConfig(config)
+    , mEventLoop(loop)
+    , mHandler(handler)
+    , mUdpServer(LM_OVERLAY, mEventLoop, *this, sOverlayRecvBufferSize)
 {
 }
 
@@ -32,10 +32,11 @@ void OverlayServer::Start()
 void OverlayServer::OnData(const void* data, size_t len)
 {
 	OverlayIdl::OverlayMessage message;
-	if (!DecodeOverlayPacket(data, len, message)) return;
+	if (!DecodeOverlayPacket(data, len, message))
+		return;
 
 	DEBUG_LOG(LL_DEBUG, LM_OVERLAY, "received overlay message: %s", ToString(message).c_str());
 	mHandler.OnOverlayMessage(message);
 }
 
-}
+} // namespace Radius

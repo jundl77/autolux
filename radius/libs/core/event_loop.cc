@@ -23,15 +23,15 @@ int EventLoop::Run(RunHot hot)
 		std::vector<Callback> ready;
 
 		mCallbacks.erase(std::remove_if(mCallbacks.begin(), mCallbacks.end(),
-			[&](const std::pair<MonotonicTime, Callback>& p)
-			{
-				const bool expired = p.first < now;
-				if (expired)
-				{
-					ready.push_back(p.second);
-				}
-				return expired;
-			}), mCallbacks.end());
+		                                [&](const std::pair<MonotonicTime, Callback>& p) {
+			                                const bool expired = p.first < now;
+			                                if (expired)
+			                                {
+				                                ready.push_back(p.second);
+			                                }
+			                                return expired;
+		                                }),
+		                 mCallbacks.end());
 		// Callbacks may post more work; never call them while mutating the queue.
 		for (auto& callback : ready)
 			callback();
@@ -42,7 +42,10 @@ int EventLoop::Run(RunHot hot)
 			mTimers[i]->Poll(now);
 		}
 		mTimers.erase(std::remove_if(mTimers.begin(), mTimers.end(),
-			[](const auto& timer) { return !timer->Active(); }), mTimers.end());
+		                             [](const auto& timer) {
+			                             return !timer->Active();
+		                             }),
+		              mTimers.end());
 
 		if (hot == RunHot::No)
 		{
@@ -68,8 +71,7 @@ ScopedHandler EventLoop::AddTimer(std::chrono::nanoseconds interval, Callback ca
 	newTimer.Start(std::move(callback));
 
 	Timer* ptrTimer = mTimers.back().get();
-	return ScopedHandler([this, ptrTimer]()
-	{
+	return ScopedHandler([this, ptrTimer]() {
 		ptrTimer->Stop(); // Reclaim after polling, outside any active callback.
 	});
 }
@@ -79,4 +81,4 @@ ScopedHandler EventLoop::AddPoller(Callback callback)
 	return AddTimer(0ns, callback);
 }
 
-}
+} // namespace Radius

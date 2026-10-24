@@ -5,14 +5,21 @@ import pytest
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.tests.conftest import ANCHOR_YOUTUBE_ID
-from autolux.training.pipeline_digest import (DOOMED_BEAT_COLUMNS, DOOMED_METRIC_KEYS,
-                                      RESCALED_BEAT_COLUMNS,
-                                      SURVIVING_BEAT_COLUMNS,
-                                      TIMING_ACCURACY_MAX_MS, _queue_errors_ms,
-                                      check_digest, degradation_digest,
-                                      digest_report, held_start_to_end,
-                                      informational_digest, relations_digest,
-                                      survives_digest)
+from autolux.training.pipeline_digest import (
+    DOOMED_BEAT_COLUMNS,
+    DOOMED_METRIC_KEYS,
+    RESCALED_BEAT_COLUMNS,
+    SURVIVING_BEAT_COLUMNS,
+    TIMING_ACCURACY_MAX_MS,
+    _queue_errors_ms,
+    check_digest,
+    degradation_digest,
+    digest_report,
+    held_start_to_end,
+    informational_digest,
+    relations_digest,
+    survives_digest,
+)
 
 BASELINE = Path(__file__).parent / 'fixtures' / 'pipeline_digest_baseline.json'
 
@@ -20,9 +27,17 @@ SAMPLE_SONG_NAME = f'{ANCHOR_YOUTUBE_ID}.mp3'
 
 
 def _beat(t, **over):
-    row = {'t': t, 'bpm': 128.0, 'onset_density': 4.0, 'strength': 0.4,
-           'change': False, 'kick_strength': 2.5, 'centroid_trend': 1.0,
-           'sub_bass_ratio': 0.3, 'rms': 0.1}
+    row = {
+        't': t,
+        'bpm': 128.0,
+        'onset_density': 4.0,
+        'strength': 0.4,
+        'change': False,
+        'kick_strength': 2.5,
+        'centroid_trend': 1.0,
+        'sub_bass_ratio': 0.3,
+        'rms': 0.1,
+    }
     row.update(over)
     return row
 
@@ -35,12 +50,19 @@ def _report(beats, **over):
         'intents': [],
         'timing_log': [],
         'metrics': {
-            'look_ahead_sec': 2.5, 'beats_detected': len(beats), 'bpm_last': 128.0,
-            'onset_density_mean': 4.0, 'timing_error_mean_ms': 0.0,
-            'timing_error_max_ms': 0.0, 'unique_effects_count': 0,
-            'effect_changes_count': 0, 'avg_effect_duration_sec': 0.0,
-            'unique_channels': [], 'intent_changes_count': 0,
-            'unique_intents_count': 0, 'intent_distribution_sec': {},
+            'look_ahead_sec': 2.5,
+            'beats_detected': len(beats),
+            'bpm_last': 128.0,
+            'onset_density_mean': 4.0,
+            'timing_error_mean_ms': 0.0,
+            'timing_error_max_ms': 0.0,
+            'unique_effects_count': 0,
+            'effect_changes_count': 0,
+            'avg_effect_duration_sec': 0.0,
+            'unique_channels': [],
+            'intent_changes_count': 0,
+            'unique_intents_count': 0,
+            'intent_distribution_sec': {},
             'dominant_intent': None,
         },
     }
@@ -50,21 +72,28 @@ def _report(beats, **over):
 
 def _demolished(report):
     stripped = dict(report)
-    stripped['beats'] = [{k: v for k, v in beat.items()
-                          if k not in DOOMED_BEAT_COLUMNS} for beat in report['beats']]
-    stripped['metrics'] = {k: v for k, v in report['metrics'].items()
-                           if k not in DOOMED_METRIC_KEYS}
+    stripped['beats'] = [
+        {k: v for k, v in beat.items() if k not in DOOMED_BEAT_COLUMNS} for beat in report['beats']
+    ]
+    stripped['metrics'] = {
+        k: v for k, v in report['metrics'].items() if k not in DOOMED_METRIC_KEYS
+    }
     return stripped
 
 
 def _streams(sound=(), os2l=(), midi=(), overlay=()):
-    return {'sound': list(sound), 'os2l': list(os2l), 'midi': list(midi),
-            'overlay': list(overlay)}
+    return {'sound': list(sound), 'os2l': list(os2l), 'midi': list(midi), 'overlay': list(overlay)}
 
 
 def _os2l(pos, **over):
-    row = {'label': 'beat', 'time': float(pos), 'change': False, 'pos': pos,
-           'bpm': 128.0, 'strength': 0.5}
+    row = {
+        'label': 'beat',
+        'time': float(pos),
+        'change': False,
+        'pos': pos,
+        'bpm': 128.0,
+        'strength': 0.5,
+    }
     row.update(over)
     return row
 
@@ -105,8 +134,19 @@ def test_a_moved_beat_time_moves_the_beat_stream_hash():
 
 def test_a_doomed_column_cannot_move_the_survival_hash():
     a = survives_digest(_report([_beat(1.0)]))
-    b = survives_digest(_report([_beat(1.0, kick_strength=9.9, onset_density=9.0,
-                                       sub_bass_ratio=0.9, centroid_trend=3.0)]))
+    b = survives_digest(
+        _report(
+            [
+                _beat(
+                    1.0,
+                    kick_strength=9.9,
+                    onset_density=9.0,
+                    sub_bass_ratio=0.9,
+                    centroid_trend=3.0,
+                )
+            ]
+        )
+    )
     assert a['beat_columns_hash'] == b['beat_columns_hash']
 
 
@@ -127,8 +167,7 @@ def test_the_schema_block_names_only_keys_that_outlive_the_rule_engine():
 def test_sound_start_and_stop_instants_are_pinned():
     events = [{'t': 0.301, 'playing': True}, {'t': 200.9004, 'playing': False}]
     d = survives_digest(_report([]), _streams(sound=events))
-    assert d['sound_events'] == [{'t': 0.301, 'playing': True},
-                                 {'t': 200.9, 'playing': False}]
+    assert d['sound_events'] == [{'t': 0.301, 'playing': True}, {'t': 200.9, 'playing': False}]
 
 
 def test_the_os2l_beat_wire_shape_is_pinned_field_by_field():
@@ -155,27 +194,35 @@ def test_the_midi_transcript_is_not_gated_anywhere_in_survives():
 
 def test_a_show_that_changed_nothing_but_its_intents_keeps_every_survivor():
     beats = [_beat(1.0), _beat(2.0)]
-    streams = _streams(sound=[{'t': 0.3, 'playing': True}], os2l=[_os2l(1)],
-                       overlay=[_overlay(1.0)])
-    busy_effects = [{'t': 1.0, 'channel': _pool_channel('breakdown'),
-                     'type': 'AUTOLOOP', 'end': 2.0},
-                    {'t': 2.0, 'channel': _pool_channel('drop'),
-                     'type': 'AUTOLOOP', 'end': 3.0}]
-    busy_intents = [{'t': 1.0, 'intent': 'breakdown', 'end': 2.0},
-                    {'t': 2.0, 'intent': 'drop', 'end': 3.0}]
-    busy_midi = [{'label': 'set_autoloop', 'time': 1.0,
-                  'channel': _pool_channel('breakdown')},
-                 {'label': 'set_autoloop', 'time': 2.0,
-                  'channel': _pool_channel('drop')}]
+    streams = _streams(
+        sound=[{'t': 0.3, 'playing': True}], os2l=[_os2l(1)], overlay=[_overlay(1.0)]
+    )
+    busy_effects = [
+        {'t': 1.0, 'channel': _pool_channel('breakdown'), 'type': 'AUTOLOOP', 'end': 2.0},
+        {'t': 2.0, 'channel': _pool_channel('drop'), 'type': 'AUTOLOOP', 'end': 3.0},
+    ]
+    busy_intents = [
+        {'t': 1.0, 'intent': 'breakdown', 'end': 2.0},
+        {'t': 2.0, 'intent': 'drop', 'end': 3.0},
+    ]
+    busy_midi = [
+        {'label': 'set_autoloop', 'time': 1.0, 'channel': _pool_channel('breakdown')},
+        {'label': 'set_autoloop', 'time': 2.0, 'channel': _pool_channel('drop')},
+    ]
 
-    busy = digest_report(_report(beats, effects=busy_effects, intents=busy_intents),
-                         {**streams, 'midi': busy_midi})
+    busy = digest_report(
+        _report(beats, effects=busy_effects, intents=busy_intents), {**streams, 'midi': busy_midi}
+    )
     held = digest_report(
-        _report(beats,
-                effects=[{'t': 1.0, 'channel': _pool_channel('breakdown'),
-                          'type': 'AUTOLOOP', 'end': 3.0}],
-                intents=[{'t': 1.0, 'intent': 'breakdown', 'end': 3.0}]),
-        {**streams, 'midi': busy_midi[:1]})
+        _report(
+            beats,
+            effects=[
+                {'t': 1.0, 'channel': _pool_channel('breakdown'), 'type': 'AUTOLOOP', 'end': 3.0}
+            ],
+            intents=[{'t': 1.0, 'intent': 'breakdown', 'end': 3.0}],
+        ),
+        {**streams, 'midi': busy_midi[:1]},
+    )
 
     assert busy['survives'] == held['survives']
     assert busy['relations'] == held['relations']
@@ -183,11 +230,15 @@ def test_a_show_that_changed_nothing_but_its_intents_keeps_every_survivor():
 
 
 def test_midi_autoloops_match_the_report_effects_one_for_one_in_order():
-    midi = [{'label': 'set_autoloop', 'time': 1.0, 'channel': 'A'},
-            {'label': 'set_color_override', 'time': 1.0, 'channel': 'C1'},
-            {'label': 'set_special_effect', 'time': 2.0, 'channel': 'STROBE'}]
-    effects = [{'t': 1.0, 'channel': 'A', 'type': 'AUTOLOOP', 'end': 2.0},
-               {'t': 2.0, 'channel': 'STROBE', 'type': 'SPECIAL_EFFECT', 'end': 3.0}]
+    midi = [
+        {'label': 'set_autoloop', 'time': 1.0, 'channel': 'A'},
+        {'label': 'set_color_override', 'time': 1.0, 'channel': 'C1'},
+        {'label': 'set_special_effect', 'time': 2.0, 'channel': 'STROBE'},
+    ]
+    effects = [
+        {'t': 1.0, 'channel': 'A', 'type': 'AUTOLOOP', 'end': 2.0},
+        {'t': 2.0, 'channel': 'STROBE', 'type': 'SPECIAL_EFFECT', 'end': 3.0},
+    ]
     d = digest_report(_report([], effects=effects), _streams(midi=midi))
     assert d['relations']['midi_matches_the_report_effects'] is True
     assert d['relations']['midi_arrives_in_enqueue_order'] is True
@@ -195,39 +246,40 @@ def test_midi_autoloops_match_the_report_effects_one_for_one_in_order():
 
 
 def test_a_midi_command_the_report_never_saw_breaks_the_match():
-    midi = [{'label': 'set_autoloop', 'time': 1.0, 'channel': 'A'},
-            {'label': 'set_autoloop', 'time': 2.0, 'channel': 'B'}]
+    midi = [
+        {'label': 'set_autoloop', 'time': 1.0, 'channel': 'A'},
+        {'label': 'set_autoloop', 'time': 2.0, 'channel': 'B'},
+    ]
     effects = [{'t': 1.0, 'channel': 'A', 'type': 'AUTOLOOP', 'end': 2.0}]
     d = relations_digest(_report([], effects=effects), _streams(midi=midi))
     assert d['midi_matches_the_report_effects'] is False
 
 
 def test_midi_time_running_backwards_is_caught():
-    midi = [{'label': 'set_autoloop', 'time': 2.0, 'channel': 'A'},
-            {'label': 'set_autoloop', 'time': 1.0, 'channel': 'B'}]
+    midi = [
+        {'label': 'set_autoloop', 'time': 2.0, 'channel': 'A'},
+        {'label': 'set_autoloop', 'time': 1.0, 'channel': 'B'},
+    ]
     d = relations_digest(_report([]), _streams(midi=midi))
     assert d['midi_arrives_in_enqueue_order'] is False
 
 
 def test_every_lit_channel_comes_from_the_pool_its_intent_names():
     intents = [{'t': 1.0, 'intent': 'breakdown', 'end': 5.0}]
-    effects = [{'t': 1.0, 'channel': _pool_channel('breakdown'), 'type': 'AUTOLOOP',
-                'end': 5.0}]
+    effects = [{'t': 1.0, 'channel': _pool_channel('breakdown'), 'type': 'AUTOLOOP', 'end': 5.0}]
     d = relations_digest(_report([], effects=effects, intents=intents))
     assert d['midi_channels_come_from_the_intents_pool'] is True
 
 
 def test_a_channel_from_another_intents_pool_is_caught():
     intents = [{'t': 1.0, 'intent': 'breakdown', 'end': 5.0}]
-    effects = [{'t': 1.0, 'channel': _pool_channel('drop'), 'type': 'AUTOLOOP',
-                'end': 5.0}]
+    effects = [{'t': 1.0, 'channel': _pool_channel('drop'), 'type': 'AUTOLOOP', 'end': 5.0}]
     d = relations_digest(_report([], effects=effects, intents=intents))
     assert d['midi_channels_come_from_the_intents_pool'] is False
 
 
 def test_an_effect_lit_before_any_intent_was_committed_is_caught():
-    effects = [{'t': 1.0, 'channel': _pool_channel('breakdown'), 'type': 'AUTOLOOP',
-                'end': 5.0}]
+    effects = [{'t': 1.0, 'channel': _pool_channel('breakdown'), 'type': 'AUTOLOOP', 'end': 5.0}]
     d = relations_digest(_report([], effects=effects))
     assert d['midi_channels_come_from_the_intents_pool'] is False
 
@@ -254,8 +306,10 @@ def test_overlay_time_running_backwards_is_caught():
 
 
 def test_timing_accuracy_is_the_queue_error_not_the_command_count():
-    log = [{'label': 'beat', 'actual_delta_sec': 2.5040, 'target_delta_sec': 2.5},
-           {'label': 'intent', 'actual_delta_sec': 2.4990, 'target_delta_sec': 2.5}]
+    log = [
+        {'label': 'beat', 'actual_delta_sec': 2.5040, 'target_delta_sec': 2.5},
+        {'label': 'intent', 'actual_delta_sec': 2.4990, 'target_delta_sec': 2.5},
+    ]
     d = survives_digest(_report([], timing_log=log))
     assert d['timing_accuracy'] == {'max_error_buffers': 1}
     assert max(_queue_errors_ms(_report([], timing_log=log))) < TIMING_ACCURACY_MAX_MS
@@ -264,9 +318,10 @@ def test_timing_accuracy_is_the_queue_error_not_the_command_count():
 
 def test_a_command_two_buffers_late_moves_the_survivor():
     period = BUFFER_SIZE / SAMPLE_RATE
-    log = [{'label': 'beat', 'actual_delta_sec': 2.5 + 1.5 * period,
-            'target_delta_sec': 2.5}]
-    assert survives_digest(_report([], timing_log=log))['timing_accuracy'] ==         {'max_error_buffers': 2}
+    log = [{'label': 'beat', 'actual_delta_sec': 2.5 + 1.5 * period, 'target_delta_sec': 2.5}]
+    assert survives_digest(_report([], timing_log=log))['timing_accuracy'] == {
+        'max_error_buffers': 2
+    }
 
 
 def test_the_queues_target_is_recorded_but_never_gated():
@@ -282,12 +337,19 @@ def test_a_moved_look_ahead_leaves_every_survivor_where_it_was():
     period = BUFFER_SIZE / SAMPLE_RATE
 
     def log(delay):
-        return [{'label': 'beat', 'target_delta_sec': delay,
-                 'actual_delta_sec': math.ceil(delay / period) * period}]
+        return [
+            {
+                'label': 'beat',
+                'target_delta_sec': delay,
+                'actual_delta_sec': math.ceil(delay / period) * period,
+            }
+        ]
 
-    assert (survives_digest(_report([], timing_log=log(2.5)))
-            == survives_digest(_report([], timing_log=log(14.0)))
-            == survives_digest(_report([], timing_log=log(1.861))))
+    assert (
+        survives_digest(_report([], timing_log=log(2.5)))
+        == survives_digest(_report([], timing_log=log(14.0)))
+        == survives_digest(_report([], timing_log=log(1.861)))
+    )
 
 
 def test_a_queue_that_missed_its_own_target_breaks_the_relation():
@@ -302,8 +364,7 @@ def test_the_digest_module_imports_nothing_the_demolition_deletes():
     import autolux.training.pipeline_digest as digest
 
     tree = ast.parse(Path(digest.__file__).read_text(encoding='utf-8'))
-    top_level = [node for node in tree.body
-                 if isinstance(node, (ast.Import, ast.ImportFrom))]
+    top_level = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     modules = set()
     for node in top_level:
         if isinstance(node, ast.Import):
@@ -314,12 +375,15 @@ def test_the_digest_module_imports_nothing_the_demolition_deletes():
 
 
 def test_the_post_demolition_report_shape_still_computes_every_gated_field():
-    report = _demolished(_report([_beat(1.0), _beat(2.0)],
-                                 timing_log=[{'label': 'beat',
-                                              'actual_delta_sec': 2.501,
-                                              'target_delta_sec': 2.5}]))
-    streams = _streams(sound=[{'t': 0.3, 'playing': True}], os2l=[_os2l(1)],
-                       overlay=[_overlay(1.0)])
+    report = _demolished(
+        _report(
+            [_beat(1.0), _beat(2.0)],
+            timing_log=[{'label': 'beat', 'actual_delta_sec': 2.501, 'target_delta_sec': 2.5}],
+        )
+    )
+    streams = _streams(
+        sound=[{'t': 0.3, 'playing': True}], os2l=[_os2l(1)], overlay=[_overlay(1.0)]
+    )
     intact = digest_report(_report([_beat(1.0), _beat(2.0)]), streams)
     d = digest_report(report, streams)
 
@@ -340,8 +404,9 @@ def test_the_doomed_density_evidence_is_dropped_rather_than_faked():
 
 
 def test_a_held_show_is_the_degradation_state():
-    report = _report([_beat(1.0), _beat(2.0)],
-                     intents=[{'t': 3.5, 'intent': 'breakdown', 'end': 10.0}])
+    report = _report(
+        [_beat(1.0), _beat(2.0)], intents=[{'t': 3.5, 'intent': 'breakdown', 'end': 10.0}]
+    )
     report['metrics']['effect_changes_count'] = 1
     d = degradation_digest(report, _streams(sound=[{'t': 0.3, 'playing': True}]))
     assert held_start_to_end(d)
@@ -351,9 +416,13 @@ def test_a_held_show_is_the_degradation_state():
 
 
 def test_the_surviving_silence_timer_does_not_disqualify_the_degradation_state():
-    report = _report([_beat(1.0)],
-                     intents=[{'t': 3.5, 'intent': 'breakdown', 'end': 300.0},
-                              {'t': 300.0, 'intent': 'atmospheric', 'end': 310.0}])
+    report = _report(
+        [_beat(1.0)],
+        intents=[
+            {'t': 3.5, 'intent': 'breakdown', 'end': 300.0},
+            {'t': 300.0, 'intent': 'atmospheric', 'end': 310.0},
+        ],
+    )
     report['metrics']['effect_changes_count'] = 2
     d = degradation_digest(report)
     assert held_start_to_end(d)
@@ -363,25 +432,32 @@ def test_the_surviving_silence_timer_does_not_disqualify_the_degradation_state()
 
 
 def test_a_show_that_switched_intent_is_not_the_degradation_state():
-    report = _report([_beat(1.0)],
-                     intents=[{'t': 3.5, 'intent': 'breakdown', 'end': 6.0},
-                              {'t': 6.0, 'intent': 'drop', 'end': 10.0}])
+    report = _report(
+        [_beat(1.0)],
+        intents=[
+            {'t': 3.5, 'intent': 'breakdown', 'end': 6.0},
+            {'t': 6.0, 'intent': 'drop', 'end': 10.0},
+        ],
+    )
     report['metrics']['effect_changes_count'] = 1
     assert not held_start_to_end(degradation_digest(report))
 
 
 def test_a_show_that_re_rolled_its_effect_is_not_the_degradation_state():
-    report = _report([_beat(1.0)],
-                     intents=[{'t': 3.5, 'intent': 'drop', 'end': 10.0}])
+    report = _report([_beat(1.0)], intents=[{'t': 3.5, 'intent': 'drop', 'end': 10.0}])
     report['metrics']['effect_changes_count'] = 4
     assert not held_start_to_end(degradation_digest(report))
 
 
 def test_a_mid_show_shed_is_not_this_predicate():
-    report = _report([_beat(1.0)],
-                     intents=[{'t': 1.0, 'intent': 'breakdown', 'end': 20.0},
-                              {'t': 20.0, 'intent': 'drop', 'end': 40.0},
-                              {'t': 40.0, 'intent': 'drop', 'end': 300.0}])
+    report = _report(
+        [_beat(1.0)],
+        intents=[
+            {'t': 1.0, 'intent': 'breakdown', 'end': 20.0},
+            {'t': 20.0, 'intent': 'drop', 'end': 40.0},
+            {'t': 40.0, 'intent': 'drop', 'end': 300.0},
+        ],
+    )
     report['metrics']['effect_changes_count'] = 3
     assert not held_start_to_end(degradation_digest(report))
 
@@ -392,9 +468,16 @@ def test_a_show_that_never_committed_is_dark_rather_than_held():
 
 def test_the_degradation_digest_carries_beats_silence_and_the_held_intent_only():
     d = degradation_digest(_report([_beat(1.0)]))
-    assert set(d) == {'beats_detected', 'beat_times_hash', 'sound_events',
-                      'intent_blocks', 'classified_blocks', 'atmospheric_blocks',
-                      'intents_held', 'effect_changes'}
+    assert set(d) == {
+        'beats_detected',
+        'beat_times_hash',
+        'sound_events',
+        'intent_blocks',
+        'classified_blocks',
+        'atmospheric_blocks',
+        'intents_held',
+        'effect_changes',
+    }
 
 
 def test_speed_is_reported_but_never_baselined():
@@ -422,7 +505,8 @@ def test_the_committed_fixture_covers_every_track_the_benchmark_subset_runs():
         youtube_id = track_id.split('.')[-1]
         assert youtube_id in covered, (
             f'{youtube_id} runs in the integration suite but has no golden '
-            f'fixture -- re-cut with training/pipeline_digest.py --write')
+            f'fixture -- re-cut with training/pipeline_digest.py --write'
+        )
 
 
 def test_the_committed_fixture_holds_every_relation_true():
@@ -432,28 +516,36 @@ def test_the_committed_fixture_holds_every_relation_true():
 
 
 def test_the_committed_fixture_pins_a_sound_stop_instant_somewhere():
-    stops = {name: [e for e in entry['survives']['sound_events'] if not e['playing']]
-             for name, entry in json.loads(BASELINE.read_text()).items()}
+    stops = {
+        name: [e for e in entry['survives']['sound_events'] if not e['playing']]
+        for name, entry in json.loads(BASELINE.read_text()).items()
+    }
     assert any(stops.values()), (
-        f'no committed track stops making sound: {stops} -- D5 has no stop '
-        f'instant to match against')
+        f'no committed track stops making sound: {stops} -- D5 has no stop instant to match against'
+    )
 
 
 def test_check_digest_reports_a_moved_survivor_and_a_broken_relation():
-    fixture = {'t.mp3': {'survives': {'beats_detected': 10},
-                         'relations': {'overlay_light_bar_fires': True}}}
-    moved = {'survives': {'beats_detected': 11},
-             'relations': {'overlay_light_bar_fires': False}}
+    fixture = {
+        't.mp3': {
+            'survives': {'beats_detected': 10},
+            'relations': {'overlay_light_bar_fires': True},
+        }
+    }
+    moved = {'survives': {'beats_detected': 11}, 'relations': {'overlay_light_bar_fires': False}}
     failures = check_digest('t.mp3', moved, fixture)
     assert any('beats_detected' in f for f in failures)
     assert any('overlay_light_bar_fires' in f for f in failures)
 
 
 def test_check_digest_is_silent_when_the_survivors_hold():
-    fixture = {'t.mp3': {'survives': {'beats_detected': 10},
-                         'relations': {'overlay_light_bar_fires': True}}}
-    same = {'survives': {'beats_detected': 10},
-            'relations': {'overlay_light_bar_fires': True}}
+    fixture = {
+        't.mp3': {
+            'survives': {'beats_detected': 10},
+            'relations': {'overlay_light_bar_fires': True},
+        }
+    }
+    same = {'survives': {'beats_detected': 10}, 'relations': {'overlay_light_bar_fires': True}}
     assert check_digest('t.mp3', same, fixture) == []
 
 
@@ -468,6 +560,7 @@ _digest_cache: dict = {}
 async def _anchor_digest(anchor_mp3) -> dict:
     if not _digest_cache:
         from autolux.training.pipeline_digest import digest_track
+
         _digest_cache.update(await digest_track(anchor_mp3))
     return _digest_cache
 
@@ -494,9 +587,11 @@ def _non_anchor_fixture_tracks() -> list:
 
     data_dir = run_eval_set.corpus_dir()
     fixture = json.loads(BASELINE.read_text())
-    return [(name, str(run_eval_set.audio_path(data_dir, Path(name).stem)))
-            for name in sorted(fixture)
-            if Path(name).stem != ANCHOR_YOUTUBE_ID]
+    return [
+        (name, str(run_eval_set.audio_path(data_dir, Path(name).stem)))
+        for name in sorted(fixture)
+        if Path(name).stem != ANCHOR_YOUTUBE_ID
+    ]
 
 
 @pytest.mark.integration
@@ -515,5 +610,6 @@ async def test_the_rewired_pipeline_has_left_the_degradation_state(anchor_mp3, n
     actual = await _anchor_digest(anchor_mp3)
     assert not held_start_to_end(actual['degradation'])
     assert actual['degradation']['classified_blocks'] > 1
-    assert actual['degradation']['beats_detected'] > 0,         'beats must survive the rewire; only the classifier went'
-
+    assert actual['degradation']['beats_detected'] > 0, (
+        'beats must survive the rewire; only the classifier went'
+    )

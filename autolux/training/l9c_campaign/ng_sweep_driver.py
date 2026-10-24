@@ -9,6 +9,7 @@ searched, ablated and joint-refined exactly like every other knob, and the
 chosen config records whatever value won under the unchanged selection rule
 (max two-seed-mean val macro subject to the flicker ceiling and lag <= 2).
 """
+
 import argparse
 import ctypes
 import dataclasses
@@ -79,7 +80,7 @@ def floor_axis(priors: Priors, smoke: bool) -> tuple:
         return tuple(max(1, int(round(v * scale))) for v in fitted)
 
     def with_buildup(vector, bars):
-        return vector[:buildup] + (int(bars),) + vector[buildup + 1:]
+        return vector[:buildup] + (int(bars),) + vector[buildup + 1 :]
 
     half, three_quarter = scaled(0.5), scaled(0.75)
     if smoke:
@@ -92,14 +93,14 @@ def floor_axis(priors: Priors, smoke: bool) -> tuple:
 
 
 def ceiling_or_die() -> float:
-    reference = json.loads((L9_CAMPAIGN / "l9_decoder_reference.json")
-                           .read_text(encoding="utf-8"))
+    reference = json.loads((L9_CAMPAIGN / "l9_decoder_reference.json").read_text(encoding="utf-8"))
     ceiling = float(reference["flicker_ceiling_per_min"])
     if abs(ceiling - REGISTERED_CEILING) > 5e-7:
         raise RuntimeError(
             f"reference ceiling {ceiling} is not the registered "
             f"{REGISTERED_CEILING} -- same split, same instrument, so a "
-            f"different number means the instrument moved: STOPPING")
+            f"different number means the instrument moved: STOPPING"
+        )
     return ceiling
 
 
@@ -118,9 +119,9 @@ def apply_smoke_grid() -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--arm", default=None,
-                        help="arm label, e.g. N (runs default to "
-                             "ng_<ARM>_w128_s1234,s1235)")
+    parser.add_argument(
+        "--arm", default=None, help="arm label, e.g. N (runs default to ng_<ARM>_w128_s1234,s1235)"
+    )
     parser.add_argument("--runs", default=None)
     parser.add_argument("--priors", type=Path, default=None)
     parser.add_argument("--out-config", type=Path, default=None)
@@ -133,9 +134,11 @@ def main() -> int:
     below_normal()
     available_mb = psutil.virtual_memory().available / 2**20
     if available_mb < args.ram_gate_mb:
-        raise RuntimeError(f"only {available_mb:.0f} MB available; the gate is "
-                           f"{args.ram_gate_mb:.0f} MB -- yielding rather than "
-                           f"starting")
+        raise RuntimeError(
+            f"only {available_mb:.0f} MB available; the gate is "
+            f"{args.ram_gate_mb:.0f} MB -- yielding rather than "
+            f"starting"
+        )
 
     if args.smoke:
         apply_smoke_grid()
@@ -152,8 +155,7 @@ def main() -> int:
         bonuses = SMOKE_BONUSES
     else:
         label = args.arm
-        runs = tuple((args.runs or f"ng_{label}_w128_s1234,"
-                                   f"ng_{label}_w128_s1235").split(","))
+        runs = tuple((args.runs or f"ng_{label}_w128_s1234,ng_{label}_w128_s1235").split(","))
         priors_path = args.priors or CAMP / f"priors_{label}.json"
         posteriors = {run: CAMP / f"posteriors_{run}" for run in runs}
         reports = {run: CAMP / run / "training_report.json" for run in runs}
@@ -176,8 +178,10 @@ def main() -> int:
     priors = Priors.load(priors_path)
     fitted, floors = floor_axis(priors, args.smoke)
     say(f"fitted floors {dict(zip(priors.classes, fitted))}")
-    say(f"floor_bars axis ({len(floors)} vectors): "
-        + "; ".join(",".join(map(str, v)) for v in floors))
+    say(
+        f"floor_bars axis ({len(floors)} vectors): "
+        + "; ".join(",".join(map(str, v)) for v in floors)
+    )
     say(f"buildup_drop_bonus axis (#345): {bonuses}")
 
     ids = split_ids(DATA, "val")
@@ -186,8 +190,7 @@ def main() -> int:
     for run in runs:
         report = json.loads(reports[run].read_text(encoding="utf-8"))
         hashes[run] = report["weight_hash"]
-        caches.append(InputCache(DATA, ids, posteriors_dir=posteriors[run],
-                                 model_sha=hashes[run]))
+        caches.append(InputCache(DATA, ids, posteriors_dir=posteriors[run], model_sha=hashes[run]))
 
     base = DecodeParams(min_coverage=1, lag_bars=BUDGET_BARS, floor_bars=fitted)
     inputs = caches[0].for_params(base)
@@ -198,55 +201,70 @@ def main() -> int:
             f"expected 215 clean val tracks, got {len(inputs)} "
             f"(skipped {[cache.skipped for cache in caches]}) -- a skip here "
             f"means a sidecar's model_sha disagrees with its "
-            f"training_report.json weight_hash, or a sidecar is missing")
+            f"training_report.json weight_hash, or a sidecar is missing"
+        )
 
     table_stream = rule_baseline(inputs)
-    say(f"{len(inputs)} val tracks; ceiling {ceiling:.6f}/min (registered "
+    say(
+        f"{len(inputs)} val tracks; ceiling {ceiling:.6f}/min (registered "
         f"{REGISTERED_CEILING}); table-stream context macro "
         f"{table_stream['macro_f1']:.4f} flicker "
-        f"{table_stream['flicker_per_min']:.4f}/min")
+        f"{table_stream['flicker_per_min']:.4f}/min"
+    )
 
     def log(row):
         if "stage_start" in row:
             say(f"\n-- {row['stage_start']}: {row['configs']} configs")
             return
-        say(f"   macro {row['macro_f1']:.4f}  flick(max) "
+        say(
+            f"   macro {row['macro_f1']:.4f}  flick(max) "
             f"{row['flicker_per_min']:6.4f}  crisp {row['crispness_05']:.4f}  "
-            f"{row['seconds']:6.2f}s  {row['params']}")
+            f"{row['seconds']:6.2f}s  {row['params']}"
+        )
 
     started = time.perf_counter()
-    result = run_sweep(caches, priors, flicker_ceiling=ceiling, log=log,
-                       base=base, budget_bars=BUDGET_BARS,
-                       extra_stage_axes={"floor_bars": floors,
-                                         "outro_escape": escapes,
-                                         "buildup_drop_bonus": bonuses})
+    result = run_sweep(
+        caches,
+        priors,
+        flicker_ceiling=ceiling,
+        log=log,
+        base=base,
+        budget_bars=BUDGET_BARS,
+        extra_stage_axes={
+            "floor_bars": floors,
+            "outro_escape": escapes,
+            "buildup_drop_bonus": bonuses,
+        },
+    )
     elapsed = time.perf_counter() - started
 
     payload = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "label": f"l9c campaign decoder sweep, arm {label}"
-                 + (" (SMOKE: l9 posteriors, tiny grid, machinery proof only)"
-                    if args.smoke else ""),
+        + (" (SMOKE: l9 posteriors, tiny grid, machinery proof only)" if args.smoke else ""),
         "registered_by": "#346",
         "split": "val",
         "tracks": len(inputs),
         "space": "raw9",
         "selection_rule": "max two-seed-mean val macro-F1 (raw9, class stream) "
-                          "subject to max-seed flicker@2s <= the 5-class "
-                          f"decoded reference ({ceiling:.6f}/min) and lag_bars "
-                          f"<= {BUDGET_BARS}",
+        "subject to max-seed flicker@2s <= the 5-class "
+        f"decoded reference ({ceiling:.6f}/min) and lag_bars "
+        f"<= {BUDGET_BARS}",
         "flicker_ceiling_per_min": ceiling,
         "reference": str(L9_CAMPAIGN / "l9_decoder_reference.json"),
         "table_stream_context": {
             "macro_f1": round(float(table_stream["macro_f1"]), 6),
-            "flicker_per_min": round(float(table_stream["flicker_per_min"]), 6)},
+            "flicker_per_min": round(float(table_stream["flicker_per_min"]), 6),
+        },
         "provenance": {
-            "priors": {"path": str(priors_path),
-                       "sha256": file_sha256(priors_path)},
-            "table": {"path": str(DATA / "training_table.csv.gz"),
-                      "sha256": file_sha256(DATA / "training_table.csv.gz")},
-            "posteriors": {run: {"dir": str(posteriors[run]),
-                                 "weight_hash": hashes[run]} for run in runs},
+            "priors": {"path": str(priors_path), "sha256": file_sha256(priors_path)},
+            "table": {
+                "path": str(DATA / "training_table.csv.gz"),
+                "sha256": file_sha256(DATA / "training_table.csv.gz"),
+            },
+            "posteriors": {
+                run: {"dir": str(posteriors[run]), "weight_hash": hashes[run]} for run in runs
+            },
             "modules_from": W,
         },
         "base": dataclasses.asdict(base),
@@ -256,8 +274,8 @@ def main() -> int:
         "outro_escape_axis": list(escapes),
         "buildup_drop_bonus_axis": list(bonuses),
         "floor_scale_note": "floor_scale is inert in this sweep: floor_bars is "
-                            "set on every row and overrides it (disclosed, "
-                            "sweep.py unmodified)",
+        "set on every row and overrides it (disclosed, "
+        "sweep.py unmodified)",
         "chosen": result["chosen"]["params"],
         "chosen_metrics": result["chosen"],
         "search_anchor": result["anchor"],
@@ -293,17 +311,19 @@ def main() -> int:
             "buildup_drop_bonus is the #345/#346 transition axis (log-domain "
             "buildup->drop entry preference); 0.0 is the pre-l9c decoder "
             "exactly",
-        ] + (["SMOKE artifact -- l9 posteriors, tiny grid; never ship this"]
-             if args.smoke else []),
+        ]
+        + (["SMOKE artifact -- l9 posteriors, tiny grid; never ship this"] if args.smoke else []),
     }
     check_class_space(config["class_space"], str(config_out))
     write_json(config_out, config)
 
-    say(f"\n{len(result['rows'])} configs in {elapsed/60:.1f} min")
+    say(f"\n{len(result['rows'])} configs in {elapsed / 60:.1f} min")
     say(f"chosen: {result['chosen']['params']}")
-    say(f"chosen row: macro {result['chosen']['macro_f1']:.6f}  flicker(max) "
+    say(
+        f"chosen row: macro {result['chosen']['macro_f1']:.6f}  flicker(max) "
         f"{result['chosen']['flicker_per_min']:.6f}  crisp "
-        f"{result['chosen']['crispness_05']:.6f}")
+        f"{result['chosen']['crispness_05']:.6f}"
+    )
     say(f"wrote {sweep_out}")
     say(f"wrote {config_out}")
     log_handle.close()

@@ -1,4 +1,5 @@
 """Bar-phase decoder: beat instants + downbeat activation in, a bar grid out."""
+
 from __future__ import annotations
 
 from collections import deque
@@ -58,7 +59,8 @@ def candidate_grid(beat_times, subdivision: int = DEFAULT_SUBDIVISION) -> np.nda
     if int(subdivision) != 2:
         raise ValueError(
             f"subdivision must be 1 or 2, got {subdivision} -- see the module "
-            f"docstring; anything else is an unmeasured claim about the metre")
+            f"docstring; anything else is an unmeasured claim about the metre"
+        )
     if times.size < 2:
         return times
     dense = np.empty(2 * times.size - 1, dtype=np.float64)
@@ -67,16 +69,22 @@ def candidate_grid(beat_times, subdivision: int = DEFAULT_SUBDIVISION) -> np.nda
     return dense
 
 
-def nearest_frames(instants, n_frames: int, frame_sec: float,
-                   t0: float) -> np.ndarray:
+def nearest_frames(instants, n_frames: int, frame_sec: float, t0: float) -> np.ndarray:
     """Activation frame whose stamp is nearest each instant; ``-1`` past the end."""
     index = np.rint((np.asarray(instants, dtype=np.float64) - t0) / frame_sec)
     index = np.maximum(index.astype(np.int64), 0)
     return np.where(index >= int(n_frames), -1, index)
 
 
-def aggregate_at_beats(activation, instants, frame_sec: float, t0: float, *,
-                       lo: int = AGG_LO_FRAMES, hi: int = AGG_HI_FRAMES) -> tuple:
+def aggregate_at_beats(
+    activation,
+    instants,
+    frame_sec: float,
+    t0: float,
+    *,
+    lo: int = AGG_LO_FRAMES,
+    hi: int = AGG_HI_FRAMES,
+) -> tuple:
     """``(scores, counts)``; a score is NaN where no frame covers the instant."""
     activation = np.asarray(activation, dtype=np.float64)
     n_frames = len(activation)
@@ -89,7 +97,7 @@ def aggregate_at_beats(activation, instants, frame_sec: float, t0: float, *,
             continue
         start = max(0, int(frame) + int(lo))
         end = min(n_frames, int(frame) + int(hi) + 1)
-        if end <= start:                               # pragma: no cover
+        if end <= start:  # pragma: no cover
             continue
         counts[index] = end - start
         scores[index] = activation[start:end].max()
@@ -104,27 +112,28 @@ class BarPhaseHMM:
         if int(params.lag_beats) < 0:
             raise ValueError(f"lag_beats must be >= 0, got {params.lag_beats}")
         if int(params.subdivision) not in (1, 2):
-            raise ValueError(
-                f"subdivision must be 1 or 2, got {params.subdivision}")
+            raise ValueError(f"subdivision must be 1 or 2, got {params.subdivision}")
         if float(params.flip_penalty) < 0.0:
             raise ValueError(
                 f"flip_penalty must be >= 0, got {params.flip_penalty} -- a "
-                f"negative penalty pays the decoder to lose the bar")
+                f"negative penalty pays the decoder to lose the bar"
+            )
         if not 0.0 < float(params.downbeat_ref) < 1.0:
-            raise ValueError(
-                f"downbeat_ref must lie in (0, 1), got {params.downbeat_ref}")
+            raise ValueError(f"downbeat_ref must lie in (0, 1), got {params.downbeat_ref}")
         if float(params.coast_ratio) <= 1.0:
             raise ValueError(
                 f"coast_ratio must exceed 1, got {params.coast_ratio} -- at or "
-                f"below 1 every ordinary beat would be read as a dropout")
+                f"below 1 every ordinary beat would be read as a dropout"
+            )
 
         self.params = params
         self._ref_logit = _logit(params.downbeat_ref)
         self.cycle = BEATS_PER_BAR * int(params.subdivision)
 
         advance = (np.arange(self.cycle) + 1) % self.cycle
-        self._transition = np.full((self.cycle, self.cycle),
-                                   -float(params.flip_penalty), dtype=np.float64)
+        self._transition = np.full(
+            (self.cycle, self.cycle), -float(params.flip_penalty), dtype=np.float64
+        )
         self._transition[np.arange(self.cycle), advance] = 0.0
         self.reset()
 
@@ -142,8 +151,8 @@ class BarPhaseHMM:
         time = float(time)
         if self._last_time is not None and time <= self._last_time:
             raise ValueError(
-                f"beat times must be strictly increasing: {time} follows "
-                f"{self._last_time}")
+                f"beat times must be strictly increasing: {time} follows {self._last_time}"
+            )
 
         coasted, period = self._plan_gap(time)
         self._coast_streak = self._coast_streak + 1 if coasted else 0
@@ -168,7 +177,8 @@ class BarPhaseHMM:
         if len(scores) != len(times):
             raise ValueError(
                 f"got {len(scores)} scores for {len(times)} beats -- the "
-                f"aggregation and the beat stream have come apart")
+                f"aggregation and the beat stream have come apart"
+            )
         if times.size > 1 and np.any(np.diff(times) <= 0.0):
             raise ValueError("beat times must be strictly increasing")
 
@@ -213,8 +223,11 @@ class BarPhaseHMM:
     def _observe(self, time: float, score: float, *, virtual: bool) -> list:
         emission = self._emission(score)
         if self._frontier_score is None:
-            seed = (np.zeros(self.cycle) if self._committed_phase is None
-                    else self._transition[self._committed_phase])
+            seed = (
+                np.zeros(self.cycle)
+                if self._committed_phase is None
+                else self._transition[self._committed_phase]
+            )
             self._frontier_score = seed + emission
             self._frontier_score -= self._frontier_score.max()
             self._frontier_candidate = (emission, float(time), bool(virtual))
@@ -222,8 +235,7 @@ class BarPhaseHMM:
             self._pending.append((emission, float(time), bool(virtual)))
 
         decisions: list = []
-        while (self._frontier_score is not None
-               and len(self._pending) >= int(self.params.lag_beats)):
+        while self._frontier_score is not None and len(self._pending) >= int(self.params.lag_beats):
             decisions.append(self._commit_one())
         return decisions
 
@@ -231,8 +243,7 @@ class BarPhaseHMM:
         path_score = np.full((self.cycle, self.cycle), -np.inf, dtype=np.float64)
         np.fill_diagonal(path_score, seed)
         for emission, _time, _virtual in self._pending:
-            path_score = ((path_score[:, :, None] + self._transition).max(axis=1)
-                          + emission)
+            path_score = (path_score[:, :, None] + self._transition).max(axis=1) + emission
         return path_score.max(axis=1)
 
     def _commit_one(self) -> PhaseDecision:
@@ -278,8 +289,9 @@ def bar_phase(phase: int, subdivision: int = DEFAULT_SUBDIVISION) -> int:
     return (phase - 1) // step + 1 if (phase - 1) % step == 0 else 0
 
 
-def decode_track(sidecar_npz, condition: str, params: PhaseParams | None = None,
-                 *, refine: bool = False) -> list:
+def decode_track(
+    sidecar_npz, condition: str, params: PhaseParams | None = None, *, refine: bool = False
+) -> list:
     params = params or PhaseParams()
     path = Path(sidecar_npz)
     with np.load(path) as archive:
@@ -287,7 +299,8 @@ def decode_track(sidecar_npz, condition: str, params: PhaseParams | None = None,
         if time_key not in archive:
             raise KeyError(
                 f"{path.name} carries no '{condition}' beat stream; it has "
-                f"{sorted(k[:-10] for k in archive if k.endswith('_beat_time'))}")
+                f"{sorted(k[:-10] for k in archive if k.endswith('_beat_time'))}"
+            )
         beats = np.asarray(archive[time_key], dtype=np.float64)
         activation = np.asarray(archive["activation"], dtype=np.float64)
         frame_sec = float(archive["frame_sec"])
@@ -311,8 +324,15 @@ def _parabolic_peak_shift(left: float, centre: float, right: float) -> float:
     return 0.5 * (left - right) / curvature if curvature < 0.0 else 0.0
 
 
-def refine_instants(decisions, activation, frame_sec: float, t0: float, *,
-                    lo: int = AGG_LO_FRAMES, hi: int = AGG_HI_FRAMES) -> list:
+def refine_instants(
+    decisions,
+    activation,
+    frame_sec: float,
+    t0: float,
+    *,
+    lo: int = AGG_LO_FRAMES,
+    hi: int = AGG_HI_FRAMES,
+) -> list:
     activation = np.asarray(activation, dtype=np.float64)
     n_frames = len(activation)
     frames = nearest_frames([d.time for d in decisions], n_frames, frame_sec, t0)
@@ -325,11 +345,15 @@ def refine_instants(decisions, activation, frame_sec: float, t0: float, *,
             continue
         window = np.clip(int(frame) + span, 0, n_frames - 1)
         peak = int(window[int(np.argmax(activation[window]))])
-        shift = _parabolic_peak_shift(activation[max(peak - 1, 0)],
-                                      activation[peak],
-                                      activation[min(peak + 1, n_frames - 1)])
+        shift = _parabolic_peak_shift(
+            activation[max(peak - 1, 0)], activation[peak], activation[min(peak + 1, n_frames - 1)]
+        )
         moment = t0 + (peak + float(np.clip(shift, -0.5, 0.5))) * frame_sec
-        refined.append(decision._replace(
-            time=float(np.clip(moment, decision.time + lo * frame_sec,
-                               decision.time + hi * frame_sec))))
+        refined.append(
+            decision._replace(
+                time=float(
+                    np.clip(moment, decision.time + lo * frame_sec, decision.time + hi * frame_sec)
+                )
+            )
+        )
     return refined

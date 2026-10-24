@@ -13,16 +13,18 @@ SETTLE_SEC = 0.2
 
 
 class EffectAction(Enum):
-    ACTIVATE = 1,
+    ACTIVATE = (1,)
     DEACTIVATE = 2
 
 
 class DelayedEffect:
-    def __init__(self,
-                 start_ts: datetime.datetime,
-                 effect: MidiChannel,
-                 action: EffectAction,
-                 duration: datetime.timedelta):
+    def __init__(
+        self,
+        start_ts: datetime.datetime,
+        effect: MidiChannel,
+        action: EffectAction,
+        duration: datetime.timedelta,
+    ):
         self.start_ts: datetime.datetime = start_ts
         self.effect: MidiChannel = effect
         self.action: EffectAction = action
@@ -48,11 +50,15 @@ class MidiClient:
             print(f'index: {i}, port: {self.available_ports[i]}')
 
     def start(self):
-        assert 0 <= self.midi_port_index < len(self.available_ports), "midi_port_index does not reference a valid port"
+        assert 0 <= self.midi_port_index < len(self.available_ports), (
+            "midi_port_index does not reference a valid port"
+        )
         self.port_name = self.midi_out.get_port_name(self.midi_port_index)
         logging.info(f"[midi] using midi port: {self.port_name}")
         self.midi_out.open_port(self.midi_port_index)
-        assert self.midi_out.is_port_open(), f"Unable to open midi port '{self.port_name}', (index={self.midi_port_index})"
+        assert self.midi_out.is_port_open(), (
+            f"Unable to open midi port '{self.port_name}', (index={self.midi_port_index})"
+        )
 
     def stop(self):
         logging.info(f'[midi] stopping midi client')
@@ -89,10 +95,14 @@ class MidiClient:
         logging.info(f'[midi] set special effect: {special_effect.name}')
         now = datetime.datetime.now()
         self.midi_out.send_message(mm.get_midi_msg_on(special_effect))
-        self._pending_effects.append(DelayedEffect(start_ts=now,
-                                                   effect=special_effect,
-                                                   action=EffectAction.DEACTIVATE,
-                                                   duration=datetime.timedelta(seconds=duration_sec)))
+        self._pending_effects.append(
+            DelayedEffect(
+                start_ts=now,
+                effect=special_effect,
+                action=EffectAction.DEACTIVATE,
+                duration=datetime.timedelta(seconds=duration_sec),
+            )
+        )
 
     async def set_color_override(self, color: MidiChannel):
         await self.clear_color_overrides()
@@ -151,4 +161,6 @@ class MidiClient:
         elif group == 4:
             self.midi_out.send_message(mm.get_group_4_intensity_msg(value))
         else:
-            raise RuntimeError(f'cannot set intensity for unknown group {group}, only groups 1-4 are supported')
+            raise RuntimeError(
+                f'cannot set intensity for unknown group {group}, only groups 1-4 are supported'
+            )

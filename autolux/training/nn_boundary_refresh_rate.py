@@ -1,4 +1,5 @@
 """What the boundary head fires at, and how often -- D9's threshold evidence."""
+
 from __future__ import annotations
 
 import argparse
@@ -33,7 +34,8 @@ async def boundary_stream(mp3: str) -> dict:
     SectionDecoder.push_posterior = spy
     try:
         components, queue = await run_fast_simulation_components(
-            FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, mp3))
+            FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, mp3)
+        )
     finally:
         SectionDecoder.push_posterior = push
     report = components["event_buffer"].to_report(queue.get_timing_log())
@@ -59,19 +61,17 @@ def measure(mp3: str, cooldown_sec: float) -> dict:
     return {
         "duration_sec": round(data["duration_sec"], 1),
         "cells": count,
-        "quantiles": {str(q): round(scores[min(count - 1, int(q * count))], 4)
-                      for q in QUANTILES},
+        "quantiles": {str(q): round(scores[min(count - 1, int(q * count))], 4) for q in QUANTILES},
         "max": round(scores[-1], 4),
         "refreshes_per_minute": {
-            str(threshold): round(len(fires(data["cells"], threshold,
-                                            cooldown_sec)) / minutes, 3)
-            for threshold in GRID},
+            str(threshold): round(len(fires(data["cells"], threshold, cooldown_sec)) / minutes, 3)
+            for threshold in GRID
+        },
     }
 
 
 def main() -> None:
-    from autolux.lib.engine.light_engine import (BOUNDARY_REFRESH_SCORE,
-                                         REFRESH_COOLDOWN_SEC)
+    from autolux.lib.engine.light_engine import BOUNDARY_REFRESH_SCORE, REFRESH_COOLDOWN_SEC
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("tracks", nargs="+")
@@ -93,19 +93,24 @@ def main() -> None:
         "chosen_threshold": BOUNDARY_REFRESH_SCORE,
         "cooldown_sec": REFRESH_COOLDOWN_SEC,
         "retired_ceiling_per_minute": round(60.0 / REFRESH_COOLDOWN_SEC, 3),
-        "realised_per_minute": {"min": min(realised), "max": max(realised),
-                                "mean": round(sum(realised) / len(realised), 3)},
+        "realised_per_minute": {
+            "min": min(realised),
+            "max": max(realised),
+            "mean": round(sum(realised) / len(realised), 3),
+        },
         "tracks": tracks,
     }
-    print(f"\n{BOUNDARY_REFRESH_SCORE} gives "
-          f"{verdict['realised_per_minute']['mean']}/min mean "
-          f"({verdict['realised_per_minute']['min']}-"
-          f"{verdict['realised_per_minute']['max']}), against a retired ceiling "
-          f"of {verdict['retired_ceiling_per_minute']}/min")
+    print(
+        f"\n{BOUNDARY_REFRESH_SCORE} gives "
+        f"{verdict['realised_per_minute']['mean']}/min mean "
+        f"({verdict['realised_per_minute']['min']}-"
+        f"{verdict['realised_per_minute']['max']}), against a retired ceiling "
+        f"of {verdict['retired_ceiling_per_minute']}/min"
+    )
     if args.write:
-        Path(args.write).write_text(json.dumps(verdict, indent=2,
-                                               sort_keys=True) + "\n",
-                                    newline="\n")
+        Path(args.write).write_text(
+            json.dumps(verdict, indent=2, sort_keys=True) + "\n", newline="\n"
+        )
         print(f"wrote {args.write}")
 
 

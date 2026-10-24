@@ -14,6 +14,7 @@ imports one -- from repeating the incantation, and guarantees the label
 vocabulary, the mel geometry and the artist parser are the *same* definitions
 the corpus was built with rather than copies that can drift.
 """
+
 from __future__ import annotations
 
 import os

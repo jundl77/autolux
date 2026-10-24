@@ -44,6 +44,7 @@ this package's ``__init__`` (it must precede the first ``import torch``, which
 bitwise-identical weights; ``--resume`` restores optimiser, scheduler and RNG
 state so an interrupted run rejoins that same trajectory.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -108,8 +109,9 @@ LR_REFERENCE_BATCH = 32
 
 def lr_note(lr: float, batch_size: int) -> str:
     if batch_size == LR_REFERENCE_BATCH:
-        return (f"lr {lr:g} at the plan's reference batch {LR_REFERENCE_BATCH} -- "
-                f"no scaling question.")
+        return (
+            f"lr {lr:g} at the plan's reference batch {LR_REFERENCE_BATCH} -- no scaling question."
+        )
     return (
         f"lr {lr:g} was specified in the plan at batch {LR_REFERENCE_BATCH} and is "
         f"running at batch {batch_size} ({batch_size / LR_REFERENCE_BATCH:g}x); no "
@@ -132,13 +134,13 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False      # benchmark=True is nondeterministic
+    torch.backends.cudnn.benchmark = False  # benchmark=True is nondeterministic
     torch.use_deterministic_algorithms(True)
 
 
 def worker_init_fn(worker_id: int) -> None:
     """Worker RNG is not covered by ``seed_everything`` in the parent."""
-    seed = (torch.initial_seed() + worker_id) % (2 ** 32)
+    seed = (torch.initial_seed() + worker_id) % (2**32)
     random.seed(seed)
     np.random.seed(seed)
 
@@ -148,9 +150,14 @@ def worker_init_fn(worker_id: int) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def focal_loss(logits: torch.Tensor, targets: torch.Tensor, *,
-               weight: torch.Tensor, gamma: float = 2.0,
-               ignore_index: int = IGNORE_INDEX) -> torch.Tensor:
+def focal_loss(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    weight: torch.Tensor,
+    gamma: float = 2.0,
+    ignore_index: int = IGNORE_INDEX,
+) -> torch.Tensor:
     """Class-weighted focal loss over ``[B, T, C]`` logits, masked positions out.
 
     Mean over *supervised* positions, so the value does not depend on how much
@@ -162,8 +169,7 @@ def focal_loss(logits: torch.Tensor, targets: torch.Tensor, *,
     valid = (flat_targets != ignore_index).to(flat.dtype)
     # IGNORE_INDEX is negative: one_hot would raise on it, so park masked
     # positions on class 0 and let `valid` delete their contribution.
-    safe = torch.where(flat_targets == ignore_index,
-                       torch.zeros_like(flat_targets), flat_targets)
+    safe = torch.where(flat_targets == ignore_index, torch.zeros_like(flat_targets), flat_targets)
 
     log_probs = F.log_softmax(flat, dim=-1)
     onehot = F.one_hot(safe, logits.shape[-1]).to(flat.dtype)
@@ -175,21 +181,28 @@ def focal_loss(logits: torch.Tensor, targets: torch.Tensor, *,
     return (losses * valid).sum() / valid.sum().clamp(min=1.0)
 
 
-def boundary_bce(logits: torch.Tensor, targets: torch.Tensor,
-                 mask: torch.Tensor, *, pos_weight: float) -> torch.Tensor:
+def boundary_bce(
+    logits: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor, *, pos_weight: float
+) -> torch.Tensor:
     """Masked, positive-reweighted BCE over ``[B, T]`` boundary logits."""
     valid = mask.to(logits.dtype)
     losses = F.binary_cross_entropy_with_logits(
-        logits, targets.to(logits.dtype),
+        logits,
+        targets.to(logits.dtype),
         pos_weight=torch.as_tensor(pos_weight, dtype=logits.dtype, device=logits.device),
         reduction="none",
     )
     return (losses * valid).sum() / valid.sum().clamp(min=1.0)
 
 
-def tv_penalty(label_logits: torch.Tensor, label_mask: torch.Tensor,
-               boundary_targets: torch.Tensor, boundary_mask: torch.Tensor, *,
-               pool: int = LABEL_POOL) -> torch.Tensor:
+def tv_penalty(
+    label_logits: torch.Tensor,
+    label_mask: torch.Tensor,
+    boundary_targets: torch.Tensor,
+    boundary_mask: torch.Tensor,
+    *,
+    pool: int = LABEL_POOL,
+) -> torch.Tensor:
     """Boundary-aware total variation of the label posteriors.
 
     ``mean_c |p_t - p_{t-1}|`` averaged over pooled frame pairs, each pair
@@ -198,7 +211,7 @@ def tv_penalty(label_logits: torch.Tensor, label_mask: torch.Tensor,
     live boundary target.
     """
     probs = label_logits.softmax(dim=-1)
-    variation = (probs[:, 1:] - probs[:, :-1]).abs().mean(dim=-1)   # [B, T-1]
+    variation = (probs[:, 1:] - probs[:, :-1]).abs().mean(dim=-1)  # [B, T-1]
 
     # Frame-rate boundary info -> pooled rate.  `max` for the target (a boundary
     # anywhere in the group makes the group a boundary) and `min` for the mask
@@ -223,9 +236,9 @@ def tv_penalty(label_logits: torch.Tensor, label_mask: torch.Tensor,
 
 
 class TargetStats(NamedTuple):
-    class_counts: np.ndarray     # [C] supervised pooled frames per class
-    boundary_positive: float     # summed boundary target mass over live frames
-    boundary_valid: int          # live boundary frames
+    class_counts: np.ndarray  # [C] supervised pooled frames per class
+    boundary_positive: float  # summed boundary target mass over live frames
+    boundary_valid: int  # live boundary frames
 
 
 def accumulate_target_stats(targets_iterable) -> TargetStats:
@@ -250,8 +263,9 @@ def load_target_stats(data_dir, youtube_ids, sections_by_youtube_id=None) -> Tar
     """
     data_dir = Path(data_dir)
     if sections_by_youtube_id is None:
-        sections_by_youtube_id = {str(track.get("id")): parse_sections(track)
-                                  for track in load_tracks(data_dir)}
+        sections_by_youtube_id = {
+            str(track.get("id")): parse_sections(track) for track in load_tracks(data_dir)
+        }
 
     def targets():
         for youtube_id in youtube_ids:
@@ -259,8 +273,7 @@ def load_target_stats(data_dir, youtube_ids, sections_by_youtube_id=None) -> Tar
             # Same truncation WindowDataset applies, so the histogram counts the
             # frames the model is actually shown.
             usable = (frames // LABEL_POOL) * LABEL_POOL
-            yield track_targets(sections_by_youtube_id[youtube_id], usable,
-                                FRAME_SEC, FRAME_SEC)
+            yield track_targets(sections_by_youtube_id[youtube_id], usable, FRAME_SEC, FRAME_SEC)
 
     return accumulate_target_stats(targets())
 
@@ -298,8 +311,7 @@ def boundary_pos_weight(positive: float, valid: int) -> float:
 def confusion_matrix(true: np.ndarray, pred: np.ndarray, n_classes: int) -> np.ndarray:
     """``matrix[t, p]`` -- rows are truth, columns are prediction."""
     matrix = np.zeros((n_classes, n_classes), dtype=np.int64)
-    np.add.at(matrix, (np.asarray(true, dtype=np.int64),
-                       np.asarray(pred, dtype=np.int64)), 1)
+    np.add.at(matrix, (np.asarray(true, dtype=np.int64), np.asarray(pred, dtype=np.int64)), 1)
     return matrix
 
 
@@ -308,8 +320,9 @@ def per_class_f1(matrix: np.ndarray) -> np.ndarray:
     predicted = matrix.sum(axis=0).astype(np.float64)
     actual = matrix.sum(axis=1).astype(np.float64)
     denominator = predicted + actual
-    return np.divide(2.0 * true_positive, denominator,
-                     out=np.zeros_like(true_positive), where=denominator > 0)
+    return np.divide(
+        2.0 * true_positive, denominator, out=np.zeros_like(true_positive), where=denominator > 0
+    )
 
 
 def macro_f1(matrix: np.ndarray) -> float:
@@ -341,8 +354,7 @@ def pr_auc(scores: np.ndarray, labels: np.ndarray) -> float:
     return float((np.diff(recall, prepend=0.0) * precision).sum())
 
 
-def per_class_ece(probs: np.ndarray, labels: np.ndarray,
-                  n_bins: int = ECE_BINS) -> np.ndarray:
+def per_class_ece(probs: np.ndarray, labels: np.ndarray, n_bins: int = ECE_BINS) -> np.ndarray:
     """One-vs-rest expected calibration error per class.
 
     Per class, not just on the argmax: the decoder divides by class priors and
@@ -403,8 +415,9 @@ def weight_hash(state_dict) -> str:
     for key in sorted(state_dict):
         value = state_dict[key]
         digest.update(key.encode("utf-8"))
-        tensor = value.detach().cpu().contiguous() if torch.is_tensor(value) \
-            else torch.as_tensor(value)
+        tensor = (
+            value.detach().cpu().contiguous() if torch.is_tensor(value) else torch.as_tensor(value)
+        )
         digest.update(str(tensor.dtype).encode("utf-8"))
         digest.update(tensor.numpy().tobytes())
     return digest.hexdigest()
@@ -416,11 +429,19 @@ def config_fingerprint(config: dict) -> str:
     Resume compares this: rejoining a run under a different learning rate or a
     different track list produces a model no report describes.
     """
-    volatile = {"started_at", "crash_after_epoch", "resume", "launch_tensorboard",
-                "tensorboard_port", "run_dir", "tb_dir"}
+    volatile = {
+        "started_at",
+        "crash_after_epoch",
+        "resume",
+        "launch_tensorboard",
+        "tensorboard_port",
+        "run_dir",
+        "tb_dir",
+    }
     trimmed = {key: value for key, value in config.items() if key not in volatile}
     return hashlib.sha256(
-        json.dumps(trimmed, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        json.dumps(trimmed, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
 
 
 def port_is_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -445,10 +466,22 @@ def ensure_tensorboard(logdir: Path, port: int, log_path: Path) -> bool:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     handle = open(log_path, "ab")
     subprocess.Popen(
-        [sys.executable, "-m", "tensorboard.main", "--logdir", str(logdir),
-         "--port", str(port), "--host", "127.0.0.1"],
-        stdout=handle, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-        creationflags=flags, close_fds=True,
+        [
+            sys.executable,
+            "-m",
+            "tensorboard.main",
+            "--logdir",
+            str(logdir),
+            "--port",
+            str(port),
+            "--host",
+            "127.0.0.1",
+        ],
+        stdout=handle,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        creationflags=flags,
+        close_fds=True,
     )
     return True
 
@@ -458,9 +491,15 @@ def ensure_tensorboard(logdir: Path, port: int, log_path: Path) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def build_loader(dataset: WindowDataset, *, batch_size: int, shuffle: bool,
-                 num_workers: int, pin_memory: bool,
-                 generator: torch.Generator | None) -> DataLoader:
+def build_loader(
+    dataset: WindowDataset,
+    *,
+    batch_size: int,
+    shuffle: bool,
+    num_workers: int,
+    pin_memory: bool,
+    generator: torch.Generator | None,
+) -> DataLoader:
     """A DataLoader wired per the CUDA pre-flight, with one deliberate departure.
 
     The pre-flight recommends ``persistent_workers=True`` to avoid paying the
@@ -479,8 +518,13 @@ def build_loader(dataset: WindowDataset, *, batch_size: int, shuffle: bool,
     path proven, not because the training needs them.
     """
     return DataLoader(
-        dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
-        pin_memory=pin_memory, drop_last=False, generator=generator,
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        drop_last=False,
+        generator=generator,
         worker_init_fn=worker_init_fn if num_workers else None,
         persistent_workers=False,
         prefetch_factor=2 if num_workers else None,
@@ -506,9 +550,16 @@ def log_epoch(writer, epoch: int, record: dict, metrics: dict) -> None:
     writer.flush()
 
 
-def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, *,
-             weight: torch.Tensor, gamma: float, pos_weight: float,
-             tv_lambda: float) -> dict:
+def evaluate(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    *,
+    weight: torch.Tensor,
+    gamma: float,
+    pos_weight: float,
+    tv_lambda: float,
+) -> dict:
     """One pass over the val split -> the metric block logged each epoch."""
     model.eval()
     matrix = np.zeros((NUM_SECTION_CLASSES, NUM_SECTION_CLASSES), dtype=np.int64)
@@ -529,8 +580,7 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, *,
 
             label_logits, boundary_logits = model(mel)
             focal = focal_loss(label_logits, labels, weight=weight, gamma=gamma)
-            bce = boundary_bce(boundary_logits, boundary, boundary_mask,
-                               pos_weight=pos_weight)
+            bce = boundary_bce(boundary_logits, boundary, boundary_mask, pos_weight=pos_weight)
             smooth = tv_penalty(label_logits, label_mask, boundary, boundary_mask)
             losses["focal"] += float(focal)
             losses["boundary"] += float(bce)
@@ -548,9 +598,11 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, *,
 
             live = boundary_mask.reshape(-1).cpu().numpy()
             boundary_scores.append(
-                torch.sigmoid(boundary_logits).reshape(-1).float().cpu().numpy()[live])
+                torch.sigmoid(boundary_logits).reshape(-1).float().cpu().numpy()[live]
+            )
             boundary_labels.append(
-                (boundary.reshape(-1).cpu().numpy()[live] >= BOUNDARY_POSITIVE_THRESHOLD))
+                (boundary.reshape(-1).cpu().numpy()[live] >= BOUNDARY_POSITIVE_THRESHOLD)
+            )
 
     probs = np.concatenate(probs_chunks) if probs_chunks else np.zeros((0, NUM_SECTION_CLASSES))
     truth = np.concatenate(label_chunks) if label_chunks else np.zeros(0, dtype=np.int64)
@@ -558,12 +610,13 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, *,
     divisor = max(batches, 1)
     return {
         "macro_f1": macro_f1(matrix),
-        "per_class_f1": {name: float(value) for name, value
-                         in zip(SECTION_LABELS, per_class_f1(matrix))},
-        "boundary_pr_auc": pr_auc(np.concatenate(boundary_scores) if boundary_scores
-                                  else np.zeros(0),
-                                  np.concatenate(boundary_labels) if boundary_labels
-                                  else np.zeros(0, dtype=bool)),
+        "per_class_f1": {
+            name: float(value) for name, value in zip(SECTION_LABELS, per_class_f1(matrix))
+        },
+        "boundary_pr_auc": pr_auc(
+            np.concatenate(boundary_scores) if boundary_scores else np.zeros(0),
+            np.concatenate(boundary_labels) if boundary_labels else np.zeros(0, dtype=bool),
+        ),
         "ece": {name: float(value) for name, value in zip(SECTION_LABELS, ece)},
         "ece_mean": float(ece.mean()),
         "loss": {key: value / divisor for key, value in losses.items()},
@@ -586,28 +639,37 @@ def train(config: dict) -> dict:
     splits = make_splits(data_dir, write=False)
     track_ids = {ref.youtube_id: ref.track_id for ref in candidate_tracks(data_dir)[0]}
     sections = {str(track.get("id")): parse_sections(track) for track in load_tracks(data_dir)}
-    chosen = {name: select_smoke_subset(splits[name], track_ids, config["smoke_tracks"])
-              for name in ("train", "val")}
+    chosen = {
+        name: select_smoke_subset(splits[name], track_ids, config["smoke_tracks"])
+        for name in ("train", "val")
+    }
     config = dict(config)
-    config["tracks"] = {name: [[track_ids[i], i] for i in ids]
-                        for name, ids in chosen.items()}
+    config["tracks"] = {name: [[track_ids[i], i] for i in ids] for name, ids in chosen.items()}
     config["lr_note"] = lr_note(config["lr"], config["batch_size"])
 
-    train_set = WindowDataset(data_dir, chosen["train"], augment=True,
-                              seed=config["seed"], sections_by_youtube_id=sections)
-    val_set = WindowDataset(data_dir, chosen["val"], augment=False,
-                            seed=config["seed"], sections_by_youtube_id=sections)
+    train_set = WindowDataset(
+        data_dir,
+        chosen["train"],
+        augment=True,
+        seed=config["seed"],
+        sections_by_youtube_id=sections,
+    )
+    val_set = WindowDataset(
+        data_dir, chosen["val"], augment=False, seed=config["seed"], sections_by_youtube_id=sections
+    )
 
     stats = load_target_stats(data_dir, chosen["train"], sections)
     weights = class_weights(stats.class_counts)
     pos_weight = boundary_pos_weight(stats.boundary_positive, stats.boundary_valid)
     weight_tensor = torch.as_tensor(weights, dtype=torch.float32, device=device)
 
-    model = SectionCRNN(n_classes=NUM_SECTION_CLASSES, label_pool=LABEL_POOL,
-                        dropout=config["dropout"]).to(device)
+    model = SectionCRNN(
+        n_classes=NUM_SECTION_CLASSES, label_pool=LABEL_POOL, dropout=config["dropout"]
+    ).to(device)
     params = count_parameters(model)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"],
-                                  weight_decay=config["weight_decay"])
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=config["lr"], weight_decay=config["weight_decay"]
+    )
 
     # Schedule length is derived from the dataset, never hardcoded: the corpus
     # is still growing, and a cosine tail computed for a stale window count
@@ -668,31 +730,48 @@ def train(config: dict) -> dict:
     writer = None
     if config["tensorboard"]:
         from torch.utils.tensorboard import SummaryWriter
+
         writer = SummaryWriter(str(tb_dir))
     if config["launch_tensorboard"]:
         logdir = data_dir / MODELS_DIR
-        started = ensure_tensorboard(logdir, config["tensorboard_port"],
-                                     logdir / "tensorboard.log")
-        print(f"tensorboard {'started' if started else 'already running'}: "
-              f"http://localhost:{config['tensorboard_port']}", flush=True)
+        started = ensure_tensorboard(logdir, config["tensorboard_port"], logdir / "tensorboard.log")
+        print(
+            f"tensorboard {'started' if started else 'already running'}: "
+            f"http://localhost:{config['tensorboard_port']}",
+            flush=True,
+        )
 
-    print(f"{config['run_name']}: {params} params (budget {PARAM_BUDGET}) | "
-          f"{len(train_set)} train windows / {len(val_set)} val windows | "
-          f"{steps_per_epoch} steps/epoch x {config['epochs']} epochs | device {device}",
-          flush=True)
-    print(f"class counts {stats.class_counts.tolist()} -> weights "
-          f"{np.round(weights, 3).tolist()} | boundary pos_weight {pos_weight:.2f}",
-          flush=True)
+    print(
+        f"{config['run_name']}: {params} params (budget {PARAM_BUDGET}) | "
+        f"{len(train_set)} train windows / {len(val_set)} val windows | "
+        f"{steps_per_epoch} steps/epoch x {config['epochs']} epochs | device {device}",
+        flush=True,
+    )
+    print(
+        f"class counts {stats.class_counts.tolist()} -> weights "
+        f"{np.round(weights, 3).tolist()} | boundary pos_weight {pos_weight:.2f}",
+        flush=True,
+    )
     print(f"lr: {config['lr_note']}", flush=True)
 
     generator = torch.Generator()
     loader_workers = config["num_workers"]
-    val_loader = build_loader(val_set, batch_size=config["batch_size"], shuffle=False,
-                              num_workers=loader_workers,
-                              pin_memory=device.type == "cuda", generator=None)
-    train_loader = build_loader(train_set, batch_size=config["batch_size"], shuffle=True,
-                                num_workers=loader_workers,
-                                pin_memory=device.type == "cuda", generator=generator)
+    val_loader = build_loader(
+        val_set,
+        batch_size=config["batch_size"],
+        shuffle=False,
+        num_workers=loader_workers,
+        pin_memory=device.type == "cuda",
+        generator=None,
+    )
+    train_loader = build_loader(
+        train_set,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        num_workers=loader_workers,
+        pin_memory=device.type == "cuda",
+        generator=generator,
+    )
 
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
@@ -719,16 +798,20 @@ def train(config: dict) -> dict:
             boundary_mask = boundary_mask.to(device, non_blocking=True)
 
             label_logits, boundary_logits = model(mel)
-            focal = focal_loss(label_logits, labels, weight=weight_tensor,
-                               gamma=config["focal_gamma"])
-            bce = boundary_bce(boundary_logits, boundary, boundary_mask,
-                               pos_weight=pos_weight)
+            focal = focal_loss(
+                label_logits, labels, weight=weight_tensor, gamma=config["focal_gamma"]
+            )
+            bce = boundary_bce(boundary_logits, boundary, boundary_mask, pos_weight=pos_weight)
             smooth = tv_penalty(label_logits, label_mask, boundary, boundary_mask)
             loss = focal + bce + config["tv_lambda"] * smooth
 
             step = (epoch - 1) * steps_per_epoch + index + 1
-            values = {"total": float(loss.detach()), "focal": float(focal.detach()),
-                      "boundary": float(bce.detach()), "tv": float(smooth.detach())}
+            values = {
+                "total": float(loss.detach()),
+                "focal": float(focal.detach()),
+                "boundary": float(bce.detach()),
+                "tv": float(smooth.detach()),
+            }
             # Before the step, not after: a NaN that has already been applied
             # has destroyed the weights, and the checkpoint written at the end
             # of the epoch would preserve the wreckage.
@@ -745,8 +828,7 @@ def train(config: dict) -> dict:
 
             for key, value in values.items():
                 totals[key] += value
-            history["steps"].append({"step": step, "epoch": epoch,
-                                     "lr": learning_rate, **values})
+            history["steps"].append({"step": step, "epoch": epoch, "lr": learning_rate, **values})
             trained_steps += 1
             if writer is not None:
                 for key, value in values.items():
@@ -754,9 +836,15 @@ def train(config: dict) -> dict:
                 writer.add_scalar("train/lr", learning_rate, step)
 
         batches = max(1, index + 1)
-        metrics = evaluate(model, val_loader, device, weight=weight_tensor,
-                           gamma=config["focal_gamma"], pos_weight=pos_weight,
-                           tv_lambda=config["tv_lambda"])
+        metrics = evaluate(
+            model,
+            val_loader,
+            device,
+            weight=weight_tensor,
+            gamma=config["focal_gamma"],
+            pos_weight=pos_weight,
+            tv_lambda=config["tv_lambda"],
+        )
         record = {
             "epoch": epoch,
             "train": {key: value / batches for key, value in totals.items()},
@@ -769,33 +857,48 @@ def train(config: dict) -> dict:
 
         log_epoch(writer, epoch, record, metrics)
 
-        print(f"epoch {epoch:3d} | train {record['train']['total']:.4f} "
-              f"(focal {record['train']['focal']:.4f} bce {record['train']['boundary']:.4f} "
-              f"tv {record['train']['tv']:.4f}) | val {metrics['loss']['total']:.4f} "
-              f"macroF1 {metrics['macro_f1']:.4f} PR-AUC {metrics['boundary_pr_auc']:.4f} "
-              f"ECE {metrics['ece_mean']:.4f} | {record['seconds']:.1f}s", flush=True)
+        print(
+            f"epoch {epoch:3d} | train {record['train']['total']:.4f} "
+            f"(focal {record['train']['focal']:.4f} bce {record['train']['boundary']:.4f} "
+            f"tv {record['train']['tv']:.4f}) | val {metrics['loss']['total']:.4f} "
+            f"macroF1 {metrics['macro_f1']:.4f} PR-AUC {metrics['boundary_pr_auc']:.4f} "
+            f"ECE {metrics['ece_mean']:.4f} | {record['seconds']:.1f}s",
+            flush=True,
+        )
 
         improved = metrics["macro_f1"] > best["macro_f1"]
         if improved:
-            best = {"macro_f1": float(metrics["macro_f1"]), "epoch": epoch,
-                    "metrics": {key: value for key, value in metrics.items()
-                                if key != "confusion"}}
-            torch.save({"model": model.state_dict(), "arch": model.arch(),
-                        "config": config, "epoch": epoch, "metrics": best},
-                       run_dir / BEST_CHECKPOINT)
+            best = {
+                "macro_f1": float(metrics["macro_f1"]),
+                "epoch": epoch,
+                "metrics": {key: value for key, value in metrics.items() if key != "confusion"},
+            }
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "arch": model.arch(),
+                    "config": config,
+                    "epoch": epoch,
+                    "metrics": best,
+                },
+                run_dir / BEST_CHECKPOINT,
+            )
 
-        torch.save({
-            "epoch": epoch,
-            "model": model.state_dict(),
-            "arch": model.arch(),
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "history": history,
-            "best": best,
-            "rng": capture_rng(),
-            "config": config,
-            "config_fingerprint": fingerprint,
-        }, checkpoint_path)
+        torch.save(
+            {
+                "epoch": epoch,
+                "model": model.state_dict(),
+                "arch": model.arch(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "history": history,
+                "best": best,
+                "rng": capture_rng(),
+                "config": config,
+                "config_fingerprint": fingerprint,
+            },
+            checkpoint_path,
+        )
 
         if config["crash_after_epoch"] and epoch >= config["crash_after_epoch"]:
             # Resume drill: die the way a killed process dies -- checkpoint on
@@ -806,8 +909,10 @@ def train(config: dict) -> dict:
             os._exit(17)
 
         if epoch - best["epoch"] >= config["patience"]:
-            print(f"early stop: no val macro-F1 improvement in {config['patience']} epochs",
-                  flush=True)
+            print(
+                f"early stop: no val macro-F1 improvement in {config['patience']} epochs",
+                flush=True,
+            )
             stopped_early = True
             break
 
@@ -828,10 +933,12 @@ def train(config: dict) -> dict:
         "weight_hash": weight_hash(model.state_dict()),
         "wall_seconds": wall,
         "steps_per_second": trained_steps / wall if wall > 0 else 0.0,
-        "gpu_peak_alloc_mb": (torch.cuda.max_memory_allocated(device) / 2 ** 20
-                              if device.type == "cuda" else None),
-        "gpu_peak_reserved_mb": (torch.cuda.max_memory_reserved(device) / 2 ** 20
-                                 if device.type == "cuda" else None),
+        "gpu_peak_alloc_mb": (
+            torch.cuda.max_memory_allocated(device) / 2**20 if device.type == "cuda" else None
+        ),
+        "gpu_peak_reserved_mb": (
+            torch.cuda.max_memory_reserved(device) / 2**20 if device.type == "cuda" else None
+        ),
     }
     with open(run_dir / REPORT_FILE, "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, sort_keys=True, default=str)
@@ -840,9 +947,12 @@ def train(config: dict) -> dict:
     if writer is not None:
         writer.close()
 
-    print(f"done: best val macro-F1 {best['macro_f1']:.4f} @ epoch {best['epoch']} | "
-          f"weights {report['weight_hash'][:16]} | {wall:.1f}s "
-          f"({report['steps_per_second']:.1f} steps/s)", flush=True)
+    print(
+        f"done: best val macro-F1 {best['macro_f1']:.4f} @ epoch {best['epoch']} | "
+        f"weights {report['weight_hash'][:16]} | {wall:.1f}s "
+        f"({report['steps_per_second']:.1f} steps/s)",
+        flush=True,
+    )
     return report
 
 
@@ -877,17 +987,24 @@ def restore_rng(state: dict) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=default_data_dir(),
-                        help="corpus root; checkpoints land in "
-                             f"<data-dir>/{MODELS_DIR}/{MODEL_VERSION}/<run-name> "
-                             "(default: %(default)s)")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=default_data_dir(),
+        help="corpus root; checkpoints land in "
+        f"<data-dir>/{MODELS_DIR}/{MODEL_VERSION}/<run-name> "
+        "(default: %(default)s)",
+    )
     parser.add_argument("--run-name", default="v1", help="run directory name")
-    parser.add_argument("--model-version", default=MODEL_VERSION,
-                        help="artifact generation; runs land in "
-                             f"<data-dir>/{MODELS_DIR}/<model-version>/<run-name>. "
-                             "A retrain on a grown corpus takes a new generation so "
-                             "the checkpoints backing an already-published verdict "
-                             "are never overwritten (default: %(default)s)")
+    parser.add_argument(
+        "--model-version",
+        default=MODEL_VERSION,
+        help="artifact generation; runs land in "
+        f"<data-dir>/{MODELS_DIR}/<model-version>/<run-name>. "
+        "A retrain on a grown corpus takes a new generation so "
+        "the checkpoints backing an already-published verdict "
+        "are never overwritten (default: %(default)s)",
+    )
     parser.add_argument("--epochs", type=int, default=60)
     # 128, not the plan's 32: the pre-flight measured throughput saturating well
     # before it and ~3.1 GB reserved, which fits the 3070 with a desktop open.
@@ -898,26 +1015,50 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tv-lambda", type=float, default=0.1)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--grad-clip", type=float, default=5.0)
-    parser.add_argument("--patience", type=int, default=10,
-                        help="early stop after N epochs without a val macro-F1 gain")
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=10,
+        help="early stop after N epochs without a val macro-F1 gain",
+    )
     parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--num-workers", type=int, default=0,
-                        help="DataLoader workers; 0 (default) is fastest for this "
-                             "corpus and the only mode that re-rolls augmentation "
-                             "every epoch -- see build_loader")
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers; 0 (default) is fastest for this "
+        "corpus and the only mode that re-rolls augmentation "
+        "every epoch -- see build_loader",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--smoke-tracks", type=int, default=0,
-                        help="limit train and val to the first N tracks of each "
-                             "split by corpus track id (0 = the whole split)")
-    parser.add_argument("--resume", action="store_true",
-                        help=f"continue from <run-dir>/{LAST_CHECKPOINT}")
-    parser.add_argument("--crash-after-epoch", type=int, default=0,
-                        help="resume drill: exit hard right after epoch N's "
-                             "checkpoint is written (0 = never)")
-    parser.add_argument("--no-tensorboard", dest="tensorboard", action="store_false",
-                        help="skip the event writer entirely")
-    parser.add_argument("--no-tensorboard-server", dest="launch_tensorboard",
-                        action="store_false", help="do not start a TensorBoard process")
+    parser.add_argument(
+        "--smoke-tracks",
+        type=int,
+        default=0,
+        help="limit train and val to the first N tracks of each "
+        "split by corpus track id (0 = the whole split)",
+    )
+    parser.add_argument(
+        "--resume", action="store_true", help=f"continue from <run-dir>/{LAST_CHECKPOINT}"
+    )
+    parser.add_argument(
+        "--crash-after-epoch",
+        type=int,
+        default=0,
+        help="resume drill: exit hard right after epoch N's checkpoint is written (0 = never)",
+    )
+    parser.add_argument(
+        "--no-tensorboard",
+        dest="tensorboard",
+        action="store_false",
+        help="skip the event writer entirely",
+    )
+    parser.add_argument(
+        "--no-tensorboard-server",
+        dest="launch_tensorboard",
+        action="store_false",
+        help="do not start a TensorBoard process",
+    )
     parser.add_argument("--tensorboard-port", type=int, default=TENSORBOARD_PORT)
     return parser
 
@@ -930,5 +1071,5 @@ def main(argv: list | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":   # spawn re-imports this module; the guard is required
+if __name__ == "__main__":  # spawn re-imports this module; the guard is required
     raise SystemExit(main())

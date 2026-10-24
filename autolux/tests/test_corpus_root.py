@@ -1,4 +1,5 @@
 """Where the corpus is, when the answer is not the obvious one."""
+
 import json
 
 import pytest

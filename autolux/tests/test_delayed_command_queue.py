@@ -31,9 +31,14 @@ async def test_fires_in_chronological_order():
     q = DelayedCommandQueue(0.0)
     order = []
 
-    async def a(): order.append('a')
-    async def b(): order.append('b')
-    async def c(): order.append('c')
+    async def a():
+        order.append('a')
+
+    async def b():
+        order.append('b')
+
+    async def c():
+        order.append('c')
 
     await q.enqueue('a', a)
     await q.enqueue('b', b)
@@ -188,11 +193,9 @@ async def test_the_timing_log_records_the_delay_each_command_asked_for():
     await q.drain()
 
     log = q.get_timing_log()
-    assert {e['label']: e['target_delta_sec'] for e in log} == {'beat': 14.0,
-                                                                'intent': 0.34}
+    assert {e['label']: e['target_delta_sec'] for e in log} == {'beat': 14.0, 'intent': 0.34}
     for entry in log:
-        assert entry['actual_delta_sec'] == pytest.approx(
-            entry['target_delta_sec'], abs=1e-9)
+        assert entry['actual_delta_sec'] == pytest.approx(entry['target_delta_sec'], abs=1e-9)
 
 
 async def test_a_shrinking_delay_cannot_reorder_a_stream():
@@ -261,6 +264,7 @@ async def test_dropping_pending_commands_releases_the_clamp_they_were_holding():
 def _record(sink, name):
     async def command():
         sink.append(name)
+
     return command
 
 

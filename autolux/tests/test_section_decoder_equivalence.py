@@ -6,6 +6,7 @@ same bar lines out of the same beats, so this feeds the recorded streams through
 ``SectionDecoder`` and demands equality against ``phase_tracking``'s own edge
 builder at the anchor the committed gate artifact records.
 """
+
 import json
 import logging
 import sys
@@ -20,7 +21,11 @@ for extra in (REPO_ROOT / "training", REPO_ROOT / "training" / "phase_tracking")
         sys.path.insert(0, str(extra))
 
 from autolux.lib.engine.section_decoder import (  # noqa: E402
-    BEATS_PER_BAR, DecodeParams, SectionDecoder, _BEAT_GAP_SEC)
+    BEATS_PER_BAR,
+    DecodeParams,
+    SectionDecoder,
+    _BEAT_GAP_SEC,
+)
 
 GATE_ARTIFACT = Path("models/phase_b/phase_tracking/phase_tracking_gate.json")
 CANDIDATE = "D_anchor"
@@ -47,8 +52,10 @@ def gate() -> tuple:
     artifact = data_dir / GATE_ARTIFACT
     beats_dir = data_dir / "madmom_beats"
     if not artifact.exists() or not beats_dir.is_dir():
-        pytest.skip(f"the phase-tracking gate's artifacts are absent: "
-                    f"{artifact} and {beats_dir} live in the gitignored corpus")
+        pytest.skip(
+            f"the phase-tracking gate's artifacts are absent: "
+            f"{artifact} and {beats_dir} live in the gitignored corpus"
+        )
     return json.loads(artifact.read_text(encoding="utf-8")), beats_dir
 
 
@@ -93,22 +100,24 @@ def test_the_runtime_draws_the_gates_candidate_d_lines_beat_for_beat():
 
             gaps = np.flatnonzero(np.diff(live) > _BEAT_GAP_SEC)
             if gaps.size == 0:
-                assert drawn == list(expected), \
-                    f"{youtube_id}: the runtime drew a different grid"
+                assert drawn == list(expected), f"{youtube_id}: the runtime drew a different grid"
                 exact.append(youtube_id)
                 continue
             until = float(live[gaps[0]])
             shared = [line for line in expected if line <= until]
-            assert drawn[:len(shared)] == shared, \
+            assert drawn[: len(shared)] == shared, (
                 f"{youtube_id}: the two grids differ before the first beat gap"
+            )
             gapped.append(youtube_id)
     finally:
         logging.disable(logging.NOTSET)
 
-    assert len(exact) >= MIN_TRACKS, \
+    assert len(exact) >= MIN_TRACKS, (
         f"only {len(exact)} tracks are free of the re-anchor the gate never modelled"
-    assert total_gate_lines == report["grid_geometry"][CANDIDATE]["bar_lines"], \
+    )
+    assert total_gate_lines == report["grid_geometry"][CANDIDATE]["bar_lines"], (
         "the reconstructed candidate-D grid is not the one the gate scored"
+    )
     assert len(exact) + len(gapped) == len(ids)
 
 
@@ -137,8 +146,7 @@ def test_a_beat_gap_leaves_no_bar_position_worth_anchoring_on():
         if phase is None:
             continue
         js, isx = pt.match(live, times)
-        truth, known = pt.truth_phase_track(
-            len(live), js, pt.required_phase(js, isx, phase))
+        truth, known = pt.truth_phase_track(len(live), js, pt.required_phase(js, isx, phase))
         for gap in gaps:
             after = int(gap) + 1
             if known[after]:
@@ -147,7 +155,8 @@ def test_a_beat_gap_leaves_no_bar_position_worth_anchoring_on():
     assert sum(seen) >= BEATS_PER_BAR * 4, f"too few gaps to read: {seen}"
     assert max(seen) * 2 < sum(seen), (
         f"the beat that ends a gap prefers a bar position ({seen}) -- the "
-        f"re-anchor is not the coin toss it is written as")
+        f"re-anchor is not the coin toss it is written as"
+    )
 
 
 @pytest.mark.integration

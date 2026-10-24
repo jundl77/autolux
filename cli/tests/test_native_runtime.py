@@ -14,7 +14,8 @@ from cli.production import check_conflicts
 @pytest.fixture
 def children(tmp_path, monkeypatch):
     helper = tmp_path / 'child.py'
-    helper.write_text('''import json, os, sys, time
+    helper.write_text(
+        '''import json, os, sys, time
 from pathlib import Path
 config = json.loads(Path(sys.argv[1]).read_text())
 directory = Path(os.environ['AUTOLUX_RUNTIME_DIR'])
@@ -25,13 +26,17 @@ if not config.get('hang'):
 while not (directory / 'stop').exists():
     time.sleep(0.01)
 (directory / 'stopped').touch()
-''', encoding='utf-8')
+''',
+        encoding='utf-8',
+    )
     original = subprocess.Popen
     launched = []
+
     def spawn(command, **kwargs):
         process = original([sys.executable, str(helper), command[1]], **kwargs)
         launched.append(process)
         return process
+
     monkeypatch.setattr(subprocess, 'Popen', spawn)
     yield launched
     for process in launched:
@@ -87,6 +92,7 @@ def test_conflicting_process_is_refused_without_killing_it():
 @pytest.mark.skipif(os.name != 'nt', reason='Windows process ownership')
 def test_role_lock_spans_instances_and_releases():
     from cli.windows_runtime import RoleLock
+
     first = RoleLock('test-' + str(os.getpid()))
     try:
         with pytest.raises(RuntimeError, match='already running'):
@@ -100,8 +106,14 @@ def test_role_lock_spans_instances_and_releases():
 @pytest.mark.skipif(os.name != 'nt', reason='Windows process ownership')
 def test_job_close_kills_owned_children_without_touching_others():
     from cli.windows_runtime import Job
-    children = [subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
-                                creationflags=subprocess.CREATE_NO_WINDOW) for _ in range(2)]
+
+    children = [
+        subprocess.Popen(
+            [sys.executable, '-c', 'import time; time.sleep(60)'],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for _ in range(2)
+    ]
     job = Job()
     try:
         job.add(children[0].pid)

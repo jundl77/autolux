@@ -22,6 +22,7 @@ banked artifacts carrying its digits.
 These cases use synthetic block lists rather than the real reports so the
 arithmetic is inspectable.
 """
+
 import sys
 from pathlib import Path
 
@@ -44,8 +45,12 @@ def block(song_t, intent):
 
 
 def test_a_drop_held_from_before_the_window_is_in_force():
-    items = [block(254.740, "breakdown"), block(267.604, "buildup"),
-             block(292.844, "drop"), block(391.895, "breakdown")]
+    items = [
+        block(254.740, "breakdown"),
+        block(267.604, "buildup"),
+        block(292.844, "drop"),
+        block(391.895, "breakdown"),
+    ]
 
     drop = ng_arc_read.arc_read(items, OPUS_DROP)["drops"][0]
 
@@ -65,8 +70,7 @@ def test_a_drop_lit_for_a_fraction_of_the_span_is_not_kept():
     # The NMK shape: DROP committed on the label and abandoned a second later,
     # leaving 43 s of a labelled drop dark.  Both booleans the instrument has
     # ever printed call this a landed, strict drop -- only the seconds do not.
-    items = [block(341.0, "breakdown"), block(343.0, "drop"),
-             block(344.0, "breakdown")]
+    items = [block(341.0, "breakdown"), block(343.0, "drop"), block(344.0, "breakdown")]
 
     drop = ng_arc_read.arc_read(items, OPUS_DROP)["drops"][0]
 
@@ -82,8 +86,12 @@ def test_a_brief_gap_inside_the_span_still_counts_as_kept():
     # The rule is stated, not measured: a labelled drop is KEPT when at least
     # KEPT_FRACTION of its seconds are in force.  A 2 s hole in 44 s clears it.
     assert ng_arc_read.KEPT_FRACTION == 0.75
-    items = [block(300.0, "drop"), block(360.0, "breakdown"),
-             block(362.0, "drop"), block(400.0, "breakdown")]
+    items = [
+        block(300.0, "drop"),
+        block(360.0, "breakdown"),
+        block(362.0, "drop"),
+        block(400.0, "breakdown"),
+    ]
 
     drop = ng_arc_read.arc_read(items, OPUS_DROP)["drops"][0]
 
@@ -95,8 +103,12 @@ def test_a_brief_gap_inside_the_span_still_counts_as_kept():
 def test_a_gap_past_the_threshold_is_not_kept():
     # The same shape with a 12 s hole falls under KEPT_FRACTION and is refused,
     # so the threshold is pinned from both sides rather than left implicit.
-    items = [block(300.0, "drop"), block(350.0, "breakdown"),
-             block(362.0, "drop"), block(400.0, "breakdown")]
+    items = [
+        block(300.0, "drop"),
+        block(350.0, "breakdown"),
+        block(362.0, "drop"),
+        block(400.0, "breakdown"),
+    ]
 
     drop = ng_arc_read.arc_read(items, OPUS_DROP)["drops"][0]
 
@@ -106,8 +118,7 @@ def test_a_gap_past_the_threshold_is_not_kept():
 
 
 def test_a_drop_entered_inside_the_window_still_lands():
-    items = [block(300.0, "breakdown"), block(342.8, "drop"),
-             block(400.0, "breakdown")]
+    items = [block(300.0, "breakdown"), block(342.8, "drop"), block(400.0, "breakdown")]
 
     drop = ng_arc_read.arc_read(items, OPUS_DROP)["drops"][0]
 
@@ -158,8 +169,7 @@ def test_the_last_block_in_a_report_stays_in_force_to_the_end():
 
 
 def test_a_buildup_held_from_before_the_arc_window_holds_into_the_drop():
-    items = [block(250.0, "buildup"), block(345.0, "drop"),
-             block(420.0, "breakdown")]
+    items = [block(250.0, "buildup"), block(345.0, "drop"), block(420.0, "breakdown")]
 
     read = ng_arc_read.arc_read(items, ARC_SPANS)
     arc = read["arcs"][0]
@@ -184,8 +194,12 @@ def test_the_strict_clause_reads_the_block_nearest_the_onset():
     # the rig demonstrably landed it.  in_force_strict asks whether ANY drop
     # block covering the window sits inside +-1.5 s, so it can only ever turn a
     # banked False into True -- never the reverse.
-    items = [block(336.0, "drop"), block(341.0, "breakdown"),
-             block(342.5, "drop"), block(400.0, "breakdown")]
+    items = [
+        block(336.0, "drop"),
+        block(341.0, "breakdown"),
+        block(342.5, "drop"),
+        block(400.0, "breakdown"),
+    ]
 
     drop = ng_arc_read.arc_read(items, OPUS_DROP)["drops"][0]
 

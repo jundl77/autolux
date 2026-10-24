@@ -1,4 +1,3 @@
-
 def logon_message() -> str:
     return """
 {"evt":"subscribed","trigger":"deck 1 get_text '%SOUNDSWITCH_ID'","value":""}
@@ -33,12 +32,16 @@ def logon_message() -> str:
 """.strip().replace('\n', '')
 
 
-def song_loaded_message(time_elapsed_ms: int, beat_pos: float, first_beat_time_ms: float, bpm: float) -> str:
-    return """
+def song_loaded_message(
+    time_elapsed_ms: int, beat_pos: float, first_beat_time_ms: float, bpm: float
+) -> str:
+    return (
+        """
 {"evt":"subscribed","trigger":"deck 1 get_text '%SOUNDSWITCH_ID'","value":"{D6516ACF-28B0-4FF2-B553-2D458EE30FF4}"}
 {"evt":"subscribed","trigger":"deck 3 get_text '%SOUNDSWITCH_ID'","value":"{D6516ACF-28B0-4FF2-B553-2D458EE30FF4}"}
 {"evt":"subscribed","trigger":"deck 4 get_text '%SOUNDSWITCH_ID'","value":"{D6516ACF-28B0-4FF2-B553-2D458EE30FF4}"}
-""".strip().replace('\n', '') + """
+""".strip().replace('\n', '')
+        + """
 {"evt":"subscribed","trigger":"deck 1 get_firstbeat","value":%f}
 {"evt":"subscribed","trigger":"deck 3 get_firstbeat","value":%f}
 {"evt":"subscribed","trigger":"deck 4 get_firstbeat","value":%f}
@@ -54,8 +57,22 @@ def song_loaded_message(time_elapsed_ms: int, beat_pos: float, first_beat_time_m
 {"evt":"subscribed","trigger":"deck 1 get_beatpos","value":%f}
 {"evt":"subscribed","trigger":"deck 3 get_beatpos","value":%f}
 {"evt":"subscribed","trigger":"deck 4 get_beatpos","value":%f}
-""".strip().replace('\n', '') % (first_beat_time_ms, first_beat_time_ms, first_beat_time_ms, bpm, bpm, bpm,
-                                 time_elapsed_ms, time_elapsed_ms, time_elapsed_ms, beat_pos, beat_pos, beat_pos)
+""".strip().replace('\n', '')
+        % (
+            first_beat_time_ms,
+            first_beat_time_ms,
+            first_beat_time_ms,
+            bpm,
+            bpm,
+            bpm,
+            time_elapsed_ms,
+            time_elapsed_ms,
+            time_elapsed_ms,
+            beat_pos,
+            beat_pos,
+            beat_pos,
+        )
+    )
 
 
 def play_start_message():
@@ -89,16 +106,24 @@ def shutdown_message():
 
 
 def update_message(beat_pos: float, time_elapsed: int):
-    return """
+    return (
+        """
 {"evt":"subscribed","trigger":"deck 1 get_time elapsed absolute","value":%d}
 {"evt":"subscribed","trigger":"deck 3 get_time elapsed absolute","value":%d}
 {"evt":"subscribed","trigger":"deck 4 get_time elapsed absolute","value":%d}
 {"evt":"subscribed","trigger":"deck 1 get_beatpos","value":%f}
 {"evt":"subscribed","trigger":"deck 3 get_beatpos","value":%f}
 {"evt":"subscribed","trigger":"deck 4 get_beatpos","value":%f}
-""".strip().replace('\n', '') % (time_elapsed, time_elapsed, time_elapsed, beat_pos, beat_pos, beat_pos)
+""".strip().replace('\n', '')
+        % (time_elapsed, time_elapsed, time_elapsed, beat_pos, beat_pos, beat_pos)
+    )
 
 
 def beat_message(change: bool, pos: int, bpm: float, strength: float):
     change_str = 'true' if change else 'false'
-    return """{"evt":"beat","change":%s,"pos":%d,"bpm":%d,"strength":%.1f}""" % (change_str, pos, bpm, strength)
+    return """{"evt":"beat","change":%s,"pos":%d,"bpm":%d,"strength":%.1f}""" % (
+        change_str,
+        pos,
+        bpm,
+        strength,
+    )

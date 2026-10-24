@@ -7,7 +7,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-torch = pytest.importorskip("torch", reason="torch is a base dependency -- the venv is not synced (uv sync --extra dev --extra visualizer)")
+torch = pytest.importorskip(
+    "torch",
+    reason="torch is a base dependency -- the venv is not synced (uv sync --extra dev --extra visualizer)",
+)
 import torch.nn.functional as F  # noqa: E402
 
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
@@ -88,9 +91,14 @@ def test_frequency_is_pooled_away_and_time_is_preserved():
 def test_arch_names_every_shape_deciding_argument():
     arch = _model().arch()
 
-    assert arch == {"n_mels": 40, "n_classes": NUM_SECTION_CLASSES, "label_pool": 2,
-                    "rnn_hidden": 128, "conv_channels": [32, 64, 64],
-                    "conv1d_channels": 128}
+    assert arch == {
+        "n_mels": 40,
+        "n_classes": NUM_SECTION_CLASSES,
+        "label_pool": 2,
+        "rnn_hidden": 128,
+        "conv_channels": [32, 64, 64],
+        "conv1d_channels": 128,
+    }
     assert json.loads(json.dumps(arch)) == arch
 
 
@@ -113,13 +121,16 @@ def test_the_folded_label_space_is_gone_from_the_trainer(name):
     assert not hasattr(nn_train, name)
 
 
-@pytest.mark.parametrize("changed", [
-    {"n_classes": 6},
-    {"rnn_hidden": 64},
-    {"conv1d_channels": 96},
-    {"conv_channels": (32, 64, 32)},
-    {"label_pool": 4},
-])
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"n_classes": 6},
+        {"rnn_hidden": 64},
+        {"conv1d_channels": 96},
+        {"conv_channels": (32, 64, 32)},
+        {"label_pool": 4},
+    ],
+)
 def test_arch_distinguishes_a_checkpoint_that_must_not_be_loaded(changed):
     assert SectionCRNN(**changed).arch() != SectionCRNN().arch()
 
@@ -159,8 +170,11 @@ def test_both_heads_reach_every_parameter():
     labels, boundary = model(torch.randn(2, WINDOW_FRAMES, MEL_BANDS))
     (labels.square().mean() + boundary.square().mean()).backward()
 
-    missing = [name for name, param in model.named_parameters()
-               if param.grad is None or not torch.isfinite(param.grad).all()]
+    missing = [
+        name
+        for name, param in model.named_parameters()
+        if param.grad is None or not torch.isfinite(param.grad).all()
+    ]
     assert missing == []
 
 
@@ -175,8 +189,9 @@ def test_focal_loss_at_gamma_zero_is_cross_entropy():
     targets[0, :3] = IGNORE_INDEX
 
     got = focal_loss(logits, targets, weight=_weights(), gamma=0.0)
-    want = F.cross_entropy(logits.reshape(-1, NUM_SECTION_CLASSES), targets.reshape(-1),
-                           ignore_index=IGNORE_INDEX)
+    want = F.cross_entropy(
+        logits.reshape(-1, NUM_SECTION_CLASSES), targets.reshape(-1), ignore_index=IGNORE_INDEX
+    )
 
     assert torch.allclose(got, want, atol=1e-6)
 
@@ -211,10 +226,12 @@ def test_focal_loss_discounts_easy_examples():
     easy[0, 0, 0], hard[0, 0, 0] = 8.0, 0.2
     target = torch.zeros(1, 1, dtype=torch.long)
 
-    easy_ratio = (focal_loss(easy, target, weight=_weights(), gamma=2.0)
-                  / focal_loss(easy, target, weight=_weights(), gamma=0.0))
-    hard_ratio = (focal_loss(hard, target, weight=_weights(), gamma=2.0)
-                  / focal_loss(hard, target, weight=_weights(), gamma=0.0))
+    easy_ratio = focal_loss(easy, target, weight=_weights(), gamma=2.0) / focal_loss(
+        easy, target, weight=_weights(), gamma=0.0
+    )
+    hard_ratio = focal_loss(hard, target, weight=_weights(), gamma=2.0) / focal_loss(
+        hard, target, weight=_weights(), gamma=0.0
+    )
 
     assert float(easy_ratio) < 1e-3
     assert float(hard_ratio) > 0.5
@@ -226,8 +243,10 @@ def test_focal_loss_scales_with_the_class_weight():
     weight = _weights()
     weight[0] = 3.0
 
-    assert torch.allclose(focal_loss(logits, target, weight=weight, gamma=2.0),
-                          3.0 * focal_loss(logits, target, weight=_weights(), gamma=2.0))
+    assert torch.allclose(
+        focal_loss(logits, target, weight=weight, gamma=2.0),
+        3.0 * focal_loss(logits, target, weight=_weights(), gamma=2.0),
+    )
 
 
 def test_class_weights_are_inverse_frequency_normalised():
@@ -275,8 +294,9 @@ def test_boundary_bce_ignores_deleted_positions():
 
 def test_boundary_bce_of_a_fully_masked_batch_is_zero():
     logits = torch.randn(2, 8, requires_grad=True)
-    loss = boundary_bce(logits, torch.rand(2, 8), torch.zeros(2, 8, dtype=torch.bool),
-                        pos_weight=4.0)
+    loss = boundary_bce(
+        logits, torch.rand(2, 8), torch.zeros(2, 8, dtype=torch.bool), pos_weight=4.0
+    )
     loss.backward()
 
     assert float(loss.detach()) == 0.0
@@ -332,8 +352,9 @@ def test_tv_penalty_skips_unsupervised_frames():
     label_mask, boundary, boundary_mask = _tv_inputs(logits)
     label_mask[:] = False
 
-    assert float(tv_penalty(logits, label_mask, boundary, boundary_mask,
-                            pool=LABEL_POOL)) == pytest.approx(0.0)
+    assert float(
+        tv_penalty(logits, label_mask, boundary, boundary_mask, pool=LABEL_POOL)
+    ) == pytest.approx(0.0)
 
 
 def test_tv_penalty_skips_frames_whose_boundary_target_was_deleted():
@@ -343,8 +364,9 @@ def test_tv_penalty_skips_frames_whose_boundary_target_was_deleted():
     label_mask, boundary, boundary_mask = _tv_inputs(logits)
     boundary_mask[:] = False
 
-    assert float(tv_penalty(logits, label_mask, boundary, boundary_mask,
-                            pool=LABEL_POOL)) == pytest.approx(0.0)
+    assert float(
+        tv_penalty(logits, label_mask, boundary, boundary_mask, pool=LABEL_POOL)
+    ) == pytest.approx(0.0)
 
 
 def test_confusion_matrix_is_true_by_predicted():
@@ -398,7 +420,7 @@ def test_pr_auc_without_a_positive_is_not_a_number():
 
 
 def test_ece_is_zero_when_confidence_matches_accuracy():
-    rows = 10 * NUM_SECTION_CLASSES          # each class occurs exactly 1/C of the time
+    rows = 10 * NUM_SECTION_CLASSES  # each class occurs exactly 1/C of the time
     probs = np.full((rows, NUM_SECTION_CLASSES), 1.0 / NUM_SECTION_CLASSES)
     labels = np.arange(rows) % NUM_SECTION_CLASSES
 
@@ -434,8 +456,9 @@ def _all_mel(loader) -> torch.Tensor:
 
 
 def test_loader_never_keeps_workers_alive_between_epochs():
-    loader = build_loader(_TinyDataset(), batch_size=2, shuffle=False,
-                          num_workers=2, pin_memory=False, generator=None)
+    loader = build_loader(
+        _TinyDataset(), batch_size=2, shuffle=False, num_workers=2, pin_memory=False, generator=None
+    )
 
     assert loader.persistent_workers is False
 
@@ -451,8 +474,9 @@ class _TinyDataset(torch.utils.data.Dataset):
 def test_worker_loader_keeps_re_rolling_augmentation_across_epochs(tmp_path):
     data_dir, ids = _loader_corpus(tmp_path)
     data = WindowDataset(data_dir, ids, augment=True)
-    loader = build_loader(data, batch_size=8, shuffle=False, num_workers=2,
-                          pin_memory=False, generator=None)
+    loader = build_loader(
+        data, batch_size=8, shuffle=False, num_workers=2, pin_memory=False, generator=None
+    )
 
     data.set_epoch(0)
     epoch_0 = _all_mel(loader)
@@ -485,8 +509,9 @@ def test_target_stats_counts_only_supervised_positions():
     mask = np.array([True, True, True, False])
     boundary = np.array([0.0, 1.0, 0.5, 9.0], dtype=np.float32)
     boundary_mask = np.array([True, True, True, False])
-    targets = TrackTargets(np.zeros(8, np.int16), np.zeros(8, bool),
-                           boundary, boundary_mask, labels, mask)
+    targets = TrackTargets(
+        np.zeros(8, np.int16), np.zeros(8, bool), boundary, boundary_mask, labels, mask
+    )
 
     stats = accumulate_target_stats([targets, targets])
 
@@ -526,8 +551,9 @@ def test_lr_note_records_the_batch_size_the_lr_was_specced_at():
 
 
 def test_weight_hash_is_stable_and_sensitive():
-    first = SectionCRNN(n_mels=8, conv_channels=(4, 4, 4), rnn_hidden=8,
-                        conv1d_channels=8).state_dict()
+    first = SectionCRNN(
+        n_mels=8, conv_channels=(4, 4, 4), rnn_hidden=8, conv1d_channels=8
+    ).state_dict()
     same = {key: value.clone() for key, value in first.items()}
     changed = {key: value.clone() for key, value in first.items()}
     changed["label_head.bias"] = changed["label_head.bias"] + 1e-7

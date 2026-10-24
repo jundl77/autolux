@@ -1,4 +1,5 @@
 """The decoder's bar grid under a phase source, and the counting degradation."""
+
 import numpy as np
 
 from autolux.lib.engine.section_decoder import DecodeParams, SectionDecoder
@@ -45,9 +46,7 @@ class RecordingDecoder(SectionDecoder):
 
 
 def _decoder(phase):
-    return RecordingDecoder(toy_priors(), DecodeParams(lag_bars=2,
-                                                       min_coverage=1),
-                            phase=phase)
+    return RecordingDecoder(toy_priors(), DecodeParams(lag_bars=2, min_coverage=1), phase=phase)
 
 
 def test_edges_land_where_the_committed_count_wraps_to_zero():
@@ -113,8 +112,7 @@ def test_evidence_reaches_the_phase():
 
 
 def test_without_a_phase_evidence_is_dropped_and_counting_stands():
-    decoder = RecordingDecoder(toy_priors(),
-                               DecodeParams(lag_bars=2, min_coverage=1))
+    decoder = RecordingDecoder(toy_priors(), DecodeParams(lag_bars=2, min_coverage=1))
     decoder.push_evidence("chunk")
     for beat in 0.5 * np.arange(1, 9):
         decoder.push_beat(beat)

@@ -49,9 +49,20 @@ def _age(path: Path, seconds: float) -> None:
 def _sine_mp3(path: Path, seconds: float) -> Path:
     subprocess.run(
         [
-            "ffmpeg", "-nostdin", "-v", "error", "-y",
-            "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
-            "-c:a", "libmp3lame", "-b:a", "64k", str(path),
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={seconds}",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "64k",
+            str(path),
         ],
         check=True,
         capture_output=True,
@@ -158,8 +169,7 @@ def test_mismatch_detail_reports_the_delta_and_the_tolerance():
 
 
 def test_a_tool_that_writes_undecodable_bytes_does_not_kill_the_worker():
-    proc = _run([sys.executable, "-c",
-                 r"import sys; sys.stdout.buffer.write(b'\xff\x81 done')"])
+    proc = _run([sys.executable, "-c", r"import sys; sys.stdout.buffer.write(b'\xff\x81 done')"])
 
     assert proc.stdout.endswith(" done")
     assert "�" in proc.stdout
@@ -181,7 +191,9 @@ def test_a_file_older_than_the_min_age_is_settled(tmp_path):
 def test_a_file_exactly_at_the_min_age_is_not_yet_settled(tmp_path):
     path = tmp_path / "edge.mp3"
     path.write_bytes(b"x")
-    assert is_settled(path, now=path.stat().st_mtime + MIN_AGE_SEC, min_age_sec=MIN_AGE_SEC) is False
+    assert (
+        is_settled(path, now=path.stat().st_mtime + MIN_AGE_SEC, min_age_sec=MIN_AGE_SEC) is False
+    )
 
 
 def test_a_missing_file_is_not_settled(tmp_path):
@@ -259,18 +271,27 @@ def test_a_real_mp3_matching_its_annotation_is_ok(tmp_path):
 
 
 @needs_ffmpeg
-@pytest.mark.parametrize(
-    "source", ["sine=frequency=440:duration=60", "anoisesrc=d=60:c=pink"]
-)
+@pytest.mark.parametrize("source", ["sine=frequency=440:duration=60", "anoisesrc=d=60:c=pink"])
 def test_a_truncated_mp3_is_rejected(tmp_path, source):
     # An mp3 cut on a frame boundary decodes with exit 0 and empty stderr, and
     # its Xing header still advertises the original length.
     full = tmp_path / "full.mp3"
     subprocess.run(
         [
-            "ffmpeg", "-nostdin", "-v", "error", "-y",
-            "-f", "lavfi", "-i", source,
-            "-c:a", "libmp3lame", "-b:a", "128k", str(full),
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            source,
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            str(full),
         ],
         check=True,
         capture_output=True,
@@ -391,7 +412,9 @@ def test_write_clean_manifest_persists_the_rejection_reason(tmp_path):
     from build_clean_manifest import CheckResult
 
     results = [
-        CheckResult("0001.a", "a", "C:/audio/a.mp3", 60.0, 12.0, 60.0, STATUS_CORRUPT, "truncated: ..."),
+        CheckResult(
+            "0001.a", "a", "C:/audio/a.mp3", 60.0, 12.0, 60.0, STATUS_CORRUPT, "truncated: ..."
+        ),
         CheckResult("0002.b", "b", "C:/audio/b.mp3", 300.0, 300.0, 300.0, STATUS_OK, ""),
     ]
     path = write_clean_manifest(tmp_path, results)
@@ -447,8 +470,15 @@ def test_require_tools_names_the_missing_tool():
 def test_genre_is_appended_so_the_existing_clean_columns_do_not_move():
     assert CLEAN_MANIFEST_HEADER[-1] == "genre"
     assert CLEAN_MANIFEST_HEADER[:-1] == (
-        "track_id", "youtube_id", "mp3_path", "ffprobe_duration_sec",
-        "decoded_duration_sec", "annotation_duration_sec", "status", "detail")
+        "track_id",
+        "youtube_id",
+        "mp3_path",
+        "ffprobe_duration_sec",
+        "decoded_duration_sec",
+        "annotation_duration_sec",
+        "status",
+        "detail",
+    )
 
 
 def test_load_manifest_rows_reads_the_genre_column(tmp_path):
@@ -476,8 +506,8 @@ def test_select_candidates_carries_the_genre_into_the_job(tmp_path):
     _age(settled, 3600)
 
     jobs, _missing, _fresh = select_candidates(
-        [ManifestRow("0002.bbb", "bbb", 200.0, "Tech House")], tmp_path,
-        now=time.time())
+        [ManifestRow("0002.bbb", "bbb", 200.0, "Tech House")], tmp_path, now=time.time()
+    )
 
     assert [job.genre for job in jobs] == ["Tech House"]
 
@@ -496,8 +526,7 @@ def test_write_clean_manifest_carries_the_genre(tmp_path):
     from build_clean_manifest import CheckResult
 
     results = [
-        CheckResult("0001.a", "a", "a.mp3", 300.0, 300.0, 300.0, STATUS_OK, "",
-                    "Drum & Bass"),
+        CheckResult("0001.a", "a", "a.mp3", 300.0, 300.0, 300.0, STATUS_OK, "", "Drum & Bass"),
         CheckResult("0002.b", "b", "b.mp3", 300.0, 300.0, 300.0, STATUS_OK, ""),
     ]
     path = write_clean_manifest(tmp_path, results)

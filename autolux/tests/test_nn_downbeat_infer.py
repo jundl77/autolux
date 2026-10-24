@@ -61,8 +61,12 @@ def seeded_model(seed: int = 20260727) -> DownbeatCRNN:
     model = DownbeatCRNN()
     state = model.state_dict()
     normalised = {name.rsplit(".", 1)[0] for name in state if name.endswith("running_mean")}
-    moments = {"weight": (1.0, 0.25), "bias": (0.0, 0.25),
-               "running_mean": (0.0, 0.25), "running_var": (1.0, 0.5)}
+    moments = {
+        "weight": (1.0, 0.25),
+        "bias": (0.0, 0.25),
+        "running_mean": (0.0, 0.25),
+        "running_var": (1.0, 0.5),
+    }
 
     # numpy's default_rng stream is a versioned guarantee, so the golden
     # reference survives exactly the torch upgrade it exists to notice.
@@ -129,8 +133,9 @@ class PositionSession:
 
 
 def index_mel(n_frames: int) -> np.ndarray:
-    return np.repeat((np.arange(n_frames) / n_frames)[:, None],
-                     MEL_BANDS, axis=1).astype(np.float32)
+    return np.repeat((np.arange(n_frames) / n_frames)[:, None], MEL_BANDS, axis=1).astype(
+        np.float32
+    )
 
 
 def test_export_declares_a_dynamic_time_axis(tmp_path):
@@ -187,9 +192,15 @@ def test_the_session_is_the_pinned_single_threaded_one(graph):
 
 def make_checkpoint(tmp_path, **overrides):
     model = DownbeatCRNN()
-    payload = {"model": model.state_dict(), "arch": model.arch(), "config": {},
-               "epoch": 20, "f1": 0.5512, "metrics": {"f1": 0.5512},
-               "pos_weight": 9.355}
+    payload = {
+        "model": model.state_dict(),
+        "arch": model.arch(),
+        "config": {},
+        "epoch": 20,
+        "f1": 0.5512,
+        "metrics": {"f1": 0.5512},
+        "pos_weight": 9.355,
+    }
     payload.update(overrides)
     path = tmp_path / "best.pt"
     torch.save(payload, path)
@@ -202,14 +213,18 @@ def test_the_downbeat_checkpoint_payload_is_flat_where_the_section_head_nests(tm
     assert isinstance(state["f1"], float)
     assert isinstance(state["metrics"]["f1"], float)
     assert isinstance(state["pos_weight"], float)
-    assert set(state["arch"]) == {"n_mels", "conv_channels", "conv1d_channels",
-                                  "rnn_hidden", "rnn_layers"}
+    assert set(state["arch"]) == {
+        "n_mels",
+        "conv_channels",
+        "conv1d_channels",
+        "rnn_hidden",
+        "rnn_layers",
+    }
 
 
 @pytest.mark.parametrize("missing", ["arch", "model", "pos_weight"])
 def test_a_checkpoint_missing_a_required_field_is_named_not_guessed(tmp_path, missing):
-    payload = torch.load(make_checkpoint(tmp_path), map_location="cpu",
-                         weights_only=False)
+    payload = torch.load(make_checkpoint(tmp_path), map_location="cpu", weights_only=False)
     del payload[missing]
     path = tmp_path / "broken.pt"
     torch.save(payload, path)
@@ -302,18 +317,24 @@ def test_lag_profile_finds_an_injected_shift():
 def make_track(n_frames=300):
     rng = np.random.default_rng(3)
     from nn.downbeat_infer import TrackActivation
+
     return TrackActivation(
         rng.random(n_frames).astype(np.float32),
         np.full(n_frames, 7, dtype=np.uint16),
-        n_frames, 12, WINDOW_FRAMES, HOP_FRAMES, EDGE_FRAMES)
+        n_frames,
+        12,
+        WINDOW_FRAMES,
+        HOP_FRAMES,
+        EDGE_FRAMES,
+    )
 
 
 def make_arrays(model_sha="a" * 64):
     track = make_track()
-    beats = {"live": (np.array([1.0, 2.0]), np.array([0.3, 0.7]),
-                       np.array([3, 3], dtype=np.int32)),
-             "expert": (np.array([1.1]), np.array([0.5]),
-                        np.array([3], dtype=np.int32))}
+    beats = {
+        "live": (np.array([1.0, 2.0]), np.array([0.3, 0.7]), np.array([3, 3], dtype=np.int32)),
+        "expert": (np.array([1.1]), np.array([0.5]), np.array([3], dtype=np.int32)),
+    }
     return sidecar_arrays(track, beats, model_sha, pos_weight=9.355)
 
 
@@ -344,15 +365,23 @@ def test_the_stored_beat_scores_are_reproducible_from_the_stored_curve(tmp_path)
     track = make_track(600)
     beats = np.arange(2.0, 20.0, 0.47)
     scores, counts = aggregate_at_beats(track.activation, beats, FRAME_SEC, FRAME_SEC)
-    save_sidecar(path, sidecar_arrays(
-        track, {"live": (beats, scores, counts), "expert": (beats, scores, counts)},
-        "a" * 64, 9.355))
+    save_sidecar(
+        path,
+        sidecar_arrays(
+            track,
+            {"live": (beats, scores, counts), "expert": (beats, scores, counts)},
+            "a" * 64,
+            9.355,
+        ),
+    )
 
     with np.load(path) as archive:
-        again, _counts = aggregate_at_beats(archive["activation"],
-                                            archive["live_beat_time"],
-                                            float(archive["frame_sec"]),
-                                            float(archive["t0"]))
+        again, _counts = aggregate_at_beats(
+            archive["activation"],
+            archive["live_beat_time"],
+            float(archive["frame_sec"]),
+            float(archive["t0"]),
+        )
         assert np.array_equal(again, archive["live_beat_score"])
 
 
@@ -393,16 +422,22 @@ def test_live_beats_are_read_from_the_cached_sim_report_not_re_derived(tmp_path)
 def _val_only_ids(monkeypatch):
     import nn.downbeat_infer as module
 
-    monkeypatch.setattr(module, "split_ids",
-                        lambda _dir, splits=("val", "test"): sorted(
-                            {"v1", "v2"} if list(splits) == ["val"]
-                            else {"v1", "v2", "t1"}))
+    monkeypatch.setattr(
+        module,
+        "split_ids",
+        lambda _dir, splits=("val", "test"): sorted(
+            {"v1", "v2"} if list(splits) == ["val"] else {"v1", "v2", "t1"}
+        ),
+    )
 
 
-@pytest.mark.parametrize("argv", [
-    ["--lag-profile", "--splits", "val", "test"],
-    ["--lag-profile", "--ids", "t1"],
-])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--lag-profile", "--splits", "val", "test"],
+        ["--lag-profile", "--ids", "t1"],
+    ],
+)
 def test_the_lag_profile_refuses_the_test_split_by_membership_not_by_flag(monkeypatch, argv):
     from nn.downbeat_infer import main
 
@@ -422,9 +457,15 @@ def test_the_lag_profile_defaults_to_val_alone(monkeypatch, capsys):
 
     def record(_data_dir, ids, **_kwargs):
         seen["ids"] = list(ids)
-        return {"tracks": 0, "offsets": [0], "downbeat_mean": [0.0],
-                "offbeat_mean": [0.0], "peak_histogram": [0],
-                "argmax_offset": 0, "modal_peak_offset": 0}
+        return {
+            "tracks": 0,
+            "offsets": [0],
+            "downbeat_mean": [0.0],
+            "offbeat_mean": [0.0],
+            "peak_histogram": [0],
+            "argmax_offset": 0,
+            "modal_peak_offset": 0,
+        }
 
     monkeypatch.setattr(module, "measure_lag", record)
 
@@ -440,8 +481,17 @@ def test_only_the_tuning_read_is_quarantined_so_generation_covers_val_and_test(m
 
     def record(_data_dir, **kwargs):
         seen["ids"] = list(kwargs["ids"])
-        return {"tracks": 0, "computed": 0, "cached": 0, "failed": 0, "frames": 0,
-                "windows": 0, "bytes": 0, "wall_seconds": 0.0, "model_sha": "x" * 64}
+        return {
+            "tracks": 0,
+            "computed": 0,
+            "cached": 0,
+            "failed": 0,
+            "frames": 0,
+            "windows": 0,
+            "bytes": 0,
+            "wall_seconds": 0.0,
+            "model_sha": "x" * 64,
+        }
 
     monkeypatch.setattr(module, "generate", record)
 
@@ -465,9 +515,11 @@ def test_torch_and_onnx_agree_on_real_windows_from_the_trained_checkpoint(tmp_pa
     _path, sess = exported(tmp_path, model)
 
     sidecars = sorted((DATA_DIR / "features").glob("*.npz"))[:2]
-    windows = [load_sidecar(sidecars[0])[:WINDOW_FRAMES][None],
-               load_sidecar(sidecars[1])[5000:5000 + WINDOW_FRAMES][None],
-               load_sidecar(sidecars[0])[1000:1000 + 512][None]]
+    windows = [
+        load_sidecar(sidecars[0])[:WINDOW_FRAMES][None],
+        load_sidecar(sidecars[1])[5000 : 5000 + WINDOW_FRAMES][None],
+        load_sidecar(sidecars[0])[1000 : 1000 + 512][None],
+    ]
 
     for mel in windows:
         logits = run_window(sess, np.ascontiguousarray(mel, dtype=np.float32))

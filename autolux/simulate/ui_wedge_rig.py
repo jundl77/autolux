@@ -21,8 +21,7 @@ SEED_STEP_SEC = BEAT_SEC / 4
 class RiggedShow:
     def __init__(self, minutes: float):
         self.clock = VirtualClock()
-        self.buffer = EventBuffer(window_sec=60.0, clock=self.clock,
-                                  look_ahead_sec=LOOK_AHEAD_SEC)
+        self.buffer = EventBuffer(window_sec=60.0, clock=self.clock, look_ahead_sec=LOOK_AHEAD_SEC)
         self.buffer.start()
         self._next_beat = 0.0
         self._next_intent = 0.0
@@ -84,22 +83,25 @@ def _server_callbacks(app) -> list:
 def profile(show: RiggedShow, ticks: int) -> None:
     app = build_app(show.buffer)
     snap = show.buffer.snapshot()
-    print(f'snapshot: {len(snap["beats"])} beats, '
-          f'{len(snap["sound_events"])} sound events, '
-          f'{len(snap["intents"])} intent blocks, '
-          f'{show.clock.monotonic() / 60:.0f} min into the set')
+    print(
+        f'snapshot: {len(snap["beats"])} beats, '
+        f'{len(snap["sound_events"])} sound events, '
+        f'{len(snap["intents"])} intent blocks, '
+        f'{show.clock.monotonic() / 60:.0f} min into the set'
+    )
 
     from autolux.simulate import visualizer_app as V
-    for name in ('_build_timeline', '_build_stage', '_build_decoder',
-                 '_build_metrics', '_anchor'):
+
+    for name in ('_build_timeline', '_build_stage', '_build_decoder', '_build_metrics', '_anchor'):
         fn = getattr(V, name)
         samples = []
         for _ in range(ticks):
             at = time.perf_counter()
             fn(snap)
             samples.append((time.perf_counter() - at) * 1000)
-        print(f'  {name:<16} median {statistics.median(samples):7.2f} ms   '
-              f'max {max(samples):7.2f} ms')
+        print(
+            f'  {name:<16} median {statistics.median(samples):7.2f} ms   max {max(samples):7.2f} ms'
+        )
 
     callbacks = _server_callbacks(app)
     samples = {key: [] for key, _ in callbacks}
@@ -110,42 +112,51 @@ def profile(show: RiggedShow, ticks: int) -> None:
             samples[key].append((time.perf_counter() - at) * 1000)
     for key, taken in samples.items():
         print(f'callback {key}')
-        print(f'  median {statistics.median(taken):7.2f} ms   '
-              f'mean {statistics.fmean(taken):7.2f} ms   '
-              f'max {max(taken):7.2f} ms')
+        print(
+            f'  median {statistics.median(taken):7.2f} ms   '
+            f'mean {statistics.fmean(taken):7.2f} ms   '
+            f'max {max(taken):7.2f} ms'
+        )
 
 
 def serve(show: RiggedShow, port: int, latency_ms: float) -> None:
     server = SnapshotServer(show.buffer, snapshot_port(port))
     server.start()
-    threading.Thread(target=show.run_forever, name='rigged-show',
-                     daemon=True).start()
-    source = SlowSource(SnapshotPoller(port=snapshot_port(port)),
-                        latency_ms / 1000.0)
+    threading.Thread(target=show.run_forever, name='rigged-show', daemon=True).start()
+    source = SlowSource(SnapshotPoller(port=snapshot_port(port)), latency_ms / 1000.0)
     app = build_app(source)
-    print(f'\n  rig → http://127.0.0.1:{port}  '
-          f'(+{latency_ms:.0f} ms injected, '
-          f'{show.clock.monotonic() / 60:.0f} min of history)\n')
+    print(
+        f'\n  rig → http://127.0.0.1:{port}  '
+        f'(+{latency_ms:.0f} ms injected, '
+        f'{show.clock.monotonic() / 60:.0f} min of history)\n'
+    )
     app.run(host='127.0.0.1', port=port, debug=False)
 
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         description='The visualizer under a slow callback, with no audio and no '
-                    'GPU: a real EventBuffer seeded with an hour of show, the '
-                    'real snapshot server, the real Dash app, and a fixed '
-                    'latency added to every snapshot read. `serve` is the wedge '
-                    'reproduction (drive a browser at it and watch whether the '
-                    'sync anchor keeps moving); `profile` times the server '
-                    'callbacks on the same payload without a browser.')
+        'GPU: a real EventBuffer seeded with an hour of show, the '
+        'real snapshot server, the real Dash app, and a fixed '
+        'latency added to every snapshot read. `serve` is the wedge '
+        'reproduction (drive a browser at it and watch whether the '
+        'sync anchor keeps moving); `profile` times the server '
+        'callbacks on the same payload without a browser.'
+    )
     parser.add_argument('mode', choices=('serve', 'profile'))
-    parser.add_argument('--minutes', type=float, default=60.0,
-                        help='how far into a set the buffer is seeded to')
-    parser.add_argument('--latency-ms', type=float, default=250.0,
-                        help='latency added to every snapshot read (serve)')
+    parser.add_argument(
+        '--minutes', type=float, default=60.0, help='how far into a set the buffer is seeded to'
+    )
+    parser.add_argument(
+        '--latency-ms',
+        type=float,
+        default=250.0,
+        help='latency added to every snapshot read (serve)',
+    )
     parser.add_argument('--port', type=int, default=8060)
-    parser.add_argument('--ticks', type=int, default=40,
-                        help='timed invocations per callback (profile)')
+    parser.add_argument(
+        '--ticks', type=int, default=40, help='timed invocations per callback (profile)'
+    )
     args = parser.parse_args(argv)
 
     show = RiggedShow(args.minutes)

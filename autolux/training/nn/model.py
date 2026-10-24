@@ -33,6 +33,7 @@ Task 3 declares time dynamic so the decoder can push a whole track through in
 one pass, and `flatten` (rather than an explicit `reshape` on read-back shape
 values) is what keeps the traced graph honest about that.
 """
+
 from __future__ import annotations
 
 import torch
@@ -78,7 +79,7 @@ def freq_pool_blocks(n_mels: int, conv_channels, freq_pool: int = FREQ_POOL) -> 
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels),
             nn.GELU(),
-            nn.MaxPool2d(kernel_size=(1, freq_pool)),   # (time, freq)
+            nn.MaxPool2d(kernel_size=(1, freq_pool)),  # (time, freq)
         ]
         in_channels = out_channels
         freq //= freq_pool
@@ -93,10 +94,16 @@ class SectionCRNN(nn.Module):
     [batch, time])``.
     """
 
-    def __init__(self, n_mels: int = 40, n_classes: int = NUM_SECTION_CLASSES,
-                 conv_channels: tuple = (32, 64, 64), conv1d_channels: int = 128,
-                 rnn_hidden: int = 128, label_pool: int = 2,
-                 dropout: float = 0.0) -> None:
+    def __init__(
+        self,
+        n_mels: int = 40,
+        n_classes: int = NUM_SECTION_CLASSES,
+        conv_channels: tuple = (32, 64, 64),
+        conv1d_channels: int = 128,
+        rnn_hidden: int = 128,
+        label_pool: int = 2,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         if label_pool < 1:
             raise ValueError(f"label_pool must be >= 1, got {label_pool}")
@@ -121,8 +128,9 @@ class SectionCRNN(nn.Module):
             nn.BatchNorm1d(conv1d_channels),
             nn.GELU(),
         )
-        self.rnn = nn.GRU(conv1d_channels, rnn_hidden, num_layers=1,
-                          batch_first=True, bidirectional=True)
+        self.rnn = nn.GRU(
+            conv1d_channels, rnn_hidden, num_layers=1, batch_first=True, bidirectional=True
+        )
         self.dropout = nn.Dropout(float(dropout))
         self.label_head = nn.Linear(2 * rnn_hidden, self.n_classes)
         self.boundary_head = nn.Linear(2 * rnn_hidden, 1)
@@ -148,24 +156,21 @@ class SectionCRNN(nn.Module):
 
     def forward(self, mel: torch.Tensor) -> tuple:
         if mel.dim() != 3:
-            raise ValueError(
-                f"mel must be [batch, time, n_mels], got {tuple(mel.shape)}"
-            )
+            raise ValueError(f"mel must be [batch, time, n_mels], got {tuple(mel.shape)}")
 
-        x = mel.unsqueeze(1)                      # [B, 1, T, M]
-        x = self.conv(x)                          # [B, C, T, M/8]
+        x = mel.unsqueeze(1)  # [B, 1, T, M]
+        x = self.conv(x)  # [B, C, T, M/8]
         # [B, C, T, F] -> [B, C*F, T].  `flatten` over the channel/freq pair
         # keeps the time axis symbolic under ONNX tracing; reading `x.shape` and
         # reshaping would freeze it.
-        x = x.permute(0, 1, 3, 2).flatten(1, 2)   # [B, C*F, T]
-        x = self.temporal(x)                      # [B, conv1d, T]
-        x, _ = self.rnn(x.transpose(1, 2))        # [B, T, 2*hidden]
+        x = x.permute(0, 1, 3, 2).flatten(1, 2)  # [B, C*F, T]
+        x = self.temporal(x)  # [B, conv1d, T]
+        x, _ = self.rnn(x.transpose(1, 2))  # [B, T, 2*hidden]
         x = self.dropout(x)
 
-        boundary = self.boundary_head(x).squeeze(-1)          # [B, T]
-        pooled = F.avg_pool1d(x.transpose(1, 2), self.label_pool,
-                              self.label_pool).transpose(1, 2)
-        labels = self.label_head(pooled)                      # [B, T/pool, C]
+        boundary = self.boundary_head(x).squeeze(-1)  # [B, T]
+        pooled = F.avg_pool1d(x.transpose(1, 2), self.label_pool, self.label_pool).transpose(1, 2)
+        labels = self.label_head(pooled)  # [B, T/pool, C]
         return labels, boundary
 
 

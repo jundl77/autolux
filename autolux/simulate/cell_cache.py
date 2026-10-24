@@ -1,4 +1,5 @@
 """The extractor's cells, recorded beside the audio and replayed without a GPU."""
+
 from __future__ import annotations
 
 import hashlib
@@ -34,20 +35,25 @@ def extractor_sha() -> str:
         digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
-_TOP_LEVEL_MISSES = (("schema", "miss_schema"),
-                     ("extractor", "miss_extractor"),
-                     ("decode", "miss_decode_path"),
-                     ("source_rate", "miss_source_rate"),
-                     ("audio_size", "miss_audio_changed"),
-                     ("audio_mtime", "miss_audio_changed"))
-_GROUP_MISSES = (("encoder", "miss_encoder"), ("framing", "miss_framing"),
-                 ("backend", "miss_backend"))
+
+_TOP_LEVEL_MISSES = (
+    ("schema", "miss_schema"),
+    ("extractor", "miss_extractor"),
+    ("decode", "miss_decode_path"),
+    ("source_rate", "miss_source_rate"),
+    ("audio_size", "miss_audio_changed"),
+    ("audio_mtime", "miss_audio_changed"),
+)
+_GROUP_MISSES = (
+    ("encoder", "miss_encoder"),
+    ("framing", "miss_framing"),
+    ("backend", "miss_backend"),
+)
 
 log = logging.getLogger(__name__)
 
 
-class TruncatedRecording(RuntimeError):
-    ...
+class TruncatedRecording(RuntimeError): ...
 
 
 def sidecar_path(audio_path, decode_path: str) -> Path:
@@ -55,8 +61,9 @@ def sidecar_path(audio_path, decode_path: str) -> Path:
     return audio_path.with_name(f"{audio_path.name}.{decode_path}.{SUFFIX}")
 
 
-def cache_key(geometry, *, source_rate: int, audio_path, decode_path: str,
-              backend: dict | None = None) -> dict:
+def cache_key(
+    geometry, *, source_rate: int, audio_path, decode_path: str, backend: dict | None = None
+) -> dict:
     from autolux.lib import section_chain
 
     stat = Path(audio_path).stat()
@@ -76,8 +83,7 @@ def cache_key(geometry, *, source_rate: int, audio_path, decode_path: str,
             "buffer_sec": float(geometry.buffer_sec),
             "label_frame_sec": float(geometry.label_frame_sec),
         },
-        "backend": dict(backend if backend is not None
-                        else section_chain.resolve_backend()),
+        "backend": dict(backend if backend is not None else section_chain.resolve_backend()),
         "source_rate": int(source_rate),
         "audio_size": stat.st_size,
         "audio_mtime": stat.st_mtime,
@@ -109,11 +115,15 @@ def open_replay(path, key: dict, expected_samples: int | None = None):
                 return None, "miss_truncated"
             if not _internally_consistent(archive):
                 return None, "miss_schema"
-            return Replay(archive["pass_trigger"], archive["pass_offset"],
-                          archive["cell_index"], archive["cell_seen_sec"],
-                          archive["cell_features"],
-                          float(key["framing"]["label_frame_sec"]),
-                          total), "hit"
+            return Replay(
+                archive["pass_trigger"],
+                archive["pass_offset"],
+                archive["cell_index"],
+                archive["cell_seen_sec"],
+                archive["cell_features"],
+                float(key["framing"]["label_frame_sec"]),
+                total,
+            ), "hit"
     except (OSError, KeyError, ValueError, zipfile.BadZipFile):
         return None, "miss_unreadable"
 
@@ -121,16 +131,25 @@ def open_replay(path, key: dict, expected_samples: int | None = None):
 def _internally_consistent(archive) -> bool:
     offsets = archive["pass_offset"]
     cells = len(archive["cell_index"])
-    return (len(offsets) == len(archive["pass_trigger"]) + 1
-            and (len(offsets) == 0 or (int(offsets[0]) == 0
-                                       and int(offsets[-1]) == cells))
-            and len(archive["cell_seen_sec"]) == cells
-            and len(archive["cell_features"]) == cells)
+    return (
+        len(offsets) == len(archive["pass_trigger"]) + 1
+        and (len(offsets) == 0 or (int(offsets[0]) == 0 and int(offsets[-1]) == cells))
+        and len(archive["cell_seen_sec"]) == cells
+        and len(archive["cell_features"]) == cells
+    )
 
 
 class Replay:
-    def __init__(self, triggers, offsets, indices, seen_sec, features,
-                 label_frame_sec: float, total_pushed: int = 0) -> None:
+    def __init__(
+        self,
+        triggers,
+        offsets,
+        indices,
+        seen_sec,
+        features,
+        label_frame_sec: float,
+        total_pushed: int = 0,
+    ) -> None:
         self._triggers = np.asarray(triggers, dtype=np.int64)
         self._offsets = np.asarray(offsets, dtype=np.int64)
         self._indices = np.asarray(indices, dtype=np.int64)
@@ -149,11 +168,13 @@ class Replay:
                 f"and the run has pushed {self._pushed} -- it was cut short "
                 f"(a duration_sec bound saves a sidecar exactly like a "
                 f"complete run does).  Delete the sidecar, or re-record it "
-                f"over the whole file.")
+                f"over the whole file."
+            )
 
     def due(self) -> bool:
-        return (self._cursor < len(self._triggers)
-                and self._pushed >= int(self._triggers[self._cursor]))
+        return self._cursor < len(self._triggers) and self._pushed >= int(
+            self._triggers[self._cursor]
+        )
 
     def run_pass(self) -> list:
         if not self.due():
@@ -168,8 +189,12 @@ class Replay:
 
     def _cell(self, row: int) -> Cell:
         index = int(self._indices[row])
-        return Cell(index, (index + 1) * self._label_frame_sec,
-                    self._features[row], float(self._seen_sec[row]))
+        return Cell(
+            index,
+            (index + 1) * self._label_frame_sec,
+            self._features[row],
+            float(self._seen_sec[row]),
+        )
 
 
 class Recorder:
@@ -210,20 +235,26 @@ class Recorder:
 
     def save(self) -> None:
         dim = len(self._features[0]) if self._features else 0
-        features = (np.stack(self._features) if self._features
-                    else np.zeros((0, dim), dtype=np.float32))
-        written = _write_archive(self.path, {
-            "key": np.str_(json.dumps(self._key, sort_keys=True)),
-            "total_pushed": np.int64(self._pushed),
-            "pass_trigger": np.asarray(self._triggers, dtype=np.int64),
-            "pass_offset": np.asarray(self._offsets, dtype=np.int64),
-            "cell_index": np.asarray(self._indices, dtype=np.int64),
-            "cell_seen_sec": np.asarray(self._seen_sec, dtype=np.float64),
-            "cell_features": features,
-        })
+        features = (
+            np.stack(self._features) if self._features else np.zeros((0, dim), dtype=np.float32)
+        )
+        written = _write_archive(
+            self.path,
+            {
+                "key": np.str_(json.dumps(self._key, sort_keys=True)),
+                "total_pushed": np.int64(self._pushed),
+                "pass_trigger": np.asarray(self._triggers, dtype=np.int64),
+                "pass_offset": np.asarray(self._offsets, dtype=np.int64),
+                "cell_index": np.asarray(self._indices, dtype=np.int64),
+                "cell_seen_sec": np.asarray(self._seen_sec, dtype=np.float64),
+                "cell_features": features,
+            },
+        )
         if written:
-            log.info(f'[cells] wrote {len(self._indices)} cells over '
-                     f'{len(self._triggers)} passes → {self.path}')
+            log.info(
+                f'[cells] wrote {len(self._indices)} cells over '
+                f'{len(self._triggers)} passes → {self.path}'
+            )
 
 
 class RecordingStream(PosteriorStream):
@@ -235,8 +266,8 @@ def recording_chain(chain, path, key: dict, tracker_plan=None):
     from autolux.lib.section_chain import SectionStream
 
     posteriors = RecordingStream(
-        Recorder(chain.stream.posteriors.stream, path, key),
-        chain.stream.posteriors.model)
+        Recorder(chain.stream.posteriors.stream, path, key), chain.stream.posteriors.model
+    )
     tracker = chain.stream.tracker
     if tracker is not None and tracker_plan is not None:
         from autolux.simulate.tracker_cache import TrackerRecorder
@@ -250,22 +281,22 @@ def _write_archive(path: Path, arrays: dict) -> bool:
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_STORED) as archive:
         for name, value in arrays.items():
             member = io.BytesIO()
-            np.lib.format.write_array(member, np.asanyarray(value),
-                                      allow_pickle=False)
+            np.lib.format.write_array(member, np.asanyarray(value), allow_pickle=False)
             info = zipfile.ZipInfo(f"{name}.npy", date_time=_ZIP_EPOCH)
             info.compress_type = zipfile.ZIP_STORED
             info.external_attr = 0o600 << 16
             archive.writestr(info, member.getvalue())
-    tmp = path.with_name(f"{path.name}.{os.getpid()}."
-                         f"{secrets.token_hex(4)}.part")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(4)}.part")
     try:
         tmp.write_bytes(buffer.getvalue())
         tmp.replace(path)
         return True
     except OSError as error:
         tmp.unlink(missing_ok=True)
-        log.warning(f'[cells] could not publish {path.name} ({error!r}) — the '
-                    f'run is unaffected, the next one pays for the GPU again')
+        log.warning(
+            f'[cells] could not publish {path.name} ({error!r}) — the '
+            f'run is unaffected, the next one pays for the GPU again'
+        )
         return False
     except BaseException:
         tmp.unlink(missing_ok=True)

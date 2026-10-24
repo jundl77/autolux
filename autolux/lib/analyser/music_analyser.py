@@ -23,13 +23,15 @@ _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
 
 
 class MusicAnalyser:
-    def __init__(self,
-                 sample_rate: int,
-                 buffer_size: int,
-                 handler: IMusicAnalyserHandler,
-                 clock: Clock = SYSTEM_CLOCK,
-                 note_clicks: bool = False,
-                 watchdog: DriftWatchdog | None = None):
+    def __init__(
+        self,
+        sample_rate: int,
+        buffer_size: int,
+        handler: IMusicAnalyserHandler,
+        clock: Clock = SYSTEM_CLOCK,
+        note_clicks: bool = False,
+        watchdog: DriftWatchdog | None = None,
+    ):
         self._clock: Clock = clock
         self.sample_rate: int = sample_rate
         self.buffer_size: int = buffer_size
@@ -37,12 +39,13 @@ class MusicAnalyser:
         self.note_clicks: bool = note_clicks
 
         self.click_sound: float = 0.15 * np.sin(
-            2. * np.pi * np.arange(self.buffer_size) / self.buffer_size
-            * self.sample_rate / 3000.)
+            2.0 * np.pi * np.arange(self.buffer_size) / self.buffer_size * self.sample_rate / 3000.0
+        )
 
         self._rhythm: MadmomRhythm = MadmomRhythm(self.sample_rate)
         self._drift: DriftWatchdog = watchdog or DriftWatchdog(
-            self.buffer_size / self.sample_rate, clock=self._clock)
+            self.buffer_size / self.sample_rate, clock=self._clock
+        )
         self._rhythm_log_at: datetime.datetime = self._clock.now() + _RHYTHM_LOG_INTERVAL
         self._beats_since_log: int = 0
         self._last_beat_activation: float = 0.0
@@ -124,7 +127,7 @@ class MusicAnalyser:
 
         self._drift.observe()
 
-        rms = float(np.sqrt(np.mean(audio_signal ** 2)))
+        rms = float(np.sqrt(np.mean(audio_signal**2)))
         self._rms_window.append(rms)
         self._track_song_duration(rms, now)
 
@@ -157,7 +160,8 @@ class MusicAnalyser:
             f'| last beat activation={self._last_beat_activation:.3f} '
             f'| drift={drift["drift_sec"]:+.3f}s shed={drift["shed_level"]}'
             f'{"" if drift["fault"] is None else "/" + drift["fault"]} '
-            f'| adapter lag={drift["adapter_latency_sec"] * 1000:.1f}ms')
+            f'| adapter lag={drift["adapter_latency_sec"] * 1000:.1f}ms'
+        )
         self._beats_since_log = 0
 
     def get_drift_status(self) -> dict:
@@ -172,15 +176,15 @@ class MusicAnalyser:
 
     async def _track_beat(self, beats: list, now: datetime.datetime) -> bool:
         for beat_time in beats:
-            interval = (beat_time - self._beat_stream_times[-1]
-                        if self._beat_stream_times else 0.0)
+            interval = beat_time - self._beat_stream_times[-1] if self._beat_stream_times else 0.0
             self._beat_stream_times.append(beat_time)
             self._beats_since_log += 1
             this_bpm: float = self.get_bpm()
             logging.debug(
                 f'[rhythm] beat #{self.beat_count + 1} @ {beat_time:.3f}s '
                 f'(madmom stream), interval={interval:.3f}s, bpm={this_bpm:.1f}, '
-                f'activation={self._last_beat_activation:.3f}')
+                f'activation={self._last_beat_activation:.3f}'
+            )
             bpm_changed: bool = self._has_bpm_changed(this_bpm)
             self.beat_count += 1
             await self.handler.on_beat(self.beat_count, this_bpm, bpm_changed)

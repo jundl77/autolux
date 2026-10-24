@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 
 
 class IMusicAnalyserHandler(ABC):
-
     @abstractmethod
     def on_sound_start(self):
         pass

@@ -5,6 +5,7 @@ is a position in the call sequence, the key carries the checkpoint sha, the
 framing, the decode path and the audio's identity, and the archive bytes are a
 pure function of the contents.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -43,8 +44,9 @@ def sidecar_path(audio_path, decode_path: str) -> Path:
     return audio_path.with_name(f"{audio_path.name}.{decode_path}.{SUFFIX}")
 
 
-def cache_key(record: dict, *, source_rate: int, audio_path,
-              decode_path: str, backend: dict | None = None) -> dict:
+def cache_key(
+    record: dict, *, source_rate: int, audio_path, decode_path: str, backend: dict | None = None
+) -> dict:
     from autolux.lib import section_chain
 
     stat = Path(audio_path).stat()
@@ -56,8 +58,9 @@ def cache_key(record: dict, *, source_rate: int, audio_path,
         "geometry": dict(record["geometry"]),
         # The tracker runs fp32, but which device computed a chunk is part of
         # what it is -- cell_cache's own rule.
-        "backend": dict(backend if backend is not None
-                        else section_chain.resolve_backend(fp16=False)),
+        "backend": dict(
+            backend if backend is not None else section_chain.resolve_backend(fp16=False)
+        ),
         "source_rate": int(source_rate),
         "audio_size": stat.st_size,
         "audio_mtime": stat.st_mtime,
@@ -65,15 +68,17 @@ def cache_key(record: dict, *, source_rate: int, audio_path,
 
 
 def miss_reason(stored: dict, wanted: dict) -> str | None:
-    for field, reason in (("schema", "miss_schema"),
-                          ("extractor", "miss_extractor"),
-                          ("decode", "miss_decode_path"),
-                          ("checkpoint_sha256", "miss_checkpoint"),
-                          ("geometry", "miss_geometry"),
-                          ("backend", "miss_backend"),
-                          ("source_rate", "miss_source_rate"),
-                          ("audio_size", "miss_audio_changed"),
-                          ("audio_mtime", "miss_audio_changed")):
+    for field, reason in (
+        ("schema", "miss_schema"),
+        ("extractor", "miss_extractor"),
+        ("decode", "miss_decode_path"),
+        ("checkpoint_sha256", "miss_checkpoint"),
+        ("geometry", "miss_geometry"),
+        ("backend", "miss_backend"),
+        ("source_rate", "miss_source_rate"),
+        ("audio_size", "miss_audio_changed"),
+        ("audio_mtime", "miss_audio_changed"),
+    ):
         if stored.get(field) != wanted.get(field):
             return reason
     return None
@@ -92,11 +97,16 @@ def open_replay(path, key: dict, expected_samples: int | None = None):
             total = int(archive["total_pushed"])
             if expected_samples is not None and total < int(expected_samples):
                 return None, "miss_truncated"
-            return TrackerReplay(archive["pass_trigger"],
-                                 archive["chunk_offset"],
-                                 archive["frame_lo"], archive["frame_hi"],
-                                 archive["avail_sec"], archive["logits"],
-                                 archive["logit_offset"], total), "hit"
+            return TrackerReplay(
+                archive["pass_trigger"],
+                archive["chunk_offset"],
+                archive["frame_lo"],
+                archive["frame_hi"],
+                archive["avail_sec"],
+                archive["logits"],
+                archive["logit_offset"],
+                total,
+            ), "hit"
     except (OSError, KeyError, ValueError, zipfile.BadZipFile):
         return None, "miss_unreadable"
 
@@ -104,8 +114,17 @@ def open_replay(path, key: dict, expected_samples: int | None = None):
 class TrackerReplay:
     alive = True
 
-    def __init__(self, triggers, chunk_offsets, frame_lo, frame_hi, avail_sec,
-                 logits, logit_offsets, total_pushed: int) -> None:
+    def __init__(
+        self,
+        triggers,
+        chunk_offsets,
+        frame_lo,
+        frame_hi,
+        avail_sec,
+        logits,
+        logit_offsets,
+        total_pushed: int,
+    ) -> None:
         self._triggers = np.asarray(triggers, dtype=np.int64)
         self._chunk_offsets = np.asarray(chunk_offsets, dtype=np.int64)
         self._frame_lo = np.asarray(frame_lo, dtype=np.int64)
@@ -126,27 +145,30 @@ class TrackerReplay:
             raise TruncatedRecording(
                 f"this tracker recording covers {self._total_pushed} source "
                 f"samples and the run has pushed {self._pushed} — delete the "
-                f"sidecar or re-record it over the whole file")
+                f"sidecar or re-record it over the whole file"
+            )
 
     def due(self) -> bool:
-        return (self._cursor < len(self._triggers)
-                and self._pushed >= int(self._triggers[self._cursor]))
+        return self._cursor < len(self._triggers) and self._pushed >= int(
+            self._triggers[self._cursor]
+        )
 
     def run_pass(self) -> list:
         if not self.due():
             return []
         index = self._cursor
         self._cursor += 1
-        lo, hi = (int(self._chunk_offsets[index]),
-                  int(self._chunk_offsets[index + 1]))
+        lo, hi = (int(self._chunk_offsets[index]), int(self._chunk_offsets[index + 1]))
         return [self._chunk(row) for row in range(lo, hi)]
 
     def _chunk(self, row: int) -> bar_tracker.TrackerChunk:
         a, b = int(self._logit_offsets[row]), int(self._logit_offsets[row + 1])
-        return bar_tracker.TrackerChunk(int(self._frame_lo[row]),
-                                        int(self._frame_hi[row]),
-                                        self._logits[a:b],
-                                        float(self._avail_sec[row]))
+        return bar_tracker.TrackerChunk(
+            int(self._frame_lo[row]),
+            int(self._frame_hi[row]),
+            self._logits[a:b],
+            float(self._avail_sec[row]),
+        )
 
     def reset(self) -> None:
         pass
@@ -192,8 +214,7 @@ class TrackerRecorder:
             self._frame_hi.append(int(chunk.frame_hi))
             self._avail_sec.append(float(chunk.avail_sec))
             self._logits.append(np.asarray(chunk.db_logits, dtype=np.float32))
-            self._logit_offsets.append(self._logit_offsets[-1]
-                                       + len(chunk.db_logits))
+            self._logit_offsets.append(self._logit_offsets[-1] + len(chunk.db_logits))
         self._chunk_offsets.append(len(self._frame_lo))
         return chunks
 
@@ -207,19 +228,23 @@ class TrackerRecorder:
         self.save()
 
     def save(self) -> None:
-        logits = (np.concatenate(self._logits) if self._logits
-                  else np.zeros(0, dtype=np.float32))
-        written = _write_archive(self.path, {
-            "key": np.str_(json.dumps(self._key, sort_keys=True)),
-            "total_pushed": np.int64(self._pushed),
-            "pass_trigger": np.asarray(self._triggers, dtype=np.int64),
-            "chunk_offset": np.asarray(self._chunk_offsets, dtype=np.int64),
-            "frame_lo": np.asarray(self._frame_lo, dtype=np.int64),
-            "frame_hi": np.asarray(self._frame_hi, dtype=np.int64),
-            "avail_sec": np.asarray(self._avail_sec, dtype=np.float64),
-            "logits": logits,
-            "logit_offset": np.asarray(self._logit_offsets, dtype=np.int64),
-        })
+        logits = np.concatenate(self._logits) if self._logits else np.zeros(0, dtype=np.float32)
+        written = _write_archive(
+            self.path,
+            {
+                "key": np.str_(json.dumps(self._key, sort_keys=True)),
+                "total_pushed": np.int64(self._pushed),
+                "pass_trigger": np.asarray(self._triggers, dtype=np.int64),
+                "chunk_offset": np.asarray(self._chunk_offsets, dtype=np.int64),
+                "frame_lo": np.asarray(self._frame_lo, dtype=np.int64),
+                "frame_hi": np.asarray(self._frame_hi, dtype=np.int64),
+                "avail_sec": np.asarray(self._avail_sec, dtype=np.float64),
+                "logits": logits,
+                "logit_offset": np.asarray(self._logit_offsets, dtype=np.int64),
+            },
+        )
         if written:
-            log.info(f'[tracker-cache] wrote {len(self._frame_lo)} chunks over '
-                     f'{len(self._triggers)} passes → {self.path}')
+            log.info(
+                f'[tracker-cache] wrote {len(self._frame_lo)} chunks over '
+                f'{len(self._triggers)} passes → {self.path}'
+            )

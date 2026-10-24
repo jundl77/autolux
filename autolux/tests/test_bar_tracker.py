@@ -1,4 +1,5 @@
 """The tracker stage: artifact verification, framing, and how it dies."""
+
 import json
 from pathlib import Path
 
@@ -6,10 +7,15 @@ import numpy as np
 import pytest
 
 from autolux.lib.analyser import bar_tracker
-from autolux.lib.analyser.bar_tracker import (BarTrackerStream, CHUNK_FRAMES,
-                                      MARGIN_FRAMES, STRIDE_FRAMES,
-                                      _PASS_PAD_SRC, _SRC_PER_FRAME,
-                                      _STRIDE_SRC)
+from autolux.lib.analyser.bar_tracker import (
+    BarTrackerStream,
+    CHUNK_FRAMES,
+    MARGIN_FRAMES,
+    STRIDE_FRAMES,
+    _PASS_PAD_SRC,
+    _SRC_PER_FRAME,
+    _STRIDE_SRC,
+)
 
 RECORD = {
     "checkpoint": "model.ckpt",
@@ -28,8 +34,7 @@ def _generation(tmp_path: Path, *, sha=None, geometry=None) -> Path:
     record["sha256"] = sha if sha is not None else bar_tracker._sha256(checkpoint)
     if geometry is not None:
         record["geometry"] = geometry
-    (tracker / bar_tracker.RECORD_NAME).write_text(json.dumps(record),
-                                                   encoding="utf-8")
+    (tracker / bar_tracker.RECORD_NAME).write_text(json.dumps(record), encoding="utf-8")
     return root
 
 
@@ -111,8 +116,7 @@ def test_chunks_are_contiguous_margin_safe_and_stamped(caplog):
         assert len(c.db_logits) == c.frame_hi - c.frame_lo
     assert stream.passes == 4
     # every model window is the full trained length
-    assert all(shape == (1, CHUNK_FRAMES, 128)
-               for shape in stream._model.windows)
+    assert all(shape == (1, CHUNK_FRAMES, 128) for shape in stream._model.windows)
 
 
 def test_a_forward_failure_kills_the_tracker_quietly(caplog):

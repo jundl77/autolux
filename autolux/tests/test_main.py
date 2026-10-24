@@ -7,8 +7,7 @@ import pytest
 from autolux.lib.main import AutoluxController
 
 
-class _StopRun(Exception):
-    ...
+class _StopRun(Exception): ...
 
 
 def _app(enable_ui: bool, event_buffer):
@@ -55,9 +54,9 @@ def _bridge_started(monkeypatch) -> list:
     from autolux.lib import ui_bridge
 
     started = []
-    monkeypatch.setattr(ui_bridge, 'start',
-                        lambda buffer, port: started.append((buffer, port))
-                        or MagicMock())
+    monkeypatch.setattr(
+        ui_bridge, 'start', lambda buffer, port: started.append((buffer, port)) or MagicMock()
+    )
     return started
 
 
@@ -135,23 +134,24 @@ def test_the_overlay_clear_is_transmitted_rather_than_queued(monkeypatch):
 
     app.overlay_client.flush_messages.assert_called()
 
+
 def _built_buffer(monkeypatch, *, enable_ui, report_path):
     from autolux.lib import section_chain
 
     for module, name in (
-            ('autolux.lib.clients.pyaudio_client', 'PyAudioClient'),
-            ('autolux.lib.clients.midi_client', 'MidiClient'),
-            ('autolux.lib.clients.os2l_client', 'Os2lClient'),
-            ('autolux.lib.clients.overlay_client', 'OverlayClient'),
-            ('autolux.lib.analyser.music_analyser', 'MusicAnalyser'),
-            ('autolux.lib.engine.light_engine', 'LightEngine'),
-            ('autolux.lib.engine.effect_controller', 'EffectController')):
+        ('autolux.lib.clients.pyaudio_client', 'PyAudioClient'),
+        ('autolux.lib.clients.midi_client', 'MidiClient'),
+        ('autolux.lib.clients.os2l_client', 'Os2lClient'),
+        ('autolux.lib.clients.overlay_client', 'OverlayClient'),
+        ('autolux.lib.analyser.music_analyser', 'MusicAnalyser'),
+        ('autolux.lib.engine.light_engine', 'LightEngine'),
+        ('autolux.lib.engine.effect_controller', 'EffectController'),
+    ):
         monkeypatch.setattr(f'{module}.{name}', MagicMock())
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda *a, **k: False)
     monkeypatch.setattr(asyncio, 'get_event_loop', MagicMock())
 
-    app = AutoluxController(midi_port_index=0, enable_ui=enable_ui,
-                               report_path=report_path)
+    app = AutoluxController(midi_port_index=0, enable_ui=enable_ui, report_path=report_path)
     return app.event_buffer
 
 
@@ -159,8 +159,9 @@ def test_a_session_report_keeps_the_whole_session(monkeypatch):
     from autolux.lib.clock import VirtualClock
     from autolux.lib.engine.event_buffer import EventBuffer
 
-    assert _built_buffer(monkeypatch, enable_ui=False,
-                         report_path='out.json')._window_sec == float('inf')
+    assert _built_buffer(monkeypatch, enable_ui=False, report_path='out.json')._window_sec == float(
+        'inf'
+    )
 
     def half_an_hour(window):
         clock = VirtualClock()

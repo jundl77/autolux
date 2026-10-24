@@ -7,14 +7,21 @@ import time
 from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
 
 
-async def _run_pipeline(components, duration_sec: float, event_buffer,
-                        command_queue, pace_real_time: bool,
-                        report_path: str | None = None, monitor=None):
+async def _run_pipeline(
+    components,
+    duration_sec: float,
+    event_buffer,
+    command_queue,
+    pace_real_time: bool,
+    report_path: str | None = None,
+    monitor=None,
+):
     from autolux.simulate import runner
+
     try:
-        await runner.run_simulation(components, duration_sec,
-                                    pace_real_time=pace_real_time,
-                                    monitor=monitor)
+        await runner.run_simulation(
+            components, duration_sec, pace_real_time=pace_real_time, monitor=monitor
+        )
     finally:
         event_buffer.set_timing_log(command_queue.get_timing_log())
         if report_path:
@@ -23,6 +30,7 @@ async def _run_pipeline(components, duration_sec: float, event_buffer,
 
 def _write_report(event_buffer, command_queue, report_path: str) -> dict:
     from autolux.simulate.evaluator import report_checksum
+
     report = event_buffer.to_report(command_queue.get_timing_log())
     report['checksum'] = report_checksum(report)
     with open(report_path, 'w') as f:
@@ -33,6 +41,7 @@ def _write_report(event_buffer, command_queue, report_path: str) -> dict:
 
 def _write_report_and_evaluate(event_buffer, command_queue, report_path: str) -> bool:
     from autolux.simulate.evaluator import evaluate, print_evaluation
+
     result = evaluate(_write_report(event_buffer, command_queue, report_path))
     print_evaluation(result)
     return result['passed']
@@ -66,7 +75,9 @@ async def _run_file_fast(args):
 
     song_sec = audio_client.duration_sec
     speed = song_sec / wall_elapsed if wall_elapsed > 0 else 0.0
-    print(f'[simulate] {song_sec:.1f}s of audio processed in {wall_elapsed:.1f}s ({speed:.1f}x real-time)')
+    print(
+        f'[simulate] {song_sec:.1f}s of audio processed in {wall_elapsed:.1f}s ({speed:.1f}x real-time)'
+    )
 
     passed = _write_report_and_evaluate(event_buffer, command_queue, args.report)
     sys.exit(0 if passed else 1)
@@ -76,9 +87,9 @@ def _session_buffer(look_ahead_sec: float, clock=None):
     from autolux.lib.clock import SYSTEM_CLOCK
     from autolux.lib.engine.event_buffer import EventBuffer
 
-    return EventBuffer(window_sec=float('inf'),
-                       clock=clock or SYSTEM_CLOCK,
-                       look_ahead_sec=look_ahead_sec)
+    return EventBuffer(
+        window_sec=float('inf'), clock=clock or SYSTEM_CLOCK, look_ahead_sec=look_ahead_sec
+    )
 
 
 async def _with_viewer(event_buffer, port, run, enabled: bool = True):
@@ -88,8 +99,10 @@ async def _with_viewer(event_buffer, port, run, enabled: bool = True):
     try:
         await run()
         if ui is not None:
-            print('[simulate] the track is over — the viewer is still up on '
-                  f'http://localhost:{port}; Ctrl-C to close it')
+            print(
+                '[simulate] the track is over — the viewer is still up on '
+                f'http://localhost:{port}; Ctrl-C to close it'
+            )
             ui.wait()
     except KeyboardInterrupt:
         pass
@@ -102,11 +115,12 @@ def _open_monitor(output_device_index: int, delay_sec: float):
     from autolux.lib.clients.pyaudio_client import PyAudioClient
     from autolux.lib.delayed_monitor import DelayedMonitor
 
-    speaker = PyAudioClient(SAMPLE_RATE, BUFFER_SIZE,
-                            output_device_index=output_device_index)
+    speaker = PyAudioClient(SAMPLE_RATE, BUFFER_SIZE, output_device_index=output_device_index)
     speaker.start_streams(start_stream_out=True, start_stream_in=False)
-    print(f'[simulate] monitoring on device {speaker.output_device_index}, '
-          f'{delay_sec:.0f}s behind the analysis — you hear room time')
+    print(
+        f'[simulate] monitoring on device {speaker.output_device_index}, '
+        f'{delay_sec:.0f}s behind the analysis — you hear room time'
+    )
     return speaker, DelayedMonitor(delay_sec, speaker.play)
 
 
@@ -118,14 +132,17 @@ async def _run_file_paced(args):
     event_buffer = _session_buffer(PLAYBACK_DELAY_SEC)
     speaker = monitor = None
     if args.output_device_index is not None:
-        speaker, monitor = _open_monitor(args.output_device_index,
-                                         PLAYBACK_DELAY_SEC)
+        speaker, monitor = _open_monitor(args.output_device_index, PLAYBACK_DELAY_SEC)
     components, command_queue = build_simulation(
-        audio_client, event_buffer, threaded=True,
-        silence_monitor=None if monitor is None else monitor.silence)
+        audio_client,
+        event_buffer,
+        threaded=True,
+        silence_monitor=None if monitor is None else monitor.silence,
+    )
 
     try:
         import librosa
+
         duration_sec = librosa.get_duration(path=args.audio)
     except Exception:
         duration_sec = float('inf')
@@ -133,12 +150,20 @@ async def _run_file_paced(args):
     event_buffer.start()
 
     try:
-        await _with_viewer(event_buffer, args.port,
-                           lambda: _run_pipeline(components, duration_sec,
-                                                 event_buffer, command_queue,
-                                                 True, args.report,
-                                                 monitor=monitor),
-                           enabled=args.ui)
+        await _with_viewer(
+            event_buffer,
+            args.port,
+            lambda: _run_pipeline(
+                components,
+                duration_sec,
+                event_buffer,
+                command_queue,
+                True,
+                args.report,
+                monitor=monitor,
+            ),
+            enabled=args.ui,
+        )
     finally:
         if speaker is not None:
             speaker.close()
@@ -155,13 +180,14 @@ async def run_realtime(args):
         input_device_index=args.device_index,
     )
     event_buffer = EventBuffer(look_ahead_sec=PLAYBACK_DELAY_SEC)
-    components, command_queue = build_simulation(audio_client, event_buffer,
-                                                 threaded=True)
+    components, command_queue = build_simulation(audio_client, event_buffer, threaded=True)
     event_buffer.start()
 
-    await _with_viewer(event_buffer, args.port,
-                       lambda: _run_pipeline(components, float('inf'),
-                                             event_buffer, command_queue, False))
+    await _with_viewer(
+        event_buffer,
+        args.port,
+        lambda: _run_pipeline(components, float('inf'), event_buffer, command_queue, False),
+    )
 
 
 def add_simulate_subparser(subparsers):
@@ -173,23 +199,38 @@ def add_simulate_subparser(subparsers):
 
     fp = sub.add_parser('file', help='Simulate from an audio file (fast headless by default)')
     fp.add_argument('audio', help='Path to audio file (MP3 / WAV / FLAC)')
-    fp.add_argument('--ui', action='store_true',
-                    help='Real-time paced run with live Dash timeline (instead of fast headless)')
-    fp.add_argument('--report', default='report.json',
-                    help='Report output path (default: report.json); under --ui '
-                         'it is written when the track ends')
-    fp.add_argument('-o', '--output-device-index', type=int, default=None,
-                    metavar='IDX',
-                    help='Monitor the track on this audio output device, one '
-                         'playback delay behind the analysis (so you hear room '
-                         'time, matching the UI). Implies real-time pacing: '
-                         'passing it without --ui paces the run without a '
-                         'viewer. Device indices come from `autolux list`.')
+    fp.add_argument(
+        '--ui',
+        action='store_true',
+        help='Real-time paced run with live Dash timeline (instead of fast headless)',
+    )
+    fp.add_argument(
+        '--report',
+        default='report.json',
+        help='Report output path (default: report.json); under --ui '
+        'it is written when the track ends',
+    )
+    fp.add_argument(
+        '-o',
+        '--output-device-index',
+        type=int,
+        default=None,
+        metavar='IDX',
+        help='Monitor the track on this audio output device, one '
+        'playback delay behind the analysis (so you hear room '
+        'time, matching the UI). Implies real-time pacing: '
+        'passing it without --ui paces the run without a '
+        'viewer. Device indices come from `autolux list`.',
+    )
     fp.add_argument('--port', type=int, default=8050, help='Dash server port (--ui only)')
 
     rp = sub.add_parser('realtime', help='Simulate from microphone in real time')
-    rp.add_argument('--device-index', type=int, default=None,
-                    help='PyAudio input device index (default: system default)')
+    rp.add_argument(
+        '--device-index',
+        type=int,
+        default=None,
+        help='PyAudio input device index (default: system default)',
+    )
     rp.add_argument('--port', type=int, default=8050, help='Dash server port')
 
     sim.set_defaults(func=simulate_cmd)

@@ -17,8 +17,12 @@ import sys
 from pathlib import Path
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"), str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -27,8 +31,18 @@ from raveform_fetch_annotations import BEATS_DIR, annotations_dir  # noqa: E402
 RECORD_SCHEMA = 1
 THIRD_PARTY_SOURCES = ("rwc", "salami", "harmonix")
 ID_PREFIXES = {"rwc": "rwc-", "salami": "salami-", "harmonix": "hx-"}
-REQUIRED_FIELDS = ("schema", "source", "id", "native_id", "title", "audio",
-                   "duration", "label_vocabulary", "sections", "provenance")
+REQUIRED_FIELDS = (
+    "schema",
+    "source",
+    "id",
+    "native_id",
+    "title",
+    "audio",
+    "duration",
+    "label_vocabulary",
+    "sections",
+    "provenance",
+)
 
 RECORD_EXTENSION = ".json"
 AUDIO_DIR = "audio"
@@ -54,8 +68,7 @@ def third_party_dir(corpus: Path) -> Path:
 
 
 def audio_path(corpus: Path, record: dict) -> Path:
-    return (third_party_dir(corpus) / AUDIO_DIR / str(record["source"])
-            / str(record["audio"]))
+    return third_party_dir(corpus) / AUDIO_DIR / str(record["source"]) / str(record["audio"])
 
 
 def beat_csv_path(corpus: Path, record: dict) -> Path:
@@ -89,8 +102,7 @@ def _span(entry, what: str, duration: float) -> tuple:
     if end <= start:
         raise ValueError(f"{what}: start {start!r} is not before end {end!r}")
     if end > duration + END_SLACK_SEC:
-        raise ValueError(
-            f"{what}: ends at {end!r}, past the record duration {duration!r}")
+        raise ValueError(f"{what}: ends at {end!r}, past the record duration {duration!r}")
     return start, end
 
 
@@ -99,11 +111,13 @@ def _check_order(spans: list, what: str) -> None:
         if after[0] < before[0]:
             raise ValueError(
                 f"{what} {index + 1} starts at {after[0]!r}, before {what} "
-                f"{index} at {before[0]!r} -- unsorted")
+                f"{index} at {before[0]!r} -- unsorted"
+            )
         if before[1] > after[0] + OVERLAP_TOLERANCE_SEC:
             raise ValueError(
                 f"{what} {index} ends at {before[1]!r}, past the start of "
-                f"{what} {index + 1} at {after[0]!r} -- overlapping")
+                f"{what} {index + 1} at {after[0]!r} -- overlapping"
+            )
 
 
 def _check_id(track_id, source: str) -> None:
@@ -127,8 +141,7 @@ def validate_record(record: dict) -> None:
     if missing:
         raise ValueError(f"record lacks {', '.join(missing)}")
     if record["schema"] != RECORD_SCHEMA:
-        raise ValueError(
-            f"schema: expected {RECORD_SCHEMA}, got {record['schema']!r}")
+        raise ValueError(f"schema: expected {RECORD_SCHEMA}, got {record['schema']!r}")
     source = record["source"]
     if source not in THIRD_PARTY_SOURCES:
         raise ValueError(f"source: {source!r} is not a third-party source")
@@ -165,13 +178,14 @@ def validate_record(record: dict) -> None:
     if masked is not None:
         if not isinstance(masked, list):
             raise ValueError(f"masked: expected a list, got {type(masked).__name__}")
-        _check_order([_span(entry, f"masked {index}", duration)
-                      for index, entry in enumerate(masked)], "masked")
+        _check_order(
+            [_span(entry, f"masked {index}", duration) for index, entry in enumerate(masked)],
+            "masked",
+        )
 
     provenance = record["provenance"]
     if not isinstance(provenance, dict):
-        raise ValueError(
-            f"provenance: expected an object, got {type(provenance).__name__}")
+        raise ValueError(f"provenance: expected an object, got {type(provenance).__name__}")
     absent = [field for field in PROVENANCE_FIELDS if not provenance.get(field)]
     if absent:
         raise ValueError(f"provenance lacks {', '.join(absent)}")
@@ -208,20 +222,19 @@ def read_record(path: Path) -> dict:
     if path.name[: -len(RECORD_EXTENSION)] != stem:
         raise RuntimeError(
             f"{path.name}: the record says {stem}{RECORD_EXTENSION} -- a renamed "
-            f"record would label the wrong track")
+            f"record would label the wrong track"
+        )
     return record
 
 
 def load_records(corpus: Path, source: str) -> list:
     directory = annotations_dir(Path(corpus))
-    records = [read_record(path)
-               for path in sorted(directory.glob(f"*{record_suffix(source)}"))]
+    records = [read_record(path) for path in sorted(directory.glob(f"*{record_suffix(source)}"))]
     records.sort(key=lambda record: str(record["id"]))
     return records
 
 
 def load_all_third_party(corpus: Path) -> list:
-    records = [record for source in THIRD_PARTY_SOURCES
-               for record in load_records(corpus, source)]
+    records = [record for source in THIRD_PARTY_SOURCES for record in load_records(corpus, source)]
     records.sort(key=lambda record: str(record["id"]))
     return records

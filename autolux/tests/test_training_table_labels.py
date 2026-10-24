@@ -1,4 +1,5 @@
 """Tests for the beat -> Raveform-label join (training/build_training_table.py)."""
+
 import csv
 import gzip
 import json
@@ -62,8 +63,12 @@ def beat(t: float, **overrides) -> dict:
     return record
 
 
-def report(beats: list, intents: list | None = None,
-           look_ahead_sec: float = LOOK_AHEAD, duration_sec: float = 1000.0) -> dict:
+def report(
+    beats: list,
+    intents: list | None = None,
+    look_ahead_sec: float = LOOK_AHEAD,
+    duration_sec: float = 1000.0,
+) -> dict:
     return {
         "duration_sec": duration_sec,
         "beats": beats,
@@ -123,8 +128,9 @@ def test_every_beat_is_accounted_for_exactly_once():
 
     assert stats.beats_total == len(beats)
     assert stats.beats_kept == len(rows)
-    assert (stats.beats_kept + stats.dropped_leading
-            + stats.dropped_gap + stats.dropped_trailing) == stats.beats_total
+    assert (
+        stats.beats_kept + stats.dropped_leading + stats.dropped_gap + stats.dropped_trailing
+    ) == stats.beats_total
 
 
 def test_track_without_sections_yields_no_rows():
@@ -179,17 +185,21 @@ def test_the_join_carries_every_published_label_unfolded():
 
 
 def test_every_vocabulary_label_survives_the_join():
-    sections = [(10.0 * i, 10.0 * (i + 1), label)
-                for i, label in enumerate(SECTION_LABELS)]
-    rows, _stats = join(sections, [beat(10.0 * i + 5.0)
-                                   for i in range(len(SECTION_LABELS))])
+    sections = [(10.0 * i, 10.0 * (i + 1), label) for i, label in enumerate(SECTION_LABELS)]
+    rows, _stats = join(sections, [beat(10.0 * i + 5.0) for i in range(len(SECTION_LABELS))])
 
     assert labels(rows) == list(SECTION_LABELS)
 
 
 def test_the_fold_machinery_is_gone_from_the_table_builder():
-    for retired in ("label_v1", "V1_MAP", "V1_ORDER", "CANONICAL_ORDER",
-                    "canonical_coverage", "raw_coverage"):
+    for retired in (
+        "label_v1",
+        "V1_MAP",
+        "V1_ORDER",
+        "CANONICAL_ORDER",
+        "canonical_coverage",
+        "raw_coverage",
+    ):
         assert not hasattr(build_training_table, retired), retired
     assert "label_canonical" not in TABLE_HEADER
     assert "label_v1" not in TABLE_HEADER
@@ -204,8 +214,10 @@ def test_label_coverage_drops_sentinels_and_clamps():
 
 
 def test_intent_blocks_are_shifted_back_by_the_look_ahead():
-    blocks = [{"t": 5.0, "intent": "GROOVE", "end": 10.0},
-              {"t": 10.0, "intent": "DROP", "end": 20.0}]
+    blocks = [
+        {"t": 5.0, "intent": "GROOVE", "end": 10.0},
+        {"t": 10.0, "intent": "DROP", "end": 20.0},
+    ]
 
     assert song_time_intents(blocks, 2.5) == [(2.5, 7.5, "GROOVE"), (7.5, 17.5, "DROP")]
 
@@ -251,15 +263,16 @@ def test_a_recorded_song_instant_is_taken_as_it_stands():
 
 def test_a_recorded_instant_is_not_floored_at_the_first_beat():
     blocks = [{"t": 20.0, "song_t": 6.0, "intent": "ATMOSPHERIC", "end": 30.0}]
-    spans, _alignment = realign_intents(blocks, LOOK_AHEAD, [9.0, 9.5],
-                                        duration_sec=40.0)
+    spans, _alignment = realign_intents(blocks, LOOK_AHEAD, [9.0, 9.5], duration_sec=40.0)
     assert spans[0][0] == pytest.approx(6.0)
 
 
 def test_recorded_and_inferred_blocks_can_share_one_report():
     beats = [10.0, 10.5, 11.0]
-    blocks = [queue_block(10.0, "GROOVE", 20.0),
-              {"t": 34.0, "song_t": 20.0, "intent": "DROP", "end": 44.0}]
+    blocks = [
+        queue_block(10.0, "GROOVE", 20.0),
+        {"t": 34.0, "song_t": 20.0, "intent": "DROP", "end": 44.0},
+    ]
 
     spans, alignment = realign_intents(blocks, LOOK_AHEAD, beats, duration_sec=50.0)
 
@@ -320,8 +333,7 @@ def test_a_block_boundary_is_de_shifted_once_not_twice():
 
 def test_the_final_block_frozen_by_mark_end_is_still_a_queue_commit():
     beats = [10.0, 11.0, 12.0]
-    blocks = [queue_block(10.0, "GROOVE", 30.0),
-              {"t": 30.0, "intent": "PEAK", "end": 30.0}]
+    blocks = [queue_block(10.0, "GROOVE", 30.0), {"t": 30.0, "intent": "PEAK", "end": 30.0}]
 
     _spans, alignment = realign_intents(blocks, LOOK_AHEAD, beats, duration_sec=30.0)
 
@@ -342,8 +354,7 @@ def test_a_queue_commit_landing_on_a_beat_instant_is_still_a_queue_commit():
 def test_realignment_tolerates_the_one_buffer_queue_latency():
     one_buffer_sec = 256 / 44100
     beats = [10.0, 10.5]
-    blocks = [{"t": 10.0 + LOOK_AHEAD + one_buffer_sec, "intent": "GROOVE",
-               "end": 20.0}]
+    blocks = [{"t": 10.0 + LOOK_AHEAD + one_buffer_sec, "intent": "GROOVE", "end": 20.0}]
 
     _spans, alignment = realign_intents(blocks, LOOK_AHEAD, beats, duration_sec=30.0)
 
@@ -403,8 +414,15 @@ def test_every_feature_column_reads_a_key_the_report_still_carries():
     live = {"t": 1.0, "bpm": 128.0, "strength": 0.0, "change": False, "rms": 0.1}
     rows, _stats = join([(0.0, 30.0, "drop")], [live])
 
-    derived = {"track_id", "youtube_id", "genre", "t_song", "intent_at_beat",
-               "label", "bar_position_unknown"}
+    derived = {
+        "track_id",
+        "youtube_id",
+        "genre",
+        "t_song",
+        "intent_at_beat",
+        "label",
+        "bar_position_unknown",
+    }
     derived |= {f"{column}_z" for column in CONTINUOUS_COLUMNS}
 
     assert set(rows[0]) - derived <= set(live)
@@ -447,13 +465,10 @@ def test_zscores_use_the_population_standard_deviation():
 
 def test_zscores_are_computed_over_the_kept_rows_of_one_track():
     sections = [(10.0, 30.0, "drop")]
-    beats = [beat(1.0, rms=100.0), beat(11.0, rms=1.0),
-             beat(12.0, rms=2.0), beat(13.0, rms=3.0)]
+    beats = [beat(1.0, rms=100.0), beat(11.0, rms=1.0), beat(12.0, rms=2.0), beat(13.0, rms=3.0)]
     rows, _stats = join(sections, beats)
 
-    assert [row["rms_z"] for row in rows] == pytest.approx(
-        [-math.sqrt(1.5), 0.0, math.sqrt(1.5)]
-    )
+    assert [row["rms_z"] for row in rows] == pytest.approx([-math.sqrt(1.5), 0.0, math.sqrt(1.5)])
 
 
 def test_every_continuous_feature_gets_a_z_column():
@@ -490,15 +505,18 @@ def write_corpus(tmp_path: Path, tracks: dict) -> tuple:
     rows = []
     sections_by_track = {}
     for track_id, (youtube, sections, payload) in sorted(tracks.items()):
-        _write_json_gz(report_path(tmp_path, youtube), {
-            "cache_version": CACHE_VERSION,
-            "track_id": track_id,
-            "youtube_id": youtube,
-            "pipeline_sha": "deadbeef",
-            "mp3_size": 1,
-            "mp3_mtime": 1.0,
-            "report": payload,
-        })
+        _write_json_gz(
+            report_path(tmp_path, youtube),
+            {
+                "cache_version": CACHE_VERSION,
+                "track_id": track_id,
+                "youtube_id": youtube,
+                "pipeline_sha": "deadbeef",
+                "mp3_size": 1,
+                "mp3_mtime": 1.0,
+                "report": payload,
+            },
+        )
         rows.append({"track_id": track_id, "youtube_id": youtube})
         sections_by_track[track_id] = sections
     return rows, sections_by_track
@@ -510,9 +528,12 @@ def read_table(path: Path) -> list:
 
 
 def test_table_writes_the_header_and_one_row_per_labeled_beat(tmp_path):
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0), beat(2.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0), beat(2.0)])),
+        },
+    )
 
     stats = build_table(tmp_path, rows, sections)
     table = read_table(tmp_path / TABLE_FILE)
@@ -525,10 +546,13 @@ def test_table_writes_the_header_and_one_row_per_labeled_beat(tmp_path):
 
 
 def test_table_is_byte_identical_when_rebuilt_from_the_same_reports(tmp_path):
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0), beat(2.0)])),
-        "0002.def": ("def", [(0.0, 30.0, "intro")], report([beat(3.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0), beat(2.0)])),
+            "0002.def": ("def", [(0.0, 30.0, "intro")], report([beat(3.0)])),
+        },
+    )
 
     build_table(tmp_path, rows, sections)
     first = (tmp_path / TABLE_FILE).read_bytes()
@@ -538,9 +562,12 @@ def test_table_is_byte_identical_when_rebuilt_from_the_same_reports(tmp_path):
 
 
 def test_an_unsimulated_track_is_recorded_not_silently_dropped(tmp_path):
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
+        },
+    )
     rows.append({"track_id": "0009.zzz", "youtube_id": "zzz"})
     sections["0009.zzz"] = [(0.0, 30.0, "drop")]
 
@@ -553,11 +580,13 @@ def test_an_unsimulated_track_is_recorded_not_silently_dropped(tmp_path):
 
 def test_a_track_with_no_mel_sidecar_joins_like_any_other(tmp_path):
     """The mel generation is dead; a hand-admitted track never gets a sidecar."""
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0), beat(2.0)])),
-        "hand-f6b19b47d413": ("hand-f6b19b47d413", [(0.0, 30.0, "intro")],
-                              report([beat(3.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0), beat(2.0)])),
+            "hand-f6b19b47d413": ("hand-f6b19b47d413", [(0.0, 30.0, "intro")], report([beat(3.0)])),
+        },
+    )
     assert not (tmp_path / FEATURES_DIR).exists()
 
     stats = build_table(tmp_path, rows, sections)
@@ -569,9 +598,12 @@ def test_a_track_with_no_mel_sidecar_joins_like_any_other(tmp_path):
 
 
 def test_table_records_a_track_whose_report_is_unreadable(tmp_path):
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
+        },
+    )
     report_path(tmp_path, "abc").write_bytes(b"not gzip at all")
 
     stats = build_table(tmp_path, rows, sections)
@@ -580,31 +612,37 @@ def test_table_records_a_track_whose_report_is_unreadable(tmp_path):
     assert [track_id for track_id, _detail in stats.skipped] == ["0001.abc"]
 
 
-FRESH = {"cache_version": CACHE_VERSION, "pipeline_sha": "sha1",
-         "mp3_size": 100, "mp3_mtime": 1.5, "report": {"beats": []}}
+FRESH = {
+    "cache_version": CACHE_VERSION,
+    "pipeline_sha": "sha1",
+    "mp3_size": 100,
+    "mp3_mtime": 1.5,
+    "report": {"beats": []},
+}
 
 
 def test_cache_is_fresh_when_pipeline_and_audio_match():
     assert cache_is_fresh(FRESH, "sha1", 100, 1.5)
 
 
-@pytest.mark.parametrize("sha,size,mtime", [
-    ("sha2", 100, 1.5),
-    ("sha1", 101, 1.5),
-    ("sha1", 100, 2.0),
-])
+@pytest.mark.parametrize(
+    "sha,size,mtime",
+    [
+        ("sha2", 100, 1.5),
+        ("sha1", 101, 1.5),
+        ("sha1", 100, 2.0),
+    ],
+)
 def test_cache_is_stale_when_anything_it_depends_on_moved(sha, size, mtime):
     assert not cache_is_fresh(FRESH, sha, size, mtime)
 
 
 def test_cache_of_an_older_envelope_version_is_stale():
-    assert not cache_is_fresh({**FRESH, "cache_version": CACHE_VERSION - 1},
-                              "sha1", 100, 1.5)
+    assert not cache_is_fresh({**FRESH, "cache_version": CACHE_VERSION - 1}, "sha1", 100, 1.5)
 
 
 def test_cache_without_a_report_is_stale():
-    assert not cache_is_fresh({k: v for k, v in FRESH.items() if k != "report"},
-                              "sha1", 100, 1.5)
+    assert not cache_is_fresh({k: v for k, v in FRESH.items() if k != "report"}, "sha1", 100, 1.5)
 
 
 def stage_track(tmp_path: Path, sha: str = "sha1", cached: bool = True) -> list:
@@ -613,12 +651,18 @@ def stage_track(tmp_path: Path, sha: str = "sha1", cached: bool = True) -> list:
     mp3.write_bytes(b"x" * 100)
     stat = mp3.stat()
     if cached:
-        _write_json_gz(report_path(tmp_path, "abc"), {
-            "cache_version": CACHE_VERSION, "track_id": "0001.abc",
-            "youtube_id": "abc", "pipeline_sha": sha,
-            "mp3_size": stat.st_size, "mp3_mtime": stat.st_mtime,
-            "report": report([beat(1.0)]),
-        })
+        _write_json_gz(
+            report_path(tmp_path, "abc"),
+            {
+                "cache_version": CACHE_VERSION,
+                "track_id": "0001.abc",
+                "youtube_id": "abc",
+                "pipeline_sha": sha,
+                "mp3_size": stat.st_size,
+                "mp3_mtime": stat.st_mtime,
+                "report": report([beat(1.0)]),
+            },
+        )
     return [{"track_id": "0001.abc", "youtube_id": "abc", "mp3_path": str(mp3)}]
 
 
@@ -745,15 +789,21 @@ def staged_repo(tmp_path: Path) -> str:
     import subprocess
 
     def git(*args):
-        subprocess.run(["git", "-C", str(tmp_path), *args], check=True,
-                       capture_output=True, stdin=subprocess.DEVNULL)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), *args],
+            check=True,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+        )
 
     git("init", "-q")
-    git("config", "user.email", "t@t"); git("config", "user.name", "t")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "engine.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "lib" / "AGENT.md").write_text("docs\n", encoding="utf-8")
-    git("add", "-A"); git("commit", "-qm", "init")
+    git("add", "-A")
+    git("commit", "-qm", "init")
     return pipeline_sha(tmp_path)
 
 
@@ -822,15 +872,15 @@ def test_cached_reports_are_byte_identical_when_rewritten(tmp_path):
 
 def write_manifest(tmp_path: Path, tracks: list) -> None:
     lines = ["track_id,youtube_id,mp3_path,decoded_duration_sec,status"]
-    lines += [f"{track_id},{track_id[-3:]},audio/{track_id}.mp3,{seconds:.3f},ok"
-              for track_id, seconds in tracks]
-    (tmp_path / CLEAN_MANIFEST_FILE).write_text("\n".join(lines) + "\n",
-                                                encoding="utf-8")
+    lines += [
+        f"{track_id},{track_id[-3:]},audio/{track_id}.mp3,{seconds:.3f},ok"
+        for track_id, seconds in tracks
+    ]
+    (tmp_path / CLEAN_MANIFEST_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def test_a_track_reaching_the_analyser_reset_is_left_out_of_the_build(tmp_path, capsys):
-    write_manifest(tmp_path, [("0001.short", 300.0),
-                              ("0002.long", ANALYSER_RESET_SEC)])
+    write_manifest(tmp_path, [("0001.short", 300.0), ("0002.long", ANALYSER_RESET_SEC)])
 
     rows = load_ok_rows(tmp_path)
 
@@ -856,7 +906,9 @@ def test_a_manifest_of_nothing_but_over_long_tracks_fails_loudly(tmp_path):
 def test_a_blank_duration_is_not_this_gates_business(tmp_path):
     (tmp_path / CLEAN_MANIFEST_FILE).write_text(
         "track_id,youtube_id,mp3_path,decoded_duration_sec,status\n"
-        "0001.blank,ank,audio/a.mp3,,ok\n", encoding="utf-8")
+        "0001.blank,ank,audio/a.mp3,,ok\n",
+        encoding="utf-8",
+    )
 
     assert [row["track_id"] for row in load_ok_rows(tmp_path)] == ["0001.blank"]
 
@@ -882,22 +934,24 @@ def test_empty_timeline_returns_none():
 
 
 def test_the_clamped_tail_tripwire_still_sees_a_recorded_block():
-    blocks = [{"t": 10.0, "song_t": 5.0, "intent": "DROP", "end": 30.0},
-              {"t": 30.0, "song_t": 20.0, "intent": "BREAKDOWN", "end": 30.0}]
+    blocks = [
+        {"t": 10.0, "song_t": 5.0, "intent": "DROP", "end": 30.0},
+        {"t": 30.0, "song_t": 20.0, "intent": "BREAKDOWN", "end": 30.0},
+    ]
 
-    _, alignment = realign_intents(blocks, LOOK_AHEAD, [5.0, 20.0],
-                                   duration_sec=30.0)
+    _, alignment = realign_intents(blocks, LOOK_AHEAD, [5.0, 20.0], duration_sec=30.0)
 
     assert alignment.song_recorded == 2
     assert alignment.clamped_tail == 1
 
 
 def test_a_block_committed_past_the_budget_is_counted():
-    blocks = [{"t": 10.0, "song_t": 6.0, "intent": "DROP", "end": 40.0},
-              {"t": 26.5, "song_t": 24.0, "intent": "BREAKDOWN", "end": 60.0}]
+    blocks = [
+        {"t": 10.0, "song_t": 6.0, "intent": "DROP", "end": 40.0},
+        {"t": 26.5, "song_t": 24.0, "intent": "BREAKDOWN", "end": 60.0},
+    ]
 
-    _, alignment = realign_intents(blocks, LOOK_AHEAD, [6.0, 24.0],
-                                   duration_sec=60.0)
+    _, alignment = realign_intents(blocks, LOOK_AHEAD, [6.0, 24.0], duration_sec=60.0)
 
     assert alignment.late == 1
 
@@ -996,8 +1050,7 @@ def test_keeping_cells_leaves_preexisting_files_alone(tmp_path):
 
     mp3 = str(tmp_path / "0001.abc.mp3")
     decode, cells, chunks = derived_cache_paths(mp3)
-    job = _job_with(mp3_path=mp3, preexisting=(decode, cells, chunks),
-                    keep_cells=True)
+    job = _job_with(mp3_path=mp3, preexisting=(decode, cells, chunks), keep_cells=True)
 
     assert paths_to_delete(job) == ()
 
@@ -1013,16 +1066,22 @@ def test_the_retention_flag_reaches_every_job(tmp_path):
 def _job_with(**over):
     from build_training_table import SimJob
 
-    fields = dict(track_id="0001", youtube_id="abc", mp3_path="a.mp3",
-                  report_path="c", preexisting=(),
-                  pipeline_sha="sha", mp3_size=1, mp3_mtime=1.0)
+    fields = dict(
+        track_id="0001",
+        youtube_id="abc",
+        mp3_path="a.mp3",
+        report_path="c",
+        preexisting=(),
+        pipeline_sha="sha",
+        mp3_size=1,
+        mp3_mtime=1.0,
+    )
     fields.update(over)
     return SimJob(**fields)
 
 
 def silence_block(beat_t: float, end: float, look_ahead=LOOK_AHEAD) -> dict:
-    return {"t": beat_t + look_ahead, "intent": "atmospheric", "end": end,
-            "trigger": "silence"}
+    return {"t": beat_t + look_ahead, "intent": "atmospheric", "end": end, "trigger": "silence"}
 
 
 def test_a_report_written_before_the_trigger_field_reads_as_the_classifier():
@@ -1030,8 +1089,10 @@ def test_a_report_written_before_the_trigger_field_reads_as_the_classifier():
 
 
 def test_the_trigger_field_separates_the_operator_action_from_the_classifier():
-    blocks = [{"t": 1.0, "intent": "DROP", "trigger": "classifier"},
-              {"t": 2.0, "intent": "atmospheric", "trigger": "silence"}]
+    blocks = [
+        {"t": 1.0, "intent": "DROP", "trigger": "classifier"},
+        {"t": 2.0, "intent": "atmospheric", "trigger": "silence"},
+    ]
 
     assert silence_triggered(blocks) == [False, True]
 
@@ -1042,8 +1103,7 @@ def test_a_silence_triggered_block_is_kept_out_of_the_scored_stream():
     intents = [queue_block(10.0, "GROOVE", 20.0), silence_block(20.0, 40.0)]
     rows, stats = join(sections, beats, intents, duration_sec=40.0)
 
-    assert labels(rows, "intent_at_beat") == ["GROOVE", "GROOVE",
-                                              NO_INTENT, NO_INTENT]
+    assert labels(rows, "intent_at_beat") == ["GROOVE", "GROOVE", NO_INTENT, NO_INTENT]
     assert stats.beats_without_intent == 2
 
 
@@ -1054,28 +1114,33 @@ def test_the_excluded_span_is_left_as_a_hole_rather_than_given_to_its_neighbour(
 
 
 def test_a_silence_block_past_the_last_label_is_counted_trailing():
-    assert count_silence_positions([(100.0, 120.0, "atmospheric")], [True],
-                                   10.0, 90.0) == SilenceBlocks(0, 0, 1)
+    assert count_silence_positions(
+        [(100.0, 120.0, "atmospheric")], [True], 10.0, 90.0
+    ) == SilenceBlocks(0, 0, 1)
 
 
 def test_a_silence_block_before_the_first_label_is_counted_leading():
-    assert count_silence_positions([(0.0, 5.0, "atmospheric")], [True],
-                                   10.0, 90.0) == SilenceBlocks(1, 0, 0)
+    assert count_silence_positions(
+        [(0.0, 5.0, "atmospheric")], [True], 10.0, 90.0
+    ) == SilenceBlocks(1, 0, 0)
 
 
 def test_a_silence_block_reaching_into_labeled_time_is_counted_interior():
-    assert count_silence_positions([(80.0, 120.0, "atmospheric")], [True],
-                                   10.0, 90.0) == SilenceBlocks(0, 1, 0)
+    assert count_silence_positions(
+        [(80.0, 120.0, "atmospheric")], [True], 10.0, 90.0
+    ) == SilenceBlocks(0, 1, 0)
 
 
 def test_a_track_with_no_labeled_region_has_no_interior_to_leak_into():
-    assert count_silence_positions([(0.0, 5.0, "atmospheric")], [True],
-                                   None, None) == SilenceBlocks(0, 0, 1)
+    assert count_silence_positions(
+        [(0.0, 5.0, "atmospheric")], [True], None, None
+    ) == SilenceBlocks(0, 0, 1)
 
 
 def test_classifier_blocks_are_never_counted_as_silence():
-    assert count_silence_positions([(80.0, 120.0, "DROP")], [False],
-                                   10.0, 90.0) == SilenceBlocks(0, 0, 0)
+    assert count_silence_positions([(80.0, 120.0, "DROP")], [False], 10.0, 90.0) == SilenceBlocks(
+        0, 0, 0
+    )
 
 
 def test_the_join_reports_where_the_blackout_fell():
@@ -1083,14 +1148,17 @@ def test_the_join_reports_where_the_blackout_fell():
     intents = [queue_block(10.0, "GROOVE", 20.0), silence_block(20.0, 60.0)]
     _rows, stats = join(sections, [beat(10.0)], intents, duration_sec=60.0)
 
-    assert (stats.silence_blocks_leading, stats.silence_blocks_interior,
-            stats.silence_blocks_trailing) == (0, 1, 0)
+    assert (
+        stats.silence_blocks_leading,
+        stats.silence_blocks_interior,
+        stats.silence_blocks_trailing,
+    ) == (0, 1, 0)
 
 
 def test_the_join_stamps_every_row_of_a_track_with_its_genre():
-    rows, _stats = join_track("0001.abc", "abc",
-                              report([beat(1.0), beat(2.0)]),
-                              [(0.0, 30.0, "drop")], "Techno")
+    rows, _stats = join_track(
+        "0001.abc", "abc", report([beat(1.0), beat(2.0)]), [(0.0, 30.0, "drop")], "Techno"
+    )
 
     assert [row["genre"] for row in rows] == ["Techno", "Techno"]
 
@@ -1106,13 +1174,15 @@ def test_genre_is_a_table_column():
 
 
 def test_the_table_takes_each_track_genre_from_the_annotation(tmp_path):
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
-        "0002.def": ("def", [(0.0, 30.0, "drop")], report([beat(2.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
+            "0002.def": ("def", [(0.0, 30.0, "drop")], report([beat(2.0)])),
+        },
+    )
 
-    build_table(tmp_path, rows, sections,
-                {"0001.abc": "Techno", "0002.def": "Trance"})
+    build_table(tmp_path, rows, sections, {"0001.abc": "Techno", "0002.def": "Trance"})
     table = read_table(tmp_path / TABLE_FILE)
 
     column = TABLE_HEADER.index("genre")
@@ -1120,9 +1190,12 @@ def test_the_table_takes_each_track_genre_from_the_annotation(tmp_path):
 
 
 def test_the_table_leaves_a_track_with_no_annotated_genre_empty(tmp_path):
-    rows, sections = write_corpus(tmp_path, {
-        "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
-    })
+    rows, sections = write_corpus(
+        tmp_path,
+        {
+            "0001.abc": ("abc", [(0.0, 30.0, "drop")], report([beat(1.0)])),
+        },
+    )
 
     build_table(tmp_path, rows, sections, {})
     table = read_table(tmp_path / TABLE_FILE)
@@ -1134,16 +1207,33 @@ def test_the_genre_lookup_follows_the_hand_label_precedence(tmp_path):
     annotations = tmp_path / "annotations"
     annotations.mkdir(parents=True)
     with open(annotations / "segments.json", "w", encoding="utf-8") as handle:
-        json.dump([{"key": "0001.abc", "id": "abc", "title": "A - B",
-                    "duration": 30.0, "genre": "Techno",
-                    "sections": [{"name": "drop", "start": 0.0, "end": 30.0}]}],
-                  handle)
-    (annotations / "abc.hand.json").write_text(json.dumps(
-        {"schema": 1, "source": "hand_label", "id": "abc", "title": "A - B",
-         "duration": 30.0, "genre": "Trance",
-         "sections": [{"name": "drop", "start": 0.0, "end": 30.0}]}),
-        encoding="utf-8")
+        json.dump(
+            [
+                {
+                    "key": "0001.abc",
+                    "id": "abc",
+                    "title": "A - B",
+                    "duration": 30.0,
+                    "genre": "Techno",
+                    "sections": [{"name": "drop", "start": 0.0, "end": 30.0}],
+                }
+            ],
+            handle,
+        )
+    (annotations / "abc.hand.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "source": "hand_label",
+                "id": "abc",
+                "title": "A - B",
+                "duration": 30.0,
+                "genre": "Trance",
+                "sections": [{"name": "drop", "start": 0.0, "end": 30.0}],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert load_genres_by_track(tmp_path) == {"0001.abc": "Trance"}
-    assert load_genres_by_track(tmp_path, include_hand=False) == {
-        "0001.abc": "Techno"}
+    assert load_genres_by_track(tmp_path, include_hand=False) == {"0001.abc": "Techno"}

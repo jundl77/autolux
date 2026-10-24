@@ -49,7 +49,7 @@ def test_no_sample_is_lost_or_repeated_across_the_hop_boundary():
         fed.append(buf)
         r.process(buf)
     seen = np.concatenate(beats.hops)
-    expected = np.concatenate(fed)[:len(seen)]
+    expected = np.concatenate(fed)[: len(seen)]
     assert np.array_equal(seen, expected)
 
 
@@ -149,11 +149,9 @@ def test_the_real_stack_streams_and_is_deterministic():
         r = MadmomRhythm(SR)
         beats = []
         for i in range(0, len(audio) - 256, 256):
-            beats.extend(r.process(audio[i:i + 256]).beats)
+            beats.extend(r.process(audio[i : i + 256]).beats)
         return beats
 
     first, second = run(), run()
     assert first == second
     assert first, 'expected beats on 20 s of real dance music'
-
-

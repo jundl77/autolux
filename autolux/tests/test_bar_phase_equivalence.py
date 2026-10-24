@@ -8,6 +8,7 @@ builds the offline reference out of ``phase_tracking``'s own functions plus a
 verbatim port of cc_fuse_score's emission builder, drives the online form in
 arrival order, and demands the identical committed position stream.
 """
+
 import sys
 from pathlib import Path
 
@@ -22,9 +23,17 @@ for extra in (REPO_ROOT / "training" / "phase_tracking",):
 import phase_tracking as pt  # noqa: E402
 
 from autolux.lib.analyser.bar_tracker import FPS, TrackerChunk  # noqa: E402
-from autolux.lib.engine.bar_phase import (AGG_HALFWIDTH, BETA, GAMMA,  # noqa: E402
-                                  GATE_T, LAG_BEATS, MAX_ADVANCE, SIGMA, ETA,
-                                  BarPhaseFusion)
+from autolux.lib.engine.bar_phase import (
+    AGG_HALFWIDTH,
+    BETA,
+    GAMMA,  # noqa: E402
+    GATE_T,
+    LAG_BEATS,
+    MAX_ADVANCE,
+    SIGMA,
+    ETA,
+    BarPhaseFusion,
+)
 
 STRIDE_FRAMES = 125
 MARGIN_FRAMES = 6
@@ -71,11 +80,11 @@ def offline_committed(beats, db_logit, avail_frame):
     p, avail_t = per_beat_votes(beats, db_logit, avail_frame, AGG_HALFWIDTH)
     emission = build_emission(beats, p, avail_t, GATE_T, BETA)
     ratios = pt.interval_ratios(beats, window=8)
-    log_transition = pt.advance_log_weights(ratios[1:], sigma=SIGMA, eta=ETA,
-                                            max_advance=MAX_ADVANCE)
+    log_transition = pt.advance_log_weights(
+        ratios[1:], sigma=SIGMA, eta=ETA, max_advance=MAX_ADVANCE
+    )
     log_start = np.log(np.asarray(pt.LIVE_START_PRIOR, dtype=np.float64))
-    decided = pt.fixed_lag_viterbi(log_transition, emission, log_start,
-                                   LAG_BEATS)
+    decided = pt.fixed_lag_viterbi(log_transition, emission, log_start, LAG_BEATS)
     base = np.arange(beats.size, dtype=np.int64) % 4
     committed, _ = pt.apply_forward_only(base, decided, LAG_BEATS)
     return committed
@@ -118,8 +127,7 @@ def make_session(seed, duration_sec=240.0, bpm=128.0, slip_every=40):
         safe = end - MARGIN_FRAMES
         if safe > prev_safe:
             avail_sec = end / FPS + 0.0264
-            chunks.append(TrackerChunk(prev_safe, safe,
-                                       logits[prev_safe:safe], avail_sec))
+            chunks.append(TrackerChunk(prev_safe, safe, logits[prev_safe:safe], avail_sec))
             avail_frame[prev_safe:safe] = avail_sec * FPS
             prev_safe = safe
         p += 1
@@ -132,8 +140,7 @@ class _FakeTracker:
 
 def online_committed(beats, chunks):
     fusion = BarPhaseFusion(_FakeTracker(), None)
-    events = ([("chunk", c.avail_sec, c) for c in chunks]
-              + [("beat", t, t) for t in beats])
+    events = [("chunk", c.avail_sec, c) for c in chunks] + [("beat", t, t) for t in beats]
     events.sort(key=lambda item: (item[1], item[0] == "beat"))
     out = []
     for kind, _, payload in events:
@@ -145,17 +152,14 @@ def online_committed(beats, chunks):
 
 
 @pytest.mark.parametrize("seed,slip_every", [(1, 0), (2, 40), (3, 25), (4, 60)])
-def test_the_online_fusion_commits_the_offline_references_stream(seed,
-                                                                 slip_every):
-    beats, logits, chunks, avail_frame, coverage = make_session(
-        seed, slip_every=slip_every)
+def test_the_online_fusion_commits_the_offline_references_stream(seed, slip_every):
+    beats, logits, chunks, avail_frame, coverage = make_session(seed, slip_every=slip_every)
     assert beats[-1] * FPS < coverage - FPS, "beats must end inside coverage"
-    expected = offline_committed(beats, logits[:coverage],
-                                 avail_frame[:coverage])
+    expected = offline_committed(beats, logits[:coverage], avail_frame[:coverage])
     got = online_committed(beats, chunks)
     assert np.array_equal(got, expected), (
-        f"first disagreement at beat "
-        f"{int(np.flatnonzero(got != expected)[0])} of {beats.size}")
+        f"first disagreement at beat {int(np.flatnonzero(got != expected)[0])} of {beats.size}"
+    )
 
 
 def test_the_fusion_with_no_evidence_converges_to_the_anchor1_count():
@@ -174,8 +178,7 @@ def test_a_dead_tracker_freezes_the_offset_and_keeps_counting():
     beats, logits, chunks, _, _ = make_session(2, slip_every=40)
     tracker = _FakeTracker()
     fusion = BarPhaseFusion(tracker, None)
-    events = ([("chunk", c.avail_sec, c) for c in chunks]
-              + [("beat", t, t) for t in beats])
+    events = [("chunk", c.avail_sec, c) for c in chunks] + [("beat", t, t) for t in beats]
     events.sort(key=lambda item: (item[1], item[0] == "beat"))
     out = []
     for k, (kind, _, payload) in enumerate(events):
@@ -185,7 +188,7 @@ def test_a_dead_tracker_freezes_the_offset_and_keeps_counting():
             fusion.push_chunk(payload)
         else:
             out.append(fusion.push_beat(payload))
-    tail = out[len(out) // 2:]
+    tail = out[len(out) // 2 :]
     steps = {(b - a) % 4 for a, b in zip(tail, tail[1:])}
     assert steps == {1}, "after the tracker died every advance must be +1"
 

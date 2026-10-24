@@ -33,11 +33,11 @@ public:
 	UdpServer(const LogModule&, EventLoop& loop, IUdpServerHandler&, size_t recvBufferSize);
 	~UdpServer();
 
-	void Start(uint32_t listenPort, PollingMode, const std::string& address="0.0.0.0", bool reuse=false);
+	void Start(uint32_t listenPort, PollingMode, const std::string& address = "0.0.0.0", bool reuse = false);
 	uint16_t ListenPort() const;
 
 private:
-	void StartServer(uint32_t listenPort,const std::string& address,bool reuse);
+	void StartServer(uint32_t listenPort, const std::string& address, bool reuse);
 	void PollSocket();
 	void ReportMetrics();
 
@@ -47,7 +47,7 @@ private:
 	IUdpServerHandler& mHandler;
 
 	WSADATA mWsaData;
-	SOCKET mSocket=INVALID_SOCKET;
+	SOCKET mSocket = INVALID_SOCKET;
 	sockaddr_in mClientAddr;
 	std::vector<char> mRecvBuffer;
 	bool mRunning = false;
@@ -58,4 +58,4 @@ private:
 	ScopedHandler mMetricsHandle;
 };
 
-}
+} // namespace Radius

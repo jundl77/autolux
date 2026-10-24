@@ -76,7 +76,11 @@ def test_the_conv_front_end_is_the_section_models_own():
 
     assert freq == MEL_BANDS // 8
     assert [type(layer).__name__ for layer in blocks[:4]] == [
-        "Conv2d", "BatchNorm2d", "GELU", "MaxPool2d"]
+        "Conv2d",
+        "BatchNorm2d",
+        "GELU",
+        "MaxPool2d",
+    ]
     keep_time_halve_freq = (1, 2)
     assert blocks[3].kernel_size == keep_time_halve_freq
 
@@ -84,25 +88,42 @@ def test_the_conv_front_end_is_the_section_models_own():
 # Frozen 2026-07-27: every trained v1/v2 checkpoint on disk is keyed by exactly this list.
 SECTION_STATE_DICT_KEYS = [
     "conv.0.weight",
-    "conv.1.weight", "conv.1.bias", "conv.1.running_mean", "conv.1.running_var",
+    "conv.1.weight",
+    "conv.1.bias",
+    "conv.1.running_mean",
+    "conv.1.running_var",
     "conv.4.weight",
-    "conv.5.weight", "conv.5.bias", "conv.5.running_mean", "conv.5.running_var",
+    "conv.5.weight",
+    "conv.5.bias",
+    "conv.5.running_mean",
+    "conv.5.running_var",
     "conv.8.weight",
-    "conv.9.weight", "conv.9.bias", "conv.9.running_mean", "conv.9.running_var",
+    "conv.9.weight",
+    "conv.9.bias",
+    "conv.9.running_mean",
+    "conv.9.running_var",
     "temporal.0.weight",
-    "temporal.1.weight", "temporal.1.bias",
-    "temporal.1.running_mean", "temporal.1.running_var",
-    "rnn.weight_ih_l0", "rnn.weight_hh_l0", "rnn.bias_ih_l0", "rnn.bias_hh_l0",
-    "rnn.weight_ih_l0_reverse", "rnn.weight_hh_l0_reverse",
-    "rnn.bias_ih_l0_reverse", "rnn.bias_hh_l0_reverse",
-    "label_head.weight", "label_head.bias",
-    "boundary_head.weight", "boundary_head.bias",
+    "temporal.1.weight",
+    "temporal.1.bias",
+    "temporal.1.running_mean",
+    "temporal.1.running_var",
+    "rnn.weight_ih_l0",
+    "rnn.weight_hh_l0",
+    "rnn.bias_ih_l0",
+    "rnn.bias_hh_l0",
+    "rnn.weight_ih_l0_reverse",
+    "rnn.weight_hh_l0_reverse",
+    "rnn.bias_ih_l0_reverse",
+    "rnn.bias_hh_l0_reverse",
+    "label_head.weight",
+    "label_head.bias",
+    "boundary_head.weight",
+    "boundary_head.bias",
 ]
 
 
 def test_section_state_dict_keys_are_frozen():
-    keys = [key for key in SectionCRNN().state_dict()
-            if not key.endswith("num_batches_tracked")]
+    keys = [key for key in SectionCRNN().state_dict() if not key.endswith("num_batches_tracked")]
 
     assert keys == SECTION_STATE_DICT_KEYS
 
@@ -127,24 +148,31 @@ def test_forward_rejects_a_mis_shaped_batch():
 def test_arch_names_every_shape_deciding_argument():
     arch = _model().arch()
 
-    assert arch == {"n_mels": 40, "conv_channels": [32, 64, 64],
-                    "conv1d_channels": 64, "rnn_hidden": 96, "rnn_layers": 1}
+    assert arch == {
+        "n_mels": 40,
+        "conv_channels": [32, 64, 64],
+        "conv1d_channels": 64,
+        "rnn_hidden": 96,
+        "rnn_layers": 1,
+    }
 
 
-@pytest.mark.parametrize("changed", [
-    {"rnn_hidden": 64},
-    {"rnn_layers": 2},
-    {"conv1d_channels": 96},
-    {"conv_channels": (32, 64, 32)},
-])
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"rnn_hidden": 64},
+        {"rnn_layers": 2},
+        {"conv1d_channels": 96},
+        {"conv_channels": (32, 64, 32)},
+    ],
+)
 def test_arch_distinguishes_a_checkpoint_that_must_not_be_loaded(changed):
     assert DownbeatCRNN(**changed).arch() != DownbeatCRNN().arch()
 
 
 def test_eval_forward_is_deterministic():
     model = _model()
-    mel = torch.randn(2, WINDOW_FRAMES, MEL_BANDS,
-                      generator=torch.Generator().manual_seed(7))
+    mel = torch.randn(2, WINDOW_FRAMES, MEL_BANDS, generator=torch.Generator().manual_seed(7))
 
     assert torch.equal(model(mel), model(mel))
 
@@ -153,8 +181,11 @@ def test_the_backward_pass_reaches_every_parameter_with_a_finite_gradient():
     model = DownbeatCRNN().train()
     model(torch.randn(2, WINDOW_FRAMES, MEL_BANDS)).square().mean().backward()
 
-    missing = [name for name, param in model.named_parameters()
-               if param.grad is None or not torch.isfinite(param.grad).all()]
+    missing = [
+        name
+        for name, param in model.named_parameters()
+        if param.grad is None or not torch.isfinite(param.grad).all()
+    ]
     assert missing == []
 
 
@@ -173,8 +204,7 @@ def test_bidirectional_context_actually_reaches_backwards():
 def _targets(downbeat, mask=None) -> DownbeatTargets:
     downbeat = np.asarray(downbeat, dtype=np.float32)
     mask = np.ones(len(downbeat), dtype=bool) if mask is None else np.asarray(mask)
-    return DownbeatTargets(downbeat, mask, np.zeros(0), np.zeros(0, np.int8),
-                           np.zeros(0, np.int64))
+    return DownbeatTargets(downbeat, mask, np.zeros(0), np.zeros(0, np.int8), np.zeros(0, np.int64))
 
 
 def test_stats_count_only_supervised_mass():
@@ -342,8 +372,7 @@ def test_deweighting_lowers_an_inflated_head():
 
 
 def test_frame_zero_is_stamped_one_frame_in_not_at_zero():
-    assert frame_times([0, 1, 2]) == pytest.approx(
-        [FRAME_SEC, 2 * FRAME_SEC, 3 * FRAME_SEC])
+    assert frame_times([0, 1, 2]) == pytest.approx([FRAME_SEC, 2 * FRAME_SEC, 3 * FRAME_SEC])
 
 
 class _Slots:
@@ -406,12 +435,18 @@ def _target_as_mel(loader):
 def test_evaluate_scores_a_perfect_head_at_f1_one(tmp_path):
     data_dir, ids = with_grids(tmp_path, count=2, frames=1200, bars=60)
     dataset = DownbeatWindowDataset(data_dir, ids, augment=False)
-    loader = build_loader(dataset, batch_size=8, shuffle=False, num_workers=0,
-                          pin_memory=False, generator=None)
+    loader = build_loader(
+        dataset, batch_size=8, shuffle=False, num_workers=0, pin_memory=False, generator=None
+    )
 
-    metrics = evaluate(_Oracle(), _target_as_mel(loader), dataset,
-                       torch.device("cpu"), pos_weight=9.0,
-                       min_distance=max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))))
+    metrics = evaluate(
+        _Oracle(),
+        _target_as_mel(loader),
+        dataset,
+        torch.device("cpu"),
+        pos_weight=9.0,
+        min_distance=max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))),
+    )
 
     assert metrics["f1"] == pytest.approx(1.0)
     assert metrics["downbeats"] > 20
@@ -428,12 +463,19 @@ def test_evaluate_scores_a_dead_head_at_f1_zero(tmp_path):
         def forward(self, mel):
             return torch.zeros(mel.shape[0], mel.shape[1])
 
-    loader = build_loader(dataset, batch_size=8, shuffle=False, num_workers=0,
-                          pin_memory=False, generator=None)
-    metrics = evaluate(Flat(), loader, dataset, torch.device("cpu"), pos_weight=9.0,
-                       min_distance=max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))))
+    loader = build_loader(
+        dataset, batch_size=8, shuffle=False, num_workers=0, pin_memory=False, generator=None
+    )
+    metrics = evaluate(
+        Flat(),
+        loader,
+        dataset,
+        torch.device("cpu"),
+        pos_weight=9.0,
+        min_distance=max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))),
+    )
 
     assert metrics["f1"] < 0.05
     assert metrics["positive_rate"] == pytest.approx(
-        float((dataset.targets_for(ids[0]).downbeat >= POSITIVE_THRESHOLD).mean()),
-        abs=0.02)
+        float((dataset.targets_for(ids[0]).downbeat >= POSITIVE_THRESHOLD).mean()), abs=0.02
+    )

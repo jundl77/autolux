@@ -23,6 +23,7 @@ clears it.  Checks, per overlay span:
 Aggregates the masked frame count against the overlay's own seconds and
 writes CAMP/mask_proof.json.  Any violation exits nonzero and the arm holds.
 """
+
 import copy
 import ctypes
 import datetime
@@ -57,8 +58,13 @@ import numpy as np  # noqa: E402
 from training.nn.ceiling import demote as DD  # noqa: E402
 from training.nn.ceiling import mask as MK  # noqa: E402
 from training.nn.dataset import (  # noqa: E402
-    FEATURES_DIR, FRAME_SEC, LABEL_POOL, load_label_space, sidecar_shape,
-    track_targets)
+    FEATURES_DIR,
+    FRAME_SEC,
+    LABEL_POOL,
+    load_label_space,
+    sidecar_shape,
+    track_targets,
+)
 from training.nn.infer import usable_frames  # noqa: E402
 
 FEATURE_DIR = DATA / "features_stream" / "MERT-v1-330M_L6-22_F3_hop1"
@@ -80,19 +86,25 @@ def main() -> int:
     sections = DD.merged_sections(DATA)
     pre_sections = copy.deepcopy(sections)
     pre_by_id, stats = MK.apply_supervision_mask(
-        CAMP / "supervision_mask_overlay.json", sections,
-        train_ids=splits["train"], val_ids=splits["val"], data_dir=DATA)
+        CAMP / "supervision_mask_overlay.json",
+        sections,
+        train_ids=splits["train"],
+        val_ids=splits["val"],
+        data_dir=DATA,
+    )
     overlay = MK.load_overlay(CAMP / "supervision_mask_overlay.json")
     print(f"applied: {stats}")
 
     for track_id, rows in pre_by_id.items():
-        assert list(rows) == list(map(tuple, pre_sections[track_id])), \
+        assert list(rows) == list(map(tuple, pre_sections[track_id])), (
             f"{track_id}: pre_by_id is not the pre-mask section list"
+        )
 
     spans_by_id: dict = {}
     for entry in overlay["sections"]:
         spans_by_id.setdefault(str(entry["id"]), []).append(
-            (float(entry["start"]), float(entry["end"]), str(entry["label"])))
+            (float(entry["start"]), float(entry["end"]), str(entry["label"]))
+        )
 
     masked_frames = expected_frames = 0
     cells_masked_out = 0
@@ -109,41 +121,39 @@ def main() -> int:
             in_any_span |= inside
             want = class_index[label]
             if not np.all(pre.label_frame[inside] == want):
-                failures.append(f"{track_id} [{start},{end}]: pre-mask frames "
-                                f"are not all {label}")
+                failures.append(f"{track_id} [{start},{end}]: pre-mask frames are not all {label}")
             if not np.all(post.label_frame[inside] == -1):
-                failures.append(f"{track_id} [{start},{end}]: post-mask frames "
-                                f"are not all -1")
+                failures.append(f"{track_id} [{start},{end}]: post-mask frames are not all -1")
             masked_frames += int(np.sum(post.label_frame[inside] == -1))
             expected_frames += int(np.sum(inside))
 
         outside = ~in_any_span
-        if not np.array_equal(pre.label_frame[outside],
-                              post.label_frame[outside]):
+        if not np.array_equal(pre.label_frame[outside], post.label_frame[outside]):
             failures.append(f"{track_id}: labels OUTSIDE the spans moved")
 
         usable = (n_frames // LABEL_POOL) * LABEL_POOL
         cell_all_in = in_any_span[:usable].reshape(-1, LABEL_POOL).all(axis=1)
         if post.label_pooled_mask[cell_all_in].any():
-            failures.append(f"{track_id}: a pooled cell fully inside a masked "
-                            f"span is still supervised")
-        cells_masked_out += int(np.sum(pre.label_pooled_mask[cell_all_in]
-                                       & ~post.label_pooled_mask[cell_all_in]))
+            failures.append(
+                f"{track_id}: a pooled cell fully inside a masked span is still supervised"
+            )
+        cells_masked_out += int(
+            np.sum(pre.label_pooled_mask[cell_all_in] & ~post.label_pooled_mask[cell_all_in])
+        )
 
         # The boundary channel the dataset trains on: post targets with the
         # pre-mask override -- FullTrackDataset._targets verbatim.
         gold = track_targets(pre_by_id[track_id], n_frames, classes=classes)
-        final = post._replace(boundary=gold.boundary,
-                              boundary_mask=gold.boundary_mask)
-        if not (np.array_equal(final.boundary, pre.boundary)
-                and np.array_equal(final.boundary_mask, pre.boundary_mask)):
-            failures.append(f"{track_id}: trained boundary channel is not the "
-                            f"pre-mask gold")
+        final = post._replace(boundary=gold.boundary, boundary_mask=gold.boundary_mask)
+        if not (
+            np.array_equal(final.boundary, pre.boundary)
+            and np.array_equal(final.boundary_mask, pre.boundary_mask)
+        ):
+            failures.append(f"{track_id}: trained boundary channel is not the pre-mask gold")
         if n % 50 == 0:
             print(f"  checked {n}/{len(spans_by_id)} tracks", flush=True)
 
-    overlay_sec = sum(float(e["end"]) - float(e["start"])
-                      for e in overlay["sections"])
+    overlay_sec = sum(float(e["end"]) - float(e["start"]) for e in overlay["sections"])
     masked_sec = masked_frames * FRAME_SEC
     proof = {
         "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -158,19 +168,20 @@ def main() -> int:
         "masked_seconds_at_frame_rate": round(masked_sec, 2),
         "overlay_seconds": round(overlay_sec, 2),
         "boundary_channel": "array-equal to pre-mask gold on every masked "
-                            "track (post targets + pre-mask override, the "
-                            "dataset's own _targets composition)",
+        "track (post targets + pre-mask override, the "
+        "dataset's own _targets composition)",
         "failures": failures,
         "verdict": "MASK PROVEN: masked spans contribute zero label-loss "
-                   "terms; everything else is byte-identical"
-                   if not failures and masked_frames == expected_frames
-                   else "MASK NOT PROVEN",
+        "terms; everything else is byte-identical"
+        if not failures and masked_frames == expected_frames
+        else "MASK NOT PROVEN",
     }
-    (CAMP / "mask_proof.json").write_text(json.dumps(proof, indent=2) + "\n",
-                                          encoding="utf-8")
-    print(f"masked frames: {masked_frames} (geometry expects "
-          f"{expected_frames}) = {masked_sec:.0f} s vs overlay "
-          f"{overlay_sec:.0f} s")
+    (CAMP / "mask_proof.json").write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"masked frames: {masked_frames} (geometry expects "
+        f"{expected_frames}) = {masked_sec:.0f} s vs overlay "
+        f"{overlay_sec:.0f} s"
+    )
     print(f"pooled cells with supervision removed: {cells_masked_out}")
     print(proof["verdict"])
     if failures:

@@ -1,4 +1,5 @@
 """Bar-grid supervision: per-frame downbeat targets and per-beat phase labels."""
+
 from __future__ import annotations
 
 import argparse
@@ -70,19 +71,20 @@ def parse_beat_grid(rows, source: str = "<memory>") -> BeatGrid:
 
     if (times < 0.0).any():
         index = int(np.argmax(times < 0.0))
-        raise RuntimeError(
-            f"{source}: negative beat time {times[index]!r} at beat {index}")
+        raise RuntimeError(f"{source}: negative beat time {times[index]!r} at beat {index}")
     if len(times) > 1 and (np.diff(times) <= 0.0).any():
         index = int(np.argmax(np.diff(times) <= 0.0))
         raise RuntimeError(
             f"{source}: beat times must be strictly increasing -- beat {index} at "
-            f"{times[index]!r} is followed by {times[index + 1]!r}")
+            f"{times[index]!r} is followed by {times[index + 1]!r}"
+        )
     outside = (phases < 1) | (phases > BEATS_PER_BAR)
     if outside.any():
         index = int(np.argmax(outside))
         raise RuntimeError(
             f"{source}: beat {index} has downbeat phase {phases[index]}, expected "
-            f"1..{BEATS_PER_BAR}")
+            f"1..{BEATS_PER_BAR}"
+        )
 
     expected = phases[:-1] % BEATS_PER_BAR + 1
     breaks = np.flatnonzero(phases[1:] != expected).astype(np.int64)
@@ -98,7 +100,8 @@ def grid_anomalies(grid: BeatGrid) -> list:
             reasons.append(
                 f"{fraction:.0%} of beats break the 1..{BEATS_PER_BAR} cycle "
                 f"({len(grid.phase_breaks)} of {beats - 1}) -- the phase column "
-                f"does not describe bars")
+                f"does not describe bars"
+            )
 
     downbeats = grid.downbeat_times
     beat_sec = grid.median_beat_sec
@@ -109,7 +112,8 @@ def grid_anomalies(grid: BeatGrid) -> list:
             reasons.append(
                 f"median bar is {bar_sec:.3f}s against {BEATS_PER_BAR} beats at "
                 f"{beat_sec:.3f}s (ratio {ratio:.2f}) -- the downbeats are not "
-                f"one per bar")
+                f"one per bar"
+            )
     return reasons
 
 
@@ -122,10 +126,10 @@ def load_beat_grid(path) -> BeatGrid:
     except (KeyError, TypeError) as exc:
         raise RuntimeError(
             f"{path}: cannot read the beat grid -- expected the 'time', 'downbeat' "
-            f"and 'section' column headers ({exc!r})") from exc
+            f"and 'section' column headers ({exc!r})"
+        ) from exc
     except ValueError as exc:
-        raise RuntimeError(
-            f"{path}: a beat row is not a number ({exc})") from exc
+        raise RuntimeError(f"{path}: a beat row is not a number ({exc})") from exc
     except OSError as exc:  # pragma: no cover
         raise RuntimeError(f"{path}: cannot read the beat grid ({exc})") from exc
     return parse_beat_grid(rows, source=str(path))
@@ -156,10 +160,13 @@ class DownbeatTargets(NamedTuple):
     beat_frame: np.ndarray
 
 
-def track_downbeat_targets(grid: BeatGrid, n_frames: int,
-                           frame_sec: float = FRAME_SEC,
-                           t0: float | None = None,
-                           sigma_sec: float = DOWNBEAT_SIGMA_SEC) -> DownbeatTargets:
+def track_downbeat_targets(
+    grid: BeatGrid,
+    n_frames: int,
+    frame_sec: float = FRAME_SEC,
+    t0: float | None = None,
+    sigma_sec: float = DOWNBEAT_SIGMA_SEC,
+) -> DownbeatTargets:
     t0 = frame_sec if t0 is None else t0
     times = t0 + np.arange(n_frames, dtype=np.float64) * frame_sec
 
@@ -183,8 +190,7 @@ def track_downbeat_targets(grid: BeatGrid, n_frames: int,
     return DownbeatTargets(target, mask, grid.times, grid.phases, frames)
 
 
-def _distance_to_nearest_downbeat(times: np.ndarray,
-                                  downbeats: np.ndarray) -> np.ndarray:
+def _distance_to_nearest_downbeat(times: np.ndarray, downbeats: np.ndarray) -> np.ndarray:
     right = np.searchsorted(downbeats, times)
     before = downbeats[np.clip(right - 1, 0, downbeats.size - 1)]
     after = downbeats[np.clip(right, 0, downbeats.size - 1)]
@@ -196,23 +202,34 @@ def _grid_holes(grid: BeatGrid) -> list:
         return []
     gaps = np.diff(grid.times)
     limit = GAP_FACTOR * float(np.median(gaps))
-    return [(float(grid.times[index]), float(grid.times[index + 1]))
-            for index in np.flatnonzero(gaps > limit)]
+    return [
+        (float(grid.times[index]), float(grid.times[index + 1]))
+        for index in np.flatnonzero(gaps > limit)
+    ]
 
 
 class DownbeatWindowDataset(WindowDataset):
-    def __init__(self, data_dir, youtube_ids, *, grids_by_youtube_id: dict | None = None,
-                 sections_by_youtube_id: dict | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        data_dir,
+        youtube_ids,
+        *,
+        grids_by_youtube_id: dict | None = None,
+        sections_by_youtube_id: dict | None = None,
+        **kwargs,
+    ) -> None:
         data_dir = Path(data_dir)
         records: dict = {}
         if sections_by_youtube_id is None or grids_by_youtube_id is None:
             records = {str(track.get("id")): track for track in load_tracks(data_dir)}
         if sections_by_youtube_id is None:
-            sections_by_youtube_id = {youtube_id: parse_sections(track)
-                                      for youtube_id, track in records.items()}
+            sections_by_youtube_id = {
+                youtube_id: parse_sections(track) for youtube_id, track in records.items()
+            }
 
-        super().__init__(data_dir, youtube_ids,
-                         sections_by_youtube_id=sections_by_youtube_id, **kwargs)
+        super().__init__(
+            data_dir, youtube_ids, sections_by_youtube_id=sections_by_youtube_id, **kwargs
+        )
 
         self._grids: dict = dict(grids_by_youtube_id or {})
         self._by_id: dict = {track.youtube_id: track for track in self._tracks}
@@ -224,27 +241,31 @@ class DownbeatWindowDataset(WindowDataset):
                 if track is None and not records:
                     raise RuntimeError(
                         f"no beat grid supplied for {youtube_id}: grids were "
-                        f"injected, so the corpus annotations were never read")
+                        f"injected, so the corpus annotations were never read"
+                    )
                 path = beat_csv_path(data_dir, track) if track is not None else None
                 if path is None:
                     raise RuntimeError(
                         f"no beat grid for {youtube_id}: it has no record in "
-                        f"{data_dir}'s annotations, so its grid cannot be located")
+                        f"{data_dir}'s annotations, so its grid cannot be located"
+                    )
                 if not path.exists():
                     raise RuntimeError(
                         f"missing beat grid for {youtube_id}: {path} -- it would "
-                        f"train on nothing but masked frames")
+                        f"train on nothing but masked frames"
+                    )
                 grid = load_beat_grid(path)
                 self._grids[youtube_id] = grid
             if grid.bars < 2:
                 raise RuntimeError(
-                    f"{youtube_id}: beat grid has {grid.bars} downbeat(s) -- "
-                    f"nothing to supervise")
+                    f"{youtube_id}: beat grid has {grid.bars} downbeat(s) -- nothing to supervise"
+                )
             anomalies = grid_anomalies(grid)
             if anomalies:
                 raise RuntimeError(
                     f"{youtube_id}: beat grid is structurally valid but not "
-                    f"believable -- " + "; ".join(anomalies))
+                    f"believable -- " + "; ".join(anomalies)
+                )
 
     def window(self, index: int, offset: int, gain_db: float = 0.0) -> tuple:
         targets = self.targets_for(self.track_id_of(index))
@@ -261,21 +282,22 @@ class DownbeatWindowDataset(WindowDataset):
         targets = self._downbeat_cache.get(youtube_id)
         if targets is None:
             track = self._by_id[youtube_id]
-            targets = track_downbeat_targets(self._grids[youtube_id], track.usable,
-                                             FRAME_SEC, FRAME_SEC)
+            targets = track_downbeat_targets(
+                self._grids[youtube_id], track.usable, FRAME_SEC, FRAME_SEC
+            )
             self._downbeat_cache[youtube_id] = targets
         return targets
 
 
-def alignment_profile(mel: np.ndarray, targets: DownbeatTargets, *,
-                      bands: int = 4, shifts=range(-4, 5)) -> dict:
+def alignment_profile(
+    mel: np.ndarray, targets: DownbeatTargets, *, bands: int = 4, shifts=range(-4, 5)
+) -> dict:
     energy = mel[:, :bands].mean(axis=1)
     flux = np.maximum(np.diff(energy, prepend=energy[:1]), 0.0)
     base = float(flux.mean()) or 1.0
 
     profile: dict = {}
-    for name, wanted in (("downbeat", targets.beat_phase == 1),
-                         ("beat", targets.beat_phase != 1)):
+    for name, wanted in (("downbeat", targets.beat_phase == 1), ("beat", targets.beat_phase != 1)):
         frames = targets.beat_frame[wanted]
         frames = frames[frames >= 0]
         lifts = {}
@@ -311,37 +333,42 @@ def validate_tracks(data_dir, youtube_ids) -> list:
         clamped = targets.beat_time < FRAME_SEC / 2.0
         on_grid = (targets.beat_frame >= 0) & ~clamped
         offsets = stamps[on_grid] - targets.beat_time[on_grid]
-        rows.append({
-            "youtube_id": youtube_id,
-            "beats": len(grid.times),
-            "bars": grid.bars,
-            "expected_bars": round(len(grid.times) / BEATS_PER_BAR, 2),
-            "phase_breaks": int(len(grid.phase_breaks)),
-            "bpm": round(60.0 / beat_sec, 1) if beat_sec else 0.0,
-            "first_beat": round(float(grid.times[0]), 3),
-            "last_beat": round(float(grid.times[-1]), 2),
-            "frames": int(n_frames),
-            "masked_pct": round(100.0 * float((~targets.mask).mean()), 2),
-            "holes": len(_grid_holes(grid)),
-            "peak_frames": int(np.count_nonzero(targets.downbeat > 0.85)),
-            "target_mean": round(float(targets.downbeat.mean()), 5),
-            "beats_past_end": int(np.count_nonzero(targets.beat_frame < 0)),
-            "beats_clamped_leading": int(np.count_nonzero(clamped)),
-            "anomalies": grid_anomalies(grid),
-            "stamp_offset_ms": round(float(offsets.mean()) * 1000.0, 2),
-            "stamp_offset_max_ms": round(float(np.abs(offsets).max()) * 1000.0, 2),
-            "align_peak_shift": max(profile["downbeat"], key=profile["downbeat"].get),
-            "align_control_shift": max(profile["beat"], key=profile["beat"].get),
-            "align_profile": {name: {k: round(v, 2) for k, v in lifts.items()}
-                              for name, lifts in profile.items()},
-        })
+        rows.append(
+            {
+                "youtube_id": youtube_id,
+                "beats": len(grid.times),
+                "bars": grid.bars,
+                "expected_bars": round(len(grid.times) / BEATS_PER_BAR, 2),
+                "phase_breaks": int(len(grid.phase_breaks)),
+                "bpm": round(60.0 / beat_sec, 1) if beat_sec else 0.0,
+                "first_beat": round(float(grid.times[0]), 3),
+                "last_beat": round(float(grid.times[-1]), 2),
+                "frames": int(n_frames),
+                "masked_pct": round(100.0 * float((~targets.mask).mean()), 2),
+                "holes": len(_grid_holes(grid)),
+                "peak_frames": int(np.count_nonzero(targets.downbeat > 0.85)),
+                "target_mean": round(float(targets.downbeat.mean()), 5),
+                "beats_past_end": int(np.count_nonzero(targets.beat_frame < 0)),
+                "beats_clamped_leading": int(np.count_nonzero(clamped)),
+                "anomalies": grid_anomalies(grid),
+                "stamp_offset_ms": round(float(offsets.mean()) * 1000.0, 2),
+                "stamp_offset_max_ms": round(float(np.abs(offsets).max()) * 1000.0, 2),
+                "align_peak_shift": max(profile["downbeat"], key=profile["downbeat"].get),
+                "align_control_shift": max(profile["beat"], key=profile["beat"].get),
+                "align_profile": {
+                    name: {k: round(v, 2) for k, v in lifts.items()}
+                    for name, lifts in profile.items()
+                },
+            }
+        )
     return rows
 
 
 def format_report(rows: list) -> str:
-    lines = ["youtube_id    beats  bars  bars/4  brk    bpm  mask%  holes  peaks "
-             " align  ctrl  stamp_ms",
-             "-" * 88]
+    lines = [
+        "youtube_id    beats  bars  bars/4  brk    bpm  mask%  holes  peaks  align  ctrl  stamp_ms",
+        "-" * 88,
+    ]
     for row in rows:
         if "error" in row:
             lines.append(f"{row['youtube_id']:<12}  {row['error']}")
@@ -351,7 +378,8 @@ def format_report(rows: list) -> str:
             f"{row['expected_bars']:>7} {row['phase_breaks']:>4} {row['bpm']:>6} "
             f"{row['masked_pct']:>6} {row['holes']:>6} {row['peak_frames']:>6} "
             f"{row['align_peak_shift']:>+6} {row['align_control_shift']:>+5} "
-            f"{row['stamp_offset_ms']:>+9.2f}")
+            f"{row['stamp_offset_ms']:>+9.2f}"
+        )
         for reason in row["anomalies"]:
             lines.append(f"{'':<12}  ANOMALY: {reason}")
     return "\n".join(lines)
@@ -360,12 +388,18 @@ def format_report(rows: list) -> str:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     from build_training_table import default_data_dir
+
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
     parser.add_argument("--split", default="train")
-    parser.add_argument("--tracks", type=int, default=3,
-                        help="how many tracks of the split to validate")
-    parser.add_argument("--ids", nargs="*", default=None,
-                        help="validate these youtube ids instead of the split's first")
+    parser.add_argument(
+        "--tracks", type=int, default=3, help="how many tracks of the split to validate"
+    )
+    parser.add_argument(
+        "--ids",
+        nargs="*",
+        default=None,
+        help="validate these youtube ids instead of the split's first",
+    )
     return parser
 
 
@@ -375,7 +409,8 @@ def main(argv: list | None = None) -> int:
         ids = [str(i) for i in args.ids]
     else:
         from .priors import split_ids
-        ids = split_ids(args.data_dir, args.split)[:args.tracks]
+
+        ids = split_ids(args.data_dir, args.split)[: args.tracks]
     rows = validate_tracks(args.data_dir, ids)
     print(format_report(rows))
     for row in rows:

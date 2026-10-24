@@ -8,8 +8,7 @@ namespace Radius {
 
 void AudioDelay::Reset(double seconds, int sampleRate, int bytesPerFrame)
 {
-	if (!std::isfinite(seconds) || seconds < 0 || seconds > 120 ||
-		sampleRate <= 0 || bytesPerFrame <= 0)
+	if (!std::isfinite(seconds) || seconds < 0 || seconds > 120 || sampleRate <= 0 || bytesPerFrame <= 0)
 		throw std::invalid_argument("invalid audio delay or frame geometry (delay must be 0..120 seconds)");
 
 	mBytesPerFrame = bytesPerFrame;
@@ -34,4 +33,4 @@ void AudioDelay::Process(char* data, size_t size)
 	}
 }
 
-}
+} // namespace Radius

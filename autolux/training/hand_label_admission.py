@@ -21,8 +21,7 @@ import sys
 from pathlib import Path
 
 _TRAINING_DIR = Path(__file__).resolve().parent
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform")):
+for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR), str(_TRAINING_DIR / "raveform")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -85,12 +84,15 @@ def section_of(spans: list, t: float) -> str:
 
 def beat_rows(beats, sections: list) -> list:
     spans = sorted(
-        ((float(section["start"]), float(section["end"]), str(section["name"]))
-         for section in sections),
+        (
+            (float(section["start"]), float(section["end"]), str(section["name"]))
+            for section in sections
+        ),
         key=lambda span: span[0],
     )
-    return [(float(time), int(position), section_of(spans, float(time)))
-            for time, position in beats]
+    return [
+        (float(time), int(position), section_of(spans, float(time))) for time, position in beats
+    ]
 
 
 def _time_field(value: float) -> str:
@@ -112,23 +114,26 @@ def _write_csv(path: Path, header: tuple, rows: list) -> None:
 
 
 def write_beat_csv(path: Path, rows: list) -> None:
-    _write_csv(path, BEAT_CSV_HEADER,
-               [(_time_field(time), position, section)
-                for time, position, section in rows])
+    _write_csv(
+        path,
+        BEAT_CSV_HEADER,
+        [(_time_field(time), position, section) for time, position, section in rows],
+    )
 
 
 def write_hand_grid(path: Path, rows: list) -> None:
-    _write_csv(path, HAND_GRID_HEADER,
-               [(_time_field(time), 1 if position == 1 else 0)
-                for time, position, _section in rows])
+    _write_csv(
+        path,
+        HAND_GRID_HEADER,
+        [(_time_field(time), 1 if position == 1 else 0) for time, position, _section in rows],
+    )
 
 
 def detect_beats(audio: Path):
-    from madmom.features.downbeats import (DBNDownBeatTrackingProcessor,
-                                           RNNDownBeatProcessor)
+    from madmom.features.downbeats import DBNDownBeatTrackingProcessor, RNNDownBeatProcessor
+
     activations = RNNDownBeatProcessor()(str(audio))
-    return DBNDownBeatTrackingProcessor(
-        beats_per_bar=[BEATS_PER_BAR], fps=DBN_FPS)(activations)
+    return DBNDownBeatTrackingProcessor(beats_per_bar=[BEATS_PER_BAR], fps=DBN_FPS)(activations)
 
 
 def _duration(text: str) -> float | None:
@@ -142,31 +147,38 @@ def load_clean_results(data_dir: Path) -> list:
     with open(path, "r", encoding="utf-8", newline="") as handle:
         return [
             gate.CheckResult(
-                row["track_id"], row["youtube_id"], row["mp3_path"],
+                row["track_id"],
+                row["youtube_id"],
+                row["mp3_path"],
                 _duration(row["ffprobe_duration_sec"]),
                 _duration(row["decoded_duration_sec"]),
                 _duration(row["annotation_duration_sec"]),
-                row["status"], row["detail"], row.get("genre") or "",
+                row["status"],
+                row["detail"],
+                row.get("genre") or "",
             )
             for row in csv.DictReader(handle)
         ]
 
 
 def upsert_clean_row(data_dir: Path, result) -> None:
-    results = [existing for existing in load_clean_results(data_dir)
-               if existing.track_id != result.track_id]
+    results = [
+        existing
+        for existing in load_clean_results(data_dir)
+        if existing.track_id != result.track_id
+    ]
     results.append(result)
     gate.write_clean_manifest(data_dir, results)
 
 
-def admit(track_id: str, audio: Path | None = None, labels: Path | None = None,
-          corpus: Path | None = None) -> str:
+def admit(
+    track_id: str, audio: Path | None = None, labels: Path | None = None, corpus: Path | None = None
+) -> str:
     corpus = Path(corpus) if corpus is not None else corpus_dir()
     record = track_record(corpus, track_id)
     check_vocabulary(record)
 
-    mp3 = corpus / gate.AUDIO_DIR / str(
-        record.get("audio") or f"{youtube_id(record)}.mp3")
+    mp3 = corpus / gate.AUDIO_DIR / str(record.get("audio") or f"{youtube_id(record)}.mp3")
     if audio is not None and Path(audio).resolve() != mp3.resolve():
         raise RuntimeError(f"audio mismatch: told {audio}, the record names {mp3}")
     if not mp3.exists():
@@ -179,9 +191,7 @@ def admit(track_id: str, audio: Path | None = None, labels: Path | None = None,
     else:
         rows = beat_rows(detect_beats(mp3), record["sections"])
         if not rows:
-            raise RuntimeError(
-                f"{record['key']}: the offline tracker heard no beats in {mp3.name}"
-            )
+            raise RuntimeError(f"{record['key']}: the offline tracker heard no beats in {mp3.name}")
         grid.parent.mkdir(parents=True, exist_ok=True)
         write_beat_csv(grid, rows)
         generated = True
@@ -191,9 +201,15 @@ def admit(track_id: str, audio: Path | None = None, labels: Path | None = None,
 
     write_manifest(corpus, build_manifest_rows(load_all_tracks(corpus)))
 
-    result = gate.check_track(gate.TrackJob(
-        str(record["key"]), youtube_id(record), str(mp3),
-        float(record["duration"]), genre_of(record)))
+    result = gate.check_track(
+        gate.TrackJob(
+            str(record["key"]),
+            youtube_id(record),
+            str(mp3),
+            float(record["duration"]),
+            genre_of(record),
+        )
+    )
     upsert_clean_row(corpus, result)
     if result.status != gate.STATUS_OK:
         raise RuntimeError(
@@ -202,6 +218,7 @@ def admit(track_id: str, audio: Path | None = None, labels: Path | None = None,
         )
 
     from nn.dataset import assign_split
+
     split = assign_split(youtube_id(record))
     return (
         f"admitted {record['key']}: beat grid {len(rows)} beats "
@@ -213,19 +230,23 @@ def admit(track_id: str, audio: Path | None = None, labels: Path | None = None,
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("track_ids", nargs="*",
-                        help="hand-label track ids (hand-<sha> or a native id)")
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus)")
-    parser.add_argument("--all", action="store_true",
-                        help="admit every committed hand label")
+    parser.add_argument(
+        "track_ids", nargs="*", help="hand-label track ids (hand-<sha> or a native id)"
+    )
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus)"
+    )
+    parser.add_argument("--all", action="store_true", help="admit every committed hand label")
     args = parser.parse_args(argv)
 
     corpus = args.data_dir.resolve() if args.data_dir else corpus_dir()
     wanted = list(args.track_ids)
     if args.all:
-        wanted += [youtube_id(record) for record in load_hand_tracks(corpus)
-                   if youtube_id(record) not in wanted]
+        wanted += [
+            youtube_id(record)
+            for record in load_hand_tracks(corpus)
+            if youtube_id(record) not in wanted
+        ]
     if not wanted:
         parser.error("name at least one track id, or pass --all")
 

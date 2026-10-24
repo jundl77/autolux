@@ -28,7 +28,7 @@ private:
 	int mNumDevices = 0;
 	uint16_t mDeviceConnected = 0;
 
-	uint8_t mSerializedFrame[DmxFrameSize + 1] {};
+	uint8_t mSerializedFrame[DmxFrameSize + 1]{};
 	bool mIsNewFrame = false;
 	int mSendCounter = 0;
 
@@ -36,4 +36,4 @@ private:
 	ScopedHandler mMetricsHandle;
 };
 
-}
+} // namespace Radius

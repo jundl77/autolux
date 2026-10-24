@@ -34,8 +34,12 @@ from pathlib import Path
 import numpy as np
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"), str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -56,17 +60,31 @@ SILENCE_FLOOR_DB = -100.0
 # Verbatim label -> raw-9, after normalisation. Only labels whose meaning
 # survives the translation; the charter's contested ones route elsewhere.
 DIRECT = {
-    "intro": "intro", "fadein": "intro", "opening": "intro", "intropt": "intro",
-    "outro": "outro", "ending": "outro",
+    "intro": "intro",
+    "fadein": "intro",
+    "opening": "intro",
+    "intropt": "intro",
+    "outro": "outro",
+    "ending": "outro",
     "bridge": "bridge",
     "breakdown": "breakdown",
-    "prechorus": "buildup", "build": "buildup", "buildup": "buildup",
+    "prechorus": "buildup",
+    "build": "buildup",
+    "buildup": "buildup",
     "transition": "buildup",
 }
 # Chorus-family labels all face the same evidence split; a quiet or
 # instrumental chorus simply falls below the drop threshold on its own merits.
-CHORUS_FAMILY = {"chorus", "altchorus", "quietchorus", "instchorus",
-                 "chorusinst", "chorushalf", "choruspart", "refrain"}
+CHORUS_FAMILY = {
+    "chorus",
+    "altchorus",
+    "quietchorus",
+    "instchorus",
+    "chorusinst",
+    "chorushalf",
+    "choruspart",
+    "refrain",
+}
 # Track-tail functions: outro only where they actually end the track.
 TAIL_FUNCTIONS = {"fadeout", "coda", "out"}
 END_SENTINEL = "end"
@@ -122,9 +140,22 @@ def decide_chorus(entry_contrast_db, threshold_db: float) -> tuple:
 
 def decode_audio(path: Path) -> np.ndarray:
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(path), "-ac", "1",
-         "-ar", str(DECODE_RATE), "-f", "f32le", "-"],
-        capture_output=True)
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-ac",
+            "1",
+            "-ar",
+            str(DECODE_RATE),
+            "-f",
+            "f32le",
+            "-",
+        ],
+        capture_output=True,
+    )
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", "replace").strip()[-300:]
         raise RuntimeError(f"ffmpeg failed on {path.name}: {tail}")
@@ -147,20 +178,25 @@ def measure_sections(samples: np.ndarray, sections: list) -> list:
     for span in sections:
         start, end = float(span["start"]), float(span["end"])
         head_end = min(start + ENTRY_WINDOW_SEC, end)
-        pre_db = (rms_db(samples, max(0.0, start - ENTRY_WINDOW_SEC), start)
-                  if start >= MIN_ENTRY_EVIDENCE_SEC else None)
-        measured.append({
-            "start": start, "end": end,
-            "rms_db": rms_db(samples, start, end),
-            "head_db": rms_db(samples, start, head_end),
-            "pre_db": pre_db,
-        })
+        pre_db = (
+            rms_db(samples, max(0.0, start - ENTRY_WINDOW_SEC), start)
+            if start >= MIN_ENTRY_EVIDENCE_SEC
+            else None
+        )
+        measured.append(
+            {
+                "start": start,
+                "end": end,
+                "rms_db": rms_db(samples, start, end),
+                "head_db": rms_db(samples, start, head_end),
+                "pre_db": pre_db,
+            }
+        )
     return measured
 
 
 def _spans_of(sections: list) -> list:
-    return [[round(float(s["start"]), 3), round(float(s["end"]), 3)]
-            for s in sections]
+    return [[round(float(s["start"]), 3), round(float(s["end"]), 3)] for s in sections]
 
 
 def measure_track(record: dict, audio: Path) -> dict:
@@ -185,11 +221,18 @@ def quantiles(values: list) -> dict:
     arr = np.asarray(sorted(values), dtype=np.float64)
     if not len(arr):
         return {"n": 0}
-    result = {name: round(float(np.quantile(arr, p)), 3)
-              for name, p in (("min", 0.0), ("q1", 0.25), ("median", 0.5),
-                              ("q3", 0.75), ("p90", 0.9), ("max", 1.0))}
-    result.update(n=int(len(arr)), mean=round(float(arr.mean()), 3),
-                  sd=round(float(arr.std()), 3))
+    result = {
+        name: round(float(np.quantile(arr, p)), 3)
+        for name, p in (
+            ("min", 0.0),
+            ("q1", 0.25),
+            ("median", 0.5),
+            ("q3", 0.75),
+            ("p90", 0.9),
+            ("max", 1.0),
+        )
+    }
+    result.update(n=int(len(arr)), mean=round(float(arr.mean()), 3), sd=round(float(arr.std()), 3))
     return result
 
 
@@ -203,14 +246,18 @@ def derive_thresholds(chorus_entries: dict) -> dict:
     return {
         "schema": 1,
         "derived_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "measure": ("entry_contrast_db = mean RMS dB of the chorus's first "
-                    f"{ENTRY_WINDOW_SEC:g} s minus mean RMS dB of the "
-                    f"{ENTRY_WINDOW_SEC:g} s of audio before its start"),
+        "measure": (
+            "entry_contrast_db = mean RMS dB of the chorus's first "
+            f"{ENTRY_WINDOW_SEC:g} s minus mean RMS dB of the "
+            f"{ENTRY_WINDOW_SEC:g} s of audio before its start"
+        ),
         "chorus_entry_contrast_db": dist,
         "chorus_drop_threshold_db": dist["pooled"]["q3"],
-        "basis": ("top tier = pooled upper quartile (Q3) of the measured chorus "
-                  "entry-contrast distribution over the admitted third-party "
-                  "corpus; deltas cancel per-source mastering level, so pooled"),
+        "basis": (
+            "top tier = pooled upper quartile (Q3) of the measured chorus "
+            "entry-contrast distribution over the admitted third-party "
+            "corpus; deltas cancel per-source mastering level, so pooled"
+        ),
     }
 
 
@@ -231,8 +278,7 @@ def map_track(record: dict, features: dict, threshold_db: float) -> dict:
         canonical = normalise_label(span["name"])
         rule, target = rule_for(canonical, final=index == len(sections) - 1)
         entry_step = None
-        if index and measured[index - 1]["rms_db"] is not None \
-                and energy["rms_db"] is not None:
+        if index and measured[index - 1]["rms_db"] is not None and energy["rms_db"] is not None:
             entry_step = round(energy["rms_db"] - measured[index - 1]["rms_db"], 3)
         entry_contrast = None
         if energy["pre_db"] is not None and energy["head_db"] is not None:
@@ -252,19 +298,32 @@ def map_track(record: dict, features: dict, threshold_db: float) -> dict:
         }
         if threshold is not None and entry_contrast is not None:
             evidence["margin_db"] = round(entry_contrast - threshold, 3)
-        mapped.append({"start": float(span["start"]), "end": float(span["end"]),
-                       "label": target, "evidence": evidence})
+        mapped.append(
+            {
+                "start": float(span["start"]),
+                "end": float(span["end"]),
+                "label": target,
+                "evidence": evidence,
+            }
+        )
     for span in record.get("masked", []):
         origin = span.get("function") or span.get("reason") or "unknown"
-        mapped.append({
-            "start": float(span["start"]), "end": float(span["end"]),
-            "label": MASKED,
-            "evidence": {
-                "source_label": f"__masked__({origin})",
-                "canonical": MASKED, "rms_db": None, "entry_step_db": None,
-                "entry_contrast_db": None, "rule": RULE_CARRYOVER,
-                "threshold_db": None,
-            }})
+        mapped.append(
+            {
+                "start": float(span["start"]),
+                "end": float(span["end"]),
+                "label": MASKED,
+                "evidence": {
+                    "source_label": f"__masked__({origin})",
+                    "canonical": MASKED,
+                    "rms_db": None,
+                    "entry_step_db": None,
+                    "entry_contrast_db": None,
+                    "rule": RULE_CARRYOVER,
+                    "threshold_db": None,
+                },
+            }
+        )
     mapped.sort(key=lambda s: float(s["start"]))
     return {
         "schema": MAPPED_SCHEMA,
@@ -280,8 +339,10 @@ def map_track(record: dict, features: dict, threshold_db: float) -> dict:
         "label_vocabulary": MAPPED_VOCABULARY,
         "mapped_from": f"{record['id']}.{record['source']}.json",
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "thresholds": {"chorus_drop_entry_contrast_db": threshold_db,
-                       "registered_in": "third_party/mapped_thresholds.json"},
+        "thresholds": {
+            "chorus_drop_entry_contrast_db": threshold_db,
+            "registered_in": "third_party/mapped_thresholds.json",
+        },
         "sections": mapped,
     }
 
@@ -290,8 +351,7 @@ def masked_fraction(mapped: dict) -> float:
     total = sum(s["end"] - s["start"] for s in mapped["sections"])
     if total <= 0:
         return 0.0
-    dark = sum(s["end"] - s["start"] for s in mapped["sections"]
-               if s["label"] == MASKED)
+    dark = sum(s["end"] - s["start"] for s in mapped["sections"] if s["label"] == MASKED)
     return dark / total
 
 
@@ -307,8 +367,7 @@ def seed_lines(mapped: dict) -> list:
     boundary and visually inherits its predecessor; a track that opens masked
     gets a 0.0 ``intro`` placeholder so the file starts where the tool expects.
     """
-    lines = [(float(s["start"]), s["label"]) for s in mapped["sections"]
-             if s["label"] != MASKED]
+    lines = [(float(s["start"]), s["label"]) for s in mapped["sections"] if s["label"] != MASKED]
     if not lines:
         return []
     lines.sort()
@@ -327,16 +386,13 @@ def stage_spot_check(picks: list, corpus: Path) -> tuple:
         audio = Path(pick["audio_path"])
         target = tmp / f"{audio.name}.labels.csv"
         if target.exists():
-            skipped.append((pick["id"], str(target),
-                            "already exists -- not overwritten"))
+            skipped.append((pick["id"], str(target), "already exists -- not overwritten"))
             continue
         lines = seed_lines(pick["mapped"])
         if not lines:
-            skipped.append((pick["id"], str(target),
-                            "fully masked -- nothing to seed"))
+            skipped.append((pick["id"], str(target), "fully masked -- nothing to seed"))
             continue
-        target.write_text("\n".join(lines) + "\n", encoding="utf-8",
-                          newline="\n")
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
         seeded.append(pick)
     return seeded, skipped
 
@@ -350,12 +406,13 @@ def choose_sample(stats: list, per_bucket: int = 2) -> list:
     """
     picks = []
     for source in tp_record.THIRD_PARTY_SOURCES:
-        rows = [s for s in stats
-                if s["source"] == source and seed_lines(s["mapped"])]
+        rows = [s for s in stats if s["source"] == source and seed_lines(s["mapped"])]
         chosen = []
-        for key, bucket in (("drops", "chorus_to_drop"),
-                            ("breakdowns", "chorus_to_breakdown"),
-                            ("masked_frac", "heavy_masked")):
+        for key, bucket in (
+            ("drops", "chorus_to_drop"),
+            ("breakdowns", "chorus_to_breakdown"),
+            ("masked_frac", "heavy_masked"),
+        ):
             taken = 0
             for row in sorted(rows, key=lambda s: (-s[key], s["id"])):
                 if taken >= per_bucket:
@@ -377,6 +434,7 @@ def _below_normal_priority():
     if sys.platform != "win32":
         return
     import ctypes
+
     handle = ctypes.windll.kernel32.GetCurrentProcess()
     ctypes.windll.kernel32.SetPriorityClass(handle, 0x00004000)
 
@@ -398,8 +456,9 @@ def load_feature_cache(path: Path) -> dict:
 
 def write_json(path: Path, payload: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".part")
-    tmp.write_text(json.dumps(payload, indent=1, ensure_ascii=False) + "\n",
-                   encoding="utf-8", newline="\n")
+    tmp.write_text(
+        json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
+    )
     tmp.replace(path)
 
 
@@ -414,9 +473,12 @@ def feature_pass(rows: list, records: dict, cache: dict, workers: int) -> tuple:
             return track_id, None, f"audio missing: {audio}"
         sections = sorted(record["sections"], key=lambda s: float(s["start"]))
         held = cache.get(track_id)
-        if held and held.get("audio_size") == audio.stat().st_size \
-                and held.get("audio_mtime_ns") == audio.stat().st_mtime_ns \
-                and held.get("spans") == _spans_of(sections):
+        if (
+            held
+            and held.get("audio_size") == audio.stat().st_size
+            and held.get("audio_mtime_ns") == audio.stat().st_mtime_ns
+            and held.get("spans") == _spans_of(sections)
+        ):
             return track_id, held, None
         try:
             return track_id, measure_track(record, audio), None
@@ -424,8 +486,7 @@ def feature_pass(rows: list, records: dict, cache: dict, workers: int) -> tuple:
             return track_id, None, str(exc)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for index, (track_id, features, reason) in enumerate(
-                pool.map(work, rows), start=1):
+        for index, (track_id, features, reason) in enumerate(pool.map(work, rows), start=1):
             if reason:
                 skips.append({"id": track_id, "reason": reason})
                 print(f"[{index}/{len(rows)}] SKIP {track_id}: {reason}")
@@ -461,33 +522,39 @@ def main(argv=None) -> int:
     features_path = tp / "mapped_features.json"
     cache = {} if args.force_features else load_feature_cache(features_path)
     features, skips = feature_pass(rows, records, cache, args.workers)
-    write_json(features_path, {
-        "schema": 1,
-        "decode": f"ffmpeg_f32le_{DECODE_RATE}_mono",
-        "entry_window_sec": ENTRY_WINDOW_SEC,
-        "tracks": features})
+    write_json(
+        features_path,
+        {
+            "schema": 1,
+            "decode": f"ffmpeg_f32le_{DECODE_RATE}_mono",
+            "entry_window_sec": ENTRY_WINDOW_SEC,
+            "tracks": features,
+        },
+    )
 
     chorus_entries = {}
     for row in rows:
         track_id = row["track_id"]
         if track_id not in features:
             continue
-        sections = sorted(records[track_id]["sections"],
-                          key=lambda s: float(s["start"]))
+        sections = sorted(records[track_id]["sections"], key=lambda s: float(s["start"]))
         for span, energy in zip(sections, features[track_id]["sections"]):
             if normalise_label(span["name"]) not in CHORUS_FAMILY:
                 continue
             if energy["pre_db"] is None or energy["head_db"] is None:
                 continue
             chorus_entries.setdefault(row["source"], []).append(
-                round(energy["head_db"] - energy["pre_db"], 3))
+                round(energy["head_db"] - energy["pre_db"], 3)
+            )
 
     thresholds = derive_thresholds(chorus_entries)
     write_json(tp / "mapped_thresholds.json", thresholds)
     threshold_db = thresholds["chorus_drop_threshold_db"]
-    print(f"registered chorus drop threshold: entry contrast >= "
-          f"{threshold_db} dB (pooled Q3, "
-          f"n={thresholds['chorus_entry_contrast_db']['pooled']['n']})")
+    print(
+        f"registered chorus drop threshold: entry contrast >= "
+        f"{threshold_db} dB (pooled Q3, "
+        f"n={thresholds['chorus_entry_contrast_db']['pooled']['n']})"
+    )
 
     stats, in_counts, out_counts, rule_counts = [], {}, {}, {}
     for row in rows:
@@ -508,20 +575,28 @@ def main(argv=None) -> int:
             rule_counts[source][evidence["rule"]] += 1
             if evidence["rule"] == RULE_CHORUS_DROP:
                 drops += 1
-            elif evidence["rule"] in (RULE_CHORUS_BREAKDOWN,
-                                      RULE_CHORUS_DEFAULT):
+            elif evidence["rule"] in (RULE_CHORUS_BREAKDOWN, RULE_CHORUS_DEFAULT):
                 breakdowns += 1
-        stats.append({
-            "id": track_id, "source": source,
-            "audio_path": row["audio_path"], "mapped": mapped,
-            "drops": drops, "breakdowns": breakdowns,
-            "masked_frac": round(masked_fraction(mapped), 4)})
+        stats.append(
+            {
+                "id": track_id,
+                "source": source,
+                "audio_path": row["audio_path"],
+                "mapped": mapped,
+                "drops": drops,
+                "breakdowns": breakdowns,
+                "masked_frac": round(masked_fraction(mapped), 4),
+            }
+        )
 
     late_quiet = sum(
-        1 for s in stats for section in s["mapped"]["sections"]
+        1
+        for s in stats
+        for section in s["mapped"]["sections"]
         if section["evidence"]["rule"] == RULE_CHORUS_BREAKDOWN
         and s["mapped"]["duration"]
-        and float(section["start"]) / float(s["mapped"]["duration"]) >= 0.7)
+        and float(section["start"]) / float(s["mapped"]["duration"]) >= 0.7
+    )
 
     sources = sorted({s["source"] for s in stats})
     summary = {
@@ -537,97 +612,124 @@ def main(argv=None) -> int:
         "chorus_split": {
             source: {
                 "drop": rule_counts.get(source, {}).get(RULE_CHORUS_DROP, 0),
-                "breakdown":
-                    rule_counts.get(source, {}).get(RULE_CHORUS_BREAKDOWN, 0)
-                    + rule_counts.get(source, {}).get(RULE_CHORUS_DEFAULT, 0)}
-            for source in sources},
+                "breakdown": rule_counts.get(source, {}).get(RULE_CHORUS_BREAKDOWN, 0)
+                + rule_counts.get(source, {}).get(RULE_CHORUS_DEFAULT, 0),
+            }
+            for source in sources
+        },
         "masked_fraction_by_source": {
-            source: round(float(np.mean([s["masked_frac"] for s in stats
-                                         if s["source"] == source])), 4)
-            for source in sources},
+            source: round(
+                float(np.mean([s["masked_frac"] for s in stats if s["source"] == source])), 4
+            )
+            for source in sources
+        },
         "noted_alternative": {
             "late_quiet_chorus_to_cooldown_candidates": late_quiet,
-            "note": ("choruses mapped breakdown whose entry sits past 70% of "
-                     "the track; a cooldown reading is defensible but "
-                     "unmeasured against the show, so the conservative rule "
-                     "ships and this is recorded only")},
+            "note": (
+                "choruses mapped breakdown whose entry sits past 70% of "
+                "the track; a cooldown reading is defensible but "
+                "unmeasured against the show, so the conservative rule "
+                "ships and this is recorded only"
+            ),
+        },
     }
     write_json(tp / "mapped_summary.json", summary)
     write_summary_md(tp / "mapped_summary.md", summary)
-    print(f"mapped {len(stats)} tracks; {len(skips)} skipped; "
-          f"summary at {tp / 'mapped_summary.json'}")
+    print(
+        f"mapped {len(stats)} tracks; {len(skips)} skipped; summary at {tp / 'mapped_summary.json'}"
+    )
 
     if args.stage_spot_check:
         picks = choose_sample(stats)
         seeded, skipped = stage_spot_check(picks, corpus)
         write_spot_check_md(tp / "spot_check_sample.md", seeded, skipped)
-        print(f"spot-check: {len(seeded)} seeded, {len(skipped)} skipped; "
-              f"doc at {tp / 'spot_check_sample.md'}")
+        print(
+            f"spot-check: {len(seeded)} seeded, {len(skipped)} skipped; "
+            f"doc at {tp / 'spot_check_sample.md'}"
+        )
     return 0
 
 
 def write_summary_md(path: Path, summary: dict) -> None:
-    lines = ["# Raw-9 mapping summary (drafts, quarantined)", "",
-             f"Generated {summary['generated_utc']} -- "
-             f"{summary['tracks_mapped']} of {summary['tracks_admitted']} "
-             f"admitted tracks mapped, {len(summary['tracks_skipped'])} skipped.",
-             "",
-             "## Registered threshold",
-             "",
-             f"chorus -> drop iff entry contrast >= "
-             f"**{summary['thresholds']['chorus_drop_threshold_db']} dB** "
-             f"({summary['thresholds']['basis']}).", "",
-             "Measured chorus entry-contrast distribution (dB):", ""]
+    lines = [
+        "# Raw-9 mapping summary (drafts, quarantined)",
+        "",
+        f"Generated {summary['generated_utc']} -- "
+        f"{summary['tracks_mapped']} of {summary['tracks_admitted']} "
+        f"admitted tracks mapped, {len(summary['tracks_skipped'])} skipped.",
+        "",
+        "## Registered threshold",
+        "",
+        f"chorus -> drop iff entry contrast >= "
+        f"**{summary['thresholds']['chorus_drop_threshold_db']} dB** "
+        f"({summary['thresholds']['basis']}).",
+        "",
+        "Measured chorus entry-contrast distribution (dB):",
+        "",
+    ]
     for source, dist in summary["thresholds"]["chorus_entry_contrast_db"].items():
         lines.append(f"- {source}: {json.dumps(dist)}")
     lines += ["", "## Chorus split", ""]
     for source, split in summary["chorus_split"].items():
-        lines.append(f"- {source}: drop {split['drop']}, "
-                     f"breakdown {split['breakdown']}")
+        lines.append(f"- {source}: drop {split['drop']}, breakdown {split['breakdown']}")
     lines += ["", "## Masked fraction (mean per track)", ""]
     for source, frac in summary["masked_fraction_by_source"].items():
         lines.append(f"- {source}: {frac:.1%}")
     lines += ["", "## Labels out", ""]
     for source, counts in summary["labels_out_by_source"].items():
-        ordered = ", ".join(f"{label} {count}" for label, count in
-                            sorted(counts.items(), key=lambda kv: -kv[1]))
+        ordered = ", ".join(
+            f"{label} {count}" for label, count in sorted(counts.items(), key=lambda kv: -kv[1])
+        )
         lines.append(f"- {source}: {ordered}")
     if summary["tracks_skipped"]:
         lines += ["", "## Skipped", ""]
         for skip in summary["tracks_skipped"]:
             lines.append(f"- {skip['id']}: {skip['reason']}")
-    lines += ["", summary["noted_alternative"]["note"] + " (count: "
-              + str(summary["noted_alternative"]
-                    ["late_quiet_chorus_to_cooldown_candidates"]) + ")", ""]
+    lines += [
+        "",
+        summary["noted_alternative"]["note"]
+        + " (count: "
+        + str(summary["noted_alternative"]["late_quiet_chorus_to_cooldown_candidates"])
+        + ")",
+        "",
+    ]
     path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
 def write_spot_check_md(path: Path, seeded: list, skipped: list) -> None:
-    lines = ["# Spot-check sample -- raw-9 drafts staged for the owner's audit",
-             "",
-             "Each track below has its mapped draft seeded into "
-             "`<corpus>/tmp_labels/` in the labelling tool's working format. "
-             "Open one with the command shown (from the main checkout); "
-             "correct and commit as usual.",
-             "",
-             "The tool's vocabulary cannot express a masked span, so masked "
-             "spans (verse/solo/inst/...) carry NO boundary in the seed and "
-             "visually inherit the previous section's label; a track opening "
-             "masked starts with a placeholder `intro` at 0.0. The full masked "
-             "spans are in the track's `annotations/<id>.mapped.json`.", ""]
+    lines = [
+        "# Spot-check sample -- raw-9 drafts staged for the owner's audit",
+        "",
+        "Each track below has its mapped draft seeded into "
+        "`<corpus>/tmp_labels/` in the labelling tool's working format. "
+        "Open one with the command shown (from the main checkout); "
+        "correct and commit as usual.",
+        "",
+        "The tool's vocabulary cannot express a masked span, so masked "
+        "spans (verse/solo/inst/...) carry NO boundary in the seed and "
+        "visually inherit the previous section's label; a track opening "
+        "masked starts with a placeholder `intro` at 0.0. The full masked "
+        "spans are in the track's `annotations/<id>.mapped.json`.",
+        "",
+    ]
     for pick in seeded:
         mapped = pick["mapped"]
-        masked_spans = [f"{s['start']:.1f}-{s['end']:.1f}s "
-                        f"({s['evidence']['source_label']})"
-                        for s in mapped["sections"] if s["label"] == MASKED]
-        lines += [f"## {pick['id']} ({pick['source']}, {pick['bucket']})", "",
-                  f"- audio: `{pick['audio_path']}`",
-                  f"- chorus->drop {pick['drops']}, chorus->breakdown "
-                  f"{pick['breakdowns']}, masked {pick['masked_frac']:.0%}",
-                  "- masked spans needing the owner's ear: "
-                  + ("; ".join(masked_spans) if masked_spans else "none"),
-                  f"- open: `python -m autolux label \"{pick['audio_path']}\"`",
-                  ""]
+        masked_spans = [
+            f"{s['start']:.1f}-{s['end']:.1f}s ({s['evidence']['source_label']})"
+            for s in mapped["sections"]
+            if s["label"] == MASKED
+        ]
+        lines += [
+            f"## {pick['id']} ({pick['source']}, {pick['bucket']})",
+            "",
+            f"- audio: `{pick['audio_path']}`",
+            f"- chorus->drop {pick['drops']}, chorus->breakdown "
+            f"{pick['breakdowns']}, masked {pick['masked_frac']:.0%}",
+            "- masked spans needing the owner's ear: "
+            + ("; ".join(masked_spans) if masked_spans else "none"),
+            f"- open: `python -m autolux label \"{pick['audio_path']}\"`",
+            "",
+        ]
     if skipped:
         lines += ["## Not seeded", ""]
         for track_id, target, reason in skipped:

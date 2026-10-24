@@ -1,4 +1,5 @@
 """Autolux command line and application lifecycle coordination."""
+
 import argparse
 import argcomplete
 import asyncio
@@ -25,14 +26,16 @@ async def run_cmd(args: argparse.Namespace):
     midi_port_index: int = int(args.midi_port_index)
     input_device_index = int(args.input_device) if args.input_device is not None else None
     output_device_index = int(args.output_device) if args.output_device is not None else None
-    global_app = AutoluxController(midi_port_index=midi_port_index,
-                                      input_device_index=input_device_index,
-                                      output_device_index=output_device_index,
-                                      debug_mode=debug_mode,
-                                      disable_os2l=args.no_os2l,
-                                      enable_ui=args.ui,
-                                      ui_port=args.ui_port,
-                                      report_path=args.report)
+    global_app = AutoluxController(
+        midi_port_index=midi_port_index,
+        input_device_index=input_device_index,
+        output_device_index=output_device_index,
+        debug_mode=debug_mode,
+        disable_os2l=args.no_os2l,
+        enable_ui=args.ui,
+        ui_port=args.ui_port,
+        report_path=args.report,
+    )
 
     try:
         await global_app.run()
@@ -45,6 +48,7 @@ def write_report(app, path):
     if path and app.event_buffer is not None:
         import json
         from autolux.simulate.evaluator import evaluate, print_evaluation
+
         report = app.event_buffer.to_report()
         with open(path, 'w') as f:
             json.dump(report, f, indent=2, default=str)
@@ -104,33 +108,92 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(help='Functionality to start')
 
     from cli import production
-    prod = subparsers.add_parser('prod', help='Supervise the production controller or receiver (also --prod)')
+
+    prod = subparsers.add_parser(
+        'prod', help='Supervise the production controller or receiver (also --prod)'
+    )
     production.add_arguments(prod)
     prod.set_defaults(func=production.run)
-    subparsers.add_parser('status', help='Show current system health').set_defaults(func=production.status)
-    subparsers.add_parser('stop', help='Stop the owned controller and receiver session').set_defaults(func=production.stop)
+    subparsers.add_parser('status', help='Show current system health').set_defaults(
+        func=production.status
+    )
+    subparsers.add_parser(
+        'stop', help='Stop the owned controller and receiver session'
+    ).set_defaults(func=production.stop)
 
     subparser = subparsers.add_parser('list', help='List all available sound and midi devices')
     subparser.set_defaults(func=list_cmd)
 
     subparser = subparsers.add_parser('run', help='Create the specified instance')
-    subparser.add_argument('midi_port_index', help='The midi port index of the midi device to use. Available devices are shown by running \'list\'')
-    subparser.add_argument('-i', '--input_device', help='Specify the index of the sound INPUT device to use, uses system-default by default', required=False, default=None)
-    subparser.add_argument('-o', '--output_device', help='Specify the index of the sound OUTPUT device to use, uses system-default by default', required=False, default=None)
-    subparser.add_argument('-d', '--debug', help='Run in debug mode, this will playback audio on the output device with additional auditory information', required=False, action='store_true')
-    subparser.add_argument('--no-os2l', help='Disable OS2L (connection to SoundSwitch). This can be useful for debugging.', required=False, action='store_true')
-    subparser.add_argument('--ui', help='Launch real-time lighting visualizer (requires dash extra)', required=False, action='store_true')
-    subparser.add_argument('--ui-port', type=int, default=8050, help='Visualizer Dash server port (default: 8050)', required=False, dest='ui_port')
-    subparser.add_argument('--report', default=None, help='Write a JSON session report on exit (e.g. report.json); implies event tracking', required=False)
+    subparser.add_argument(
+        'midi_port_index',
+        help='The midi port index of the midi device to use. Available devices are shown by running \'list\'',
+    )
+    subparser.add_argument(
+        '-i',
+        '--input_device',
+        help='Specify the index of the sound INPUT device to use, uses system-default by default',
+        required=False,
+        default=None,
+    )
+    subparser.add_argument(
+        '-o',
+        '--output_device',
+        help='Specify the index of the sound OUTPUT device to use, uses system-default by default',
+        required=False,
+        default=None,
+    )
+    subparser.add_argument(
+        '-d',
+        '--debug',
+        help='Run in debug mode, this will playback audio on the output device with additional auditory information',
+        required=False,
+        action='store_true',
+    )
+    subparser.add_argument(
+        '--no-os2l',
+        help='Disable OS2L (connection to SoundSwitch). This can be useful for debugging.',
+        required=False,
+        action='store_true',
+    )
+    subparser.add_argument(
+        '--ui',
+        help='Launch real-time lighting visualizer (requires dash extra)',
+        required=False,
+        action='store_true',
+    )
+    subparser.add_argument(
+        '--ui-port',
+        type=int,
+        default=8050,
+        help='Visualizer Dash server port (default: 8050)',
+        required=False,
+        dest='ui_port',
+    )
+    subparser.add_argument(
+        '--report',
+        default=None,
+        help='Write a JSON session report on exit (e.g. report.json); implies event tracking',
+        required=False,
+    )
     subparser.set_defaults(func=run_cmd)
 
-    subparser = subparsers.add_parser('label', help='Hand-label a song into sections in the browser (requires dash extra)')
+    subparser = subparsers.add_parser(
+        'label', help='Hand-label a song into sections in the browser (requires dash extra)'
+    )
     subparser.add_argument('audio', help='Path to the audio file to label')
-    subparser.add_argument('--port', type=int, default=8070, help='Labeler Dash server port (default: 8070)')
-    subparser.add_argument('--seed', action='store_true', help="Start from the published section boundaries when there is no working file yet, so only the names need changing")
+    subparser.add_argument(
+        '--port', type=int, default=8070, help='Labeler Dash server port (default: 8070)'
+    )
+    subparser.add_argument(
+        '--seed',
+        action='store_true',
+        help="Start from the published section boundaries when there is no working file yet, so only the names need changing",
+    )
     subparser.set_defaults(func=label_cmd)
 
     from autolux.simulate.cli import add_simulate_subparser
+
     add_simulate_subparser(subparsers)
     return parser
 

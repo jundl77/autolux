@@ -40,24 +40,34 @@ class SlowEncoder(FakeEncoder):
 
 
 def geometry(margin=1.0, hop=0.5, buffer=6.0):
-    return M.StreamGeometry(model_id="fake", layers=(6, 22), margin_sec=margin,
-                            hop_sec=hop, buffer_sec=buffer, label_frame_sec=CELL)
+    return M.StreamGeometry(
+        model_id="fake",
+        layers=(6, 22),
+        margin_sec=margin,
+        hop_sec=hop,
+        buffer_sec=buffer,
+        label_frame_sec=CELL,
+    )
 
 
 def chain(encoder, graph, corpus_mean, **kwargs):
     return PosteriorStream(
         M.MertStream(encoder, geometry=geometry(**kwargs)),
-        SectionModel(graph, mean=corpus_mean,
-                     session_factory=lambda _path: FakeSession()))
+        SectionModel(graph, mean=corpus_mean, session_factory=lambda _path: FakeSession()),
+    )
 
 
 def noise(seconds, seed=0):
-    return np.random.default_rng(seed).normal(
-        size=int(seconds * M.SOURCE_SAMPLE_RATE)).astype(np.float32) * 0.1
+    return (
+        np.random.default_rng(seed)
+        .normal(size=int(seconds * M.SOURCE_SAMPLE_RATE))
+        .astype(np.float32)
+        * 0.1
+    )
 
 
 def buffers(audio):
-    return [audio[i:i + BUF] for i in range(0, len(audio) - BUF, BUF)]
+    return [audio[i : i + BUF] for i in range(0, len(audio) - BUF, BUF)]
 
 
 def pump(worker, seconds, seed=0, sink=None):
@@ -107,11 +117,12 @@ class Pacing:
 def stage(tiny, mean):  # noqa: F811
     started = []
 
-    def build(encoder=None, watchdog=None, margin=1.0, hop=0.5, buffer=6.0,
-              **kwargs):
-        worker = GpuStage(chain(encoder or SlowEncoder(), tiny, mean,
-                                margin=margin, hop=hop, buffer=buffer),
-                          watchdog or DriftWatchdog(BUFFER_SEC), **kwargs)
+    def build(encoder=None, watchdog=None, margin=1.0, hop=0.5, buffer=6.0, **kwargs):
+        worker = GpuStage(
+            chain(encoder or SlowEncoder(), tiny, mean, margin=margin, hop=hop, buffer=buffer),
+            watchdog or DriftWatchdog(BUFFER_SEC),
+            **kwargs,
+        )
         worker.start()
         started.append(worker)
         return worker
@@ -142,8 +153,9 @@ def test_the_audio_loop_walks_past_a_pass_that_takes_hundreds_of_buffers(stage):
         worker.push_audio(block)
     elapsed = time.perf_counter() - started
     encoder.gate.set()
-    assert elapsed < len(blocks) * BUFFER_SEC, \
+    assert elapsed < len(blocks) * BUFFER_SEC, (
         f'{elapsed:.3f}s of audio-thread time for {len(blocks)} buffers'
+    )
 
 
 def test_whole_passes_arrive_in_order_and_only_once(stage):
@@ -176,8 +188,7 @@ def test_the_hand_off_queue_is_bounded_and_overflow_is_a_shed(stage):
     assert any(gaps), 'the consumer was never told about the hole'
 
 
-def test_the_threaded_stage_decides_exactly_what_the_synchronous_one_decides(
-        tiny, mean):  # noqa: F811
+def test_the_threaded_stage_decides_exactly_what_the_synchronous_one_decides(tiny, mean):  # noqa: F811
     from autolux.lib.engine.section_decoder import DecodeParams, SectionDecoder
     from autolux.tests.test_nn_decoder import toy_priors
 
@@ -185,16 +196,16 @@ def test_the_threaded_stage_decides_exactly_what_the_synchronous_one_decides(
     beat_every = 32
 
     def run(stream, quiesce_after=None):
-        decoder = SectionDecoder(toy_priors(floor=2),
-                                 DecodeParams(lag_bars=1, min_coverage=1))
+        decoder = SectionDecoder(toy_priors(floor=2), DecodeParams(lag_bars=1, min_coverage=1))
         decisions, cells = [], []
 
         def absorb(drained):
             assert not drained.gap, 'an undisturbed run must not gap'
             for item in drained.posteriors:
                 cells.append((item.index, round(item.time_sec, 6)))
-                decisions.extend(decoder.push_posterior(
-                    item.time_sec, item.posterior, item.boundary))
+                decisions.extend(
+                    decoder.push_posterior(item.time_sec, item.posterior, item.boundary)
+                )
 
         for n, block in enumerate(blocks):
             absorb(stream.push_audio(block))
@@ -210,8 +221,7 @@ def test_the_threaded_stage_decides_exactly_what_the_synchronous_one_decides(
 
     inline = run(chain(FakeEncoder(), tiny, mean))
 
-    threaded = GpuStage(chain(FakeEncoder(), tiny, mean),
-                        DriftWatchdog(BUFFER_SEC))
+    threaded = GpuStage(chain(FakeEncoder(), tiny, mean), DriftWatchdog(BUFFER_SEC))
     threaded.start()
     try:
         found = run(threaded, quiesce_after=True)
@@ -326,8 +336,7 @@ def test_a_ring_overrun_is_a_shed_and_a_resync_rather_than_a_crash(stage):
     assert worker.faults == 1, 'the overrun was not the fault, or was not one'
     before = worker.passes
     pump(worker, 8.0, seed=7)
-    settle(lambda: not worker.shed and worker.passes > before,
-           why='the stage never came back')
+    settle(lambda: not worker.shed and worker.passes > before, why='the stage never came back')
 
 
 def test_every_transition_is_logged(stage, caplog):
@@ -346,7 +355,8 @@ def test_every_transition_is_logged(stage, caplog):
 
 @pytest.mark.integration
 def test_the_shipped_chain_runs_on_its_own_thread_and_its_vram_pool_settles(
-        nn_artifacts, anchor_mp3):
+    nn_artifacts, anchor_mp3
+):
     from autolux.lib import section_chain
     from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
     from autolux.lib.clients.pyaudio_client import PyAudioClient  # noqa: F401
@@ -378,14 +388,17 @@ def test_the_shipped_chain_runs_on_its_own_thread_and_its_vram_pool_settles(
     assert chain.stream.passes > 20, 'not enough passes to say anything'
     assert watchdog.fault is None, f'the stage faulted: {watchdog.fault}'
 
-    settled = reserved[len(reserved) * 2 // 3:]
-    print(f'\n[task10] {chain.stream.passes} passes | cuda reserved '
-          f'{reserved[1] / 1e6:.0f}MB after pass 1, '
-          f'{max(reserved) / 1e6:.0f}MB peak, '
-          f'{(max(settled) - min(settled)) / 1e6:+.1f}MB over the last third '
-          f'({len(settled)} passes)')
-    assert max(settled) - min(settled) < 256e6, \
+    settled = reserved[len(reserved) * 2 // 3 :]
+    print(
+        f'\n[task10] {chain.stream.passes} passes | cuda reserved '
+        f'{reserved[1] / 1e6:.0f}MB after pass 1, '
+        f'{max(reserved) / 1e6:.0f}MB peak, '
+        f'{(max(settled) - min(settled)) / 1e6:+.1f}MB over the last third '
+        f'({len(settled)} passes)'
+    )
+    assert max(settled) - min(settled) < 256e6, (
         'the reserved pool was still climbing once the ring was full'
+    )
 
 
 def _reserved() -> int:
@@ -395,8 +408,7 @@ def _reserved() -> int:
 
 
 def test_stopping_the_stage_ends_its_thread(tiny, mean):  # noqa: F811
-    worker = GpuStage(chain(SlowEncoder(), tiny, mean),
-                      DriftWatchdog(BUFFER_SEC))
+    worker = GpuStage(chain(SlowEncoder(), tiny, mean), DriftWatchdog(BUFFER_SEC))
     worker.start()
     worker.push_audio(np.zeros(BUF, dtype=np.float32))
     worker.stop()

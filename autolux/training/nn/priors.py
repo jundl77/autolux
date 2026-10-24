@@ -39,6 +39,7 @@ Fitted from the **train split only**.  The priors are model parameters; fitting
 them on val or test would leak the answer into every number Tasks 5 and 6
 produce, and nothing downstream could detect it.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,7 +52,7 @@ from typing import NamedTuple
 import numpy as np
 
 from . import _TRAINING_DIR  # noqa: F401  (puts training/ on sys.path for the
-                             # lazy imports below)
+# lazy imports below)
 
 # **Nothing heavy at module scope.**  ``decoder`` imports this module, and the
 # decoder is the object that runs live at showtime -- so the import that a show
@@ -161,12 +162,12 @@ class Priors(NamedTuple):
     """
 
     classes: tuple
-    initial: np.ndarray         # [C] P(first run is this class)
-    transition: np.ndarray      # [C, C] P(next run | this run), 0 where illegal
-    floor_bars: np.ndarray      # [C] int, min bars before a switch is allowed
-    hazard: np.ndarray          # [C] per-bar P(switch) once past the floor
-    class_prior: np.ndarray     # [C] share of corpus BARS, for scaled likelihoods
-    corpus: dict                # provenance and the raw statistics behind the fit
+    initial: np.ndarray  # [C] P(first run is this class)
+    transition: np.ndarray  # [C, C] P(next run | this run), 0 where illegal
+    floor_bars: np.ndarray  # [C] int, min bars before a switch is allowed
+    hazard: np.ndarray  # [C] per-bar P(switch) once past the floor
+    class_prior: np.ndarray  # [C] share of corpus BARS, for scaled likelihoods
+    corpus: dict  # provenance and the raw statistics behind the fit
 
     # -- derived views ------------------------------------------------------ #
 
@@ -232,8 +233,7 @@ class Priors(NamedTuple):
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".part")
         with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(self.to_dict(), handle, indent=2, sort_keys=True,
-                      allow_nan=False)
+            json.dump(self.to_dict(), handle, indent=2, sort_keys=True, allow_nan=False)
             handle.write("\n")
         tmp.replace(path)
 
@@ -263,9 +263,9 @@ def label_runs(sections: list) -> list:
     rather than taken from the merged span.
     """
     from build_training_table import label_coverage
+
     spans = sorted(
-        ((float(start), float(end), label)
-         for start, end, label in label_coverage(sections)),
+        ((float(start), float(end), label) for start, end, label in label_coverage(sections)),
         key=lambda span: span[0],
     )
     runs: list = []
@@ -286,11 +286,12 @@ def bar_runs(sections: list, downbeats: np.ndarray) -> list:
     sentinel's bars belong to nobody.
     """
     from build_training_table import label_coverage
+
     downbeats = np.asarray(downbeats, dtype=np.float64)
     runs: list = []
     for start, end, label in sorted(
-            ((float(s), float(e), l) for s, e, l in label_coverage(sections)),
-            key=lambda span: span[0]):
+        ((float(s), float(e), l) for s, e, l in label_coverage(sections)), key=lambda span: span[0]
+    ):
         bars = int(np.count_nonzero((downbeats >= start) & (downbeats < end)))
         if runs and runs[-1][0] == label:
             runs[-1][1] += bars
@@ -309,8 +310,7 @@ SKIP_NO_ANNOTATION = "skipped_no_annotation_record"
 SKIP_NO_BEAT_GRID = "skipped_no_beat_grid"
 SKIP_DEGENERATE_GRID = "skipped_degenerate_beat_grid"
 SKIP_NO_BAR_RUNS = "skipped_no_bar_runs"
-SKIP_CAUSES = (SKIP_NO_ANNOTATION, SKIP_NO_BEAT_GRID, SKIP_DEGENERATE_GRID,
-               SKIP_NO_BAR_RUNS)
+SKIP_CAUSES = (SKIP_NO_ANNOTATION, SKIP_NO_BEAT_GRID, SKIP_DEGENERATE_GRID, SKIP_NO_BAR_RUNS)
 
 # How many dropped ids a warning names before it says "and N more".  A corpus
 # fit asks for hundreds of ids; a warning that dumps all of them is a warning
@@ -330,7 +330,12 @@ def corpus_bar_runs_by_cause(data_dir, youtube_ids) -> tuple:
     everywhere.
     """
     from raveform_fetch_annotations import (
-        beat_csv_path, load_all_tracks, parse_beat_csv, parse_sections)
+        beat_csv_path,
+        load_all_tracks,
+        parse_beat_csv,
+        parse_sections,
+    )
+
     data_dir = Path(data_dir)
     wanted = set(str(i) for i in youtube_ids)
     by_id = {str(track.get("id")): track for track in load_all_tracks(data_dir)}
@@ -348,12 +353,14 @@ def corpus_bar_runs_by_cause(data_dir, youtube_ids) -> tuple:
             continue
         downbeats = np.array(
             [time for time, position, _section in parse_beat_csv(path) if position == 1],
-            dtype=np.float64)
+            dtype=np.float64,
+        )
         if downbeats.size < 2:
             skipped[SKIP_DEGENERATE_GRID].append(youtube_id)
             continue
-        runs = [(label, bars) for label, bars in
-                bar_runs(parse_sections(track), downbeats) if bars > 0]
+        runs = [
+            (label, bars) for label, bars in bar_runs(parse_sections(track), downbeats) if bars > 0
+        ]
         if runs:
             sequences.append(runs)
         else:
@@ -370,13 +377,14 @@ def corpus_bar_runs(data_dir, youtube_ids) -> tuple:
 
 def _skip_report(split: str, requested: int, fitted: int, skipped: dict) -> str:
     dropped = sorted(i for ids in skipped.values() for i in ids)
-    causes = ", ".join(f"{cause}={len(skipped[cause])}"
-                       for cause in SKIP_CAUSES if skipped[cause])
+    causes = ", ".join(f"{cause}={len(skipped[cause])}" for cause in SKIP_CAUSES if skipped[cause])
     sample = ", ".join(dropped[:SKIP_SAMPLE])
     if len(dropped) > SKIP_SAMPLE:
         sample += f", and {len(dropped) - SKIP_SAMPLE} more"
-    return (f"[priors] split {split!r}: dropped {len(dropped)} of {requested} "
-            f"ids ({causes}), fitting {fitted}; dropped ids: {sample}")
+    return (
+        f"[priors] split {split!r}: dropped {len(dropped)} of {requested} "
+        f"ids ({causes}), fitting {fitted}; dropped ids: {sample}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -384,10 +392,16 @@ def _skip_report(split: str, requested: int, fitted: int, skipped: dict) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def fit_runs(sequences, *, classes=None, smoothing: float = SMOOTHING,
-             floor_percentile: float = FLOOR_PERCENTILE,
-             uniform_forks: dict = UNIFORM_FORKS, strict: bool = True,
-             provenance: dict | None = None) -> Priors:
+def fit_runs(
+    sequences,
+    *,
+    classes=None,
+    smoothing: float = SMOOTHING,
+    floor_percentile: float = FLOOR_PERCENTILE,
+    uniform_forks: dict = UNIFORM_FORKS,
+    strict: bool = True,
+    provenance: dict | None = None,
+) -> Priors:
     """Fit priors from ``[[(label, n_bars), ...], ...]`` -- one list per track.
 
     Pure: no paths, no I/O, no corpus.  ``fit`` is the thin adapter that reads
@@ -441,8 +455,9 @@ def fit_runs(sequences, *, classes=None, smoothing: float = SMOOTHING,
     total_bars = float(sum(sum(v) for v in durations.values()))
     if total_bars <= 0.0:
         raise RuntimeError("no bars in the fitting corpus -- every run is empty")
-    class_prior = np.array([sum(durations[label]) for label in classes],
-                           dtype=np.float64) / total_bars
+    class_prior = (
+        np.array([sum(durations[label]) for label in classes], dtype=np.float64) / total_bars
+    )
 
     corpus = {
         "tracks": tracks,
@@ -450,11 +465,11 @@ def fit_runs(sequences, *, classes=None, smoothing: float = SMOOTHING,
         "bars": int(total_bars),
         "transition_counts": {
             f"{src}->{dst}": int(counts[i, j])
-            for i, src in enumerate(classes) for j, dst in enumerate(classes)
+            for i, src in enumerate(classes)
+            for j, dst in enumerate(classes)
             if legal[i, j]
         },
-        "initial_counts": {label: int(initial_counts[i])
-                           for i, label in enumerate(classes)},
+        "initial_counts": {label: int(initial_counts[i]) for i, label in enumerate(classes)},
         "illegal_observed": {pair: int(count) for pair, count in sorted(illegal.items())},
         "duration_bars": stats,
         "uniform_forks": {src: list(dsts) for src, dsts in (uniform_forks or {}).items()},
@@ -463,8 +478,7 @@ def fit_runs(sequences, *, classes=None, smoothing: float = SMOOTHING,
     }
     corpus.update(provenance or {})
 
-    return Priors(classes, initial, transition, floor_bars, hazard, class_prior,
-                  corpus)
+    return Priors(classes, initial, transition, floor_bars, hazard, class_prior, corpus)
 
 
 def _smoothed(counts: np.ndarray, allowed: np.ndarray, smoothing: float) -> np.ndarray:
@@ -549,6 +563,7 @@ def _duration_model(durations: dict, classes, floor_percentile: float) -> tuple:
 def split_ids(data_dir, split: str = "train") -> list:
     """The frozen split's youtube ids.  Never regenerates the split file."""
     from .dataset import SPLITS_FILE
+
     path = Path(data_dir) / SPLITS_FILE
     if not path.exists():
         raise RuntimeError(
@@ -562,8 +577,9 @@ def split_ids(data_dir, split: str = "train") -> list:
     return [str(i) for i in document[split]]
 
 
-def fit(data_dir, *, split: str = "train", strict: bool = True,
-        require_all_ids: bool = False, **kwargs) -> Priors:
+def fit(
+    data_dir, *, split: str = "train", strict: bool = True, require_all_ids: bool = False, **kwargs
+) -> Priors:
     """Fit priors from one split of the corpus.
 
     ``split`` defaults to ``train`` and should stay there.  Val is the decoder
@@ -617,38 +633,49 @@ def format_report(priors: Priors) -> str:
     lines = []
 
     corpus = priors.corpus
-    lines.append(f"fitted on {corpus.get('tracks', '?')} tracks / "
-                 f"{corpus.get('runs', '?')} runs / {corpus.get('bars', '?')} bars "
-                 f"(split={corpus.get('split', '?')})")
+    lines.append(
+        f"fitted on {corpus.get('tracks', '?')} tracks / "
+        f"{corpus.get('runs', '?')} runs / {corpus.get('bars', '?')} bars "
+        f"(split={corpus.get('split', '?')})"
+    )
     if corpus.get("skipped_tracks"):
-        causes = ", ".join(f"{cause}={len(corpus.get(cause) or [])}"
-                           for cause in SKIP_CAUSES if corpus.get(cause))
-        lines.append(f"  WARNING {corpus['skipped_tracks']} of "
-                     f"{corpus.get('split_size', '?')} ids in the split were "
-                     f"not fitted: {causes}")
+        causes = ", ".join(
+            f"{cause}={len(corpus.get(cause) or [])}" for cause in SKIP_CAUSES if corpus.get(cause)
+        )
+        lines.append(
+            f"  WARNING {corpus['skipped_tracks']} of "
+            f"{corpus.get('split_size', '?')} ids in the split were "
+            f"not fitted: {causes}"
+        )
     if corpus.get("illegal_observed"):
-        lines.append(f"  WARNING structurally illegal transitions observed: "
-                     f"{corpus['illegal_observed']}")
+        lines.append(
+            f"  WARNING structurally illegal transitions observed: {corpus['illegal_observed']}"
+        )
 
     lines.append("")
     lines.append("initial P(first run):")
-    lines.append("  " + "  ".join(f"{label}={priors.initial[i]:.4f}"
-                                  for i, label in enumerate(classes)))
+    lines.append(
+        "  " + "  ".join(f"{label}={priors.initial[i]:.4f}" for i, label in enumerate(classes))
+    )
 
     lines.append("")
     lines.append("transition P(next run | this run)   ('.' = structurally impossible)")
     lines.append(" " * (width + 2) + "".join(f"{label:>11}" for label in classes))
     for i, src in enumerate(classes):
-        cells = "".join("          ." if priors.transition[i, j] == 0.0
-                        else f"{priors.transition[i, j]:>11.4f}"
-                        for j in range(len(classes)))
+        cells = "".join(
+            "          ." if priors.transition[i, j] == 0.0 else f"{priors.transition[i, j]:>11.4f}"
+            for j in range(len(classes))
+        )
         lines.append(f"  {src:<{width}}{cells}")
 
     lines.append("")
-    lines.append("duration (bars): floor = corpus p05, then a memoryless tail "
-                 "halving at the corpus median")
-    lines.append(f"  {'class':<{width}}  {'n':>5} {'p05':>6} {'median':>7} "
-                 f"{'p95':>6} {'floor':>6} {'hazard':>8} {'E[bars]':>8}")
+    lines.append(
+        "duration (bars): floor = corpus p05, then a memoryless tail halving at the corpus median"
+    )
+    lines.append(
+        f"  {'class':<{width}}  {'n':>5} {'p05':>6} {'median':>7} "
+        f"{'p95':>6} {'floor':>6} {'hazard':>8} {'E[bars]':>8}"
+    )
     for i, label in enumerate(classes):
         stats = priors.corpus.get("duration_bars", {}).get(label, {})
         if not stats.get("n"):
@@ -658,39 +685,58 @@ def format_report(priors: Priors) -> str:
             f"  {label:<{width}}  {stats['n']:>5} {stats['p05']:>6.1f} "
             f"{stats['median']:>7.1f} {stats['p95']:>6.1f} "
             f"{int(priors.floor_bars[i]):>6} {priors.hazard[i]:>8.4f} "
-            f"{stats['expected_bars']:>8.1f}")
+            f"{stats['expected_bars']:>8.1f}"
+        )
 
     lines.append("")
     lines.append("class prior (share of corpus bars, for scaled likelihoods):")
-    lines.append("  " + "  ".join(f"{label}={priors.class_prior[i]:.4f}"
-                                  for i, label in enumerate(classes)))
+    lines.append(
+        "  " + "  ".join(f"{label}={priors.class_prior[i]:.4f}" for i, label in enumerate(classes))
+    )
     return "\n".join(lines)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     from build_training_table import default_data_dir
+
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
-    parser.add_argument("--split", default="train",
-                        help="fit on this split (default: %(default)s -- moving "
-                             "it off train leaks into every later metric)")
-    parser.add_argument("--out", type=Path, default=None,
-                        help=f"default: <data-dir>/{MODELS_DIR}/{MODEL_VERSION}/{PRIORS_FILE}")
-    parser.add_argument("--allow-illegal", action="store_true",
-                        help="record rather than refuse transitions the "
-                             "structural graph calls impossible")
-    parser.add_argument("--require-all-ids", action="store_true",
-                        help="refuse rather than warn when an id in the split "
-                             "could not be fitted -- for a deliberate refit, "
-                             "where a short corpus is a broken one")
+    parser.add_argument(
+        "--split",
+        default="train",
+        help="fit on this split (default: %(default)s -- moving "
+        "it off train leaks into every later metric)",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"default: <data-dir>/{MODELS_DIR}/{MODEL_VERSION}/{PRIORS_FILE}",
+    )
+    parser.add_argument(
+        "--allow-illegal",
+        action="store_true",
+        help="record rather than refuse transitions the structural graph calls impossible",
+    )
+    parser.add_argument(
+        "--require-all-ids",
+        action="store_true",
+        help="refuse rather than warn when an id in the split "
+        "could not be fitted -- for a deliberate refit, "
+        "where a short corpus is a broken one",
+    )
     return parser
 
 
 def main(argv: list | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
-    priors = fit(args.data_dir, split=args.split, strict=not args.allow_illegal,
-                 require_all_ids=args.require_all_ids)
+    priors = fit(
+        args.data_dir,
+        split=args.split,
+        strict=not args.allow_illegal,
+        require_all_ids=args.require_all_ids,
+    )
     out = Path(args.out) if args.out else priors_path(args.data_dir)
     priors.save(out)
     print(format_report(priors))

@@ -11,16 +11,14 @@ from pathlib import Path
 
 SURVIVING_BEAT_COLUMNS = ('t', 'bpm', 'change', 'rms')
 RESCALED_BEAT_COLUMNS = ('strength',)
-DOOMED_BEAT_COLUMNS = ('onset_density', 'kick_strength', 'centroid_trend',
-                       'sub_bass_ratio')
+DOOMED_BEAT_COLUMNS = ('onset_density', 'kick_strength', 'centroid_trend', 'sub_bass_ratio')
 DOOMED_METRIC_KEYS = ('onset_density_mean',)
 
 # Matches the command-timing tolerance tests/test_simulation.py holds the queue to.
 TIMING_ACCURACY_MAX_MS = 10.0
 
 _EFFECT_MIDI_LABELS = ('set_autoloop', 'set_special_effect')
-_MIDI_LABEL_TO_EFFECT_TYPE = {'set_autoloop': 'AUTOLOOP',
-                              'set_special_effect': 'SPECIAL_EFFECT'}
+_MIDI_LABEL_TO_EFFECT_TYPE = {'set_autoloop': 'AUTOLOOP', 'set_special_effect': 'SPECIAL_EFFECT'}
 
 _STREAM_NAMES = ('sound', 'os2l', 'midi', 'overlay')
 _OVERLAY_LIGHT_BAR = 'LIGHT_BAR_24'
@@ -49,8 +47,7 @@ def _non_decreasing(values) -> bool:
 
 
 def _queue_errors_ms(report: dict) -> list:
-    return [abs(e['actual_delta_sec'] - e['target_delta_sec']) * 1000
-            for e in report['timing_log']]
+    return [abs(e['actual_delta_sec'] - e['target_delta_sec']) * 1000 for e in report['timing_log']]
 
 
 def _queue_error_buffers(report: dict) -> int:
@@ -72,8 +69,9 @@ def _os2l_digest(events: list) -> dict:
     return {
         'beats': len(beats),
         'wire_keys': wire,
-        'stream_hash': _hash([[e['change'], e['pos'], round(e['bpm'], 4),
-                               e['strength']] for e in beats]),
+        'stream_hash': _hash(
+            [[e['change'], e['pos'], round(e['bpm'], 4), e['strength']] for e in beats]
+        ),
         'strengths': sorted({e['strength'] for e in beats}),
         'positions': [beats[0]['pos'], beats[-1]['pos']] if beats else [],
     }
@@ -86,8 +84,7 @@ def survives_digest(report: dict, streams: dict | None = None) -> dict:
     return {
         'beats_detected': metrics['beats_detected'],
         'beat_times_hash': _hash([round(b['t'], 4) for b in beats]),
-        'beat_columns_hash': _hash([[b[c] for c in SURVIVING_BEAT_COLUMNS]
-                                    for b in beats]),
+        'beat_columns_hash': _hash([[b[c] for c in SURVIVING_BEAT_COLUMNS] for b in beats]),
         'bpm_median': round(_median(sorted(b['bpm'] for b in beats if b['bpm'] > 0)), 4),
         'bpm_last': metrics['bpm_last'],
         'rms_mean': round(sum(b['rms'] for b in beats) / len(beats), 6) if beats else 0.0,
@@ -100,15 +97,17 @@ def survives_digest(report: dict, streams: dict | None = None) -> dict:
         'schema': {
             'report_keys': sorted(report.keys()),
             'metric_keys': sorted(set(metrics) - set(DOOMED_METRIC_KEYS)),
-            'beat_keys': (sorted(set(beats[0]) - set(DOOMED_BEAT_COLUMNS))
-                          if beats else []),
+            'beat_keys': (sorted(set(beats[0]) - set(DOOMED_BEAT_COLUMNS)) if beats else []),
         },
     }
 
 
 def _effects_match_report(midi: list, report_effects: list) -> bool:
-    applied = [(_MIDI_LABEL_TO_EFFECT_TYPE[e['label']], e['channel'])
-               for e in midi if e['label'] in _EFFECT_MIDI_LABELS]
+    applied = [
+        (_MIDI_LABEL_TO_EFFECT_TYPE[e['label']], e['channel'])
+        for e in midi
+        if e['label'] in _EFFECT_MIDI_LABELS
+    ]
     return applied == [(e['type'], e['channel']) for e in report_effects]
 
 
@@ -123,11 +122,14 @@ def _intent_at(intents: list, t: float) -> str | None:
 def _channels_come_from_the_intents_pool(report: dict) -> bool:
     from autolux.lib.engine.effect_definitions import INTENT_EFFECTS
 
-    pools = {intent.value: {effect.midi_channel.name for effect in effects}
-             for intent, effects in INTENT_EFFECTS.items()}
-    return all(effect['channel'] in pools.get(_intent_at(report['intents'],
-                                                         effect['t']), ())
-               for effect in report['effects'])
+    pools = {
+        intent.value: {effect.midi_channel.name for effect in effects}
+        for intent, effects in INTENT_EFFECTS.items()
+    }
+    return all(
+        effect['channel'] in pools.get(_intent_at(report['intents'], effect['t']), ())
+        for effect in report['effects']
+    )
 
 
 def relations_digest(report: dict, streams: dict | None = None) -> dict:
@@ -135,15 +137,13 @@ def relations_digest(report: dict, streams: dict | None = None) -> dict:
     light_bar = [e for e in streams['overlay'] if e['effect'] == _OVERLAY_LIGHT_BAR]
     errors_ms = _queue_errors_ms(report)
     return {
-        'midi_arrives_in_enqueue_order': _non_decreasing(e['time']
-                                                         for e in streams['midi']),
-        'midi_matches_the_report_effects': _effects_match_report(streams['midi'],
-                                                                 report['effects']),
-        'midi_channels_come_from_the_intents_pool':
-            _channels_come_from_the_intents_pool(report),
+        'midi_arrives_in_enqueue_order': _non_decreasing(e['time'] for e in streams['midi']),
+        'midi_matches_the_report_effects': _effects_match_report(
+            streams['midi'], report['effects']
+        ),
+        'midi_channels_come_from_the_intents_pool': _channels_come_from_the_intents_pool(report),
         'overlay_light_bar_fires': bool(light_bar),
-        'overlay_arrives_in_enqueue_order': _non_decreasing(e['time']
-                                                            for e in light_bar),
+        'overlay_arrives_in_enqueue_order': _non_decreasing(e['time'] for e in light_bar),
         'queue_error_within_tolerance': max(errors_ms, default=0.0) < TIMING_ACCURACY_MAX_MS,
     }
 
@@ -164,12 +164,14 @@ def informational_digest(report: dict, streams: dict | None = None) -> dict:
             'ordering_hash': _hash([[e['label'], e['channel']] for e in midi]),
         },
         'overlay': {
-            'light_bar_updates': sum(1 for e in streams['overlay']
-                                     if e['effect'] == _OVERLAY_LIGHT_BAR),
+            'light_bar_updates': sum(
+                1 for e in streams['overlay'] if e['effect'] == _OVERLAY_LIGHT_BAR
+            ),
         },
         'timing': {
-            'target_delta_sec': sorted({round(e['target_delta_sec'], 4)
-                                        for e in report['timing_log']}),
+            'target_delta_sec': sorted(
+                {round(e['target_delta_sec'], 4) for e in report['timing_log']}
+            ),
             'commands': len(report['timing_log']),
         },
     }
@@ -181,8 +183,7 @@ def degradation_digest(report: dict, streams: dict | None = None) -> dict:
 
     beats = report['beats']
     intents = report['intents']
-    classified = [e for e in intents
-                  if e['intent'] != LightIntent.ATMOSPHERIC.value]
+    classified = [e for e in intents if e['intent'] != LightIntent.ATMOSPHERIC.value]
     return {
         'beats_detected': report['metrics']['beats_detected'],
         'beat_times_hash': _hash([round(b['t'], 4) for b in beats]),
@@ -196,15 +197,17 @@ def degradation_digest(report: dict, streams: dict | None = None) -> dict:
 
 
 def held_start_to_end(degradation: dict) -> bool:
-    return (degradation['intent_blocks'] >= 1
-            and degradation['classified_blocks'] <= 1
-            and len([i for i in degradation['intents_held']
-                     if i != 'atmospheric']) <= 1
-            and degradation['effect_changes'] <= degradation['atmospheric_blocks'] + 1)
+    return (
+        degradation['intent_blocks'] >= 1
+        and degradation['classified_blocks'] <= 1
+        and len([i for i in degradation['intents_held'] if i != 'atmospheric']) <= 1
+        and degradation['effect_changes'] <= degradation['atmospheric_blocks'] + 1
+    )
 
 
-def digest_report(report: dict, streams: dict | None = None, *,
-                  wall_elapsed: float | None = None) -> dict:
+def digest_report(
+    report: dict, streams: dict | None = None, *, wall_elapsed: float | None = None
+) -> dict:
     digest = {
         'survives': survives_digest(report, streams),
         'relations': relations_digest(report, streams),
@@ -255,8 +258,7 @@ async def digest_track(path: str) -> dict:
     )
     wall_elapsed = time.monotonic() - wall_start
     report = components['event_buffer'].to_report(command_queue.get_timing_log())
-    digest = digest_report(report, capture_streams(components),
-                           wall_elapsed=wall_elapsed)
+    digest = digest_report(report, capture_streams(components), wall_elapsed=wall_elapsed)
     digest['report_checksum'] = report_checksum(report)
     return digest
 
@@ -284,11 +286,17 @@ def _drop_machine_dependent_speed(digests: dict) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('tracks', nargs='+')
-    ap.add_argument('--write', metavar='PATH',
-                    help='write the digests to PATH as a JSON object keyed by track name')
-    ap.add_argument('--check', metavar='PATH',
-                    help='compare the survivors and relations against a committed '
-                         'fixture and exit non-zero on any difference')
+    ap.add_argument(
+        '--write',
+        metavar='PATH',
+        help='write the digests to PATH as a JSON object keyed by track name',
+    )
+    ap.add_argument(
+        '--check',
+        metavar='PATH',
+        help='compare the survivors and relations against a committed '
+        'fixture and exit non-zero on any difference',
+    )
     args = ap.parse_args()
 
     digests = {}
@@ -302,16 +310,20 @@ def main() -> None:
         out = Path(args.write)
         out.parent.mkdir(parents=True, exist_ok=True)
         _drop_machine_dependent_speed(digests)
-        out.write_text(json.dumps(digests, indent=2, sort_keys=True) + '\n',
-                       newline='\n')
+        out.write_text(json.dumps(digests, indent=2, sort_keys=True) + '\n', newline='\n')
         print(f'\nwrote {out}')
 
     if args.check:
         fixture = json.loads(Path(args.check).read_text())
-        failures = [failure for name, digest in digests.items()
-                    for failure in check_digest(name, digest, fixture)]
-        print('\n' + ('\n'.join(failures) if failures
-                      else f'all {len(digests)} tracks match {args.check}'))
+        failures = [
+            failure
+            for name, digest in digests.items()
+            for failure in check_digest(name, digest, fixture)
+        ]
+        print(
+            '\n'
+            + ('\n'.join(failures) if failures else f'all {len(digests)} tracks match {args.check}')
+        )
         raise SystemExit(1 if failures else 0)
 
 

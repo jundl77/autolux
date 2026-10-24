@@ -14,9 +14,14 @@ PLAYBACK_DELAY_SEC = 14.0
 FAST_SIM_RANDOM_SEED = 1337
 
 
-def build_simulation(audio_client, event_buffer=None, clock: Clock = SYSTEM_CLOCK,
-                     section: object | None = None, threaded: bool = False,
-                     silence_monitor=None):
+def build_simulation(
+    audio_client,
+    event_buffer=None,
+    clock: Clock = SYSTEM_CLOCK,
+    section: object | None = None,
+    threaded: bool = False,
+    silence_monitor=None,
+):
     from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
     from autolux.lib.analyser.drift_watchdog import DriftWatchdog
     from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
@@ -37,8 +42,11 @@ def build_simulation(audio_client, event_buffer=None, clock: Clock = SYSTEM_CLOC
 
     effect_controller = EffectController(midi_client, event_buffer=event_buffer, clock=clock)
     light_engine = LightEngine(
-        midi_client, os2l_client, overlay_client,
-        effect_controller, command_queue,
+        midi_client,
+        os2l_client,
+        overlay_client,
+        effect_controller,
+        command_queue,
         event_buffer=event_buffer,
         playback_delay_sec=PLAYBACK_DELAY_SEC,
         section_chain=None if section is None else section.stream,
@@ -48,8 +56,9 @@ def build_simulation(audio_client, event_buffer=None, clock: Clock = SYSTEM_CLOC
         clock=clock,
     )
 
-    music_analyser = MusicAnalyser(SAMPLE_RATE, BUFFER_SIZE, light_engine, clock=clock,
-                                   watchdog=watchdog)
+    music_analyser = MusicAnalyser(
+        SAMPLE_RATE, BUFFER_SIZE, light_engine, clock=clock, watchdog=watchdog
+    )
     light_engine.set_analyser(music_analyser)
 
     return {
@@ -78,40 +87,45 @@ def load_section_chain(watchdog=None, audio_client=None):
     tracker_plan = _tracker_cache_plan(audio_client)
     if plan is not None:
         expected = _expected_samples(audio_client)
-        replay, reason = cell_cache.open_replay(*plan,
-                                                expected_samples=expected)
+        replay, reason = cell_cache.open_replay(*plan, expected_samples=expected)
         tracker_replay = None
         if tracker_plan is not None:
             from autolux.simulate import tracker_cache
 
             tracker_replay, tracker_reason = tracker_cache.open_replay(
-                *tracker_plan, expected_samples=expected)
+                *tracker_plan, expected_samples=expected
+            )
         else:
             tracker_reason = "no_tracker"
         # One decision for both caches: a run is warm only when every stage
         # this machine would run can be replayed.
-        if replay is not None and (tracker_plan is None
-                                   or tracker_replay is not None):
-            logging.info(f'[sim] replaying cached extractor cells '
-                         f'← {plan[0].name}'
-                         + ('' if tracker_replay is None
-                            else f' and tracker chunks ← {tracker_plan[0].name}'))
+        if replay is not None and (tracker_plan is None or tracker_replay is not None):
+            logging.info(
+                f'[sim] replaying cached extractor cells '
+                f'← {plan[0].name}'
+                + (
+                    ''
+                    if tracker_replay is None
+                    else f' and tracker chunks ← {tracker_plan[0].name}'
+                )
+            )
             return section_chain.build_section_chain(
-                extractor=lambda _: replay, tracker=tracker_replay)
-        logging.info(f'[sim] extractor cells: {reason} / tracker chunks: '
-                     f'{tracker_reason} — this run needs the GPU')
+                extractor=lambda _: replay, tracker=tracker_replay
+            )
+        logging.info(
+            f'[sim] extractor cells: {reason} / tracker chunks: '
+            f'{tracker_reason} — this run needs the GPU'
+        )
 
     if _SECTION_CHAIN is _UNBUILT:
-        _SECTION_CHAIN = (section_chain.build_section_chain()
-                          if _artifacts_or_degrade() else None)
+        _SECTION_CHAIN = section_chain.build_section_chain() if _artifacts_or_degrade() else None
     if _SECTION_CHAIN is None:
         return None
     _SECTION_CHAIN.stream.reset()
     _SECTION_CHAIN.decoder.reset()
     if plan is None:
         return _SECTION_CHAIN
-    return cell_cache.recording_chain(_SECTION_CHAIN, *plan,
-                                      tracker_plan=tracker_plan)
+    return cell_cache.recording_chain(_SECTION_CHAIN, *plan, tracker_plan=tracker_plan)
 
 
 def _artifacts_or_degrade() -> bool:
@@ -119,8 +133,10 @@ def _artifacts_or_degrade() -> bool:
 
     if section_chain.artifacts_present():
         return True
-    logging.warning('[sim] no NN artifacts on this machine — running '
-                    'the degradation state (beats, silence, held intent)')
+    logging.warning(
+        '[sim] no NN artifacts on this machine — running '
+        'the degradation state (beats, silence, held intent)'
+    )
     return False
 
 
@@ -139,9 +155,12 @@ def _cell_cache_plan(audio_client):
     if path is None or decode is None or not section_chain.artifacts_present():
         return None
     geometry = section_chain.read_geometry().stream
-    return (cell_cache.sidecar_path(path, decode),
-            cell_cache.cache_key(geometry, source_rate=SAMPLE_RATE,
-                                 audio_path=path, decode_path=decode))
+    return (
+        cell_cache.sidecar_path(path, decode),
+        cell_cache.cache_key(
+            geometry, source_rate=SAMPLE_RATE, audio_path=path, decode_path=decode
+        ),
+    )
 
 
 def _tracker_cache_plan(audio_client):
@@ -154,39 +173,50 @@ def _tracker_cache_plan(audio_client):
     if path is None or decode is None or not section_chain.bar_tracker_present():
         return None
     record = bar_tracker.load_record(section_chain.generation_dir())
-    return (tracker_cache.sidecar_path(path, decode),
-            tracker_cache.cache_key(record, source_rate=SAMPLE_RATE,
-                                    audio_path=path, decode_path=decode))
+    return (
+        tracker_cache.sidecar_path(path, decode),
+        tracker_cache.cache_key(
+            record, source_rate=SAMPLE_RATE, audio_path=path, decode_path=decode
+        ),
+    )
 
 
 _UNBUILT = object()
 _SECTION_CHAIN = _UNBUILT
 
 
-async def run_fast_simulation_components(audio_client, duration_sec: float = float('inf'),
-                                         seed: int = FAST_SIM_RANDOM_SEED):
+async def run_fast_simulation_components(
+    audio_client, duration_sec: float = float('inf'), seed: int = FAST_SIM_RANDOM_SEED
+):
     from autolux.lib.engine.event_buffer import EventBuffer
 
     random.seed(seed)
     clock = VirtualClock()
-    event_buffer = EventBuffer(window_sec=float('inf'), clock=clock,
-                               look_ahead_sec=PLAYBACK_DELAY_SEC)
+    event_buffer = EventBuffer(
+        window_sec=float('inf'), clock=clock, look_ahead_sec=PLAYBACK_DELAY_SEC
+    )
     components, command_queue = build_simulation(audio_client, event_buffer, clock=clock)
     event_buffer.start()
     await run_simulation(components, duration_sec, clock=clock)
     return components, command_queue
 
 
-async def run_fast_simulation(audio_client, duration_sec: float = float('inf'),
-                              seed: int = FAST_SIM_RANDOM_SEED):
+async def run_fast_simulation(
+    audio_client, duration_sec: float = float('inf'), seed: int = FAST_SIM_RANDOM_SEED
+):
     components, command_queue = await run_fast_simulation_components(
-        audio_client, duration_sec, seed)
+        audio_client, duration_sec, seed
+    )
     return components['audio_client'], components['event_buffer'], command_queue
 
 
-async def run_simulation(components: dict, duration_sec: float,
-                         clock: Clock = SYSTEM_CLOCK,
-                         pace_real_time: bool = False, monitor=None):
+async def run_simulation(
+    components: dict,
+    duration_sec: float,
+    clock: Clock = SYSTEM_CLOCK,
+    pace_real_time: bool = False,
+    monitor=None,
+):
     audio_client = components['audio_client']
     music_analyser = components['music_analyser']
     command_queue = components['command_queue']
@@ -203,8 +233,10 @@ async def run_simulation(components: dict, duration_sec: float,
     last_1s = clock.now()
     last_10s = clock.now()
 
-    logging.info(f'[sim] starting simulation loop for {duration_sec:.1f}s '
-                 f'({"virtual" if is_virtual else "wall"} time)')
+    logging.info(
+        f'[sim] starting simulation loop for {duration_sec:.1f}s '
+        f'({"virtual" if is_virtual else "wall"} time)'
+    )
     if monitor is not None:
         monitor.arm()
     while clock.monotonic() - start_mono < duration_sec and not audio_client.exhausted:
@@ -271,11 +303,13 @@ def print_timing_report(command_queue, tolerance_sec: float = TIMING_TOLERANCE_S
     worst_error_ms = 0.0
 
     print(f'\n{"─" * 72}')
-    print(f'  TIMING REPORT   playback_delay={command_queue.delay_sec:.3f}s   '
-          f'tolerance=±{tolerance_sec * 1000:.0f}ms')
+    print(
+        f'  TIMING REPORT   playback_delay={command_queue.delay_sec:.3f}s   '
+        f'tolerance=±{tolerance_sec * 1000:.0f}ms'
+    )
     print(f'{"─" * 72}')
     print(f'  {"label":<18} {"actual_delta":>12}  {"error":>8}  {"status":>6}')
-    print(f'  {"─"*18} {"─"*12}  {"─"*8}  {"─"*6}')
+    print(f'  {"─" * 18} {"─" * 12}  {"─" * 8}  {"─" * 6}')
 
     for entry in log:
         actual = entry['actual_delta_sec']
@@ -290,7 +324,9 @@ def print_timing_report(command_queue, tolerance_sec: float = TIMING_TOLERANCE_S
 
     total = len(log)
     print(f'{"─" * 72}')
-    print(f'  RESULT: {passed}/{total} within ±{tolerance_sec * 1000:.0f}ms  |  worst error: {worst_error_ms:.1f}ms')
+    print(
+        f'  RESULT: {passed}/{total} within ±{tolerance_sec * 1000:.0f}ms  |  worst error: {worst_error_ms:.1f}ms'
+    )
     verdict = 'PASS' if passed == total else f'FAIL ({total - passed} command(s) out of tolerance)'
     print(f'  {verdict}')
     print(f'{"─" * 72}\n')

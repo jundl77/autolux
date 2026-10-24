@@ -49,9 +49,20 @@ def _sine_mp3(path: Path, seconds: float) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
-            "ffmpeg", "-nostdin", "-v", "error", "-y",
-            "-f", "lavfi", "-i", f"sine=frequency=440:duration={seconds}",
-            "-c:a", "libmp3lame", "-b:a", "64k", str(path),
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=440:duration={seconds}",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "64k",
+            str(path),
         ],
         check=True,
         capture_output=True,
@@ -105,7 +116,9 @@ def _write_corpus(root: Path, tracks: list) -> Path:
     for track_id, _youtube_id, duration in tracks:
         with open(
             root / "annotations" / "beats" / f"{track_id}.beat.csv",
-            "w", encoding="utf-8", newline="",
+            "w",
+            encoding="utf-8",
+            newline="",
         ) as handle:
             writer = csv.writer(handle, lineterminator="\n")
             writer.writerow(("time", "downbeat", "section"))
@@ -154,9 +167,13 @@ def test_disk_outranks_the_failure_log():
 def test_the_most_recent_failure_record_wins(tmp_path):
     path = tmp_path / "failed.jsonl"
     path.write_text(
-        json.dumps({"youtube_id": "a", "reason": "bot_check", "error": "sign in", "timestamp": "t1"})
+        json.dumps(
+            {"youtube_id": "a", "reason": "bot_check", "error": "sign in", "timestamp": "t1"}
+        )
         + "\n"
-        + json.dumps({"youtube_id": "a", "reason": "unavailable", "error": "gone", "timestamp": "t2"})
+        + json.dumps(
+            {"youtube_id": "a", "reason": "unavailable", "error": "gone", "timestamp": "t2"}
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -168,7 +185,8 @@ def test_the_most_recent_failure_record_wins(tmp_path):
 def test_a_torn_last_line_does_not_lose_the_earlier_failures(tmp_path):
     path = tmp_path / "failed.jsonl"
     path.write_text(
-        json.dumps({"youtube_id": "a", "reason": "unavailable", "error": "gone"}) + "\n"
+        json.dumps({"youtube_id": "a", "reason": "unavailable", "error": "gone"})
+        + "\n"
         + '{"youtube_id": "b", "rea',
         encoding="utf-8",
     )
@@ -223,8 +241,12 @@ def test_an_annotation_with_no_manifest_row_is_reported(tmp_path):
     from raveform_fetch_annotations import load_tracks
 
     tracks = load_tracks(tmp_path) + [
-        {"key": "0009.zzz", "id": "zzz", "duration": 10.0, "sections": [
-            {"name": "intro", "start": 0.0, "end": 10.0}]},
+        {
+            "key": "0009.zzz",
+            "id": "zzz",
+            "duration": 10.0,
+            "sections": [{"name": "intro", "start": 0.0, "end": 10.0}],
+        },
     ]
     issues = check_annotations(tmp_path, gate.load_manifest_rows(tmp_path), tracks)
     assert any("0009.zzz" in issue for issue in issues)
@@ -292,7 +314,9 @@ def test_millisecond_rounding_in_the_manifest_is_not_an_issue(tmp_path):
     _write_corpus(tmp_path, [("0001.aaa", "aaa", 429.9639229025)])
     from raveform_fetch_annotations import load_tracks
 
-    assert check_annotations(tmp_path, gate.load_manifest_rows(tmp_path), load_tracks(tmp_path)) == []
+    assert (
+        check_annotations(tmp_path, gate.load_manifest_rows(tmp_path), load_tracks(tmp_path)) == []
+    )
 
 
 def test_durations_come_from_the_annotation_record_at_full_precision():
@@ -301,31 +325,37 @@ def test_durations_come_from_the_annotation_record_at_full_precision():
 
 
 def test_a_fully_accounted_corpus_converges():
-    counts = tally([
-        _verdict("0001.a", "a", STATUS_OK),
-        _verdict("0002.b", "b", STATUS_DURATION_MISMATCH),
-        _verdict("0003.c", "c", STATUS_UNAVAILABLE),
-    ])
+    counts = tally(
+        [
+            _verdict("0001.a", "a", STATUS_OK),
+            _verdict("0002.b", "b", STATUS_DURATION_MISMATCH),
+            _verdict("0003.c", "c", STATUS_UNAVAILABLE),
+        ]
+    )
     converged, statement = convergence(counts, manifest_tracks=3)
     assert converged
     assert "3" in statement
 
 
 def test_a_single_missing_track_blocks_convergence():
-    counts = tally([
-        _verdict("0001.a", "a", STATUS_OK),
-        _verdict("0002.b", "b", STATUS_MISSING),
-    ])
+    counts = tally(
+        [
+            _verdict("0001.a", "a", STATUS_OK),
+            _verdict("0002.b", "b", STATUS_MISSING),
+        ]
+    )
     converged, statement = convergence(counts, manifest_tracks=2)
     assert not converged
     assert "MISSING" in statement
 
 
 def test_a_single_corrupt_track_blocks_convergence():
-    counts = tally([
-        _verdict("0001.a", "a", STATUS_OK),
-        _verdict("0002.b", "b", STATUS_CORRUPT),
-    ])
+    counts = tally(
+        [
+            _verdict("0001.a", "a", STATUS_OK),
+            _verdict("0002.b", "b", STATUS_CORRUPT),
+        ]
+    )
     converged, _statement = convergence(counts, manifest_tracks=2)
     assert not converged
 
@@ -353,22 +383,39 @@ def test_a_track_left_behind_by_a_transient_failure_is_flagged():
 
 def test_the_remainder_warning_reaches_the_human_report():
     payload = {
-        "generated_at_utc": "2026-07-27T00:00:00Z", "data_dir": "C:/corpus",
+        "generated_at_utc": "2026-07-27T00:00:00Z",
+        "data_dir": "C:/corpus",
         "manifest_tracks": 1,
-        "counts": {STATUS_OK: 0, STATUS_DURATION_MISMATCH: 0, STATUS_UNAVAILABLE: 1,
-                   STATUS_MISSING: 0, STATUS_CORRUPT: 0},
+        "counts": {
+            STATUS_OK: 0,
+            STATUS_DURATION_MISMATCH: 0,
+            STATUS_UNAVAILABLE: 1,
+            STATUS_MISSING: 0,
+            STATUS_CORRUPT: 0,
+        },
         "unavailable_by_reason": {"http_403": 1},
-        "converged": True, "convergence_statement": "CONVERGED: ...",
-        "all_clear": True, "verdict_statement": "ALL CLEAR: ...",
+        "converged": True,
+        "convergence_statement": "CONVERGED: ...",
+        "all_clear": True,
+        "verdict_statement": "ALL CLEAR: ...",
         "retryable_remainder": ["0001.a"],
         "tolerance": {"abs_sec": 10.0, "rel": 0.03},
-        "checksums": {"skipped": True}, "orphans": [], "annotation_issues": [],
+        "checksums": {"skipped": True},
+        "orphans": [],
+        "annotation_issues": [],
         "tracks": [
-            {"track_id": "0001.a", "youtube_id": "a", "status": STATUS_UNAVAILABLE,
-             "detail": "http_403: ERROR: HTTP Error 403: Forbidden",
-             "decoded_duration_sec": None, "annotation_duration_sec": 300.0,
-             "ffprobe_duration_sec": None, "failure_reason": "http_403", "mp3_path": "",
-             "sha256": ""},
+            {
+                "track_id": "0001.a",
+                "youtube_id": "a",
+                "status": STATUS_UNAVAILABLE,
+                "detail": "http_403: ERROR: HTTP Error 403: Forbidden",
+                "decoded_duration_sec": None,
+                "annotation_duration_sec": 300.0,
+                "ffprobe_duration_sec": None,
+                "failure_reason": "http_403",
+                "mp3_path": "",
+                "sha256": "",
+            },
         ],
     }
     text = render_text_report(payload)
@@ -450,12 +497,27 @@ def test_checksums_cover_the_ok_files_only_and_are_sha256sum_readable(tmp_path):
     for name in ("b", "a", "bad"):
         (audio / f"{name}.mp3").write_bytes(name.encode())
     verdicts = [
-        _verdict("0002.b", "b", STATUS_OK, mp3_path=str(audio / "b.mp3"),
-                 sha256=hashlib.sha256(b"b").hexdigest()),
-        _verdict("0001.a", "a", STATUS_OK, mp3_path=str(audio / "a.mp3"),
-                 sha256=hashlib.sha256(b"a").hexdigest()),
-        _verdict("0003.bad", "bad", STATUS_DURATION_MISMATCH, mp3_path=str(audio / "bad.mp3"),
-                 sha256=hashlib.sha256(b"bad").hexdigest()),
+        _verdict(
+            "0002.b",
+            "b",
+            STATUS_OK,
+            mp3_path=str(audio / "b.mp3"),
+            sha256=hashlib.sha256(b"b").hexdigest(),
+        ),
+        _verdict(
+            "0001.a",
+            "a",
+            STATUS_OK,
+            mp3_path=str(audio / "a.mp3"),
+            sha256=hashlib.sha256(b"a").hexdigest(),
+        ),
+        _verdict(
+            "0003.bad",
+            "bad",
+            STATUS_DURATION_MISMATCH,
+            mp3_path=str(audio / "bad.mp3"),
+            sha256=hashlib.sha256(b"bad").hexdigest(),
+        ),
     ]
     path, count = write_checksums(tmp_path, verdicts)
     assert count == 2
@@ -473,8 +535,13 @@ def test_the_text_report_names_every_unavailable_and_mismatched_track():
         "generated_at_utc": "2026-07-27T00:00:00Z",
         "data_dir": "C:/corpus",
         "manifest_tracks": 3,
-        "counts": {STATUS_OK: 1, STATUS_DURATION_MISMATCH: 1, STATUS_UNAVAILABLE: 1,
-                   STATUS_MISSING: 0, STATUS_CORRUPT: 0},
+        "counts": {
+            STATUS_OK: 1,
+            STATUS_DURATION_MISMATCH: 1,
+            STATUS_UNAVAILABLE: 1,
+            STATUS_MISSING: 0,
+            STATUS_CORRUPT: 0,
+        },
         "unavailable_by_reason": {"unavailable": 1},
         "converged": True,
         "convergence_statement": "converged: 3 accounted for",
@@ -485,18 +552,42 @@ def test_the_text_report_names_every_unavailable_and_mismatched_track():
         "orphans": [],
         "annotation_issues": [],
         "tracks": [
-            {"track_id": "0001.a", "youtube_id": "a", "status": STATUS_OK, "detail": "",
-             "decoded_duration_sec": 300.0, "annotation_duration_sec": 300.0,
-             "ffprobe_duration_sec": 300.0, "failure_reason": "", "mp3_path": "", "sha256": "d"},
-            {"track_id": "0002.b", "youtube_id": "b", "status": STATUS_DURATION_MISMATCH,
-             "detail": "decoded 200.000 s vs annotation 400.000 s",
-             "decoded_duration_sec": 200.0, "annotation_duration_sec": 400.0,
-             "ffprobe_duration_sec": 200.0, "failure_reason": "", "mp3_path": "", "sha256": ""},
-            {"track_id": "0003.c", "youtube_id": "c", "status": STATUS_UNAVAILABLE,
-             "detail": "unavailable: ERROR: Video unavailable",
-             "decoded_duration_sec": None, "annotation_duration_sec": 500.0,
-             "ffprobe_duration_sec": None, "failure_reason": "unavailable", "mp3_path": "",
-             "sha256": ""},
+            {
+                "track_id": "0001.a",
+                "youtube_id": "a",
+                "status": STATUS_OK,
+                "detail": "",
+                "decoded_duration_sec": 300.0,
+                "annotation_duration_sec": 300.0,
+                "ffprobe_duration_sec": 300.0,
+                "failure_reason": "",
+                "mp3_path": "",
+                "sha256": "d",
+            },
+            {
+                "track_id": "0002.b",
+                "youtube_id": "b",
+                "status": STATUS_DURATION_MISMATCH,
+                "detail": "decoded 200.000 s vs annotation 400.000 s",
+                "decoded_duration_sec": 200.0,
+                "annotation_duration_sec": 400.0,
+                "ffprobe_duration_sec": 200.0,
+                "failure_reason": "",
+                "mp3_path": "",
+                "sha256": "",
+            },
+            {
+                "track_id": "0003.c",
+                "youtube_id": "c",
+                "status": STATUS_UNAVAILABLE,
+                "detail": "unavailable: ERROR: Video unavailable",
+                "decoded_duration_sec": None,
+                "annotation_duration_sec": 500.0,
+                "ffprobe_duration_sec": None,
+                "failure_reason": "unavailable",
+                "mp3_path": "",
+                "sha256": "",
+            },
         ],
     }
     text = render_text_report(payload)
@@ -530,8 +621,9 @@ def test_pruning_leaves_a_duration_mismatch_on_disk(tmp_path):
     audio = tmp_path / "audio"
     audio.mkdir()
     (audio / "odd.mp3").write_bytes(b"odd")
-    verdicts = [_verdict("0001.odd", "odd", STATUS_DURATION_MISMATCH,
-                         mp3_path=str(audio / "odd.mp3"))]
+    verdicts = [
+        _verdict("0001.odd", "odd", STATUS_DURATION_MISMATCH, mp3_path=str(audio / "odd.mp3"))
+    ]
     assert prune_corrupt(tmp_path, verdicts) == []
     assert (audio / "odd.mp3").exists()
 
@@ -553,8 +645,15 @@ def test_a_whole_miniature_corpus_is_accounted_for(tmp_path):
     (audio / "orphan.mp3").write_bytes(b"x")
     (audio / "aaa.mp3.44100.npy").write_bytes(b"x")
     (tmp_path / "failed.jsonl").write_text(
-        json.dumps({"youtube_id": "ddd", "reason": "unavailable",
-                    "error": "ERROR: Video unavailable", "timestamp": "t"}) + "\n",
+        json.dumps(
+            {
+                "youtube_id": "ddd",
+                "reason": "unavailable",
+                "error": "ERROR: Video unavailable",
+                "timestamp": "t",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 

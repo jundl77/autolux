@@ -10,9 +10,15 @@ import pytest
 from autolux.lib.analyser.mert_stream import Cell, StreamGeometry
 from autolux.simulate import cell_cache
 
-GEOMETRY = StreamGeometry(model_id="m-a-p/MERT-v1-330M", layers=(4, 8, 12),
-                          margin_sec=3.0, hop_sec=1.0, buffer_sec=30.0,
-                          label_frame_sec=0.5, encoder_sha="decfecaef6d14868")
+GEOMETRY = StreamGeometry(
+    model_id="m-a-p/MERT-v1-330M",
+    layers=(4, 8, 12),
+    margin_sec=3.0,
+    hop_sec=1.0,
+    buffer_sec=30.0,
+    label_frame_sec=0.5,
+    encoder_sha="decfecaef6d14868",
+)
 
 SCHEDULE = (2, 1, 0, 3)
 DIM = 6
@@ -34,8 +40,9 @@ class FakeStream:
         self._written += len(samples)
 
     def due(self) -> bool:
-        return (self._passes < len(self._schedule)
-                and self._written >= (self._passes + 1) * self._hop)
+        return (
+            self._passes < len(self._schedule) and self._written >= (self._passes + 1) * self._hop
+        )
 
     def run_pass(self) -> list:
         count = self._schedule[self._passes]
@@ -46,8 +53,7 @@ class FakeStream:
             index = self._next_index
             self._next_index += 1
             features = np.full(DIM, index, dtype=np.float32)
-            cells.append(Cell(index, (index + 1) * GEOMETRY.label_frame_sec,
-                              features, seen))
+            cells.append(Cell(index, (index + 1) * GEOMETRY.label_frame_sec, features, seen))
         return cells
 
 
@@ -61,8 +67,10 @@ def drive(stream, buffers: int = 6, buffer_size: int = 100) -> list:
 
 
 def as_tuples(groups) -> list:
-    return [[(c.index, c.time_sec, c.features.tolist(), c.audio_seen_sec)
-             for c in group] for group in groups]
+    return [
+        [(c.index, c.time_sec, c.features.tolist(), c.audio_seen_sec) for c in group]
+        for group in groups
+    ]
 
 
 @pytest.fixture
@@ -74,8 +82,9 @@ def audio(tmp_path) -> Path:
 
 @pytest.fixture
 def key(audio) -> dict:
-    return cell_cache.cache_key(GEOMETRY, source_rate=44100, audio_path=audio,
-                                decode_path="librosa")
+    return cell_cache.cache_key(
+        GEOMETRY, source_rate=44100, audio_path=audio, decode_path="librosa"
+    )
 
 
 def record(audio: Path, key: dict, stream=None) -> Path:
@@ -151,32 +160,36 @@ def test_a_sidecar_cut_under_another_decode_is_a_named_miss(audio, key):
     assert reason == "miss_decode_path"
 
 
-@pytest.mark.parametrize("field,value,reason", [
-    ("schema", "mert-cells/0", "miss_schema"),
-    ("extractor", "0000000000000000", "miss_extractor"),
-    ("source_rate", 48000, "miss_source_rate"),
-    ("audio_size", 999, "miss_audio_changed"),
-    ("audio_mtime", 1.0, "miss_audio_changed"),
-])
-def test_a_moved_top_level_field_is_its_own_named_miss(audio, key, field, value,
-                                                       reason):
+@pytest.mark.parametrize(
+    "field,value,reason",
+    [
+        ("schema", "mert-cells/0", "miss_schema"),
+        ("extractor", "0000000000000000", "miss_extractor"),
+        ("source_rate", 48000, "miss_source_rate"),
+        ("audio_size", 999, "miss_audio_changed"),
+        ("audio_mtime", 1.0, "miss_audio_changed"),
+    ],
+)
+def test_a_moved_top_level_field_is_its_own_named_miss(audio, key, field, value, reason):
     path = record(audio, key)
     replay, found = cell_cache.open_replay(path, dict(key, **{field: value}))
     assert replay is None
     assert found == reason
 
 
-@pytest.mark.parametrize("group,field,value,reason", [
-    ("encoder", "encoder_sha", "0000000000000000", "miss_encoder"),
-    ("encoder", "layers", [4, 8], "miss_encoder"),
-    ("encoder", "revision", "deadbeef", "miss_encoder"),
-    ("framing", "margin_sec", 5.0, "miss_framing"),
-    ("framing", "hop_sec", 2.0, "miss_framing"),
-    ("framing", "buffer_sec", 20.0, "miss_framing"),
-    ("framing", "label_frame_sec", 0.25, "miss_framing"),
-])
-def test_a_moved_geometry_field_is_its_own_named_miss(audio, key, group, field,
-                                                      value, reason):
+@pytest.mark.parametrize(
+    "group,field,value,reason",
+    [
+        ("encoder", "encoder_sha", "0000000000000000", "miss_encoder"),
+        ("encoder", "layers", [4, 8], "miss_encoder"),
+        ("encoder", "revision", "deadbeef", "miss_encoder"),
+        ("framing", "margin_sec", 5.0, "miss_framing"),
+        ("framing", "hop_sec", 2.0, "miss_framing"),
+        ("framing", "buffer_sec", 20.0, "miss_framing"),
+        ("framing", "label_frame_sec", 0.25, "miss_framing"),
+    ],
+)
+def test_a_moved_geometry_field_is_its_own_named_miss(audio, key, group, field, value, reason):
     path = record(audio, key)
     wanted = dict(key)
     wanted[group] = dict(key[group], **{field: value})
@@ -203,14 +216,19 @@ def test_an_unreadable_sidecar_is_a_miss_and_not_an_error(audio, key):
 def test_the_key_carries_the_geometry_the_features_were_framed_under(key):
     assert key["encoder"]["encoder_sha"] == GEOMETRY.encoder_sha
     assert key["encoder"]["layers"] == list(GEOMETRY.layers)
-    assert key["framing"] == {"margin_sec": 3.0, "hop_sec": 1.0,
-                              "buffer_sec": 30.0, "label_frame_sec": 0.5}
+    assert key["framing"] == {
+        "margin_sec": 3.0,
+        "hop_sec": 1.0,
+        "buffer_sec": 30.0,
+        "label_frame_sec": 0.5,
+    }
 
 
 def test_the_audio_key_moves_when_the_file_does(audio, key):
     audio.write_bytes(b"a different recording entirely, of a different length")
-    moved = cell_cache.cache_key(GEOMETRY, source_rate=44100, audio_path=audio,
-                                 decode_path="librosa")
+    moved = cell_cache.cache_key(
+        GEOMETRY, source_rate=44100, audio_path=audio, decode_path="librosa"
+    )
     assert moved["audio_size"] != key["audio_size"]
 
 
@@ -259,12 +277,18 @@ def test_a_warm_chain_loads_no_encoder(nn_artifacts, anchor_mp3, monkeypatch):
     monkeypatch.setattr(mert_stream, "load_encoder", _refuse)
     replay, reason = cell_cache.open_replay(
         cell_cache.sidecar_path(anchor_mp3, "librosa"),
-        cell_cache.cache_key(section_chain.read_geometry().stream,
-                             source_rate=44100, audio_path=anchor_mp3,
-                             decode_path="librosa"))
+        cell_cache.cache_key(
+            section_chain.read_geometry().stream,
+            source_rate=44100,
+            audio_path=anchor_mp3,
+            decode_path="librosa",
+        ),
+    )
     if replay is None:
-        pytest.skip(f"no warm sidecar for the anchor track ({reason}); run "
-                    f"`python -m autolux simulate file` on it first")
+        pytest.skip(
+            f"no warm sidecar for the anchor track ({reason}); run "
+            f"`python -m autolux simulate file` on it first"
+        )
     chain = section_chain.build_section_chain(extractor=lambda _: replay)
     assert chain.stream.stream is replay
 
@@ -289,8 +313,7 @@ def test_a_sidecar_recorded_under_another_backend_is_a_named_miss(audio, key):
 def test_the_builder_and_the_key_read_the_backend_from_one_place():
     from autolux.lib import section_chain
 
-    assert section_chain.resolve_backend("cpu", False) == {
-        "device": "cpu", "precision": "fp32"}
+    assert section_chain.resolve_backend("cpu", False) == {"device": "cpu", "precision": "fp32"}
     assert section_chain.resolve_backend("cuda")["precision"] == "fp16"
 
 
@@ -305,13 +328,11 @@ def test_a_recording_shorter_than_this_run_is_a_named_miss(audio, key):
     replay, reason = cell_cache.open_replay(path, key, expected_samples=6 * 100)
     assert replay is not None and reason == "hit"
 
-    replay, reason = cell_cache.open_replay(path, key,
-                                            expected_samples=6 * 100 + 1)
+    replay, reason = cell_cache.open_replay(path, key, expected_samples=6 * 100 + 1)
     assert replay is None and reason == "miss_truncated"
 
 
-def test_a_replay_pushed_past_its_recording_refuses_instead_of_going_quiet(
-        audio, key):
+def test_a_replay_pushed_past_its_recording_refuses_instead_of_going_quiet(audio, key):
     path = record(audio, key)
     replay, reason = cell_cache.open_replay(path, key)
     assert reason == "hit"
@@ -341,8 +362,7 @@ def test_the_temp_name_is_the_writer_s_own(audio, key, monkeypatch):
     assert str(os.getpid()) in seen[0] and seen[0].endswith(".part")
 
 
-def test_a_sidecar_that_cannot_be_published_does_not_fail_the_run(
-        audio, key, monkeypatch, caplog):
+def test_a_sidecar_that_cannot_be_published_does_not_fail_the_run(audio, key, monkeypatch, caplog):
     def refuse(self, data):
         raise PermissionError(13, "used by another process")
 
@@ -368,8 +388,12 @@ def test_an_edit_to_the_extractor_moves_the_key():
     import hashlib
 
     sources = cell_cache._EXTRACTOR_SOURCES
-    assert any(path.name == "mert_stream.py" for path in sources),         'the module that turns audio into cells is not in the identity'
-    assert any(path.name == "cell_cache.py" for path in sources),         'the module that replays them is not in the identity'
+    assert any(path.name == "mert_stream.py" for path in sources), (
+        'the module that turns audio into cells is not in the identity'
+    )
+    assert any(path.name == "cell_cache.py" for path in sources), (
+        'the module that replays them is not in the identity'
+    )
 
     before = cell_cache.extractor_sha()
     edited = [path.read_bytes() for path in sources]
@@ -377,4 +401,4 @@ def test_an_edit_to_the_extractor_moves_the_key():
         digest = hashlib.sha256()
         for other in range(len(sources)):
             digest.update(edited[other] + (b"# edit" if other == index else b""))
-        assert digest.hexdigest()[:16] != before,             f'an edit to {path.name} does not move the key'
+        assert digest.hexdigest()[:16] != before, f'an edit to {path.name} does not move the key'

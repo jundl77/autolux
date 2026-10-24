@@ -1,4 +1,5 @@
 """Deploy an immutable Radius bundle and supervise one SSH-owned receiver session."""
+
 import base64
 import hashlib
 import ipaddress
@@ -13,8 +14,14 @@ import uuid
 
 
 def encoded_command(script):
-    return ['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
-            base64.b64encode(script.encode('utf-16le')).decode('ascii')]
+    return [
+        'powershell.exe',
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-EncodedCommand',
+        base64.b64encode(script.encode('utf-16le')).decode('ascii'),
+    ]
 
 
 def ps_literal(value):
@@ -37,18 +44,46 @@ class RemoteRuntime:
     def options(self):
         for path in (self.key, self.known_hosts):
             if not path.is_file():
-                raise RuntimeError(f'Missing SSH setup file: {path}. See cli/deployment/enable-ssh.ps1.')
-        return ['-i', str(self.key), '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-                '-o', f'UserKnownHostsFile={self.known_hosts}', '-o', 'ConnectTimeout=5',
-                '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3']
+                raise RuntimeError(
+                    f'Missing SSH setup file: {path}. See cli/deployment/enable-ssh.ps1.'
+                )
+        return [
+            '-i',
+            str(self.key),
+            '-o',
+            'BatchMode=yes',
+            '-o',
+            'StrictHostKeyChecking=yes',
+            '-o',
+            f'UserKnownHostsFile={self.known_hosts}',
+            '-o',
+            'ConnectTimeout=5',
+            '-o',
+            'ServerAliveInterval=10',
+            '-o',
+            'ServerAliveCountMax=3',
+        ]
 
     def ssh(self, script, *, timeout=15):
-        result = subprocess.run(['ssh', *self.options(), f'{self.user}@{self.host}',
-                                 *encoded_command("$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; " + script)],
-                                capture_output=True, text=True, timeout=timeout,
-                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        result = subprocess.run(
+            [
+                'ssh',
+                *self.options(),
+                f'{self.user}@{self.host}',
+                *encoded_command(
+                    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
+                    + script
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
         if result.returncode:
-            raise RuntimeError(f'Receiver SSH failed: {result.stderr.strip() or result.stdout.strip()}')
+            raise RuntimeError(
+                f'Receiver SSH failed: {result.stderr.strip() or result.stdout.strip()}'
+            )
         return result.stdout.strip()
 
     def check_connection(self):
@@ -57,59 +92,88 @@ class RemoteRuntime:
     def __enter__(self):
         try:
             self.run_dir.mkdir(parents=True, exist_ok=True)
-            files = [self.spec.executable, *[self.spec.executable.parent / name
-                     for name in ('soundio.dll', 'ftd2xx.dll')],
-                     Path(__file__).parent / 'deployment' / 'run-radius.ps1']
+            files = [
+                self.spec.executable,
+                *[self.spec.executable.parent / name for name in ('soundio.dll', 'ftd2xx.dll')],
+                Path(__file__).parent / 'deployment' / 'run-radius.ps1',
+            ]
             digest = hashlib.sha256()
             for file in files:
                 digest.update(file.name.encode())
                 digest.update(file.read_bytes())
             version = digest.hexdigest()[:20]
-            script = ("$base=Join-Path $env:LOCALAPPDATA 'Autolux'; "
-                      f"$bundle=Join-Path $base 'radius/{version}'; "
-                      f"$run=Join-Path $base 'runs/{self.session_id}'; "
-                      "New-Item -ItemType Directory -Force -Path $bundle,$run | Out-Null; "
-                      "@{bundle=$bundle;run=$run}|ConvertTo-Json -Compress")
+            script = (
+                "$base=Join-Path $env:LOCALAPPDATA 'Autolux'; "
+                f"$bundle=Join-Path $base 'radius/{version}'; "
+                f"$run=Join-Path $base 'runs/{self.session_id}'; "
+                "New-Item -ItemType Directory -Force -Path $bundle,$run | Out-Null; "
+                "@{bundle=$bundle;run=$run}|ConvertTo-Json -Compress"
+            )
             self.remote = json.loads(self.ssh(script))
             config = self.run_dir / 'receiver.json'
             config.write_text(json.dumps(self.spec.config), encoding='utf-8')
-            for sources, destination in ((files, self.remote['bundle']), ([config], self.remote['run'])):
+            for sources, destination in (
+                (files, self.remote['bundle']),
+                ([config], self.remote['run']),
+            ):
                 # scp's SFTP transport accepts a single destination argument, including spaces.
                 target = f'{self.user}@{self.host}:' + destination.replace('\\', '/') + '/'
-                subprocess.run(['scp', *self.options(), *map(str, sources), target], check=True,
-                               capture_output=True, text=True, timeout=60,
-                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                subprocess.run(
+                    ['scp', *self.options(), *map(str, sources), target],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+                )
             bundle, run = map(ps_literal, (self.remote['bundle'], self.remote['run']))
-            self.ssh(f'& (Join-Path {bundle} radius_rx.exe) --check-config (Join-Path {run} receiver.json); exit $LASTEXITCODE')
+            self.ssh(
+                f'& (Join-Path {bundle} radius_rx.exe) --check-config (Join-Path {run} receiver.json); exit $LASTEXITCODE'
+            )
             self._log = (self.run_dir / 'receiver-ssh.log').open('wb')
             script = f'& (Join-Path {bundle} run-radius.ps1) -Bundle {bundle} -RunDirectory {run}; exit $LASTEXITCODE'
-            self.process = subprocess.Popen(['ssh', *self.options(), f'{self.user}@{self.host}', *encoded_command(script)],
-                                            stdin=subprocess.DEVNULL, stdout=self._log, stderr=subprocess.STDOUT,
-                                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            self.process = subprocess.Popen(
+                ['ssh', *self.options(), f'{self.user}@{self.host}', *encoded_command(script)],
+                stdin=subprocess.DEVNULL,
+                stdout=self._log,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+            )
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 self.check_health()
-                ready = self.ssh(f'$p=Join-Path {run} ready; if(Test-Path -LiteralPath $p){{Get-Content -LiteralPath $p}}')
+                ready = self.ssh(
+                    f'$p=Join-Path {run} ready; if(Test-Path -LiteralPath $p){{Get-Content -LiteralPath $p}}'
+                )
                 if ready == 'autolux-native-v1':
                     logging.info('[prod] receiver ready on %s', self.host)
                     return self
-                time.sleep(.2)
-            raise RuntimeError(f'Receiver startup timed out. See {self.run_dir / "receiver-ssh.log"}')
+                time.sleep(0.2)
+            raise RuntimeError(
+                f'Receiver startup timed out. See {self.run_dir / "receiver-ssh.log"}'
+            )
         except BaseException:
             self.close()
             raise
 
     def check_health(self):
         if self.process and self.process.poll() is not None:
-            raise RuntimeError(f'Receiver SSH session exited ({self.process.returncode}); see {self.run_dir / "receiver-ssh.log"}')
+            raise RuntimeError(
+                f'Receiver SSH session exited ({self.process.returncode}); see {self.run_dir / "receiver-ssh.log"}'
+            )
 
     def close(self):
         if self.remote and self.process:
             try:
                 run = ps_literal(self.remote['run'])
-                self.ssh(f'New-Item -ItemType File -Force -Path (Join-Path {run} stop) | Out-Null', timeout=8)
+                self.ssh(
+                    f'New-Item -ItemType File -Force -Path (Join-Path {run} stop) | Out-Null',
+                    timeout=8,
+                )
             except (OSError, RuntimeError, subprocess.TimeoutExpired):
-                logging.exception('[prod] remote shutdown request failed; receiver heartbeat timeout remains active')
+                logging.exception(
+                    '[prod] remote shutdown request failed; receiver heartbeat timeout remains active'
+                )
             try:
                 self.process.wait(timeout=8)
             except subprocess.TimeoutExpired:

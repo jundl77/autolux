@@ -28,7 +28,7 @@ from nn.downbeat_decoder import (  # noqa: E402
     refine_instants,
 )
 
-TEMPO_SEC = 0.46875           # 128 BPM, the corpus's modal tempo
+TEMPO_SEC = 0.46875  # 128 BPM, the corpus's modal tempo
 FRAME_SEC = 0.05
 
 
@@ -36,14 +36,16 @@ def beat_grid(n_beats: int, tempo: float = TEMPO_SEC, start: float = 1.0) -> np.
     return start + tempo * np.arange(n_beats, dtype=np.float64)
 
 
-def clean_scores(n_beats: int, offset: int = 0, high: float = 0.90,
-                 low: float = 0.05) -> np.ndarray:
+def clean_scores(
+    n_beats: int, offset: int = 0, high: float = 0.90, low: float = 0.05
+) -> np.ndarray:
     index = np.arange(n_beats)
     return np.where((index - offset) % BEATS_PER_BAR == 0, high, low)
 
 
-def ambiguous_scores(n_beats: int, offset: int = 0, high: float = 0.90,
-                     low: float = 0.05) -> np.ndarray:
+def ambiguous_scores(
+    n_beats: int, offset: int = 0, high: float = 0.90, low: float = 0.05
+) -> np.ndarray:
     index = np.arange(n_beats)
     return np.where((index - offset) % (BEATS_PER_BAR // 2) == 0, high, low)
 
@@ -89,8 +91,7 @@ def test_a_candidate_maps_to_the_frame_whose_stamp_is_nearest():
 
 
 def test_a_beat_before_the_first_frame_stamp_is_frame_zero_not_a_sentinel():
-    assert nearest_frames(np.array([0.0, 1e-9]), 100, FRAME_SEC,
-                          FRAME_SEC).tolist() == [0, 0]
+    assert nearest_frames(np.array([0.0, 1e-9]), 100, FRAME_SEC, FRAME_SEC).tolist() == [0, 0]
 
 
 def test_a_beat_past_the_end_of_the_activation_gets_the_sentinel():
@@ -101,8 +102,9 @@ def test_aggregation_takes_the_peak_of_the_window_not_its_mean():
     activation = np.zeros(50)
     activation[10] = 0.8
 
-    scores, counts = aggregate_at_beats(activation, np.array([FRAME_SEC * 11]),
-                                        FRAME_SEC, FRAME_SEC)
+    scores, counts = aggregate_at_beats(
+        activation, np.array([FRAME_SEC * 11]), FRAME_SEC, FRAME_SEC
+    )
 
     assert scores[0] == pytest.approx(0.8)
     assert counts[0] == AGG_HI_FRAMES - AGG_LO_FRAMES + 1
@@ -110,7 +112,7 @@ def test_aggregation_takes_the_peak_of_the_window_not_its_mean():
 
 @pytest.mark.parametrize("jitter_ms", [-50, -25, 0, 25, 50])
 def test_the_aggregation_window_absorbs_beat_timing_jitter(jitter_ms):
-    frame_sec = 0.04644                      # the real mel grid, where it matters
+    frame_sec = 0.04644  # the real mel grid, where it matters
     activation = np.zeros(400)
     downbeats = np.arange(20, 380, 32)
     activation[downbeats] = 0.9
@@ -122,8 +124,7 @@ def test_the_aggregation_window_absorbs_beat_timing_jitter(jitter_ms):
 
 
 def test_a_candidate_with_no_frames_scores_nan_rather_than_zero():
-    scores, counts = aggregate_at_beats(np.zeros(50), np.array([1000.0]),
-                                        FRAME_SEC, FRAME_SEC)
+    scores, counts = aggregate_at_beats(np.zeros(50), np.array([1000.0]), FRAME_SEC, FRAME_SEC)
 
     assert np.isnan(scores[0])
     assert counts[0] == 0
@@ -197,8 +198,7 @@ def test_a_sustained_reharmonisation_is_followed_after_paying_the_penalty():
     decisions = BarPhaseHMM(PhaseParams(flip_penalty=2.0)).decode(times, scores)
 
     assert phase_flips(decisions) == 1
-    assert phases_of(decisions)[-8:] == [1 + (index - 2) % BEATS_PER_BAR
-                                         for index in range(88, 96)]
+    assert phases_of(decisions)[-8:] == [1 + (index - 2) % BEATS_PER_BAR for index in range(88, 96)]
 
 
 def test_a_flip_must_pay_for_itself_inside_the_look_ahead():
@@ -250,7 +250,7 @@ def test_a_committed_decision_survives_an_adversarial_future():
     decoder.flush()
 
     reference = BarPhaseHMM(params).decode(times[:60], honest[:60])
-    assert committed == reference[:len(committed)]
+    assert committed == reference[: len(committed)]
 
 
 @pytest.mark.parametrize("prefix", [20, 40, 60, 90])
@@ -286,13 +286,12 @@ def test_phase_survives_a_dropout_and_the_gap_is_coasted(dropped):
     times = beat_grid(n_beats)
     scores = clean_scores(n_beats)
     keep = np.ones(n_beats, dtype=bool)
-    keep[20:20 + dropped] = False
+    keep[20 : 20 + dropped] = False
 
     decisions = BarPhaseHMM().decode(times[keep], scores[keep])
 
     real = [d for d in decisions if not d.virtual]
-    assert [d.phase for d in real] == [1 + index % BEATS_PER_BAR
-                                       for index in np.flatnonzero(keep)]
+    assert [d.phase for d in real] == [1 + index % BEATS_PER_BAR for index in np.flatnonzero(keep)]
     assert sum(1 for d in decisions if d.virtual) == dropped
 
 
@@ -330,8 +329,9 @@ def test_the_phase_re_locks_after_a_discontinuity():
     first = beat_grid(48)
     second = beat_grid(48, tempo=0.5, start=900.0)
     confident = dict(high=0.9999, low=0.0001)
-    scores = np.concatenate([clean_scores(48, **confident),
-                             clean_scores(48, offset=1, **confident)])
+    scores = np.concatenate(
+        [clean_scores(48, **confident), clean_scores(48, offset=1, **confident)]
+    )
 
     decisions = BarPhaseHMM().decode(np.concatenate([first, second]), scores)
 
@@ -457,8 +457,7 @@ def test_refinement_moves_an_instant_onto_the_activation_peak():
     activation[40] = 0.6
     activation[41] = 1.0
     activation[42] = 0.8
-    decisions = [d for d in BarPhaseHMM().decode(
-        np.array([FRAME_SEC * 42.0]), np.array([1.0]))]
+    decisions = [d for d in BarPhaseHMM().decode(np.array([FRAME_SEC * 42.0]), np.array([1.0]))]
 
     refined = refine_instants(decisions, activation, FRAME_SEC, FRAME_SEC)
 
@@ -475,8 +474,7 @@ def test_refinement_changes_nothing_but_the_time():
 
     refined = refine_instants(decisions, activation, FRAME_SEC, FRAME_SEC)
 
-    assert [d._replace(time=0.0) for d in refined] == \
-           [d._replace(time=0.0) for d in decisions]
+    assert [d._replace(time=0.0) for d in refined] == [d._replace(time=0.0) for d in decisions]
 
 
 def test_refinement_cannot_move_an_instant_outside_its_own_evidence_window():
@@ -527,8 +525,9 @@ def test_the_decode_path_imports_without_torch():
         "importlib.import_module('nn.downbeat_decoder');"
         "assert 'nn.dataset' not in sys.modules, sorted(sys.modules)"
     )
-    result = subprocess.run([sys.executable, "-c", probe], cwd=str(TRAINING_DIR),
-                            capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", probe], cwd=str(TRAINING_DIR), capture_output=True, text=True
+    )
 
     assert result.returncode == 0, result.stderr
 
@@ -539,9 +538,14 @@ def test_decode_track_at_subdivision_two_builds_its_own_candidates(tmp_path):
     midpoint_downbeats = 0.5 * (beats[:-1] + beats[1:])[::BEATS_PER_BAR]
     activation[nearest_frames(midpoint_downbeats, 500, FRAME_SEC, FRAME_SEC)] = 0.95
     path = tmp_path / "track.npz"
-    np.savez(path, activation=activation, frame_sec=np.float64(FRAME_SEC),
-             t0=np.float64(FRAME_SEC), live_beat_time=beats,
-             live_beat_score=np.full(len(beats), 0.02))
+    np.savez(
+        path,
+        activation=activation,
+        frame_sec=np.float64(FRAME_SEC),
+        t0=np.float64(FRAME_SEC),
+        live_beat_time=beats,
+        live_beat_score=np.full(len(beats), 0.02),
+    )
 
     on_beat = decode_track(path, "live", PhaseParams(subdivision=1))
     half = decode_track(path, "live", PhaseParams(subdivision=2))
@@ -551,18 +555,24 @@ def test_decode_track_at_subdivision_two_builds_its_own_candidates(tmp_path):
 
 
 def write_sidecar(path, **arrays):
-    base = {"activation": np.zeros(600, dtype=np.float32),
-            "frame_sec": np.float64(FRAME_SEC), "t0": np.float64(FRAME_SEC)}
+    base = {
+        "activation": np.zeros(600, dtype=np.float32),
+        "frame_sec": np.float64(FRAME_SEC),
+        "t0": np.float64(FRAME_SEC),
+    }
     np.savez(path, **{**base, **arrays})
     return path
 
 
 def test_decode_track_reads_a_sidecar_and_decodes_the_named_condition(tmp_path):
     times = beat_grid(48)
-    path = write_sidecar(tmp_path / "track.npz", live_beat_time=times,
-                         live_beat_score=clean_scores(48),
-                         expert_beat_time=times[::2],
-                         expert_beat_score=np.full(24, np.nan))
+    path = write_sidecar(
+        tmp_path / "track.npz",
+        live_beat_time=times,
+        live_beat_score=clean_scores(48),
+        expert_beat_time=times[::2],
+        expert_beat_score=np.full(24, np.nan),
+    )
 
     decisions = decode_track(path, "live")
 
@@ -571,8 +581,9 @@ def test_decode_track_reads_a_sidecar_and_decodes_the_named_condition(tmp_path):
 
 
 def test_decode_track_names_an_unknown_condition(tmp_path):
-    path = write_sidecar(tmp_path / "track.npz", live_beat_time=np.zeros(1),
-                         live_beat_score=np.zeros(1))
+    path = write_sidecar(
+        tmp_path / "track.npz", live_beat_time=np.zeros(1), live_beat_score=np.zeros(1)
+    )
 
     with pytest.raises(KeyError, match="madmom"):
         decode_track(path, "madmom")

@@ -18,31 +18,33 @@ def _report_for(track: str) -> dict:
 
     async def run():
         _, event_buffer, queue = await run_fast_simulation(
-            FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, track))
+            FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, track)
+        )
         return event_buffer.to_report(queue.get_timing_log())
 
     report = asyncio.run(run())
-    return {'checksum': report_checksum(report),
-            'beats': report['metrics']['beats_detected'],
-            'bpm_last': report['metrics']['bpm_last'],
-            'intents': report['metrics']['intent_distribution_sec'],
-            'effects': report['metrics']['effect_changes_count']}
+    return {
+        'checksum': report_checksum(report),
+        'beats': report['metrics']['beats_detected'],
+        'bpm_last': report['metrics']['bpm_last'],
+        'intents': report['metrics']['intent_distribution_sec'],
+        'effects': report['metrics']['effect_changes_count'],
+    }
 
 
 def _spawn(track: str) -> dict:
     # A fresh interpreter is the point: hash seeds, import-time RNG and cached
     # models all survive an in-process rerun.
     out = subprocess.run(
-        [sys.executable, __file__, '--emit', track],
-        capture_output=True, text=True, check=True)
+        [sys.executable, __file__, '--emit', track], capture_output=True, text=True, check=True
+    )
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('tracks', nargs='+')
-    ap.add_argument('--emit', action='store_true',
-                    help=argparse.SUPPRESS)
+    ap.add_argument('--emit', action='store_true', help=argparse.SUPPRESS)
     ap.add_argument('--runs', type=int, default=2)
     ap.add_argument('--out', default=None)
     args = ap.parse_args()
@@ -56,11 +58,15 @@ def main() -> None:
         name = Path(track).name
         results = [_spawn(track) for _ in range(args.runs)]
         identical = all(r == results[0] for r in results)
-        verdicts[name] = {'identical': identical, **results[0],
-                          'all_checksums': [r['checksum'] for r in results]}
+        verdicts[name] = {
+            'identical': identical,
+            **results[0],
+            'all_checksums': [r['checksum'] for r in results],
+        }
         status = 'IDENTICAL' if identical else 'DIVERGED'
-        print(f'{name:36s} {status}  sha {results[0]["checksum"][:16]}  '
-              f'beats {results[0]["beats"]}')
+        print(
+            f'{name:36s} {status}  sha {results[0]["checksum"][:16]}  beats {results[0]["beats"]}'
+        )
         if not identical:
             failures.append(name)
             for i, r in enumerate(results):
@@ -71,8 +77,7 @@ def main() -> None:
         print(f'wrote {args.out}')
     if failures:
         raise SystemExit(f'NOT DETERMINISTIC: {failures}')
-    print(f'\nall {len(args.tracks)} tracks identical across '
-          f'{args.runs} fresh processes')
+    print(f'\nall {len(args.tracks)} tracks identical across {args.runs} fresh processes')
 
 
 if __name__ == '__main__':

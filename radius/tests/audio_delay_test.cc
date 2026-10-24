@@ -29,8 +29,8 @@ void CheckStream(double seconds, int rate, const std::vector<size_t>& chunks)
 		delay.Process(reinterpret_cast<char*>(audio.data()), audio.size() * sizeof(float));
 		for (size_t i = 0; i < frames; ++i)
 			for (size_t channel = 0; channel < 2; ++channel)
-				Check(audio[i * 2 + channel] == (position + i < lag ? 0.0f :
-					static_cast<float>((position + i - lag) * 2 + channel + 1)));
+				Check(audio[i * 2 + channel] ==
+				      (position + i < lag ? 0.0f : static_cast<float>((position + i - lag) * 2 + channel + 1)));
 		position += frames;
 	}
 }
@@ -52,8 +52,14 @@ int main()
 	for (double invalid : {-1.0, 121.0, static_cast<double>(INFINITY), static_cast<double>(NAN)})
 	{
 		bool rejected = false;
-		try { delay.Reset(invalid, 44100, 8); }
-		catch (const std::invalid_argument&) { rejected = true; }
+		try
+		{
+			delay.Reset(invalid, 44100, 8);
+		}
+		catch (const std::invalid_argument&)
+		{
+			rejected = true;
+		}
 		Check(rejected);
 	}
 	std::cout << "audio delay: frame-exact stereo delay, wrap, reset and validation passed\n";

@@ -11,13 +11,20 @@ from autolux.lib.analyser import mert_stream as M
 from autolux.lib.analyser.drift_watchdog import DriftWatchdog, ShedLevel
 from autolux.lib.analyser.gpu_stage import GpuStage
 from autolux.tests.test_drift_watchdog import FakeClock
-from autolux.tests.test_gpu_stage import (BUFFER_SEC, EMPTY, SlowEncoder, buffers,
-                                  chain, noise, settle)
+from autolux.tests.test_gpu_stage import (
+    BUFFER_SEC,
+    EMPTY,
+    SlowEncoder,
+    buffers,
+    chain,
+    noise,
+    settle,
+)
 from autolux.tests.test_section_model import mean, tiny  # noqa: F401
 
 
 class FaultyEncoder(SlowEncoder):
-    def __init__(self, error, *, generation=0, fail_until=10 ** 9, **kwargs):
+    def __init__(self, error, *, generation=0, fail_until=10**9, **kwargs):
         super().__init__(**kwargs)
         self.error = error
         self.generation = generation
@@ -35,17 +42,20 @@ def faulty(tiny, mean, error, *, clock=None, repairable=True, **kwargs):  # noqa
     built = []
 
     def reinit():
-        built.append(FaultyEncoder(
-            error, generation=len(built) + 1,
-            fail_until=1 if repairable else 10 ** 9))
+        built.append(
+            FaultyEncoder(error, generation=len(built) + 1, fail_until=1 if repairable else 10**9)
+        )
         return built[-1]
 
     encoder = FaultyEncoder(error, **kwargs)
     watchdog = DriftWatchdog(BUFFER_SEC)
-    worker = GpuStage(chain(encoder, tiny, mean, margin=1.0, hop=0.5,
-                            buffer=20.0),
-                      watchdog, clock=clock or FakeClock(), reinit=reinit,
-                      pass_timeout_sec=1.0)
+    worker = GpuStage(
+        chain(encoder, tiny, mean, margin=1.0, hop=0.5, buffer=20.0),
+        watchdog,
+        clock=clock or FakeClock(),
+        reinit=reinit,
+        pass_timeout_sec=1.0,
+    )
     worker.start()
     return worker, watchdog, encoder, built
 
@@ -76,22 +86,25 @@ def wait_for_one_more_fault(worker, clock, sec, patience=1.0):
 
 
 CUDA_ERROR = RuntimeError('CUDA error: an illegal memory access was encountered')
-CONTEXT_LOST = RuntimeError('CUDA error: invalid device context '
-                            '(the device was reset while suspended)')
-OUT_OF_MEMORY = RuntimeError('CUDA out of memory. Tried to allocate 2.00 GiB '
-                             '(GPU 0; 8.00 GiB total capacity)')
+CONTEXT_LOST = RuntimeError(
+    'CUDA error: invalid device context (the device was reset while suspended)'
+)
+OUT_OF_MEMORY = RuntimeError(
+    'CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 8.00 GiB total capacity)'
+)
 
 
 def test_a_cuda_error_mid_pass_holds_logs_and_comes_back(tiny, mean, caplog):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(tiny, mean, CUDA_ERROR,
-                                               clock=clock, fail_until=1)
+    worker, watchdog, encoder, _built = faulty(tiny, mean, CUDA_ERROR, clock=clock, fail_until=1)
     try:
         with caplog.at_level(logging.WARNING):
             feed(worker, 4.0)
             settle(lambda: worker.faults > 0, why='the fault never surfaced')
-            settle(lambda: watchdog.level is ShedLevel.NN_SHED,
-                   why='the fault never reached the ladder')
+            settle(
+                lambda: watchdog.level is ShedLevel.NN_SHED,
+                why='the fault never reached the ladder',
+            )
             drain(worker, 50, clock=clock, step=0.05)
             feed(worker, 4.0, seed=1)
             settle(lambda: worker.passes > 0, why='the stage never came back')
@@ -109,9 +122,12 @@ def test_a_hung_pass_is_noticed_from_the_consumer_side(tiny, mean, caplog):  # n
     encoder = SlowEncoder()
     encoder.gate.clear()
     watchdog = DriftWatchdog(BUFFER_SEC)
-    worker = GpuStage(chain(encoder, tiny, mean, margin=1.0, hop=0.5,
-                            buffer=20.0),
-                      watchdog, clock=clock, pass_timeout_sec=1.0)
+    worker = GpuStage(
+        chain(encoder, tiny, mean, margin=1.0, hop=0.5, buffer=20.0),
+        watchdog,
+        clock=clock,
+        pass_timeout_sec=1.0,
+    )
     worker.start()
     try:
         with caplog.at_level(logging.WARNING):
@@ -125,8 +141,7 @@ def test_a_hung_pass_is_noticed_from_the_consumer_side(tiny, mean, caplog):  # n
             assert worker.push_audio(EMPTY).posteriors == [], 'not holding'
 
             encoder.gate.set()
-            settle(lambda: watchdog.fault is None,
-                   why='the returning pass did not clear the fault')
+            settle(lambda: watchdog.fault is None, why='the returning pass did not clear the fault')
             feed(worker, 4.0, seed=2)
             settle(lambda: worker.passes > 1, why='the stage never came back')
     finally:
@@ -140,9 +155,12 @@ def test_a_pass_that_never_returns_leaves_a_show_running_on_beats(tiny, mean):  
     encoder = SlowEncoder()
     encoder.gate.clear()
     watchdog = DriftWatchdog(BUFFER_SEC)
-    worker = GpuStage(chain(encoder, tiny, mean, margin=1.0, hop=0.5,
-                            buffer=20.0),
-                      watchdog, clock=clock, pass_timeout_sec=1.0)
+    worker = GpuStage(
+        chain(encoder, tiny, mean, margin=1.0, hop=0.5, buffer=20.0),
+        watchdog,
+        clock=clock,
+        pass_timeout_sec=1.0,
+    )
     worker.start()
     try:
         feed(worker, 3.0)
@@ -164,8 +182,7 @@ def test_a_pass_that_never_returns_leaves_a_show_running_on_beats(tiny, mean):  
 
 def test_a_lost_context_is_repaired_by_reinitialising_the_extractor(tiny, mean):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, built = faulty(tiny, mean, CONTEXT_LOST,
-                                              clock=clock)
+    worker, watchdog, encoder, built = faulty(tiny, mean, CONTEXT_LOST, clock=clock)
     try:
         feed(worker, 4.0)
         settle(lambda: worker.faults > 0, why='the fault never surfaced')
@@ -184,10 +201,11 @@ def test_a_lost_context_is_repaired_by_reinitialising_the_extractor(tiny, mean):
     assert worker.posteriors.stream.samples_seen > 0, 'the clock was restarted'
 
 
-def test_an_allocation_failure_gets_the_same_hold_and_reinit_contract_as_a_cuda_error(tiny, mean, caplog):  # noqa: F811
+def test_an_allocation_failure_gets_the_same_hold_and_reinit_contract_as_a_cuda_error(
+    tiny, mean, caplog
+):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(tiny, mean, OUT_OF_MEMORY,
-                                               clock=clock, fail_until=1)
+    worker, watchdog, encoder, _built = faulty(tiny, mean, OUT_OF_MEMORY, clock=clock, fail_until=1)
     try:
         with caplog.at_level(logging.WARNING):
             feed(worker, 4.0)
@@ -203,8 +221,9 @@ def test_an_allocation_failure_gets_the_same_hold_and_reinit_contract_as_a_cuda_
 
 def test_a_permanent_fault_logs_at_a_rate_not_at_a_frequency(tiny, mean, caplog):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(tiny, mean, CUDA_ERROR,
-                                               clock=clock, repairable=False)
+    worker, watchdog, encoder, _built = faulty(
+        tiny, mean, CUDA_ERROR, clock=clock, repairable=False
+    )
     try:
         with caplog.at_level(logging.WARNING):
             feed(worker, 4.0)
@@ -218,29 +237,30 @@ def test_a_permanent_fault_logs_at_a_rate_not_at_a_frequency(tiny, mean, caplog)
 
     named = [r for r in caplog.records if 'illegal memory access' in r.message]
     assert named, 'the fault was never named at all'
-    assert len(named) <= 3, \
-        f'{len(named)} fault lines in 24s of a permanent fault'
+    assert len(named) <= 3, f'{len(named)} fault lines in 24s of a permanent fault'
     assert worker.faults > len(named), 'the rate limit did nothing'
 
 
 def test_the_backoff_is_capped_so_retrying_never_stops(tiny, mean):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(tiny, mean, CUDA_ERROR,
-                                               clock=clock, repairable=False)
+    worker, watchdog, encoder, _built = faulty(
+        tiny, mean, CUDA_ERROR, clock=clock, repairable=False
+    )
     try:
         feed(worker, 4.0)
         settle(lambda: worker.faults > 0, why='the fault never surfaced')
         for _ in range(20):
             feed(worker, 0.6, seed=5)
-            assert wait_for_one_more_fault(worker, clock, 60.0),                 f'no retry after {worker.faults} faults — the backoff is uncapped'
+            assert wait_for_one_more_fault(worker, clock, 60.0), (
+                f'no retry after {worker.faults} faults — the backoff is uncapped'
+            )
         assert worker.faults > 10
         assert worker.reinits > 5, 'it stopped trying a new encoder'
     finally:
         worker.stop()
 
 
-async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(
-        tiny, mean):  # noqa: F811
+async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, mean):  # noqa: F811
     import sys
     from pathlib import Path
 
@@ -256,29 +276,32 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lib.engine.light_engine import LightEngine
     from autolux.lib.engine.section_decoder import DecodeParams, SectionDecoder
-    from autolux.simulate.stub_clients import (StubMidiClient, StubOs2lClient,
-                                       StubOverlayClient)
+    from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
     from autolux.tests.test_light_engine import FakeAnalyser
     from autolux.tests.test_nn_decoder import toy_priors
 
     clock = VirtualClock()
-    worker, watchdog, _encoder, _built = faulty(tiny, mean, CUDA_ERROR,
-                                                clock=FakeClock(),
-                                                repairable=False)
+    worker, watchdog, _encoder, _built = faulty(
+        tiny, mean, CUDA_ERROR, clock=FakeClock(), repairable=False
+    )
     midi = StubMidiClient(clock=clock)
-    events = EventBuffer(window_sec=float('inf'), clock=clock,
-                         look_ahead_sec=14.0)
+    events = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     events.start()
     queue = DelayedCommandQueue(14.0, clock=clock)
-    engine = LightEngine(midi, StubOs2lClient(clock=clock),
-                         StubOverlayClient(clock=clock),
-                         EffectController(midi, clock=clock, event_buffer=events),
-                         queue, event_buffer=events, playback_delay_sec=14.0,
-                         section_chain=worker,
-                         section_decoder=SectionDecoder(
-                             toy_priors(floor=2),
-                             DecodeParams(lag_bars=1, min_coverage=1)),
-                         clock=clock)
+    engine = LightEngine(
+        midi,
+        StubOs2lClient(clock=clock),
+        StubOverlayClient(clock=clock),
+        EffectController(midi, clock=clock, event_buffer=events),
+        queue,
+        event_buffer=events,
+        playback_delay_sec=14.0,
+        section_chain=worker,
+        section_decoder=SectionDecoder(
+            toy_priors(floor=2), DecodeParams(lag_bars=1, min_coverage=1)
+        ),
+        clock=clock,
+    )
     engine.set_analyser(FakeAnalyser())
 
     try:
@@ -299,8 +322,7 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(
     assert report['metrics']['beats_detected'] > 10, 'beats stopped'
     digest = degradation_digest(report)
     assert digest['effect_changes'] >= 1, 'the rig was dark for the whole run'
-    assert held_start_to_end(digest), \
-        'a dead GPU produced something other than a held show'
+    assert held_start_to_end(digest), 'a dead GPU produced something other than a held show'
 
 
 class FlappingEncoder(SlowEncoder):
@@ -318,11 +340,17 @@ class FlappingEncoder(SlowEncoder):
 
 def flapping(tiny, mean, error):  # noqa: F811
     clock = FakeClock()
-    encoder = FlappingEncoder(error, )
+    encoder = FlappingEncoder(
+        error,
+    )
     watchdog = DriftWatchdog(BUFFER_SEC)
-    worker = GpuStage(chain(encoder, tiny, mean, margin=1.0, hop=0.5,
-                            buffer=20.0),
-                      watchdog, clock=clock, reinit=None, pass_timeout_sec=1.0)
+    worker = GpuStage(
+        chain(encoder, tiny, mean, margin=1.0, hop=0.5, buffer=20.0),
+        watchdog,
+        clock=clock,
+        reinit=None,
+        pass_timeout_sec=1.0,
+    )
     worker.start()
     return worker, encoder
 
@@ -362,9 +390,13 @@ def test_a_sustained_run_of_passes_does_clear_the_backoff(tiny, mean):  # noqa: 
     clock = FakeClock()
     encoder = SlowEncoder()
     watchdog = DriftWatchdog(BUFFER_SEC)
-    worker = GpuStage(chain(encoder, tiny, mean, margin=1.0, hop=0.5,
-                            buffer=20.0),
-                      watchdog, clock=clock, reinit=None, pass_timeout_sec=1.0)
+    worker = GpuStage(
+        chain(encoder, tiny, mean, margin=1.0, hop=0.5, buffer=20.0),
+        watchdog,
+        clock=clock,
+        reinit=None,
+        pass_timeout_sec=1.0,
+    )
     worker._attempts = 5
     worker.start()
     try:

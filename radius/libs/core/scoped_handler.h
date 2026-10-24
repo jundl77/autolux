@@ -7,12 +7,13 @@ namespace Radius {
 class ScopedHandler
 {
 public:
-	ScopedHandler() =default;
+	ScopedHandler() = default;
 
 	template <typename Callable>
-	explicit ScopedHandler(Callable&& callable) :
-			mAtExit(std::forward<Callable>(callable))
-	{}
+	explicit ScopedHandler(Callable&& callable)
+	    : mAtExit(std::forward<Callable>(callable))
+	{
+	}
 
 	~ScopedHandler()
 	{
@@ -22,11 +23,11 @@ public:
 		}
 	}
 
-	ScopedHandler(const ScopedHandler&) =delete;
-	ScopedHandler& operator=(ScopedHandler&) =delete;
+	ScopedHandler(const ScopedHandler&) = delete;
+	ScopedHandler& operator=(ScopedHandler&) = delete;
 
-	ScopedHandler(ScopedHandler&& other) :
-			mAtExit(std::move(other.mAtExit))
+	ScopedHandler(ScopedHandler&& other)
+	    : mAtExit(std::move(other.mAtExit))
 	{
 		other.mAtExit = nullptr;
 	}
@@ -47,4 +48,4 @@ private:
 	std::function<void()> mAtExit;
 };
 
-}
+} // namespace Radius

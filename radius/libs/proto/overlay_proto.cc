@@ -48,4 +48,4 @@ std::string ToString(OverlayMessage& msg)
 #endif
 }
 
-}
+} // namespace Radius::OverlayIdl

@@ -216,16 +216,15 @@ def report(data_dir: Path, tracks: list) -> None:
     merged_pairs = transition_counts(per_track_merged)
     raw_adjacent_same = sum(count for (a, b), count in raw_pairs.items() if a == b)
     dropped_sections = sum(
-        1
-        for runs in per_track_raw
-        for _s, _e, label, _d in runs
-        if label in DROPPED_LABELS
+        1 for runs in per_track_raw for _s, _e, label, _d in runs if label in DROPPED_LABELS
     )
 
     print()
     print("corpus")
     print(f"  tracks                 : {len(tracks)}")
-    print(f"  total track duration   : {track_seconds / 3600.0:.1f} h  (sum of the 'duration' field)")
+    print(
+        f"  total track duration   : {track_seconds / 3600.0:.1f} h  (sum of the 'duration' field)"
+    )
     print(f"  annotated section time : {raw_seconds / 3600.0:.1f} h  (raw sections)")
     print(f"  merged section time    : {merged_seconds / 3600.0:.1f} h  ('end' sentinel removed)")
     print(
@@ -237,8 +236,7 @@ def report(data_dir: Path, tracks: list) -> None:
     print()
     print("RAW label statistics -- labels exactly as published, sections NOT merged.")
     print(
-        f"  {raw_adjacent_same} adjacent same-label pairs are counted here as separate"
-        " sections, so"
+        f"  {raw_adjacent_same} adjacent same-label pairs are counted here as separate sections, so"
     )
     print("  these medians describe annotation events, not contiguous musical sections.")
     raw_order = sorted(raw_stats, key=lambda label: -raw_stats[label]["count"])
@@ -318,7 +316,10 @@ def report(data_dir: Path, tracks: list) -> None:
         )
     short_total = sum(short_sections.values())
     breakdown = ", ".join(f"{label} x{n}" for label, n in short_sections.most_common())
-    print(f"  sections under 0.5 s          : {short_total}" + (f"  ({breakdown})" if breakdown else ""))
+    print(
+        f"  sections under 0.5 s          : {short_total}"
+        + (f"  ({breakdown})" if breakdown else "")
+    )
     print(
         f"  duration != sections[-1].end  : {duration_mismatch}/{len(tracks)} tracks "
         f"(max abs delta {max_duration_delta!r})"
@@ -363,7 +364,9 @@ def main(argv: list | None = None) -> int:
 
     tracks = load_all_tracks(data_dir)
     if not tracks:
-        raise RuntimeError(f"no track records in {annotations_dir(data_dir)} -- run the fetch first")
+        raise RuntimeError(
+            f"no track records in {annotations_dir(data_dir)} -- run the fetch first"
+        )
 
     rows = build_manifest_rows(tracks)
     if args.stats_only:

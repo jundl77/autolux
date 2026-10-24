@@ -5,11 +5,20 @@ from autolux.lib.analyser.music_analyser import MusicAnalyser
 
 
 class _StubHandler:
-    def on_sound_start(self): pass
-    def on_sound_stop(self): pass
-    async def on_cycle(self): pass
-    async def on_beat(self, beat_number, bpm, bpm_changed): pass
-    async def on_note(self): pass
+    def on_sound_start(self):
+        pass
+
+    def on_sound_stop(self):
+        pass
+
+    async def on_cycle(self):
+        pass
+
+    async def on_beat(self, beat_number, bpm, bpm_changed):
+        pass
+
+    async def on_note(self):
+        pass
 
 
 @pytest.fixture
@@ -162,6 +171,7 @@ async def test_a_burst_of_beats_in_one_buffer_cannot_strobe_the_overlay_bar(anal
 class _FakeRhythm:
     def __init__(self):
         from autolux.lib.analyser.madmom_rhythm import RhythmEvents
+
         self._events = RhythmEvents
         self.fire_on = set()
         self.calls = 0
@@ -232,11 +242,13 @@ async def test_the_fifteen_minute_roll_is_not_a_song_boundary():
         clock.advance(0.1)
         await analyser.analyse(loud.copy())
 
-    assert handler.events == ['start'], \
+    assert handler.events == ['start'], (
         'the roll re-announced a song the room never stopped hearing'
+    )
     assert analyser.is_song_playing() is True
-    assert analyser.get_song_current_duration() < datetime.timedelta(minutes=1), \
+    assert analyser.get_song_current_duration() < datetime.timedelta(minutes=1), (
         'the song clock was not rolled'
+    )
 
 
 async def test_the_fifteen_minute_roll_keeps_the_beat_lock():
@@ -256,14 +268,14 @@ async def test_the_fifteen_minute_roll_keeps_the_beat_lock():
     clock.advance(0.1)
     await analyser.analyse(loud.copy())
 
-    assert analyser.get_song_current_duration() < datetime.timedelta(minutes=1), \
+    assert analyser.get_song_current_duration() < datetime.timedelta(minutes=1), (
         'the song clock was not rolled'
-    assert analyser._rhythm.resets == 0, \
+    )
+    assert analyser._rhythm.resets == 0, (
         'the roll re-locked madmom mid-audio; a gained or lost beat rotates the bar grid'
-    assert analyser.beat_count == 2, \
-        'the OS2L beat position re-based mid-song'
-    assert list(analyser._beat_stream_times) == bpm_window, \
-        'the BPM window was torn down mid-lock'
+    )
+    assert analyser.beat_count == 2, 'the OS2L beat position re-based mid-song'
+    assert list(analyser._beat_stream_times) == bpm_window, 'the BPM window was torn down mid-lock'
 
 
 async def test_a_real_sound_stop_still_relocks_the_tracker():
@@ -280,12 +292,12 @@ async def test_a_real_sound_stop_still_relocks_the_tracker():
     for _ in range(8):
         clock.advance(0.1)
         await analyser.analyse(np.zeros(256, dtype=np.float32))
-    assert analyser._rhythm.resets > 0, \
-        'a song boundary must still re-lock the tracker'
+    assert analyser._rhythm.resets > 0, 'a song boundary must still re-lock the tracker'
 
 
 async def test_a_song_reset_does_not_clear_the_drift_watchdog(analyser):
     from autolux.lib.analyser.drift_watchdog import ShedLevel
+
     analyser._drift._level = ShedLevel.NN_SHED
     analyser._drift.total_drift_sec = 4.2
     analyser._reset_state()
@@ -308,6 +320,7 @@ async def test_a_song_reset_does_clear_the_rhythm_stack(analyser):
 
 async def test_the_rhythm_heartbeat_survives_repeated_song_resets(caplog):
     import logging
+
     clock = VirtualClock()
     analyser = _make_analyser(clock)
 
@@ -317,11 +330,13 @@ async def test_the_rhythm_heartbeat_survives_repeated_song_resets(caplog):
             analyser._reset_state()
             analyser._log_rhythm_state(clock.now())
     assert any('[rhythm]' in r.message for r in caplog.records), (
-        'the heartbeat never fired across 12 s of repeated song resets')
+        'the heartbeat never fired across 12 s of repeated song resets'
+    )
 
 
 async def test_the_rhythm_heartbeat_actually_fires(caplog):
     import logging
+
     clock = VirtualClock()
     analyser = _make_analyser(clock)
     clock.advance(11.0)
@@ -332,6 +347,7 @@ async def test_the_rhythm_heartbeat_actually_fires(caplog):
 
 async def test_the_heartbeat_rearms_rather_than_repeating_every_buffer(caplog):
     import logging
+
     clock = VirtualClock()
     analyser = _make_analyser(clock)
     clock.advance(11.0)
@@ -369,8 +385,9 @@ async def test_debug_clicks_are_mixed_into_the_returned_audio():
         client.start_streams()
         clock = VirtualClock()
         handler = _Handler()
-        analyser = MusicAnalyser(SAMPLE_RATE, BUFFER_SIZE, handler, clock=clock,
-                                 note_clicks=note_clicks)
+        analyser = MusicAnalyser(
+            SAMPLE_RATE, BUFFER_SIZE, handler, clock=clock, note_clicks=note_clicks
+        )
 
         clicked: list[int] = []
         for i in range(int(20 * SAMPLE_RATE / BUFFER_SIZE)):
@@ -382,18 +399,19 @@ async def test_debug_clicks_are_mixed_into_the_returned_audio():
             out = await analyser.analyse(clean.copy())
             if not np.array_equal(out, clean):
                 clicked.append(i)
-                assert np.allclose(out - clean, analyser.click_sound, atol=1e-5), \
+                assert np.allclose(out - clean, analyser.click_sound, atol=1e-5), (
                     'the buffer was modified, but not by the click'
+                )
         return handler, clicked
 
     on, clicked_on = await run(note_clicks=True)
     _, clicked_off = await run(note_clicks=False)
 
     assert on.beat_buffers, 'no beats on 20 s of the anchor track'
-    assert clicked_on == on.beat_buffers, \
-        'clicks did not land exactly on the beats'
-    assert on.note_buffers == on.beat_buffers, \
+    assert clicked_on == on.beat_buffers, 'clicks did not land exactly on the beats'
+    assert on.note_buffers == on.beat_buffers, (
         'the overlay light bar is no longer following the beat stream'
+    )
     assert not clicked_off, 'audio was modified with -d off'
 
 

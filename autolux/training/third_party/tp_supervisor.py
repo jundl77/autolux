@@ -23,8 +23,12 @@ import time
 from pathlib import Path
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"), str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -83,8 +87,7 @@ def _stamp() -> str:
 def log(log_path: Path, event: str) -> None:
     line = f"{_stamp()}  {event}"
     try:
-        with open(log_path, "a", encoding="ascii", errors="replace",
-                  newline="\n") as handle:
+        with open(log_path, "a", encoding="ascii", errors="replace", newline="\n") as handle:
             handle.write(line + "\n")
             handle.flush()
     except OSError:
@@ -94,8 +97,7 @@ def log(log_path: Path, event: str) -> None:
 
 def write_state(state_path: Path, text: str) -> None:
     try:
-        with open(state_path, "w", encoding="ascii", errors="replace",
-                  newline="\n") as handle:
+        with open(state_path, "w", encoding="ascii", errors="replace", newline="\n") as handle:
             handle.write(text + "\n")
             handle.flush()
     except OSError:
@@ -104,8 +106,7 @@ def write_state(state_path: Path, text: str) -> None:
 
 def count_mp3s(corpus: Path) -> int:
     try:
-        return sum(1 for _ in (work_dir(corpus) / tp_record.AUDIO_DIR)
-                   .glob("*/*.mp3"))
+        return sum(1 for _ in (work_dir(corpus) / tp_record.AUDIO_DIR).glob("*/*.mp3"))
     except OSError:
         return -1
 
@@ -122,31 +123,34 @@ def sleep_until(deadline: float) -> None:
         time.sleep(min(_POLL_SECONDS, remaining))
 
 
-def build_command(python: str, downloader: Path, corpus: Path,
-                  queue: Path | None) -> list:
+def build_command(python: str, downloader: Path, corpus: Path, queue: Path | None) -> list:
     command = [
-        python, "-u", str(downloader),
-        "--data-dir", str(corpus),
-        "--pause", GENTLE_PAUSE,
-        "--retry-reasons", retry_reasons_arg(),
+        python,
+        "-u",
+        str(downloader),
+        "--data-dir",
+        str(corpus),
+        "--pause",
+        GENTLE_PAUSE,
+        "--retry-reasons",
+        retry_reasons_arg(),
     ]
     if queue is not None:
         command += ["--queue", str(queue)]
     return command
 
 
-def run_cycle(command: list, corpus: Path, cycle: int, log_path: Path,
-              state_path: Path) -> int:
+def run_cycle(command: list, corpus: Path, cycle: int, log_path: Path, state_path: Path) -> int:
     cycle_log = work_dir(corpus) / f"{CYCLE_LOG_STEM}{cycle}.log"
     cycle_err = work_dir(corpus) / f"{CYCLE_LOG_STEM}{cycle}.err.log"
     log(log_path, f"LAUNCH   cycle {cycle}: {' '.join(command)}")
-    log(log_path, f"         child stdout -> {cycle_log.name}, "
-                  f"stderr -> {cycle_err.name}")
+    log(log_path, f"         child stdout -> {cycle_log.name}, stderr -> {cycle_err.name}")
     try:
-        with open(cycle_log, "w", encoding="utf-8", errors="replace") as out, \
-             open(cycle_err, "w", encoding="utf-8", errors="replace") as err:
-            child = subprocess.Popen(command, stdout=out, stderr=err,
-                                     cwd=str(work_dir(corpus)))
+        with (
+            open(cycle_log, "w", encoding="utf-8", errors="replace") as out,
+            open(cycle_err, "w", encoding="utf-8", errors="replace") as err,
+        ):
+            child = subprocess.Popen(command, stdout=out, stderr=err, cwd=str(work_dir(corpus)))
             write_state(state_path, f"RUNNING pid={child.pid}")
             log(log_path, f"         child pid {child.pid}")
             while True:
@@ -176,18 +180,29 @@ def parse_cooldowns(text: str) -> tuple:
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus dir)")
-    parser.add_argument("--downloader", type=Path, default=DOWNLOADER,
-                        help="downloader script (default: %(default)s)")
-    parser.add_argument("--queue", type=Path, default=None,
-                        help="fetch queue csv passed through to the downloader")
-    parser.add_argument("--python", default=sys.executable,
-                        help="interpreter for the child (default: the one running this)")
-    parser.add_argument("--cooldowns",
-                        default=",".join(str(m) for m in DEFAULT_COOLDOWNS),
-                        help="comma list of cool-down minutes, one per cycle; its "
-                             "length is the cycle cap (default: %(default)s)")
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus dir)"
+    )
+    parser.add_argument(
+        "--downloader",
+        type=Path,
+        default=DOWNLOADER,
+        help="downloader script (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--queue", type=Path, default=None, help="fetch queue csv passed through to the downloader"
+    )
+    parser.add_argument(
+        "--python",
+        default=sys.executable,
+        help="interpreter for the child (default: the one running this)",
+    )
+    parser.add_argument(
+        "--cooldowns",
+        default=",".join(str(m) for m in DEFAULT_COOLDOWNS),
+        help="comma list of cool-down minutes, one per cycle; its "
+        "length is the cycle cap (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -211,8 +226,10 @@ def main(argv: list | None = None) -> int:
     log(log_path, f"         python {args.python}")
     log(log_path, f"         downloader {downloader}")
     log(log_path, f"         retry reasons {retry_reasons_arg()}")
-    log(log_path, f"         cycles {len(cooldowns)}, cool-downs "
-                  f"{'/'.join(f'{m:g}m' for m in cooldowns)}")
+    log(
+        log_path,
+        f"         cycles {len(cooldowns)}, cool-downs {'/'.join(f'{m:g}m' for m in cooldowns)}",
+    )
     log(log_path, f"         quarantine now {count_mp3s(corpus)} mp3 on disk")
 
     if not downloader.is_file():
@@ -224,8 +241,11 @@ def main(argv: list | None = None) -> int:
         write_state(state_path, "FAILED (preflight: yt-dlp not on PATH)")
         return 3
     if shutil.which("deno") is None and shutil.which("node") is None:
-        log(log_path, "WARN     no JS runtime visible to this process -- yt-dlp will "
-                      "warn that some formats may be missing")
+        log(
+            log_path,
+            "WARN     no JS runtime visible to this process -- yt-dlp will "
+            "warn that some formats may be missing",
+        )
 
     command = build_command(args.python, downloader, corpus, args.queue)
 
@@ -235,8 +255,11 @@ def main(argv: list | None = None) -> int:
 
         if minutes > 0:
             deadline = time.time() + minutes * 60.0
-            log(log_path, f"COOLDOWN until {hhmm(deadline)}  ({minutes:g} min, before "
-                          f"cycle {index}/{len(cooldowns)})")
+            log(
+                log_path,
+                f"COOLDOWN until {hhmm(deadline)}  ({minutes:g} min, before "
+                f"cycle {index}/{len(cooldowns)})",
+            )
             write_state(state_path, f"COOLDOWN until {hhmm(deadline)}")
             sleep_until(deadline)
             if _interrupted:
@@ -250,24 +273,33 @@ def main(argv: list | None = None) -> int:
             write_state(state_path, f"DONE mp3s={on_disk}")
             return 0
         if code == EXIT_BLOCKED:
-            log(log_path, f"CHILD_EXIT code 2  (refusal guard tripped again; "
-                          f"{on_disk} mp3 on disk)")
+            log(
+                log_path, f"CHILD_EXIT code 2  (refusal guard tripped again; {on_disk} mp3 on disk)"
+            )
         else:
-            log(log_path, f"CHILD_EXIT code {code}  (unexpected; treating as a block; "
-                          f"{on_disk} mp3 on disk)")
+            log(
+                log_path,
+                f"CHILD_EXIT code {code}  (unexpected; treating as a block; {on_disk} mp3 on disk)",
+            )
         if _interrupted:
             break
 
     on_disk = count_mp3s(corpus)
     if _interrupted:
-        log(log_path, f"STOPPED  by signal; {on_disk} mp3 on disk. State is resumable "
-                      "-- re-run this supervisor to continue.")
+        log(
+            log_path,
+            f"STOPPED  by signal; {on_disk} mp3 on disk. State is resumable "
+            "-- re-run this supervisor to continue.",
+        )
         write_state(state_path, f"STOPPED (signal) mp3s={on_disk}")
         return 130
 
-    log(log_path, f"GAVE_UP  after {len(cooldowns)} cycles; {on_disk} mp3 on disk. "
-                  "YouTube is still refusing. No credential workaround was attempted "
-                  "-- this is an owner decision.")
+    log(
+        log_path,
+        f"GAVE_UP  after {len(cooldowns)} cycles; {on_disk} mp3 on disk. "
+        "YouTube is still refusing. No credential workaround was attempted "
+        "-- this is an owner decision.",
+    )
     write_state(state_path, f"GAVE_UP after {len(cooldowns)} cycles")
     return 1
 

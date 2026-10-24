@@ -269,9 +269,7 @@ def load_hand_tracks(data_dir: Path) -> list:
         except ValueError as exc:
             raise RuntimeError(f"{path.name}: hand label does not parse ({exc})") from None
         if not isinstance(record, dict):
-            raise RuntimeError(
-                f"{path.name}: expected a JSON object, got {type(record).__name__}"
-            )
+            raise RuntimeError(f"{path.name}: expected a JSON object, got {type(record).__name__}")
         missing = [field for field in _HAND_LABEL_FIELDS if field not in record]
         if missing:
             raise RuntimeError(f"{path.name}: hand label lacks {', '.join(missing)}")

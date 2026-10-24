@@ -1,7 +1,13 @@
 import pytest
-from autolux.lib.engine.effect_definitions import (INTENT_EFFECTS, SECTION_CLASS_INTENTS,
-                                           Effect, EffectSource, EffectType,
-                                           LightIntent, intent_for_class)
+from autolux.lib.engine.effect_definitions import (
+    INTENT_EFFECTS,
+    SECTION_CLASS_INTENTS,
+    Effect,
+    EffectSource,
+    EffectType,
+    LightIntent,
+    intent_for_class,
+)
 from autolux.lib.clients.midi_message import MidiChannel
 from autolux.lib.label_space import SECTION_LABELS
 
@@ -12,30 +18,40 @@ def test_groove_is_gone_because_no_path_can_produce_it():
 
 
 def test_peaks_banks_move_into_drop_rather_than_going_dark():
-    channels = [effect.midi_channel.name
-                for effect in INTENT_EFFECTS[LightIntent.DROP]]
-    assert channels == ['AUTOLOOP_BANK_1D', 'AUTOLOOP_BANK_1E',
-                        'AUTOLOOP_BANK_1F', 'AUTOLOOP_BANK_1G',
-                        'AUTOLOOP_BANK_1H', 'SPECIAL_EFFECT_STROBE']
+    channels = [effect.midi_channel.name for effect in INTENT_EFFECTS[LightIntent.DROP]]
+    assert channels == [
+        'AUTOLOOP_BANK_1D',
+        'AUTOLOOP_BANK_1E',
+        'AUTOLOOP_BANK_1F',
+        'AUTOLOOP_BANK_1G',
+        'AUTOLOOP_BANK_1H',
+        'SPECIAL_EFFECT_STROBE',
+    ]
 
 
 def test_no_bank_of_the_two_families_the_show_draws_from_goes_dark():
     # Bank families 3 and 4 have never been wired to an intent; 1 and 2 are the
     # show's pools, and retiring an intent must re-home its banks rather than
     # silently shrink the rig.
-    reachable = {effect.midi_channel.name
-                 for pool in INTENT_EFFECTS.values() for effect in pool}
-    banks = {channel.name for channel in MidiChannel
-             if channel.name.startswith(('AUTOLOOP_BANK_1', 'AUTOLOOP_BANK_2'))}
+    reachable = {effect.midi_channel.name for pool in INTENT_EFFECTS.values() for effect in pool}
+    banks = {
+        channel.name
+        for channel in MidiChannel
+        if channel.name.startswith(('AUTOLOOP_BANK_1', 'AUTOLOOP_BANK_2'))
+    }
     assert banks <= reachable
 
 
 def test_grooves_banks_move_into_breakdown_rather_than_going_dark():
-    channels = [effect.midi_channel.name
-                for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]]
-    assert channels == ['AUTOLOOP_BANK_2C', 'AUTOLOOP_BANK_2D',
-                        'AUTOLOOP_BANK_2E', 'AUTOLOOP_BANK_2F',
-                        'AUTOLOOP_BANK_2G', 'AUTOLOOP_BANK_2H']
+    channels = [effect.midi_channel.name for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]]
+    assert channels == [
+        'AUTOLOOP_BANK_2C',
+        'AUTOLOOP_BANK_2D',
+        'AUTOLOOP_BANK_2E',
+        'AUTOLOOP_BANK_2F',
+        'AUTOLOOP_BANK_2G',
+        'AUTOLOOP_BANK_2H',
+    ]
 
 
 def test_every_intent_the_show_can_enter_has_a_pool():
@@ -47,8 +63,10 @@ def test_every_vocabulary_class_has_an_intent_and_nothing_else_does():
 
 
 def test_the_five_classes_the_show_already_played_are_untouched():
-    assert {label: SECTION_CLASS_INTENTS[label]
-            for label in ('intro', 'buildup', 'breakdown', 'drop', 'outro')} == {
+    assert {
+        label: SECTION_CLASS_INTENTS[label]
+        for label in ('intro', 'buildup', 'breakdown', 'drop', 'outro')
+    } == {
         'intro': LightIntent.ATMOSPHERIC,
         'outro': LightIntent.ATMOSPHERIC,
         'buildup': LightIntent.BUILDUP,
@@ -59,8 +77,10 @@ def test_the_five_classes_the_show_already_played_are_untouched():
 
 
 def test_the_four_new_classes_carry_the_provisional_owner_pending_mapping():
-    assert {label: SECTION_CLASS_INTENTS[label]
-            for label in ('altintro', 'bridge', 'cooldown', 'altoutro')} == {
+    assert {
+        label: SECTION_CLASS_INTENTS[label]
+        for label in ('altintro', 'bridge', 'cooldown', 'altoutro')
+    } == {
         'altintro': LightIntent.ATMOSPHERIC,
         'bridge': LightIntent.BREAKDOWN,
         'cooldown': LightIntent.BREAKDOWN,
@@ -73,7 +93,8 @@ def test_cooldown_lands_on_the_intent_that_inherited_grooves_banks():
     # into BREAKDOWN under D7, so this is that ruling followed through.
     assert SECTION_CLASS_INTENTS['cooldown'] is LightIntent.BREAKDOWN
     assert MidiChannel.AUTOLOOP_BANK_2F in {
-        effect.midi_channel for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]}
+        effect.midi_channel for effect in INTENT_EFFECTS[LightIntent.BREAKDOWN]
+    }
 
 
 def test_a_class_the_map_does_not_know_is_refused_rather_than_defaulted():

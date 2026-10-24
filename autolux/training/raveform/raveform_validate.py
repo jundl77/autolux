@@ -182,9 +182,7 @@ def find_orphans(data_dir: Path, known_youtube_ids) -> list:
     if not audio.is_dir():
         return []
     known = set(known_youtube_ids)
-    return sorted(
-        path.stem for path in audio.glob("*.mp3") if path.stem not in known
-    )
+    return sorted(path.stem for path in audio.glob("*.mp3") if path.stem not in known)
 
 
 def annotation_durations(tracks: list) -> dict:
@@ -364,9 +362,7 @@ def validate(
         )
     verdicts.sort(key=lambda verdict: verdict.track_id)
 
-    checksum_path, checksum_count = (
-        write_checksums(data_dir, verdicts) if checksums else (None, 0)
-    )
+    checksum_path, checksum_count = write_checksums(data_dir, verdicts) if checksums else (None, 0)
 
     payload = build_payload(
         data_dir=data_dir,

@@ -10,6 +10,7 @@ one-character change here.  Hence the golden literal below.
 The rest pins what ``--cut`` promises: the committed bytes ARE the corpus bytes,
 and the label slice is a verbatim subset of the annotation it records.
 """
+
 import hashlib
 import json
 import sys
@@ -71,14 +72,15 @@ def test_opaque_name_is_the_documented_expression():
 
     for youtube_id in EVAL_SET["youtube_ids"]:
         digest = hashlib.sha256(youtube_id.encode("utf-8")).digest()
-        assert opaque_name(youtube_id) == (
-            base64.urlsafe_b64encode(digest).decode("ascii")[:NAME_CHARS])
+        assert (
+            opaque_name(youtube_id)
+            == (base64.urlsafe_b64encode(digest).decode("ascii")[:NAME_CHARS])
+        )
     assert f"[:{NAME_CHARS}]" in AUDIO_NAME_SCHEME
 
 
 def test_derived_names_are_filename_safe_and_unique():
-    names = [committed_audio_path(youtube_id).name
-             for youtube_id in EVAL_SET["youtube_ids"]]
+    names = [committed_audio_path(youtube_id).name for youtube_id in EVAL_SET["youtube_ids"]]
     assert len(set(names)) == len(names)
     for name in names:
         assert name.endswith(".mp3") and len(name) == NAME_CHARS + 4
@@ -119,20 +121,26 @@ def test_the_eval_set_records_the_scheme_this_code_implements():
 def fake_corpus(tmp_path: Path, records: list) -> Path:
     (tmp_path / "audio").mkdir(parents=True, exist_ok=True)
     (tmp_path / "annotations").mkdir(parents=True, exist_ok=True)
-    with open(tmp_path / "annotations" / "segments.json", "w",
-              encoding="utf-8") as handle:
+    with open(tmp_path / "annotations" / "segments.json", "w", encoding="utf-8") as handle:
         json.dump(records, handle)
     return tmp_path
 
 
-def write_hand_label(root: Path, youtube_id: str, sections: list,
-                     duration: float = 20.0) -> Path:
+def write_hand_label(root: Path, youtube_id: str, sections: list, duration: float = 20.0) -> Path:
     """One hand label where the CUT looks for it -- never the corpus dir."""
     path = hand_label_path(youtube_id, root)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
-        json.dump({"id": youtube_id, "title": "Hand Artist - Hand Track",
-                   "duration": duration, "sections": sections}, handle, indent=2)
+        json.dump(
+            {
+                "id": youtube_id,
+                "title": "Hand Artist - Hand Track",
+                "duration": duration,
+                "sections": sections,
+            },
+            handle,
+            indent=2,
+        )
     return path
 
 
@@ -156,10 +164,14 @@ def test_copy_audio_refuses_a_track_the_corpus_does_not_have(tmp_path):
         copy_audio(data_dir, ["gone"], audio_dir=tmp_path / "committed")
 
 
-PUBLISHED_SECTIONS = [{"name": "intro", "start": 0.0, "end": 10.0},
-                      {"name": "drop", "start": 10.0, "end": 20.0}]
-HAND_SECTIONS = [{"name": "intro", "start": 0.0, "end": 10.0},
-                 {"name": "bridge", "start": 10.0, "end": 20.0}]
+PUBLISHED_SECTIONS = [
+    {"name": "intro", "start": 0.0, "end": 10.0},
+    {"name": "drop", "start": 10.0, "end": 20.0},
+]
+HAND_SECTIONS = [
+    {"name": "intro", "start": 0.0, "end": 10.0},
+    {"name": "bridge", "start": 10.0, "end": 20.0},
+]
 
 
 def test_cut_labels_takes_the_records_verbatim(tmp_path):
@@ -170,21 +182,22 @@ def test_cut_labels_takes_the_records_verbatim(tmp_path):
     data_dir = fake_corpus(tmp_path, [wanted, other])
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json",
-                          hand_root=tmp_path / "hand")
+    document = cut_labels(
+        data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand"
+    )
 
     assert document["tracks"] == [wanted]
     assert document["truths"][PUBLISHED]["tracks_in_source"] == 2
-    assert sections_by_track(document) == {
-        "a.1": [(0.0, 10.0, "intro"), (10.0, 20.0, "drop")]}
+    assert sections_by_track(document) == {"a.1": [(0.0, 10.0, "intro"), (10.0, 20.0, "drop")]}
 
 
 def test_cut_labels_records_the_sha_of_the_annotation_it_cut(tmp_path):
     data_dir = fake_corpus(tmp_path, [{"key": "a.1", "id": "1", "sections": []}])
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json",
-                          hand_root=tmp_path / "hand")
+    document = cut_labels(
+        data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand"
+    )
 
     on_disk = (data_dir / "annotations" / "segments.json").read_bytes()
     assert labels_source_sha(document) == hashlib.sha256(on_disk).hexdigest()
@@ -193,14 +206,12 @@ def test_cut_labels_records_the_sha_of_the_annotation_it_cut(tmp_path):
 def test_cut_labels_records_the_sha_of_every_hand_label_it_adopted(tmp_path):
     """The owner half's provenance is per FILE, because a hand label is a file
     in this repo that he edits routinely."""
-    data_dir = fake_corpus(
-        tmp_path, [{"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS}])
+    data_dir = fake_corpus(tmp_path, [{"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS}])
     hand_root = tmp_path / "hand"
     label = write_hand_label(hand_root, "1", HAND_SECTIONS)
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json",
-                          hand_root=hand_root)
+    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
 
     ruling = owner_rulings(document)["a.1"]
     assert ruling["ruling"] == OVERRIDDEN
@@ -211,18 +222,27 @@ def test_cut_labels_records_the_sha_of_every_hand_label_it_adopted(tmp_path):
 def test_every_owner_record_is_the_corpus_merge_of_its_published_and_hand_records(tmp_path):
     """Not a re-derivation: the corpus's own merge, so an owner record is
     provably the published record plus the hand sections and nothing invented."""
-    published = {"key": "a.1", "id": "1", "title": "Real Artist - Real Track",
-                 "sections": PUBLISHED_SECTIONS}
+    published = {
+        "key": "a.1",
+        "id": "1",
+        "title": "Real Artist - Real Track",
+        "sections": PUBLISHED_SECTIONS,
+    }
     data_dir = fake_corpus(tmp_path, [published])
     hand_root = tmp_path / "hand"
     write_hand_label(hand_root, "1", HAND_SECTIONS)
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json",
-                          hand_root=hand_root)
+    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
 
-    hand = {"id": "1", "title": "Hand Artist - Hand Track", "duration": 20.0,
-            "sections": HAND_SECTIONS, "key": "1", "source": "hand_label"}
+    hand = {
+        "id": "1",
+        "title": "Hand Artist - Hand Track",
+        "duration": 20.0,
+        "sections": HAND_SECTIONS,
+        "key": "1",
+        "source": "hand_label",
+    }
     assert document["owner_tracks"] == [merge_hand_tracks([published], [hand])[0]]
     assert document["owner_tracks"][0]["title"] == "Real Artist - Real Track"
 
@@ -230,16 +250,20 @@ def test_every_owner_record_is_the_corpus_merge_of_its_published_and_hand_record
 def test_only_an_overridden_track_gets_an_owner_record(tmp_path):
     """Nine identical copies would make the diff unreadable and would invite the
     two copies to drift; the fallback IS the published record."""
-    data_dir = fake_corpus(tmp_path, [
-        {"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS},
-        {"key": "b.2", "id": "2", "sections": PUBLISHED_SECTIONS}])
+    data_dir = fake_corpus(
+        tmp_path,
+        [
+            {"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS},
+            {"key": "b.2", "id": "2", "sections": PUBLISHED_SECTIONS},
+        ],
+    )
     hand_root = tmp_path / "hand"
     write_hand_label(hand_root, "1", HAND_SECTIONS)
-    eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"},
-                           {"track_id": "b.2", "youtube_id": "2"}]}
+    eval_set = {
+        "tracks": [{"track_id": "a.1", "youtube_id": "1"}, {"track_id": "b.2", "youtube_id": "2"}]
+    }
 
-    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json",
-                          hand_root=hand_root)
+    document = cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
     truths = sections_by_truth(document)
 
     assert [record["key"] for record in document["owner_tracks"]] == ["a.1"]
@@ -248,17 +272,22 @@ def test_only_an_overridden_track_gets_an_owner_record(tmp_path):
 
 
 def test_the_rulings_name_every_frozen_track_even_the_unruled_ones(tmp_path):
-    data_dir = fake_corpus(tmp_path, [
-        {"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS},
-        {"key": "b.2", "id": "2", "sections": PUBLISHED_SECTIONS}])
+    data_dir = fake_corpus(
+        tmp_path,
+        [
+            {"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS},
+            {"key": "b.2", "id": "2", "sections": PUBLISHED_SECTIONS},
+        ],
+    )
     hand_root = tmp_path / "hand"
     write_hand_label(hand_root, "1", HAND_SECTIONS)
-    eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"},
-                           {"track_id": "b.2", "youtube_id": "2"}]}
+    eval_set = {
+        "tracks": [{"track_id": "a.1", "youtube_id": "1"}, {"track_id": "b.2", "youtube_id": "2"}]
+    }
 
-    rulings = owner_rulings(cut_labels(data_dir, eval_set,
-                                       path=tmp_path / "labels.json",
-                                       hand_root=hand_root))
+    rulings = owner_rulings(
+        cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=hand_root)
+    )
 
     assert set(rulings) == {"a.1", "b.2"}
     assert rulings["a.1"]["ruling"] == OVERRIDDEN
@@ -269,31 +298,27 @@ def test_a_recut_carries_an_accepted_ruling_forward(tmp_path):
     """'the published label is right' is a decision, and the slice is the only
     place it is recorded -- a re-cut that wiped it would silently re-open a
     track the owner has already closed."""
-    data_dir = fake_corpus(
-        tmp_path, [{"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS}])
+    data_dir = fake_corpus(tmp_path, [{"key": "a.1", "id": "1", "sections": PUBLISHED_SECTIONS}])
     eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"}]}
     path = tmp_path / "labels.json"
     cut_labels(data_dir, eval_set, path=path, hand_root=tmp_path / "hand")
 
     document = json.loads(path.read_text(encoding="utf-8"))
-    document["truths"][OWNER]["rulings"]["a.1"] = {"ruling": ACCEPTED,
-                                                  "dated": "2026-09-09"}
+    document["truths"][OWNER]["rulings"]["a.1"] = {"ruling": ACCEPTED, "dated": "2026-09-09"}
     path.write_text(json.dumps(document), encoding="utf-8")
 
-    again = cut_labels(data_dir, eval_set, path=path,
-                       hand_root=tmp_path / "hand")
+    again = cut_labels(data_dir, eval_set, path=path, hand_root=tmp_path / "hand")
 
-    assert owner_rulings(again)["a.1"] == {"ruling": ACCEPTED,
-                                           "dated": "2026-09-09"}
+    assert owner_rulings(again)["a.1"] == {"ruling": ACCEPTED, "dated": "2026-09-09"}
 
 
 def test_cut_labels_refuses_an_eval_track_with_no_annotation(tmp_path):
     data_dir = fake_corpus(tmp_path, [{"key": "a.1", "id": "1", "sections": []}])
-    eval_set = {"tracks": [{"track_id": "a.1", "youtube_id": "1"},
-                           {"track_id": "b.2", "youtube_id": "2"}]}
+    eval_set = {
+        "tracks": [{"track_id": "a.1", "youtube_id": "1"}, {"track_id": "b.2", "youtube_id": "2"}]
+    }
     with pytest.raises(RuntimeError, match="b.2"):
-        cut_labels(data_dir, eval_set, path=tmp_path / "labels.json",
-                   hand_root=tmp_path / "hand")
+        cut_labels(data_dir, eval_set, path=tmp_path / "labels.json", hand_root=tmp_path / "hand")
 
 
 def test_load_labels_rejects_a_document_that_is_not_a_slice(tmp_path):
@@ -308,11 +333,16 @@ def test_load_labels_refuses_a_slice_from_before_the_owner_reading(tmp_path):
     the published reading, and reading it as if it carried both would silently
     score the owner column against published labels."""
     path = tmp_path / "labels.json"
-    path.write_text(json.dumps({
-        "schema": 1,
-        "source": {"file": "annotations/segments.json", "sha256": "abc"},
-        "tracks": [{"key": "a.1", "sections": []}],
-    }), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "source": {"file": "annotations/segments.json", "sha256": "abc"},
+                "tracks": [{"key": "a.1", "sections": []}],
+            }
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(RuntimeError) as excinfo:
         load_labels(path)
     assert "schema 1" in str(excinfo.value) and "--cut" in str(excinfo.value)
@@ -324,8 +354,9 @@ def test_load_labels_explains_itself_when_absent(tmp_path):
 
 
 def test_build_labels_document_is_json_round_trippable():
-    document = build_labels_document([{"key": "a.1", "sections": []}], "sha", 1,
-                                     rulings={"a.1": {"ruling": UNREVIEWED}})
+    document = build_labels_document(
+        [{"key": "a.1", "sections": []}], "sha", 1, rulings={"a.1": {"ruling": UNREVIEWED}}
+    )
     assert json.loads(json.dumps(document)) == document
     assert document["schema"] == LABELS_SCHEMA
 
@@ -386,6 +417,5 @@ def test_the_committed_slice_is_checked_out_with_canonical_line_endings():
 def test_the_committed_audio_dir_holds_only_the_eval_set():
     """Precisely ten tracks, and nothing else: the owner authorised committing
     the eval set, not a habit of committing audio."""
-    expected = {committed_audio_path(youtube_id).name
-                for youtube_id in EVAL_SET["youtube_ids"]}
+    expected = {committed_audio_path(youtube_id).name for youtube_id in EVAL_SET["youtube_ids"]}
     assert {path.name for path in EVAL_AUDIO_DIR.glob("*.mp3")} == expected

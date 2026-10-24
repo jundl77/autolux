@@ -41,9 +41,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"),
-              str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -217,19 +220,16 @@ def _classify(token: str, vocab: dict) -> str:
 
 def parse_rows(text: str, vocab: dict) -> list:
     rows = []
-    for number, line in enumerate(
-            text.replace("\r\n", "\n").replace("\r", "\n").split("\n"), 1):
+    for number, line in enumerate(text.replace("\r\n", "\n").replace("\r", "\n").split("\n"), 1):
         if not line.strip():
             continue
         fields = line.split("\t")
         if len(fields) != 2:
-            raise ConvertError(
-                f"line {number}: {len(fields)} tab-separated fields, want 2")
+            raise ConvertError(f"line {number}: {len(fields)} tab-separated fields, want 2")
         try:
             time = float(fields[0])
         except ValueError:
-            raise ConvertError(
-                f"line {number}: time {fields[0]!r} is not a number") from None
+            raise ConvertError(f"line {number}: time {fields[0]!r} is not a number") from None
         if time < 0.0:
             raise ConvertError(f"line {number}: time {time!r} is negative")
         large, small, function = [], [], []
@@ -250,7 +250,8 @@ def parse_rows(text: str, vocab: dict) -> list:
         if after.time < before.time:
             raise ConvertError(
                 f"line {index}: time {after.time!r} is before line "
-                f"{index - 1}'s {before.time!r} -- unsorted")
+                f"{index - 1}'s {before.time!r} -- unsorted"
+            )
     return rows
 
 
@@ -259,9 +260,11 @@ def _is_end(row: Row) -> bool:
 
 
 def _musical(function: tuple) -> tuple:
-    return tuple(name for name in function
-                 if name.casefold() not in NON_MUSICAL
-                 and name.casefold() != END_MARKER)
+    return tuple(
+        name
+        for name in function
+        if name.casefold() not in NON_MUSICAL and name.casefold() != END_MARKER
+    )
 
 
 def segments(rows: list) -> list:
@@ -270,9 +273,11 @@ def segments(rows: list) -> list:
     if not boundaries:
         raise ConvertError("no large-scale or function tokens anywhere")
     ends = [row.time for row in boundaries[1:]] + [rows[-1].time]
-    return [Segment(row.time, end, row.large, row.small, row.function)
-            for row, end in zip(boundaries, ends)
-            if end - row.time > MIN_SPAN_SEC]
+    return [
+        Segment(row.time, end, row.large, row.small, row.function)
+        for row, end in zip(boundaries, ends)
+        if end - row.time > MIN_SPAN_SEC
+    ]
 
 
 def _layers(segment: Segment) -> dict:
@@ -291,8 +296,7 @@ def parse_annotation(text: str, vocab: dict) -> Parse:
         span = {"start": segment.start, "end": segment.end}
         musical = _musical(segment.function)
         if musical:
-            sections.append({"name": ", ".join(musical), **span,
-                             **_layers(segment)})
+            sections.append({"name": ", ".join(musical), **span, **_layers(segment)})
             continue
         # The parsed layer would write no_function here and lose the letter.
         reason = NO_FUNCTION if not segment.function else "non_musical"
@@ -303,7 +307,8 @@ def parse_annotation(text: str, vocab: dict) -> Parse:
     if not sections:
         raise ConvertError(
             "no section survives the mask -- the annotator named no musical "
-            "function anywhere in the file")
+            "function anywhere in the file"
+        )
     return Parse(sections, masked, rows[-1].time)
 
 
@@ -345,14 +350,12 @@ def track_duration(row: dict, parse: Parse) -> tuple:
     stated = (row.get("SONG_DURATION") or "").strip()
     if not stated:
         if parse.last_time <= 0.0:
-            raise ConvertError(
-                "no SONG_DURATION and the annotation ends at zero")
+            raise ConvertError("no SONG_DURATION and the annotation ends at zero")
         return parse.last_time, "annotation_last_time"
     try:
         duration = float(stated)
     except ValueError:
-        raise ConvertError(
-            f"SONG_DURATION {stated!r} is not a number") from None
+        raise ConvertError(f"SONG_DURATION {stated!r} is not a number") from None
     if duration <= 0.0 and parse.last_time <= 0.0:
         raise ConvertError(f"SONG_DURATION {stated!r} is not positive")
     if parse.last_time > duration:
@@ -394,8 +397,9 @@ def choose_annotator(salami: Path, salami_id: str, vocab: dict) -> tuple:
     raise ConvertError("; ".join(reasons))
 
 
-def convert_track(salami_id: str, salami: Path, row: dict, vocab: dict,
-                  corpus: Path, copy: bool) -> Verdict:
+def convert_track(
+    salami_id: str, salami: Path, row: dict, vocab: dict, corpus: Path, copy: bool
+) -> Verdict:
     identifier = track_id(salami_id)
     annotator, path, parse = choose_annotator(salami, salami_id, vocab)
 
@@ -422,14 +426,13 @@ def convert_track(salami_id: str, salami: Path, row: dict, vocab: dict,
         "masked": parse.masked,
         "provenance": {
             "converter": CONVERTER,
-            "converted_utc": datetime.now(timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"),
+            "converted_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "annotator": annotator,
             "annotation_file": path.name,
             "annotation_sha256": sha256(path),
             "annotators_available": sorted(
-                number for number in TEXTFILES
-                if textfile_path(salami, salami_id, number).exists()),
+                number for number in TEXTFILES if textfile_path(salami, salami_id, number).exists()
+            ),
             "duration_source": duration_source,
             "salami_source": (row.get("SOURCE") or "").strip(),
             "vocabulary_transform": "case_only",
@@ -448,14 +451,20 @@ def convert_track(salami_id: str, salami: Path, row: dict, vocab: dict,
     write_record(annotation_path(corpus, identifier, SOURCE), record)
 
     return Verdict(
-        identifier, annotator,
+        identifier,
+        annotator,
         tuple(section["name"] for section in parse.sections),
-        tuple(name for section in parse.sections
-              for name in section.get("large_scale", "").split(", ") if name),
+        tuple(
+            name
+            for section in parse.sections
+            for name in section.get("large_scale", "").split(", ")
+            if name
+        ),
         len(parse.masked),
         sum(span["end"] - span["start"] for span in parse.masked),
         sum(section["end"] - section["start"] for section in parse.sections),
-        duration, duration_source,
+        duration,
+        duration_source,
     )
 
 
@@ -464,8 +473,7 @@ def convert_track(salami_id: str, salami: Path, row: dict, vocab: dict,
 # --------------------------------------------------------------------------- #
 
 
-def eligible(salami: Path, metadata: dict, ids: list | None,
-             include_live: bool) -> tuple:
+def eligible(salami: Path, metadata: dict, ids: list | None, include_live: bool) -> tuple:
     wanted = ids if ids is not None else sorted(metadata, key=_sort_key)
     convertible, excluded, no_annotation, no_audio, unknown = [], [], [], [], []
     for salami_id in wanted:
@@ -473,8 +481,7 @@ def eligible(salami: Path, metadata: dict, ids: list | None,
         if row is None:
             unknown.append(salami_id)
             continue
-        if not include_live and (row.get("CLASS") or "").strip() == \
-                LIVE_ARCHIVE_CLASS:
+        if not include_live and (row.get("CLASS") or "").strip() == LIVE_ARCHIVE_CLASS:
             excluded.append(salami_id)
             continue
         if not annotation_dir(salami, salami_id).is_dir():
@@ -487,8 +494,7 @@ def eligible(salami: Path, metadata: dict, ids: list | None,
     return convertible, excluded, no_annotation, no_audio, unknown
 
 
-def _report(verdicts: list, failures: list, buckets: tuple,
-            requested: int, partial: bool) -> dict:
+def _report(verdicts: list, failures: list, buckets: tuple, requested: int, partial: bool) -> dict:
     labels: dict = {}
     letters: dict = {}
     two_annotators = []
@@ -508,8 +514,7 @@ def _report(verdicts: list, failures: list, buckets: tuple,
         "tracks_requested": requested,
         "converted": len(verdicts),
         "failed": len(failures),
-        "failures": [{"id": identifier, "reason": reason}
-                     for identifier, reason in failures],
+        "failures": [{"id": identifier, "reason": reason} for identifier, reason in failures],
         "excluded_live_music_archive": len(excluded),
         "excluded_live_music_archive_ids": excluded,
         "no_annotation": len(no_annotation),
@@ -524,11 +529,14 @@ def _report(verdicts: list, failures: list, buckets: tuple,
         "tracks_with_two_annotators": len(both),
         "tracks_with_two_annotators_ids": both,
         "annotator2_used": fallbacks,
-        "duration_sources": dict(sorted(collections.Counter(
-            verdict.duration_source for verdict in verdicts).items())),
+        "duration_sources": dict(
+            sorted(collections.Counter(verdict.duration_source for verdict in verdicts).items())
+        ),
         "duration_from_annotation": [
-            verdict.track_id for verdict in verdicts
-            if verdict.duration_source == "annotation_last_time"],
+            verdict.track_id
+            for verdict in verdicts
+            if verdict.duration_source == "annotation_last_time"
+        ],
         "labelled_sec": round(sum(v.labelled_sec for v in verdicts), 3),
         "audio_sec": round(sum(v.duration_sec for v in verdicts), 3),
     }
@@ -551,80 +559,109 @@ def write_report(corpus: Path, report: dict) -> Path:
 
 
 def print_report(report: dict) -> None:
-    print(f"converted {report['converted']}/{report['tracks_requested']}, "
-          f"failed {report['failed']}"
-          + (" (partial run)" if report["partial"] else ""))
+    print(
+        f"converted {report['converted']}/{report['tracks_requested']}, "
+        f"failed {report['failed']}" + (" (partial run)" if report["partial"] else "")
+    )
     for failure in report["failures"]:
         print(f"  FAIL {failure['id']}: {failure['reason']}")
-    print(f"excluded {LIVE_ARCHIVE_CLASS}: "
-          f"{report['excluded_live_music_archive']}; no annotation: "
-          f"{report['no_annotation']}; no audio: {report['no_audio']}")
-    print(f"labels ({len(report['labels'])} distinct): " + ", ".join(
-        f"{name}={count}" for name, count in report["labels"].items()))
-    print(f"large-scale ({len(report['large_scale_labels'])} distinct): "
-          + ", ".join(f"{name}={count}"
-                      for name, count in report["large_scale_labels"].items()))
-    print(f"masked {report['masked_spans']} span(s), "
-          f"{report['masked_sec']:.3f} s")
-    print(f"two annotators available: {report['tracks_with_two_annotators']}; "
-          f"annotator 2 used: {len(report['annotator2_used'])}")
-    print("duration sources: " + ", ".join(
-        f"{name}={count}"
-        for name, count in report["duration_sources"].items()))
-    print(f"labelled {report['labelled_sec']:.3f} s of "
-          f"{report['audio_sec']:.3f} s of audio")
+    print(
+        f"excluded {LIVE_ARCHIVE_CLASS}: "
+        f"{report['excluded_live_music_archive']}; no annotation: "
+        f"{report['no_annotation']}; no audio: {report['no_audio']}"
+    )
+    print(
+        f"labels ({len(report['labels'])} distinct): "
+        + ", ".join(f"{name}={count}" for name, count in report["labels"].items())
+    )
+    print(
+        f"large-scale ({len(report['large_scale_labels'])} distinct): "
+        + ", ".join(f"{name}={count}" for name, count in report["large_scale_labels"].items())
+    )
+    print(f"masked {report['masked_spans']} span(s), {report['masked_sec']:.3f} s")
+    print(
+        f"two annotators available: {report['tracks_with_two_annotators']}; "
+        f"annotator 2 used: {len(report['annotator2_used'])}"
+    )
+    print(
+        "duration sources: "
+        + ", ".join(f"{name}={count}" for name, count in report["duration_sources"].items())
+    )
+    print(f"labelled {report['labelled_sec']:.3f} s of {report['audio_sec']:.3f} s of audio")
 
 
-def convert(salami: Path, corpus: Path, ids: list | None = None,
-            limit: int | None = None, copy: bool = True,
-            include_live: bool = False) -> dict:
+def convert(
+    salami: Path,
+    corpus: Path,
+    ids: list | None = None,
+    limit: int | None = None,
+    copy: bool = True,
+    include_live: bool = False,
+) -> dict:
     metadata = load_metadata(metadata_path(salami))
     vocab = load_case_map(vocab_path(salami))
     convertible, excluded, no_annotation, no_audio, unknown = eligible(
-        salami, metadata, ids, include_live)
+        salami, metadata, ids, include_live
+    )
     partial = ids is not None or limit is not None
     if limit is not None:
         convertible = convertible[:limit]
-    both = [salami_id for salami_id in convertible
-            if all(textfile_path(salami, salami_id, number).exists()
-                   for number in TEXTFILES)]
+    both = [
+        salami_id
+        for salami_id in convertible
+        if all(textfile_path(salami, salami_id, number).exists() for number in TEXTFILES)
+    ]
 
     verdicts, failures = [], []
     for salami_id in convertible:
         try:
-            verdicts.append(convert_track(salami_id, salami,
-                                          metadata[salami_id], vocab, corpus,
-                                          copy))
+            verdicts.append(
+                convert_track(salami_id, salami, metadata[salami_id], vocab, corpus, copy)
+            )
         except ConvertError as error:
             failures.append((track_id(salami_id), str(error)))
-    report = _report(verdicts, failures,
-                     (excluded, no_annotation, no_audio, unknown, both),
-                     len(convertible), partial)
+    report = _report(
+        verdicts,
+        failures,
+        (excluded, no_annotation, no_audio, unknown, both),
+        len(convertible),
+        partial,
+    )
     write_report(corpus, report)
     return report
 
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--salami-dir", type=Path, required=True,
-                        help="the salami-data-public root")
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus)")
-    parser.add_argument("--ids", nargs="+", default=None,
-                        help="explicit SALAMI song ids")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="convert only the first N eligible tracks")
-    parser.add_argument("--no-audio", action="store_true",
-                        help="convert annotations only, skip the audio copy")
-    parser.add_argument("--include-live-archive", action="store_true",
-                        help=f"convert {LIVE_ARCHIVE_CLASS} tracks, which are "
-                             f"excluded from admission by default")
+    parser.add_argument(
+        "--salami-dir", type=Path, required=True, help="the salami-data-public root"
+    )
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus)"
+    )
+    parser.add_argument("--ids", nargs="+", default=None, help="explicit SALAMI song ids")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="convert only the first N eligible tracks"
+    )
+    parser.add_argument(
+        "--no-audio", action="store_true", help="convert annotations only, skip the audio copy"
+    )
+    parser.add_argument(
+        "--include-live-archive",
+        action="store_true",
+        help=f"convert {LIVE_ARCHIVE_CLASS} tracks, which are excluded from admission by default",
+    )
     args = parser.parse_args(argv)
 
     corpus = args.data_dir.resolve() if args.data_dir else corpus_dir()
-    report = convert(args.salami_dir.resolve(), corpus, ids=args.ids,
-                     limit=args.limit, copy=not args.no_audio,
-                     include_live=args.include_live_archive)
+    report = convert(
+        args.salami_dir.resolve(),
+        corpus,
+        ids=args.ids,
+        limit=args.limit,
+        copy=not args.no_audio,
+        include_live=args.include_live_archive,
+    )
     print_report(report)
     return 1 if report["failed"] else 0
 

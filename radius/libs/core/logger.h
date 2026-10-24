@@ -11,8 +11,8 @@
 namespace Radius {
 
 #define LL_DEBUG 0
-#define LL_INFO  1
-#define LL_WARN  2
+#define LL_INFO 1
+#define LL_WARN 2
 #define LL_ERROR 3
 
 using LogModule = StrongTypedef<std::string, struct LogModuleTag>;
@@ -24,43 +24,45 @@ std::string LogLevelToString(int logLevel);
 
 inline decltype(auto) GetLocalTime()
 {
-	std::chrono::zoned_time time {std::chrono::current_zone(), std::chrono::system_clock::now()};
+	std::chrono::zoned_time time{std::chrono::current_zone(), std::chrono::system_clock::now()};
 	return std::format("{:%Y-%m-%d %T}", time);
 }
 
-#define LOG(level, module, ...) \
-	do \
-	{ \
-		if (level == LL_DEBUG && GetGlobalLogLevel() == LL_DEBUG) \
-		{ \
-			std::cout << GetLocalTime() << " [Debug ] [" << module << "] "; \
-			std::printf(__VA_ARGS__); \
-			std::cout << std::endl; \
-		} \
-		else if (level == LL_INFO && GetGlobalLogLevel() <= LL_INFO) \
-		{ \
-			std::cout << GetLocalTime() << " [Info ] [" << module << "] "; \
-			std::printf(__VA_ARGS__); \
-			std::cout << std::endl; \
-		} \
-		else if (level == LL_WARN && GetGlobalLogLevel() <= LL_WARN) \
-		{ \
-			std::cout << GetLocalTime() << " [Warn ] [" << module << "] "; \
-			std::printf(__VA_ARGS__); \
-			std::cout << std::endl; \
-		} \
-		else if (level == LL_ERROR && GetGlobalLogLevel() <= LL_ERROR) \
-		{ \
-			std::cout << GetLocalTime() << " [Error ] [" << module << "] "; \
-			std::printf(__VA_ARGS__); \
-			std::cout << std::endl; \
-		} \
-	} while(false)
+#define LOG(level, module, ...)                                                                                        \
+	do                                                                                                                 \
+	{                                                                                                                  \
+		if (level == LL_DEBUG && GetGlobalLogLevel() == LL_DEBUG)                                                      \
+		{                                                                                                              \
+			std::cout << GetLocalTime() << " [Debug ] [" << module << "] ";                                            \
+			std::printf(__VA_ARGS__);                                                                                  \
+			std::cout << std::endl;                                                                                    \
+		}                                                                                                              \
+		else if (level == LL_INFO && GetGlobalLogLevel() <= LL_INFO)                                                   \
+		{                                                                                                              \
+			std::cout << GetLocalTime() << " [Info ] [" << module << "] ";                                             \
+			std::printf(__VA_ARGS__);                                                                                  \
+			std::cout << std::endl;                                                                                    \
+		}                                                                                                              \
+		else if (level == LL_WARN && GetGlobalLogLevel() <= LL_WARN)                                                   \
+		{                                                                                                              \
+			std::cout << GetLocalTime() << " [Warn ] [" << module << "] ";                                             \
+			std::printf(__VA_ARGS__);                                                                                  \
+			std::cout << std::endl;                                                                                    \
+		}                                                                                                              \
+		else if (level == LL_ERROR && GetGlobalLogLevel() <= LL_ERROR)                                                 \
+		{                                                                                                              \
+			std::cout << GetLocalTime() << " [Error ] [" << module << "] ";                                            \
+			std::printf(__VA_ARGS__);                                                                                  \
+			std::cout << std::endl;                                                                                    \
+		}                                                                                                              \
+	} while (false)
 
 #ifdef NDEBUG
-#define DEBUG_LOG(level, module, ...) {}
+#define DEBUG_LOG(level, module, ...)                                                                                  \
+	{                                                                                                                  \
+	}
 #else
 #define DEBUG_LOG(level, module, ...) LOG(level, module, __VA_ARGS__)
 #endif
 
-}
+} // namespace Radius

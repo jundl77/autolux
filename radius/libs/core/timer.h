@@ -13,8 +13,9 @@ class Timer
 {
 public:
 	explicit Timer(std::chrono::nanoseconds interval)
-		: mInterval(interval)
-	{}
+	    : mInterval(interval)
+	{
+	}
 
 	void Start(TimerCallback callback)
 	{
@@ -26,7 +27,11 @@ public:
 	{
 		mCallback = {};
 	}
-	bool Active() const { return bool(mCallback); }
+
+	bool Active() const
+	{
+		return bool(mCallback);
+	}
 
 	void Poll(MonotonicTime now)
 	{
@@ -52,7 +57,7 @@ private:
 	std::chrono::nanoseconds mInterval;
 	TimerCallback mCallback;
 
-	MonotonicTime mLastCall {};
+	MonotonicTime mLastCall{};
 };
 
-}
+} // namespace Radius

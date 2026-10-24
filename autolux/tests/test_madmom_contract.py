@@ -9,6 +9,7 @@ pytestmark = pytest.mark.integration
 @functools.lru_cache(maxsize=None)
 def _beat_stage():
     from autolux.lib.analyser.madmom_rhythm import _BeatStage
+
     return _BeatStage()
 
 
@@ -24,8 +25,7 @@ def _networks(processor):
 
 
 def _layer_kinds(processor) -> set[str]:
-    return {type(layer).__name__
-            for net in _networks(processor) for layer in net.layers}
+    return {type(layer).__name__ for net in _networks(processor) for layer in net.layers}
 
 
 def _frame_sizes(processor) -> list[int]:
@@ -45,6 +45,7 @@ def test_the_beat_network_we_build_contains_no_bidirectional_layer():
 
 def test_the_offline_variant_really_is_bidirectional():
     from madmom.features.beats import RNNBeatProcessor
+
     assert 'BidirectionalLayer' in _layer_kinds(RNNBeatProcessor())
 
 
@@ -55,11 +56,13 @@ def test_the_frame_geometry_is_the_online_one():
     assert beat == [2048], f'online beat geometry changed: {beat}'
     assert max(beat) == FRAME_SIZE, (
         'the adapter buffers FRAME_SIZE samples before handing over a frame; it '
-        'must be at least the largest window the chain reads')
+        'must be at least the largest window the chain reads'
+    )
 
 
 def test_online_beat_decoding_is_forward_only():
     from madmom.features.beats import DBNBeatTrackingProcessor
+
     src = inspect.getsource(DBNBeatTrackingProcessor.process_online)
     assert 'self.hmm.forward(' in src
     assert 'viterbi' not in src.lower()
@@ -67,6 +70,7 @@ def test_online_beat_decoding_is_forward_only():
 
 def test_online_beat_times_never_run_ahead_of_the_frame_counter():
     from madmom.features.beats import DBNBeatTrackingProcessor
+
     src = inspect.getsource(DBNBeatTrackingProcessor.process_online)
     assert '(frame + self.counter) / float(self.fps)' in src
 
@@ -78,12 +82,12 @@ def test_one_activation_in_yields_at_most_one_event_out():
     dbn = DBNBeatTrackingProcessor(fps=100, online=True)
     dbn.reset()
     for value in np.tile([0.9, 0.1, 0.1, 0.1, 0.1], 200):
-        assert len(np.atleast_1d(
-            dbn.process_online(np.array([value]), reset=False))) <= 1
+        assert len(np.atleast_1d(dbn.process_online(np.array([value]), reset=False))) <= 1
 
 
 def test_processors_expose_reset_so_the_analyser_need_not_rebuild_models():
     from madmom.features.beats import DBNBeatTrackingProcessor
+
     assert callable(DBNBeatTrackingProcessor.reset)
 
 
@@ -101,8 +105,7 @@ def test_online_state_is_bounded_so_the_roll_may_keep_the_beat_lock():
         n = int(seconds * SAMPLE_RATE)
         t = (np.arange(n) + int(t0 * SAMPLE_RATE)) / SAMPLE_RATE
         phase = t % (60.0 / 128.0)
-        return ((phase < 0.05) * 0.6
-                * np.sin(2 * np.pi * 80.0 * phase / 0.05)).astype(np.float32)
+        return ((phase < 0.05) * 0.6 * np.sin(2 * np.pi * 80.0 * phase / 0.05)).astype(np.float32)
 
     def graph(obj, path='r', seen=None, out=None, depth=0):
         seen = set() if seen is None else seen
@@ -126,31 +129,33 @@ def test_online_state_is_bounded_so_the_roll_may_keep_the_beat_lock():
         audio = click(seconds, t0)
         beats = 0
         for i in range(0, len(audio) - 256, 256):
-            beats += len(rhythm.process(audio[i:i + 256]).beats)
+            beats += len(rhythm.process(audio[i : i + 256]).beats)
         return beats
 
     rhythm = MadmomRhythm(SAMPLE_RATE)
     feed(rhythm, 5.0, 0.0)
     before = graph(rhythm)
-    assert feed(rhythm, 20.0, 5.0) > 20, \
-        'the DBN never locked; the diff would prove nothing'
+    assert feed(rhythm, 20.0, 5.0) > 20, 'the DBN never locked; the diff would prove nothing'
     after = graph(rhythm)
 
-    grown = {p for p in before.keys() | after.keys()
-             if before.get(p) != after.get(p) and not p.endswith('._pending')}
+    grown = {
+        p
+        for p in before.keys() | after.keys()
+        if before.get(p) != after.get(p) and not p.endswith('._pending')
+    }
     assert not grown, f'online state grew with audio fed: {sorted(grown)[:10]}'
 
 
 def test_the_live_path_never_imports_the_offline_downbeat_tracker():
     from pathlib import Path
-    lib = Path(__file__).parent.parent / 'lib'
-    offenders = [p for p in lib.rglob('*.py')
-                 if 'DownBeat' in p.read_text(encoding='utf-8')]
-    assert not offenders, f'offline downbeat tracker referenced in {offenders}'
 
+    lib = Path(__file__).parent.parent / 'lib'
+    offenders = [p for p in lib.rglob('*.py') if 'DownBeat' in p.read_text(encoding='utf-8')]
+    assert not offenders, f'offline downbeat tracker referenced in {offenders}'
 
 
 def test_the_pinned_version_is_the_one_that_imports_on_this_python():
     # PyPI 0.16.1 dies at import on Python >= 3.10; the pin is git main, which reports 0.17.dev0.
     import madmom
+
     assert madmom.__version__.startswith('0.17')

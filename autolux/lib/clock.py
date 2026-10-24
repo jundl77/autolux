@@ -1,4 +1,5 @@
 """Injectable time source, so simulation can run faster than real time."""
+
 import datetime
 import time
 

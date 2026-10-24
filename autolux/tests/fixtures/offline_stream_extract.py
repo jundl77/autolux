@@ -1,4 +1,5 @@
 """Frozen copy of training/nn/ceiling's extractor: never refactored to share code with the module it checks, re-copied only when that extractor changes."""
+
 from __future__ import annotations
 
 import math
@@ -23,12 +24,15 @@ def chunk_samples(seconds: float, sample_rate: int = ENCODER_SAMPLE_RATE) -> int
     return frames * ENCODER_SAMPLES_PER_FRAME
 
 
-def encoder_frame_times(n_frames: int, *,
-                        frame_rate_hz: float = ENCODER_FRAME_RATE_HZ,
-                        samples_per_frame: int = ENCODER_SAMPLES_PER_FRAME,
-                        receptive_field: int = ENCODER_RECEPTIVE_FIELD,
-                        sample_rate: int = ENCODER_SAMPLE_RATE,
-                        offset_samples: int = 0) -> np.ndarray:
+def encoder_frame_times(
+    n_frames: int,
+    *,
+    frame_rate_hz: float = ENCODER_FRAME_RATE_HZ,
+    samples_per_frame: int = ENCODER_SAMPLES_PER_FRAME,
+    receptive_field: int = ENCODER_RECEPTIVE_FIELD,
+    sample_rate: int = ENCODER_SAMPLE_RATE,
+    offset_samples: int = 0,
+) -> np.ndarray:
     del frame_rate_hz
     starts = np.arange(int(n_frames), dtype=np.float64) * samples_per_frame
     return (offset_samples + starts + receptive_field / 2.0) / float(sample_rate)
@@ -67,8 +71,7 @@ class Accumulator:
         self.sums = np.zeros((n_pooled, n_layers, dim), dtype=np.float64)
         self.counts = np.zeros(n_pooled, dtype=np.int64)
 
-    def add(self, stacked: np.ndarray, times: np.ndarray, lo_sec: float,
-            hi_sec: float) -> None:
+    def add(self, stacked: np.ndarray, times: np.ndarray, lo_sec: float, hi_sec: float) -> None:
         keep = (times >= lo_sec) & (times < hi_sec)
         if not keep.any():
             return
@@ -85,33 +88,32 @@ class Accumulator:
         if filled:
             if not reached.any():
                 raise RuntimeError("no encoder frame reached any label cell")
-            source = np.maximum.accumulate(
-                np.where(reached, np.arange(len(reached)), -1))
+            source = np.maximum.accumulate(np.where(reached, np.arange(len(reached)), -1))
             source[source < 0] = int(np.flatnonzero(reached)[0])
             pooled = pooled[source]
         return pooled.astype(np.float32), filled
 
 
-def extract(encoder, audio, *, margin_sec: float, hop_sec: float,
-            buffer_sec: float, n_pooled: int) -> np.ndarray:
+def extract(
+    encoder, audio, *, margin_sec: float, hop_sec: float, buffer_sec: float, n_pooled: int
+) -> np.ndarray:
     length = chunk_samples(buffer_sec)
     hop = chunk_samples(hop_sec)
     margins = {float(margin_sec): chunk_samples(margin_sec)}
     state = Accumulator(n_pooled, encoder.n_layers, encoder.dim)
-    for start, end, spans in pass_schedule(len(audio), length=length, hop=hop,
-                                           margin_samples=margins):
+    for start, end, spans in pass_schedule(
+        len(audio), length=length, hop=hop, margin_samples=margins
+    ):
         segment = np.ascontiguousarray(audio[start:end], dtype=np.float32)
-        times = encoder_frame_times(encoder_frames(len(segment)),
-                                    offset_samples=start,
-                                    sample_rate=ENCODER_SAMPLE_RATE)
+        times = encoder_frame_times(
+            encoder_frames(len(segment)), offset_samples=start, sample_rate=ENCODER_SAMPLE_RATE
+        )
         wanted = np.zeros(len(times), dtype=bool)
         for lo, hi in spans.values():
-            wanted |= ((times >= lo / ENCODER_SAMPLE_RATE)
-                       & (times < hi / ENCODER_SAMPLE_RATE))
+            wanted |= (times >= lo / ENCODER_SAMPLE_RATE) & (times < hi / ENCODER_SAMPLE_RATE)
         keep = np.flatnonzero(wanted)
         stacked = encoder.frames(segment, start, keep)
         kept_times = times[keep]
         for lo, hi in spans.values():
-            state.add(stacked, kept_times, lo / ENCODER_SAMPLE_RATE,
-                      hi / ENCODER_SAMPLE_RATE)
+            state.add(stacked, kept_times, lo / ENCODER_SAMPLE_RATE, hi / ENCODER_SAMPLE_RATE)
     return state.finish()[0]

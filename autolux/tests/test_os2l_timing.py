@@ -44,7 +44,10 @@ def test_future_playhead_does_not_hold_up_an_already_delayed_beat():
     assert [call.args[0] for call in client._send_message.call_args_list] == ['room beat']
     clock.advance(14)
     client._poll_queue()
-    assert [call.args[0] for call in client._send_message.call_args_list] == ['room beat', 'future playhead']
+    assert [call.args[0] for call in client._send_message.call_args_list] == [
+        'room beat',
+        'future playhead',
+    ]
 
 
 def test_equal_deadline_messages_keep_their_order():
@@ -53,7 +56,11 @@ def test_equal_deadline_messages_keep_their_order():
         client.send_message(message, delay_sec=14)
     clock.advance(14)
     client._poll_queue()
-    assert [call.args[0] for call in client._send_message.call_args_list] == ['start', 'position', 'stop']
+    assert [call.args[0] for call in client._send_message.call_args_list] == [
+        'start',
+        'position',
+        'stop',
+    ]
 
 
 async def test_client_delays_boundaries_but_never_delays_engine_beats_twice():

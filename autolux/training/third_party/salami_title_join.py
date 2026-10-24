@@ -29,8 +29,18 @@ DUR_FRAC = 0.03
 TOP_K = 25
 TITLE_DIRS = ("youtube_dl", "youtube_dl_mp3")
 MEDIA_EXT = {
-    ".mp3", ".wmv", ".mp4", ".m4a", ".webm", ".flv", ".avi", ".wav",
-    ".ogg", ".mkv", ".aac", ".opus",
+    ".mp3",
+    ".wmv",
+    ".mp4",
+    ".m4a",
+    ".webm",
+    ".flv",
+    ".avi",
+    ".wav",
+    ".ogg",
+    ".mkv",
+    ".aac",
+    ".opus",
 }
 TRACK_NO = re.compile(r"^\d{1,3}\s*[-._)\]]*\s+")
 
@@ -217,12 +227,21 @@ def bound_gt(value: float, current: float | None) -> bool:
 
 def probe_duration(path: Path) -> Probe:
     cmd = [
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(path),
     ]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
             creationflags=BELOW_NORMAL,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -313,9 +332,7 @@ def main(argv: list | None = None) -> int:
     audio_dir = data_dir / "audio"
     meta = read_metadata(data_dir / "metadata" / "metadata.csv")
     pairing_len = read_pairing_lengths(args.pairings) if args.pairings else {}
-    annotated = {
-        p.name for p in (data_dir / "annotations").glob("*") if p.is_dir()
-    }
+    annotated = {p.name for p in (data_dir / "annotations").glob("*") if p.is_dir()}
     variants = build_variants(meta)
 
     groups = collect_candidates(audio_dir)
@@ -356,15 +373,11 @@ def main(argv: list | None = None) -> int:
             "salami_id": song_id,
             "title_score": round(hit["score"], 4),
             "runner_up_score": round(hit["runner_up"], 4),
-            "ffprobe_duration": (
-                None if probe.duration is None else round(probe.duration, 2)
-            ),
+            "ffprobe_duration": (None if probe.duration is None else round(probe.duration, 2)),
             "salami_length": length,
             "salami_length_source": length_src,
             "duration_delta": None if delta is None else round(delta, 2),
-            "duration_tolerance": (
-                None if length is None else round(tolerance(length), 2)
-            ),
+            "duration_tolerance": (None if length is None else round(tolerance(length), 2)),
             "metadata_title": row.title if row else None,
             "metadata_artist": row.artist if row else None,
             "metadata_class": row.klass if row else None,
@@ -402,9 +415,7 @@ def main(argv: list | None = None) -> int:
         record["copied"] = True
         copied += 1
 
-    reasons = Counter(
-        r["reason"] for r in records if r["decision"] == "REJECTED"
-    )
+    reasons = Counter(r["reason"] for r in records if r["decision"] == "REJECTED")
     accepted = [r for r in records if r["decision"] == "ACCEPTED"]
     payload = {
         "summary": {
@@ -414,9 +425,7 @@ def main(argv: list | None = None) -> int:
             "copied": copied,
             "rejected": len(records) - len(accepted),
             "rejected_by_reason": dict(sorted(reasons.items())),
-            "accepted_with_annotation": sum(
-                1 for r in accepted if r["has_annotation"]
-            ),
+            "accepted_with_annotation": sum(1 for r in accepted if r["has_annotation"]),
             "accepted_class_distribution": dict(
                 sorted(Counter(r["metadata_class"] for r in accepted).items())
             ),

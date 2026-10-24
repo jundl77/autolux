@@ -13,4 +13,4 @@ public:
 	virtual void OnOverlayMessage(const OverlayIdl::OverlayMessage&) = 0;
 };
 
-}
+} // namespace Radius

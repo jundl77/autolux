@@ -12,4 +12,4 @@ public:
 	virtual void OnDmxMessage(const DmxFrame&, int universe) = 0;
 };
 
-}
+} // namespace Radius

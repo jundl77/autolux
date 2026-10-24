@@ -1,4 +1,5 @@
 """``DownbeatCRNN`` -- the acoustic model behind the bar-phase decoder."""
+
 from __future__ import annotations
 
 import torch
@@ -10,9 +11,15 @@ PARAM_BUDGET = 300_000
 
 
 class DownbeatCRNN(nn.Module):
-    def __init__(self, n_mels: int = 40, conv_channels: tuple = (32, 64, 64),
-                 conv1d_channels: int = 64, rnn_hidden: int = 96,
-                 rnn_layers: int = 1, dropout: float = 0.0) -> None:
+    def __init__(
+        self,
+        n_mels: int = 40,
+        conv_channels: tuple = (32, 64, 64),
+        conv1d_channels: int = 64,
+        rnn_hidden: int = 96,
+        rnn_layers: int = 1,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         if rnn_layers < 1:
             raise ValueError(f"rnn_layers must be >= 1, got {rnn_layers}")
@@ -29,14 +36,18 @@ class DownbeatCRNN(nn.Module):
 
         self.conv = nn.Sequential(*blocks)
         self.temporal = nn.Sequential(
-            nn.Conv1d(self.feature_dim, conv1d_channels, kernel_size=5, padding=2,
-                      bias=False),
+            nn.Conv1d(self.feature_dim, conv1d_channels, kernel_size=5, padding=2, bias=False),
             nn.BatchNorm1d(conv1d_channels),
             nn.GELU(),
         )
-        self.rnn = nn.GRU(conv1d_channels, rnn_hidden, num_layers=self.rnn_layers,
-                          batch_first=True, bidirectional=True,
-                          dropout=float(dropout) if self.rnn_layers > 1 else 0.0)
+        self.rnn = nn.GRU(
+            conv1d_channels,
+            rnn_hidden,
+            num_layers=self.rnn_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=float(dropout) if self.rnn_layers > 1 else 0.0,
+        )
         self.dropout = nn.Dropout(float(dropout))
         self.downbeat_head = nn.Linear(2 * rnn_hidden, 1)
 
@@ -51,9 +62,7 @@ class DownbeatCRNN(nn.Module):
 
     def forward(self, mel: torch.Tensor) -> torch.Tensor:
         if mel.dim() != 3:
-            raise ValueError(
-                f"mel must be [batch, time, n_mels], got {tuple(mel.shape)}"
-            )
+            raise ValueError(f"mel must be [batch, time, n_mels], got {tuple(mel.shape)}")
 
         batched = mel.unsqueeze(1)
         conv_features = self.conv(batched)

@@ -1,7 +1,11 @@
 import socket
 from struct import *
 import logging
-from autolux.lib.clients.overlay_definitions import OverlayEffect, OverlayDefinition, OVERLAY_EFFECTS
+from autolux.lib.clients.overlay_definitions import (
+    OverlayEffect,
+    OverlayDefinition,
+    OVERLAY_EFFECTS,
+)
 
 OVERLAY_PROTOCOL_ID = 0x7799
 UDP_IP = "192.168.178.245"
@@ -151,7 +155,9 @@ class OverlayClient:
 
     def _add_overlay(self, effect: OverlayEffect, definition: OverlayDefinition):
         assert effect not in self.effects_to_overlay_index, f"effect {effect.name} already exists"
-        index = self.overlays.add_overlay(definition.start_offset, len(definition.dmx_data), definition.dmx_data, is_active=False)
+        index = self.overlays.add_overlay(
+            definition.start_offset, len(definition.dmx_data), definition.dmx_data, is_active=False
+        )
         self.effects_to_overlay_index[effect] = index
         self._should_flush = True
         logging.info(f'[overlay] added overlay effect: {effect.name}')

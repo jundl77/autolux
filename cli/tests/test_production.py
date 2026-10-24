@@ -29,16 +29,22 @@ def test_specs_share_one_session_and_delay_only_transmitted_audio():
 
 
 @pytest.mark.parametrize('failure', ['receiver_start', 'controller_run', None])
-async def test_partial_start_and_show_failure_clean_up_owned_endpoints(tmp_path, monkeypatch, failure):
+async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
+    tmp_path, monkeypatch, failure
+):
     from cli import main, remote_runtime, windows_runtime
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
+
     events = []
     parser = argparse.ArgumentParser()
     production.add_arguments(parser)
     args = parser.parse_args([])
-    tx = NativeSpec('radius_tx', Path('tx.exe'), {'peer_address': '127.0.0.1',
-        'session': 17, 'overlay_port': 19001, 'dmx_universe': 0})
+    tx = NativeSpec(
+        'radius_tx',
+        Path('tx.exe'),
+        {'peer_address': '127.0.0.1', 'session': 17, 'overlay_port': 19001, 'dmx_universe': 0},
+    )
     rx = NativeSpec('radius_rx', Path('rx.exe'), {})
     monkeypatch.setattr(production, 'ROOT', tmp_path)
     (tmp_path / '.live').mkdir()
@@ -49,41 +55,68 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(tmp_path,
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda: True)
 
     class Lock:
-        def __init__(self, *_): pass
-        def close(self): events.append('unlock')
+        def __init__(self, *_):
+            pass
+
+        def close(self):
+            events.append('unlock')
 
     class Remote:
-        def __init__(self, *_): pass
-        def check_connection(self): events.append('ssh_check')
+        def __init__(self, *_):
+            pass
+
+        def check_connection(self):
+            events.append('ssh_check')
+
         def __enter__(self):
-            if failure == 'receiver_start': raise RuntimeError('start failed')
-            events.append('rx_start'); return self
-        def __exit__(self, *_): events.append('rx_stop')
-        def check_health(self): pass
+            if failure == 'receiver_start':
+                raise RuntimeError('start failed')
+            events.append('rx_start')
+            return self
+
+        def __exit__(self, *_):
+            events.append('rx_stop')
+
+        def check_health(self):
+            pass
 
     class Native:
-        def __init__(self, specs, path): Path(path).mkdir(parents=True)
-        def __enter__(self): events.append('tx_start'); return self
-        def __exit__(self, *_): events.append('tx_stop')
-        def check_health(self): pass
+        def __init__(self, specs, path):
+            Path(path).mkdir(parents=True)
+
+        def __enter__(self):
+            events.append('tx_start')
+            return self
+
+        def __exit__(self, *_):
+            events.append('tx_stop')
+
+        def check_health(self):
+            pass
 
     class App:
         def __init__(self, *_, **kwargs):
             assert kwargs['overlay_host'] == '127.0.0.1'
             self.event_buffer = EventBuffer()
-        def _shut_down(self): events.append('app_stop')
+
+        def _shut_down(self):
+            events.append('app_stop')
+
         async def run(self):
             try:
                 self.health_check()
-                if failure == 'controller_run': raise RuntimeError('show failed')
-            finally: self._shut_down()
+                if failure == 'controller_run':
+                    raise RuntimeError('show failed')
+            finally:
+                self._shut_down()
 
     monkeypatch.setattr(windows_runtime, 'RoleLock', Lock)
     monkeypatch.setattr(remote_runtime, 'RemoteRuntime', Remote)
     monkeypatch.setattr(production, 'NativeRuntime', Native)
     monkeypatch.setattr(main, 'AutoluxController', App)
     if failure:
-        with pytest.raises(RuntimeError): await production.run(args)
+        with pytest.raises(RuntimeError):
+            await production.run(args)
     else:
         await production.run(args)
     assert events.count('app_stop') == 1

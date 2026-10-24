@@ -49,6 +49,7 @@ def _retry_reasons(data_dir: Path) -> str:
         sys.dont_write_bytecode = previous
     return _RETRY_REASONS_FALLBACK
 
+
 EXIT_CLEAN = 0
 EXIT_BLOCKED = 2
 
@@ -121,10 +122,14 @@ def build_command(python: str, downloader: Path, data_dir: Path) -> list:
     return [
         python,
         str(downloader),
-        "--data-dir", str(data_dir),
-        "--sleep-min", GENTLE_SLEEP_MIN,
-        "--sleep-max", GENTLE_SLEEP_MAX,
-        "--retry-reasons", _retry_reasons(data_dir),
+        "--data-dir",
+        str(data_dir),
+        "--sleep-min",
+        GENTLE_SLEEP_MIN,
+        "--sleep-max",
+        GENTLE_SLEEP_MAX,
+        "--retry-reasons",
+        _retry_reasons(data_dir),
     ]
 
 
@@ -134,8 +139,10 @@ def run_cycle(command: list, data_dir: Path, cycle: int, log_path: Path, state_p
     log(log_path, f"LAUNCH   cycle {cycle}: {' '.join(command)}")
     log(log_path, f"         child stdout -> {cycle_log.name}, stderr -> {cycle_err.name}")
     try:
-        with open(cycle_log, "w", encoding="utf-8", errors="replace") as out, \
-             open(cycle_err, "w", encoding="utf-8", errors="replace") as err:
+        with (
+            open(cycle_log, "w", encoding="utf-8", errors="replace") as out,
+            open(cycle_err, "w", encoding="utf-8", errors="replace") as err,
+        ):
             child = subprocess.Popen(command, stdout=out, stderr=err, cwd=str(data_dir))
             write_state(state_path, f"RUNNING pid={child.pid}")
             log(log_path, f"         child pid {child.pid}")
@@ -179,15 +186,26 @@ def parse_cooldowns(text: str) -> tuple:
 def main(argv: list | None = None) -> int:
     here = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=here,
-                        help="corpus root (default: this script's directory)")
-    parser.add_argument("--downloader", type=Path, default=None,
-                        help=f"downloader script (default: <data-dir>/{DOWNLOADER_FILE})")
-    parser.add_argument("--python", default=sys.executable,
-                        help="interpreter for the child (default: the one running this)")
-    parser.add_argument("--cooldowns", default=",".join(str(m) for m in DEFAULT_COOLDOWNS),
-                        help="comma list of cool-down minutes, one per cycle; its length is "
-                             "the cycle cap (default: %(default)s)")
+    parser.add_argument(
+        "--data-dir", type=Path, default=here, help="corpus root (default: this script's directory)"
+    )
+    parser.add_argument(
+        "--downloader",
+        type=Path,
+        default=None,
+        help=f"downloader script (default: <data-dir>/{DOWNLOADER_FILE})",
+    )
+    parser.add_argument(
+        "--python",
+        default=sys.executable,
+        help="interpreter for the child (default: the one running this)",
+    )
+    parser.add_argument(
+        "--cooldowns",
+        default=",".join(str(m) for m in DEFAULT_COOLDOWNS),
+        help="comma list of cool-down minutes, one per cycle; its length is "
+        "the cycle cap (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
 
     if hasattr(sys.stdout, "reconfigure"):
@@ -208,8 +226,10 @@ def main(argv: list | None = None) -> int:
     log(log_path, "=" * 70)
     log(log_path, f"SUPERVISOR start  data-dir {data_dir}")
     log(log_path, f"         python {args.python}")
-    log(log_path, f"         cycles {len(cooldowns)}, cool-downs "
-                  f"{'/'.join(f'{m:g}m' for m in cooldowns)}")
+    log(
+        log_path,
+        f"         cycles {len(cooldowns)}, cool-downs {'/'.join(f'{m:g}m' for m in cooldowns)}",
+    )
     log(log_path, f"         corpus now {count_mp3s(data_dir)} mp3 on disk")
 
     if not downloader.is_file():
@@ -221,7 +241,10 @@ def main(argv: list | None = None) -> int:
         write_state(state_path, preflight_failed_state("yt-dlp not on PATH"))
         return 3
     if shutil.which("deno") is None:
-        log(log_path, "WARN     no deno on PATH -- yt-dlp will warn that some formats may be missing")
+        log(
+            log_path,
+            "WARN     no deno on PATH -- yt-dlp will warn that some formats may be missing",
+        )
 
     command = build_command(args.python, downloader, data_dir)
 
@@ -230,8 +253,11 @@ def main(argv: list | None = None) -> int:
             break
 
         deadline = time.time() + minutes * 60.0
-        log(log_path, f"COOLDOWN until {hhmm(deadline)}  ({minutes:g} min, before cycle "
-                      f"{index}/{len(cooldowns)})")
+        log(
+            log_path,
+            f"COOLDOWN until {hhmm(deadline)}  ({minutes:g} min, before cycle "
+            f"{index}/{len(cooldowns)})",
+        )
         write_state(state_path, f"COOLDOWN until {hhmm(deadline)}")
         sleep_until(deadline)
         if _interrupted:
@@ -247,21 +273,29 @@ def main(argv: list | None = None) -> int:
         if code == EXIT_BLOCKED:
             log(log_path, f"CHILD_EXIT code 2  (block guard tripped again; {on_disk} mp3 on disk)")
         else:
-            log(log_path, f"CHILD_EXIT code {code}  (unexpected; treating as a block; "
-                          f"{on_disk} mp3 on disk)")
+            log(
+                log_path,
+                f"CHILD_EXIT code {code}  (unexpected; treating as a block; {on_disk} mp3 on disk)",
+            )
         if _interrupted:
             break
 
     on_disk = count_mp3s(data_dir)
     if _interrupted:
-        log(log_path, f"STOPPED  by signal; {on_disk} mp3 on disk. State is resumable -- "
-                      "re-run this supervisor to continue.")
+        log(
+            log_path,
+            f"STOPPED  by signal; {on_disk} mp3 on disk. State is resumable -- "
+            "re-run this supervisor to continue.",
+        )
         write_state(state_path, terminal_state(True, len(cooldowns), on_disk))
         return 130
 
-    log(log_path, f"GAVE_UP  after {len(cooldowns)} cycles; {on_disk} mp3 on disk. "
-                  "YouTube is still refusing. No credential workaround was attempted -- "
-                  "this is an owner decision.")
+    log(
+        log_path,
+        f"GAVE_UP  after {len(cooldowns)} cycles; {on_disk} mp3 on disk. "
+        "YouTube is still refusing. No credential workaround was attempted -- "
+        "this is an owner decision.",
+    )
     write_state(state_path, terminal_state(False, len(cooldowns), on_disk))
     return 1
 

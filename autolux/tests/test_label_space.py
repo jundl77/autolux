@@ -13,8 +13,15 @@ from autolux.lib.label_space import (
 
 def test_the_vocabulary_is_the_raw_raveform_nine_in_arrangement_order():
     assert SECTION_LABELS == (
-        'intro', 'altintro', 'buildup', 'breakdown', 'bridge',
-        'drop', 'cooldown', 'outro', 'altoutro',
+        'intro',
+        'altintro',
+        'buildup',
+        'breakdown',
+        'bridge',
+        'drop',
+        'cooldown',
+        'outro',
+        'altoutro',
     )
     assert NUM_SECTION_CLASSES == 9
 

@@ -144,9 +144,13 @@ class _NoCommands:
 
 def _components(buffers: int) -> dict:
     idle = _Idle()
-    return {'audio_client': _FiniteAudio(buffers), 'music_analyser': idle,
-            'light_engine': idle, 'midi_client': idle,
-            'command_queue': _NoCommands()}
+    return {
+        'audio_client': _FiniteAudio(buffers),
+        'music_analyser': idle,
+        'light_engine': idle,
+        'midi_client': idle,
+        'command_queue': _NoCommands(),
+    }
 
 
 def _buffers_for(seconds: float) -> int:
@@ -156,21 +160,22 @@ def _buffers_for(seconds: float) -> int:
 def test_setup_latency_is_not_deducted_from_the_monitors_delay():
     monitor, clock, played = _monitor()
     clock.advance(30.0)
-    asyncio.run(run_simulation(_components(_buffers_for(13.0)), float('inf'),
-                               clock=clock, monitor=monitor))
+    asyncio.run(
+        run_simulation(_components(_buffers_for(13.0)), float('inf'), clock=clock, monitor=monitor)
+    )
     assert played == []
 
 
 def test_the_headphones_join_one_full_delay_after_the_first_buffer():
     clock = VirtualClock()
     heard = []
-    monitor = DelayedMonitor(
-        14.0, lambda buf: heard.append((clock.monotonic(), buf)), clock=clock)
+    monitor = DelayedMonitor(14.0, lambda buf: heard.append((clock.monotonic(), buf)), clock=clock)
     clock.advance(30.0)
     start = clock.monotonic()
 
-    asyncio.run(run_simulation(_components(_buffers_for(16.0)), float('inf'),
-                               clock=clock, monitor=monitor))
+    asyncio.run(
+        run_simulation(_components(_buffers_for(16.0)), float('inf'), clock=clock, monitor=monitor)
+    )
 
     assert heard, 'the monitor never joined the room'
     at, first = heard[0]
@@ -185,8 +190,7 @@ def test_the_tail_the_room_has_not_heard_plays_out_when_the_file_ends():
         monitor.feed(index)
     assert played == [], 'the fixture should still be inside the delay'
 
-    asyncio.run(run_simulation(_components(0), 60.0, pace_real_time=True,
-                               monitor=monitor))
+    asyncio.run(run_simulation(_components(0), 60.0, pace_real_time=True, monitor=monitor))
 
     assert played == list(range(20))
 
@@ -198,8 +202,7 @@ def test_a_persistent_stop_cuts_the_tail_rather_than_playing_it_out_at_the_end()
         monitor.feed(index)
     monitor.silence()
 
-    asyncio.run(run_simulation(_components(0), 60.0, pace_real_time=True,
-                               monitor=monitor))
+    asyncio.run(run_simulation(_components(0), 60.0, pace_real_time=True, monitor=monitor))
 
     assert played == []
 

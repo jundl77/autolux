@@ -1,4 +1,5 @@
 """The numbers a downbeat F1 has to be read against."""
+
 from __future__ import annotations
 
 import argparse
@@ -33,8 +34,9 @@ from build_training_table import default_data_dir  # noqa: E402
 from raveform_fetch_annotations import load_tracks, parse_sections  # noqa: E402
 
 
-def gaussian_at(instants: np.ndarray, times: np.ndarray,
-                sigma: float = DOWNBEAT_SIGMA_SEC) -> np.ndarray:
+def gaussian_at(
+    instants: np.ndarray, times: np.ndarray, sigma: float = DOWNBEAT_SIGMA_SEC
+) -> np.ndarray:
     if not instants.size or not times.size:
         return np.zeros(len(times), dtype=np.float64)
     right = np.searchsorted(instants, times)
@@ -66,8 +68,9 @@ def score_activations(dataset, activations: dict, min_distance: int) -> dict:
         live = targets.mask
         activation = activations[youtube_id]
         picked = pick_live(activation, live, min_distance)
-        per_track.append((frame_times(picked), activation[picked],
-                          reference_downbeats(targets, live)))
+        per_track.append(
+            (frame_times(picked), activation[picked], reference_downbeats(targets, live))
+        )
     return sweep_peak_f1(per_track)
 
 
@@ -86,8 +89,7 @@ def ece_floor(dataset, pos_weight: float) -> float:
     return binary_ece(deweighted(inflated, pos_weight), labels)
 
 
-def peak_phase_histogram(dataset, activations: dict, threshold: float,
-                         min_distance: int) -> dict:
+def peak_phase_histogram(dataset, activations: dict, threshold: float, min_distance: int) -> dict:
     counts = np.zeros(BEATS_PER_BAR + 1, dtype=np.int64)
     for youtube_id in dataset.track_ids():
         targets = dataset.targets_for(youtube_id)
@@ -111,9 +113,10 @@ def peak_phase_histogram(dataset, activations: dict, threshold: float,
         counts[0] += int((~locked).sum())
         for phase in range(1, BEATS_PER_BAR + 1):
             counts[phase] += int(((phases[nearest] == phase) & locked).sum())
-    return {"unlocked": int(counts[0]),
-            **{f"phase_{phase}": int(counts[phase])
-               for phase in range(1, BEATS_PER_BAR + 1)}}
+    return {
+        "unlocked": int(counts[0]),
+        **{f"phase_{phase}": int(counts[phase]) for phase in range(1, BEATS_PER_BAR + 1)},
+    }
 
 
 def model_activations(checkpoint, dataset, device, batch_size: int = 128) -> dict:
@@ -123,17 +126,27 @@ def model_activations(checkpoint, dataset, device, batch_size: int = 128) -> dic
     from .train import build_loader
 
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    arch = {key: (tuple(value) if isinstance(value, list) else value)
-            for key, value in state["arch"].items()}
+    arch = {
+        key: (tuple(value) if isinstance(value, list) else value)
+        for key, value in state["arch"].items()
+    }
     model = DownbeatCRNN(**arch).to(device)
     model.load_state_dict(state["model"])
     model.eval()
 
     sums = {i: np.zeros(len(dataset.targets_for(i).downbeat)) for i in dataset.track_ids()}
-    counts = {i: np.zeros(len(dataset.targets_for(i).downbeat), dtype=np.int64)
-              for i in dataset.track_ids()}
-    loader = build_loader(dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-                          pin_memory=device.type == "cuda", generator=None)
+    counts = {
+        i: np.zeros(len(dataset.targets_for(i).downbeat), dtype=np.int64)
+        for i in dataset.track_ids()
+    }
+    loader = build_loader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=device.type == "cuda",
+        generator=None,
+    )
     index = 0
     with torch.no_grad():
         for mel, _target, _mask in loader:
@@ -154,7 +167,8 @@ def tunable_split_ids(splits: dict, split: str) -> list:
         raise RuntimeError(
             "downbeat_baselines reads annotated bar phase to say which decoder "
             "knob is worth tuning, which makes it a tuning instrument -- and the "
-            "test split is read once, by the verdict.  Use --split val.")
+            "test split is read once, by the verdict.  Use --split val."
+        )
     if split not in splits:
         listed = sorted(k for k in splits if isinstance(splits[k], list))
         raise RuntimeError(f"no {split!r} split (has {listed})")
@@ -171,22 +185,34 @@ def build_dataset(data_dir: Path, split: str, tracks: int, seed: int):
     grids, missing = load_beat_grids(data_dir, ids)
     if missing:
         raise RuntimeError(f"{len(missing)} track(s) have no beat grid: {missing[:5]}")
-    return DownbeatWindowDataset(data_dir, ids, augment=False, seed=seed,
-                                 sections_by_youtube_id=sections,
-                                 grids_by_youtube_id=grids)
+    return DownbeatWindowDataset(
+        data_dir,
+        ids,
+        augment=False,
+        seed=seed,
+        sections_by_youtube_id=sections,
+        grids_by_youtube_id=grids,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
-    parser.add_argument("--split", default="val",
-                        help="'test' is refused: this mode reads truth to choose "
-                             "a value, which is a tuning read")
+    parser.add_argument(
+        "--split",
+        default="val",
+        help="'test' is refused: this mode reads truth to choose a value, which is a tuning read",
+    )
     parser.add_argument("--tracks", type=int, default=0, help="0 = the whole split")
-    parser.add_argument("--checkpoint", type=Path, default=None,
-                        help="a best.pt; without it only the nulls are computed")
-    parser.add_argument("--threshold", type=float, default=0.75,
-                        help="operating point for the phase histogram")
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="a best.pt; without it only the nulls are computed",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=0.75, help="operating point for the phase histogram"
+    )
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--device", default=None)
     return parser
@@ -200,18 +226,23 @@ def main(argv: list | None = None) -> int:
 
     rng = np.random.default_rng(args.seed)
     nulls = {
-        "phase-blind beat detector": {i: phase_blind_activation(dataset.targets_for(i))
-                                      for i in dataset.track_ids()},
-        "iid uniform noise": {i: rng.random(len(dataset.targets_for(i).downbeat))
-                              for i in dataset.track_ids()},
-        "constant": {i: np.full(len(dataset.targets_for(i).downbeat), 0.5)
-                     for i in dataset.track_ids()},
+        "phase-blind beat detector": {
+            i: phase_blind_activation(dataset.targets_for(i)) for i in dataset.track_ids()
+        },
+        "iid uniform noise": {
+            i: rng.random(len(dataset.targets_for(i).downbeat)) for i in dataset.track_ids()
+        },
+        "constant": {
+            i: np.full(len(dataset.targets_for(i).downbeat), 0.5) for i in dataset.track_ids()
+        },
     }
     print("\n-- baselines (same picker, same matcher, same split) --")
     for name, activations in nulls.items():
         swept = score_activations(dataset, activations, min_distance)
-        print(f"  {name:<28} F1 {swept['f1']:.4f}  P {swept['precision']:.4f} "
-              f"R {swept['recall']:.4f}  @{swept['best_threshold']:.2f}")
+        print(
+            f"  {name:<28} F1 {swept['f1']:.4f}  P {swept['precision']:.4f} "
+            f"R {swept['recall']:.4f}  @{swept['best_threshold']:.2f}"
+        )
 
     if args.checkpoint is None:
         return 0
@@ -221,8 +252,10 @@ def main(argv: list | None = None) -> int:
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     activations, pos_weight = model_activations(args.checkpoint, dataset, device)
     swept = score_activations(dataset, activations, min_distance)
-    print(f"  {'trained model':<28} F1 {swept['f1']:.4f}  P {swept['precision']:.4f} "
-          f"R {swept['recall']:.4f}  @{swept['best_threshold']:.2f}")
+    print(
+        f"  {'trained model':<28} F1 {swept['f1']:.4f}  P {swept['precision']:.4f} "
+        f"R {swept['recall']:.4f}  @{swept['best_threshold']:.2f}"
+    )
 
     floor = ece_floor(dataset, pos_weight)
     print(f"\n-- calibration (pos_weight {pos_weight:.4f}) --")
@@ -230,8 +263,7 @@ def main(argv: list | None = None) -> int:
 
     histogram = peak_phase_histogram(dataset, activations, args.threshold, min_distance)
     total = sum(histogram.values())
-    print(f"\n-- phase of predicted peaks at threshold {args.threshold} "
-          f"({total} peaks) --")
+    print(f"\n-- phase of predicted peaks at threshold {args.threshold} ({total} peaks) --")
     for key, value in histogram.items():
         print(f"  {key:<10} {value:7d}  {100.0 * value / max(total, 1):5.1f} %")
     return 0

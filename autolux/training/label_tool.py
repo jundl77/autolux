@@ -128,6 +128,7 @@ same strip clientside, immediately -- the admission decodes the audio and
 generates a beat grid, ~30 s with nothing on screen otherwise -- and the
 server's stamped verdict overwrites it.
 """
+
 import csv
 import hashlib
 import json
@@ -145,27 +146,36 @@ import numpy as np
 import plotly.graph_objects as go
 from dash import ALL, Input, Output, Patch, State, callback_context, dcc, html
 
-LABELS = ['intro', 'altintro', 'buildup', 'breakdown', 'bridge', 'drop',
-          'cooldown', 'outro', 'altoutro']
+LABELS = [
+    'intro',
+    'altintro',
+    'buildup',
+    'breakdown',
+    'bridge',
+    'drop',
+    'cooldown',
+    'outro',
+    'altoutro',
+]
 STRENGTHS = ['major', 'minor']
 DEFAULT_STRENGTH = STRENGTHS[0]
 LABEL_COLORS = {
-    'intro':     '#1565c0',
-    'altintro':  '#0d47a1',
-    'buildup':   '#e65100',
+    'intro': '#1565c0',
+    'altintro': '#0d47a1',
+    'buildup': '#e65100',
     'breakdown': '#7b1fa2',
-    'bridge':    '#4a148c',
-    'drop':      '#b71c1c',
-    'cooldown':  '#00838f',
-    'outro':     '#283593',
-    'altoutro':  '#4527a0',
+    'bridge': '#4a148c',
+    'drop': '#b71c1c',
+    'cooldown': '#00838f',
+    'outro': '#283593',
+    'altoutro': '#4527a0',
 }
 
 DARK_BG = '#0d1117'
 CARD_BG = '#111827'
-BORDER  = '#1e2937'
-MUTED   = '#6e7681'
-TEXT    = '#c9d1d9'
+BORDER = '#1e2937'
+MUTED = '#6e7681'
+TEXT = '#c9d1d9'
 
 DECODE_RATE = 22050
 FRAME = 1024
@@ -180,22 +190,41 @@ STATUS_OK = '#3fb950'
 STATUS_BAD = '#f85149'
 STATUS_PENDING = '#d29922'
 REFUSAL_MARKS = ('refused', 'FAILED', 'unreadable', 'no longer controls')
-STATUS_BASE = {'margin': '0 20px 10px', 'padding': '8px 12px',
-               'borderRadius': '6px', 'fontSize': '13px', 'minHeight': '18px',
-               'color': MUTED, 'border': f'1px solid {BORDER}'}
-COMMIT_PENDING_TEXT = ('committing… decoding the audio and generating the '
-                       'beat grid, this can take ~30 s')
-COMMIT_PENDING_STYLE = dict(STATUS_BASE, color=STATUS_PENDING,
-                            fontWeight='bold',
-                            border=f'1px solid {STATUS_PENDING}',
-                            background='#2b2008')
-STALE_BANNER_STYLE = {'position': 'sticky', 'top': '0', 'zIndex': '1000',
-                      'padding': '14px 20px', 'background': '#b71c1c',
-                      'color': '#ffffff', 'fontSize': '16px',
-                      'fontWeight': 'bold', 'textAlign': 'center'}
-STALE_BANNER_TEXT = ('THIS TAB NO LONGER CONTROLS A SONG — the tool was '
-                     'relaunched. Close this tab and use the freshly opened '
-                     'one.')
+STATUS_BASE = {
+    'margin': '0 20px 10px',
+    'padding': '8px 12px',
+    'borderRadius': '6px',
+    'fontSize': '13px',
+    'minHeight': '18px',
+    'color': MUTED,
+    'border': f'1px solid {BORDER}',
+}
+COMMIT_PENDING_TEXT = (
+    'committing… decoding the audio and generating the beat grid, this can take ~30 s'
+)
+COMMIT_PENDING_STYLE = dict(
+    STATUS_BASE,
+    color=STATUS_PENDING,
+    fontWeight='bold',
+    border=f'1px solid {STATUS_PENDING}',
+    background='#2b2008',
+)
+STALE_BANNER_STYLE = {
+    'position': 'sticky',
+    'top': '0',
+    'zIndex': '1000',
+    'padding': '14px 20px',
+    'background': '#b71c1c',
+    'color': '#ffffff',
+    'fontSize': '16px',
+    'fontWeight': 'bold',
+    'textAlign': 'center',
+}
+STALE_BANNER_TEXT = (
+    'THIS TAB NO LONGER CONTROLS A SONG — the tool was '
+    'relaunched. Close this tab and use the freshly opened '
+    'one.'
+)
 
 
 TMP_LABELS_DIR_NAME = 'tmp_labels'
@@ -205,8 +234,7 @@ HAND_ID_PREFIX = 'hand-'
 HAND_ID_LENGTH = 12
 CHECKSUMS_FILE = 'checksums.sha256'
 ARTIST_SEPARATOR = ' - '
-_DASH_VARIANTS = dict.fromkeys(
-    map(ord, '‐‑‒–—―⁃−'), '-')
+_DASH_VARIANTS = dict.fromkeys(map(ord, '‐‑‒–—―⁃−'), '-')
 _YOUTUBE_ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
 
 
@@ -273,8 +301,11 @@ def locate_in_corpus(digest: str, size: int) -> Path:
                 if found.exists():
                     return found
         for candidate in sorted(audio.glob('*')):
-            if (candidate.is_file() and candidate.stat().st_size == size
-                    and audio_digest(str(candidate)) == digest):
+            if (
+                candidate.is_file()
+                and candidate.stat().st_size == size
+                and audio_digest(str(candidate)) == digest
+            ):
                 return candidate
     except OSError:
         return None
@@ -321,8 +352,7 @@ def _json_record(path: Path) -> dict:
 def _source_annotation(audio_path: str) -> Path:
     path = Path(audio_path).resolve()
     try:
-        if (path.parents[1].name == 'audio'
-                and path.parents[2].name == THIRD_PARTY_DIR):
+        if path.parents[1].name == 'audio' and path.parents[2].name == THIRD_PARTY_DIR:
             return annotations_dir() / f'{path.stem}.{path.parent.name}.json'
     except IndexError:
         pass
@@ -331,8 +361,7 @@ def _source_annotation(audio_path: str) -> Path:
 
 def _published_record(identifier: str) -> dict:
     try:
-        tracks = json.loads(
-            (annotations_dir() / SEGMENTS_FILE).read_text(encoding='utf-8'))
+        tracks = json.loads((annotations_dir() / SEGMENTS_FILE).read_text(encoding='utf-8'))
         for track in tracks:
             if isinstance(track, dict) and str(track.get('id', '')) == identifier:
                 return track
@@ -351,7 +380,7 @@ def split_credit(record: dict) -> tuple:
     title = str(record.get('title') or '').strip()
     artist = str(record.get('artist') or '').strip()
     if artist and title.startswith(f'{artist}{ARTIST_SEPARATOR}'):
-        title = title[len(artist) + len(ARTIST_SEPARATOR):].strip()
+        title = title[len(artist) + len(ARTIST_SEPARATOR) :].strip()
     elif not artist and ARTIST_SEPARATOR in title:
         head, _, tail = title.partition(ARTIST_SEPARATOR)
         artist, title = head.strip(), tail.strip()
@@ -425,8 +454,9 @@ def beat_grid(audio_path: str) -> list:
     try:
         beats_dir = annotations_dir() / 'beats'
         identifier = resolve_identity(audio_path)[0]
-        found = (sorted(beats_dir.glob(f'{identifier}.hand.beat.csv'))
-                 or sorted(beats_dir.glob(f'*.{identifier}.beat.csv')))
+        found = sorted(beats_dir.glob(f'{identifier}.hand.beat.csv')) or sorted(
+            beats_dir.glob(f'*.{identifier}.beat.csv')
+        )
     except OSError:
         return []
     if not found:
@@ -434,10 +464,13 @@ def beat_grid(audio_path: str) -> list:
     generated = found[0].name.endswith('.hand.beat.csv')
     try:
         with open(found[0], 'r', encoding='utf-8', newline='') as handle:
-            return [(float(row['time']),
-                     int(int(row['downbeat']) != 0 if generated
-                         else int(row['downbeat']) == 1))
-                    for row in csv.DictReader(handle)]
+            return [
+                (
+                    float(row['time']),
+                    int(int(row['downbeat']) != 0 if generated else int(row['downbeat']) == 1),
+                )
+                for row in csv.DictReader(handle)
+            ]
     except (OSError, KeyError, ValueError):
         return []
 
@@ -452,31 +485,57 @@ def title_artist(title: str, no_artist: bool = False) -> str:
     return None if (no_artist or not separator) else head.strip()
 
 
-def to_annotation(sections: list, duration: float, identifier: str,
-                  audio_name: str, title: str, no_artist: bool = False,
-                  genre: str = None) -> dict:
+def to_annotation(
+    sections: list,
+    duration: float,
+    identifier: str,
+    audio_name: str,
+    title: str,
+    no_artist: bool = False,
+    genre: str = None,
+) -> dict:
     ordered = normalise(sections)
     spans = []
     for index, entry in enumerate(ordered):
-        end = (ordered[index + 1]['start'] if index + 1 < len(ordered)
-               else max(duration, entry['start']))
-        spans.append({'name': entry['label'], 'start': entry['start'],
-                      'end': round(end, TIME_DECIMALS),
-                      'strength': entry['strength']})
-    record = {'schema': HAND_LABEL_SCHEMA, 'source': 'hand_label',
-              'id': identifier, 'title': title.strip(),
-              'artist': title_artist(title, no_artist), 'audio': audio_name,
-              'duration': round(float(duration), TIME_DECIMALS),
-              'sections': spans}
+        end = (
+            ordered[index + 1]['start']
+            if index + 1 < len(ordered)
+            else max(duration, entry['start'])
+        )
+        spans.append(
+            {
+                'name': entry['label'],
+                'start': entry['start'],
+                'end': round(end, TIME_DECIMALS),
+                'strength': entry['strength'],
+            }
+        )
+    record = {
+        'schema': HAND_LABEL_SCHEMA,
+        'source': 'hand_label',
+        'id': identifier,
+        'title': title.strip(),
+        'artist': title_artist(title, no_artist),
+        'audio': audio_name,
+        'duration': round(float(duration), TIME_DECIMALS),
+        'sections': spans,
+    }
     if (genre or '').strip():
         record['genre'] = genre.strip()
     return record
 
 
 def from_annotation(record: dict) -> list:
-    return normalise([{'start': span['start'], 'label': span['name'],
-                       'strength': span.get('strength', DEFAULT_STRENGTH)}
-                      for span in record['sections']])
+    return normalise(
+        [
+            {
+                'start': span['start'],
+                'label': span['name'],
+                'strength': span.get('strength', DEFAULT_STRENGTH),
+            }
+            for span in record['sections']
+        ]
+    )
 
 
 # About one bar. Inside it a published start is the annotation's own offset
@@ -498,17 +557,18 @@ def published_seed(audio_path: str) -> list:
     identifier, native = resolve_identity(audio_path)
     if native is None:
         return []
-    spans = [span for span in (_published_record(identifier).get('sections') or [])
-             if isinstance(span, dict) and span.get('name') in LABELS]
+    spans = [
+        span
+        for span in (_published_record(identifier).get('sections') or [])
+        if isinstance(span, dict) and span.get('name') in LABELS
+    ]
     if not spans:
         return []
-    seed = normalise([{'start': float(span['start']), 'label': span['name']}
-                      for span in spans])
+    seed = normalise([{'start': float(span['start']), 'label': span['name']} for span in spans])
     if seed[0]['start'] <= SEED_ANCHOR_TOLERANCE:
         seed[0]['start'] = 0.0
     else:
-        seed.insert(0, {'start': 0.0, 'label': LABELS[0],
-                        'strength': DEFAULT_STRENGTH})
+        seed.insert(0, {'start': 0.0, 'label': LABELS[0], 'strength': DEFAULT_STRENGTH})
     return normalise(seed)
 
 
@@ -535,15 +595,21 @@ def admit_track(identifier: str, audio: Path, labels: Path) -> tuple:
     except (ImportError, AttributeError):
         return False, f'admission pending — run `{ADMISSION_HINT}`'
     try:
-        return True, str(entry(track_id=identifier, audio=audio, labels=labels,
-                               corpus=corpus_dir()))
+        return True, str(
+            entry(track_id=identifier, audio=audio, labels=labels, corpus=corpus_dir())
+        )
     except Exception as error:
         return False, f'admission FAILED ({type(error).__name__}: {error})'
 
 
-def commit_labels(audio_path: str, sections: list, duration: float,
-                  title: str, no_artist: bool = False,
-                  genre: str = None) -> dict:
+def commit_labels(
+    audio_path: str,
+    sections: list,
+    duration: float,
+    title: str,
+    no_artist: bool = False,
+    genre: str = None,
+) -> dict:
     identifier, native = resolve_identity(audio_path)
     copied = native is None
     if native is not None:
@@ -553,24 +619,36 @@ def commit_labels(audio_path: str, sections: list, duration: float,
         home.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(audio_path, home)
     path = hand_label_path(identifier)
-    record = to_annotation(sections, duration, identifier, home.name, title,
-                           no_artist, genre)
+    record = to_annotation(sections, duration, identifier, home.name, title, no_artist, genre)
     write_atomically(path, json.dumps(record, indent=2, ensure_ascii=False) + '\n')
     admitted, admission = admit_track(identifier, home, path)
-    return {'labels': path, 'audio': home, 'copied': copied,
-            'sections': len(record['sections']), 'title': record['title'],
-            'artist': record['artist'],
-            'admitted': admitted, 'admission': admission}
+    return {
+        'labels': path,
+        'audio': home,
+        'copied': copied,
+        'sections': len(record['sections']),
+        'title': record['title'],
+        'artist': record['artist'],
+        'admitted': admitted,
+        'admission': admission,
+    }
 
 
 def commit_status(result: dict) -> str:
-    audio = (f'audio copied → {result["audio"]}' if result['copied']
-             else f'audio already at {result["audio"]}')
-    artist = (f'artist {result["artist"]!r}' if result['artist']
-              else 'recorded as having NO artist, so no eval-set artist can be '
-                   'excluded on it')
-    return (f'committed ✓ {result["sections"]} sections · {result["title"]!r} · '
-            f'{artist} → {result["labels"]} · {audio} · {result["admission"]}')
+    audio = (
+        f'audio copied → {result["audio"]}'
+        if result['copied']
+        else f'audio already at {result["audio"]}'
+    )
+    artist = (
+        f'artist {result["artist"]!r}'
+        if result['artist']
+        else 'recorded as having NO artist, so no eval-set artist can be excluded on it'
+    )
+    return (
+        f'committed ✓ {result["sections"]} sections · {result["title"]!r} · '
+        f'{artist} → {result["labels"]} · {audio} · {result["admission"]}'
+    )
 
 
 def clock_text(seconds: float) -> str:
@@ -579,10 +657,14 @@ def clock_text(seconds: float) -> str:
 
 
 def normalise(sections: list) -> list:
-    rounded = [{'start': max(0.0, round(float(s['start']), TIME_DECIMALS)),
-                'label': s['label'],
-                'strength': s.get('strength') or DEFAULT_STRENGTH}
-               for s in sections]
+    rounded = [
+        {
+            'start': max(0.0, round(float(s['start']), TIME_DECIMALS)),
+            'label': s['label'],
+            'strength': s.get('strength') or DEFAULT_STRENGTH,
+        }
+        for s in sections
+    ]
     out, seen = [], set()
     for entry in sorted(rounded, key=lambda s: s['start']):
         if entry['start'] in seen:
@@ -592,13 +674,12 @@ def normalise(sections: list) -> list:
     return out
 
 
-def add_boundary(sections: list, start: float, label: str,
-                 strength: str = DEFAULT_STRENGTH) -> list:
+def add_boundary(
+    sections: list, start: float, label: str, strength: str = DEFAULT_STRENGTH
+) -> list:
     start = max(0.0, round(float(start), TIME_DECIMALS))
-    kept = [s for s in sections
-            if round(float(s['start']), TIME_DECIMALS) != start]
-    return normalise(kept + [{'start': start, 'label': label,
-                              'strength': strength}])
+    kept = [s for s in sections if round(float(s['start']), TIME_DECIMALS) != start]
+    return normalise(kept + [{'start': start, 'label': label, 'strength': strength}])
 
 
 def clamp_time(seconds: float, duration: float = 0.0) -> float:
@@ -628,10 +709,8 @@ def format_csv(sections: list) -> str:
     """
     rows = normalise(sections)
     if all(s['strength'] == DEFAULT_STRENGTH for s in rows):
-        return ''.join(f'{s["start"]:.{TIME_DECIMALS}f},{s["label"]}\n'
-                       for s in rows)
-    return ''.join(f'{s["start"]:.{TIME_DECIMALS}f},{s["label"]},{s["strength"]}\n'
-                   for s in rows)
+        return ''.join(f'{s["start"]:.{TIME_DECIMALS}f},{s["label"]}\n' for s in rows)
+    return ''.join(f'{s["start"]:.{TIME_DECIMALS}f},{s["label"]},{s["strength"]}\n' for s in rows)
 
 
 class LabelFileError(ValueError):
@@ -647,16 +726,17 @@ def parse_csv(text: str) -> list:
         try:
             start = float(fields[0])
         except ValueError:
-            raise LabelFileError(
-                f'line {number}: {fields[0]!r} is not a time in seconds') from None
+            raise LabelFileError(f'line {number}: {fields[0]!r} is not a time in seconds') from None
         if fields[1] not in LABELS:
-            raise LabelFileError(
-                f'line {number}: {fields[1]!r} is not one of '
-                f'{", ".join(LABELS)}')
+            raise LabelFileError(f'line {number}: {fields[1]!r} is not one of {", ".join(LABELS)}')
         strength = fields[2] if len(fields) > 2 else ''
-        sections.append({
-            'start': start, 'label': fields[1],
-            'strength': strength if strength in STRENGTHS else DEFAULT_STRENGTH})
+        sections.append(
+            {
+                'start': start,
+                'label': fields[1],
+                'strength': strength if strength in STRENGTHS else DEFAULT_STRENGTH,
+            }
+        )
     return normalise(sections)
 
 
@@ -694,8 +774,7 @@ def save_labels(audio_path: str, sections: list) -> Path:
 
 
 def saved_status(path: Path, sections: list) -> str:
-    return (f'saved ✓ {time.strftime("%H:%M:%S")} · '
-            f'{len(sections)} sections → {path}')
+    return f'saved ✓ {time.strftime("%H:%M:%S")} · {len(sections)} sections → {path}'
 
 
 def stamped(message: str) -> str:
@@ -718,25 +797,42 @@ def stale_token_refusal(page_token, server_token) -> str:
     """
     if server_token is None or page_token == server_token:
         return None
-    return ('refused: this tab belongs to an earlier launch and no longer '
-            'controls a song — close it and use the freshly opened tab, '
-            'nothing was changed')
+    return (
+        'refused: this tab belongs to an earlier launch and no longer '
+        'controls a song — close it and use the freshly opened tab, '
+        'nothing was changed'
+    )
 
 
 def status_style(message: str) -> dict:
     bad = any(mark in message for mark in REFUSAL_MARKS)
     color = STATUS_BAD if bad else STATUS_OK
-    return dict(STATUS_BASE, color=color, fontWeight='bold',
-                border=f'1px solid {color}',
-                background='#2d1214' if bad else '#12261a')
+    return dict(
+        STATUS_BASE,
+        color=color,
+        fontWeight='bold',
+        border=f'1px solid {color}',
+        background='#2d1214' if bad else '#12261a',
+    )
 
 
-def apply_edit(audio_path: str, trigger, sections: list, cursor: float = 0.0,
-               new_label: str = None, new_strength: str = DEFAULT_STRENGTH,
-               row_labels: list = (), row_strengths: list = (),
-               duration: float = 0.0, artist: str = '', title: str = '',
-               no_artist: bool = False, genre: str = '',
-               page_token: str = None, server_token: str = None) -> tuple:
+def apply_edit(
+    audio_path: str,
+    trigger,
+    sections: list,
+    cursor: float = 0.0,
+    new_label: str = None,
+    new_strength: str = DEFAULT_STRENGTH,
+    row_labels: list = (),
+    row_strengths: list = (),
+    duration: float = 0.0,
+    artist: str = '',
+    title: str = '',
+    no_artist: bool = False,
+    genre: str = '',
+    page_token: str = None,
+    server_token: str = None,
+) -> tuple:
     """Apply one UI event and write the result. `None` means "leave it alone".
 
     The file is the state, so a page whose sections disagree with it has lost
@@ -755,61 +851,74 @@ def apply_edit(audio_path: str, trigger, sections: list, cursor: float = 0.0,
     try:
         on_disk = disk_labels(audio_path)
     except LabelFileError as error:
-        return None, (f'edit refused: {labels_path(audio_path)} is unreadable '
-                      f'-- {error}')
+        return None, (f'edit refused: {labels_path(audio_path)} is unreadable -- {error}')
     if on_disk is not None and on_disk != normalise(sections):
-        return None, ('edit refused: this page is older than the labels on '
-                      'disk -- reload it to catch up, nothing was changed')
+        return None, (
+            'edit refused: this page is older than the labels on '
+            'disk -- reload it to catch up, nothing was changed'
+        )
     if trigger == 'save':
         return None, saved_status(save_labels(audio_path, sections), sections)
     if trigger == 'commit':
         artist = plain_dashes(artist).strip()
         title = plain_dashes(title).strip()
         if not title:
-            return None, ('commit refused: a title is required — the dataset\'s '
-                          'artist guard reads it, and a track without one is '
-                          'invisible to the benchmark contamination check')
+            return None, (
+                'commit refused: a title is required — the dataset\'s '
+                'artist guard reads it, and a track without one is '
+                'invisible to the benchmark contamination check'
+            )
         if artist:
             return None, commit_status(
-                commit_labels(audio_path, sections, duration,
-                              f'{artist}{ARTIST_SEPARATOR}{title}', False,
-                              genre))
+                commit_labels(
+                    audio_path,
+                    sections,
+                    duration,
+                    f'{artist}{ARTIST_SEPARATOR}{title}',
+                    False,
+                    genre,
+                )
+            )
         if not no_artist:
             return None, (
                 'commit refused: the artist field is empty — fill it in, or '
                 'tick "no artist" if the release genuinely has none. The '
                 'benchmark keeps eval-set artists out of training by reading '
                 'this field, so a track without one is never checked for '
-                'contamination and nothing anywhere says so')
+                'contamination and nothing anywhere says so'
+            )
         return None, commit_status(
-            commit_labels(audio_path, sections, duration, title, True, genre))
+            commit_labels(audio_path, sections, duration, title, True, genre)
+        )
     if isinstance(trigger, dict) and not 0 <= trigger['index'] < len(sections):
         return None, None
     if trigger == 'mark':
-        updated = add_boundary(sections, clamp_time(cursor or 0.0, duration),
-                               new_label or LABELS[0], new_strength)
+        updated = add_boundary(
+            sections, clamp_time(cursor or 0.0, duration), new_label or LABELS[0], new_strength
+        )
     elif isinstance(trigger, dict) and trigger['type'] == 'row-nudge':
         updated = list(sections)
         moved = updated.pop(trigger['index'])
         target = clamp_time(moved['start'] + trigger['delta'], duration)
         blocking = boundary_at(updated, target)
         if blocking is not None:
-            return None, (f'nudge refused: {blocking["label"]} already starts '
-                          f'at {target:.{TIME_DECIMALS}f} s -- moving onto a '
-                          f'boundary would delete it')
-        updated = add_boundary(updated, target, moved['label'],
-                               moved['strength'])
+            return None, (
+                f'nudge refused: {blocking["label"]} already starts '
+                f'at {target:.{TIME_DECIMALS}f} s -- moving onto a '
+                f'boundary would delete it'
+            )
+        updated = add_boundary(updated, target, moved['label'], moved['strength'])
     elif isinstance(trigger, dict) and trigger['type'] == 'row-del':
         updated = [s for i, s in enumerate(sections) if i != trigger['index']]
-    elif isinstance(trigger, dict) and trigger['type'] in ('row-label',
-                                                           'row-strength'):
-        values = (row_labels if trigger['type'] == 'row-label' else row_strengths)
+    elif isinstance(trigger, dict) and trigger['type'] in ('row-label', 'row-strength'):
+        values = row_labels if trigger['type'] == 'row-label' else row_strengths
         field = 'label' if trigger['type'] == 'row-label' else 'strength'
         if trigger['index'] >= len(values):
             return None, None
         updated = list(sections)
-        updated[trigger['index']] = dict(updated[trigger['index']],
-                                         **{field: values[trigger['index']]})
+        updated[trigger['index']] = dict(
+            updated[trigger['index']], **{field: values[trigger['index']]}
+        )
     else:
         return None, None
     updated = normalise(updated)
@@ -821,15 +930,30 @@ def apply_edit(audio_path: str, trigger, sections: list, cursor: float = 0.0,
 def decode_mono(audio_path: str, rate: int = DECODE_RATE) -> np.ndarray:
     try:
         proc = subprocess.run(
-            ['ffmpeg', '-nostdin', '-v', 'error', '-i', audio_path,
-             '-f', 'f32le', '-ac', '1', '-ar', str(rate), '-'],
-            capture_output=True, stdin=subprocess.DEVNULL,
+            [
+                'ffmpeg',
+                '-nostdin',
+                '-v',
+                'error',
+                '-i',
+                audio_path,
+                '-f',
+                'f32le',
+                '-ac',
+                '1',
+                '-ar',
+                str(rate),
+                '-',
+            ],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
         )
     except OSError as error:
         raise SystemExit(f'ffmpeg could not run: {error}')
     if proc.returncode != 0:
-        raise SystemExit(f'ffmpeg failed on {audio_path}: '
-                         f'{proc.stderr.decode("utf-8", "replace").strip()}')
+        raise SystemExit(
+            f'ffmpeg failed on {audio_path}: {proc.stderr.decode("utf-8", "replace").strip()}'
+        )
     return np.frombuffer(proc.stdout, dtype='<f4')
 
 
@@ -845,11 +969,10 @@ def _spectral_flux(windows: np.ndarray) -> np.ndarray:
     flux = np.empty(len(windows), dtype=np.float32)
     previous = None
     for start in range(0, len(windows), FFT_CHUNK):
-        block = windows[start:start + FFT_CHUNK] * taper
+        block = windows[start : start + FFT_CHUNK] * taper
         magnitude = np.abs(np.fft.rfft(block, axis=1)).astype(np.float32)
-        deltas = np.diff(magnitude, axis=0,
-                         prepend=magnitude[:1] if previous is None else previous)
-        flux[start:start + len(magnitude)] = np.maximum(deltas, 0.0).sum(axis=1)
+        deltas = np.diff(magnitude, axis=0, prepend=magnitude[:1] if previous is None else previous)
+        flux[start : start + len(magnitude)] = np.maximum(deltas, 0.0).sum(axis=1)
         previous = magnitude[-1:]
     return flux
 
@@ -877,33 +1000,87 @@ def section_shapes(track: Track, sections: list) -> tuple:
     Split out from the figure because it is the only part that changes. The
     traces behind it are the whole decode and are the same on every edit.
     """
-    shapes = [dict(type='line', xref='x', yref='paper', layer='above',
-                   x0=0.0, x1=0.0, y0=0.0, y1=1.0,
-                   line=dict(color='#ffffff', width=1.5))]
+    shapes = [
+        dict(
+            type='line',
+            xref='x',
+            yref='paper',
+            layer='above',
+            x0=0.0,
+            x1=0.0,
+            y0=0.0,
+            y1=1.0,
+            line=dict(color='#ffffff', width=1.5),
+        )
+    ]
     annotations = []
     for index, entry in enumerate(sections):
         start = entry['start']
-        end = (sections[index + 1]['start'] if index + 1 < len(sections)
-               else max(track.duration, start))
+        end = (
+            sections[index + 1]['start']
+            if index + 1 < len(sections)
+            else max(track.duration, start)
+        )
         if end <= start:
             continue
         color = LABEL_COLORS.get(entry['label'], MUTED)
-        shapes.append(dict(type='rect', xref='x', yref='paper', layer='below',
-                           x0=start, x1=end, y0=0.0, y1=RIBBON_LOW,
-                           fillcolor=color, opacity=0.14, line_width=0))
-        shapes.append(dict(type='rect', xref='x', yref='paper', layer='below',
-                           x0=start, x1=end, y0=RIBBON_LOW, y1=RIBBON_HIGH,
-                           fillcolor=color, opacity=0.85, line_width=0))
+        shapes.append(
+            dict(
+                type='rect',
+                xref='x',
+                yref='paper',
+                layer='below',
+                x0=start,
+                x1=end,
+                y0=0.0,
+                y1=RIBBON_LOW,
+                fillcolor=color,
+                opacity=0.14,
+                line_width=0,
+            )
+        )
+        shapes.append(
+            dict(
+                type='rect',
+                xref='x',
+                yref='paper',
+                layer='below',
+                x0=start,
+                x1=end,
+                y0=RIBBON_LOW,
+                y1=RIBBON_HIGH,
+                fillcolor=color,
+                opacity=0.85,
+                line_width=0,
+            )
+        )
         minor = entry['strength'] == 'minor'
-        shapes.append(dict(type='line', xref='x', yref='paper', layer='below',
-                           x0=start, x1=start, y0=0.0, y1=RIBBON_HIGH,
-                           line=dict(color=color, width=1.0 if minor else 2.0,
-                                     dash='dash' if minor else 'dot')))
-        annotations.append(dict(
-            x=(start + end) / 2, y=0.94, xref='x', yref='paper',
-            text=f'{entry["label"]} ·minor' if minor else entry['label'],
-            showarrow=False,
-            font=dict(color='rgba(255,255,255,0.92)', size=10, family='monospace')))
+        shapes.append(
+            dict(
+                type='line',
+                xref='x',
+                yref='paper',
+                layer='below',
+                x0=start,
+                x1=start,
+                y0=0.0,
+                y1=RIBBON_HIGH,
+                line=dict(
+                    color=color, width=1.0 if minor else 2.0, dash='dash' if minor else 'dot'
+                ),
+            )
+        )
+        annotations.append(
+            dict(
+                x=(start + end) / 2,
+                y=0.94,
+                xref='x',
+                yref='paper',
+                text=f'{entry["label"]} ·minor' if minor else entry['label'],
+                showarrow=False,
+                font=dict(color='rgba(255,255,255,0.92)', size=10, family='monospace'),
+            )
+        )
     return shapes, annotations
 
 
@@ -931,40 +1108,69 @@ def build_figure(track: Track, sections: list, beats: list = ()) -> go.Figure:
     shapes, annotations = section_shapes(track, sections)
     figure = go.Figure()
     for sign in (1.0, -1.0):
-        figure.add_trace(go.Scattergl(
-            x=track.times, y=WAVE_MID + sign * WAVE_HALF * track.envelope,
-            mode='lines', line=dict(color='rgba(88,166,255,0.75)', width=1),
-            hoverinfo='skip'))
-    figure.add_trace(go.Scattergl(
-        x=track.times, y=FLUX_BASE + FLUX_SPAN * track.flux,
-        mode='lines', line=dict(color='rgba(63,185,80,0.9)', width=1),
-        hoverinfo='skip'))
-    for downbeat, height, size, alpha in ((0, 0.035, 9, 0.40),
-                                          (1, 0.055, 20, 0.85)):
+        figure.add_trace(
+            go.Scattergl(
+                x=track.times,
+                y=WAVE_MID + sign * WAVE_HALF * track.envelope,
+                mode='lines',
+                line=dict(color='rgba(88,166,255,0.75)', width=1),
+                hoverinfo='skip',
+            )
+        )
+    figure.add_trace(
+        go.Scattergl(
+            x=track.times,
+            y=FLUX_BASE + FLUX_SPAN * track.flux,
+            mode='lines',
+            line=dict(color='rgba(63,185,80,0.9)', width=1),
+            hoverinfo='skip',
+        )
+    )
+    for downbeat, height, size, alpha in ((0, 0.035, 9, 0.40), (1, 0.055, 20, 0.85)):
         times = [t for t, flag in beats if bool(flag) == bool(downbeat)]
         if times:
-            figure.add_trace(go.Scattergl(
-                x=times, y=[height] * len(times), mode='markers',
-                marker=dict(symbol='line-ns', size=size,
-                            line=dict(color=f'rgba(168,218,220,{alpha})',
-                                      width=1.4)),
-                hoverinfo='skip'))
+            figure.add_trace(
+                go.Scattergl(
+                    x=times,
+                    y=[height] * len(times),
+                    mode='markers',
+                    marker=dict(
+                        symbol='line-ns',
+                        size=size,
+                        line=dict(color=f'rgba(168,218,220,{alpha})', width=1.4),
+                    ),
+                    hoverinfo='skip',
+                )
+            )
     figure.update_layout(
-        shapes=shapes, annotations=annotations,
-        xaxis=dict(range=[0.0, track.duration], gridcolor='#1a2332',
-                   color=MUTED, ticksuffix='s', showline=False),
-        yaxis=dict(range=[0.0, 1.0], showticklabels=False, showgrid=False,
-                   fixedrange=True),
-        plot_bgcolor=DARK_BG, paper_bgcolor=DARK_BG,
-        height=330, margin=dict(l=8, r=8, t=8, b=34),
-        dragmode='pan', uirevision='labels', showlegend=False,
+        shapes=shapes,
+        annotations=annotations,
+        xaxis=dict(
+            range=[0.0, track.duration],
+            gridcolor='#1a2332',
+            color=MUTED,
+            ticksuffix='s',
+            showline=False,
+        ),
+        yaxis=dict(range=[0.0, 1.0], showticklabels=False, showgrid=False, fixedrange=True),
+        plot_bgcolor=DARK_BG,
+        paper_bgcolor=DARK_BG,
+        height=330,
+        margin=dict(l=8, r=8, t=8, b=34),
+        dragmode='pan',
+        uirevision='labels',
+        showlegend=False,
     )
     return figure
 
 
 BUTTON_STYLE = {
-    'background': CARD_BG, 'color': TEXT, 'border': f'1px solid {BORDER}',
-    'borderRadius': '6px', 'padding': '6px 12px', 'fontFamily': 'monospace',
+    'background': CARD_BG,
+    'color': TEXT,
+    'border': f'1px solid {BORDER}',
+    'borderRadius': '6px',
+    'padding': '6px 12px',
+    'fontFamily': 'monospace',
     'cursor': 'pointer',
 }
 CELL_STYLE = {'padding': '4px 10px', 'borderBottom': f'1px solid {BORDER}'}
@@ -972,38 +1178,65 @@ CELL_STYLE = {'padding': '4px 10px', 'borderBottom': f'1px solid {BORDER}'}
 
 def _nudge_button(index: int, delta: float) -> html.Button:
     return html.Button(
-        f'{delta:+.1f}', id={'type': 'row-nudge', 'index': index, 'delta': delta},
-        style=dict(BUTTON_STYLE, padding='3px 8px', marginRight='4px'))
+        f'{delta:+.1f}',
+        id={'type': 'row-nudge', 'index': index, 'delta': delta},
+        style=dict(BUTTON_STYLE, padding='3px 8px', marginRight='4px'),
+    )
 
 
 def build_rows(sections: list) -> list:
-    header = html.Tr([html.Th(text, style=dict(CELL_STYLE, color=MUTED,
-                                               textAlign='left'))
-                      for text in ('#', 'start', '', 'label', 'strength',
-                                   'nudge', '')])
+    header = html.Tr(
+        [
+            html.Th(text, style=dict(CELL_STYLE, color=MUTED, textAlign='left'))
+            for text in ('#', 'start', '', 'label', 'strength', 'nudge', '')
+        ]
+    )
     rows = [header]
     for index, entry in enumerate(sections):
-        rows.append(html.Tr([
-            html.Td(str(index), style=dict(CELL_STYLE, color=MUTED)),
-            html.Td(f'{entry["start"]:.3f} s', style=dict(CELL_STYLE, color=TEXT)),
-            html.Td(clock_text(entry['start']), style=dict(CELL_STYLE, color=MUTED)),
-            html.Td(dcc.Dropdown(
-                id={'type': 'row-label', 'index': index}, options=LABELS,
-                value=entry['label'], clearable=False,
-                style={'width': '150px', 'color': '#000000'}), style=CELL_STYLE),
-            html.Td(dcc.Dropdown(
-                id={'type': 'row-strength', 'index': index}, options=STRENGTHS,
-                value=entry['strength'], clearable=False,
-                style={'width': '110px', 'color': '#000000'}), style=CELL_STYLE),
-            html.Td([_nudge_button(index, delta) for delta in NUDGES],
-                    style=CELL_STYLE),
-            html.Td(html.Button('delete', id={'type': 'row-del', 'index': index},
-                                style=dict(BUTTON_STYLE, padding='3px 10px',
-                                           color='#f85149')),
-                    style=CELL_STYLE),
-        ]))
-    return [html.Table(rows, style={'borderCollapse': 'collapse',
-                                    'fontFamily': 'monospace', 'fontSize': '13px'})]
+        rows.append(
+            html.Tr(
+                [
+                    html.Td(str(index), style=dict(CELL_STYLE, color=MUTED)),
+                    html.Td(f'{entry["start"]:.3f} s', style=dict(CELL_STYLE, color=TEXT)),
+                    html.Td(clock_text(entry['start']), style=dict(CELL_STYLE, color=MUTED)),
+                    html.Td(
+                        dcc.Dropdown(
+                            id={'type': 'row-label', 'index': index},
+                            options=LABELS,
+                            value=entry['label'],
+                            clearable=False,
+                            style={'width': '150px', 'color': '#000000'},
+                        ),
+                        style=CELL_STYLE,
+                    ),
+                    html.Td(
+                        dcc.Dropdown(
+                            id={'type': 'row-strength', 'index': index},
+                            options=STRENGTHS,
+                            value=entry['strength'],
+                            clearable=False,
+                            style={'width': '110px', 'color': '#000000'},
+                        ),
+                        style=CELL_STYLE,
+                    ),
+                    html.Td([_nudge_button(index, delta) for delta in NUDGES], style=CELL_STYLE),
+                    html.Td(
+                        html.Button(
+                            'delete',
+                            id={'type': 'row-del', 'index': index},
+                            style=dict(BUTTON_STYLE, padding='3px 10px', color='#f85149'),
+                        ),
+                        style=CELL_STYLE,
+                    ),
+                ]
+            )
+        )
+    return [
+        html.Table(
+            rows,
+            style={'borderCollapse': 'collapse', 'fontFamily': 'monospace', 'fontSize': '13px'},
+        )
+    ]
 
 
 SINK_STORAGE_KEY = 'labelToolAudioSink'
@@ -1129,7 +1362,8 @@ function (clicks) {
     return [PENDING_TEXT, PENDING_STYLE];
 }
 """.replace('PENDING_TEXT', json.dumps(COMMIT_PENDING_TEXT)).replace(
-    'PENDING_STYLE', json.dumps(COMMIT_PENDING_STYLE))
+    'PENDING_STYLE', json.dumps(COMMIT_PENDING_STYLE)
+)
 
 SEEK_SLOP_PX = 4
 
@@ -1240,8 +1474,7 @@ def build_app(audio_path: str, track: Track, beats: list = ()) -> dash.Dash:
     def serve_audio():
         """conditional=True answers Range requests, which is the whole of what
         makes seeking inside an <audio> element work."""
-        return flask.send_file(audio_path, mimetype=audio_mimetype(audio_path),
-                               conditional=True)
+        return flask.send_file(audio_path, mimetype=audio_mimetype(audio_path), conditional=True)
 
     @app.server.route('/token')
     def serve_token():
@@ -1249,96 +1482,179 @@ def build_app(audio_path: str, track: Track, beats: list = ()) -> dash.Dash:
 
     def serve_layout():
         sections = load_labels(audio_path)
-        return html.Div([
-            html.Div(STALE_BANNER_TEXT, id='stale-banner',
-                     style=dict(STALE_BANNER_STYLE, display='none')),
-            html.Div([
-                html.Span(name, style={'color': TEXT}),
-                html.Span(f'  ·  {clock_text(track.duration)}  ·  {labels_path(audio_path)}',
-                          style={'color': MUTED}),
-            ], style={'padding': '12px 20px', 'borderBottom': f'1px solid {BORDER}',
-                      'fontSize': '13px'}),
-            html.Div(html.Audio(id='player', src='/audio', controls=True,
-                                style={'width': '100%'}),
-                     style={'padding': '12px 20px 4px'}),
-            html.Div([
-                html.Div('0.00 s', id='cursor-seconds',
-                         style={'fontSize': '32px', 'color': '#ffffff'}),
-                html.Div('0sec', id='cursor-clock',
-                         style={'fontSize': '18px', 'color': MUTED, 'marginLeft': '16px'}),
-                html.Div(id='sink-chip'),
-                dcc.Dropdown(id='sink-pick', clearable=False,
-                             placeholder='audio output',
-                             style={'width': '300px', 'color': '#000000',
-                                    'marginLeft': '10px', 'display': 'inline-block',
-                                    'verticalAlign': 'middle'}),
-                html.Div([
-                    dcc.Dropdown(id='new-label', options=LABELS, value=LABELS[0],
-                                 clearable=False,
-                                 style={'width': '150px', 'color': '#000000',
+        return html.Div(
+            [
+                html.Div(
+                    STALE_BANNER_TEXT,
+                    id='stale-banner',
+                    style=dict(STALE_BANNER_STYLE, display='none'),
+                ),
+                html.Div(
+                    [
+                        html.Span(name, style={'color': TEXT}),
+                        html.Span(
+                            f'  ·  {clock_text(track.duration)}  ·  {labels_path(audio_path)}',
+                            style={'color': MUTED},
+                        ),
+                    ],
+                    style={
+                        'padding': '12px 20px',
+                        'borderBottom': f'1px solid {BORDER}',
+                        'fontSize': '13px',
+                    },
+                ),
+                html.Div(
+                    html.Audio(id='player', src='/audio', controls=True, style={'width': '100%'}),
+                    style={'padding': '12px 20px 4px'},
+                ),
+                html.Div(
+                    [
+                        html.Div(
+                            '0.00 s',
+                            id='cursor-seconds',
+                            style={'fontSize': '32px', 'color': '#ffffff'},
+                        ),
+                        html.Div(
+                            '0sec',
+                            id='cursor-clock',
+                            style={'fontSize': '18px', 'color': MUTED, 'marginLeft': '16px'},
+                        ),
+                        html.Div(id='sink-chip'),
+                        dcc.Dropdown(
+                            id='sink-pick',
+                            clearable=False,
+                            placeholder='audio output',
+                            style={
+                                'width': '300px',
+                                'color': '#000000',
+                                'marginLeft': '10px',
+                                'display': 'inline-block',
+                                'verticalAlign': 'middle',
+                            },
+                        ),
+                        html.Div(
+                            [
+                                dcc.Dropdown(
+                                    id='new-label',
+                                    options=LABELS,
+                                    value=LABELS[0],
+                                    clearable=False,
+                                    style={
+                                        'width': '150px',
+                                        'color': '#000000',
                                         'display': 'inline-block',
-                                        'verticalAlign': 'middle'}),
-                    dcc.RadioItems(id='new-strength', options=STRENGTHS,
-                                   value=DEFAULT_STRENGTH, inline=True,
-                                   style={'marginLeft': '10px'},
-                                   labelStyle={'color': TEXT, 'fontSize': '13px',
-                                               'marginRight': '6px'},
-                                   inputStyle={'marginRight': '4px',
-                                               'marginLeft': '8px'}),
-                    html.Button('mark boundary at current time', id='mark',
-                                style=dict(BUTTON_STYLE, marginLeft='10px')),
-                    html.Button('save now', id='save',
-                                style=dict(BUTTON_STYLE, marginLeft='10px',
-                                           color='#3fb950')),
-                    dcc.Input(id='artist', value=known['artist'] or '',
-                              placeholder='artist', debounce=False,
-                              style={'marginLeft': '10px', 'width': '120px',
-                                     'padding': '6px 10px', 'borderRadius': '6px',
-                                     'background': CARD_BG, 'color': TEXT,
-                                     'border': f'1px solid {BORDER}',
-                                     'fontFamily': 'monospace'}),
-                    dcc.Input(id='title', value=known['title'],
-                              placeholder='track title', debounce=False,
-                              style={'marginLeft': '8px', 'width': '150px',
-                                     'padding': '6px 10px', 'borderRadius': '6px',
-                                     'background': CARD_BG, 'color': TEXT,
-                                     'border': f'1px solid {BORDER}',
-                                     'fontFamily': 'monospace'}),
-                    dcc.Input(id='genre', value=known['genre'] or '',
-                              placeholder='genre',
-                              debounce=False,
-                              style={'marginLeft': '8px', 'width': '130px',
-                                     'padding': '6px 10px', 'borderRadius': '6px',
-                                     'background': CARD_BG, 'color': TEXT,
-                                     'border': f'1px solid {BORDER}',
-                                     'fontFamily': 'monospace'}),
-                    dcc.Checklist(id='no-artist', options=[{'label': 'no artist',
-                                                            'value': 'yes'}],
-                                  value=[], inline=True,
-                                  style={'marginLeft': '8px'},
-                                  labelStyle={'color': TEXT, 'fontSize': '13px'},
-                                  inputStyle={'marginRight': '4px'}),
-                    html.Button('commit to dataset', id='commit',
-                                style=dict(BUTTON_STYLE, marginLeft='10px',
-                                           color='#58a6ff')),
-                ], style={'marginLeft': 'auto', 'display': 'flex',
-                          'alignItems': 'center'}),
-            ], style={'display': 'flex', 'alignItems': 'center',
-                      'padding': '4px 20px 12px'}),
-            html.Div(id='status', style=dict(STATUS_BASE)),
-            dcc.Graph(id='timeline', figure=build_figure(track, sections, beats),
-                      config={'displayModeBar': False, 'scrollZoom': True}),
-            html.Div(build_rows(sections), id='table', style={'padding': '0 20px 40px'}),
-            dcc.Store(id='sections', data=sections),
-            dcc.Store(id='cursor', data=0.0),
-            dcc.Store(id='sink-echo'),
-            dcc.Store(id='playhead-echo'),
-            dcc.Store(id='space-echo'),
-            dcc.Store(id='launch-token', data=token),
-            dcc.Interval(id='tick', interval=TICK_MS),
-            dcc.Interval(id='stale-tick', interval=STALE_TICK_MS),
-        ], style={'background': DARK_BG, 'minHeight': '100vh',
-                  'fontFamily': 'monospace'})
+                                        'verticalAlign': 'middle',
+                                    },
+                                ),
+                                dcc.RadioItems(
+                                    id='new-strength',
+                                    options=STRENGTHS,
+                                    value=DEFAULT_STRENGTH,
+                                    inline=True,
+                                    style={'marginLeft': '10px'},
+                                    labelStyle={
+                                        'color': TEXT,
+                                        'fontSize': '13px',
+                                        'marginRight': '6px',
+                                    },
+                                    inputStyle={'marginRight': '4px', 'marginLeft': '8px'},
+                                ),
+                                html.Button(
+                                    'mark boundary at current time',
+                                    id='mark',
+                                    style=dict(BUTTON_STYLE, marginLeft='10px'),
+                                ),
+                                html.Button(
+                                    'save now',
+                                    id='save',
+                                    style=dict(BUTTON_STYLE, marginLeft='10px', color='#3fb950'),
+                                ),
+                                dcc.Input(
+                                    id='artist',
+                                    value=known['artist'] or '',
+                                    placeholder='artist',
+                                    debounce=False,
+                                    style={
+                                        'marginLeft': '10px',
+                                        'width': '120px',
+                                        'padding': '6px 10px',
+                                        'borderRadius': '6px',
+                                        'background': CARD_BG,
+                                        'color': TEXT,
+                                        'border': f'1px solid {BORDER}',
+                                        'fontFamily': 'monospace',
+                                    },
+                                ),
+                                dcc.Input(
+                                    id='title',
+                                    value=known['title'],
+                                    placeholder='track title',
+                                    debounce=False,
+                                    style={
+                                        'marginLeft': '8px',
+                                        'width': '150px',
+                                        'padding': '6px 10px',
+                                        'borderRadius': '6px',
+                                        'background': CARD_BG,
+                                        'color': TEXT,
+                                        'border': f'1px solid {BORDER}',
+                                        'fontFamily': 'monospace',
+                                    },
+                                ),
+                                dcc.Input(
+                                    id='genre',
+                                    value=known['genre'] or '',
+                                    placeholder='genre',
+                                    debounce=False,
+                                    style={
+                                        'marginLeft': '8px',
+                                        'width': '130px',
+                                        'padding': '6px 10px',
+                                        'borderRadius': '6px',
+                                        'background': CARD_BG,
+                                        'color': TEXT,
+                                        'border': f'1px solid {BORDER}',
+                                        'fontFamily': 'monospace',
+                                    },
+                                ),
+                                dcc.Checklist(
+                                    id='no-artist',
+                                    options=[{'label': 'no artist', 'value': 'yes'}],
+                                    value=[],
+                                    inline=True,
+                                    style={'marginLeft': '8px'},
+                                    labelStyle={'color': TEXT, 'fontSize': '13px'},
+                                    inputStyle={'marginRight': '4px'},
+                                ),
+                                html.Button(
+                                    'commit to dataset',
+                                    id='commit',
+                                    style=dict(BUTTON_STYLE, marginLeft='10px', color='#58a6ff'),
+                                ),
+                            ],
+                            style={'marginLeft': 'auto', 'display': 'flex', 'alignItems': 'center'},
+                        ),
+                    ],
+                    style={'display': 'flex', 'alignItems': 'center', 'padding': '4px 20px 12px'},
+                ),
+                html.Div(id='status', style=dict(STATUS_BASE)),
+                dcc.Graph(
+                    id='timeline',
+                    figure=build_figure(track, sections, beats),
+                    config={'displayModeBar': False, 'scrollZoom': True},
+                ),
+                html.Div(build_rows(sections), id='table', style={'padding': '0 20px 40px'}),
+                dcc.Store(id='sections', data=sections),
+                dcc.Store(id='cursor', data=0.0),
+                dcc.Store(id='sink-echo'),
+                dcc.Store(id='playhead-echo'),
+                dcc.Store(id='space-echo'),
+                dcc.Store(id='launch-token', data=token),
+                dcc.Interval(id='tick', interval=TICK_MS),
+                dcc.Interval(id='stale-tick', interval=STALE_TICK_MS),
+            ],
+            style={'background': DARK_BG, 'minHeight': '100vh', 'fontFamily': 'monospace'},
+        )
 
     app.layout = serve_layout
 
@@ -1419,17 +1735,46 @@ def build_app(audio_path: str, track: Track, beats: list = ()) -> dash.Dash:
         State('launch-token', 'data'),
         prevent_initial_call=True,
     )
-    def edit(mark_clicks, save_clicks, commit_clicks, nudges, deletes,
-             row_labels, row_strengths, sections, cursor, new_label,
-             new_strength, artist, title, no_artist, genre, page_token):
+    def edit(
+        mark_clicks,
+        save_clicks,
+        commit_clicks,
+        nudges,
+        deletes,
+        row_labels,
+        row_strengths,
+        sections,
+        cursor,
+        new_label,
+        new_strength,
+        artist,
+        title,
+        no_artist,
+        genre,
+        page_token,
+    ):
         updated, status = apply_edit(
-            audio_path, callback_context.triggered_id, sections, cursor,
-            new_label, new_strength, row_labels, row_strengths, track.duration,
-            artist or '', title, bool(no_artist), genre or '', page_token,
-            token)
-        return (dash.no_update if updated is None else updated,
-                dash.no_update if status is None else stamped(status),
-                dash.no_update if status is None else status_style(status))
+            audio_path,
+            callback_context.triggered_id,
+            sections,
+            cursor,
+            new_label,
+            new_strength,
+            row_labels,
+            row_strengths,
+            track.duration,
+            artist or '',
+            title,
+            bool(no_artist),
+            genre or '',
+            page_token,
+            token,
+        )
+        return (
+            dash.no_update if updated is None else updated,
+            dash.no_update if status is None else stamped(status),
+            dash.no_update if status is None else status_style(status),
+        )
 
     @app.callback(
         Output('table', 'children'),
@@ -1456,8 +1801,10 @@ def seed_from_published(audio_path: str) -> str:
     if not seed:
         return '  no published annotation for these bytes — starting empty'
     write_atomically(path, format_csv(seed))
-    return (f'  seeded {len(seed)} sections from the published annotation — '
-            f'the boundaries are the published ones, the names are a draft')
+    return (
+        f'  seeded {len(seed)} sections from the published annotation — '
+        f'the boundaries are the published ones, the names are a draft'
+    )
 
 
 def launch(audio: str, port: int = 8070, seed: bool = False) -> None:
@@ -1480,15 +1827,17 @@ def launch(audio: str, port: int = 8070, seed: bool = False) -> None:
     except LabelFileError as error:
         raise SystemExit(
             f'{labels_path(audio_path)} cannot be read: {error}\n'
-            f'  fix or delete that line and relaunch — nothing was changed')
+            f'  fix or delete that line and relaunch — nothing was changed'
+        )
 
     print(f'  decoding {Path(audio_path).name} ...')
     track = Track(audio_path)
-    print(f'  {track.duration:.1f} s, {len(sections)} sections loaded from '
-          f'{labels_path(audio_path)}')
+    print(
+        f'  {track.duration:.1f} s, {len(sections)} sections loaded from {labels_path(audio_path)}'
+    )
     beats = beat_grid(audio_path)
-    print(f'  beat grid: {len(beats)} beats' if beats
-          else '  beat grid: none for this track')
+    print(f'  beat grid: {len(beats)} beats' if beats else '  beat grid: none for this track')
     print(f'\n  Labeler → http://localhost:{port}\n')
     build_app(audio_path, track, beats).run(
-        port=port, debug=False, use_reloader=False, dev_tools_hot_reload=False)
+        port=port, debug=False, use_reloader=False, dev_tools_hot_reload=False
+    )

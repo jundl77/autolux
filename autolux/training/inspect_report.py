@@ -1,4 +1,5 @@
 """Inspect a simulation report: per-10s rms/beat/intent bins + intent timeline."""
+
 import argparse
 import json
 
@@ -42,9 +43,11 @@ def main() -> None:
             print(f'{t:>5.0f}-{t1:<5.0f}  {"-":>6}  {0:>5}  {dominant_intent_at(t, t1)}')
         t = t1
 
-    print(f'\nIntent timeline — raw audience time '
-          f'(= song time + metrics.look_ahead_sec = {look_ahead:.2f}s); '
-          f'the bin table above is de-shifted to song time:')
+    print(
+        f'\nIntent timeline — raw audience time '
+        f'(= song time + metrics.look_ahead_sec = {look_ahead:.2f}s); '
+        f'the bin table above is de-shifted to song time:'
+    )
     for block in intents:
         end = block.get('end', duration)
         print(f"  {block['t']:>7.1f} - {end:<7.1f}  ({end - block['t']:>6.1f}s)  {block['intent']}")

@@ -11,14 +11,14 @@ a parser that assumes exactly one drops a real segment on the first shape and
 invents a zero-length one on the second.  The bar positions run past four and
 sometimes open at two; folding either would fabricate downbeats.
 """
+
 import csv
 import json
 import sys
 from pathlib import Path
 
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
-for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"),
-              str(TRAINING_DIR / "third_party")):
+for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"), str(TRAINING_DIR / "third_party")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -30,15 +30,23 @@ TRACK = "hx-0001_12step"
 DURATION = "152.0"
 
 # The head of segments/0001_12step.txt, verbatim, plus its tail sentinel.
-SEGMENTS = ["0.0 intro", "19.3873291063 verse", "52.0233019687 chorus",
-            "148.054524769 end"]
+SEGMENTS = ["0.0 intro", "19.3873291063 verse", "52.0233019687 chorus", "148.054524769 end"]
 BEATS = ["0.0\t1\t1", "0.530973\t2\t1", "2.123892\t1\t2"]
-ODD_BEATS = ["0.0\t1\t1", "0.530973\t2\t1", "7.058786\t5\t1",
-             "7.3108855\t6\t1"]
+ODD_BEATS = ["0.0\t1\t1", "0.530973\t2\t1", "7.058786\t5\t1", "7.3108855\t6\t1"]
 
-METADATA_HEADER = ["File", "Title", "Artist", "Release", "Duration", "BPM",
-                   "Ratio Bars in 4", "Time Signature", "Genre",
-                   "MusicBrainz Id", "Acoustid Id"]
+METADATA_HEADER = [
+    "File",
+    "Title",
+    "Artist",
+    "Release",
+    "Duration",
+    "BPM",
+    "Ratio Bars in 4",
+    "Time Signature",
+    "Genre",
+    "MusicBrainz Id",
+    "Acoustid Id",
+]
 
 
 def text_of(lines, terminator="\r\n"):
@@ -52,19 +60,35 @@ def write_lines(path, lines, terminator="\r\n"):
 
 
 def write_segments(dataset, native, lines, terminator="\r\n"):
-    return write_lines(harmonix_convert.segments_path(dataset, native), lines,
-                       terminator)
+    return write_lines(harmonix_convert.segments_path(dataset, native), lines, terminator)
 
 
 def write_beats(dataset, native, lines, terminator="\r\n"):
-    return write_lines(harmonix_convert.beats_path(dataset, native), lines,
-                       terminator)
+    return write_lines(harmonix_convert.beats_path(dataset, native), lines, terminator)
 
 
-def metadata_row(native, title="1, 2 Step", artist="Ciara", release="Goodies",
-                 duration=DURATION, bpm="113", genre="R&B"):
-    return [native, title, artist, release, duration, bpm, "100.0", "4|4",
-            genre, "0408655f-189f-371b-9c41-ec861e1a7810", ""]
+def metadata_row(
+    native,
+    title="1, 2 Step",
+    artist="Ciara",
+    release="Goodies",
+    duration=DURATION,
+    bpm="113",
+    genre="R&B",
+):
+    return [
+        native,
+        title,
+        artist,
+        release,
+        duration,
+        bpm,
+        "100.0",
+        "4|4",
+        genre,
+        "0408655f-189f-371b-9c41-ec861e1a7810",
+        "",
+    ]
 
 
 def write_csv(path, header, rows):
@@ -77,36 +101,51 @@ def write_csv(path, header, rows):
 
 
 def write_metadata(dataset, rows):
-    return write_csv(dataset / harmonix_convert.METADATA_FILE,
-                     METADATA_HEADER, rows)
+    return write_csv(dataset / harmonix_convert.METADATA_FILE, METADATA_HEADER, rows)
 
 
 def write_urls(dataset, natives):
     return write_csv(
-        dataset / harmonix_convert.URLS_FILE, ["File", "URL"],
-        [[native, f"http://www.youtube.com/watch?v=iBHNgV6_zn{index}"]
-         for index, native in enumerate(natives)])
+        dataset / harmonix_convert.URLS_FILE,
+        ["File", "URL"],
+        [
+            [native, f"http://www.youtube.com/watch?v=iBHNgV6_zn{index}"]
+            for index, native in enumerate(natives)
+        ],
+    )
 
 
 def write_scores(dataset, natives):
-    return write_csv(dataset / harmonix_convert.SCORES_FILE, ["File", "score"],
-                     [[native, "0.9984119782214156"] for native in natives])
+    return write_csv(
+        dataset / harmonix_convert.SCORES_FILE,
+        ["File", "score"],
+        [[native, "0.9984119782214156"] for native in natives],
+    )
 
 
-def make_rig(tmp_path, segments=None, beats=None, natives=(NATIVE,),
-             metadata=None, duration=DURATION, title="1, 2 Step"):
+def make_rig(
+    tmp_path,
+    segments=None,
+    beats=None,
+    natives=(NATIVE,),
+    metadata=None,
+    duration=DURATION,
+    title="1, 2 Step",
+):
     harmonixset = tmp_path / "harmonixset"
     dataset = harmonix_convert.dataset_dir(harmonixset)
     corpus = tmp_path / "corpus"
     (corpus / "annotations").mkdir(parents=True)
 
     for native in natives:
-        write_segments(dataset, native,
-                       SEGMENTS if segments is None else segments)
+        write_segments(dataset, native, SEGMENTS if segments is None else segments)
         write_beats(dataset, native, BEATS if beats is None else beats)
-    write_metadata(dataset, metadata if metadata is not None else [
-        metadata_row(native, duration=duration, title=title)
-        for native in natives])
+    write_metadata(
+        dataset,
+        metadata
+        if metadata is not None
+        else [metadata_row(native, duration=duration, title=title) for native in natives],
+    )
     write_urls(dataset, natives)
     write_scores(dataset, natives)
     return harmonixset, corpus
@@ -114,27 +153,25 @@ def make_rig(tmp_path, segments=None, beats=None, natives=(NATIVE,),
 
 def run(rig, extra=()):
     harmonixset, corpus = rig
-    return harmonix_convert.main([
-        "--harmonixset", str(harmonixset), "--data-dir", str(corpus), *extra])
+    return harmonix_convert.main(
+        ["--harmonixset", str(harmonixset), "--data-dir", str(corpus), *extra]
+    )
 
 
 def load_record(corpus, native=NATIVE):
-    path = tp_record.annotation_path(corpus, harmonix_convert.track_id(native),
-                                     "harmonix")
+    path = tp_record.annotation_path(corpus, harmonix_convert.track_id(native), "harmonix")
     with open(path, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def load_report(corpus, name=None):
     name = name or harmonix_convert.REPORT_FILE
-    with open(tp_record.third_party_dir(corpus) / name, "r",
-              encoding="utf-8") as handle:
+    with open(tp_record.third_party_dir(corpus) / name, "r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def beat_grid_rows(corpus, native=NATIVE):
-    path = (corpus / "annotations" / "beats"
-            / f"{harmonix_convert.track_id(native)}.beat.csv")
+    path = corpus / "annotations" / "beats" / f"{harmonix_convert.track_id(native)}.beat.csv"
     with open(path, "r", encoding="utf-8", newline="") as handle:
         return list(csv.reader(handle))
 
@@ -150,8 +187,9 @@ def snapshot(corpus):
     files = {}
     for path in sorted(corpus.rglob("*")):
         if not path.is_file() or path.name in (
-                harmonix_convert.REPORT_FILE,
-                harmonix_convert.PARTIAL_REPORT_FILE):
+            harmonix_convert.REPORT_FILE,
+            harmonix_convert.PARTIAL_REPORT_FILE,
+        ):
             continue
         name = path.relative_to(corpus).as_posix()
         if name.endswith(".harmonix.json"):
@@ -171,8 +209,7 @@ def snapshot(corpus):
 def test_segments_are_space_separated_not_tab_separated():
     parse = harmonix_convert.parse_segments(text_of(SEGMENTS), 152.0)
 
-    assert [(section.name, section.start, section.end)
-            for section in parse.sections] == [
+    assert [(section.name, section.start, section.end) for section in parse.sections] == [
         ("intro", 0.0, 19.3873291063),
         ("verse", 19.3873291063, 52.0233019687),
         ("chorus", 52.0233019687, 148.054524769),
@@ -189,8 +226,9 @@ def test_a_tab_separated_segments_line_is_refused():
 
 
 def test_crlf_and_lf_input_parse_identically():
-    assert (harmonix_convert.parse_segments(text_of(SEGMENTS, "\n"), 152.0)
-            == harmonix_convert.parse_segments(text_of(SEGMENTS), 152.0))
+    assert harmonix_convert.parse_segments(
+        text_of(SEGMENTS, "\n"), 152.0
+    ) == harmonix_convert.parse_segments(text_of(SEGMENTS), 152.0)
 
 
 def test_no_label_carries_a_carriage_return():
@@ -202,60 +240,58 @@ def test_no_label_carries_a_carriage_return():
 def test_the_end_sentinel_terminates_the_last_segment_and_is_not_a_section():
     parse = harmonix_convert.parse_segments(text_of(SEGMENTS), 152.0)
 
-    assert [section.name for section in parse.sections] == [
-        "intro", "verse", "chorus"]
+    assert [section.name for section in parse.sections] == ["intro", "verse", "chorus"]
     assert parse.sections[-1].end == 148.054524769
     assert parse.end_source == harmonix_convert.END_FROM_SENTINEL
     assert parse.duplicate_end is False
 
 
 def test_a_duplicated_end_row_is_redundant_and_the_first_one_terminates():
-    parse = harmonix_convert.parse_segments(text_of([
-        "0.0 intro", "138.481749 chorus", "153.492761 end",
-        "157.241784438 end"]), 154.392)
+    parse = harmonix_convert.parse_segments(
+        text_of(["0.0 intro", "138.481749 chorus", "153.492761 end", "157.241784438 end"]), 154.392
+    )
 
     assert [(section.name, section.end) for section in parse.sections] == [
-        ("intro", 138.481749), ("chorus", 153.492761)]
+        ("intro", 138.481749),
+        ("chorus", 153.492761),
+    ]
     assert parse.duplicate_end is True
     assert parse.end_source == harmonix_convert.END_FROM_SENTINEL
 
 
 def test_a_missing_end_row_closes_the_final_segment_on_the_duration():
-    parse = harmonix_convert.parse_segments(text_of([
-        "0.0 intro", "223.050684 outro"]), 246.004)
+    parse = harmonix_convert.parse_segments(text_of(["0.0 intro", "223.050684 outro"]), 246.004)
 
     assert parse.sections[-1] == ("outro", 223.050684, 246.004)
     assert parse.end_source == harmonix_convert.END_FROM_DURATION
 
 
 def test_a_duration_before_the_final_start_is_clamped_never_reversed():
-    parse = harmonix_convert.parse_segments(text_of([
-        "0.0 intro", "247.427962 instrumental"]), 100.0)
+    parse = harmonix_convert.parse_segments(
+        text_of(["0.0 intro", "247.427962 instrumental"]), 100.0
+    )
 
     assert parse.sections[-1].end > parse.sections[-1].start
 
 
 def test_adjacent_identical_labels_are_stored_unmerged_and_counted():
-    parse = harmonix_convert.parse_segments(text_of([
-        "0.0 chorus", "10.0 chorus", "20.0 verse", "30.0 verse",
-        "40.0 end"]), 45.0)
+    parse = harmonix_convert.parse_segments(
+        text_of(["0.0 chorus", "10.0 chorus", "20.0 verse", "30.0 verse", "40.0 end"]), 45.0
+    )
 
-    assert [section.name for section in parse.sections] == [
-        "chorus", "chorus", "verse", "verse"]
+    assert [section.name for section in parse.sections] == ["chorus", "chorus", "verse", "verse"]
     assert harmonix_convert.adjacent_identical(parse.sections) == 2
 
 
 def test_silence_is_a_real_label_and_stays_a_section():
-    parse = harmonix_convert.parse_segments(text_of([
-        "0.0 silence", "5.0 intro", "40.0 end"]), 45.0)
+    parse = harmonix_convert.parse_segments(text_of(["0.0 silence", "5.0 intro", "40.0 end"]), 45.0)
 
     assert parse.sections[0] == ("silence", 0.0, 5.0)
 
 
 def test_a_non_advancing_segment_time_is_refused():
     try:
-        harmonix_convert.parse_segments(text_of([
-            "10.0 intro", "10.0 verse", "20.0 end"]), 30.0)
+        harmonix_convert.parse_segments(text_of(["10.0 intro", "10.0 verse", "20.0 end"]), 30.0)
     except harmonix_convert.ConvertError as error:
         assert "does not advance" in str(error)
     else:
@@ -277,8 +313,7 @@ def test_a_file_of_nothing_but_a_sentinel_is_refused():
 
 
 def test_beats_are_tab_separated_and_the_bar_number_is_dropped():
-    assert harmonix_convert.parse_beats(text_of(BEATS)) == [
-        (0.0, 1), (0.530973, 2), (2.123892, 1)]
+    assert harmonix_convert.parse_beats(text_of(BEATS)) == [(0.0, 1), (0.530973, 2), (2.123892, 1)]
 
 
 def test_a_space_separated_beats_line_is_refused():
@@ -319,8 +354,7 @@ def test_a_converted_track_emits_a_record_that_validates(tmp_path):
     assert record["label_vocabulary"] == "harmonix_function"
     assert record["beats"] == "harmonix_expert"
     assert record["masked"] == []
-    assert record["sections"][0] == {"name": "intro", "start": 0.0,
-                                     "end": 19.3873291063}
+    assert record["sections"][0] == {"name": "intro", "start": 0.0, "end": 19.3873291063}
     assert len(record["sections"]) == 3
 
 
@@ -352,8 +386,7 @@ def test_the_provenance_names_its_sources_and_the_alignment_score(tmp_path):
     assert provenance["converted_utc"].endswith("Z")
 
 
-def test_a_track_without_an_end_row_records_where_its_final_end_came_from(
-        tmp_path):
+def test_a_track_without_an_end_row_records_where_its_final_end_came_from(tmp_path):
     rig = make_rig(tmp_path, segments=["0.0 intro", "100.0 outro"])
     corpus = rig[1]
 
@@ -361,8 +394,7 @@ def test_a_track_without_an_end_row_records_where_its_final_end_came_from(
 
     record = load_record(corpus)
     assert record["sections"][-1]["end"] == 152.0
-    assert record["provenance"]["final_segment_end_source"] == (
-        "metadata_duration")
+    assert record["provenance"]["final_segment_end_source"] == ("metadata_duration")
     assert load_report(corpus)["no_end_sentinel_ids"] == [TRACK]
 
 
@@ -391,11 +423,12 @@ def test_the_beat_grid_is_the_published_three_column_format(tmp_path):
     ]
 
 
-def test_the_grid_carries_the_start_and_end_sentinels_around_the_labels(
-        tmp_path):
-    rig = make_rig(tmp_path,
-                   segments=["5.0 intro", "10.0 chorus", "20.0 end"],
-                   beats=["1.0\t1\t1", "7.0\t2\t1", "30.0\t3\t1"])
+def test_the_grid_carries_the_start_and_end_sentinels_around_the_labels(tmp_path):
+    rig = make_rig(
+        tmp_path,
+        segments=["5.0 intro", "10.0 chorus", "20.0 end"],
+        beats=["1.0\t1\t1", "7.0\t2\t1", "30.0\t3\t1"],
+    )
     run(rig)
 
     assert beat_grid_rows(rig[1])[1:] == [
@@ -413,8 +446,7 @@ def test_a_bar_position_of_six_reaches_the_grid_and_is_reported(tmp_path):
     assert beat_grid_rows(corpus)[4] == ["7.3109", "6", "intro"]
     report = load_report(corpus)
     assert report["odd_meter_count"] == 1
-    assert report["odd_meter_tracks"] == [
-        {"id": TRACK, "max_position": 6}]
+    assert report["odd_meter_tracks"] == [{"id": TRACK, "max_position": 6}]
 
 
 def test_a_four_four_track_is_not_counted_as_odd_meter(tmp_path):
@@ -427,16 +459,14 @@ def test_a_four_four_track_is_not_counted_as_odd_meter(tmp_path):
 
 
 def test_a_track_opening_mid_bar_keeps_its_pickup_and_is_reported(tmp_path):
-    rig = make_rig(tmp_path, beats=["0.0\t2\t1", "0.530973\t3\t1",
-                                    "2.123892\t4\t1"])
+    rig = make_rig(tmp_path, beats=["0.0\t2\t1", "0.530973\t3\t1", "2.123892\t4\t1"])
     corpus = rig[1]
     run(rig)
 
     assert beat_grid_rows(corpus)[1] == ["0", "2", "intro"]
     report = load_report(corpus)
     assert report["mid_bar_start_count"] == 1
-    assert report["mid_bar_start_tracks"] == [
-        {"id": TRACK, "first_position": 2}]
+    assert report["mid_bar_start_tracks"] == [{"id": TRACK, "first_position": 2}]
 
 
 def test_a_track_opening_on_a_downbeat_is_not_counted_as_mid_bar(tmp_path):
@@ -456,8 +486,7 @@ def test_an_existing_beat_grid_is_kept(tmp_path):
 
     run(rig)
 
-    assert grid.read_text(encoding="utf-8") == (
-        "time,downbeat,section\n0.25,1,intro\n")
+    assert grid.read_text(encoding="utf-8") == ("time,downbeat,section\n0.25,1,intro\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -466,9 +495,9 @@ def test_an_existing_beat_grid_is_kept(tmp_path):
 
 
 def test_the_report_counts_the_label_vocabulary_and_the_seconds(tmp_path):
-    rig = make_rig(tmp_path, segments=[
-        "0.0 intro", "10.0 chorus", "20.0 chorus", "30.0 silence",
-        "40.0 end"])
+    rig = make_rig(
+        tmp_path, segments=["0.0 intro", "10.0 chorus", "20.0 chorus", "30.0 silence", "40.0 end"]
+    )
     run(rig)
 
     report = load_report(rig[1])
@@ -493,8 +522,7 @@ def test_the_report_carries_the_dtw_score_distribution(tmp_path):
 
 
 def test_a_duplicated_end_track_is_named_in_the_report(tmp_path):
-    rig = make_rig(tmp_path, segments=[
-        "0.0 intro", "10.0 chorus", "20.0 end", "25.0 end"])
+    rig = make_rig(tmp_path, segments=["0.0 intro", "10.0 chorus", "20.0 end", "25.0 end"])
     run(rig)
 
     assert load_report(rig[1])["duplicate_end_ids"] == [TRACK]
@@ -503,8 +531,7 @@ def test_a_duplicated_end_track_is_named_in_the_report(tmp_path):
 def test_a_broken_track_fails_alone_and_the_batch_continues(tmp_path):
     rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot"))
     harmonixset, corpus = rig
-    write_segments(harmonix_convert.dataset_dir(harmonixset), NATIVE,
-                   ["0.0\tintro", "10.0\tend"])
+    write_segments(harmonix_convert.dataset_dir(harmonixset), NATIVE, ["0.0\tintro", "10.0\tend"])
 
     assert run(rig) == 1
 
@@ -514,12 +541,10 @@ def test_a_broken_track_fails_alone_and_the_batch_continues(tmp_path):
     assert report["failures"][0]["id"] == TRACK
     assert "space-separated" in report["failures"][0]["reason"]
     assert not (corpus / "annotations" / f"{TRACK}.harmonix.json").exists()
-    assert (corpus / "annotations"
-            / "hx-0003_6foot7foot.harmonix.json").exists()
+    assert (corpus / "annotations" / "hx-0003_6foot7foot.harmonix.json").exists()
 
 
-def test_an_os_error_on_one_track_is_recorded_and_the_batch_continues(
-        tmp_path, monkeypatch):
+def test_an_os_error_on_one_track_is_recorded_and_the_batch_continues(tmp_path, monkeypatch):
     rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot"))
     corpus = rig[1]
     real = harmonix_convert.sha256
@@ -543,8 +568,9 @@ def test_an_os_error_on_one_track_is_recorded_and_the_batch_continues(
 def test_a_missing_segments_file_is_a_bucket_not_a_failure(tmp_path):
     rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot"))
     harmonixset, corpus = rig
-    harmonix_convert.segments_path(harmonix_convert.dataset_dir(harmonixset),
-                                   "0003_6foot7foot").unlink()
+    harmonix_convert.segments_path(
+        harmonix_convert.dataset_dir(harmonixset), "0003_6foot7foot"
+    ).unlink()
 
     assert run(rig) == 0
 
@@ -566,8 +592,9 @@ def test_an_id_absent_from_the_metadata_is_reported_by_name(tmp_path):
 def test_a_missing_annotation_does_not_make_a_whole_set_run_partial(tmp_path):
     rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot"))
     harmonixset, corpus = rig
-    harmonix_convert.segments_path(harmonix_convert.dataset_dir(harmonixset),
-                                   "0003_6foot7foot").unlink()
+    harmonix_convert.segments_path(
+        harmonix_convert.dataset_dir(harmonixset), "0003_6foot7foot"
+    ).unlink()
 
     run(rig)
 
@@ -592,8 +619,7 @@ def test_require_audio_converts_only_the_tracks_whose_mp3_has_landed(tmp_path):
     assert report["converted"] == 1
     assert report["no_audio_ids"] == ["0003_6foot7foot"]
     assert (corpus / "annotations" / f"{TRACK}.harmonix.json").exists()
-    assert not (corpus / "annotations"
-                / "hx-0003_6foot7foot.harmonix.json").exists()
+    assert not (corpus / "annotations" / "hx-0003_6foot7foot.harmonix.json").exists()
 
 
 def test_without_require_audio_a_track_with_no_mp3_still_converts(tmp_path):
@@ -605,8 +631,7 @@ def test_without_require_audio_a_track_with_no_mp3_still_converts(tmp_path):
 
 
 def test_limit_converts_only_the_first_n_tracks(tmp_path):
-    rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot",
-                                      "0004_abc"))
+    rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot", "0004_abc"))
     corpus = rig[1]
 
     assert run(rig, ["--limit", "2"]) == 0
@@ -617,8 +642,7 @@ def test_limit_converts_only_the_first_n_tracks(tmp_path):
     assert not (corpus / "annotations" / "hx-0004_abc.harmonix.json").exists()
 
 
-def test_a_restricted_run_writes_the_partial_report_and_spares_the_full_one(
-        tmp_path):
+def test_a_restricted_run_writes_the_partial_report_and_spares_the_full_one(tmp_path):
     rig = make_rig(tmp_path, natives=(NATIVE, "0003_6foot7foot"))
     corpus = rig[1]
     full = tp_record.third_party_dir(corpus) / harmonix_convert.REPORT_FILE
@@ -635,46 +659,39 @@ def test_a_restricted_run_writes_the_partial_report_and_spares_the_full_one(
 
 
 def test_only_an_unrestricted_run_writes_the_full_report_name():
-    assert harmonix_convert.report_file(None, None, False) == (
-        harmonix_convert.REPORT_FILE)
+    assert harmonix_convert.report_file(None, None, False) == (harmonix_convert.REPORT_FILE)
     assert harmonix_convert.report_file(["0001_12step"], None, False) == (
-        harmonix_convert.PARTIAL_REPORT_FILE)
-    assert harmonix_convert.report_file(None, 25, False) == (
-        harmonix_convert.PARTIAL_REPORT_FILE)
-    assert harmonix_convert.report_file(None, None, True) == (
-        harmonix_convert.PARTIAL_REPORT_FILE)
+        harmonix_convert.PARTIAL_REPORT_FILE
+    )
+    assert harmonix_convert.report_file(None, 25, False) == (harmonix_convert.PARTIAL_REPORT_FILE)
+    assert harmonix_convert.report_file(None, None, True) == (harmonix_convert.PARTIAL_REPORT_FILE)
 
 
-def test_a_second_conversion_leaves_the_record_byte_identical(
-        tmp_path, monkeypatch):
+def test_a_second_conversion_leaves_the_record_byte_identical(tmp_path, monkeypatch):
     rig = make_rig(tmp_path)
     corpus = rig[1]
-    monkeypatch.setattr(harmonix_convert, "_now_utc",
-                        lambda: "2026-01-01T00:00:00Z")
+    monkeypatch.setattr(harmonix_convert, "_now_utc", lambda: "2026-01-01T00:00:00Z")
     run(rig)
     path = corpus / "annotations" / f"{TRACK}.harmonix.json"
     before = path.read_bytes()
 
-    monkeypatch.setattr(harmonix_convert, "_now_utc",
-                        lambda: "2027-02-03T04:05:06Z")
+    monkeypatch.setattr(harmonix_convert, "_now_utc", lambda: "2027-02-03T04:05:06Z")
     assert run(rig) == 0
 
     assert path.read_bytes() == before
-    assert json.loads(before)["provenance"]["converted_utc"] == (
-        "2026-01-01T00:00:00Z")
+    assert json.loads(before)["provenance"]["converted_utc"] == ("2026-01-01T00:00:00Z")
 
 
 def test_a_changed_record_takes_the_fresh_timestamp(tmp_path, monkeypatch):
     rig = make_rig(tmp_path)
     harmonixset, corpus = rig
-    monkeypatch.setattr(harmonix_convert, "_now_utc",
-                        lambda: "2026-01-01T00:00:00Z")
+    monkeypatch.setattr(harmonix_convert, "_now_utc", lambda: "2026-01-01T00:00:00Z")
     run(rig)
 
-    write_metadata(harmonix_convert.dataset_dir(harmonixset),
-                   [metadata_row(NATIVE, title="Renamed")])
-    monkeypatch.setattr(harmonix_convert, "_now_utc",
-                        lambda: "2027-02-03T04:05:06Z")
+    write_metadata(
+        harmonix_convert.dataset_dir(harmonixset), [metadata_row(NATIVE, title="Renamed")]
+    )
+    monkeypatch.setattr(harmonix_convert, "_now_utc", lambda: "2027-02-03T04:05:06Z")
     run(rig)
 
     record = load_record(corpus)
@@ -694,7 +711,15 @@ def test_conversion_is_idempotent(tmp_path):
     second = load_report(corpus)
 
     assert snapshot(corpus) == before
-    for key in ("converted", "failed", "labels", "labelled_sec", "audio_sec",
-                "adjacent_identical_pairs", "odd_meter_tracks",
-                "mid_bar_start_tracks", "no_end_sentinel_ids"):
+    for key in (
+        "converted",
+        "failed",
+        "labels",
+        "labelled_sec",
+        "audio_sec",
+        "adjacent_identical_pairs",
+        "odd_meter_tracks",
+        "mid_bar_start_tracks",
+        "no_end_sentinel_ids",
+    ):
         assert first[key] == second[key]

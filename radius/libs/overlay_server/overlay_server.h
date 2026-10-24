@@ -33,4 +33,4 @@ private:
 	UdpServer mUdpServer;
 };
 
-}
+} // namespace Radius

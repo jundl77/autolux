@@ -1,4 +1,5 @@
 """The fitted section priors and the fixed-lag Viterbi decoder."""
+
 import ast
 import dataclasses
 import inspect
@@ -85,8 +86,7 @@ def toy_priors(floor=4, hazard=0.25, class_prior=None, initial=None):
             if transition_allowed(src, dst):
                 transition[i, j] = 1.0
     rows = transition.sum(axis=1, keepdims=True)
-    transition = np.divide(transition, rows, out=np.zeros_like(transition),
-                           where=rows > 0)
+    transition = np.divide(transition, rows, out=np.zeros_like(transition), where=rows > 0)
     if initial is None:
         initial = np.full(n, 1.0 / n)
     if class_prior is None:
@@ -261,8 +261,11 @@ def test_label_runs_merge_across_a_dropped_sentinel_without_folding():
         (50.0, 60.0, "altoutro"),
     ]
     assert label_runs(sections) == [
-        (0.0, 10.0, "intro"), (10.0, 40.0, "drop"),
-        (40.0, 50.0, "cooldown"), (50.0, 60.0, "altoutro")]
+        (0.0, 10.0, "intro"),
+        (10.0, 40.0, "drop"),
+        (40.0, 50.0, "cooldown"),
+        (50.0, 60.0, "altoutro"),
+    ]
 
 
 def test_the_default_class_space_to_fit_in_is_the_whole_vocabulary():
@@ -289,13 +292,17 @@ def test_a_priors_file_naming_the_shipping_five_classes_still_loads(tmp_path):
     assert Priors.load(path).classes == SHIPPING_CLASSES
 
 
-@pytest.mark.parametrize("classes, complaint", [
-    (("intro", "verse", "breakdown", "drop", "outro"), "vocabulary does not know"),
-    (("buildup", "intro", "breakdown", "drop", "outro"), "wrong order"),
-    (("intro", "intro", "breakdown", "drop", "outro"), "duplicate"),
-])
+@pytest.mark.parametrize(
+    "classes, complaint",
+    [
+        (("intro", "verse", "breakdown", "drop", "outro"), "vocabulary does not know"),
+        (("buildup", "intro", "breakdown", "drop", "outro"), "wrong order"),
+        (("intro", "intro", "breakdown", "drop", "outro"), "duplicate"),
+    ],
+)
 def test_a_priors_file_whose_class_space_is_not_the_vocabulary_is_refused(
-        tmp_path, classes, complaint):
+    tmp_path, classes, complaint
+):
     """Every table in the file is indexed by this list, so a wrong one loads
     cleanly and decodes shifted."""
     path = tmp_path / PRIORS_FILE
@@ -310,8 +317,7 @@ def test_a_priors_file_whose_class_space_is_not_the_vocabulary_is_refused(
 
 def test_a_decoder_built_on_a_class_space_outside_the_vocabulary_is_refused():
     """The floors, the class prior and the transition matrix are all positional."""
-    broken = toy_priors()._replace(
-        classes=("intro", "verse", "breakdown", "drop", "outro"))
+    broken = toy_priors()._replace(classes=("intro", "verse", "breakdown", "drop", "outro"))
     with pytest.raises(ValueError, match="vocabulary does not know"):
         FixedLagViterbi(broken, lag_bars=2)
 
@@ -355,11 +361,20 @@ def skip_corpus(tmp_path, *, records, grids, split=None):
     data_dir = tmp_path / "raveform"
     beats = data_dir / "annotations" / "beats"
     beats.mkdir(parents=True)
-    with open(data_dir / "annotations" / "segments.json", "w",
-              encoding="utf-8") as handle:
-        json.dump([{"key": name, "id": name, "title": f"An Artist - {name}",
-                    "duration": 24.0, "sections": SKIP_SECTIONS}
-                   for name in records], handle)
+    with open(data_dir / "annotations" / "segments.json", "w", encoding="utf-8") as handle:
+        json.dump(
+            [
+                {
+                    "key": name,
+                    "id": name,
+                    "title": f"An Artist - {name}",
+                    "duration": 24.0,
+                    "sections": SKIP_SECTIONS,
+                }
+                for name in records
+            ],
+            handle,
+        )
     for name, (bars, t0) in grids.items():
         write_beat_csv(beats / f"{name}.beat.csv", bars=bars, bar_sec=2.0, t0=t0)
     if split is not None:
@@ -374,8 +389,12 @@ def four_cause_corpus(tmp_path, *, split=True):
     data_dir = skip_corpus(
         tmp_path,
         records=[name for name in ids if name != "ghost"],
-        grids={"fits_a": (8, 0.0), "fits_b": (8, 0.0), "one_downbeat": (1, 0.0),
-               "off_grid": (8, 100.0)},
+        grids={
+            "fits_a": (8, 0.0),
+            "fits_b": (8, 0.0),
+            "one_downbeat": (1, 0.0),
+            "off_grid": (8, 100.0),
+        },
         split=ids if split else None,
     )
     return data_dir, ids
@@ -385,8 +404,7 @@ def test_a_track_absent_from_the_annotation_source_is_not_a_missing_beat_grid(tm
     """The incident, exactly: five tracks whose grids were present and valid on
     disk were reported under a key that names the beat grid, and everyone went
     looking at the wrong artifact."""
-    data_dir = skip_corpus(tmp_path, records=["present"],
-                           grids={"present": (8, 0.0)})
+    data_dir = skip_corpus(tmp_path, records=["present"], grids={"present": (8, 0.0)})
 
     sequences, skipped = corpus_bar_runs_by_cause(data_dir, ["present", "ghost"])
 
@@ -396,8 +414,7 @@ def test_a_track_absent_from_the_annotation_source_is_not_a_missing_beat_grid(tm
 
 
 def test_a_track_whose_grid_file_is_missing_is_counted_under_the_missing_grid_cause(tmp_path):
-    data_dir = skip_corpus(tmp_path, records=["present", "no_grid"],
-                           grids={"present": (8, 0.0)})
+    data_dir = skip_corpus(tmp_path, records=["present", "no_grid"], grids={"present": (8, 0.0)})
 
     sequences, skipped = corpus_bar_runs_by_cause(data_dir, ["present", "no_grid"])
 
@@ -408,11 +425,12 @@ def test_a_track_whose_grid_file_is_missing_is_counted_under_the_missing_grid_ca
 
 def test_a_degenerate_grid_and_a_track_with_no_bar_runs_land_in_their_own_causes(tmp_path):
     data_dir = skip_corpus(
-        tmp_path, records=["one_downbeat", "off_grid"],
-        grids={"one_downbeat": (1, 0.0), "off_grid": (8, 100.0)})
+        tmp_path,
+        records=["one_downbeat", "off_grid"],
+        grids={"one_downbeat": (1, 0.0), "off_grid": (8, 100.0)},
+    )
 
-    sequences, skipped = corpus_bar_runs_by_cause(
-        data_dir, ["one_downbeat", "off_grid"])
+    sequences, skipped = corpus_bar_runs_by_cause(data_dir, ["one_downbeat", "off_grid"])
 
     assert sequences == []
     assert skipped[SKIP_DEGENERATE_GRID] == ["one_downbeat"]
@@ -474,9 +492,9 @@ def test_a_dropped_id_warns_by_default_rather_than_raising(tmp_path, caplog):
 
 
 def test_a_complete_fit_neither_warns_nor_refuses_under_the_strict_flag(tmp_path, caplog):
-    data_dir = skip_corpus(tmp_path, records=["a", "b"],
-                           grids={"a": (8, 0.0), "b": (8, 0.0)},
-                           split=["a", "b"])
+    data_dir = skip_corpus(
+        tmp_path, records=["a", "b"], grids={"a": (8, 0.0), "b": (8, 0.0)}, split=["a", "b"]
+    )
 
     with caplog.at_level("WARNING"):
         priors = fit(data_dir, classes=SHIPPING_CLASSES, require_all_ids=True)
@@ -487,8 +505,7 @@ def test_a_complete_fit_neither_warns_nor_refuses_under_the_strict_flag(tmp_path
 
 def test_the_warning_samples_the_dropped_ids_rather_than_listing_all_of_them(tmp_path, caplog):
     ghosts = [f"ghost{index:03d}" for index in range(40)]
-    data_dir = skip_corpus(tmp_path, records=["a"], grids={"a": (8, 0.0)},
-                           split=["a"] + ghosts)
+    data_dir = skip_corpus(tmp_path, records=["a"], grids={"a": (8, 0.0)}, split=["a"] + ghosts)
 
     with caplog.at_level("WARNING"):
         fit(data_dir, classes=SHIPPING_CLASSES)
@@ -520,8 +537,7 @@ def test_a_genuine_switch_is_followed_once_and_cleanly():
 
 def test_minimum_duration_is_honoured_under_bar_by_bar_alternation():
     priors = toy_priors(floor=5)
-    posteriors = np.array([one_hot(DROP if bar % 2 else BREAKDOWN)
-                           for bar in range(60)])
+    posteriors = np.array([one_hot(DROP if bar % 2 else BREAKDOWN) for bar in range(60)])
     spans = segments(FixedLagViterbi(priors, lag_bars=3).decode(posteriors))
     for start, end, label in spans[:-1]:
         assert end - start >= int(priors.floor_bars[INDEX[label]])
@@ -529,20 +545,17 @@ def test_minimum_duration_is_honoured_under_bar_by_bar_alternation():
 
 def test_floor_scale_widens_or_relaxes_the_minimum_dwell():
     priors = toy_priors(floor=8)
-    posteriors = np.array([one_hot(DROP if (bar // 4) % 2 else BREAKDOWN)
-                           for bar in range(64)])
-    tight = segments(FixedLagViterbi(priors, lag_bars=2, floor_scale=0.25)
-                     .decode(posteriors))
-    loose = segments(FixedLagViterbi(priors, lag_bars=2, floor_scale=1.0)
-                     .decode(posteriors))
+    posteriors = np.array([one_hot(DROP if (bar // 4) % 2 else BREAKDOWN) for bar in range(64)])
+    tight = segments(FixedLagViterbi(priors, lag_bars=2, floor_scale=0.25).decode(posteriors))
+    loose = segments(FixedLagViterbi(priors, lag_bars=2, floor_scale=1.0).decode(posteriors))
     assert len(tight) > len(loose), "a smaller floor must permit more switches"
 
 
 def test_no_illegal_transition_is_emitted_under_adversarial_evidence():
     priors = toy_priors(floor=2)
     posteriors = np.array(
-        [one_hot(INTRO)] * 6 + [one_hot(OUTRO)] * 6
-        + [one_hot(DROP)] * 6 + [one_hot(INTRO)] * 6)
+        [one_hot(INTRO)] * 6 + [one_hot(OUTRO)] * 6 + [one_hot(DROP)] * 6 + [one_hot(INTRO)] * 6
+    )
     spans = segments(FixedLagViterbi(priors, lag_bars=2).decode(posteriors))
     for before, after in zip(spans, spans[1:]):
         assert transition_allowed(before[2], after[2]), f"{before[2]}->{after[2]}"
@@ -558,8 +571,7 @@ def test_a_class_with_no_legal_successor_absorbs_the_rest_of_the_track():
 
 def test_intro_is_never_re_entered_after_leaving_it():
     priors = toy_priors(floor=2)
-    posteriors = np.array([one_hot(INTRO)] * 8 + [one_hot(DROP)] * 8
-                          + [one_hot(INTRO)] * 8)
+    posteriors = np.array([one_hot(INTRO)] * 8 + [one_hot(DROP)] * 8 + [one_hot(INTRO)] * 8)
     spans = segments(FixedLagViterbi(priors, lag_bars=2).decode(posteriors))
     assert [span[2] for span in spans].count("intro") == 1
 
@@ -573,8 +585,7 @@ def test_a_decision_is_emitted_exactly_lag_bars_after_its_own(lag):
         emitted = decoder.push(row)
         expected = [bar - lag] if bar >= lag else []
         assert [d.bar for d in emitted] == expected
-    assert [d.bar for d in decoder.flush()] == list(range(len(posteriors) - lag,
-                                                          len(posteriors)))
+    assert [d.bar for d in decoder.flush()] == list(range(len(posteriors) - lag, len(posteriors)))
 
 
 def test_an_emitted_decision_never_changes_when_more_audio_arrives():
@@ -592,7 +603,8 @@ def test_an_emitted_decision_never_changes_when_more_audio_arrives():
         for bar, label in emitted.items():
             assert label == full[bar], (
                 f"bar {bar} was emitted as {label} after {k} bars but the full "
-                f"decode says {full[bar]}")
+                f"decode says {full[bar]}"
+            )
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2, 3, 4])
@@ -606,10 +618,12 @@ def test_the_emitted_stream_is_itself_one_legal_path(seed, alpha, floor, lag):
 
     for before, after in zip(spans, spans[1:]):
         assert transition_allowed(before[2], after[2]), (
-            f"emitted {before[2]}->{after[2]}, which is -inf in the matrix")
+            f"emitted {before[2]}->{after[2]}, which is -inf in the matrix"
+        )
     for start, end, label in spans[:-1]:
         assert end - start >= int(priors.floor_bars[INDEX[label]]), (
-            f"emitted a {end - start}-bar {label} run under a {floor}-bar floor")
+            f"emitted a {end - start}-bar {label} run under a {floor}-bar floor"
+        )
 
 
 def test_every_bar_is_decided_exactly_once_and_in_order():
@@ -696,8 +710,10 @@ def test_prior_division_strength_scales_the_correction_in_both_directions():
     reversed_ = FixedLagViterbi(priors, lag_bars=2, prior_strength=-1.0)
     assert set(labels_of(weak.decode(posteriors))) == {"drop"}
     assert set(labels_of(reversed_.decode(posteriors))) == {"drop"}
-    assert (reversed_._emission_bonus[DROP] - reversed_._emission_bonus[BUILDUP]
-            > weak._emission_bonus[DROP] - weak._emission_bonus[BUILDUP])
+    assert (
+        reversed_._emission_bonus[DROP] - reversed_._emission_bonus[BUILDUP]
+        > weak._emission_bonus[DROP] - weak._emission_bonus[BUILDUP]
+    )
 
 
 def test_the_default_prior_strength_is_neutral_because_the_net_is_pre_balanced():
@@ -732,28 +748,27 @@ def test_drop_miss_cost_is_charged_once_at_the_entry_edge_not_once_per_bar():
     finite = np.isfinite(neutral._transition[:, entry])
     assert finite.any(), "some edge must enter drop"
     np.testing.assert_allclose(
-        eager._transition[finite, entry] - neutral._transition[finite, entry],
-        np.log(3.0))
-    np.testing.assert_allclose(eager._log_initial[entry] - neutral._log_initial[entry],
-                               np.log(3.0))
+        eager._transition[finite, entry] - neutral._transition[finite, entry], np.log(3.0)
+    )
+    np.testing.assert_allclose(eager._log_initial[entry] - neutral._log_initial[entry], np.log(3.0))
 
     saturated = int(eager._final_state[DROP])
-    assert eager._transition[saturated, saturated] == \
-        neutral._transition[saturated, saturated]
+    assert eager._transition[saturated, saturated] == neutral._transition[saturated, saturated]
 
 
 @pytest.mark.parametrize("cost", [1.0, 3.0, 20.0, 200.0, 1000.0])
 def test_raising_the_cost_never_lengthens_a_drop_run(cost):
     """Per bar, cost 1000 swallowed the whole track: 41 % -> 64 % drop occupancy."""
     priors = toy_priors(floor=4)
-    posteriors = np.array([one_hot(BREAKDOWN)] * 12 + [one_hot(DROP)] * 12
-                          + [one_hot(BREAKDOWN)] * 12)
-    spans = segments(FixedLagViterbi(priors, lag_bars=2, drop_miss_cost=cost)
-                     .decode(posteriors))
+    posteriors = np.array(
+        [one_hot(BREAKDOWN)] * 12 + [one_hot(DROP)] * 12 + [one_hot(BREAKDOWN)] * 12
+    )
+    spans = segments(FixedLagViterbi(priors, lag_bars=2, drop_miss_cost=cost).decode(posteriors))
     drops = [span for span in spans if span[2] == "drop"]
     assert drops == [(12, 24, "drop")], (
         f"at cost {cost} the drop covered {drops} instead of exactly the bars "
-        f"the evidence supports -- is the bonus per bar?")
+        f"the evidence supports -- is the bonus per bar?"
+    )
 
 
 @pytest.mark.parametrize("spike", [10, 12, 14])
@@ -761,8 +776,7 @@ def test_boundary_hazard_sharpens_where_an_ambiguous_switch_lands(spike):
     priors = toy_priors(floor=4)
     ambiguous = np.zeros(5)
     ambiguous[BREAKDOWN], ambiguous[DROP] = 0.5, 0.5
-    posteriors = np.array(
-        [one_hot(BREAKDOWN)] * 9 + [ambiguous] * 8 + [one_hot(DROP)] * 9)
+    posteriors = np.array([one_hot(BREAKDOWN)] * 9 + [ambiguous] * 8 + [one_hot(DROP)] * 9)
     boundary = np.full(len(posteriors), 0.02)
     boundary[spike] = 0.99
 
@@ -827,14 +841,16 @@ def test_importing_the_decoder_does_not_drag_torch_onto_the_decode_path():
         "                if m in sys.modules);"
         "print(leaked, len(sys.modules))"
     )
-    result = subprocess.run([sys.executable, "-c", probe], cwd=str(REPO_ROOT),
-                            capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", probe], cwd=str(REPO_ROOT), capture_output=True, text=True
+    )
     assert result.returncode == 0, result.stderr
     leaked, modules = result.stdout.strip().rsplit(" ", 1)
     assert leaked == "[]", f"decode path imported {leaked}"
     assert int(modules) < 500, (
         f"a bare decoder import loaded {modules} modules -- something heavy "
-        f"crept back onto the decode path")
+        f"crept back onto the decode path"
+    )
 
 
 def write_beat_csv(path, bars, beats_per_bar=4, bar_sec=2.0, t0=0.5):
@@ -935,8 +951,9 @@ def test_a_config_naming_a_knob_the_decoder_lacks_is_refused(tmp_path):
 
 def test_a_config_of_known_knobs_round_trips(tmp_path):
     path = tmp_path / "decoder_config.json"
-    path.write_text(json.dumps({"chosen": {"lag_bars": 2, "temperature": 0.5,
-                                           "floor_bars": [1, 2, 3, 4, 5]}}))
+    path.write_text(
+        json.dumps({"chosen": {"lag_bars": 2, "temperature": 0.5, "floor_bars": [1, 2, 3, 4, 5]}})
+    )
     params = load_decoder_config(path)
     assert params.lag_bars == 2
     assert params.temperature == 0.5
@@ -1049,12 +1066,14 @@ def test_a_floor_vector_of_the_wrong_length_is_refused():
 
 def test_the_floor_vector_sets_the_minimum_run_length_class_by_class():
     priors = toy_priors(floor=8, hazard=0.3)
-    posteriors = np.array([one_hot(BREAKDOWN)] * 8 + [one_hot(DROP)] * 2
-                          + [one_hot(BREAKDOWN)] * 10)
+    posteriors = np.array(
+        [one_hot(BREAKDOWN)] * 8 + [one_hot(DROP)] * 2 + [one_hot(BREAKDOWN)] * 10
+    )
 
     long_floors = FixedLagViterbi(priors, lag_bars=0, boundary_weight=0.0)
-    short_floors = FixedLagViterbi(priors, lag_bars=0, boundary_weight=0.0,
-                                   floor_bars=(2, 2, 2, 2, 2))
+    short_floors = FixedLagViterbi(
+        priors, lag_bars=0, boundary_weight=0.0, floor_bars=(2, 2, 2, 2, 2)
+    )
     assert labels_of(long_floors.decode(posteriors)).count("drop") == 8
     assert labels_of(short_floors.decode(posteriors)).count("drop") == 2
 
@@ -1064,8 +1083,7 @@ def test_outro_is_terminal_until_an_escape_is_opened():
     posteriors = np.array([one_hot(OUTRO)] * 4 + [one_hot(DROP)] * 12)
 
     terminal = FixedLagViterbi(priors, lag_bars=0, boundary_weight=0.0)
-    escaping = FixedLagViterbi(priors, lag_bars=0, boundary_weight=0.0,
-                               outro_escape=0.2)
+    escaping = FixedLagViterbi(priors, lag_bars=0, boundary_weight=0.0, outro_escape=0.2)
     assert set(labels_of(terminal.decode(posteriors))) == {"outro"}
     assert "drop" in labels_of(escaping.decode(posteriors))
 
@@ -1073,9 +1091,9 @@ def test_outro_is_terminal_until_an_escape_is_opened():
 def test_a_zero_escape_reproduces_the_terminal_decoder_exactly():
     priors = toy_priors(floor=2, hazard=0.3)
     posteriors = np.array([one_hot(OUTRO)] * 4 + [one_hot(DROP)] * 12)
-    assert (labels_of(FixedLagViterbi(priors, lag_bars=0, outro_escape=0.0)
-                      .decode(posteriors))
-            == labels_of(FixedLagViterbi(priors, lag_bars=0).decode(posteriors)))
+    assert labels_of(
+        FixedLagViterbi(priors, lag_bars=0, outro_escape=0.0).decode(posteriors)
+    ) == labels_of(FixedLagViterbi(priors, lag_bars=0).decode(posteriors))
 
 
 @pytest.mark.parametrize("escape", [0.5, 0.6, -0.01])
@@ -1087,8 +1105,10 @@ def test_an_escape_that_leaves_no_probability_to_stay_is_refused(escape):
 def test_the_escape_only_opens_the_two_classes_a_track_can_resume_into():
     decoder = FixedLagViterbi(toy_priors(floor=2), outro_escape=0.2)
     source = int(decoder._final_state[decoder.classes.index("outro")])
-    reachable = {decoder.classes[int(decoder._state_class[target])]
-                 for target in np.flatnonzero(np.isfinite(decoder._transition[source]))}
+    reachable = {
+        decoder.classes[int(decoder._state_class[target])]
+        for target in np.flatnonzero(np.isfinite(decoder._transition[source]))
+    }
     assert reachable == {"outro", "breakdown", "drop"}
 
 
@@ -1113,8 +1133,7 @@ def entry_bonus_pair(bonus, floor=2):
     stayed forbidden reads as no change -- which is what it is.
     """
     neutral = FixedLagViterbi(toy_priors(floor=floor), lag_bars=2)
-    boosted = FixedLagViterbi(toy_priors(floor=floor), lag_bars=2,
-                              buildup_entry_bonus=bonus)
+    boosted = FixedLagViterbi(toy_priors(floor=floor), lag_bars=2, buildup_entry_bonus=bonus)
     with np.errstate(invalid="ignore"):
         delta = boosted._transition - neutral._transition
     return neutral, boosted, np.where(np.isnan(delta), 0.0, delta)
@@ -1130,16 +1149,16 @@ def test_the_default_entry_bonus_is_bit_identically_the_knobless_decoder(monkeyp
     posteriors = intro_then_bars_that_shade_breakdown()
     reference = FixedLagViterbi(toy_priors(floor=1), lag_bars=2)
 
-    monkeypatch.setattr(FixedLagViterbi, "_apply_buildup_entry_bonus",
-                        lambda self, transition, switch: None)
+    monkeypatch.setattr(
+        FixedLagViterbi, "_apply_buildup_entry_bonus", lambda self, transition, switch: None
+    )
     knobless = FixedLagViterbi(toy_priors(floor=1), lag_bars=2)
     monkeypatch.undo()
 
     assert DecodeParams().buildup_entry_bonus == 0.0
     assert reference._transition.tobytes() == knobless._transition.tobytes()
     assert reference._cold_initial.tobytes() == knobless._cold_initial.tobytes()
-    assert (labels_of(reference.decode(posteriors))
-            == labels_of(knobless.decode(posteriors)))
+    assert labels_of(reference.decode(posteriors)) == labels_of(knobless.decode(posteriors))
 
 
 def test_the_entry_bonus_lifts_every_legal_edge_into_buildup_by_exactly_itself():
@@ -1155,7 +1174,10 @@ def test_the_entry_bonus_lifts_every_legal_edge_into_buildup_by_exactly_itself()
     moved = np.flatnonzero(delta.any(axis=1))
     assert delta[moved, target] == pytest.approx(0.7)
     assert {neutral.classes[int(neutral._state_class[state])] for state in moved} == {
-        "intro", "breakdown", "drop"}
+        "intro",
+        "breakdown",
+        "drop",
+    }
 
     delta[moved, target] = 0.0
     assert not delta.any()
@@ -1197,8 +1219,7 @@ def test_the_entry_bonus_leaves_the_cold_start_alone():
 def test_the_entry_bonus_resolves_an_ambiguous_exit_toward_buildup():
     posteriors = intro_then_bars_that_shade_breakdown()
     neutral = FixedLagViterbi(toy_priors(floor=1), lag_bars=2)
-    boosted = FixedLagViterbi(toy_priors(floor=1), lag_bars=2,
-                              buildup_entry_bonus=1.0)
+    boosted = FixedLagViterbi(toy_priors(floor=1), lag_bars=2, buildup_entry_bonus=1.0)
 
     neutral_labels = labels_of(neutral.decode(posteriors))
     boosted_labels = labels_of(boosted.decode(posteriors))
@@ -1217,8 +1238,7 @@ def test_a_non_finite_entry_bonus_is_refused():
 
 def test_the_entry_bonus_round_trips_through_a_config_and_a_typo_still_raises(tmp_path):
     path = tmp_path / "decoder_config.json"
-    path.write_text(json.dumps({"chosen": {"lag_bars": 2,
-                                           "buildup_entry_bonus": 1.0}}))
+    path.write_text(json.dumps({"chosen": {"lag_bars": 2, "buildup_entry_bonus": 1.0}}))
     assert load_decoder_config(path).buildup_entry_bonus == 1.0
 
     # A config cut before the knob existed still loads, at the neutral point.
@@ -1279,18 +1299,14 @@ def test_a_sidecar_where_no_frame_clears_the_coverage_threshold_raises(tmp_path)
 def test_decode_track_carries_every_knob_the_config_names(tmp_path):
     npz = tmp_path / "t.npz"
     beats = tmp_path / "t.beat.csv"
-    synthetic_npz(npz, [BREAKDOWN] * 80 + [DROP] * 40 + [BREAKDOWN] * 80,
-                  thin_frames=4)
+    synthetic_npz(npz, [BREAKDOWN] * 80 + [DROP] * 40 + [BREAKDOWN] * 80, thin_frames=4)
     write_beat_csv(beats, bars=10, bar_sec=2.0, t0=0.0)
     priors = toy_priors(floor=8, hazard=0.3)
 
     long_floors = DecodeParams(lag_bars=0, boundary_weight=0.0)
-    short_floors = DecodeParams(lag_bars=0, boundary_weight=0.0,
-                                floor_bars=(2, 2, 2, 2, 2))
-    decoded_long = [label for _, label in
-                    decode_track(npz, beats, long_floors, priors=priors)]
-    decoded_short = [label for _, label in
-                     decode_track(npz, beats, short_floors, priors=priors)]
+    short_floors = DecodeParams(lag_bars=0, boundary_weight=0.0, floor_bars=(2, 2, 2, 2, 2))
+    decoded_long = [label for _, label in decode_track(npz, beats, long_floors, priors=priors)]
+    decoded_short = [label for _, label in decode_track(npz, beats, short_floors, priors=priors)]
     assert decoded_long.count("drop") != decoded_short.count("drop")
     assert decoded_short.count("drop") == 2
 
@@ -1325,17 +1341,14 @@ def graded_bars(bars):
 
 def test_decode_track_forwards_the_temperature_to_the_bar_average(tmp_path):
     npz, beats = tmp_path / "t.npz", tmp_path / "t.beat.csv"
-    rows_npz(npz, graded_bars(16), frame_sec=0.25,
-             label_pool=2, label_t0=0.5)
+    rows_npz(npz, graded_bars(16), frame_sec=0.25, label_pool=2, label_t0=0.5)
     write_beat_csv(beats, bars=16, bar_sec=2.0, t0=0.5)
     priors = toy_priors(floor=2, hazard=0.3)
 
     neutral = DecodeParams(lag_bars=0, boundary_weight=0.0, min_coverage=1)
     hot = dataclasses.replace(neutral, temperature=8.0)
-    assert (set(label for _, label in decode_track(npz, beats, neutral, priors=priors))
-            == {"drop"})
-    assert (set(label for _, label in decode_track(npz, beats, hot, priors=priors))
-            == {"breakdown"})
+    assert set(label for _, label in decode_track(npz, beats, neutral, priors=priors)) == {"drop"}
+    assert set(label for _, label in decode_track(npz, beats, hot, priors=priors)) == {"breakdown"}
 
 
 def test_decode_track_forwards_the_outro_escape_to_the_trellis(tmp_path):
@@ -1346,10 +1359,8 @@ def test_decode_track_forwards_the_outro_escape_to_the_trellis(tmp_path):
 
     terminal = DecodeParams(lag_bars=0, boundary_weight=0.0, min_coverage=1)
     escaping = dataclasses.replace(terminal, outro_escape=0.2)
-    assert (set(label for _, label in decode_track(npz, beats, terminal, priors=priors))
-            == {"outro"})
-    assert "drop" in [label for _, label in
-                      decode_track(npz, beats, escaping, priors=priors)]
+    assert set(label for _, label in decode_track(npz, beats, terminal, priors=priors)) == {"outro"}
+    assert "drop" in [label for _, label in decode_track(npz, beats, escaping, priors=priors)]
 
 
 NON_DEFAULT_TRELLIS_KNOBS = {
@@ -1416,14 +1427,17 @@ def test_only_one_place_builds_the_trellis():
         if path == shared:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        offenders += [f"{path.relative_to(root)}:{node.lineno}"
-                      for node in ast.walk(tree)
-                      if isinstance(node, ast.Call)
-                      and isinstance(node.func, ast.Name)
-                      and node.func.id == "FixedLagViterbi"]
+        offenders += [
+            f"{path.relative_to(root)}:{node.lineno}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "FixedLagViterbi"
+        ]
     assert offenders == [], (
         f"build_decoder is the one way to build one; {offenders} hand-list the "
-        f"knobs and can fall behind DecodeParams")
+        f"knobs and can fall behind DecodeParams"
+    )
 
 
 def test_the_source_walk_skips_the_gitignored_corpus(tmp_path):
@@ -1439,6 +1453,7 @@ def test_the_source_walk_skips_the_gitignored_corpus(tmp_path):
     corpus = tmp_path / "training" / "data" / "raveform" / "models" / "campaign"
     corpus.mkdir(parents=True)
     (corpus / "ops_copy.py").write_text(
-        '﻿"""an ops copy with a BOM"""\nFixedLagViterbi(1)\n', encoding="utf-8")
+        '﻿"""an ops copy with a BOM"""\nFixedLagViterbi(1)\n', encoding="utf-8"
+    )
 
     assert [p.name for p in _repo_sources(tmp_path)] == ["ours.py"]

@@ -1,4 +1,5 @@
 """Hold each command until the audience hears the audio that caused it."""
+
 import bisect
 import logging
 from collections import deque
@@ -30,12 +31,12 @@ class DelayedCommandQueue:
     def pending(self) -> int:
         return len(self._queue)
 
-    async def enqueue(self, label: str, factory: CommandFactory,
-                      delay_sec: float | None = None) -> None:
+    async def enqueue(
+        self, label: str, factory: CommandFactory, delay_sec: float | None = None
+    ) -> None:
         self.schedule(label, factory, delay_sec)
 
-    def schedule(self, label: str, factory: CommandFactory,
-                 delay_sec: float | None = None) -> None:
+    def schedule(self, label: str, factory: CommandFactory, delay_sec: float | None = None) -> None:
         enqueue_time = self._clock.monotonic()
         delay = self._delay_sec if delay_sec is None else float(delay_sec)
         fire_at = self._kept_in_stream_order(label, enqueue_time + delay)
@@ -44,16 +45,17 @@ class DelayedCommandQueue:
         bisect.insort(
             self._queue,
             (fire_at, self._sequence, enqueue_time, delay, label, factory),
-            key=lambda item: (item[0], item[1]))
+            key=lambda item: (item[0], item[1]),
+        )
 
     def _kept_in_stream_order(self, label: str, fire_at: float) -> float:
         return max(fire_at, self._last_fire_at.get(label, float('-inf')))
 
-    def drop_pending(self, label: str, later_than: float,
-                     inclusive: bool = False) -> int:
+    def drop_pending(self, label: str, later_than: float, inclusive: bool = False) -> int:
         def doomed(item) -> bool:
-            return item[4] == label and (item[0] >= later_than if inclusive
-                                         else item[0] > later_than)
+            return item[4] == label and (
+                item[0] >= later_than if inclusive else item[0] > later_than
+            )
 
         keep = [item for item in self._queue if not doomed(item)]
         dropped = len(self._queue) - len(keep)
@@ -83,19 +85,23 @@ class DelayedCommandQueue:
                 f'[cmd_queue] {label!r}  target={delay:.3f}s  '
                 f'actual={actual_delta:.3f}s  error={error_ms:.1f}ms'
             )
-            self._timing_log.append({
-                'label': label,
-                'enqueue_time': enqueue_time,
-                'target_fire_time': fire_at,
-                'target_delta_sec': delay,
-                'actual_fire_time': actual_fire_time,
-                'actual_delta_sec': actual_delta,
-            })
+            self._timing_log.append(
+                {
+                    'label': label,
+                    'enqueue_time': enqueue_time,
+                    'target_fire_time': fire_at,
+                    'target_delta_sec': delay,
+                    'actual_fire_time': actual_fire_time,
+                    'actual_delta_sec': actual_delta,
+                }
+            )
             try:
                 await factory()
             except Exception as error:
-                log.exception(f'[cmd_queue] {label!r} failed ({error!r}) — '
-                              f'dropping it and delivering the rest')
+                log.exception(
+                    f'[cmd_queue] {label!r} failed ({error!r}) — '
+                    f'dropping it and delivering the rest'
+                )
 
     def get_timing_log(self) -> list[dict]:
         return list(self._timing_log)

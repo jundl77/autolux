@@ -1,4 +1,5 @@
 """Tests for the eval-set benchmark runner (training/run_eval_set.py)."""
+
 import hashlib
 import json
 import sys
@@ -76,8 +77,9 @@ def eval_document(*specs) -> dict:
     }
 
 
-def metrics(macro_f1=0.5, accuracy=0.5, boundary_f1=0.5, crispness=0.5,
-            flicker_per_min=1.0) -> dict:
+def metrics(
+    macro_f1=0.5, accuracy=0.5, boundary_f1=0.5, crispness=0.5, flicker_per_min=1.0
+) -> dict:
     return {
         "macro_f1": macro_f1,
         "accuracy": accuracy,
@@ -87,11 +89,9 @@ def metrics(macro_f1=0.5, accuracy=0.5, boundary_f1=0.5, crispness=0.5,
     }
 
 
-def result_document(tracks: dict, aggregate: dict | None = None,
-                    eval_sha: str = "abc123") -> dict:
+def result_document(tracks: dict, aggregate: dict | None = None, eval_sha: str = "abc123") -> dict:
     return {
-        "eval_set": {"sha256": eval_sha, "tracks": len(tracks),
-                     "youtube_ids": sorted(tracks)},
+        "eval_set": {"sha256": eval_sha, "tracks": len(tracks), "youtube_ids": sorted(tracks)},
         "pipeline_sha": "deadbeef",
         "space": GATED_SPACE,
         "truth": GATED_TRUTH,
@@ -101,11 +101,22 @@ def result_document(tracks: dict, aggregate: dict | None = None,
 
 
 def entry(checksum="cafe", **overrides) -> dict:
-    record = {"youtube_id": "yt", "checksum": checksum, "beats": 100, "rows": 90,
-              "song_sec": 300.0, "exposure_sec": 280.0,
-              "changes_intent": 20, "changes_class": 15, "label_boundaries": 12,
-              "late": 1, "blocks_measurable": 14,
-              "silence_leading": 0, "silence_interior": 0, "silence_trailing": 1}
+    record = {
+        "youtube_id": "yt",
+        "checksum": checksum,
+        "beats": 100,
+        "rows": 90,
+        "song_sec": 300.0,
+        "exposure_sec": 280.0,
+        "changes_intent": 20,
+        "changes_class": 15,
+        "label_boundaries": 12,
+        "late": 1,
+        "blocks_measurable": 14,
+        "silence_leading": 0,
+        "silence_interior": 0,
+        "silence_trailing": 1,
+    }
     record.update(metrics())
     record.update(overrides)
     return record
@@ -121,25 +132,27 @@ def corpus(tmp_path: Path, segments: str = "[]") -> Path:
 def frozen_against(tmp_path: Path) -> dict:
     from select_eval_set import input_paths, sha256_of
 
-    return {"selected_from": {"inputs": {name: sha256_of(path) for name, path
-                                         in input_paths(tmp_path).items()}}}
+    return {
+        "selected_from": {
+            "inputs": {name: sha256_of(path) for name, path in input_paths(tmp_path).items()}
+        }
+    }
 
 
 def test_shortest_track_ids_takes_the_shortest_by_duration():
-    document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0),
-                             ("c.3", "3", 300.0), ("d.4", "4", 470.0))
+    document = eval_document(
+        ("a.1", "1", 400.0), ("b.2", "2", 250.0), ("c.3", "3", 300.0), ("d.4", "4", 470.0)
+    )
     assert shortest_track_ids(document, 2) == ["b.2", "c.3"]
 
 
 def test_shortest_track_ids_keeps_eval_set_order():
-    document = eval_document(("a.1", "1", 300.0), ("b.2", "2", 250.0),
-                             ("c.3", "3", 400.0))
+    document = eval_document(("a.1", "1", 300.0), ("b.2", "2", 250.0), ("c.3", "3", 400.0))
     assert shortest_track_ids(document, 2) == ["a.1", "b.2"]
 
 
 def test_shortest_track_ids_breaks_duration_ties_by_id():
-    document = eval_document(("z.9", "9", 300.0), ("a.1", "1", 300.0),
-                             ("m.5", "5", 400.0))
+    document = eval_document(("z.9", "9", 300.0), ("a.1", "1", 300.0), ("m.5", "5", 400.0))
     assert shortest_track_ids(document, 1) == ["a.1"]
 
 
@@ -201,8 +214,7 @@ def test_build_jobs_gives_each_worker_only_its_own_sections(tmp_path):
     document = eval_document(("a.1", "1", 400.0))
     sections = {"a.1": [(0.0, 10.0, "intro")], "other.2": [(0.0, 5.0, "drop")]}
     jobs = build_jobs(tmp_path, select_tracks(document), by_truth(sections))
-    assert [job.sections for job in jobs] == [
-        {truth: sections["a.1"] for truth in REPORTED_TRUTHS}]
+    assert [job.sections for job in jobs] == [{truth: sections["a.1"] for truth in REPORTED_TRUTHS}]
 
 
 def test_build_jobs_carries_every_truths_reading_of_the_same_track(tmp_path):
@@ -211,8 +223,7 @@ def test_build_jobs_carries_every_truths_reading_of_the_same_track(tmp_path):
     document = eval_document(("a.1", "1", 400.0))
     published = {"a.1": [(0.0, 10.0, "drop")]}
     owner = {"a.1": [(0.0, 10.0, "bridge")]}
-    jobs = build_jobs(tmp_path, select_tracks(document),
-                      by_truth(published, owner))
+    jobs = build_jobs(tmp_path, select_tracks(document), by_truth(published, owner))
 
     assert jobs[0].sections[PUBLISHED] == published["a.1"]
     assert jobs[0].sections[OWNER] == owner["a.1"]
@@ -221,16 +232,18 @@ def test_build_jobs_carries_every_truths_reading_of_the_same_track(tmp_path):
 def test_build_jobs_refuses_a_track_missing_from_one_truth_only(tmp_path):
     document = eval_document(("a.1", "1", 400.0))
     with pytest.raises(RuntimeError, match="no annotation"):
-        build_jobs(tmp_path, select_tracks(document),
-                   {PUBLISHED: {"a.1": [(0.0, 10.0, "intro")]}, OWNER: {}})
+        build_jobs(
+            tmp_path,
+            select_tracks(document),
+            {PUBLISHED: {"a.1": [(0.0, 10.0, "intro")]}, OWNER: {}},
+        )
 
 
 def test_missing_inputs_reports_a_missing_annotation_file(tmp_path):
     document = eval_document(("a.1", "1", 400.0))
     (tmp_path / "audio").mkdir()
     corpus_audio_path(tmp_path, "1").write_bytes(b"x")
-    problems = missing_inputs(tmp_path, select_tracks(document),
-                              labels=tmp_path / NO_SLICE)
+    problems = missing_inputs(tmp_path, select_tracks(document), labels=tmp_path / NO_SLICE)
     assert any("segments.json" in problem for problem in problems)
 
 
@@ -251,7 +264,8 @@ def test_audio_resolution_prefers_the_committed_copy(tmp_path, monkeypatch):
 
 def test_audio_resolution_falls_back_to_the_corpus(tmp_path):
     assert audio_path(tmp_path, "not-an-eval-track") == corpus_audio_path(
-        tmp_path, "not-an-eval-track")
+        tmp_path, "not-an-eval-track"
+    )
 
 
 def test_missing_audio_names_the_corpus_path_a_human_can_act_on(tmp_path):
@@ -280,37 +294,42 @@ def test_the_committed_slice_covers_exactly_the_frozen_eval_set(tmp_path):
 
 
 def test_every_committed_mp3_the_eval_set_names_is_there():
-    missing = [youtube_id
-               for youtube_id in load_eval_set(EVAL_SET_FILE)["youtube_ids"]
-               if not committed_audio_path(youtube_id).exists()]
+    missing = [
+        youtube_id
+        for youtube_id in load_eval_set(EVAL_SET_FILE)["youtube_ids"]
+        if not committed_audio_path(youtube_id).exists()
+    ]
     assert not missing, f"{len(missing)} eval-set mp3s are not committed: {missing}"
 
 
 def slice_cut_from(tmp_path: Path, sha: str, rulings: dict | None = None) -> Path:
     path = tmp_path / "eval_labels.json"
-    path.write_text(json.dumps({
-        "schema": 2,
-        "truths": {
-            "published": {"file": "annotations/segments.json", "sha256": sha},
-            "owner": {"rulings": rulings or {"a.1": {"ruling": UNREVIEWED}}},
-        },
-        "tracks": [{"key": "a.1", "sections": []}],
-        "owner_tracks": [],
-    }), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "truths": {
+                    "published": {"file": "annotations/segments.json", "sha256": sha},
+                    "owner": {"rulings": rulings or {"a.1": {"ruling": UNREVIEWED}}},
+                },
+                "tracks": [{"key": "a.1", "sections": []}],
+                "owner_tracks": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     return path
 
 
 def test_a_slice_cut_from_the_frozen_labels_passes(tmp_path):
     document = {"selected_from": {"inputs": {"segments.json": "abc123"}}}
-    verify_ground_truth(document, tmp_path,
-                        labels=slice_cut_from(tmp_path, "abc123"))
+    verify_ground_truth(document, tmp_path, labels=slice_cut_from(tmp_path, "abc123"))
 
 
 def test_a_slice_cut_from_other_labels_is_a_hard_failure(tmp_path):
     document = {"selected_from": {"inputs": {"segments.json": "abc123"}}}
     with pytest.raises(RuntimeError) as excinfo:
-        verify_ground_truth(document, tmp_path,
-                            labels=slice_cut_from(tmp_path, "d1ffe4e47"))
+        verify_ground_truth(document, tmp_path, labels=slice_cut_from(tmp_path, "d1ffe4e47"))
     message = str(excinfo.value)
     assert "GROUND TRUTH" in message and "eval_assets.py --cut" in message
 
@@ -319,8 +338,9 @@ def test_a_slice_with_no_recorded_source_is_a_failure(tmp_path):
     path = tmp_path / "eval_labels.json"
     path.write_text(json.dumps({"schema": 2, "tracks": []}), encoding="utf-8")
     with pytest.raises(RuntimeError, match="GROUND TRUTH"):
-        verify_ground_truth({"selected_from": {"inputs": {"segments.json": "a"}}},
-                            tmp_path, labels=path)
+        verify_ground_truth(
+            {"selected_from": {"inputs": {"segments.json": "a"}}}, tmp_path, labels=path
+        )
 
 
 def test_the_committed_slice_was_cut_from_the_frozen_ground_truth():
@@ -356,8 +376,9 @@ def owner_slice(rulings: dict) -> dict:
 
 def test_an_unmoved_hand_label_passes_the_owner_ground_truth_check(tmp_path):
     name, sha = hand_label(tmp_path)
-    verify_owner_ground_truth(owner_slice(
-        {"a.1": {"ruling": OVERRIDDEN, "file": name, "sha256": sha}}))
+    verify_owner_ground_truth(
+        owner_slice({"a.1": {"ruling": OVERRIDDEN, "file": name, "sha256": sha}})
+    )
 
 
 def test_a_moved_hand_label_is_a_hard_failure_that_names_the_track(tmp_path):
@@ -365,8 +386,9 @@ def test_a_moved_hand_label_is_a_hard_failure_that_names_the_track(tmp_path):
     (tmp_path / "a-hand-label.json").write_bytes(b'{"sections": ["moved"]}')
 
     with pytest.raises(RuntimeError) as excinfo:
-        verify_owner_ground_truth(owner_slice(
-            {"a.1": {"ruling": OVERRIDDEN, "file": name, "sha256": sha}}))
+        verify_owner_ground_truth(
+            owner_slice({"a.1": {"ruling": OVERRIDDEN, "file": name, "sha256": sha}})
+        )
 
     message = str(excinfo.value)
     assert "OWNER GROUND TRUTH" in message
@@ -378,8 +400,9 @@ def test_a_missing_hand_label_is_a_hard_failure_rather_than_a_skip(tmp_path):
     (tmp_path / "a-hand-label.json").unlink()
 
     with pytest.raises(RuntimeError, match="not on this checkout"):
-        verify_owner_ground_truth(owner_slice(
-            {"a.1": {"ruling": OVERRIDDEN, "file": name, "sha256": sha}}))
+        verify_owner_ground_truth(
+            owner_slice({"a.1": {"ruling": OVERRIDDEN, "file": name, "sha256": sha}})
+        )
 
 
 def test_an_overridden_ruling_with_no_sha_is_a_failure():
@@ -390,9 +413,11 @@ def test_an_overridden_ruling_with_no_sha_is_a_failure():
 def test_a_track_the_owner_has_not_relabelled_pins_nothing(tmp_path):
     """A freeze that does not follow a NEW hand label is the freeze working;
     only what the slice adopted is pinned."""
-    verify_owner_ground_truth(owner_slice(
-        {"a.1": {"ruling": UNREVIEWED},
-         "b.2": {"ruling": ACCEPTED, "dated": "2026-09-09"}}))
+    verify_owner_ground_truth(
+        owner_slice(
+            {"a.1": {"ruling": UNREVIEWED}, "b.2": {"ruling": ACCEPTED, "dated": "2026-09-09"}}
+        )
+    )
 
 
 def test_every_overridden_ruling_has_its_hand_label_on_disk_at_the_recorded_sha():
@@ -419,26 +444,27 @@ def test_the_owner_rulings_name_every_frozen_track():
     assert set(rulings) == {track["track_id"] for track in frozen}
 
     on_disk = hand_records()
-    overridden = {track_id for track_id, ruling in rulings.items()
-                  if ruling.get("ruling") == OVERRIDDEN}
-    expected = {str(track["track_id"]) for track in frozen
-                if str(track["youtube_id"]) in on_disk}
+    overridden = {
+        track_id for track_id, ruling in rulings.items() if ruling.get("ruling") == OVERRIDDEN
+    }
+    expected = {str(track["track_id"]) for track in frozen if str(track["youtube_id"]) in on_disk}
     assert overridden == expected, (
         "a hand label for a frozen track is not adopted by the slice -- re-cut "
-        "it with training/eval_assets.py --cut and re-cut the baseline")
+        "it with training/eval_assets.py --cut and re-cut the baseline"
+    )
 
 
 def test_unmoved_labels_pass_the_ground_truth_check(tmp_path):
     data_dir = corpus(tmp_path, segments='[{"key": "a.1"}]')
-    verify_ground_truth(frozen_against(data_dir), data_dir,
-                        labels=tmp_path / NO_SLICE)
+    verify_ground_truth(frozen_against(data_dir), data_dir, labels=tmp_path / NO_SLICE)
 
 
 def test_moved_labels_are_a_hard_failure_that_names_the_cause(tmp_path):
     data_dir = corpus(tmp_path, segments='[{"key": "a.1"}]')
     document = frozen_against(data_dir)
     (data_dir / "annotations" / "segments.json").write_text(
-        '[{"key": "a.1", "sections": "moved"}]', encoding="utf-8")
+        '[{"key": "a.1", "sections": "moved"}]', encoding="utf-8"
+    )
 
     with pytest.raises(RuntimeError) as excinfo:
         verify_ground_truth(document, data_dir, labels=tmp_path / NO_SLICE)
@@ -459,8 +485,7 @@ def test_a_grown_corpus_does_not_fail_the_ground_truth_check(tmp_path):
 def test_an_eval_set_with_no_recorded_label_checksum_is_a_failure(tmp_path):
     data_dir = corpus(tmp_path)
     with pytest.raises(RuntimeError, match="GROUND TRUTH"):
-        verify_ground_truth({"selected_from": {"inputs": {}}}, data_dir,
-                            labels=tmp_path / NO_SLICE)
+        verify_ground_truth({"selected_from": {"inputs": {}}}, data_dir, labels=tmp_path / NO_SLICE)
 
 
 def test_an_identical_run_compares_clean():
@@ -512,17 +537,20 @@ def test_the_aggregate_row_is_gated_too():
     assert any("(aggregate)" in line for line in outcome.regressions)
 
 
-@pytest.mark.parametrize("fact,moved", [
-    ("rows", 89),
-    ("label_boundaries", 13),
-    ("exposure_sec", 279.5),
-    ("late", 2),
-    ("beats", 101),
-    ("changes_intent", 21),
-    ("silence_interior", 1),
-    ("silence_trailing", 2),
-    ("silence_leading", 1),
-])
+@pytest.mark.parametrize(
+    "fact,moved",
+    [
+        ("rows", 89),
+        ("label_boundaries", 13),
+        ("exposure_sec", 279.5),
+        ("late", 2),
+        ("beats", 101),
+        ("changes_intent", 21),
+        ("silence_interior", 1),
+        ("silence_trailing", 2),
+        ("silence_leading", 1),
+    ],
+)
 def test_a_moved_count_fact_fails_even_when_every_score_holds(fact, moved):
     baseline = result_document({"a.1": entry()})
     current = result_document({"a.1": entry(**{fact: moved})})
@@ -556,8 +584,9 @@ def test_every_guarded_metric_is_actually_checked():
 
 
 def test_a_subset_run_compares_only_its_own_tracks():
-    baseline = result_document({"a.1": entry(), "b.2": entry(), "c.3": entry()},
-                               aggregate=metrics(macro_f1=0.60))
+    baseline = result_document(
+        {"a.1": entry(), "b.2": entry(), "c.3": entry()}, aggregate=metrics(macro_f1=0.60)
+    )
     current = result_document({"a.1": entry()}, aggregate=metrics(macro_f1=0.10))
     outcome = compare(baseline, current)
     assert outcome.failed is False
@@ -581,10 +610,8 @@ def test_a_baseline_cut_against_a_different_eval_set_is_a_hard_failure():
 
 
 def test_a_drift_with_improved_scores_still_fails():
-    baseline = result_document({"a.1": entry(checksum="cafe", macro_f1=0.20,
-                                             flicker_per_min=4.0)})
-    current = result_document({"a.1": entry(checksum="f00d", macro_f1=0.60,
-                                            flicker_per_min=1.0)})
+    baseline = result_document({"a.1": entry(checksum="cafe", macro_f1=0.20, flicker_per_min=4.0)})
+    current = result_document({"a.1": entry(checksum="f00d", macro_f1=0.60, flicker_per_min=1.0)})
     outcome = compare(baseline, current)
     assert outcome.failed
     assert outcome.checksum_drift
@@ -594,11 +621,9 @@ def test_a_drift_with_improved_scores_still_fails():
 def test_a_guarded_metric_missing_from_the_baseline_is_a_failure_not_a_skip():
     stale = entry()
     stale.pop("macro_f1")
-    outcome = compare(result_document({"a.1": stale}),
-                      result_document({"a.1": entry()}))
+    outcome = compare(result_document({"a.1": stale}), result_document({"a.1": entry()}))
     assert outcome.failed
-    assert any("macro_f1" in line and "NOT being gated" in line
-               for line in outcome.ungated)
+    assert any("macro_f1" in line and "NOT being gated" in line for line in outcome.ungated)
 
 
 def test_load_baseline_explains_itself_when_absent(tmp_path):
@@ -662,8 +687,7 @@ def test_every_committed_row_carries_the_count_facts_the_tripwire_reads():
         missing = [fact for fact in COUNT_FACTS if fact not in row]
         assert not missing, f"{track_id} is missing {missing} -- not a tripwire"
         for truth, block in row["truths"].items():
-            missing = [fact for fact in COUNT_FACTS
-                       if fact != "beats" and fact not in block]
+            missing = [fact for fact in COUNT_FACTS if fact != "beats" and fact not in block]
             assert not missing, f"{track_id}/{truth} is missing {missing}"
 
 
@@ -695,30 +719,34 @@ def test_the_committed_baseline_compares_clean_against_itself():
 
 def test_a_subset_may_not_overwrite_the_committed_baseline():
     document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0))
-    refusal = partial_baseline_refusal(
-        select_tracks(document, ["a.1"]), document, BASELINE_FILE)
+    refusal = partial_baseline_refusal(select_tracks(document, ["a.1"]), document, BASELINE_FILE)
     assert refusal and "REFUSING" in refusal
     assert "--allow-partial-baseline" in refusal
 
 
 def test_a_full_run_may_overwrite_the_committed_baseline():
     document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0))
-    assert partial_baseline_refusal(
-        select_tracks(document), document, BASELINE_FILE) is None
+    assert partial_baseline_refusal(select_tracks(document), document, BASELINE_FILE) is None
 
 
 def test_a_subset_may_overwrite_an_explicit_alternative_path(tmp_path):
     document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0))
-    assert partial_baseline_refusal(
-        select_tracks(document, ["a.1"]), document,
-        tmp_path / "scratch.json") is None
+    assert (
+        partial_baseline_refusal(
+            select_tracks(document, ["a.1"]), document, tmp_path / "scratch.json"
+        )
+        is None
+    )
 
 
 def test_the_subset_refusal_can_be_overridden_deliberately():
     document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0))
-    assert partial_baseline_refusal(
-        select_tracks(document, ["a.1"]), document, BASELINE_FILE,
-        allowed=True) is None
+    assert (
+        partial_baseline_refusal(
+            select_tracks(document, ["a.1"]), document, BASELINE_FILE, allowed=True
+        )
+        is None
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -740,7 +768,8 @@ def test_an_unreviewed_track_refuses_an_owner_truth_baseline(monkeypatch):
     gates_owner_truth(monkeypatch)
     document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0))
     refusal = unreviewed_truth_refusal(
-        document, ruled(**{"a.1": {"ruling": OVERRIDDEN}}), BASELINE_FILE)
+        document, ruled(**{"a.1": {"ruling": OVERRIDDEN}}), BASELINE_FILE
+    )
 
     assert refusal and "REFUSING" in refusal and "b.2" in refusal
     assert "--allow-unreviewed-truth" in refusal
@@ -750,10 +779,19 @@ def test_an_unreviewed_track_refuses_an_owner_truth_baseline(monkeypatch):
 def test_a_fully_ruled_set_may_cut_an_owner_truth_baseline(monkeypatch):
     gates_owner_truth(monkeypatch)
     document = eval_document(("a.1", "1", 400.0), ("b.2", "2", 250.0))
-    assert unreviewed_truth_refusal(document, ruled(**{
-        "a.1": {"ruling": OVERRIDDEN},
-        "b.2": {"ruling": ACCEPTED, "dated": "2026-09-09"},
-    }), BASELINE_FILE) is None
+    assert (
+        unreviewed_truth_refusal(
+            document,
+            ruled(
+                **{
+                    "a.1": {"ruling": OVERRIDDEN},
+                    "b.2": {"ruling": ACCEPTED, "dated": "2026-09-09"},
+                }
+            ),
+            BASELINE_FILE,
+        )
+        is None
+    )
 
 
 def test_accepting_a_published_label_counts_as_ruling_on_it(monkeypatch):
@@ -762,23 +800,24 @@ def test_accepting_a_published_label_counts_as_ruling_on_it(monkeypatch):
     inject transcription noise into eight ground truths to fix two."""
     gates_owner_truth(monkeypatch)
     document = eval_document(("a.1", "1", 400.0))
-    assert unreviewed_truth_refusal(
-        document, ruled(**{"a.1": {"ruling": ACCEPTED, "dated": "2026-09-09"}}),
-        BASELINE_FILE) is None
+    assert (
+        unreviewed_truth_refusal(
+            document, ruled(**{"a.1": {"ruling": ACCEPTED, "dated": "2026-09-09"}}), BASELINE_FILE
+        )
+        is None
+    )
 
 
 def test_the_review_refusal_can_be_overridden_deliberately(monkeypatch):
     gates_owner_truth(monkeypatch)
     document = eval_document(("a.1", "1", 400.0))
-    assert unreviewed_truth_refusal(document, ruled(), BASELINE_FILE,
-                                    allowed=True) is None
+    assert unreviewed_truth_refusal(document, ruled(), BASELINE_FILE, allowed=True) is None
 
 
 def test_an_unreviewed_set_may_write_an_explicit_alternative_path(tmp_path, monkeypatch):
     gates_owner_truth(monkeypatch)
     document = eval_document(("a.1", "1", 400.0))
-    assert unreviewed_truth_refusal(document, ruled(),
-                                    tmp_path / "scratch.json") is None
+    assert unreviewed_truth_refusal(document, ruled(), tmp_path / "scratch.json") is None
 
 
 def test_a_published_truth_baseline_does_not_wait_on_owner_rulings():
@@ -789,17 +828,25 @@ def test_a_published_truth_baseline_does_not_wait_on_owner_rulings():
 
 
 def beat(t: float) -> dict:
-    return {"t": t, "bpm": 128.0, "onset_density": 4.0, "kick_strength": 2.0,
-            "centroid_trend": 1.0, "sub_bass_ratio": 0.3, "rms": 0.1}
+    return {
+        "t": t,
+        "bpm": 128.0,
+        "onset_density": 4.0,
+        "kick_strength": 2.0,
+        "centroid_trend": 1.0,
+        "sub_bass_ratio": 0.3,
+        "rms": 0.1,
+    }
 
 
 def perfect_report(beat_times, blocks, duration_sec: float) -> dict:
     return {
         "duration_sec": duration_sec,
         "beats": [beat(t) for t in beat_times],
-        "intents": [{"t": start + LOOK_AHEAD, "intent": intent,
-                     "end": end + LOOK_AHEAD}
-                    for start, end, intent in blocks],
+        "intents": [
+            {"t": start + LOOK_AHEAD, "intent": intent, "end": end + LOOK_AHEAD}
+            for start, end, intent in blocks
+        ],
         "metrics": {"look_ahead_sec": LOOK_AHEAD},
     }
 
@@ -807,10 +854,10 @@ def perfect_report(beat_times, blocks, duration_sec: float) -> dict:
 def test_a_report_matching_the_annotation_scores_one():
     beat_times = [0.5 * index for index in range(1, 121)]
     sections = [(0.0, 20.0, "intro"), (20.0, 40.0, "drop"), (40.0, 60.5, "outro")]
-    blocks = [(0.0, 20.0, "atmospheric"), (20.0, 40.0, "drop"),
-              (40.0, 60.5, "atmospheric")]
+    blocks = [(0.0, 20.0, "atmospheric"), (20.0, 40.0, "drop"), (40.0, 60.5, "atmospheric")]
     scores, rows, _stats = score_report(
-        "t.1", "1", perfect_report(beat_times, blocks, 63.0), sections)
+        "t.1", "1", perfect_report(beat_times, blocks, 63.0), sections
+    )
     assert rows == len(beat_times)
     for space in REPORTED_SPACES:
         result = track_metrics(scores[space])
@@ -825,7 +872,8 @@ def test_a_constant_intent_scores_far_below_one():
     sections = [(0.0, 20.0, "intro"), (20.0, 40.0, "drop"), (40.0, 60.5, "outro")]
     blocks = [(0.0, 60.5, "drop")]
     scores, _rows, _stats = score_report(
-        "t.1", "1", perfect_report(beat_times, blocks, 63.0), sections)
+        "t.1", "1", perfect_report(beat_times, blocks, 63.0), sections
+    )
     assert track_metrics(scores[GATED_SPACE])["macro_f1"] < 0.5
 
 
@@ -834,7 +882,8 @@ def test_score_report_scores_every_reported_granularity():
     sections = [(0.0, 20.0, "intro"), (20.0, 40.0, "drop"), (40.0, 60.5, "outro")]
     blocks = [(0.0, 60.5, "drop")]
     scores, _rows, _stats = score_report(
-        "t.1", "1", perfect_report(beat_times, blocks, 63.0), sections)
+        "t.1", "1", perfect_report(beat_times, blocks, 63.0), sections
+    )
     assert set(scores) == set(REPORTED_SPACES)
     assert {RAW9, LEGACY_V1} == set(REPORTED_SPACES)
 
@@ -849,10 +898,8 @@ def test_the_gated_space_is_the_raw_nine_the_decoder_commits():
 
 
 def test_a_baseline_cut_in_another_space_is_a_desync_not_a_comparison():
-    baseline = {"eval_set": {"sha256": "abc"}, "space": LEGACY_V1,
-                "tracks": {}, "aggregate": {}}
-    current = {"eval_set": {"sha256": "abc"}, "space": GATED_SPACE,
-               "tracks": {}, "aggregate": {}}
+    baseline = {"eval_set": {"sha256": "abc"}, "space": LEGACY_V1, "tracks": {}, "aggregate": {}}
+    current = {"eval_set": {"sha256": "abc"}, "space": GATED_SPACE, "tracks": {}, "aggregate": {}}
     outcome = compare(baseline, current)
     assert outcome.failed
     assert any("space" in line for line in outcome.desync)
@@ -879,10 +926,20 @@ def test_no_single_hardcoded_truth_survives_in_the_runner():
 
 
 def test_a_baseline_cut_against_another_truth_is_a_desync_not_a_comparison():
-    baseline = {"eval_set": {"sha256": "abc"}, "space": GATED_SPACE,
-                "truth": OWNER, "tracks": {}, "aggregate": {}}
-    current = {"eval_set": {"sha256": "abc"}, "space": GATED_SPACE,
-               "truth": PUBLISHED, "tracks": {}, "aggregate": {}}
+    baseline = {
+        "eval_set": {"sha256": "abc"},
+        "space": GATED_SPACE,
+        "truth": OWNER,
+        "tracks": {},
+        "aggregate": {},
+    }
+    current = {
+        "eval_set": {"sha256": "abc"},
+        "space": GATED_SPACE,
+        "truth": PUBLISHED,
+        "tracks": {},
+        "aggregate": {},
+    }
     outcome = compare(baseline, current)
     assert outcome.failed
     assert any("ground truth" in line for line in outcome.desync)
@@ -891,8 +948,7 @@ def test_a_baseline_cut_against_another_truth_is_a_desync_not_a_comparison():
 def test_a_baseline_that_records_no_truth_at_all_is_a_desync():
     """Cut before the owner reading existed, so nothing says which annotator its
     numbers were scored against."""
-    baseline = {"eval_set": {"sha256": "abc"}, "space": GATED_SPACE,
-                "tracks": {}, "aggregate": {}}
+    baseline = {"eval_set": {"sha256": "abc"}, "space": GATED_SPACE, "tracks": {}, "aggregate": {}}
     current = result_document({})
     current["eval_set"]["sha256"] = "abc"
     outcome = compare(baseline, current)
@@ -904,17 +960,19 @@ def test_the_ungated_truth_cannot_fail_the_gate_on_its_own():
     """The owner column is REPORTED, not gated -- moving it must not stop a
     commit until the flip."""
     baseline = result_document({"a.1": entry()})
-    current = result_document({"a.1": entry(
-        truths={truth: metrics(macro_f1=0.01) for truth in REPORTED_TRUTHS})})
+    current = result_document(
+        {"a.1": entry(truths={truth: metrics(macro_f1=0.01) for truth in REPORTED_TRUTHS})}
+    )
 
     assert compare(baseline, current).failed is False
 
 
 def built_entry(report, sections, owner_sections=None) -> dict:
     """One simulation read by both annotators, exactly as ``run_job`` does it."""
-    reads = {PUBLISHED: score_report("t.1", "1", report, sections),
-             OWNER: score_report("t.1", "1", report,
-                                 owner_sections if owner_sections else sections)}
+    reads = {
+        PUBLISHED: score_report("t.1", "1", report, sections),
+        OWNER: score_report("t.1", "1", report, owner_sections if owner_sections else sections),
+    }
     return track_entry(report, reads, "1", 63.0)
 
 
@@ -940,18 +998,15 @@ def test_a_track_entry_reports_both_annotators_with_every_guarded_metric():
 
     assert set(built["truths"]) == set(REPORTED_TRUTHS)
     for truth, block in built["truths"].items():
-        assert not [metric for metric in GUARDED_METRICS
-                    if metric not in block], truth
-        assert not [fact for fact in COUNT_FACTS
-                    if fact not in block and fact != "beats"], truth
+        assert not [metric for metric in GUARDED_METRICS if metric not in block], truth
+        assert not [fact for fact in COUNT_FACTS if fact not in block and fact != "beats"], truth
         assert set(block["spaces"]) == set(REPORTED_SPACES), truth
 
 
 def test_the_gated_numbers_at_the_top_of_an_entry_are_the_gated_spaces_numbers():
     """The baseline gate reads the top level, so it must name one space, not a mix."""
     beat_times = [0.5 * index for index in range(1, 121)]
-    sections = [(0.0, 20.0, "breakdown"), (20.0, 40.0, "cooldown"),
-                (40.0, 60.5, "drop")]
+    sections = [(0.0, 20.0, "breakdown"), (20.0, 40.0, "cooldown"), (40.0, 60.5, "drop")]
     report = perfect_report(beat_times, [(0.0, 60.5, "drop")], 63.0)
 
     built = built_entry(report, sections)
@@ -969,8 +1024,7 @@ def test_the_gated_numbers_at_the_top_of_an_entry_are_the_gated_truths_numbers()
     beat_times = [0.5 * index for index in range(1, 121)]
     sections = [(0.0, 20.0, "intro"), (20.0, 40.0, "drop"), (40.0, 60.5, "outro")]
     owner = [(0.0, 20.0, "intro"), (20.0, 40.0, "bridge"), (40.0, 60.5, "outro")]
-    report = perfect_report(beat_times, [(0.0, 40.0, "drop"),
-                                         (40.0, 60.5, "atmospheric")], 63.0)
+    report = perfect_report(beat_times, [(0.0, 40.0, "drop"), (40.0, 60.5, "atmospheric")], 63.0)
 
     built = built_entry(report, sections, owner)
     gated = built["truths"][GATED_TRUTH]
@@ -1018,10 +1072,10 @@ def test_a_track_with_no_owner_override_scores_identically_under_both_truths():
 def test_the_raw_space_never_sees_fewer_label_boundaries_than_the_fold():
     """The legacy view can only merge classes, so it can only lose boundaries."""
     beat_times = [0.5 * index for index in range(1, 121)]
-    sections = [(0.0, 20.0, "breakdown"), (20.0, 40.0, "cooldown"),
-                (40.0, 60.5, "drop")]
+    sections = [(0.0, 20.0, "breakdown"), (20.0, 40.0, "cooldown"), (40.0, 60.5, "drop")]
     scores, _rows, _stats = score_report(
-        "t.1", "1", perfect_report(beat_times, [(0.0, 60.5, "drop")], 63.0), sections)
+        "t.1", "1", perfect_report(beat_times, [(0.0, 60.5, "drop")], 63.0), sections
+    )
 
     assert space_facts(scores[RAW9])["label_boundaries"] == 2
     assert space_facts(scores[LEGACY_V1])["label_boundaries"] == 1
@@ -1030,8 +1084,9 @@ def test_the_raw_space_never_sees_fewer_label_boundaries_than_the_fold():
 def test_the_ungated_granularity_cannot_fail_the_gate_on_its_own():
     """raw9 is REPORTED, not gated -- moving it must not stop a commit yet."""
     baseline = result_document({"a.1": entry()})
-    current = result_document({"a.1": entry(
-        spaces={space: metrics(macro_f1=0.01) for space in REPORTED_SPACES})})
+    current = result_document(
+        {"a.1": entry(spaces={space: metrics(macro_f1=0.01) for space in REPORTED_SPACES})}
+    )
 
     assert compare(baseline, current).failed is False
 
@@ -1046,7 +1101,9 @@ def test_build_document_round_trips_through_json(tmp_path):
 def test_build_document_carries_the_gate_settings():
     built = build_document(
         eval_set={"sha256": "abc", "tracks": 1, "youtube_ids": ["1"]},
-        pipeline_sha_="x", entries={"a.1": entry()}, aggregate_metrics=metrics(),
+        pipeline_sha_="x",
+        entries={"a.1": entry()},
+        aggregate_metrics=metrics(),
     )
     assert built["gate"]["score_tolerance"] == DEFAULT_SCORE_TOLERANCE
     assert built["gate"]["flicker_tolerance"] == DEFAULT_FLICKER_TOLERANCE
@@ -1080,11 +1137,9 @@ def test_crispness_is_gated_downward_like_the_other_scores():
 def test_a_baseline_without_crispness_is_not_gated_rather_than_skipped():
     stale = entry()
     stale.pop("crispness")
-    outcome = compare(result_document({"a.1": stale}),
-                      result_document({"a.1": entry()}))
+    outcome = compare(result_document({"a.1": stale}), result_document({"a.1": entry()}))
     assert outcome.failed
-    assert any("crispness" in line and "NOT being gated" in line
-               for line in outcome.ungated)
+    assert any("crispness" in line and "NOT being gated" in line for line in outcome.ungated)
 
 
 def test_the_committed_baseline_records_the_crispness_tolerance():
@@ -1162,8 +1217,9 @@ def test_a_count_fact_missing_from_the_baseline_is_a_failure_not_a_skip():
 def test_the_printed_table_shows_the_ungated_granularity_beside_the_gated_one():
     from run_eval_set import TrackRun, render_table
 
-    spaces = {space: dict(metrics(), label_boundaries=7, changes_class=5)
-              for space in REPORTED_SPACES}
+    spaces = {
+        space: dict(metrics(), label_boundaries=7, changes_class=5) for space in REPORTED_SPACES
+    }
     run = TrackRun("a.1", "1", entry(spaces=spaces), {}, 3.0)
     text = render_table([run], dict(metrics(), spaces=spaces), 300.0, 3.0)
 
@@ -1178,8 +1234,7 @@ def test_the_printed_table_shows_the_owner_reading_beside_the_gated_one():
     correction is visible before the gate flips, so nothing waits."""
     from run_eval_set import TrackRun, render_table
 
-    truths = {truth: dict(metrics(), label_boundaries=7, rows=90)
-              for truth in REPORTED_TRUTHS}
+    truths = {truth: dict(metrics(), label_boundaries=7, rows=90) for truth in REPORTED_TRUTHS}
     run = TrackRun("a.1", "1", entry(truths=truths), {}, 3.0)
     text = render_table([run], dict(metrics(), truths=truths), 300.0, 3.0)
 

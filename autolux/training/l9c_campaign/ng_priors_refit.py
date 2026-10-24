@@ -8,6 +8,7 @@ label9 worktree's nn.priors CLI and the main repo's side by side on today's
 data and byte-comparing (priors.py is committed-identical in both trees; this
 proves the whole import graph agrees on the fit).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,8 +28,7 @@ W = str(MAIN)
 sys.path[:0] = [W, W + r"\training"]
 
 try:
-    ctypes.windll.kernel32.SetPriorityClass(
-        ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
+    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
 except Exception:  # noqa: BLE001
     pass
 
@@ -39,13 +39,26 @@ def run_priors_cli(tree: Path, out: Path, split: str) -> None:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(tree), str(tree / "training")])
     result = subprocess.run(
-        [str(VENV_PY), "-m", "nn.priors", "--data-dir", str(DATA),
-         "--split", split, "--out", str(out)],
-        capture_output=True, text=True, env=env, cwd=str(tree), timeout=3600)
+        [
+            str(VENV_PY),
+            "-m",
+            "nn.priors",
+            "--data-dir",
+            str(DATA),
+            "--split",
+            split,
+            "--out",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tree),
+        timeout=3600,
+    )
     if result.returncode != 0:
         sys.stderr.write(result.stdout[-2000:] + result.stderr[-2000:])
-        raise SystemExit(f"{tree} nn.priors CLI failed "
-                         f"(exit {result.returncode})")
+        raise SystemExit(f"{tree} nn.priors CLI failed (exit {result.returncode})")
 
 
 def floor_rows(priors, labels=("buildup", "drop", "breakdown", "bridge")) -> str:
@@ -53,10 +66,12 @@ def floor_rows(priors, labels=("buildup", "drop", "breakdown", "bridge")) -> str
     for label in labels:
         index = priors.index(label)
         stats = priors.corpus["duration_bars"][label]
-        lines.append(f"  {label:<9} n={stats['n']:>4} median={stats['median']:>5.1f} "
-                     f"floor={int(priors.floor_bars[index]):>2} "
-                     f"hazard={priors.hazard[index]:.4f} "
-                     f"E[bars]={stats['expected_bars']:.1f}")
+        lines.append(
+            f"  {label:<9} n={stats['n']:>4} median={stats['median']:>5.1f} "
+            f"floor={int(priors.floor_bars[index]):>2} "
+            f"hazard={priors.hazard[index]:.4f} "
+            f"E[bars]={stats['expected_bars']:.1f}"
+        )
     return "\n".join(lines)
 
 
@@ -80,8 +95,10 @@ def main() -> int:
         run_priors_cli(MAIN, main_out, args.split)
         a, b = label9_out.read_bytes(), main_out.read_bytes()
         if a == b:
-            print(f"ANCHOR OK: label9 and main trees fit byte-identical "
-                  f"priors on today's data ({len(a)} bytes)")
+            print(
+                f"ANCHOR OK: label9 and main trees fit byte-identical "
+                f"priors on today's data ({len(a)} bytes)"
+            )
             return 0
         print("ANCHOR FAILED: the two trees' fits differ", file=sys.stderr)
         return 1
@@ -89,14 +106,16 @@ def main() -> int:
     run_priors_cli(MAIN, args.out, args.split)
 
     from nn.priors import Priors  # noqa: PLC0415
+
     priors = Priors.load(args.out)
     check_class_space(priors.classes, str(args.out))
     if len(priors.classes) != 9:
-        raise SystemExit(f"{args.out}: {len(priors.classes)} classes, not the "
-                         f"full vocabulary")
+        raise SystemExit(f"{args.out}: {len(priors.classes)} classes, not the full vocabulary")
     corpus = priors.corpus
-    print(f"arm N: fitted {corpus['tracks']} tracks / {corpus['runs']} runs / "
-          f"{corpus['bars']} bars (split={args.split})")
+    print(
+        f"arm N: fitted {corpus['tracks']} tracks / {corpus['runs']} runs / "
+        f"{corpus['bars']} bars (split={args.split})"
+    )
     print(floor_rows(priors))
     print(f"wrote {args.out}")
     return 0

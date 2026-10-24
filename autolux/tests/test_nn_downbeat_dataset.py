@@ -101,16 +101,19 @@ def test_load_beat_grid_reads_a_csv_off_disk(tmp_path):
     assert grid.source == str(path)
 
 
-@pytest.mark.parametrize("rows, header, match", [
-    ([], "time,downbeat,section", "no beats"),
-    (grid_rows(bars=2), "time,beat,section", "column"),
-    ([(0.5, 1, "drop"), ("later", 2, "drop")], "time,downbeat,section", "not a number"),
-    ([(0.5, 1, "drop"), (1.0, 9, "drop")], "time,downbeat,section", "phase"),
-    ([(0.5, 1, "drop"), (1.0, 0, "drop")], "time,downbeat,section", "phase"),
-    ([(0.5, 1, "drop"), (0.4, 2, "drop")], "time,downbeat,section", "increas"),
-    ([(0.5, 1, "drop"), (0.5, 2, "drop")], "time,downbeat,section", "increas"),
-    ([(-0.5, 1, "drop"), (0.5, 2, "drop")], "time,downbeat,section", "negative"),
-])
+@pytest.mark.parametrize(
+    "rows, header, match",
+    [
+        ([], "time,downbeat,section", "no beats"),
+        (grid_rows(bars=2), "time,beat,section", "column"),
+        ([(0.5, 1, "drop"), ("later", 2, "drop")], "time,downbeat,section", "not a number"),
+        ([(0.5, 1, "drop"), (1.0, 9, "drop")], "time,downbeat,section", "phase"),
+        ([(0.5, 1, "drop"), (1.0, 0, "drop")], "time,downbeat,section", "phase"),
+        ([(0.5, 1, "drop"), (0.4, 2, "drop")], "time,downbeat,section", "increas"),
+        ([(0.5, 1, "drop"), (0.5, 2, "drop")], "time,downbeat,section", "increas"),
+        ([(-0.5, 1, "drop"), (0.5, 2, "drop")], "time,downbeat,section", "negative"),
+    ],
+)
 def test_a_malformed_grid_raises_and_names_the_file(tmp_path, rows, header, match):
     path = write_grid(tmp_path / "0001.abc.beat.csv", rows, header=header)
     with pytest.raises(RuntimeError, match=match) as raised:
@@ -160,8 +163,10 @@ def test_a_stuck_phase_column_is_caught_by_both_invariants():
 
 
 def test_a_repeated_phase_pair_is_caught_even_though_downbeats_look_sane():
-    rows = [(time, (index // 2) % BEATS_PER_BAR + 1, section)
-            for index, (time, _phase, section) in enumerate(grid_rows(bars=40))]
+    rows = [
+        (time, (index // 2) % BEATS_PER_BAR + 1, section)
+        for index, (time, _phase, section) in enumerate(grid_rows(bars=40))
+    ]
 
     reasons = grid_anomalies(parse_beat_grid(rows))
 
@@ -180,7 +185,7 @@ def test_target_peaks_on_the_downbeat_frame_with_a_gaussian_shape():
     downbeat = grid.downbeat_times[2]
 
     peak = frame_of(downbeat)
-    assert abs(int(np.argmax(targets.downbeat[peak - 4:peak + 5])) - 4) <= 1
+    assert abs(int(np.argmax(targets.downbeat[peak - 4 : peak + 5])) - 4) <= 1
     for offset in (-2, -1, 0, 1, 2):
         index = peak + offset
         delta = (FRAME_SEC * (index + 1)) - downbeat
@@ -203,7 +208,7 @@ def test_every_downbeat_gets_a_peak_and_nothing_else_does():
     past_the_masked_leading_edge = grid.downbeat_times[1:]
     for instant in past_the_masked_leading_edge:
         near = frame_of(instant)
-        assert targets.downbeat[near - 1:near + 2].max() > 0.85
+        assert targets.downbeat[near - 1 : near + 2].max() > 0.85
 
     peaks = np.flatnonzero(targets.downbeat > 0.85)
     for peak in peaks:
@@ -221,8 +226,8 @@ def test_audio_outside_the_grid_is_masked_and_zeroed():
     rows = grid_rows(bpm=120.0, bars=8, start=20.0)
     grid, targets = targets_for(rows, duration=120.0)
 
-    assert not targets.mask[:frame_of(19.5)].any()
-    assert not targets.mask[frame_of(grid.times[-1] + 1.0):].any()
+    assert not targets.mask[: frame_of(19.5)].any()
+    assert not targets.mask[frame_of(grid.times[-1] + 1.0) :].any()
     assert targets.mask[frame_of(30.0)]
     assert (targets.downbeat[~targets.mask] == 0.0).all()
 
@@ -230,13 +235,13 @@ def test_audio_outside_the_grid_is_masked_and_zeroed():
 def test_a_hole_in_the_grid_is_masked_rather_than_taught_as_silence():
     rows = grid_rows(bpm=120.0, bars=8, start=1.0)
     two_bars = 2 * BEATS_PER_BAR
-    kept = rows[:12] + rows[12 + two_bars:]
+    kept = rows[:12] + rows[12 + two_bars :]
     grid, targets = targets_for(kept)
 
     hole_start = kept[11][0]
     hole_end = kept[12][0]
     assert hole_end - hole_start > GAP_FACTOR * 0.5
-    assert not targets.mask[frame_of(hole_start + 0.5):frame_of(hole_end - 0.5)].any()
+    assert not targets.mask[frame_of(hole_start + 0.5) : frame_of(hole_end - 0.5)].any()
     assert targets.mask[frame_of(hole_start - 1.0)]
     assert targets.mask[frame_of(hole_end + 1.0)]
 
@@ -314,8 +319,10 @@ def with_grids(tmp_path, count=4, frames=3000, bpm=128.0, bars=200):
     tracks = corpus_tracks(count)
     data_dir, _eval_set = fake_corpus(tmp_path, tracks, frames=frames)
     for track_id, _youtube, _title in tracks:
-        write_grid(data_dir / "annotations" / "beats" / f"{track_id}.beat.csv",
-                   grid_rows(bpm=bpm, bars=bars, start=1.0))
+        write_grid(
+            data_dir / "annotations" / "beats" / f"{track_id}.beat.csv",
+            grid_rows(bpm=bpm, bars=bars, start=1.0),
+        )
     ids = [youtube for _t, youtube, _title in tracks]
     return data_dir, ids
 
@@ -341,8 +348,8 @@ def test_window_targets_are_the_track_targets_sliced_at_the_offset(tmp_path):
     _mel, downbeat, mask = data[index]
 
     end = min(offset + WINDOW_FRAMES, len(whole.downbeat))
-    assert np.array_equal(downbeat[:end - offset], whole.downbeat[offset:end])
-    assert np.array_equal(mask[:end - offset], whole.mask[offset:end])
+    assert np.array_equal(downbeat[: end - offset], whole.downbeat[offset:end])
+    assert np.array_equal(mask[: end - offset], whole.mask[offset:end])
 
 
 def test_eval_mode_is_deterministic_and_augmentation_leaves_targets_alone(tmp_path):
@@ -364,9 +371,9 @@ def test_padding_past_the_end_of_a_short_track_is_masked(tmp_path):
     data = DownbeatWindowDataset(data_dir, ids)
     mel, downbeat, mask = data[0]
 
-    assert (mel[WINDOW_FRAMES // 2:] == 0.0).all()
-    assert not mask[WINDOW_FRAMES // 2:].any()
-    assert (downbeat[WINDOW_FRAMES // 2:] == 0.0).all()
+    assert (mel[WINDOW_FRAMES // 2 :] == 0.0).all()
+    assert not mask[WINDOW_FRAMES // 2 :].any()
+    assert (downbeat[WINDOW_FRAMES // 2 :] == 0.0).all()
 
 
 def test_dataset_refuses_a_track_with_no_beat_grid(tmp_path):
@@ -382,14 +389,14 @@ def test_dataset_refuses_an_id_whose_grid_was_not_supplied(tmp_path):
     sections = {ids[0]: [(0.0, 30.0, "intro"), (30.0, 60.0, "drop")]}
 
     with pytest.raises(RuntimeError, match="no beat grid"):
-        DownbeatWindowDataset(data_dir, ids, sections_by_youtube_id=sections,
-                              grids_by_youtube_id={})
+        DownbeatWindowDataset(
+            data_dir, ids, sections_by_youtube_id=sections, grids_by_youtube_id={}
+        )
 
 
 def test_dataset_refuses_a_track_whose_grid_has_no_bars(tmp_path):
     data_dir, ids = with_grids(tmp_path, count=1)
-    rows = [(t, 2 if i % 2 else 3, "drop")
-            for i, (t, _p, _s) in enumerate(grid_rows(bars=40))]
+    rows = [(t, 2 if i % 2 else 3, "drop") for i, (t, _p, _s) in enumerate(grid_rows(bars=40))]
     write_grid(data_dir / "annotations" / "beats" / "0000.id00000000.beat.csv", rows)
 
     with pytest.raises(RuntimeError, match="downbeat"):

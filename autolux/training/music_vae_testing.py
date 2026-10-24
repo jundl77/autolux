@@ -3,7 +3,9 @@ import numpy as np
 from magenta.models.music_vae import TrainedModel
 import magenta.music as mm
 
-model = TrainedModel(model_name='hierdec-mel_16bar', batch_size=4, checkpoint_dir_or_path='PATH_TO_CHECKPOINT')
+model = TrainedModel(
+    model_name='hierdec-mel_16bar', batch_size=4, checkpoint_dir_or_path='PATH_TO_CHECKPOINT'
+)
 
 sample_rate = 44100
 block_size = 2048
@@ -11,15 +13,19 @@ threshold = 0.5
 
 previous_embedding = None
 
-click_sound: float = 0.7 * np.sin(2. * np.pi * np.arange(block_size) / block_size * sample_rate / 3000.)
+click_sound: float = 0.7 * np.sin(
+    2.0 * np.pi * np.arange(block_size) / block_size * sample_rate / 3000.0
+)
 
 p = pyaudio.PyAudio()
-stream_out = p.open(format=pyaudio.paFloat32,
-                    channels=1,
-                    output_device_index=12,
-                    rate=sample_rate,
-                    output=True,
-                    frames_per_buffer=block_size)
+stream_out = p.open(
+    format=pyaudio.paFloat32,
+    channels=1,
+    output_device_index=12,
+    rate=sample_rate,
+    output=True,
+    frames_per_buffer=block_size,
+)
 
 
 def audio_callback(in_data, frame_count, time_info, status):
@@ -44,14 +50,17 @@ def audio_callback(in_data, frame_count, time_info, status):
 
     return None, pyaudio.paContinue
 
+
 p = pyaudio.PyAudio()
 
-stream = p.open(format=pyaudio.paFloat32,
-                channels=1,
-                rate=sample_rate,
-                input=True,
-                frames_per_buffer=block_size,
-                stream_callback=audio_callback)
+stream = p.open(
+    format=pyaudio.paFloat32,
+    channels=1,
+    rate=sample_rate,
+    input=True,
+    frames_per_buffer=block_size,
+    stream_callback=audio_callback,
+)
 
 stream.start_stream()
 stream_out.start_stream()

@@ -30,8 +30,12 @@ import sys
 from pathlib import Path
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"), str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -50,12 +54,28 @@ from raveform_fetch_annotations import parse_beat_csv  # noqa: E402
 TP_DIR = "third_party"
 TP_MANIFEST_FILE = "manifest.csv"
 TP_CLEAN_MANIFEST_FILE = "clean_manifest.csv"
-TP_MANIFEST_HEADER = ("track_id", "source", "native_id", "title", "artist",
-                      "genre", "n_sections", "n_masked", "labelled_sec",
-                      "total_sec")
-TP_CLEAN_HEADER = ("track_id", "source", "audio_path", "probe_duration_sec",
-                   "decoded_duration_sec", "annotation_duration_sec",
-                   "status", "detail")
+TP_MANIFEST_HEADER = (
+    "track_id",
+    "source",
+    "native_id",
+    "title",
+    "artist",
+    "genre",
+    "n_sections",
+    "n_masked",
+    "labelled_sec",
+    "total_sec",
+)
+TP_CLEAN_HEADER = (
+    "track_id",
+    "source",
+    "audio_path",
+    "probe_duration_sec",
+    "decoded_duration_sec",
+    "annotation_duration_sec",
+    "status",
+    "detail",
+)
 
 MASKED_SENTINEL = "masked"
 
@@ -65,9 +85,10 @@ def tp_dir(corpus: Path) -> Path:
 
 
 def _masked_spans(record: dict) -> list:
-    return sorted(((float(span["start"]), float(span["end"]))
-                   for span in record.get("masked", [])),
-                  key=lambda span: span[0])
+    return sorted(
+        ((float(span["start"]), float(span["end"])) for span in record.get("masked", [])),
+        key=lambda span: span[0],
+    )
 
 
 def _is_masked(spans: list, t: float) -> bool:
@@ -80,16 +101,16 @@ def third_party_beat_rows(beats, record: dict) -> list:
     # interior, so a consumer truncating at the first ``end`` would drop the
     # back half of the track.  A mask is a hole, not a tail.
     spans = _masked_spans(record)
-    return [(time, position,
-             MASKED_SENTINEL if _is_masked(spans, time) else section)
-            for time, position, section in beat_rows(beats, record["sections"])]
+    return [
+        (time, position, MASKED_SENTINEL if _is_masked(spans, time) else section)
+        for time, position, section in beat_rows(beats, record["sections"])
+    ]
 
 
 def labelled_seconds(record: dict) -> float:
     # The sum of the sections, not the span they cover: a gap is unlabelled
     # audio and must not be counted as labelled.
-    return sum(float(section["end"]) - float(section["start"])
-               for section in record["sections"])
+    return sum(float(section["end"]) - float(section["start"]) for section in record["sections"])
 
 
 def manifest_rows(records: list) -> list:
@@ -138,8 +159,8 @@ def read_beat_csv(path: Path) -> list:
         header = tuple(csv.DictReader(handle).fieldnames or ())
     if header != BEAT_CSV_HEADER:
         raise RuntimeError(
-            f"{path.name}: beat grid columns are {header}, expected "
-            f"{BEAT_CSV_HEADER}")
+            f"{path.name}: beat grid columns are {header}, expected {BEAT_CSV_HEADER}"
+        )
     return parse_beat_csv(path)
 
 
@@ -152,28 +173,33 @@ def read_raw_beat_rows(path: Path) -> list:
         header = tuple(reader.fieldnames or ())
         if header != BEAT_CSV_HEADER:
             raise RuntimeError(
-                f"{path.name}: beat grid columns are {header}, expected "
-                f"{BEAT_CSV_HEADER}")
+                f"{path.name}: beat grid columns are {header}, expected {BEAT_CSV_HEADER}"
+            )
         return [(row["time"], row["downbeat"], row["section"]) for row in reader]
 
 
 def repair_grid(corpus: Path, record: dict) -> tuple:
     grid = tp_record.beat_csv_path(corpus, record)
     if not grid.exists():
-        raise RuntimeError(
-            f"{record['id']}: no beat grid at {grid} -- repair never creates one")
+        raise RuntimeError(f"{record['id']}: no beat grid at {grid} -- repair never creates one")
     raw = read_raw_beat_rows(grid)
-    wanted = [section for _time, _position, section in third_party_beat_rows(
-        [(float(time), int(position)) for time, position, _section in raw],
-        record)]
+    wanted = [
+        section
+        for _time, _position, section in third_party_beat_rows(
+            [(float(time), int(position)) for time, position, _section in raw], record
+        )
+    ]
     before = [section for _time, _position, section in raw]
     if wanted == before:
         return False, 0
-    promoted = sum(1 for was, now in zip(before, wanted)
-                   if was == END_SENTINEL and now == MASKED_SENTINEL)
-    _write_csv(grid, BEAT_CSV_HEADER,
-               [(time, position, section)
-                for (time, position, _section), section in zip(raw, wanted)])
+    promoted = sum(
+        1 for was, now in zip(before, wanted) if was == END_SENTINEL and now == MASKED_SENTINEL
+    )
+    _write_csv(
+        grid,
+        BEAT_CSV_HEADER,
+        [(time, position, section) for (time, position, _section), section in zip(raw, wanted)],
+    )
     return True, promoted
 
 
@@ -195,11 +221,12 @@ def repair_sections(track_ids: list, source: str, corpus: Path) -> int:
         if moved:
             changed += 1
             promoted += beats
-            print(f"repaired {track_id}: {beats} beats end -> "
-                  f"{MASKED_SENTINEL}")
-    print(f"examined {examined} grids, changed {changed}, "
-          f"{promoted} beats moved from {END_SENTINEL} to {MASKED_SENTINEL}, "
-          f"skipped {skipped}")
+            print(f"repaired {track_id}: {beats} beats end -> {MASKED_SENTINEL}")
+    print(
+        f"examined {examined} grids, changed {changed}, "
+        f"{promoted} beats moved from {END_SENTINEL} to {MASKED_SENTINEL}, "
+        f"skipped {skipped}"
+    )
     return 0
 
 
@@ -214,11 +241,14 @@ def load_clean_results(corpus: Path) -> list:
     with open(path, "r", encoding="utf-8", newline="") as handle:
         return [
             gate.CheckResult(
-                row["track_id"], row["source"], row["audio_path"],
+                row["track_id"],
+                row["source"],
+                row["audio_path"],
                 _duration(row["probe_duration_sec"]),
                 _duration(row["decoded_duration_sec"]),
                 _duration(row["annotation_duration_sec"]),
-                row["status"], row["detail"],
+                row["status"],
+                row["detail"],
             )
             for row in csv.DictReader(handle)
         ]
@@ -242,8 +272,9 @@ def write_clean_manifest(corpus: Path, results: list) -> Path:
 
 
 def upsert_clean_row(corpus: Path, result) -> None:
-    results = [existing for existing in load_clean_results(corpus)
-               if existing.track_id != result.track_id]
+    results = [
+        existing for existing in load_clean_results(corpus) if existing.track_id != result.track_id
+    ]
     results.append(result)
     write_clean_manifest(corpus, results)
 
@@ -266,21 +297,25 @@ def admit(track_id: str, source: str, corpus: Path | None = None) -> str:
         rows = third_party_beat_rows(detect_beats(audio), record)
         if not rows:
             raise RuntimeError(
-                f"{record['id']}: the offline tracker heard no beats in {audio.name}")
+                f"{record['id']}: the offline tracker heard no beats in {audio.name}"
+            )
         grid.parent.mkdir(parents=True, exist_ok=True)
         write_beat_csv(grid, rows)
 
     # The gate's job is duration measurement, so its record travels with the
     # source in the slot a corpus track uses for its youtube id -- that is the
     # column this manifest carries, and the one the upsert reads back.
-    result = gate.check_track(gate.TrackJob(
-        str(record["id"]), str(record["source"]), str(audio),
-        float(record["duration"])))
+    result = gate.check_track(
+        gate.TrackJob(
+            str(record["id"]), str(record["source"]), str(audio), float(record["duration"])
+        )
+    )
     upsert_clean_row(corpus, result)
     if result.status != gate.STATUS_OK:
         raise RuntimeError(
             f"{record['id']}: the cleanliness gate says {result.status} "
-            f"({result.detail}) -- recorded, not admitted")
+            f"({result.detail}) -- recorded, not admitted"
+        )
 
     write_manifest(corpus, manifest_rows(tp_record.load_all_third_party(corpus)))
     return (
@@ -293,26 +328,34 @@ def admit(track_id: str, source: str, corpus: Path | None = None) -> str:
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("track_ids", nargs="*",
-                        help="third-party track ids (e.g. rwc-p001)")
-    parser.add_argument("--source", required=True,
-                        choices=list(tp_record.THIRD_PARTY_SOURCES),
-                        help="which converted annotation source to admit from")
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus)")
-    parser.add_argument("--all", action="store_true",
-                        help="admit every converted record of that source")
-    parser.add_argument("--repair-sections", action="store_true",
-                        help="recompute only the section column of existing "
-                             "beat grids; never runs the tracker")
+    parser.add_argument("track_ids", nargs="*", help="third-party track ids (e.g. rwc-p001)")
+    parser.add_argument(
+        "--source",
+        required=True,
+        choices=list(tp_record.THIRD_PARTY_SOURCES),
+        help="which converted annotation source to admit from",
+    )
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus)"
+    )
+    parser.add_argument(
+        "--all", action="store_true", help="admit every converted record of that source"
+    )
+    parser.add_argument(
+        "--repair-sections",
+        action="store_true",
+        help="recompute only the section column of existing beat grids; never runs the tracker",
+    )
     args = parser.parse_args(argv)
 
     corpus = args.data_dir.resolve() if args.data_dir else corpus_dir()
     wanted = list(args.track_ids)
     if args.all:
-        wanted += [str(record["id"])
-                   for record in tp_record.load_records(corpus, args.source)
-                   if str(record["id"]) not in wanted]
+        wanted += [
+            str(record["id"])
+            for record in tp_record.load_records(corpus, args.source)
+            if str(record["id"]) not in wanted
+        ]
     if not wanted:
         parser.error("name at least one track id, or pass --all")
 

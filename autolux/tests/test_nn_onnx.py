@@ -31,6 +31,7 @@ The handful of tests that need the trained checkpoint and the real corpus are
 skipped when the (gitignored) data directory is absent, which is every machine
 but the one that trained it.
 """
+
 import json
 import math
 import sys
@@ -118,8 +119,7 @@ needs_corpus = pytest.mark.skipif(
 # --------------------------------------------------------------------------- #
 
 
-def seeded_model(seed: int = 20260726,
-                 n_classes: int = NUM_SECTION_CLASSES) -> SectionCRNN:
+def seeded_model(seed: int = 20260726, n_classes: int = NUM_SECTION_CLASSES) -> SectionCRNN:
     """The real architecture with weights drawn from a numpy seed.
 
     Not ``torch.manual_seed``: numpy's ``default_rng`` stream is a documented,
@@ -141,8 +141,12 @@ def seeded_model(seed: int = 20260726,
     model = SectionCRNN(n_classes=n_classes)
     state = model.state_dict()
     normalised = {name.rsplit(".", 1)[0] for name in state if name.endswith("running_mean")}
-    moments = {"weight": (1.0, 0.25), "bias": (0.0, 0.25),
-               "running_mean": (0.0, 0.25), "running_var": (1.0, 0.5)}
+    moments = {
+        "weight": (1.0, 0.25),
+        "bias": (0.0, 0.25),
+        "running_mean": (0.0, 0.25),
+        "running_var": (1.0, 0.5),
+    }
 
     rng = np.random.default_rng(seed)
     with torch.no_grad():
@@ -155,7 +159,7 @@ def seeded_model(seed: int = 20260726,
                 centre, spread = moments[leaf]
                 draw = centre + spread * draw
             elif tensor.dim() > 1:
-                draw = GAIN * draw / math.sqrt(tensor[0].numel())     # fan-in
+                draw = GAIN * draw / math.sqrt(tensor[0].numel())  # fan-in
             else:
                 draw = 0.05 * draw
             tensor.copy_(torch.from_numpy(draw.reshape(tensor.shape)).float())
@@ -284,8 +288,7 @@ def test_build_from_checkpoint_refuses_a_checkpoint_without_an_arch_block():
 
 
 def test_build_from_checkpoint_refuses_weights_that_do_not_fit():
-    checkpoint = {"model": SectionCRNN(rnn_hidden=64).state_dict(),
-                  "arch": SectionCRNN().arch()}
+    checkpoint = {"model": SectionCRNN(rnn_hidden=64).state_dict(), "arch": SectionCRNN().arch()}
 
     with pytest.raises(RuntimeError):
         build_from_checkpoint(checkpoint)
@@ -302,9 +305,16 @@ def test_a_published_checkpoint_loads_without_executing_it(tmp_path):
     """
     donor = SectionCRNN(label_pool=4)
     path = tmp_path / "best.pt"
-    torch.save({"model": donor.state_dict(), "arch": donor.arch(),
-                "config": {"lr": 0.001, "run_name": "v1b", "epochs": 40},
-                "epoch": 7, "metrics": {"macro_f1": 0.5}}, path)
+    torch.save(
+        {
+            "model": donor.state_dict(),
+            "arch": donor.arch(),
+            "config": {"lr": 0.001, "run_name": "v1b", "epochs": 40},
+            "epoch": 7,
+            "metrics": {"macro_f1": 0.5},
+        },
+        path,
+    )
 
     checkpoint = load_checkpoint(path)
 
@@ -385,8 +395,8 @@ def test_torch_and_onnx_agree_on_three_real_windows(tmp_path):
     mel_b = load_sidecar(sidecars[1])
     windows = [
         mel_a[:WINDOW_FRAMES][None],
-        mel_b[5000:5000 + WINDOW_FRAMES][None],
-        mel_a[1000:1000 + 512][None],          # a length never exported
+        mel_b[5000 : 5000 + WINDOW_FRAMES][None],
+        mel_a[1000 : 1000 + 512][None],  # a length never exported
     ]
 
     for mel in windows:
@@ -423,8 +433,8 @@ def test_window_offsets_end_exactly_at_the_end_of_the_track():
     offsets = window_offsets(frames, window_frames=100, hop_frames=40)
 
     assert offsets[0] == 0
-    assert offsets[-1] == frames - 100          # 900, not the hop's 880
-    assert offsets[-1] - offsets[-2] < 40       # the deliberate re-overlap
+    assert offsets[-1] == frames - 100  # 900, not the hop's 880
+    assert offsets[-1] - offsets[-2] < 40  # the deliberate re-overlap
 
 
 def test_window_offsets_does_not_duplicate_an_exact_landing():
@@ -444,26 +454,34 @@ def test_contribution_spans_cover_every_frame_exactly_once_or_more():
 
     covered = np.zeros(frames, dtype=int)
     for index, offset in enumerate(offsets):
-        lo, hi = contribution_span(offset, n_frames=frames, first=index == 0,
-                                   last=index == len(offsets) - 1,
-                                   window_frames=window, edge_frames=edge)
+        lo, hi = contribution_span(
+            offset,
+            n_frames=frames,
+            first=index == 0,
+            last=index == len(offsets) - 1,
+            window_frames=window,
+            edge_frames=edge,
+        )
         covered[lo:hi] += 1
 
     assert covered.min() >= 1, "the hop/edge geometry leaves frames unvoted on"
 
 
 def test_an_interior_window_never_votes_on_its_own_edges():
-    lo, hi = contribution_span(300, n_frames=1000, first=False, last=False,
-                               window_frames=100, edge_frames=10)
+    lo, hi = contribution_span(
+        300, n_frames=1000, first=False, last=False, window_frames=100, edge_frames=10
+    )
 
     assert (lo, hi) == (310, 390)
 
 
 def test_the_first_and_last_window_donate_the_margin_nothing_else_can_reach():
-    first = contribution_span(0, n_frames=1000, first=True, last=False,
-                              window_frames=100, edge_frames=10)
-    last = contribution_span(900, n_frames=1000, first=False, last=True,
-                             window_frames=100, edge_frames=10)
+    first = contribution_span(
+        0, n_frames=1000, first=True, last=False, window_frames=100, edge_frames=10
+    )
+    last = contribution_span(
+        900, n_frames=1000, first=False, last=True, window_frames=100, edge_frames=10
+    )
 
     assert first == (0, 90)
     assert last == (910, 1000)
@@ -494,7 +512,7 @@ class _StubSession:
 
     def run(self, _names, feeds):
         mel = feeds["mel"]
-        index = mel[0, :, 0].astype(np.float64)     # global frame index, or -1 when padded
+        index = mel[0, :, 0].astype(np.float64)  # global frame index, or -1 when padded
         position = np.arange(mel.shape[1], dtype=np.float64)
         self.calls += 1
         boundary = self.boundary_fn(index, position)[None]
@@ -522,8 +540,9 @@ def test_aggregation_places_every_frame_at_its_own_track_position():
     windows must return that same answer, frame for frame."""
     frames = 3 * WINDOW_FRAMES
     truth = np.sin(np.arange(frames) * 0.01)
-    stub = _StubSession(lambda index, _p: _pooled(np.sin(index * 0.01)),
-                        lambda index, _p: np.sin(index * 0.01))
+    stub = _StubSession(
+        lambda index, _p: _pooled(np.sin(index * 0.01)), lambda index, _p: np.sin(index * 0.01)
+    )
 
     result = infer_track(stub, _indexed_mel(frames))
 
@@ -536,34 +555,38 @@ def test_aggregation_never_reads_a_window_edge():
     """A stub that screams only at its own outer margin: if any interior frame
     of the track picks that up, the never-read-the-edge rule is not enforced."""
     frames = 3 * WINDOW_FRAMES
+
     def edge_only(_index, position):
-        loud = ((position < EDGE_FRAMES)
-                | (position >= WINDOW_FRAMES - EDGE_FRAMES)).astype(np.float64)
+        loud = ((position < EDGE_FRAMES) | (position >= WINDOW_FRAMES - EDGE_FRAMES)).astype(
+            np.float64
+        )
         return loud * 40.0 - 20.0
+
     stub = _StubSession(lambda i, p: _pooled(edge_only(i, p)), edge_only)
 
     result = infer_track(stub, _indexed_mel(frames))
 
-    interior = result.boundary[EDGE_FRAMES:frames - EDGE_FRAMES]
+    interior = result.boundary[EDGE_FRAMES : frames - EDGE_FRAMES]
     assert interior.max() < 1e-6, "a window edge leaked into the aggregate"
     # The two ends are the documented exception: no window's interior reaches
     # them, so the first and last window donate their margin rather than leave
     # the decoder an undefined posterior.
     assert result.boundary[:EDGE_FRAMES].min() > 0.99
-    assert result.boundary[frames - EDGE_FRAMES:].min() > 0.99
+    assert result.boundary[frames - EDGE_FRAMES :].min() > 0.99
 
 
 def test_aggregation_averages_the_reoverlapped_tail_instead_of_concatenating():
     """A track length is not a whole number of hops, so the final window is
     clamped back and re-covers frames its predecessor already voted on."""
-    frames = WINDOW_FRAMES + 3 * HOP_FRAMES + LABEL_POOL     # not hop-aligned
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.full_like(index, 2.0))
+    frames = WINDOW_FRAMES + 3 * HOP_FRAMES + LABEL_POOL  # not hop-aligned
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.full_like(index, 2.0)
+    )
 
     result = infer_track(stub, _indexed_mel(frames))
 
     assert len(result.boundary) == frames
-    assert result.coverage.sum() > frames          # overlap really happened
+    assert result.coverage.sum() > frames  # overlap really happened
     # Every frame is a mean of identical values, so the mean is that value --
     # a concatenation would have produced a longer array, a sum a larger one.
     assert np.abs(result.boundary - 1.0 / (1.0 + math.exp(-2.0))).max() < 1e-6
@@ -571,14 +594,15 @@ def test_aggregation_averages_the_reoverlapped_tail_instead_of_concatenating():
 
 def test_coverage_counts_the_windows_that_voted_on_each_frame():
     frames = 3 * WINDOW_FRAMES
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.zeros_like(index))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.zeros_like(index)
+    )
 
     result = infer_track(stub, _indexed_mel(frames))
 
     interior = (WINDOW_FRAMES - 2 * EDGE_FRAMES) // HOP_FRAMES
     assert result.coverage.max() == interior
-    assert result.coverage[0] == 1                 # only the first window reaches it
+    assert result.coverage[0] == 1  # only the first window reaches it
     assert result.coverage.dtype == np.uint16
 
 
@@ -587,7 +611,8 @@ def test_label_posteriors_are_probabilities_on_the_pooled_grid():
     rng = np.random.default_rng(3)
     stub = _StubSession(
         lambda index, _p: rng.normal(size=(len(index) // LABEL_POOL, NUM_SECTION_CLASSES)),
-        lambda index, _p: np.zeros_like(index))
+        lambda index, _p: np.zeros_like(index),
+    )
 
     result = infer_track(stub, _indexed_mel(frames))
 
@@ -604,8 +629,9 @@ def test_a_sidecar_records_the_geometry_it_was_actually_run_with():
     decoder a hop it is not expecting with nothing to notice."""
     frames = 3 * WINDOW_FRAMES
     hop, edge = 4 * HOP_FRAMES, 2 * EDGE_FRAMES
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.zeros_like(index))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.zeros_like(index)
+    )
 
     result = infer_track(stub, _indexed_mel(frames), hop_frames=hop, edge_frames=edge)
     arrays = posterior_arrays(result, "0" * 64)
@@ -620,8 +646,9 @@ def test_a_sidecar_records_the_geometry_it_was_actually_run_with():
 def test_a_sidecar_from_a_non_default_geometry_is_not_treated_as_current(tmp_path):
     path = tmp_path / "a.npz"
     frames = 3 * WINDOW_FRAMES
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.zeros_like(index))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.zeros_like(index)
+    )
     result = infer_track(stub, _indexed_mel(frames), hop_frames=4 * HOP_FRAMES)
 
     save_posteriors(path, posterior_arrays(result, "0" * 64))
@@ -629,16 +656,20 @@ def test_a_sidecar_from_a_non_default_geometry_is_not_treated_as_current(tmp_pat
     assert not sidecar_is_current(path, "0" * 64)
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"hop_frames": HOP_FRAMES + 1},
-    {"edge_frames": EDGE_FRAMES + 1},
-    {"window_frames": WINDOW_FRAMES + 1},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"hop_frames": HOP_FRAMES + 1},
+        {"edge_frames": EDGE_FRAMES + 1},
+        {"window_frames": WINDOW_FRAMES + 1},
+    ],
+)
 def test_infer_track_refuses_a_geometry_that_breaks_pool_alignment(kwargs):
     """An unaligned window or hop shifts every label posterior by half a pooled
     frame, and the slice arithmetic would keep working."""
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.zeros_like(index))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.zeros_like(index)
+    )
 
     with pytest.raises(ValueError, match="multiple of the label pooling factor"):
         infer_track(stub, _indexed_mel(2 * WINDOW_FRAMES), **kwargs)
@@ -646,18 +677,23 @@ def test_infer_track_refuses_a_geometry_that_breaks_pool_alignment(kwargs):
 
 def test_infer_track_refuses_a_hop_wider_than_the_window_interior():
     """Frames no window votes on would divide by a zero coverage count."""
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.zeros_like(index))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.zeros_like(index)
+    )
 
     with pytest.raises(ValueError, match="usable window interior"):
-        infer_track(stub, _indexed_mel(2 * WINDOW_FRAMES),
-                    hop_frames=WINDOW_FRAMES - 2 * EDGE_FRAMES + LABEL_POOL)
+        infer_track(
+            stub,
+            _indexed_mel(2 * WINDOW_FRAMES),
+            hop_frames=WINDOW_FRAMES - 2 * EDGE_FRAMES + LABEL_POOL,
+        )
 
 
 def test_a_track_shorter_than_one_window_is_padded_not_dropped():
     frames = WINDOW_FRAMES // 2
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.full_like(index, 1.0))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.full_like(index, 1.0)
+    )
 
     result = infer_track(stub, _indexed_mel(frames))
 
@@ -668,8 +704,9 @@ def test_a_track_shorter_than_one_window_is_padded_not_dropped():
 
 def test_an_odd_frame_count_is_truncated_to_the_pooled_grid():
     frames = 2 * WINDOW_FRAMES + 1
-    stub = _StubSession(lambda index, _p: _pooled(index * 0.0),
-                        lambda index, _p: np.zeros_like(index))
+    stub = _StubSession(
+        lambda index, _p: _pooled(index * 0.0), lambda index, _p: np.zeros_like(index)
+    )
 
     result = infer_track(stub, _indexed_mel(frames))
 
@@ -685,11 +722,20 @@ def test_an_odd_frame_count_is_truncated_to_the_pooled_grid():
 def _arrays(seed=0, **geometry):
     rng = np.random.default_rng(seed)
     label = rng.random((10, NUM_SECTION_CLASSES)).astype(np.float32)
-    shape = {"window_frames": WINDOW_FRAMES, "hop_frames": HOP_FRAMES,
-             "edge_frames": EDGE_FRAMES, **geometry}
-    track = TrackPosteriors(label / label.sum(1, keepdims=True),
-                            rng.random(20).astype(np.float32),
-                            np.full(20, 3, dtype=np.uint16), 20, 7, **shape)
+    shape = {
+        "window_frames": WINDOW_FRAMES,
+        "hop_frames": HOP_FRAMES,
+        "edge_frames": EDGE_FRAMES,
+        **geometry,
+    }
+    track = TrackPosteriors(
+        label / label.sum(1, keepdims=True),
+        rng.random(20).astype(np.float32),
+        np.full(20, 3, dtype=np.uint16),
+        20,
+        7,
+        **shape,
+    )
     return posterior_arrays(track, "0" * 64)
 
 
@@ -770,7 +816,8 @@ def test_the_two_time_bases_are_both_recorded():
 
     assert float(arrays["label_frame_sec"]) == pytest.approx(FRAME_SEC * LABEL_POOL)
     assert float(arrays["label_t0"]) == pytest.approx(
-        float(arrays["t0"]) + (LABEL_POOL - 1) * FRAME_SEC)
+        float(arrays["t0"]) + (LABEL_POOL - 1) * FRAME_SEC
+    )
 
 
 def test_sidecar_is_current_only_for_this_model_and_this_geometry(tmp_path):
@@ -802,8 +849,7 @@ def test_sidecar_is_current_rejects_a_truncated_file(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def _mini_corpus(tmp_path, graph, ids=("aaa", "bbb"),
-                 frames=WINDOW_FRAMES + 10 * HOP_FRAMES):
+def _mini_corpus(tmp_path, graph, ids=("aaa", "bbb"), frames=WINDOW_FRAMES + 10 * HOP_FRAMES):
     """A features/ directory and a graph -- the two inputs of a corpus run.
 
     Just long enough to need eleven windows: these tests are about the run's
@@ -816,8 +862,9 @@ def _mini_corpus(tmp_path, graph, ids=("aaa", "bbb"),
     rng = np.random.default_rng(7)
     for youtube_id in ids:
         mel = (rng.random((frames, MEL_BANDS)) * 3.0).astype(np.float32)
-        write_feature_sidecar(data_dir / "features" / f"{youtube_id}.npz",
-                              mel, FRAME_SEC, FRAME_SEC)
+        write_feature_sidecar(
+            data_dir / "features" / f"{youtube_id}.npz", mel, FRAME_SEC, FRAME_SEC
+        )
     model_path, _sess = graph
     return data_dir, model_path, list(ids)
 
@@ -825,8 +872,7 @@ def _mini_corpus(tmp_path, graph, ids=("aaa", "bbb"),
 def test_generate_writes_one_sidecar_per_track_and_a_manifest(tmp_path, graph):
     data_dir, model_path, ids = _mini_corpus(tmp_path, graph)
 
-    manifest = generate(data_dir, model_path=model_path, ids=ids,
-                        workers=1, progress_every=0)
+    manifest = generate(data_dir, model_path=model_path, ids=ids, workers=1, progress_every=0)
 
     out = data_dir / POSTERIORS_DIR
     assert sorted(p.name for p in out.glob("*.npz")) == [f"{i}.npz" for i in ids]
@@ -841,22 +887,34 @@ def test_generated_bytes_do_not_depend_on_how_many_workers_ran(tmp_path, graph):
     12-thread run and a 1-thread run must produce identical files."""
     data_dir, model_path, ids = _mini_corpus(tmp_path, graph)
 
-    generate(data_dir, model_path=model_path, ids=ids, out_dir=tmp_path / "serial",
-             workers=1, progress_every=0)
-    generate(data_dir, model_path=model_path, ids=ids, out_dir=tmp_path / "parallel",
-             workers=4, progress_every=0)
+    generate(
+        data_dir,
+        model_path=model_path,
+        ids=ids,
+        out_dir=tmp_path / "serial",
+        workers=1,
+        progress_every=0,
+    )
+    generate(
+        data_dir,
+        model_path=model_path,
+        ids=ids,
+        out_dir=tmp_path / "parallel",
+        workers=4,
+        progress_every=0,
+    )
 
     for youtube_id in ids:
-        assert ((tmp_path / "serial" / f"{youtube_id}.npz").read_bytes()
-                == (tmp_path / "parallel" / f"{youtube_id}.npz").read_bytes())
+        assert (tmp_path / "serial" / f"{youtube_id}.npz").read_bytes() == (
+            tmp_path / "parallel" / f"{youtube_id}.npz"
+        ).read_bytes()
 
 
 def test_generate_reuses_a_sidecar_this_model_already_produced(tmp_path, graph):
     data_dir, model_path, ids = _mini_corpus(tmp_path, graph)
     generate(data_dir, model_path=model_path, ids=ids, workers=1, progress_every=0)
 
-    again = generate(data_dir, model_path=model_path, ids=ids,
-                     workers=1, progress_every=0)
+    again = generate(data_dir, model_path=model_path, ids=ids, workers=1, progress_every=0)
 
     assert again["cached"] == len(ids) and again["computed"] == 0
 
@@ -867,8 +925,7 @@ def test_generate_recomputes_when_the_model_changes(tmp_path, graph):
     other = tmp_path / "other" / MODEL_FILE
     export_model(seeded_model(seed=11), other)
 
-    manifest = generate(data_dir, model_path=other, ids=ids,
-                        workers=1, progress_every=0)
+    manifest = generate(data_dir, model_path=other, ids=ids, workers=1, progress_every=0)
 
     assert manifest["computed"] == len(ids) and manifest["cached"] == 0
 
@@ -879,8 +936,7 @@ def test_generate_records_a_broken_track_and_finishes_the_rest(tmp_path, graph):
     data_dir, model_path, ids = _mini_corpus(tmp_path, graph, ids=("aaa", "bbb", "ccc"))
     (data_dir / "features" / "bbb.npz").write_bytes(b"not an npz")
 
-    manifest = generate(data_dir, model_path=model_path, ids=ids,
-                        workers=2, progress_every=0)
+    manifest = generate(data_dir, model_path=model_path, ids=ids, workers=2, progress_every=0)
 
     assert manifest["failed"] == 1
     assert manifest["computed"] == 2
@@ -894,11 +950,10 @@ def test_a_failed_track_does_not_leave_an_older_models_sidecar_readable(tmp_path
     would consume last week's posteriors believing they are this model's."""
     data_dir, model_path, ids = _mini_corpus(tmp_path, graph)
     stale = data_dir / POSTERIORS_DIR / "aaa.npz"
-    save_posteriors(stale, _arrays())                  # a different model_sha
+    save_posteriors(stale, _arrays())  # a different model_sha
     (data_dir / "features" / "aaa.npz").write_bytes(b"not an npz")
 
-    manifest = generate(data_dir, model_path=model_path, ids=ids,
-                        workers=1, progress_every=0)
+    manifest = generate(data_dir, model_path=model_path, ids=ids, workers=1, progress_every=0)
 
     assert manifest["failed"] == 1
     assert not stale.exists()
@@ -914,8 +969,9 @@ def test_a_forced_recompute_that_fails_keeps_the_current_sidecar(tmp_path, graph
     before = good.read_bytes()
     (data_dir / "features" / "aaa.npz").write_bytes(b"not an npz")
 
-    manifest = generate(data_dir, model_path=model_path, ids=ids, workers=1,
-                        force=True, progress_every=0)
+    manifest = generate(
+        data_dir, model_path=model_path, ids=ids, workers=1, force=True, progress_every=0
+    )
 
     assert manifest["failed"] == 1
     assert good.read_bytes() == before

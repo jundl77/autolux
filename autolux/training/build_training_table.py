@@ -108,8 +108,7 @@ class Timeline:
 
 def _clamped_spans(sections: list) -> list:
     return [
-        (float(start), max(float(start), float(end)), str(label))
-        for start, end, label in sections
+        (float(start), max(float(start), float(end)), str(label)) for start, end, label in sections
     ]
 
 
@@ -119,9 +118,7 @@ def label_coverage(sections: list) -> list:
     A merged run's span can swallow a dropped sentinel sitting between two
     members, and that time belongs to neither neighbour.
     """
-    return [
-        span for span in _clamped_spans(sections) if span[2] not in DROPPED_LABELS
-    ]
+    return [span for span in _clamped_spans(sections) if span[2] not in DROPPED_LABELS]
 
 
 def dropped_coverage(sections: list) -> list:
@@ -137,8 +134,9 @@ def labeled_bounds(sections: list) -> tuple:
     return first_start, last_end
 
 
-def song_time_intents(blocks: list, look_ahead_sec: float,
-                      default_end: float | None = None) -> list:
+def song_time_intents(
+    blocks: list, look_ahead_sec: float, default_end: float | None = None
+) -> list:
     spans = []
     for block in blocks:
         start = float(block["t"]) - look_ahead_sec
@@ -172,9 +170,13 @@ def _nearest_gap(sorted_times: list, value: float) -> float:
     return best
 
 
-def realign_intents(blocks: list, look_ahead_sec: float, beat_times: list,
-                    duration_sec: float | None = None,
-                    tolerance: float = _QUEUE_STAMP_TOLERANCE_SEC) -> tuple:
+def realign_intents(
+    blocks: list,
+    look_ahead_sec: float,
+    beat_times: list,
+    duration_sec: float | None = None,
+    tolerance: float = _QUEUE_STAMP_TOLERANCE_SEC,
+) -> tuple:
     """Intent blocks -> song-time spans: ``song_t`` if recorded, else the queue shift."""
     if not blocks:
         return [], IntentAlignment(0, 0, 0, 0)
@@ -184,8 +186,7 @@ def realign_intents(blocks: list, look_ahead_sec: float, beat_times: list,
     song_stamped = clamped_tail = song_recorded = 0
     for block in blocks:
         t = float(block["t"])
-        is_clamped = (duration_sec is not None
-                      and abs(t - float(duration_sec)) <= _STAMP_EPS)
+        is_clamped = duration_sec is not None and abs(t - float(duration_sec)) <= _STAMP_EPS
         if block.get("song_t") is not None:
             starts.append(float(block["song_t"]))
             song_recorded += 1
@@ -215,12 +216,10 @@ def realign_intents(blocks: list, look_ahead_sec: float, beat_times: list,
             end = starts[index + 1]
         else:
             raw_end = block.get("end", duration_sec)
-            end = (float("inf") if raw_end is None
-                   else float(raw_end) - shifts[index])
+            end = float("inf") if raw_end is None else float(raw_end) - shifts[index]
         spans.append((starts[index], max(starts[index], end), str(block["intent"])))
     late = sum(1 for shift in shifts if shift > look_ahead_sec + tolerance)
-    return spans, IntentAlignment(len(blocks), song_stamped, clamped_tail,
-                                  song_recorded, late)
+    return spans, IntentAlignment(len(blocks), song_stamped, clamped_tail, song_recorded, late)
 
 
 LEADING, INTERIOR, TRAILING = "leading", "interior", "trailing"
@@ -233,8 +232,7 @@ class SilenceBlocks(NamedTuple):
 
 
 def silence_triggered(blocks: list) -> list:
-    return [str(block.get("trigger", CLASSIFIER_TRIGGER)) == SILENCE_TRIGGER
-            for block in blocks]
+    return [str(block.get("trigger", CLASSIFIER_TRIGGER)) == SILENCE_TRIGGER for block in blocks]
 
 
 def drop_silence_spans(spans: list, silence: list) -> list:
@@ -253,11 +251,12 @@ def silence_position(span, first_start, last_end) -> str:
     return INTERIOR
 
 
-def count_silence_positions(spans: list, silence: list,
-                            first_start, last_end) -> SilenceBlocks:
+def count_silence_positions(spans: list, silence: list, first_start, last_end) -> SilenceBlocks:
     counts = collections.Counter(
         silence_position(span, first_start, last_end)
-        for span, excluded in zip(spans, silence) if excluded)
+        for span, excluded in zip(spans, silence)
+        if excluded
+    )
     return SilenceBlocks(counts[LEADING], counts[INTERIOR], counts[TRAILING])
 
 
@@ -289,8 +288,9 @@ class JoinStats(NamedTuple):
     silence_blocks_trailing: int
 
 
-def join_track(track_id: str, youtube_id_: str, report: dict, sections: list,
-               genre: str = "") -> tuple:
+def join_track(
+    track_id: str, youtube_id_: str, report: dict, sections: list, genre: str = ""
+) -> tuple:
     """One track's report + annotation -> ``(rows, JoinStats)``; pure, no I/O."""
     beats = sorted(report.get("beats", []), key=lambda record: float(record["t"]))
     coverage = Timeline(label_coverage(sections))
@@ -305,8 +305,9 @@ def join_track(track_id: str, youtube_id_: str, report: dict, sections: list,
     silence = silence_triggered(blocks)
     silence_blocks = count_silence_positions(spans, silence, first_start, last_end)
     intents = Timeline(drop_silence_spans(spans, silence))
-    naive_intents = Timeline(drop_silence_spans(
-        song_time_intents(blocks, look_ahead_sec, duration_sec), silence))
+    naive_intents = Timeline(
+        drop_silence_spans(song_time_intents(blocks, look_ahead_sec, duration_sec), silence)
+    )
 
     rows: list = []
     leading = gap = trailing = in_dropped = without_intent = reattributed = 0
@@ -332,17 +333,19 @@ def join_track(track_id: str, youtube_id_: str, report: dict, sections: list,
             intent = NO_INTENT
             without_intent += 1
 
-        rows.append({
-            "track_id": track_id,
-            "youtube_id": youtube_id_,
-            "genre": genre,
-            "t_song": t,
-            "bpm": float(record.get("bpm", 0.0)),
-            "rms": float(record.get("rms", 0.0)),
-            "intent_at_beat": intent,
-            "label": label,
-            "bar_position_unknown": BAR_POSITION_UNKNOWN,
-        })
+        rows.append(
+            {
+                "track_id": track_id,
+                "youtube_id": youtube_id_,
+                "genre": genre,
+                "t_song": t,
+                "bpm": float(record.get("bpm", 0.0)),
+                "rms": float(record.get("rms", 0.0)),
+                "intent_at_beat": intent,
+                "label": label,
+                "bar_position_unknown": BAR_POSITION_UNKNOWN,
+            }
+        )
 
     _add_zscores(rows)
     stats = JoinStats(
@@ -435,17 +438,19 @@ def derived_cache_paths(mp3_path: str) -> tuple:
     from autolux.simulate.fake_audio_client import FileAudioClient
     from autolux.simulate.tracker_cache import sidecar_path as tracker_sidecar_path
 
-    return (decode_cache_path(mp3_path),
-            str(sidecar_path(mp3_path, FileAudioClient.decode_path)),
-            str(tracker_sidecar_path(mp3_path, FileAudioClient.decode_path)))
+    return (
+        decode_cache_path(mp3_path),
+        str(sidecar_path(mp3_path, FileAudioClient.decode_path)),
+        str(tracker_sidecar_path(mp3_path, FileAudioClient.decode_path)),
+    )
 
 
 def paths_to_delete(job: SimJob) -> tuple:
     return tuple(
-        path for path in derived_cache_paths(job.mp3_path)
+        path
+        for path in derived_cache_paths(job.mp3_path)
         if path not in job.preexisting
-        and not (job.keep_cells and path.endswith((".mertcells.npz",
-                                                   ".bartracker.npz")))
+        and not (job.keep_cells and path.endswith((".mertcells.npz", ".bartracker.npz")))
     )
 
 
@@ -454,11 +459,11 @@ def _write_json_gz(path: Path, payload: dict) -> None:
     tmp = path.with_suffix(path.suffix + ".part")
     try:
         with open(tmp, "wb") as raw:
-            with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6,
-                               filename="", mtime=_REPRODUCIBLE_GZIP_MTIME) as compressed:
+            with gzip.GzipFile(
+                fileobj=raw, mode="wb", compresslevel=6, filename="", mtime=_REPRODUCIBLE_GZIP_MTIME
+            ) as compressed:
                 compressed.write(
-                    json.dumps(payload, separators=(",", ":"), sort_keys=True)
-                    .encode("utf-8")
+                    json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
                 )
         tmp.replace(path)
     except BaseException:
@@ -487,8 +492,7 @@ def report_envelope(job: SimJob, report: dict) -> dict:
     }
 
 
-def cache_is_fresh(envelope: dict, pipeline_sha_: str,
-                   mp3_size: int, mp3_mtime: float) -> bool:
+def cache_is_fresh(envelope: dict, pipeline_sha_: str, mp3_size: int, mp3_mtime: float) -> bool:
     if not isinstance(envelope, dict):
         return False
     return (
@@ -514,11 +518,19 @@ def simulate_track(job: SimJob) -> SimResult:
         report = event_buffer.to_report(command_queue.get_timing_log())
         _write_json_gz(Path(job.report_path), report_envelope(job, report))
 
-        return SimResult(job.track_id, True, "", len(report.get("beats", [])),
-                         0, 0, time.monotonic() - started)
+        return SimResult(
+            job.track_id, True, "", len(report.get("beats", [])), 0, 0, time.monotonic() - started
+        )
     except Exception as exc:  # noqa: BLE001
-        return SimResult(job.track_id, False, f"{type(exc).__name__}: {exc}"[:300],
-                         0, 0, 0, time.monotonic() - started)
+        return SimResult(
+            job.track_id,
+            False,
+            f"{type(exc).__name__}: {exc}"[:300],
+            0,
+            0,
+            0,
+            time.monotonic() - started,
+        )
     finally:
         for path in paths_to_delete(job):
             try:
@@ -547,16 +559,17 @@ def _release_track_memory() -> None:
 def load_ok_rows(data_dir: Path) -> list:
     path = data_dir / CLEAN_MANIFEST_FILE
     if not path.exists():
-        raise RuntimeError(
-            f"missing {path} -- run training/raveform/build_clean_manifest.py first"
-        )
+        raise RuntimeError(f"missing {path} -- run training/raveform/build_clean_manifest.py first")
     with open(path, "r", encoding="utf-8", newline="") as handle:
         rows = [row for row in csv.DictReader(handle) if row["status"] == STATUS_OK]
     rows, rejected = _reject_past_the_analyser_reset(rows)
     for track_id, seconds in rejected:
-        print(f"  SKIP {track_id}: {seconds / 60.0:.1f} min reaches MusicAnalyser's "
-              f"{ANALYSER_RESET_SEC / 60.0:.0f}-minute self-reset -- its beats and "
-              f"its features would no longer describe the same audio", flush=True)
+        print(
+            f"  SKIP {track_id}: {seconds / 60.0:.1f} min reaches MusicAnalyser's "
+            f"{ANALYSER_RESET_SEC / 60.0:.0f}-minute self-reset -- its beats and "
+            f"its features would no longer describe the same audio",
+            flush=True,
+        )
     if not rows:
         raise RuntimeError(f"no ok rows in {path} -- nothing to build from")
     rows.sort(key=lambda row: row["track_id"])
@@ -587,10 +600,15 @@ def load_genres_by_track(data_dir: Path, include_hand: bool = True) -> dict:
     return {str(track["key"]): genre_of(track) for track in tracks}
 
 
-def select_jobs(rows: list, data_dir: Path, force: bool = False,
-                min_age_sec: float = MIN_AGE_SEC,
-                preexisting_caches: set | None = None,
-                sha: str | None = None, keep_cells: bool = False) -> tuple:
+def select_jobs(
+    rows: list,
+    data_dir: Path,
+    force: bool = False,
+    min_age_sec: float = MIN_AGE_SEC,
+    preexisting_caches: set | None = None,
+    sha: str | None = None,
+    keep_cells: bool = False,
+) -> tuple:
     """``(jobs, counts)`` -- which tracks still need simulating, and why."""
     now = time.time()
     preexisting_caches = preexisting_caches or set()
@@ -620,19 +638,26 @@ def select_jobs(rows: list, data_dir: Path, force: bool = False,
             continue
 
         counts[reason] += 1
-        jobs.append(SimJob(
-            row["track_id"], row["youtube_id"], str(mp3), str(cached),
-            preexisting=tuple(path for path in derived_cache_paths(str(mp3))
-                              if path in preexisting_caches),
-            pipeline_sha=sha, mp3_size=stat.st_size, mp3_mtime=stat.st_mtime,
-            keep_cells=keep_cells,
-        ))
+        jobs.append(
+            SimJob(
+                row["track_id"],
+                row["youtube_id"],
+                str(mp3),
+                str(cached),
+                preexisting=tuple(
+                    path for path in derived_cache_paths(str(mp3)) if path in preexisting_caches
+                ),
+                pipeline_sha=sha,
+                mp3_size=stat.st_size,
+                mp3_mtime=stat.st_mtime,
+                keep_cells=keep_cells,
+            )
+        )
     jobs.sort(key=lambda job: job.track_id)
     return jobs, counts
 
 
-def _cache_miss_reason(cached: Path, sha: str,
-                       mp3_size: int, mp3_mtime: float) -> str | None:
+def _cache_miss_reason(cached: Path, sha: str, mp3_size: int, mp3_mtime: float) -> str | None:
     """``None`` when the cache may be used, else the counter name for the miss."""
     if not cached.exists():
         return "miss_new"
@@ -644,8 +669,7 @@ def _cache_miss_reason(cached: Path, sha: str,
         return None
     if envelope.get("pipeline_sha") != sha:
         return "miss_pipeline_changed"
-    if (envelope.get("mp3_size") != mp3_size
-            or envelope.get("mp3_mtime") != mp3_mtime):
+    if envelope.get("mp3_size") != mp3_size or envelope.get("mp3_mtime") != mp3_mtime:
         return "miss_audio_changed"
     return "miss_stale_format"
 
@@ -654,9 +678,11 @@ def find_caches(data_dir: Path) -> set:
     audio_dir = data_dir / AUDIO_DIR
     if not audio_dir.exists():
         return set()
-    return {str(path) for path in audio_dir.glob("*.npy")} | {
-        str(path) for path in audio_dir.glob("*.mertcells.npz")} | {
-        str(path) for path in audio_dir.glob("*.bartracker.npz")}
+    return (
+        {str(path) for path in audio_dir.glob("*.npy")}
+        | {str(path) for path in audio_dir.glob("*.mertcells.npz")}
+        | {str(path) for path in audio_dir.glob("*.bartracker.npz")}
+    )
 
 
 _CORES_RESERVED_FOR_OS = 2
@@ -687,15 +713,15 @@ def run_simulations(jobs: list, workers: int, progress_every: int = 10) -> list:
     try:
         for lo in range(0, len(jobs), stride):
             with concurrent.futures.ProcessPoolExecutor(max_workers=width) as pool:
-                for result in pool.map(simulate_track, jobs[lo:lo + stride],
-                                       chunksize=1):
+                for result in pool.map(simulate_track, jobs[lo : lo + stride], chunksize=1):
                     results.append(result)
-                    _print_progress(len(results), len(jobs), started,
-                                    progress_every)
+                    _print_progress(len(results), len(jobs), started, progress_every)
     except concurrent.futures.process.BrokenProcessPool as exc:
-        print(f"  WARNING: worker pool broke after {len(results)}/{len(jobs)} "
-              f"track(s): {exc}.  Re-run to continue -- cached reports are kept.",
-              flush=True)
+        print(
+            f"  WARNING: worker pool broke after {len(results)}/{len(jobs)} "
+            f"track(s): {exc}.  Re-run to continue -- cached reports are kept.",
+            flush=True,
+        )
     return results
 
 
@@ -705,8 +731,11 @@ def _print_progress(done: int, total: int, started: float, every: int) -> None:
     elapsed = time.time() - started
     rate = done / elapsed if elapsed > 0 else 0.0
     remaining = (total - done) / rate if rate > 0 else 0.0
-    print(f"  simulated {done}/{total}  {elapsed / 60:.1f} min elapsed  "
-          f"{rate * 60:.1f} tracks/min  ~{remaining / 60:.1f} min left", flush=True)
+    print(
+        f"  simulated {done}/{total}  {elapsed / 60:.1f} min elapsed  "
+        f"{rate * 60:.1f} tracks/min  ~{remaining / 60:.1f} min left",
+        flush=True,
+    )
 
 
 class TableStats(NamedTuple):
@@ -720,8 +749,9 @@ class TableStats(NamedTuple):
     missing_reports: list
 
 
-def build_table(data_dir: Path, rows: list, sections_by_track: dict,
-                genres_by_track: dict | None = None) -> TableStats:
+def build_table(
+    data_dir: Path, rows: list, sections_by_track: dict, genres_by_track: dict | None = None
+) -> TableStats:
     path = data_dir / TABLE_FILE
     tmp = path.with_suffix(path.suffix + ".part")
     tracks = row_count = 0
@@ -733,10 +763,17 @@ def build_table(data_dir: Path, rows: list, sections_by_track: dict,
     missing_reports: list = []
 
     try:
-        with open(tmp, "wb") as raw_file, \
-                gzip.GzipFile(fileobj=raw_file, mode="wb", compresslevel=6,
-                              filename="", mtime=_REPRODUCIBLE_GZIP_MTIME) as compressed, \
-                io.TextIOWrapper(compressed, encoding="utf-8", newline="") as handle:
+        with (
+            open(tmp, "wb") as raw_file,
+            gzip.GzipFile(
+                fileobj=raw_file,
+                mode="wb",
+                compresslevel=6,
+                filename="",
+                mtime=_REPRODUCIBLE_GZIP_MTIME,
+            ) as compressed,
+            io.TextIOWrapper(compressed, encoding="utf-8", newline="") as handle,
+        ):
             writer = csv.writer(handle, lineterminator="\n")
             writer.writerow(TABLE_HEADER)
             for row in rows:
@@ -756,8 +793,12 @@ def build_table(data_dir: Path, rows: list, sections_by_track: dict,
                     continue
 
                 joined, stats = join_track(
-                    track_id, row["youtube_id"], report, sections,
-                    (genres_by_track or {}).get(track_id, ""))
+                    track_id,
+                    row["youtube_id"],
+                    report,
+                    sections,
+                    (genres_by_track or {}).get(track_id, ""),
+                )
                 look_ahead.add(float(report.get("metrics", {}).get("look_ahead_sec", 0.0)))
                 tracks += 1
                 row_count += len(joined)
@@ -769,8 +810,7 @@ def build_table(data_dir: Path, rows: list, sections_by_track: dict,
                 dropped["in_dropped_section"] += stats.dropped_in_dropped_section
                 dropped["without_intent"] += stats.beats_without_intent
                 dropped["intent_blocks_song_stamped"] += stats.intent_blocks_song_stamped
-                dropped["intent_blocks_song_recorded"] += \
-                    stats.intent_blocks_song_recorded
+                dropped["intent_blocks_song_recorded"] += stats.intent_blocks_song_recorded
                 dropped["intent_blocks_late"] += stats.intent_blocks_late
                 dropped["intent_reattributed"] += stats.intent_reattributed
                 dropped["silence_blocks_leading"] += stats.silence_blocks_leading
@@ -785,15 +825,19 @@ def build_table(data_dir: Path, rows: list, sections_by_track: dict,
         tmp.unlink(missing_ok=True)
         raise
 
-    return TableStats(tracks, row_count, labels, intents, dropped,
-                      look_ahead, skipped, missing_reports)
+    return TableStats(
+        tracks, row_count, labels, intents, dropped, look_ahead, skipped, missing_reports
+    )
 
 
 def _git(repo_root: Path, *args: str) -> str | None:
     try:
         proc = subprocess.run(
             ["git", "-C", str(repo_root), *args],
-            capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -828,13 +872,17 @@ def sidecar_stats(data_dir: Path) -> tuple:
     return len(paths), sum(path.stat().st_size for path in paths)
 
 
-def write_meta(data_dir: Path, stats: TableStats, failures: list,
-               elapsed_sec: float, cache_counts: collections.Counter | None = None,
-               sha: str | None = None) -> Path:
+def write_meta(
+    data_dir: Path,
+    stats: TableStats,
+    failures: list,
+    elapsed_sec: float,
+    cache_counts: collections.Counter | None = None,
+    sha: str | None = None,
+) -> Path:
     count, total_bytes = sidecar_stats(data_dir)
     meta = {
-        "built_at": datetime.datetime.now(datetime.timezone.utc)
-                            .replace(microsecond=0).isoformat(),
+        "built_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
         "git_sha": git_sha(),
         "pipeline_sha": pipeline_sha() if sha is None else sha,
         "report_cache": dict(sorted((cache_counts or {}).items())),
@@ -881,9 +929,16 @@ def _ordered_counts(counter: collections.Counter, order: tuple) -> dict:
     return {label: counter[label] for label in known + extra}
 
 
-def print_report(stats: TableStats, results: list, table_path: Path,
-                 meta_path: Path, data_dir: Path, elapsed: float,
-                 new_caches: set, cache_counts: collections.Counter | None = None) -> None:
+def print_report(
+    stats: TableStats,
+    results: list,
+    table_path: Path,
+    meta_path: Path,
+    data_dir: Path,
+    elapsed: float,
+    new_caches: set,
+    cache_counts: collections.Counter | None = None,
+) -> None:
     failures = [result for result in results if not result.ok]
     count, total_bytes = sidecar_stats(data_dir)
     dropped = stats.dropped
@@ -892,13 +947,17 @@ def print_report(stats: TableStats, results: list, table_path: Path,
         print()
         print("report cache")
         print(f"  hits (no sim, no decode): {cache_counts['hit']}")
-        misses = {key: value for key, value in sorted(cache_counts.items())
-                  if key.startswith("miss_")}
-        print(f"  misses                  : {sum(misses.values())}"
-              + (f"  ({', '.join(f'{k[5:]} {v}' for k, v in misses.items())})"
-                 if misses else ""))
-        for key, caption in (("too_recent", "too recent to touch"),
-                             ("missing_audio", "audio file missing")):
+        misses = {
+            key: value for key, value in sorted(cache_counts.items()) if key.startswith("miss_")
+        }
+        print(
+            f"  misses                  : {sum(misses.values())}"
+            + (f"  ({', '.join(f'{k[5:]} {v}' for k, v in misses.items())})" if misses else "")
+        )
+        for key, caption in (
+            ("too_recent", "too recent to touch"),
+            ("missing_audio", "audio file missing"),
+        ):
             if cache_counts[key]:
                 print(f"  {caption:<24}: {cache_counts[key]}")
 
@@ -913,16 +972,22 @@ def print_report(stats: TableStats, results: list, table_path: Path,
     print(f"     of which in a dropped 'end' sentinel: {dropped['in_dropped_section']}")
     print(f"  rows without an intent: {dropped['without_intent']}")
     print(f"  look_ahead_sec        : {sorted(stats.look_ahead_sec)}")
-    print(f"  song-stamped intent blocks realigned: "
-          f"{dropped['intent_blocks_song_stamped']}  "
-          f"(rows re-attributed: {dropped['intent_reattributed']})")
-    print(f"  intent blocks committed late: {dropped['intent_blocks_late']} of "
-          f"{dropped['intent_blocks_song_recorded']} eligible  "
-          f"(#154's accepted lateness -- the chain was older than the "
-          f"playback delay; only a block that RECORDED its instant can be "
-          f"measured, so a zero denominator means the reports predate it)")
-    print(f"  tracks with no cached report : {len(stats.missing_reports)}"
-          + (f"  {stats.missing_reports[:10]}" if stats.missing_reports else ""))
+    print(
+        f"  song-stamped intent blocks realigned: "
+        f"{dropped['intent_blocks_song_stamped']}  "
+        f"(rows re-attributed: {dropped['intent_reattributed']})"
+    )
+    print(
+        f"  intent blocks committed late: {dropped['intent_blocks_late']} of "
+        f"{dropped['intent_blocks_song_recorded']} eligible  "
+        f"(#154's accepted lateness -- the chain was older than the "
+        f"playback delay; only a block that RECORDED its instant can be "
+        f"measured, so a zero denominator means the reports predate it)"
+    )
+    print(
+        f"  tracks with no cached report : {len(stats.missing_reports)}"
+        + (f"  {stats.missing_reports[:10]}" if stats.missing_reports else "")
+    )
 
     print()
     print("class histogram")
@@ -935,8 +1000,10 @@ def print_report(stats: TableStats, results: list, table_path: Path,
     print("mel feature sidecars")
     print(f"  tracks    : {count}")
     print(f"  total size: {total_bytes / 2**20:.1f} MiB")
-    print(f"  frame     : {MEL_BANDS} bands, "
-          f"{POOL_BUFFERS * BUFFER_SIZE / SAMPLE_RATE * 1000:.2f} ms hop")
+    print(
+        f"  frame     : {MEL_BANDS} bands, "
+        f"{POOL_BUFFERS * BUFFER_SIZE / SAMPLE_RATE * 1000:.2f} ms hop"
+    )
 
     if failures:
         print()
@@ -952,8 +1019,10 @@ def print_report(stats: TableStats, results: list, table_path: Path,
             print(f"  {track_id:<20} {detail}")
 
     print()
-    print(f"decode caches left in {data_dir / AUDIO_DIR}: "
-          f"{len(new_caches)} new" + (f" -- {sorted(new_caches)}" if new_caches else ""))
+    print(
+        f"decode caches left in {data_dir / AUDIO_DIR}: "
+        f"{len(new_caches)} new" + (f" -- {sorted(new_caches)}" if new_caches else "")
+    )
     print(f"wall time: {elapsed / 60:.1f} min")
     print()
     print(f"table: {table_path}  ({table_path.stat().st_size / 2**20:.1f} MiB)")
@@ -969,39 +1038,51 @@ def _print_histogram(counter: collections.Counter, total: int) -> None:
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--data-dir", type=Path, default=default_data_dir(),
+        "--data-dir",
+        type=Path,
+        default=default_data_dir(),
         help="corpus root; reads clean_manifest.csv + annotations/, writes "
-             "training_table.csv.gz, reports/ and features/ (default: %(default)s)",
+        "training_table.csv.gz, reports/ and features/ (default: %(default)s)",
     )
     parser.add_argument(
-        "--workers", type=int, default=default_workers(),
+        "--workers",
+        type=int,
+        default=default_workers(),
         help="parallel simulation workers (default: %(default)s = cpu_count - 2)",
     )
     parser.add_argument(
-        "--limit", type=int, default=0,
+        "--limit",
+        type=int,
+        default=0,
         help="simulate at most N tracks (smoke run; 0 = no limit)",
     )
     parser.add_argument(
-        "--min-age-sec", type=float, default=MIN_AGE_SEC,
+        "--min-age-sec",
+        type=float,
+        default=MIN_AGE_SEC,
         help="skip audio written more recently than this -- the corpus "
-             "downloader may still be running (default: %(default)s)",
+        "downloader may still be running (default: %(default)s)",
     )
     parser.add_argument(
-        "--force", action="store_true",
+        "--force",
+        action="store_true",
         help="ignore the report cache and re-simulate every track",
     )
     parser.add_argument(
-        "--table-only", action="store_true",
+        "--table-only",
+        action="store_true",
         help="skip the simulations and re-join the cached reports on disk",
     )
     parser.add_argument(
-        "--simulate-only", action="store_true",
+        "--simulate-only",
+        action="store_true",
         help="run the simulations and stop before the table join",
     )
     parser.add_argument(
-        "--keep-cell-sidecars", action="store_true",
+        "--keep-cell-sidecars",
+        action="store_true",
         help="keep each track's extractor cell sidecar beside the audio; "
-             "the decode cache is still deleted per track",
+        "the decode cache is still deleted per track",
     )
     args = parser.parse_args(argv)
     if args.table_only and args.simulate_only:
@@ -1018,13 +1099,14 @@ def main(argv: list | None = None) -> int:
     rows = load_ok_rows(data_dir)
     sections_by_track = load_sections_by_track(data_dir)
     genres_by_track = load_genres_by_track(data_dir)
-    print(f"clean manifest: {len(rows)} ok track(s); "
-          f"{len(sections_by_track)} annotated track(s)")
+    print(f"clean manifest: {len(rows)} ok track(s); {len(sections_by_track)} annotated track(s)")
 
     preexisting_caches = find_caches(data_dir)
     if preexisting_caches:
-        print(f"NOTE: {len(preexisting_caches)} decode cache(s) predate this run "
-              f"and will be left in place")
+        print(
+            f"NOTE: {len(preexisting_caches)} decode cache(s) predate this run "
+            f"and will be left in place"
+        )
 
     results: list = []
     cache_counts: collections.Counter = collections.Counter()
@@ -1032,28 +1114,32 @@ def main(argv: list | None = None) -> int:
         print("NOTE: --table-only -- no simulations, re-joining cached reports")
     else:
         jobs, cache_counts = select_jobs(
-            rows, data_dir, force=args.force, min_age_sec=args.min_age_sec,
-            preexisting_caches=preexisting_caches, sha=sha,
+            rows,
+            data_dir,
+            force=args.force,
+            min_age_sec=args.min_age_sec,
+            preexisting_caches=preexisting_caches,
+            sha=sha,
             keep_cells=args.keep_cell_sidecars,
         )
         if args.limit:
             jobs = jobs[: args.limit]
             print(f"NOTE: --limit {args.limit} -- simulating a subset only")
-        print(f"stage A: {len(jobs)} to simulate, {cache_counts['hit']} cache hit(s)",
-              flush=True)
+        print(f"stage A: {len(jobs)} to simulate, {cache_counts['hit']} cache hit(s)", flush=True)
         if jobs:
             print(f"  {args.workers} worker(s)", flush=True)
             results = run_simulations(jobs, workers=args.workers)
 
     if args.simulate_only:
-        failures = [(result.track_id, result.detail)
-                    for result in results if not result.ok]
+        failures = [(result.track_id, result.detail) for result in results if not result.ok]
         for track_id, detail in failures:
             print(f"  FAIL {track_id}: {detail}", flush=True)
-        print(f"simulate-only: {sum(1 for result in results if result.ok)}"
-              f"/{len(results)} simulated, {len(failures)} failed, "
-              f"{(time.time() - started) / 60:.1f} min -- table join skipped",
-              flush=True)
+        print(
+            f"simulate-only: {sum(1 for result in results if result.ok)}"
+            f"/{len(results)} simulated, {len(failures)} failed, "
+            f"{(time.time() - started) / 60:.1f} min -- table join skipped",
+            flush=True,
+        )
         return 1 if failures else 0
 
     print("stage B: joining beats to labels ...", flush=True)
@@ -1063,8 +1149,16 @@ def main(argv: list | None = None) -> int:
     meta_path = write_meta(data_dir, stats, failures, elapsed, cache_counts, sha)
 
     new_caches = find_caches(data_dir) - preexisting_caches
-    print_report(stats, results, data_dir / TABLE_FILE, meta_path, data_dir,
-                 elapsed, new_caches, cache_counts)
+    print_report(
+        stats,
+        results,
+        data_dir / TABLE_FILE,
+        meta_path,
+        data_dir,
+        elapsed,
+        new_caches,
+        cache_counts,
+    )
     return 0
 
 

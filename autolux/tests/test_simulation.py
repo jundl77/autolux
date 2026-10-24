@@ -54,6 +54,7 @@ async def _sample_run() -> dict:
 @pytest.mark.integration
 async def test_sample_song_evaluation_passes(nn_artifacts):
     from autolux.simulate.evaluator import evaluate
+
     run = await _sample_run()
     result = evaluate(run['report'])
     assert result['passed'], f'sample-song evaluation failed: {result["criteria"]}'
@@ -65,8 +66,9 @@ async def test_the_decoder_drives_the_show_on_a_real_track(nn_artifacts):
     intents = [block['intent'] for block in run['report']['intents']]
     assert len(intents) >= 4, intents
     assert {'atmospheric', 'drop'} <= set(intents), intents
-    assert all(block['t'] <= run['report']['duration_sec'] + 1e-6
-               for block in run['report']['intents'])
+    assert all(
+        block['t'] <= run['report']['duration_sec'] + 1e-6 for block in run['report']['intents']
+    )
 
 
 @pytest.mark.integration
@@ -102,6 +104,7 @@ async def test_runs_much_faster_than_real_time():
 @pytest.mark.integration
 async def test_simulation_is_deterministic():
     from autolux.simulate.evaluator import report_checksum
+
     track = _require_audio([SAMPLE_TRACK_ID])[0]
     mp3 = str(run_eval_set.audio_path(DATA_DIR, track["youtube_id"]))
     first = (await _sample_run())['report']
@@ -116,12 +119,17 @@ async def test_simulation_is_deterministic():
 @pytest.mark.integration
 def test_eval_set_head_matches_the_committed_baseline(nn_artifacts):
     _require_audio(BENCH_TRACK_IDS)
-    exit_code = run_eval_set.main([
-        "--only", ",".join(BENCH_TRACK_IDS),
-        "--data-dir", str(DATA_DIR),
-        "--workers", "1",
-        "--quiet",
-    ])
+    exit_code = run_eval_set.main(
+        [
+            "--only",
+            ",".join(BENCH_TRACK_IDS),
+            "--data-dir",
+            str(DATA_DIR),
+            "--workers",
+            "1",
+            "--quiet",
+        ]
+    )
     assert exit_code == 0, (
         f"eval-set benchmark failed on {', '.join(BENCH_TRACK_IDS)} -- see the "
         f"table above.  If the pipeline change is intended, re-cut with "

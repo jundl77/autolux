@@ -33,10 +33,11 @@ def bar_line(index: int, *, period: float = 0.5, start: float = 0.0) -> float:
 
 
 def decoder(*, lag_bars=2, floor=4, feature_latency_sec=0.0, **params):
-    return SectionDecoder(toy_priors(floor=floor),
-                          DecodeParams(lag_bars=lag_bars, min_coverage=1,
-                                       **params),
-                          feature_latency_sec=feature_latency_sec)
+    return SectionDecoder(
+        toy_priors(floor=floor),
+        DecodeParams(lag_bars=lag_bars, min_coverage=1, **params),
+        feature_latency_sec=feature_latency_sec,
+    )
 
 
 class Driver:
@@ -60,8 +61,7 @@ class Driver:
         self.decisions.extend(decisions)
 
 
-def feed(section, *, bars, labels, period=0.5, cells_per_bar=8,
-         boundary=0.0, start=0.0) -> Driver:
+def feed(section, *, bars, labels, period=0.5, cells_per_bar=8, boundary=0.0, start=0.0) -> Driver:
     driver = Driver(section)
     bar_sec = period * BEATS_PER_BAR
     for beat in beats((bars + 1) * BEATS_PER_BAR, period=period, start=start):
@@ -69,8 +69,7 @@ def feed(section, *, bars, labels, period=0.5, cells_per_bar=8,
     step = bar_sec / cells_per_bar
     for index in range(bars * cells_per_bar + cells_per_bar):
         which = min(index // cells_per_bar, len(labels) - 1)
-        driver.cell(start + (index + 1) * step, one_hot(labels[which]),
-                    boundary)
+        driver.cell(start + (index + 1) * step, one_hot(labels[which]), boundary)
     return driver
 
 
@@ -84,9 +83,10 @@ def test_a_bar_is_four_beats_and_the_first_line_closes_on_the_fourth_beat():
 def test_the_first_detected_beat_is_bar_position_one_not_zero():
     section = decoder()
     section.push_beat(4.0)
-    assert section.bar_edges == [], \
-        'the first detected beat opened a bar; madmom has not emitted the ' \
+    assert section.bar_edges == [], (
+        'the first detected beat opened a bar; madmom has not emitted the '
         'downbeat its warm-up costs'
+    )
     for beat in beats(3, period=0.5, start=4.5):
         section.push_beat(beat)
     assert section.bar_edges == [pytest.approx(5.5)]
@@ -151,8 +151,7 @@ def test_a_bars_posterior_is_the_mean_of_the_cells_inside_it():
     section.push_posterior(bar_line(0) + 1.5, inside[1], 0.0)
     section.push_posterior(bar_line(1), one_hot(4), 0.0)
     assert section.bars_pushed == 1
-    np.testing.assert_allclose(section.recent_observations[-1].posterior,
-                               np.mean(inside, axis=0))
+    np.testing.assert_allclose(section.recent_observations[-1].posterior, np.mean(inside, axis=0))
 
 
 def test_the_closing_edge_belongs_to_the_next_bar():
@@ -162,8 +161,7 @@ def test_the_closing_edge_belongs_to_the_next_bar():
     section.push_posterior(bar_line(0) + 1.0, one_hot(0), 0.0)
     section.push_posterior(bar_line(1), one_hot(3), 0.0)
     section.push_posterior(bar_line(1) + 0.5, one_hot(3), 0.0)
-    np.testing.assert_allclose(section.recent_observations[-1].posterior,
-                               one_hot(0))
+    np.testing.assert_allclose(section.recent_observations[-1].posterior, one_hot(0))
 
 
 def test_the_boundary_is_the_max_within_tolerance_of_the_bar_line_or_nan_with_no_cell():
@@ -204,7 +202,8 @@ def test_temperature_is_applied_per_cell_before_the_bar_average():
     section.push_posterior(bar_line(1), one_hot(2), 0.0)
     np.testing.assert_allclose(
         section.recent_observations[-1].posterior,
-        temper(np.asarray(rows, dtype=np.float64), 0.5).mean(axis=0))
+        temper(np.asarray(rows, dtype=np.float64), 0.5).mean(axis=0),
+    )
 
 
 def test_a_config_asking_for_overlap_coverage_is_refused():
@@ -214,28 +213,26 @@ def test_a_config_asking_for_overlap_coverage_is_refused():
 
 def test_the_streaming_push_equals_the_offline_decode_of_the_same_birth():
     labels = [0] * 6 + [1] * 6 + [3] * 8 + [4] * 6
-    driver = feed(decoder(lag_bars=2), bars=len(labels), labels=labels,
-                  boundary=0.3)
+    driver = feed(decoder(lag_bars=2), bars=len(labels), labels=labels, boundary=0.3)
 
     offline = FixedLagViterbi(toy_priors(), 2)
     offline.restart()
     offline.push(None, None)
     expected = []
     for observation in driver.observations:
-        expected.extend(offline.push(observation.posterior,
-                                     observation.boundary))
+        expected.extend(offline.push(observation.posterior, observation.boundary))
     expected.extend(offline.flush())
     expected = [d for d in expected if d.bar >= 1]
 
-    assert [(d.bar, d.label) for d in driver.decisions] == \
-           [(d.bar - 1, d.label) for d in expected[:len(driver.decisions)]]
+    assert [(d.bar, d.label) for d in driver.decisions] == [
+        (d.bar - 1, d.label) for d in expected[: len(driver.decisions)]
+    ]
     assert len(expected) - len(driver.decisions) == 2
 
 
 def test_a_decision_carries_the_bar_line_it_starts_on():
     labels = [0] * 8 + [3] * 8
-    driver = feed(decoder(lag_bars=2), bars=len(labels), labels=labels,
-                  period=0.5)
+    driver = feed(decoder(lag_bars=2), bars=len(labels), labels=labels, period=0.5)
     assert driver.decisions
     for decision in driver.decisions:
         assert isinstance(decision, BarDecision)
@@ -261,8 +258,9 @@ def test_the_bar_grid_does_not_grow_with_the_set():
         for beat in beats(BEATS_PER_BAR, period=0.5, start=bar * bar_sec):
             section.push_beat(beat)
         for cell in range(8):
-            section.push_posterior(bar * bar_sec + (cell + 1) * bar_sec / 8,
-                                   one_hot(3 if bar % 20 else 0), 0.0)
+            section.push_posterior(
+                bar * bar_sec + (cell + 1) * bar_sec / 8, one_hot(3 if bar % 20 else 0), 0.0
+            )
     assert len(section.bar_edges) <= 64
     assert section.bars_pushed > 350, 'the grid stopped advancing'
 
@@ -292,24 +290,26 @@ def test_a_beat_gap_re_anchors_the_grid_instead_of_closing_a_bar_across_it():
     assert section.pending_cells == 0, 'the stall was carried into the new bar'
     assert section.bar_edges[-1] == pytest.approx(60.0)
     section.push_beat(60.5)
-    assert section.bar_edges[-1] == pytest.approx(60.0), \
+    assert section.bar_edges[-1] == pytest.approx(60.0), (
         'the beat after the gap did not open the bar'
+    )
 
 
 def test_a_re_anchor_leaves_the_bar_it_had_already_closed_alone():
     section = decoder(lag_bars=2)
     for beat in beats(8, period=0.5):
         section.push_beat(beat)
-    assert section.bar_edges == [pytest.approx(bar_line(0)),
-                                 pytest.approx(bar_line(1))]
+    assert section.bar_edges == [pytest.approx(bar_line(0)), pytest.approx(bar_line(1))]
 
     section.push_beat(60.0)
-    assert section.bar_edges[1] == pytest.approx(bar_line(1)), \
+    assert section.bar_edges[1] == pytest.approx(bar_line(1)), (
         'the closed bar lost the line that closed it'
-    assert 60.0 - bar_line(1) not in [pytest.approx(hi - lo) for lo, hi
-                                      in zip(section.bar_edges, section.bar_edges[1:])
-                                      if lo == pytest.approx(bar_line(0))], \
-        'bar 0 was stretched across the gap'
+    )
+    assert 60.0 - bar_line(1) not in [
+        pytest.approx(hi - lo)
+        for lo, hi in zip(section.bar_edges, section.bar_edges[1:])
+        if lo == pytest.approx(bar_line(0))
+    ], 'bar 0 was stretched across the gap'
 
 
 def test_the_bar_a_gap_re_anchors_still_lasts_four_beats():
@@ -319,9 +319,10 @@ def test_the_bar_a_gap_re_anchors_still_lasts_four_beats():
     section.push_beat(60.0)
     for beat in beats(5, period=0.5, start=60.5):
         section.push_beat(beat)
-    assert section.bar_edges[-2:] == [pytest.approx(60.0), pytest.approx(62.0)], \
-        'the re-anchored grid carried the first-beat warm-up offset it has no ' \
+    assert section.bar_edges[-2:] == [pytest.approx(60.0), pytest.approx(62.0)], (
+        'the re-anchored grid carried the first-beat warm-up offset it has no '
         'evidence for and closed a three-beat bar'
+    )
 
 
 def test_the_bar_the_gap_falls_in_is_never_decoded():
@@ -347,10 +348,10 @@ def test_the_bar_the_gap_falls_in_is_never_decoded():
         section.push_posterior(60.5 + index * 0.25, one_hot(0), 0.0)
         absorb()
 
-    stretched = [obs for obs in seen
-                 if obs.end_sec - obs.start_sec > 4.0 and obs.posterior is not None]
-    assert stretched == [], \
-        f'a bar spanning the gap was decoded from stale cells: {stretched}'
+    stretched = [
+        obs for obs in seen if obs.end_sec - obs.start_sec > 4.0 and obs.posterior is not None
+    ]
+    assert stretched == [], f'a bar spanning the gap was decoded from stale cells: {stretched}'
 
 
 def test_a_commit_can_never_name_a_bar_line_the_grid_has_dropped():
@@ -389,10 +390,8 @@ def test_reset_makes_the_decoder_indistinguishable_from_a_fresh_one():
     assert used.bars_pushed == 0
 
     again = feed(used, bars=len(labels), labels=labels, boundary=0.8)
-    fresh = feed(decoder(lag_bars=2), bars=len(labels), labels=labels,
-                 boundary=0.8)
-    assert [tuple(d) for d in again.decisions] == \
-           [tuple(d) for d in fresh.decisions]
+    fresh = feed(decoder(lag_bars=2), bars=len(labels), labels=labels, boundary=0.8)
+    assert [tuple(d) for d in again.decisions] == [tuple(d) for d in fresh.decisions]
 
 
 def test_a_warm_restart_keeps_the_bar_position_the_beat_stream_never_lost():
@@ -407,9 +406,9 @@ def test_a_warm_restart_keeps_the_bar_position_the_beat_stream_never_lost():
     for beat in beats(6, period=0.5, start=3.0):
         shed.push_beat(beat)
 
-    assert shed.bar_edges == [pytest.approx(line)
-                              for line in uninterrupted.bar_edges
-                              if line >= 3.0]
+    assert shed.bar_edges == [
+        pytest.approx(line) for line in uninterrupted.bar_edges if line >= 3.0
+    ]
 
 
 def test_a_beat_gap_across_a_warm_restart_still_re_anchors():
@@ -425,8 +424,7 @@ def test_a_beat_gap_across_a_warm_restart_still_re_anchors():
 def test_chain_latency_is_the_features_plus_the_lag_the_bars_actually_took():
     section = decoder(lag_bars=2, feature_latency_sec=7.9938)
     assert section.bar_sec == pytest.approx(NOMINAL_BAR_SEC)
-    assert section.chain_latency_sec == pytest.approx(
-        7.9938 + 3 * NOMINAL_BAR_SEC)
+    assert section.chain_latency_sec == pytest.approx(7.9938 + 3 * NOMINAL_BAR_SEC)
 
     for beat in beats(5 * BEATS_PER_BAR, period=0.5):
         section.push_beat(beat)

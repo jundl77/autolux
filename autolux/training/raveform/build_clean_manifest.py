@@ -84,11 +84,7 @@ def duration_tolerance(annotation_duration_sec: float) -> float:
 
 
 def _unusable(duration_sec: float | None) -> bool:
-    return (
-        duration_sec is None
-        or not math.isfinite(duration_sec)
-        or duration_sec <= 0.0
-    )
+    return duration_sec is None or not math.isfinite(duration_sec) or duration_sec <= 0.0
 
 
 def classify(
@@ -148,8 +144,17 @@ def decode(path: str) -> tuple[str, float | None]:
     try:
         proc = _run(
             [
-                "ffmpeg", "-nostdin", "-v", "error", "-progress", "-",
-                "-i", path, "-f", "null", "-",
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-progress",
+                "-",
+                "-i",
+                path,
+                "-f",
+                "null",
+                "-",
             ]
         )
     except subprocess.TimeoutExpired:
@@ -179,9 +184,13 @@ def probe_duration(path: str) -> float | None:
     try:
         proc = _run(
             [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=nokey=1:noprint_wrappers=1",
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=nokey=1:noprint_wrappers=1",
                 path,
             ]
         )
@@ -226,8 +235,12 @@ def load_manifest_rows(data_dir: Path) -> list:
     if path.exists():
         with open(path, "r", encoding="utf-8", newline="") as handle:
             rows = [
-                ManifestRow(row["track_id"], row["youtube_id"],
-                            float(row["total_sec"]), row.get("genre") or "")
+                ManifestRow(
+                    row["track_id"],
+                    row["youtube_id"],
+                    float(row["total_sec"]),
+                    row.get("genre") or "",
+                )
                 for row in csv.DictReader(handle)
             ]
     else:

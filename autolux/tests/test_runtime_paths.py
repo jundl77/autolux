@@ -23,9 +23,12 @@ def test_shadow_simulation_dispatches_through_the_current_cli(campaign, monkeypa
     import sys
     import types
     from cli import main
+
     source = Path(__file__).resolve().parents[1] / 'training' / campaign / 'ng_probe_rig.py'
     tree = ast.parse(source.read_text(encoding='utf-8'))
-    function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run_sim_inner')
+    function = next(
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'run_sim_inner'
+    )
     root = tmp_path / 'shadow'
     config = root / 'nn_shadow/nn/decoder_config.json'
     package = types.ModuleType('nn')
@@ -34,14 +37,22 @@ def test_shadow_simulation_dispatches_through_the_current_cli(campaign, monkeypa
     monkeypatch.setitem(sys.modules, 'nn', package)
     monkeypatch.setitem(sys.modules, 'nn.decoder', package.decoder)
     calls = []
+
     async def fake_main():
         calls.append(list(sys.argv))
+
     monkeypatch.setattr(main, 'main', fake_main)
     monkeypatch.setattr(sys, 'path', list(sys.path))
     monkeypatch.setattr(sys, 'argv', list(sys.argv))
     monkeypatch.setenv('RAVEFORM_DATA_DIR', 'before')
-    scope = {'Path': Path, 'sys': sys, 'os': __import__('os'), 'asyncio': asyncio,
-             'MAIN': source.parents[2], 'CODE': source.parents[2]}
+    scope = {
+        'Path': Path,
+        'sys': sys,
+        'os': __import__('os'),
+        'asyncio': asyncio,
+        'MAIN': source.parents[2],
+        'CODE': source.parents[2],
+    }
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), scope)
     scope['run_sim_inner'](str(root), 'track.mp3', 'report.json')
     assert calls == [['autolux', 'simulate', 'file', 'track.mp3', '--report', 'report.json']]

@@ -11,6 +11,7 @@ the split assignment and the artist-exclusion guard must treat a hand id like
 any corpus id, or hand tracks would sit outside the contamination protections
 without anything saying so.
 """
+
 import csv
 import json
 import sys
@@ -56,25 +57,37 @@ HAND_SECTIONS = [
 ]
 
 
-def published_record(key="0001.native00001", youtube="native00001",
-                     title="Some Artist - Some Track", duration=150.0):
-    return {"key": key, "id": youtube, "title": title, "duration": duration,
-            "sections": PUBLISHED_SECTIONS}
+def published_record(
+    key="0001.native00001", youtube="native00001", title="Some Artist - Some Track", duration=150.0
+):
+    return {
+        "key": key,
+        "id": youtube,
+        "title": title,
+        "duration": duration,
+        "sections": PUBLISHED_SECTIONS,
+    }
 
 
-def hand_record(identifier="hand-ab12cd34ef56", title="Hand Artist - Hand Track",
-                duration=120.0, sections=None):
-    return {"schema": 1, "source": "hand_label", "id": identifier,
-            "title": title, "audio": f"{identifier}.mp3", "duration": duration,
-            "sections": sections if sections is not None else HAND_SECTIONS}
+def hand_record(
+    identifier="hand-ab12cd34ef56", title="Hand Artist - Hand Track", duration=120.0, sections=None
+):
+    return {
+        "schema": 1,
+        "source": "hand_label",
+        "id": identifier,
+        "title": title,
+        "audio": f"{identifier}.mp3",
+        "duration": duration,
+        "sections": sections if sections is not None else HAND_SECTIONS,
+    }
 
 
 def make_corpus(tmp_path, published=(), hand=()):
     data_dir = tmp_path / "raveform"
     (data_dir / "annotations" / "beats").mkdir(parents=True)
     (data_dir / "audio").mkdir()
-    with open(data_dir / "annotations" / "segments.json", "w",
-              encoding="utf-8") as handle:
+    with open(data_dir / "annotations" / "segments.json", "w", encoding="utf-8") as handle:
         json.dump(list(published), handle)
     for record in hand:
         path = data_dir / "annotations" / f"{record['id']}.hand.json"
@@ -102,7 +115,8 @@ def test_load_hand_tracks_reads_a_committed_label(tmp_path):
 def test_load_hand_tracks_ignores_everything_but_hand_json(tmp_path):
     data_dir = make_corpus(tmp_path, [published_record()], [])
     (data_dir / "annotations" / "beats" / "0001.native00001.beat.csv").write_text(
-        "time,downbeat,section\n0.5,1,intro\n", encoding="utf-8")
+        "time,downbeat,section\n0.5,1,intro\n", encoding="utf-8"
+    )
 
     assert load_hand_tracks(data_dir) == []
 
@@ -139,8 +153,7 @@ def test_load_all_tracks_appends_a_hand_only_track(tmp_path):
 
     merged = load_all_tracks(data_dir)
 
-    assert [track["key"] for track in merged] == [
-        "0001.native00001", "hand-ab12cd34ef56"]
+    assert [track["key"] for track in merged] == ["0001.native00001", "hand-ab12cd34ef56"]
 
 
 def test_a_hand_label_on_a_native_id_wins_over_the_published_sections(tmp_path):
@@ -178,8 +191,10 @@ BEATS = [(0.5, 1.0), (1.0, 2.0), (1.5, 3.0), (2.0, 4.0), (2.5, 1.0)]
 
 
 def test_beat_rows_carry_position_and_section():
-    sections = [{"name": "intro", "start": 0.75, "end": 2.2},
-                {"name": "drop", "start": 2.2, "end": 2.4}]
+    sections = [
+        {"name": "intro", "start": 0.75, "end": 2.2},
+        {"name": "drop", "start": 2.2, "end": 2.4},
+    ]
 
     rows = admission.beat_rows(BEATS, sections)
 
@@ -194,19 +209,18 @@ def test_beat_rows_carry_position_and_section():
 
 def test_the_written_grid_matches_the_published_format(tmp_path):
     path = tmp_path / "hand-ab12cd34ef56.beat.csv"
-    admission.write_beat_csv(path, [(0.11, 1, "intro"), (0.5862, 2, "intro"),
-                                    (1.06239999, 3, "drop")])
+    admission.write_beat_csv(
+        path, [(0.11, 1, "intro"), (0.5862, 2, "intro"), (1.06239999, 3, "drop")]
+    )
 
     data = path.read_bytes()
     assert data == b"time,downbeat,section\n0.11,1,intro\n0.5862,2,intro\n1.0624,3,drop\n"
-    assert parse_beat_csv(path) == [(0.11, 1, "intro"), (0.5862, 2, "intro"),
-                                    (1.0624, 3, "drop")]
+    assert parse_beat_csv(path) == [(0.11, 1, "intro"), (0.5862, 2, "intro"), (1.0624, 3, "drop")]
 
 
 def test_the_hand_grid_flags_downbeats_for_the_labeller(tmp_path):
     path = tmp_path / "hand-ab12cd34ef56.hand.beat.csv"
-    admission.write_hand_grid(path, [(0.5, 1, "intro"), (1.0, 2, "intro"),
-                                     (1.5, 4, "intro")])
+    admission.write_hand_grid(path, [(0.5, 1, "intro"), (1.0, 2, "intro"), (1.5, 4, "intro")])
 
     assert path.read_bytes() == b"time,downbeat\n0.5,1\n1,0\n1.5,0\n"
 
@@ -220,9 +234,14 @@ def measured(record, mp3_path, decoded=None):
     duration = float(record["duration"])
     return gate.CheckResult(
         record["id"] if record["id"].startswith("hand-") else "0001.native00001",
-        record["id"], str(mp3_path), duration + 0.05,
-        decoded if decoded is not None else duration, duration,
-        gate.STATUS_OK, "")
+        record["id"],
+        str(mp3_path),
+        duration + 0.05,
+        decoded if decoded is not None else duration,
+        duration,
+        gate.STATUS_OK,
+        "",
+    )
 
 
 def admission_corpus(tmp_path, monkeypatch, record=None, beats=None):
@@ -238,21 +257,17 @@ def admission_corpus(tmp_path, monkeypatch, record=None, beats=None):
         return beats if beats is not None else BEATS
 
     monkeypatch.setattr(admission, "detect_beats", fake_detect)
-    monkeypatch.setattr(
-        admission.gate, "check_track",
-        lambda job: measured(record, job.mp3_path))
+    monkeypatch.setattr(admission.gate, "check_track", lambda job: measured(record, job.mp3_path))
     return data_dir, record, mp3, calls
 
 
 def manifest_rows(data_dir):
-    with open(data_dir / "manifest.csv", "r", encoding="utf-8",
-              newline="") as handle:
+    with open(data_dir / "manifest.csv", "r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
 
 
 def clean_rows(data_dir):
-    with open(data_dir / gate.CLEAN_MANIFEST_FILE, "r", encoding="utf-8",
-              newline="") as handle:
+    with open(data_dir / gate.CLEAN_MANIFEST_FILE, "r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
 
 
@@ -263,12 +278,10 @@ def test_admit_makes_the_track_dataset_complete(tmp_path, monkeypatch):
 
     grid = data_dir / "annotations" / "beats" / "hand-ab12cd34ef56.beat.csv"
     assert parse_beat_csv(grid) == admission.beat_rows(BEATS, record["sections"])
-    assert (data_dir / "annotations" / "beats"
-            / "hand-ab12cd34ef56.hand.beat.csv").exists()
+    assert (data_dir / "annotations" / "beats" / "hand-ab12cd34ef56.hand.beat.csv").exists()
 
     rows = manifest_rows(data_dir)
-    assert [row["track_id"] for row in rows] == [
-        "0001.native00001", "hand-ab12cd34ef56"]
+    assert [row["track_id"] for row in rows] == ["0001.native00001", "hand-ab12cd34ef56"]
     hand_row = rows[1]
     assert hand_row["youtube_id"] == record["id"]
     assert hand_row["n_sections"] == "3"
@@ -289,21 +302,20 @@ def test_admit_is_idempotent_and_never_redetects(tmp_path, monkeypatch):
     data_dir, record, _mp3, calls = admission_corpus(tmp_path, monkeypatch)
 
     first = admission.admit(record["id"], corpus=data_dir)
-    snapshot = {path.name: path.read_bytes()
-                for path in data_dir.rglob("*") if path.is_file()}
+    snapshot = {path.name: path.read_bytes() for path in data_dir.rglob("*") if path.is_file()}
     second = admission.admit(record["id"], corpus=data_dir)
 
     assert len(calls) == 1
     assert "kept" in second and "generated" in first
-    after = {path.name: path.read_bytes()
-             for path in data_dir.rglob("*") if path.is_file()}
+    after = {path.name: path.read_bytes() for path in data_dir.rglob("*") if path.is_file()}
     assert after == snapshot
 
 
 def test_admit_preserves_existing_clean_manifest_rows(tmp_path, monkeypatch):
     data_dir, record, _mp3, _calls = admission_corpus(tmp_path, monkeypatch)
-    native = gate.CheckResult("0001.native00001", "native00001", "x.mp3",
-                              150.0, 150.0, 150.0, gate.STATUS_OK, "")
+    native = gate.CheckResult(
+        "0001.native00001", "native00001", "x.mp3", 150.0, 150.0, 150.0, gate.STATUS_OK, ""
+    )
     gate.write_clean_manifest(data_dir, [native])
     before = clean_rows(data_dir)
 
@@ -311,15 +323,14 @@ def test_admit_preserves_existing_clean_manifest_rows(tmp_path, monkeypatch):
 
     after = clean_rows(data_dir)
     assert after[0] == before[0]
-    assert [row["track_id"] for row in after] == [
-        "0001.native00001", "hand-ab12cd34ef56"]
+    assert [row["track_id"] for row in after] == ["0001.native00001", "hand-ab12cd34ef56"]
 
 
 def test_admit_records_a_gate_failure_and_refuses(tmp_path, monkeypatch):
     data_dir, record, _mp3, _calls = admission_corpus(tmp_path, monkeypatch)
     truncated = gate.CheckResult(
-        record["id"], record["id"], "x.mp3", 120.05, 40.0, 120.0,
-        gate.STATUS_CORRUPT, "truncated")
+        record["id"], record["id"], "x.mp3", 120.05, 40.0, 120.0, gate.STATUS_CORRUPT, "truncated"
+    )
     monkeypatch.setattr(admission.gate, "check_track", lambda job: truncated)
 
     with pytest.raises(RuntimeError, match="corrupt"):
@@ -329,10 +340,10 @@ def test_admit_records_a_gate_failure_and_refuses(tmp_path, monkeypatch):
 
 
 def test_admit_refuses_a_label_outside_the_vocabulary(tmp_path, monkeypatch):
-    record = hand_record(sections=[
-        {"name": "chorus", "start": 0.0, "end": 120.0, "strength": "major"}])
-    data_dir, record, _mp3, _calls = admission_corpus(
-        tmp_path, monkeypatch, record=record)
+    record = hand_record(
+        sections=[{"name": "chorus", "start": 0.0, "end": 120.0, "strength": "major"}]
+    )
+    data_dir, record, _mp3, _calls = admission_corpus(tmp_path, monkeypatch, record=record)
 
     with pytest.raises(RuntimeError, match="chorus"):
         admission.admit(record["id"], corpus=data_dir)
@@ -356,20 +367,16 @@ def test_admit_refuses_a_track_with_no_hand_label(tmp_path, monkeypatch):
 def test_admit_keeps_a_published_beat_grid(tmp_path, monkeypatch):
     override = hand_record(identifier="native00001", duration=149.5)
     override["audio"] = "native00001.mp3"
-    data_dir, record, _mp3, calls = admission_corpus(
-        tmp_path, monkeypatch, record=override)
-    published_grid = (data_dir / "annotations" / "beats"
-                      / "0001.native00001.beat.csv")
-    published_grid.write_text(
-        "time,downbeat,section\n0.5,1,intro\n1,2,intro\n", encoding="utf-8")
+    data_dir, record, _mp3, calls = admission_corpus(tmp_path, monkeypatch, record=override)
+    published_grid = data_dir / "annotations" / "beats" / "0001.native00001.beat.csv"
+    published_grid.write_text("time,downbeat,section\n0.5,1,intro\n1,2,intro\n", encoding="utf-8")
     before = published_grid.read_bytes()
 
     admission.admit(record["id"], corpus=data_dir)
 
     assert calls == []
     assert published_grid.read_bytes() == before
-    hand_grid = (data_dir / "annotations" / "beats"
-                 / "native00001.hand.beat.csv")
+    hand_grid = data_dir / "annotations" / "beats" / "native00001.hand.beat.csv"
     assert hand_grid.read_bytes() == b"time,downbeat\n0.5,1\n1,0\n"
 
 
@@ -400,23 +407,21 @@ def test_partition_places_a_hand_id_additively():
     frozen = {"train": ["native00001"], "val": [], "test": []}
     candidates = [
         TrackRef("0001.native00001", "native00001", "Some Artist - Some Track"),
-        TrackRef("hand-ab12cd34ef56", "hand-ab12cd34ef56",
-                 "Hand Artist - Hand Track"),
+        TrackRef("hand-ab12cd34ef56", "hand-ab12cd34ef56", "Hand Artist - Hand Track"),
     ]
 
-    result = partition(candidates, eval_ids=frozenset(),
-                       artist_names=frozenset(), existing=frozen)
+    result = partition(candidates, eval_ids=frozenset(), artist_names=frozenset(), existing=frozen)
 
     assert "native00001" in result["train"]
     placed = set(result["train"]) | set(result["val"]) | set(result["test"])
     assert "hand-ab12cd34ef56" in placed
     assert assign_split("hand-ab12cd34ef56") == next(
-        split for split in SPLIT_NAMES if "hand-ab12cd34ef56" in result[split])
+        split for split in SPLIT_NAMES if "hand-ab12cd34ef56" in result[split]
+    )
 
 
 def test_the_artist_guard_reads_a_hand_title():
-    candidates = [TrackRef("hand-ab12cd34ef56", "hand-ab12cd34ef56",
-                           "Greg Downey - Rewired")]
+    candidates = [TrackRef("hand-ab12cd34ef56", "hand-ab12cd34ef56", "Greg Downey - Rewired")]
     names = excluded_artist_names([{"title": "Greg Downey - Come To Me"}])
 
     result = partition(candidates, eval_ids=frozenset(), artist_names=names)
@@ -427,15 +432,14 @@ def test_the_artist_guard_reads_a_hand_title():
 def test_candidate_tracks_include_a_hand_only_track(tmp_path):
     record = hand_record()
     data_dir = make_corpus(tmp_path, [published_record()], [record])
-    with open(data_dir / gate.CLEAN_MANIFEST_FILE, "w", encoding="utf-8",
-              newline="") as handle:
+    with open(data_dir / gate.CLEAN_MANIFEST_FILE, "w", encoding="utf-8", newline="") as handle:
         handle.write(",".join(gate.CLEAN_MANIFEST_HEADER) + "\n")
-        handle.write("hand-ab12cd34ef56,hand-ab12cd34ef56,x.mp3,"
-                     "120.05,120.0,120.0,ok,\n")
+        handle.write("hand-ab12cd34ef56,hand-ab12cd34ef56,x.mp3,120.05,120.0,120.0,ok,\n")
     candidates, no_annotation, _unlabeled = candidate_tracks(data_dir)
 
-    assert candidates == [TrackRef("hand-ab12cd34ef56", "hand-ab12cd34ef56",
-                                   "Hand Artist - Hand Track")]
+    assert candidates == [
+        TrackRef("hand-ab12cd34ef56", "hand-ab12cd34ef56", "Hand Artist - Hand Track")
+    ]
     assert no_annotation == []
 
 
@@ -447,13 +451,13 @@ def test_the_priors_refit_reads_a_hand_track(tmp_path):
     beats = [(0.5 * index, index % 4 + 1) for index in range(240)]
     admission.write_beat_csv(
         data_dir / "annotations" / "beats" / "hand-ab12cd34ef56.beat.csv",
-        admission.beat_rows(beats, record["sections"]))
+        admission.beat_rows(beats, record["sections"]),
+    )
 
     sequences, skipped = corpus_bar_runs(data_dir, ["hand-ab12cd34ef56"])
 
     assert skipped == []
-    assert [label for label, _bars in sequences[0]] == [
-        "intro", "breakdown", "drop"]
+    assert [label for label, _bars in sequences[0]] == ["intro", "breakdown", "drop"]
 
 
 def test_the_benchmarks_published_truth_ignores_hand_labels(tmp_path):
@@ -463,11 +467,13 @@ def test_the_benchmarks_published_truth_ignores_hand_labels(tmp_path):
     override = hand_record(identifier="native00001", duration=149.5)
     data_dir = make_corpus(tmp_path, [published_record()], [override])
 
-    truths = run_eval_set.load_sections_by_truth(
-        data_dir, labels=tmp_path / "no-such-labels.json")
+    truths = run_eval_set.load_sections_by_truth(data_dir, labels=tmp_path / "no-such-labels.json")
 
     assert truths[run_eval_set.PUBLISHED]["0001.native00001"] == [
-        (0.0, 60.0, "intro"), (60.0, 140.0, "drop"), (140.0, 150.0, "end")]
+        (0.0, 60.0, "intro"),
+        (60.0, 140.0, "drop"),
+        (140.0, 150.0, "end"),
+    ]
 
 
 def test_the_benchmarks_owner_truth_reads_hand_labels(tmp_path):
@@ -478,12 +484,13 @@ def test_the_benchmarks_owner_truth_reads_hand_labels(tmp_path):
     override = hand_record(identifier="native00001", duration=149.5)
     data_dir = make_corpus(tmp_path, [published_record()], [override])
 
-    truths = run_eval_set.load_sections_by_truth(
-        data_dir, labels=tmp_path / "no-such-labels.json")
+    truths = run_eval_set.load_sections_by_truth(data_dir, labels=tmp_path / "no-such-labels.json")
 
     assert truths[run_eval_set.OWNER]["0001.native00001"][0] == (0.0, 30.0, "intro")
-    assert (truths[run_eval_set.OWNER]["0001.native00001"]
-            != truths[run_eval_set.PUBLISHED]["0001.native00001"])
+    assert (
+        truths[run_eval_set.OWNER]["0001.native00001"]
+        != truths[run_eval_set.PUBLISHED]["0001.native00001"]
+    )
 
 
 def test_the_table_join_reads_hand_wins(tmp_path):
@@ -495,7 +502,10 @@ def test_the_table_join_reads_hand_wins(tmp_path):
 
     assert hand_wins["0001.native00001"][0] == (0.0, 30.0, "intro")
     assert published_only["0001.native00001"] == [
-        (0.0, 60.0, "intro"), (60.0, 140.0, "drop"), (140.0, 150.0, "end")]
+        (0.0, 60.0, "intro"),
+        (60.0, 140.0, "drop"),
+        (140.0, 150.0, "end"),
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -505,16 +515,14 @@ def test_the_table_join_reads_hand_wins(tmp_path):
 
 def test_a_hand_override_keeps_the_published_genre(tmp_path):
     override = hand_record(identifier="native00001")
-    data_dir = make_corpus(
-        tmp_path, [dict(published_record(), genre="Techno")], [override])
+    data_dir = make_corpus(tmp_path, [dict(published_record(), genre="Techno")], [override])
 
     assert load_all_tracks(data_dir)[0]["genre"] == "Techno"
 
 
 def test_a_hand_genre_wins_over_the_published_one(tmp_path):
     override = dict(hand_record(identifier="native00001"), genre="Trance")
-    data_dir = make_corpus(
-        tmp_path, [dict(published_record(), genre="Techno")], [override])
+    data_dir = make_corpus(tmp_path, [dict(published_record(), genre="Techno")], [override])
 
     assert load_all_tracks(data_dir)[0]["genre"] == "Trance"
 
@@ -529,7 +537,7 @@ def test_a_hand_only_track_manifests_an_empty_genre(tmp_path):
     from raveform_manifest import MANIFEST_HEADER, build_manifest_rows
 
     data_dir = make_corpus(tmp_path, [], [hand_record()])
-    row, = build_manifest_rows(load_all_tracks(data_dir))
+    (row,) = build_manifest_rows(load_all_tracks(data_dir))
 
     assert row[MANIFEST_HEADER.index("genre")] == ""
 
@@ -538,24 +546,31 @@ def test_a_hand_only_track_with_a_genre_manifests_it(tmp_path):
     from raveform_manifest import MANIFEST_HEADER, build_manifest_rows
 
     data_dir = make_corpus(tmp_path, [], [dict(hand_record(), genre="Techno")])
-    row, = build_manifest_rows(load_all_tracks(data_dir))
+    (row,) = build_manifest_rows(load_all_tracks(data_dir))
 
     assert row[MANIFEST_HEADER.index("genre")] == "Techno"
 
 
 def test_upserting_a_clean_row_keeps_every_other_track_genre(tmp_path):
-    with open(tmp_path / gate.CLEAN_MANIFEST_FILE, "w", encoding="utf-8",
-              newline="") as handle:
+    with open(tmp_path / gate.CLEAN_MANIFEST_FILE, "w", encoding="utf-8", newline="") as handle:
         handle.write(",".join(gate.CLEAN_MANIFEST_HEADER) + "\n")
-        handle.write("0001.native00001,native00001,x.mp3,"
-                     "150.0,150.0,150.0,ok,,Techno\n")
+        handle.write("0001.native00001,native00001,x.mp3,150.0,150.0,150.0,ok,,Techno\n")
 
-    admission.upsert_clean_row(tmp_path, gate.CheckResult(
-        "hand-ab12cd34ef56", "hand-ab12cd34ef56", "y.mp3", 120.0, 120.0, 120.0,
-        gate.STATUS_OK, ""))
+    admission.upsert_clean_row(
+        tmp_path,
+        gate.CheckResult(
+            "hand-ab12cd34ef56",
+            "hand-ab12cd34ef56",
+            "y.mp3",
+            120.0,
+            120.0,
+            120.0,
+            gate.STATUS_OK,
+            "",
+        ),
+    )
 
-    with open(tmp_path / gate.CLEAN_MANIFEST_FILE, "r", encoding="utf-8",
-              newline="") as handle:
+    with open(tmp_path / gate.CLEAN_MANIFEST_FILE, "r", encoding="utf-8", newline="") as handle:
         rows = {row["track_id"]: row["genre"] for row in csv.DictReader(handle)}
 
     assert rows == {"0001.native00001": "Techno", "hand-ab12cd34ef56": ""}

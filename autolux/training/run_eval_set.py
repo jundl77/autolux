@@ -107,9 +107,17 @@ GUARDED_METRICS = {
 DEFAULT_SCORE_TOLERANCE = 0.02
 DEFAULT_FLICKER_TOLERANCE = 0.20
 
-COUNT_FACTS = ("rows", "label_boundaries", "exposure_sec", "beats",
-               "changes_intent", "late",
-               "silence_leading", "silence_interior", "silence_trailing")
+COUNT_FACTS = (
+    "rows",
+    "label_boundaries",
+    "exposure_sec",
+    "beats",
+    "changes_intent",
+    "late",
+    "silence_leading",
+    "silence_interior",
+    "silence_trailing",
+)
 
 AUDIO_MISSING_HINT = (
     "eval-set audio missing -- expected the committed copy in "
@@ -166,10 +174,10 @@ def select_tracks(document: dict, only: list | None = None) -> list:
     if only is None:
         return tracks
     wanted = {str(item).strip() for item in only if str(item).strip()}
-    picked = [track for track in tracks
-              if track["track_id"] in wanted or track["youtube_id"] in wanted]
-    known = {track["track_id"] for track in tracks} | {
-        track["youtube_id"] for track in tracks}
+    picked = [
+        track for track in tracks if track["track_id"] in wanted or track["youtube_id"] in wanted
+    ]
+    known = {track["track_id"] for track in tracks} | {track["youtube_id"] for track in tracks}
     unknown = sorted(wanted - known)
     if unknown:
         raise RuntimeError(
@@ -181,9 +189,8 @@ def select_tracks(document: dict, only: list | None = None) -> list:
 
 def shortest_track_ids(document: dict, count: int) -> list:
     tracks = list(document.get("tracks") or [])
-    by_length = sorted(tracks, key=lambda track: (float(track["duration_sec"]),
-                                                  track["track_id"]))
-    chosen = {track["track_id"] for track in by_length[:max(0, count)]}
+    by_length = sorted(tracks, key=lambda track: (float(track["duration_sec"]), track["track_id"]))
+    chosen = {track["track_id"] for track in by_length[: max(0, count)]}
     return [track["track_id"] for track in tracks if track["track_id"] in chosen]
 
 
@@ -194,7 +201,8 @@ def missing_inputs(data_dir: Path, tracks: list, labels: Path | None = None) -> 
         problems.append(
             f"missing {segments} -- run "
             f"training/raveform/raveform_fetch_annotations.py, or restore the "
-            f"committed {EVAL_LABELS_FILE.name}")
+            f"committed {EVAL_LABELS_FILE.name}"
+        )
     for track in tracks:
         mp3 = audio_path(data_dir, track["youtube_id"])
         if not mp3.exists():
@@ -207,12 +215,14 @@ def missing_model(data_dir: Path) -> str | None:
 
     if section_chain.artifacts_present(data_dir):
         return None
-    return ("the shipped model is not on this machine: "
-            f"{', '.join(section_chain.artifacts(data_dir).missing())}\n"
-            "the benchmark scores a neural show; without the model every track "
-            "runs the degradation state, so its checksums and scores describe "
-            "nothing.  This is a missing download, not a regression -- do not "
-            "re-cut the baseline from here.")
+    return (
+        "the shipped model is not on this machine: "
+        f"{', '.join(section_chain.artifacts(data_dir).missing())}\n"
+        "the benchmark scores a neural show; without the model every track "
+        "runs the degradation state, so its checksums and scores describe "
+        "nothing.  This is a missing download, not a regression -- do not "
+        "re-cut the baseline from here."
+    )
 
 
 def verify_owner_ground_truth(slice_document: dict) -> None:
@@ -237,23 +247,23 @@ def verify_owner_ground_truth(slice_document: dict) -> None:
         elif not label.exists():
             drift.append(f"{track_id} -- {name} is not on this checkout")
         elif file_sha256(label) != recorded:
-            drift.append(f"{track_id} -- {name} is {file_sha256(label)[:12]}... "
-                         f"on disk, the slice was cut from {recorded[:12]}...")
+            drift.append(
+                f"{track_id} -- {name} is {file_sha256(label)[:12]}... "
+                f"on disk, the slice was cut from {recorded[:12]}..."
+            )
     if drift:
         raise RuntimeError(
             "the eval set's OWNER GROUND TRUTH does not match the freeze:\n  "
             + "\n  ".join(drift)
             + "\nre-cut the slice (training/eval_assets.py --cut) and the "
-              "baseline together."
+            "baseline together."
         )
 
 
-def verify_ground_truth(document: dict, data_dir: Path,
-                        labels: Path | None = None) -> None:
+def verify_ground_truth(document: dict, data_dir: Path, labels: Path | None = None) -> None:
     path, committed = labels_source(data_dir, labels)
     if committed:
-        frozen = ((document.get("selected_from") or {}).get("inputs")
-                  or {}).get(SEGMENTS_FILE)
+        frozen = ((document.get("selected_from") or {}).get("inputs") or {}).get(SEGMENTS_FILE)
         slice_document = load_labels(path)
         cut_from = labels_source_sha(slice_document)
         if not frozen or not cut_from or frozen != cut_from:
@@ -280,12 +290,13 @@ def verify_ground_truth(document: dict, data_dir: Path,
 def same_path(left: Path, right: Path) -> bool:
     try:
         return Path(left).resolve() == Path(right).resolve()
-    except OSError:                                             # pragma: no cover
+    except OSError:  # pragma: no cover
         return Path(left).absolute() == Path(right).absolute()
 
 
-def partial_baseline_refusal(selected: list, document: dict, baseline_path: Path,
-                             allowed: bool = False) -> str | None:
+def partial_baseline_refusal(
+    selected: list, document: dict, baseline_path: Path, allowed: bool = False
+) -> str | None:
     total = len(document.get("tracks") or [])
     if allowed or len(selected) >= total or not same_path(baseline_path, BASELINE_FILE):
         return None
@@ -304,14 +315,16 @@ def partial_baseline_refusal(selected: list, document: dict, baseline_path: Path
 
 def unreviewed_tracks(document: dict, slice_document: dict) -> list:
     rulings = owner_rulings(slice_document)
-    return [str(track["track_id"]) for track in document.get("tracks") or []
-            if str((rulings.get(str(track["track_id"])) or {}).get(
-                "ruling", UNREVIEWED)) == UNREVIEWED]
+    return [
+        str(track["track_id"])
+        for track in document.get("tracks") or []
+        if str((rulings.get(str(track["track_id"])) or {}).get("ruling", UNREVIEWED)) == UNREVIEWED
+    ]
 
 
-def unreviewed_truth_refusal(document: dict, slice_document: dict,
-                             baseline_path: Path,
-                             allowed: bool = False) -> str | None:
+def unreviewed_truth_refusal(
+    document: dict, slice_document: dict, baseline_path: Path, allowed: bool = False
+) -> str | None:
     """All-or-nothing on REVIEW, incremental on OVERRIDE.
 
     A ruling is one of overridden / accepted / unreviewed, so the owner reading
@@ -321,8 +334,7 @@ def unreviewed_truth_refusal(document: dict, slice_document: dict,
     the aggregate cannot be attributed, and it would move again every time one
     more track is ruled on, with no pipeline change.
     """
-    if (allowed or GATED_TRUTH != OWNER
-            or not same_path(baseline_path, BASELINE_FILE)):
+    if allowed or GATED_TRUTH != OWNER or not same_path(baseline_path, BASELINE_FILE):
         return None
     unreviewed = unreviewed_tracks(document, slice_document)
     if not unreviewed:
@@ -382,23 +394,21 @@ def score_report(track_id: str, youtube_id: str, report: dict, sections: list):
         track_id=track_id,
         times=tuple(row["t_song"] for row in rows),
         intents=tuple(row["intent_at_beat"] for row in rows),
-        labels={name: tuple(spec.view(row[LABEL_COLUMN]) for row in rows)
-                for name, spec in SPACES.items()},
+        labels={
+            name: tuple(spec.view(row[LABEL_COLUMN]) for row in rows)
+            for name, spec in SPACES.items()
+        },
     )
-    return ({space: score_track(track, space) for space in REPORTED_SPACES},
-            len(rows), stats)
+    return ({space: score_track(track, space) for space in REPORTED_SPACES}, len(rows), stats)
 
 
 def track_metrics(score) -> dict:
     return {
         "macro_f1": round(score.macro_f1, 6),
         "accuracy": round(score.accuracy, 6),
-        "boundary_f1": round(
-            score.boundary_prf(STREAM, BOUNDARY_TOLERANCE_SEC)[2], 6),
-        "crispness": round(
-            score.boundary_prf(STREAM, CRISPNESS_TOLERANCE_SEC)[2], 6),
-        "flicker_per_min": round(
-            score.flicker_per_minute[STREAM][BOUNDARY_TOLERANCE_SEC], 6),
+        "boundary_f1": round(score.boundary_prf(STREAM, BOUNDARY_TOLERANCE_SEC)[2], 6),
+        "crispness": round(score.boundary_prf(STREAM, CRISPNESS_TOLERANCE_SEC)[2], 6),
+        "flicker_per_min": round(score.flicker_per_minute[STREAM][BOUNDARY_TOLERANCE_SEC], 6),
     }
 
 
@@ -411,10 +421,8 @@ def space_facts(score) -> dict:
     about the run rather than about the reading.
     """
     return {
-        "label_boundaries":
-            score.boundary["intent"][BOUNDARY_TOLERANCE_SEC]["overall"]["n_truth"],
-        "changes_class":
-            score.boundary["class"][BOUNDARY_TOLERANCE_SEC]["overall"]["n_pred"],
+        "label_boundaries": score.boundary["intent"][BOUNDARY_TOLERANCE_SEC]["overall"]["n_truth"],
+        "changes_class": score.boundary["class"][BOUNDARY_TOLERANCE_SEC]["overall"]["n_pred"],
     }
 
 
@@ -436,8 +444,7 @@ def truth_block(scores: dict, rows: int, stats=None) -> dict:
     block = {
         "rows": rows,
         "exposure_sec": round(gated.exposure_sec, 3),
-        "changes_intent":
-            gated.boundary["intent"][BOUNDARY_TOLERANCE_SEC]["overall"]["n_pred"],
+        "changes_intent": gated.boundary["intent"][BOUNDARY_TOLERANCE_SEC]["overall"]["n_pred"],
     }
     if stats is not None:
         block["late"] = int(stats.intent_blocks_late)
@@ -446,13 +453,11 @@ def truth_block(scores: dict, rows: int, stats=None) -> dict:
         block["silence_interior"] = int(stats.silence_blocks_interior)
         block["silence_trailing"] = int(stats.silence_blocks_trailing)
     block.update(space_block(gated))
-    block["spaces"] = {space: space_block(scores[space])
-                       for space in REPORTED_SPACES}
+    block["spaces"] = {space: space_block(scores[space]) for space in REPORTED_SPACES}
     return block
 
 
-def track_entry(report: dict, reads: dict, youtube_id: str,
-                song_sec: float) -> dict:
+def track_entry(report: dict, reads: dict, youtube_id: str, song_sec: float) -> dict:
     from autolux.simulate.evaluator import report_checksum
 
     blocks = {truth: truth_block(*reads[truth]) for truth in REPORTED_TRUTHS}
@@ -477,22 +482,30 @@ class Job(NamedTuple):
 
 def run_job(job: Job) -> TrackRun:
     track_id, youtube_id = job.track["track_id"], job.track["youtube_id"]
-    report, song_sec, wall_sec = simulate_report(
-        audio_path(Path(job.data_dir), youtube_id))
-    reads = {truth: score_report(track_id, youtube_id, report,
-                                 job.sections[truth])
-             for truth in REPORTED_TRUTHS}
-    return TrackRun(track_id, youtube_id,
-                    track_entry(report, reads, youtube_id, song_sec),
-                    {truth: reads[truth][0] for truth in REPORTED_TRUTHS},
-                    wall_sec)
+    report, song_sec, wall_sec = simulate_report(audio_path(Path(job.data_dir), youtube_id))
+    reads = {
+        truth: score_report(track_id, youtube_id, report, job.sections[truth])
+        for truth in REPORTED_TRUTHS
+    }
+    return TrackRun(
+        track_id,
+        youtube_id,
+        track_entry(report, reads, youtube_id, song_sec),
+        {truth: reads[truth][0] for truth in REPORTED_TRUTHS},
+        wall_sec,
+    )
 
 
-def build_document(eval_set: dict, pipeline_sha_: str, entries: dict,
-                   aggregate_metrics: dict, aggregate_spaces: dict | None = None,
-                   aggregate_truths: dict | None = None,
-                   score_tolerance: float = DEFAULT_SCORE_TOLERANCE,
-                   flicker_tolerance: float = DEFAULT_FLICKER_TOLERANCE) -> dict:
+def build_document(
+    eval_set: dict,
+    pipeline_sha_: str,
+    entries: dict,
+    aggregate_metrics: dict,
+    aggregate_spaces: dict | None = None,
+    aggregate_truths: dict | None = None,
+    score_tolerance: float = DEFAULT_SCORE_TOLERANCE,
+    flicker_tolerance: float = DEFAULT_FLICKER_TOLERANCE,
+) -> dict:
     return {
         "schema": SCHEMA_VERSION,
         "eval_set": eval_set,
@@ -504,12 +517,16 @@ def build_document(eval_set: dict, pipeline_sha_: str, entries: dict,
         "stream": STREAM,
         "boundary_tolerance_sec": BOUNDARY_TOLERANCE_SEC,
         "crispness_tolerance_sec": CRISPNESS_TOLERANCE_SEC,
-        "gate": {"score_tolerance": score_tolerance,
-                 "flicker_tolerance": flicker_tolerance,
-                 "metrics": dict(GUARDED_METRICS)},
-        "aggregate": {**aggregate_metrics,
-                      "spaces": dict(aggregate_spaces or {}),
-                      "truths": dict(aggregate_truths or {})},
+        "gate": {
+            "score_tolerance": score_tolerance,
+            "flicker_tolerance": flicker_tolerance,
+            "metrics": dict(GUARDED_METRICS),
+        },
+        "aggregate": {
+            **aggregate_metrics,
+            "spaces": dict(aggregate_spaces or {}),
+            "truths": dict(aggregate_truths or {}),
+        },
         "tracks": entries,
     }
 
@@ -539,12 +556,19 @@ class Comparison(NamedTuple):
 
     @property
     def failed(self) -> bool:
-        return bool(self.desync or self.unbaselined or self.ungated
-                    or self.checksum_drift or self.regressions or self.fact_drift)
+        return bool(
+            self.desync
+            or self.unbaselined
+            or self.ungated
+            or self.checksum_drift
+            or self.regressions
+            or self.fact_drift
+        )
 
 
-def _regression(name: str, metric: str, before: float, after: float,
-                tolerance: float) -> str | None:
+def _regression(
+    name: str, metric: str, before: float, after: float, tolerance: float
+) -> str | None:
     delta = after - before
     if GUARDED_METRICS[metric] == REGRESSES_DOWN:
         if delta >= -tolerance:
@@ -554,8 +578,10 @@ def _regression(name: str, metric: str, before: float, after: float,
         if delta <= tolerance:
             return None
         arrow = "rose"
-    return (f"{name}: {metric} {arrow} {before:.4f} -> {after:.4f} "
-            f"({delta:+.4f}, tolerance {tolerance:.4f})")
+    return (
+        f"{name}: {metric} {arrow} {before:.4f} -> {after:.4f} "
+        f"({delta:+.4f}, tolerance {tolerance:.4f})"
+    )
 
 
 def _fact_drift(name: str, before: dict, after: dict) -> list:
@@ -565,34 +591,34 @@ def _fact_drift(name: str, before: dict, after: dict) -> list:
     for fact in COUNT_FACTS:
         if fact not in before or fact not in after:
             where = "the baseline" if fact not in before else "this run"
-            drift.append(f"{name}: {fact} is missing from {where} -- it is "
-                         f"NOT being compared")
+            drift.append(f"{name}: {fact} is missing from {where} -- it is NOT being compared")
         elif before[fact] != after[fact]:
             drift.append(f"{name}: {fact} {before[fact]} -> {after[fact]}")
     return drift
 
 
-def _compare_metrics(name: str, before: dict, after: dict, score_tolerance: float,
-                     flicker_tolerance: float) -> tuple:
+def _compare_metrics(
+    name: str, before: dict, after: dict, score_tolerance: float, flicker_tolerance: float
+) -> tuple:
     ungated, regressions = [], []
     for metric in GUARDED_METRICS:
         if metric not in before or metric not in after:
             where = "the baseline" if metric not in before else "this run"
-            ungated.append(f"{name}: {metric} is missing from {where} -- it is "
-                           f"NOT being gated")
+            ungated.append(f"{name}: {metric} is missing from {where} -- it is NOT being gated")
             continue
-        tolerance = (flicker_tolerance if metric == "flicker_per_min"
-                     else score_tolerance)
-        line = _regression(name, metric, float(before[metric]),
-                           float(after[metric]), tolerance)
+        tolerance = flicker_tolerance if metric == "flicker_per_min" else score_tolerance
+        line = _regression(name, metric, float(before[metric]), float(after[metric]), tolerance)
         if line:
             regressions.append(line)
     return ungated, regressions, _fact_drift(name, before, after)
 
 
-def compare(baseline: dict, current: dict,
-            score_tolerance: float = DEFAULT_SCORE_TOLERANCE,
-            flicker_tolerance: float = DEFAULT_FLICKER_TOLERANCE) -> Comparison:
+def compare(
+    baseline: dict,
+    current: dict,
+    score_tolerance: float = DEFAULT_SCORE_TOLERANCE,
+    flicker_tolerance: float = DEFAULT_FLICKER_TOLERANCE,
+) -> Comparison:
     desync, unbaselined, ungated, drift, regressions, facts = [], [], [], [], [], []
 
     baseline_sha = (baseline.get("eval_set") or {}).get("sha256")
@@ -631,7 +657,8 @@ def compare(baseline: dict, current: dict,
         if before is None:
             unbaselined.append(
                 f"{track_id}: no baseline entry -- the eval set grew without the "
-                f"baseline being re-cut")
+                f"baseline being re-cut"
+            )
             continue
         if before.get("checksum") != after.get("checksum"):
             drift.append(
@@ -639,30 +666,36 @@ def compare(baseline: dict, current: dict,
                 f" -> {str(after.get('checksum'))[:12]}... "
                 f"(beats {before.get('beats')} -> {after.get('beats')}, "
                 f"intent changes {before.get('changes_intent')} -> "
-                f"{after.get('changes_intent')})")
+                f"{after.get('changes_intent')})"
+            )
         row_ungated, row_regressions, row_facts = _compare_metrics(
-            track_id, before, after, score_tolerance, flicker_tolerance)
+            track_id, before, after, score_tolerance, flicker_tolerance
+        )
         ungated += row_ungated
         regressions += row_regressions
         facts += row_facts
 
     if not subset:
         row_ungated, row_regressions, row_facts = _compare_metrics(
-            "(aggregate)", baseline.get("aggregate") or {},
-            current.get("aggregate") or {}, score_tolerance, flicker_tolerance)
+            "(aggregate)",
+            baseline.get("aggregate") or {},
+            current.get("aggregate") or {},
+            score_tolerance,
+            flicker_tolerance,
+        )
         ungated += row_ungated
         regressions += row_regressions
         facts += row_facts
 
-    return Comparison(desync, unbaselined, ungated, drift, regressions, facts,
-                      subset)
+    return Comparison(desync, unbaselined, ungated, drift, regressions, facts, subset)
 
 
 WIDTH = 116
 
 
-def render_table(runs: list, aggregate_entry: dict, total_song: float,
-                 total_wall: float, workers: int = 1) -> str:
+def render_table(
+    runs: list, aggregate_entry: dict, total_song: float, total_wall: float, workers: int = 1
+) -> str:
     lines = [
         f'  {"track_id":<20}{"song":>7}{"wall":>7}{"x-rt":>7}{"beats":>7}'
         f'{"rows":>7}{"macroF1":>9}{"acc":>7}{"bF1":>7}{"crisp":>7}'
@@ -713,12 +746,17 @@ def render_table(runs: list, aggregate_entry: dict, total_song: float,
 
 def render_truths(runs: list, aggregate_entry: dict) -> list:
     """The same run read by every annotator -- one gated, the rest reported."""
-    lines = ["", f'  every ground truth ({GATED_TRUTH} is the gated one)',
-             f'  {"track_id":<20}' + "".join(
-                 f'{truth + " macroF1":>19}{"acc":>7}{"bF1":>7}{"crisp":>7}'
-                 f'{"flick/m":>9}{"rows":>7}{"bnd":>6}'
-                 for truth in REPORTED_TRUTHS),
-             "  " + "-" * (20 + 62 * len(REPORTED_TRUTHS))]
+    lines = [
+        "",
+        f'  every ground truth ({GATED_TRUTH} is the gated one)',
+        f'  {"track_id":<20}'
+        + "".join(
+            f'{truth + " macroF1":>19}{"acc":>7}{"bF1":>7}{"crisp":>7}'
+            f'{"flick/m":>9}{"rows":>7}{"bnd":>6}'
+            for truth in REPORTED_TRUTHS
+        ),
+        "  " + "-" * (20 + 62 * len(REPORTED_TRUTHS)),
+    ]
     rows = [(run.track_id, run.entry.get("truths") or {}) for run in runs]
     aggregate_truths = aggregate_entry.get("truths") or {}
     if aggregate_truths:
@@ -730,24 +768,33 @@ def render_truths(runs: list, aggregate_entry: dict) -> list:
             if block is None:
                 cells += f'{"-":>62}'
                 continue
-            cells += (f'{block["macro_f1"]:>19.3f}{block["accuracy"]:>7.3f}'
-                      f'{block["boundary_f1"]:>7.3f}{block["crispness"]:>7.3f}'
-                      f'{block["flicker_per_min"]:>9.2f}'
-                      f'{block.get("rows", "-"):>7}'
-                      f'{block.get("label_boundaries", "-"):>6}')
+            cells += (
+                f'{block["macro_f1"]:>19.3f}{block["accuracy"]:>7.3f}'
+                f'{block["boundary_f1"]:>7.3f}{block["crispness"]:>7.3f}'
+                f'{block["flicker_per_min"]:>9.2f}'
+                f'{block.get("rows", "-"):>7}'
+                f'{block.get("label_boundaries", "-"):>6}'
+            )
         lines.append(f'  {track_id:<20}{cells}')
-    lines.append('  a track the owner has not relabelled reads identically '
-                 'under both -- it IS the same annotation')
+    lines.append(
+        '  a track the owner has not relabelled reads identically '
+        'under both -- it IS the same annotation'
+    )
     return lines
 
 
 def render_spaces(runs: list, aggregate_entry: dict) -> list:
     """The same run read at every granularity -- one gated, the rest reported."""
-    lines = ["", f'  every granularity ({GATED_SPACE} is the gated one)',
-             f'  {"track_id":<20}' + "".join(
-                 f'{space + " macroF1":>19}{"acc":>7}{"bF1":>7}{"flick/m":>9}{"bnd":>6}'
-                 for space in REPORTED_SPACES),
-             "  " + "-" * (20 + 48 * len(REPORTED_SPACES))]
+    lines = [
+        "",
+        f'  every granularity ({GATED_SPACE} is the gated one)',
+        f'  {"track_id":<20}'
+        + "".join(
+            f'{space + " macroF1":>19}{"acc":>7}{"bF1":>7}{"flick/m":>9}{"bnd":>6}'
+            for space in REPORTED_SPACES
+        ),
+        "  " + "-" * (20 + 48 * len(REPORTED_SPACES)),
+    ]
     aggregate_spaces = aggregate_entry.get("spaces") or {}
     rows = [(run.track_id, run.entry.get("spaces") or {}) for run in runs]
     if aggregate_spaces:
@@ -759,13 +806,17 @@ def render_spaces(runs: list, aggregate_entry: dict) -> list:
             if block is None:
                 cells += f'{"-":>48}'
                 continue
-            cells += (f'{block["macro_f1"]:>19.3f}{block["accuracy"]:>7.3f}'
-                      f'{block["boundary_f1"]:>7.3f}'
-                      f'{block["flicker_per_min"]:>9.2f}'
-                      f'{block["label_boundaries"]:>6}')
+            cells += (
+                f'{block["macro_f1"]:>19.3f}{block["accuracy"]:>7.3f}'
+                f'{block["boundary_f1"]:>7.3f}'
+                f'{block["flicker_per_min"]:>9.2f}'
+                f'{block["label_boundaries"]:>6}'
+            )
         lines.append(f'  {track_id:<20}{cells}')
-    lines.append('  bnd = label boundaries the vocabulary can see; a coarser '
-                 'reading merges classes and sees fewer')
+    lines.append(
+        '  bnd = label boundaries the vocabulary can see; a coarser '
+        'reading merges classes and sees fewer'
+    )
     return lines
 
 
@@ -774,8 +825,7 @@ def render_comparison(outcome: Comparison, baseline_path: Path) -> str:
     if outcome.desync:
         lines += ["", "  EVAL SET DESYNC"] + [f"    - {line}" for line in outcome.desync]
     if outcome.unbaselined:
-        lines += ["", "  NOT IN THE BASELINE"] + [f"    - {line}"
-                                                  for line in outcome.unbaselined]
+        lines += ["", "  NOT IN THE BASELINE"] + [f"    - {line}" for line in outcome.unbaselined]
     if outcome.ungated:
         lines += ["", "  NOT GATED (a guarded metric is missing)"]
         lines += [f"    - {line}" for line in outcome.ungated]
@@ -792,14 +842,20 @@ def render_comparison(outcome: Comparison, baseline_path: Path) -> str:
         lines += ["", f"  MATCHES BASELINE ({scope}): {baseline_path}"]
         return "\n".join(lines)
     lines += [""]
-    if (outcome.checksum_drift and not outcome.regressions
-            and not outcome.desync and not outcome.ungated
-            and not outcome.fact_drift):
-        lines += ["  Scores held or improved (no regressions).  A behaviour change",
-                  "  fails this gate whichever way the numbers moved -- it is the",
-                  "  operator, not the tool, who decides an improvement was meant.",
-                  "  If it was, re-cut the baseline in the SAME commit:",
-                  "  uv run python training/run_eval_set.py --write-baseline"]
+    if (
+        outcome.checksum_drift
+        and not outcome.regressions
+        and not outcome.desync
+        and not outcome.ungated
+        and not outcome.fact_drift
+    ):
+        lines += [
+            "  Scores held or improved (no regressions).  A behaviour change",
+            "  fails this gate whichever way the numbers moved -- it is the",
+            "  operator, not the tool, who decides an improvement was meant.",
+            "  If it was, re-cut the baseline in the SAME commit:",
+            "  uv run python training/run_eval_set.py --write-baseline",
+        ]
     return "\n".join(lines)
 
 
@@ -812,7 +868,8 @@ def build_jobs(data_dir: Path, tracks: list, sections_by_truth: dict) -> list:
             if spans is None:
                 raise RuntimeError(
                     f"{track['track_id']} has no annotation in {SEGMENTS_FILE} "
-                    f"under the {truth} ground truth")
+                    f"under the {truth} ground truth"
+                )
             sections[truth] = spans
         jobs.append(Job(str(data_dir), track, sections))
     return jobs
@@ -825,8 +882,10 @@ def execute(jobs: list, workers: int, quiet: bool = False) -> list:
         if quiet:
             return
         speed = result.entry["song_sec"] / result.wall_sec if result.wall_sec else 0.0
-        print(f"  [{index}/{total}] {result.track_id} {result.wall_sec:.1f}s "
-              f"({speed:.0f}x realtime)", flush=True)
+        print(
+            f"  [{index}/{total}] {result.track_id} {result.wall_sec:.1f}s ({speed:.0f}x realtime)",
+            flush=True,
+        )
 
     if workers <= 1 or total <= 1:
         results = []
@@ -837,17 +896,20 @@ def execute(jobs: list, workers: int, quiet: bool = False) -> list:
         return results
 
     results = []
-    with concurrent.futures.ProcessPoolExecutor(
-            max_workers=min(workers, total)) as pool:
-        for index, result in enumerate(pool.map(run_job, jobs, chunksize=1),
-                                       start=1):
+    with concurrent.futures.ProcessPoolExecutor(max_workers=min(workers, total)) as pool:
+        for index, result in enumerate(pool.map(run_job, jobs, chunksize=1), start=1):
             results.append(result)
             announce(index, result)
     return results
 
 
-def run(data_dir: Path, eval_set_path: Path, only: list | None = None,
-        workers: int = 1, quiet: bool = False) -> tuple:
+def run(
+    data_dir: Path,
+    eval_set_path: Path,
+    only: list | None = None,
+    workers: int = 1,
+    quiet: bool = False,
+) -> tuple:
     eval_document = load_eval_set(Path(eval_set_path))
     tracks = select_tracks(eval_document, only)
     if not tracks:
@@ -864,61 +926,97 @@ def run(data_dir: Path, eval_set_path: Path, only: list | None = None,
     total_wall = time.monotonic() - started
     total_song = sum(result.entry["song_sec"] for result in runs)
 
-    corpus = {truth: {space: aggregate([result.scores[truth][space]
-                                        for result in runs])
-                      for space in REPORTED_SPACES}
-              for truth in REPORTED_TRUTHS}
+    corpus = {
+        truth: {
+            space: aggregate([result.scores[truth][space] for result in runs])
+            for space in REPORTED_SPACES
+        }
+        for truth in REPORTED_TRUTHS
+    }
     gated = corpus[GATED_TRUTH]
     document = build_document(
         eval_set=eval_set_identity(eval_set_path, eval_document),
         pipeline_sha_=pipeline_sha(REPO_ROOT),
         entries={result.track_id: result.entry for result in runs},
         aggregate_metrics=track_metrics(gated[GATED_SPACE]),
-        aggregate_spaces={space: space_block(gated[space])
-                          for space in REPORTED_SPACES},
+        aggregate_spaces={space: space_block(gated[space]) for space in REPORTED_SPACES},
         aggregate_truths={
-            truth: {**space_block(corpus[truth][GATED_SPACE]),
-                    "spaces": {space: space_block(corpus[truth][space])
-                               for space in REPORTED_SPACES}}
-            for truth in REPORTED_TRUTHS},
+            truth: {
+                **space_block(corpus[truth][GATED_SPACE]),
+                "spaces": {space: space_block(corpus[truth][space]) for space in REPORTED_SPACES},
+            }
+            for truth in REPORTED_TRUTHS
+        },
     )
     return document, runs, total_song, total_wall
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=corpus_dir(),
-                        help=f"corpus root holding audio/ and annotations/; "
-                             f"${DATA_DIR_ENV} overrides (default: %(default)s)")
-    parser.add_argument("--eval-set", type=Path, default=EVAL_SET_FILE,
-                        help="the frozen eval set (default: %(default)s)")
-    parser.add_argument("--baseline", type=Path, default=BASELINE_FILE,
-                        help="the committed baseline (default: %(default)s)")
-    parser.add_argument("--write-baseline", action="store_true",
-                        help="cut a new baseline instead of comparing against one")
-    parser.add_argument("--allow-partial-baseline", action="store_true",
-                        help="permit --write-baseline to shrink the COMMITTED "
-                             "baseline to the tracks this run covered")
-    parser.add_argument("--allow-unreviewed-truth", action="store_true",
-                        help="permit an OWNER-truth --write-baseline while some "
-                             "frozen tracks carry no owner ruling (the "
-                             "aggregate is then a mix of two annotators)")
-    parser.add_argument("--only", default=None,
-                        help="comma-separated track_ids or youtube_ids to run "
-                             "(default: the whole frozen set)")
-    parser.add_argument("--score-tolerance", type=float,
-                        default=DEFAULT_SCORE_TOLERANCE,
-                        help="how far F1/accuracy may fall (default: %(default)s)")
-    parser.add_argument("--flicker-tolerance", type=float,
-                        default=DEFAULT_FLICKER_TOLERANCE,
-                        help="how far flicker/min may rise (default: %(default)s)")
-    parser.add_argument("--workers", type=int, default=1,
-                        help="parallel simulations; the bytes are identical "
-                             "either way, but a cold run holds several GB of "
-                             "VRAM per worker and oversubscribing one card "
-                             "wedges rather than slows (default: %(default)s)")
-    parser.add_argument("--quiet", action="store_true",
-                        help="only the table and the verdict")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=corpus_dir(),
+        help=f"corpus root holding audio/ and annotations/; "
+        f"${DATA_DIR_ENV} overrides (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--eval-set",
+        type=Path,
+        default=EVAL_SET_FILE,
+        help="the frozen eval set (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=BASELINE_FILE,
+        help="the committed baseline (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="cut a new baseline instead of comparing against one",
+    )
+    parser.add_argument(
+        "--allow-partial-baseline",
+        action="store_true",
+        help="permit --write-baseline to shrink the COMMITTED "
+        "baseline to the tracks this run covered",
+    )
+    parser.add_argument(
+        "--allow-unreviewed-truth",
+        action="store_true",
+        help="permit an OWNER-truth --write-baseline while some "
+        "frozen tracks carry no owner ruling (the "
+        "aggregate is then a mix of two annotators)",
+    )
+    parser.add_argument(
+        "--only",
+        default=None,
+        help="comma-separated track_ids or youtube_ids to run (default: the whole frozen set)",
+    )
+    parser.add_argument(
+        "--score-tolerance",
+        type=float,
+        default=DEFAULT_SCORE_TOLERANCE,
+        help="how far F1/accuracy may fall (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--flicker-tolerance",
+        type=float,
+        default=DEFAULT_FLICKER_TOLERANCE,
+        help="how far flicker/min may rise (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="parallel simulations; the bytes are identical "
+        "either way, but a cold run holds several GB of "
+        "VRAM per worker and oversubscribing one card "
+        "wedges rather than slows (default: %(default)s)",
+    )
+    parser.add_argument("--quiet", action="store_true", help="only the table and the verdict")
     return parser
 
 
@@ -936,12 +1034,18 @@ def main(argv: list | None = None) -> int:
             return 2
         if args.write_baseline:
             refusal = partial_baseline_refusal(
-                select_tracks(document, only), document, Path(args.baseline),
-                args.allow_partial_baseline)
+                select_tracks(document, only),
+                document,
+                Path(args.baseline),
+                args.allow_partial_baseline,
+            )
             if not refusal:
                 refusal = unreviewed_truth_refusal(
-                    document, load_labels_document(Path(args.data_dir)),
-                    Path(args.baseline), args.allow_unreviewed_truth)
+                    document,
+                    load_labels_document(Path(args.data_dir)),
+                    Path(args.baseline),
+                    args.allow_unreviewed_truth,
+                )
             if refusal:
                 print(refusal, file=sys.stderr)
                 return 2
@@ -951,29 +1055,34 @@ def main(argv: list | None = None) -> int:
 
     try:
         result, runs, total_song, total_wall = run(
-            args.data_dir, args.eval_set, only,
-            workers=args.workers, quiet=args.quiet)
+            args.data_dir, args.eval_set, only, workers=args.workers, quiet=args.quiet
+        )
     except RuntimeError as exc:
         print(f"{exc}", file=sys.stderr)
         return 2
 
     print()
-    print(render_table(runs, result["aggregate"], total_song, total_wall,
-                       args.workers))
+    print(render_table(runs, result["aggregate"], total_song, total_wall, args.workers))
 
     if args.write_baseline:
         write_json(Path(args.baseline), result)
         print()
         print(f"  baseline written: {args.baseline}")
-        print(f"  eval set        : {result['eval_set']['sha256'][:12]}... "
-              f"({result['eval_set']['tracks']} tracks)")
+        print(
+            f"  eval set        : {result['eval_set']['sha256'][:12]}... "
+            f"({result['eval_set']['tracks']} tracks)"
+        )
         print(f"  pipeline        : {result['pipeline_sha'][:12]}...")
-        print(f"  ground truth    : {result['truth']} "
-              f"(reported: {', '.join(result['reported_truths'])})")
+        print(
+            f"  ground truth    : {result['truth']} "
+            f"(reported: {', '.join(result['reported_truths'])})"
+        )
         if len(result["tracks"]) != result["eval_set"]["tracks"]:
-            print(f"  WARNING: this baseline covers {len(result['tracks'])} of "
-                  f"{result['eval_set']['tracks']} eval-set tracks -- the rest "
-                  f"are NOT gated by it")
+            print(
+                f"  WARNING: this baseline covers {len(result['tracks'])} of "
+                f"{result['eval_set']['tracks']} eval-set tracks -- the rest "
+                f"are NOT gated by it"
+            )
         return 0
 
     try:

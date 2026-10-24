@@ -7,6 +7,7 @@ frozen file up to CAMP, pre-seeds, runs training.nn.dataset.make_splits (the
 additive rebuild with the eval-set and artist guards), and asserts the outcome
 against the backup.  Any assertion failure restores the backup and exits 1.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,17 +45,15 @@ def verify(doc: dict, backup: dict, relabels: list) -> list:
         before, after = set(backup[split]), set(doc[split])
         if before != after:
             failures.append(
-                f"{split} membership moved: +{sorted(after - before)} "
-                f"-{sorted(before - after)}")
+                f"{split} membership moved: +{sorted(after - before)} -{sorted(before - after)}"
+            )
     for track_id in relabels:
         if placement(doc, track_id) != "train":
-            failures.append(f"relabel {track_id} left train "
-                            f"(now {placement(doc, track_id)!r})")
+            failures.append(f"relabel {track_id} left train (now {placement(doc, track_id)!r})")
     for key in ("excluded_eval_set", "excluded_artist"):
         before, after = set(backup[key]), set(doc[key])
         if before != after:
-            failures.append(f"{key} changed: +{sorted(after - before)} "
-                            f"-{sorted(before - after)}")
+            failures.append(f"{key} changed: +{sorted(after - before)} -{sorted(before - after)}")
     return failures
 
 
@@ -62,9 +61,11 @@ def summarise(doc: dict, backup: dict) -> None:
     for split in ("train", "val", "test"):
         delta = len(doc[split]) - len(backup[split])
         print(f"  {split}: {len(backup[split])} -> {len(doc[split])} ({delta:+d})")
-    print(f"  excluded_eval_set {len(doc['excluded_eval_set'])}, "
-          f"excluded_artist {len(doc['excluded_artist'])}, "
-          f"retired {len(doc['retired'])}, candidates {doc['candidates']}")
+    print(
+        f"  excluded_eval_set {len(doc['excluded_eval_set'])}, "
+        f"excluded_artist {len(doc['excluded_artist'])}, "
+        f"retired {len(doc['retired'])}, candidates {doc['candidates']}"
+    )
 
 
 def main(argv: list | None = None) -> int:
@@ -79,20 +80,25 @@ def main(argv: list | None = None) -> int:
     doc = load(splits_path)
     relabels = relabel_ids(corpus)
     if len(relabels) != 13:
-        raise SystemExit(f"expected 13 relabel youtube-ids, found {len(relabels)}: "
-                         f"{relabels}")
+        raise SystemExit(f"expected 13 relabel youtube-ids, found {len(relabels)}: {relabels}")
 
     missing = [i for i in NEW_HAND_IDS if placement(doc, i) is None]
     print("new hand ids:")
     for track_id in NEW_HAND_IDS:
-        print(f"  {track_id}: placed={placement(doc, track_id) or 'ABSENT'}  "
-              f"hash-would-say={assign_split(track_id)}")
-    print(f"relabels in train: "
-          f"{sum(1 for i in relabels if placement(doc, i) == 'train')}/{len(relabels)}")
+        print(
+            f"  {track_id}: placed={placement(doc, track_id) or 'ABSENT'}  "
+            f"hash-would-say={assign_split(track_id)}"
+        )
+    print(
+        f"relabels in train: "
+        f"{sum(1 for i in relabels if placement(doc, i) == 'train')}/{len(relabels)}"
+    )
 
     if not args.apply:
-        print(f"\nDRY RUN: --apply would pre-seed {missing} into train and rebuild "
-              f"via make_splits; val/test membership must not move")
+        print(
+            f"\nDRY RUN: --apply would pre-seed {missing} into train and rebuild "
+            f"via make_splits; val/test membership must not move"
+        )
         return 0
 
     args.camp.mkdir(parents=True, exist_ok=True)
@@ -106,14 +112,12 @@ def main(argv: list | None = None) -> int:
 
     seeded = dict(doc)
     seeded["train"] = list(doc["train"]) + missing
-    splits_path.write_text(json.dumps(seeded, indent=2, sort_keys=True) + "\n",
-                           encoding="utf-8")
+    splits_path.write_text(json.dumps(seeded, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     try:
         rebuilt = make_splits(corpus)
     except BaseException:
         shutil.copy2(backup_path, splits_path)
-        print(f"make_splits raised -- restored {splits_path} from backup",
-              file=sys.stderr)
+        print(f"make_splits raised -- restored {splits_path} from backup", file=sys.stderr)
         raise
 
     failures = verify(rebuilt, backup, relabels)

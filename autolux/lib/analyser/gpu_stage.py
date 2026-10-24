@@ -1,4 +1,5 @@
 """The GPU stage on its own thread, and what the show does when it stops."""
+
 from __future__ import annotations
 
 import logging
@@ -40,9 +41,16 @@ def reserved_bytes():
 
 
 class GpuStage:
-    def __init__(self, posteriors, watchdog, *, clock: Clock = SYSTEM_CLOCK,
-                 reinit=None, queue_passes: int = _QUEUE_PASSES,
-                 pass_timeout_sec: float = _PASS_TIMEOUT_SEC) -> None:
+    def __init__(
+        self,
+        posteriors,
+        watchdog,
+        *,
+        clock: Clock = SYSTEM_CLOCK,
+        reinit=None,
+        queue_passes: int = _QUEUE_PASSES,
+        pass_timeout_sec: float = _PASS_TIMEOUT_SEC,
+    ) -> None:
         self.posteriors = posteriors
         self._watchdog = watchdog
         self._clock = clock
@@ -77,8 +85,7 @@ class GpuStage:
         if self._thread is not None:
             return
         self._running = True
-        self._thread = threading.Thread(target=self._work, name="mert-gpu",
-                                        daemon=True)
+        self._thread = threading.Thread(target=self._work, name="mert-gpu", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -89,8 +96,9 @@ class GpuStage:
             return
         thread.join(_STOP_JOIN_SEC)
         if thread.is_alive():
-            logging.warning('[gpu] the pass thread is still inside a pass and '
-                            'was left to exit on its own')
+            logging.warning(
+                '[gpu] the pass thread is still inside a pass and was left to exit on its own'
+            )
 
     def push_audio(self, samples) -> Drained:
         self._check_for_a_hung_pass()
@@ -99,7 +107,9 @@ class GpuStage:
             self._wake.set()
         return self._drain()
 
-    def reset(self, ) -> None:
+    def reset(
+        self,
+    ) -> None:
         if self._thread is None or not self._thread.is_alive():
             self._take_reset()
             return
@@ -185,9 +195,12 @@ class GpuStage:
         with self._lock:
             self._queue.clear()
             self._gap = True
-        self._say('shed', f'[gpu] shed: holding the intent, the hand-off queue '
-                          f'is dropped and the decoder is reset '
-                          f'({self.passes} passes so far)')
+        self._say(
+            'shed',
+            f'[gpu] shed: holding the intent, the hand-off queue '
+            f'is dropped and the decoder is reset '
+            f'({self.passes} passes so far)',
+        )
         self._shed = True
 
     def _leave_shed(self) -> None:
@@ -196,10 +209,13 @@ class GpuStage:
         with self._lock:
             self._queue.clear()
             self._gap = True
-        self._say('restored', f'[gpu] restored at the live edge: skipped '
-                              f'{record.lost_sec:.2f}s / {record.cells_lost} '
-                              f'cells, resuming at cell '
-                              f'{record.first_cell_index}')
+        self._say(
+            'restored',
+            f'[gpu] restored at the live edge: skipped '
+            f'{record.lost_sec:.2f}s / {record.cells_lost} '
+            f'cells, resuming at cell '
+            f'{record.first_cell_index}',
+        )
         self._shed = False
 
     def _one_pass(self) -> None:
@@ -237,17 +253,21 @@ class GpuStage:
         if room:
             return True
         self.overflows += 1
-        self._fault('queue_overflow',
-                    f'{self._queue_passes} passes are waiting for a '
-                    f'consumer that has stopped draining')
+        self._fault(
+            'queue_overflow',
+            f'{self._queue_passes} passes are waiting for a consumer that has stopped draining',
+        )
         return False
 
     def _fault(self, kind: str, detail) -> None:
         self.faults += 1
         self._clean = 0
-        self._say(kind, f'[gpu] {kind}: {detail} — the show holds whatever '
-                        f'intent it has (a quiet floor at start-up) and keeps '
-                        f'beats (fault #{self.faults}, {self.reinits} reinit(s))')
+        self._say(
+            kind,
+            f'[gpu] {kind}: {detail} — the show holds whatever '
+            f'intent it has (a quiet floor at start-up) and keeps '
+            f'beats (fault #{self.faults}, {self.reinits} reinit(s))',
+        )
         self._retry_at = self._clock.monotonic() + self._backoff()
         self._watchdog.report_fault(kind)
 
@@ -271,13 +291,17 @@ class GpuStage:
         try:
             self.posteriors.set_encoder(self._reinit())
         except Exception as error:
-            self._say('reinit_failed',
-                      f'[gpu] reinit_failed: {error} — the show holds its '
-                      f'intent and keeps beats (fault #{self.faults}, '
-                      f'{self.reinits} reinit(s))')
+            self._say(
+                'reinit_failed',
+                f'[gpu] reinit_failed: {error} — the show holds its '
+                f'intent and keeps beats (fault #{self.faults}, '
+                f'{self.reinits} reinit(s))',
+            )
             return False
-        self._say('reinit', f'[gpu] extractor reinitialised (attempt '
-                            f'{self._attempts}, {self.reinits} so far)')
+        self._say(
+            'reinit',
+            f'[gpu] extractor reinitialised (attempt {self._attempts}, {self.reinits} so far)',
+        )
         return True
 
     def _say(self, kind: str, message: str) -> None:
@@ -288,8 +312,7 @@ class GpuStage:
             return
         self._said[kind] = now
         more = self._suppressed.pop(kind, 0)
-        logging.warning(message + (f' [+{more} more since the last line]'
-                                   if more else ''))
+        logging.warning(message + (f' [+{more} more since the last line]' if more else ''))
 
     def _status(self) -> None:
         now = self._clock.monotonic()
@@ -304,5 +327,5 @@ class GpuStage:
             f'[gpu] {self.passes} passes | last {len(took)}: mean '
             f'{took.mean():.0f}ms max {took.max():.0f}ms | queue '
             f'{len(self._queue)}/{self._queue_passes}'
-            + ('' if reserved is None
-               else f' | cuda reserved {reserved / 1e6:.0f}MB'))
+            + ('' if reserved is None else f' | cuda reserved {reserved / 1e6:.0f}MB')
+        )

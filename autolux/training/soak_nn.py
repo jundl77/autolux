@@ -58,27 +58,41 @@ def buckets(stamps, values, width: float = BUCKET_SEC) -> list:
     for index, stamp in enumerate(stamps):
         if stamp < edge:
             continue
-        out.append({"minute": round(edge / 60.0), "buffers": index - start,
-                    "p99_ms": float(np.percentile(values[start:index], 99)),
-                    "max_ms": float(np.max(values[start:index]))})
+        out.append(
+            {
+                "minute": round(edge / 60.0),
+                "buffers": index - start,
+                "p99_ms": float(np.percentile(values[start:index], 99)),
+                "max_ms": float(np.max(values[start:index])),
+            }
+        )
         start, edge = index, edge + width
     if len(stamps) - start > 1:
-        out.append({"minute": round(edge / 60.0), "buffers": len(stamps) - start,
-                    "p99_ms": float(np.percentile(values[start:], 99)),
-                    "max_ms": float(np.max(values[start:]))})
+        out.append(
+            {
+                "minute": round(edge / 60.0),
+                "buffers": len(stamps) - start,
+                "p99_ms": float(np.percentile(values[start:], 99)),
+                "max_ms": float(np.max(values[start:])),
+            }
+        )
     return out
 
 
-def play(device: int, tracks: list, gap_sec: float, sample_rate: int,
-         buffer_size: int) -> None:
+def play(device: int, tracks: list, gap_sec: float, sample_rate: int, buffer_size: int) -> None:
     import pyaudio
     from autolux.simulate.fake_audio_client import FileAudioClient
 
     audio = pyaudio.PyAudio()
     name = audio.get_device_info_by_index(device)["name"]
-    stream = audio.open(format=pyaudio.paFloat32, channels=1, rate=sample_rate,
-                        output_device_index=device, output=True,
-                        frames_per_buffer=buffer_size)
+    stream = audio.open(
+        format=pyaudio.paFloat32,
+        channels=1,
+        rate=sample_rate,
+        output_device_index=device,
+        output=True,
+        frames_per_buffer=buffer_size,
+    )
     silence = np.zeros(buffer_size, dtype=np.float32).tobytes()
     print(f"playing {len(tracks)} tracks into [{device}] {name}", flush=True)
     started = time.monotonic()
@@ -87,9 +101,12 @@ def play(device: int, tracks: list, gap_sec: float, sample_rate: int,
             path = committed_audio_path(track["youtube_id"])
             client = FileAudioClient(sample_rate, buffer_size, str(path))
             client.start_streams()
-            print(f"  [{index}/{len(tracks)}] {track['track_id']} "
-                  f"{client.duration_sec / 60:.1f}m  "
-                  f"t+{time.monotonic() - started:.0f}s", flush=True)
+            print(
+                f"  [{index}/{len(tracks)}] {track['track_id']} "
+                f"{client.duration_sec / 60:.1f}m  "
+                f"t+{time.monotonic() - started:.0f}s",
+                flush=True,
+            )
             while not client.exhausted:
                 stream.write(client.read().tobytes())
             for _ in range(int(gap_sec * sample_rate / buffer_size)):
@@ -111,6 +128,7 @@ class Sampler(threading.Thread):
 
     def run(self) -> None:
         from autolux.lib.analyser.gpu_stage import reserved_bytes
+
         watchdog = self._app.drift_watchdog
         stage = None if self._app.section is None else self._app.section.stream
         started = time.monotonic()
@@ -126,8 +144,9 @@ class Sampler(threading.Thread):
             now = round(time.monotonic() - started, 2)
             level = watchdog.level.name
             if level != last:
-                self.transitions.append({"t": now, "from": last, "to": level,
-                                         "fault": watchdog.fault})
+                self.transitions.append(
+                    {"t": now, "from": last, "to": level, "fault": watchdog.fault}
+                )
                 last = level
             row = {
                 "t": now,
@@ -137,22 +156,37 @@ class Sampler(threading.Thread):
                 "total_drift_sec": round(watchdog.total_drift_sec, 3),
                 "shed": level,
                 "fault": watchdog.fault,
-                "intent": (self._app.light_engine.current_intent.name
-                           if self._app.light_engine.current_intent else None),
+                "intent": (
+                    self._app.light_engine.current_intent.name
+                    if self._app.light_engine.current_intent
+                    else None
+                ),
                 "commits": self._app.light_engine.intent_commits,
             }
             if stage is not None:
-                row.update(queued=stage.queued, passes=stage.passes,
-                           faults=stage.faults, overflows=stage.overflows,
-                           reinits=stage.reinits, resyncs=stage.resyncs,
-                           reserved_bytes=reserved_bytes())
+                row.update(
+                    queued=stage.queued,
+                    passes=stage.passes,
+                    faults=stage.faults,
+                    overflows=stage.overflows,
+                    reinits=stage.reinits,
+                    resyncs=stage.resyncs,
+                    reserved_bytes=reserved_bytes(),
+                )
             self.rows.append(row)
         self._app.stop()
 
 
 def _instrument(app) -> dict:
-    record = {"stamps": [], "on_audio": [], "analyse": [], "drain": [],
-              "loop": [], "between_reads": [], "boundaries": []}
+    record = {
+        "stamps": [],
+        "on_audio": [],
+        "analyse": [],
+        "drain": [],
+        "loop": [],
+        "between_reads": [],
+        "boundaries": [],
+    }
     engine, analyser, queue = app.light_engine, app.music_analyser, app.command_queue
     on_audio, analyse, drain = engine.on_audio, analyser.analyse, queue.drain
     sound_start, sound_stop = engine.on_sound_start, engine.on_sound_stop
@@ -199,8 +233,10 @@ def _instrument(app) -> dict:
     def stamp(event, inner):
         def stamped():
             record["boundaries"].append(
-                {"t": round(time.perf_counter() - started, 3), "event": event})
+                {"t": round(time.perf_counter() - started, 3), "event": event}
+            )
             return inner()
+
         return stamped
 
     engine.on_audio = timed_on_audio
@@ -211,34 +247,41 @@ def _instrument(app) -> dict:
     return record
 
 
-def boundary_verdict(boundaries: list, transitions: list,
-                     window_sec: float = 30.0) -> dict:
+def boundary_verdict(boundaries: list, transitions: list, window_sec: float = 30.0) -> dict:
     near = []
     if not boundaries:
-        return {"boundaries": 0, "sheds_near_a_boundary": 0, "detail": [],
-                "passed": False,
-                "why": "no track boundary was recorded, so nothing was tested"}
+        return {
+            "boundaries": 0,
+            "sheds_near_a_boundary": 0,
+            "detail": [],
+            "passed": False,
+            "why": "no track boundary was recorded, so nothing was tested",
+        }
     for transition in transitions:
         if transition["to"] == "NONE":
             continue
         closest = min(boundaries, key=lambda b: abs(transition["t"] - b["t"]))
         gap = abs(transition["t"] - closest["t"])
         if gap <= window_sec:
-            near.append({"shed_at": transition["t"], "boundary": closest,
-                         "gap_sec": round(gap, 2)})
-    return {"boundaries": len(boundaries), "sheds_near_a_boundary": len(near),
-            "detail": near,
-            "passed": not near}
+            near.append({"shed_at": transition["t"], "boundary": closest, "gap_sec": round(gap, 2)})
+    return {
+        "boundaries": len(boundaries),
+        "sheds_near_a_boundary": len(near),
+        "detail": near,
+        "passed": not near,
+    }
 
 
 async def _soak(args) -> dict:
     from autolux.lib.main import PLAYBACK_DELAY_SEC, AutoluxController
 
-    app = AutoluxController(midi_port_index=args.midi_port,
-                               input_device_index=args.input_device,
-                               disable_os2l=args.no_os2l,
-                               ui_port=args.ui_port,
-                               report_path=args.report)
+    app = AutoluxController(
+        midi_port_index=args.midi_port,
+        input_device_index=args.input_device,
+        disable_os2l=args.no_os2l,
+        ui_port=args.ui_port,
+        report_path=args.report,
+    )
     timing = _instrument(app)
     sampler = Sampler(app, args.minutes)
     sampler.start()
@@ -260,15 +303,16 @@ async def _soak(args) -> dict:
             "loop": spread(loop),
             "between_reads": spread(timing["between_reads"][warm:]),
         },
-        "over_budget_pct": float(100 * np.mean(
-            np.asarray(timing["between_reads"][warm:]) > BUDGET_MS))
-        if len(timing["between_reads"]) > warm else None,
+        "over_budget_pct": float(
+            100 * np.mean(np.asarray(timing["between_reads"][warm:]) > BUDGET_MS)
+        )
+        if len(timing["between_reads"]) > warm
+        else None,
         "budget_ms": BUDGET_MS,
         "per_minute": buckets(stamps, loop),
         "boundaries": timing["boundaries"],
         "shed_transitions": sampler.transitions,
-        "boundary_verdict": boundary_verdict(timing["boundaries"],
-                                             sampler.transitions),
+        "boundary_verdict": boundary_verdict(timing["boundaries"], sampler.transitions),
         "samples": sampler.rows,
     }
     if app.event_buffer is not None and args.report:
@@ -316,23 +360,32 @@ def main(argv: list | None = None) -> int:
     sub = parser.add_subparsers(dest="mode", required=True)
 
     player = sub.add_parser("play", help="eval-set tracks into an output device")
-    player.add_argument("--device", type=int, required=True,
-                        help="output device index from `autolux list`")
+    player.add_argument(
+        "--device", type=int, required=True, help="output device index from `autolux list`"
+    )
     player.add_argument("--tracks", type=int, default=DEFAULT_TRACK_COUNT)
-    player.add_argument("--gap", type=float, default=3.0,
-                        help="silence between tracks; must clear the 0.3 s gate")
+    player.add_argument(
+        "--gap", type=float, default=3.0, help="silence between tracks; must clear the 0.3 s gate"
+    )
 
     soak = sub.add_parser("run", help="the pipeline, sampled, for a fixed time")
     soak.add_argument("--midi-port", type=int, required=True)
     soak.add_argument("--input-device", type=int, required=True)
     soak.add_argument("--minutes", type=float, default=33.0)
-    soak.add_argument("--no-os2l", action="store_true",
-                      help="required off a rig: Os2lClient.start RAISES after "
-                           "10 s when no SoundSwitch answers the zeroconf query")
-    soak.add_argument("--ui-port", type=int, default=8050,
-                      help="--report alone starts Dash (main.py gates the UI "
-                           "thread on the event buffer, not on --ui), so this "
-                           "moves it off a port something else may hold")
+    soak.add_argument(
+        "--no-os2l",
+        action="store_true",
+        help="required off a rig: Os2lClient.start RAISES after "
+        "10 s when no SoundSwitch answers the zeroconf query",
+    )
+    soak.add_argument(
+        "--ui-port",
+        type=int,
+        default=8050,
+        help="--report alone starts Dash (main.py gates the UI "
+        "thread on the event buffer, not on --ui), so this "
+        "moves it off a port something else may hold",
+    )
     soak.add_argument("--report", default=None)
     soak.add_argument("--record", default=None)
 
@@ -341,8 +394,7 @@ def main(argv: list | None = None) -> int:
     from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 
     if args.mode == "play":
-        play(args.device, eval_tracks(args.tracks), args.gap,
-             SAMPLE_RATE, BUFFER_SIZE)
+        play(args.device, eval_tracks(args.tracks), args.gap, SAMPLE_RATE, BUFFER_SIZE)
         return 0
 
     record = run_soak(args)

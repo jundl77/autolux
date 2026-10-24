@@ -1,0 +1,19 @@
+repos:
+  - repo: local
+    hooks:
+      - id: python-format
+        name: Python formatting (Ruff)
+        entry: uv run --locked --extra dev ruff format
+        language: system
+        types: [python]
+        files: ^(autolux|cli|radius|tools)/
+        exclude: ^(autolux/training/data/|radius/x_|radius/cmake-build-)
+        require_serial: true
+      - id: cpp-format
+        name: C++ and Protobuf formatting (clang-format)
+        entry: uv run --locked --extra dev clang-format -i --style=file
+        language: system
+        types_or: [c, c++, proto]
+        files: ^radius/
+        exclude: ^radius/(x_|cmake-build-)
+        require_serial: true

@@ -10,6 +10,7 @@ from autolux.simulate.fake_audio_client import FileAudioClient
 @pytest.fixture
 def wav_file(tmp_path):
     import soundfile as sf
+
     t = np.arange(SAMPLE_RATE) / SAMPLE_RATE
     audio = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
     path = tmp_path / 'tone.wav'
@@ -33,6 +34,7 @@ def test_file_client_reads_unthrottled_and_exhausts(wav_file):
 
 def test_file_client_decode_cache_roundtrip(wav_file):
     import os
+
     c1 = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, wav_file)
     c1.start_streams()
     cache = f'{wav_file}.{SAMPLE_RATE}.npy'
@@ -45,6 +47,7 @@ def test_file_client_decode_cache_roundtrip(wav_file):
 
 def test_file_client_stale_cache_is_refreshed(wav_file, tmp_path):
     import os
+
     c1 = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, wav_file)
     c1.start_streams()
     cache = f'{wav_file}.{SAMPLE_RATE}.npy'
@@ -58,4 +61,5 @@ def test_file_client_stale_cache_is_refreshed(wav_file, tmp_path):
 
 def test_pyaudio_client_satisfies_exhausted_interface():
     from autolux.lib.clients.pyaudio_client import PyAudioClient
+
     assert isinstance(getattr(PyAudioClient, 'exhausted', None), property)

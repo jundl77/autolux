@@ -1,4 +1,5 @@
 """Two fresh processes, one file, one question: are the bytes the same?"""
+
 from __future__ import annotations
 
 import argparse
@@ -51,17 +52,18 @@ async def run_once(mp3: str, mode: str) -> dict:
 
     wall = time.monotonic()
     _, event_buffer, command_queue = await run_fast_simulation(
-        FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, mp3))
+        FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, mp3)
+    )
     wall = time.monotonic() - wall
 
     report = event_buffer.to_report(command_queue.get_timing_log())
     return {
         "mode": mode,
         "checksum": report_checksum(report),
-        "cells_sha256": (sha256_of(sidecar.read_bytes())
-                         if sidecar.exists() else None),
-        "tracker_sha256": (sha256_of(tracker_sidecar.read_bytes())
-                           if tracker_sidecar.exists() else None),
+        "cells_sha256": (sha256_of(sidecar.read_bytes()) if sidecar.exists() else None),
+        "tracker_sha256": (
+            sha256_of(tracker_sidecar.read_bytes()) if tracker_sidecar.exists() else None
+        ),
         "intents": [block["intent"] for block in report["intents"]],
         "wall_sec": round(wall, 2),
     }
@@ -69,12 +71,15 @@ async def run_once(mp3: str, mode: str) -> dict:
 
 def _child(mp3: str, mode: str) -> dict:
     out = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), "--run-one", mp3,
-         "--mode", mode],
-        cwd=str(REPO_ROOT), capture_output=True, text=True)
+        [sys.executable, str(Path(__file__).resolve()), "--run-one", mp3, "--mode", mode],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
     if out.returncode != 0:
-        raise RuntimeError(f"{mode} run of {mp3} failed:\n{out.stdout[-4000:]}"
-                           f"\n{out.stderr[-4000:]}")
+        raise RuntimeError(
+            f"{mode} run of {mp3} failed:\n{out.stdout[-4000:]}\n{out.stderr[-4000:]}"
+        )
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
@@ -84,22 +89,20 @@ def prove(mp3: str) -> dict:
 
     def report_same(left, right):
         return left["checksum"] == right["checksum"]
+
     return {
         "runs": runs,
         "cold_across_processes": report_same(cold_a, cold_b),
         "warm_across_processes": report_same(warm_a, warm_b),
         "cold_matches_warm": report_same(cold_a, warm_a),
-        "extractor_bytes_across_processes":
-            cold_a["cells_sha256"] == cold_b["cells_sha256"],
-        "tracker_bytes_across_processes":
-            cold_a["tracker_sha256"] == cold_b["tracker_sha256"],
+        "extractor_bytes_across_processes": cold_a["cells_sha256"] == cold_b["cells_sha256"],
+        "tracker_bytes_across_processes": cold_a["tracker_sha256"] == cold_b["tracker_sha256"],
         "checksum": cold_a["checksum"],
     }
 
 
 def contract(proof: dict) -> str:
-    if not all(t["warm_across_processes"] and t["cold_matches_warm"]
-               for t in proof.values()):
+    if not all(t["warm_across_processes"] and t["cold_matches_warm"] for t in proof.values()):
         return "not byte-deterministic"
     if all(t["cold_across_processes"] for t in proof.values()):
         return "byte-deterministic, cold or warm"
@@ -131,9 +134,10 @@ def main() -> None:
     print(f"\nCONTRACT: {verdict}")
     if args.write:
         out = Path(args.write)
-        out.write_text(json.dumps({"contract": verdict, "tracks": proof},
-                                  indent=2, sort_keys=True) + "\n",
-                       newline="\n")
+        out.write_text(
+            json.dumps({"contract": verdict, "tracks": proof}, indent=2, sort_keys=True) + "\n",
+            newline="\n",
+        )
         print(f"wrote {out}")
 
 

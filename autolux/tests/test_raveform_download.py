@@ -50,7 +50,10 @@ def test_rate_limit_is_a_bot_check():
 
 
 def test_cookie_advice_is_a_bot_check():
-    assert classify_error("Use --cookies-from-browser or --cookies for the authentication") == "bot_check"
+    assert (
+        classify_error("Use --cookies-from-browser or --cookies for the authentication")
+        == "bot_check"
+    )
 
 
 def test_age_restriction_is_its_own_bucket():
@@ -66,7 +69,10 @@ def test_removed_video_is_unavailable():
 
 
 def test_private_video_is_unavailable():
-    assert classify_error("ERROR: Private video. Sign in if you've been granted access") == "unavailable"
+    assert (
+        classify_error("ERROR: Private video. Sign in if you've been granted access")
+        == "unavailable"
+    )
 
 
 def test_copyright_takedown_is_its_own_bucket():
@@ -75,7 +81,9 @@ def test_copyright_takedown_is_its_own_bucket():
 
 
 def test_unrecognised_text_is_other():
-    assert classify_error("ERROR: unable to download video data: <urlopen error timed out>") == "other"
+    assert (
+        classify_error("ERROR: unable to download video data: <urlopen error timed out>") == "other"
+    )
 
 
 def test_empty_text_is_other():

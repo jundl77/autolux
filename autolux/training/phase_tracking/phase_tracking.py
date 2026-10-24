@@ -9,6 +9,7 @@ Everything here builds a bar grid from the LIVE beat stream, causally, with
 corrections applied FORWARD ONLY -- a correction that arrives N beats late
 re-times future bar lines and never rewrites one already emitted.
 """
+
 from __future__ import annotations
 
 import csv
@@ -23,16 +24,17 @@ MATCH_TOL_SEC = 0.07
 def annotation_beats(path: Path):
     with open(path, "r", encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
-    return (np.asarray([float(r["time"]) for r in rows], dtype=np.float64),
-            np.asarray([int(r["downbeat"]) for r in rows], dtype=np.int64))
+    return (
+        np.asarray([float(r["time"]) for r in rows], dtype=np.float64),
+        np.asarray([int(r["downbeat"]) for r in rows], dtype=np.int64),
+    )
 
 
 def expert_phase(times: np.ndarray, positions: np.ndarray):
     expert = np.asarray(sorted(t for t, p in zip(times, positions) if p == 1))
     for phase in range(4):
         candidate = times[phase::4]
-        if candidate.shape == expert.shape and np.allclose(candidate, expert,
-                                                           atol=1e-6):
+        if candidate.shape == expert.shape and np.allclose(candidate, expert, atol=1e-6):
             return phase
     return None
 
@@ -48,8 +50,7 @@ def match(madmom: np.ndarray, expert: np.ndarray, tol: float = MATCH_TOL_SEC):
     idx = np.searchsorted(expert, madmom)
     idx = np.clip(idx, 1, len(expert) - 1)
     left, right = expert[idx - 1], expert[idx]
-    nearest = np.where(np.abs(madmom - left) <= np.abs(madmom - right),
-                       idx - 1, idx)
+    nearest = np.where(np.abs(madmom - left) <= np.abs(madmom - right), idx - 1, idx)
     delta = np.abs(madmom - expert[nearest])
     ok = delta <= tol
     js, ins, ds = np.nonzero(ok)[0], nearest[ok], delta[ok]
@@ -58,8 +59,10 @@ def match(madmom: np.ndarray, expert: np.ndarray, tol: float = MATCH_TOL_SEC):
         if i not in best or d < best[i][1]:
             best[i] = (j, d)
     pairs = sorted((j, i) for i, (j, _) in best.items())
-    return (np.asarray([p[0] for p in pairs], np.int64),
-            np.asarray([p[1] for p in pairs], np.int64))
+    return (
+        np.asarray([p[0] for p in pairs], np.int64),
+        np.asarray([p[1] for p in pairs], np.int64),
+    )
 
 
 def required_phase(js: np.ndarray, isx: np.ndarray, phase: int) -> np.ndarray:
@@ -83,7 +86,7 @@ def truth_phase_track(n_beats: int, js: np.ndarray, required: np.ndarray):
         hi = js[k + 1] if k + 1 < js.size else n_beats
         out[lo:hi] = required[k]
         known[lo:hi] = True
-    known[:js[0]] = False
+    known[: js[0]] = False
     return out, known
 
 
@@ -98,9 +101,12 @@ def close_grid(edges: np.ndarray) -> np.ndarray:
     return np.append(edges, edges[-1] + float(np.median(np.diff(edges))))
 
 
-def edges_from_positions(beats: np.ndarray, positions: np.ndarray,
-                         advances: np.ndarray | None = None,
-                         interpolate: bool = False) -> np.ndarray:
+def edges_from_positions(
+    beats: np.ndarray,
+    positions: np.ndarray,
+    advances: np.ndarray | None = None,
+    interpolate: bool = False,
+) -> np.ndarray:
     """Bar lines: the beats at which the running count wraps to 0.
 
     ``interpolate`` additionally emits a line inside an interval the count
@@ -129,8 +135,14 @@ def edges_from_positions(beats: np.ndarray, positions: np.ndarray,
 # --------------------------------------------------------------------------- #
 # candidate A -- interval-signature slip repair, no model input at all
 # --------------------------------------------------------------------------- #
-def interval_ratios(beats: np.ndarray, *, window: int = 8, min_history: int = 3,
-                    clean_lo: float = 0.75, clean_hi: float = 1.35) -> np.ndarray:
+def interval_ratios(
+    beats: np.ndarray,
+    *,
+    window: int = 8,
+    min_history: int = 3,
+    clean_lo: float = 0.75,
+    clean_hi: float = 1.35,
+) -> np.ndarray:
     """Each interval over the running median of the recent CLEAN ones.
 
     Split out from the repair because the ratios depend on the history window
@@ -151,9 +163,15 @@ def interval_ratios(beats: np.ndarray, *, window: int = 8, min_history: int = 3,
     return ratios
 
 
-def repair_from_ratios(ratios: np.ndarray, *, del_lo: float = 1.5,
-                       ins_hi: float = 0.65, pair_lo: float = 0.70,
-                       pair_hi: float = 1.35, max_advance: int = 8):
+def repair_from_ratios(
+    ratios: np.ndarray,
+    *,
+    del_lo: float = 1.5,
+    ins_hi: float = 0.65,
+    pair_lo: float = 0.70,
+    pair_hi: float = 1.35,
+    max_advance: int = 8,
+):
     """``(positions, advances)`` -- how many bar positions each interval crosses.
 
     A dropped beat leaves one ~double interval, so the count advances by
@@ -171,32 +189,51 @@ def repair_from_ratios(ratios: np.ndarray, *, del_lo: float = 1.5,
             previous = ratios[j - 1]
             if r >= del_lo:
                 step = int(min(max(round(r), 1), max_advance))
-            elif (r <= ins_hi and np.isfinite(previous) and previous <= ins_hi
-                    and pair_lo <= previous + r <= pair_hi):
+            elif (
+                r <= ins_hi
+                and np.isfinite(previous)
+                and previous <= ins_hi
+                and pair_lo <= previous + r <= pair_hi
+            ):
                 step = 0
         positions[j] = (positions[j - 1] + step) % 4
         advances[j] = step
     return positions, advances
 
 
-def interval_repair(beats: np.ndarray, *, window: int = 8, min_history: int = 3,
-                    del_lo: float = 1.5, ins_hi: float = 0.65,
-                    pair_lo: float = 0.70, pair_hi: float = 1.35,
-                    clean_lo: float = 0.75, clean_hi: float = 1.35,
-                    max_advance: int = 8):
-    ratios = interval_ratios(beats, window=window, min_history=min_history,
-                             clean_lo=clean_lo, clean_hi=clean_hi)
+def interval_repair(
+    beats: np.ndarray,
+    *,
+    window: int = 8,
+    min_history: int = 3,
+    del_lo: float = 1.5,
+    ins_hi: float = 0.65,
+    pair_lo: float = 0.70,
+    pair_hi: float = 1.35,
+    clean_lo: float = 0.75,
+    clean_hi: float = 1.35,
+    max_advance: int = 8,
+):
+    ratios = interval_ratios(
+        beats, window=window, min_history=min_history, clean_lo=clean_lo, clean_hi=clean_hi
+    )
     positions, advances = repair_from_ratios(
-        ratios, del_lo=del_lo, ins_hi=ins_hi, pair_lo=pair_lo, pair_hi=pair_hi,
-        max_advance=max_advance)
+        ratios,
+        del_lo=del_lo,
+        ins_hi=ins_hi,
+        pair_lo=pair_lo,
+        pair_hi=pair_hi,
+        max_advance=max_advance,
+    )
     return positions, advances, ratios
 
 
 # --------------------------------------------------------------------------- #
 # candidate B -- a 4-state fixed-lag phase filter
 # --------------------------------------------------------------------------- #
-def advance_log_weights(ratios: np.ndarray, *, sigma: float, eta: float,
-                        max_advance: int) -> np.ndarray:
+def advance_log_weights(
+    ratios: np.ndarray, *, sigma: float, eta: float, max_advance: int
+) -> np.ndarray:
     """``[n, max_advance+1]`` log weights for "this interval spans ``a`` beats".
 
     ``a = 0`` is the second half of a split interval, and it is scored on the
@@ -223,8 +260,7 @@ def advance_log_weights(ratios: np.ndarray, *, sigma: float, eta: float,
         out[j] = prior - (r - centres) ** 2 / variance
         previous = ratios[j - 1] if j else np.nan
         if np.isfinite(previous):
-            out[j, 0] = prior[0] - ((r - 0.5) ** 2
-                                    + (previous + r - 1.0) ** 2) / variance
+            out[j, 0] = prior[0] - ((r - 0.5) ** 2 + (previous + r - 1.0) ** 2) / variance
         else:
             out[j, 0] = -np.inf
     return out
@@ -256,8 +292,9 @@ def causal_z(values: np.ndarray, warmup: int) -> np.ndarray:
     return out
 
 
-def fixed_lag_viterbi(log_transition: np.ndarray, log_emission: np.ndarray,
-                      log_start: np.ndarray, lag_beats: int) -> np.ndarray:
+def fixed_lag_viterbi(
+    log_transition: np.ndarray, log_emission: np.ndarray, log_start: np.ndarray, lag_beats: int
+) -> np.ndarray:
     """Per beat, the state decided ``lag_beats`` later by backtracking.
 
     The project's own decoder shape: a forward Viterbi with backpointers, read
@@ -295,8 +332,7 @@ def fixed_lag_viterbi(log_transition: np.ndarray, log_emission: np.ndarray,
     return decided
 
 
-def apply_forward_only(base_positions: np.ndarray, decided: np.ndarray,
-                       lag_beats: int):
+def apply_forward_only(base_positions: np.ndarray, decided: np.ndarray, lag_beats: int):
     """Emit on the running count; rotate it when a late decision disagrees.
 
     The committed past is immutable: at beat ``j`` the line is emitted from the
@@ -332,12 +368,22 @@ def apply_forward_only(base_positions: np.ndarray, decided: np.ndarray,
 LIVE_START_PRIOR = (51.0 / 215.0, 147.0 / 215.0, 6.0 / 215.0, 11.0 / 215.0)
 
 
-def phase_filter(beats: np.ndarray, boundary_samples: np.ndarray | None, *,
-                 lag_beats: int = 8, sigma: float = 0.22, eta: float = 0.02,
-                 max_advance: int = 4, beta: float = 0.0, warmup: int = 16,
-                 slip_rate: float | None = None, start_prior=LIVE_START_PRIOR,
-                 anchor: int = 0, base: tuple | None = None,
-                 ratios: np.ndarray | None = None):
+def phase_filter(
+    beats: np.ndarray,
+    boundary_samples: np.ndarray | None,
+    *,
+    lag_beats: int = 8,
+    sigma: float = 0.22,
+    eta: float = 0.02,
+    max_advance: int = 4,
+    beta: float = 0.0,
+    warmup: int = 16,
+    slip_rate: float | None = None,
+    start_prior=LIVE_START_PRIOR,
+    anchor: int = 0,
+    base: tuple | None = None,
+    ratios: np.ndarray | None = None,
+):
     """``(committed positions, advances, corrections, decided)``.
 
     ``slip_rate`` not None selects the interval-blind ablation.  ``beta`` 0.0
@@ -353,17 +399,16 @@ def phase_filter(beats: np.ndarray, boundary_samples: np.ndarray | None, *,
     if ratios is None:
         ratios = interval_ratios(beats)
     if slip_rate is None:
-        log_transition = advance_log_weights(ratios[1:], sigma=sigma, eta=eta,
-                                             max_advance=max_advance)
+        log_transition = advance_log_weights(
+            ratios[1:], sigma=sigma, eta=eta, max_advance=max_advance
+        )
     else:
-        log_transition = flat_log_weights(n - 1, slip_rate=slip_rate,
-                                          max_advance=max_advance)
+        log_transition = flat_log_weights(n - 1, slip_rate=slip_rate, max_advance=max_advance)
     log_emission = np.zeros((n, 4), dtype=np.float64)
     if beta != 0.0 and boundary_samples is not None:
         log_emission[:, 0] = beta * causal_z(boundary_samples, warmup)
     log_start = np.log(np.asarray(start_prior, dtype=np.float64))
-    decided = fixed_lag_viterbi(log_transition, log_emission, log_start,
-                                lag_beats)
+    decided = fixed_lag_viterbi(log_transition, log_emission, log_start, lag_beats)
     if base is None:
         base_positions = (np.arange(n, dtype=np.int64) + anchor) % 4
         advances = np.ones(n, dtype=np.int64)
@@ -371,16 +416,14 @@ def phase_filter(beats: np.ndarray, boundary_samples: np.ndarray | None, *,
     else:
         base_positions, advances = base
         base_positions = (base_positions + anchor) % 4
-    committed, corrections = apply_forward_only(base_positions, decided,
-                                                lag_beats)
+    committed, corrections = apply_forward_only(base_positions, decided, lag_beats)
     return committed, advances, corrections, decided
 
 
 # --------------------------------------------------------------------------- #
 # the oracle -- perfect phase knowledge, delivered ``lag_beats`` late
 # --------------------------------------------------------------------------- #
-def oracle_positions(n: int, truth: np.ndarray, known: np.ndarray,
-                     lag_beats: int) -> np.ndarray:
+def oracle_positions(n: int, truth: np.ndarray, known: np.ndarray, lag_beats: int) -> np.ndarray:
     """What a tracker that is never wrong, only late, would commit."""
     committed = np.zeros(n, dtype=np.int64)
     phase = 0

@@ -6,19 +6,20 @@
 
 namespace Radius {
 
-static const LogModule LM_USB_CLIENT {"USB_CLIENT"};
+static const LogModule LM_USB_CLIENT{"USB_CLIENT"};
 static const WORD sVID = 0x0403;
 static const WORD sPID = 0x6001;
 static constexpr uint8_t DMX_PACKET_START_CODE = 0;
 
 EnttecUSBClient::EnttecUSBClient(EventLoop& loop)
-	: mEventLoop(loop)
+    : mEventLoop(loop)
 {
 }
 
 EnttecUSBClient::~EnttecUSBClient()
 {
-	if (mDeviceConnected) {
+	if (mDeviceConnected)
+	{
 		std::memset(mSerializedFrame, 0, sizeof(mSerializedFrame));
 		FTDI_SendData(SET_DMX_TX_MODE, mSerializedFrame, sizeof(mSerializedFrame));
 		FTDI_ClosePort();
@@ -40,8 +41,12 @@ void EnttecUSBClient::Start()
 
 	mIsNewFrame = true;
 	FlushFrame(); // Establish a black frame before accepting media.
-	mSenderHandle = mEventLoop.AddTimer(15ms, [this]() { FlushFrame(); });
-	mMetricsHandle = mEventLoop.AddTimer(5s, [this]() { ReportMetrics(); });
+	mSenderHandle = mEventLoop.AddTimer(15ms, [this]() {
+		FlushFrame();
+	});
+	mMetricsHandle = mEventLoop.AddTimer(5s, [this]() {
+		ReportMetrics();
+	});
 }
 
 void EnttecUSBClient::UpdateFrame(const DmxFrame& dmxFrame)
@@ -73,7 +78,8 @@ void EnttecUSBClient::FlushFrame()
 	}
 	mSendCounter += 1;
 	mIsNewFrame = false;
-	DEBUG_LOG(LL_DEBUG, LM_USB_CLIENT, "sent DMX frame to USB device successfully, frame: %s", HexToString<513>(mSerializedFrame).c_str());
+	DEBUG_LOG(LL_DEBUG, LM_USB_CLIENT, "sent DMX frame to USB device successfully, frame: %s",
+	          HexToString<513>(mSerializedFrame).c_str());
 }
 
 void EnttecUSBClient::ReloadDriver()
@@ -97,4 +103,4 @@ void EnttecUSBClient::ReportMetrics()
 	mSendCounter = 0;
 }
 
-}
+} // namespace Radius

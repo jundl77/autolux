@@ -17,8 +17,9 @@ STOP_PERSISTENCE_SEC = 2.0
 class EventBuffer:
     SNAPSHOT_WINDOW_SEC = 35.0
 
-    def __init__(self, window_sec: float = 60.0, clock: Clock = SYSTEM_CLOCK,
-                 look_ahead_sec: float = 0.0):
+    def __init__(
+        self, window_sec: float = 60.0, clock: Clock = SYSTEM_CLOCK, look_ahead_sec: float = 0.0
+    ):
         self._lock = threading.Lock()
         self._window_sec = window_sec
         self._clock = clock
@@ -61,12 +62,15 @@ class EventBuffer:
     def add_beat(self, bpm: float, change: bool, rms: float = 0.0) -> None:
         with self._lock:
             self._beats_detected += 1
-            self._beats.append({
-                't': self._now(), 'bpm': bpm,
-                'strength': _UNMEASURED_BEAT_STRENGTH,
-                'change': change,
-                'rms': round(rms, 4),
-            })
+            self._beats.append(
+                {
+                    't': self._now(),
+                    'bpm': bpm,
+                    'strength': _UNMEASURED_BEAT_STRENGTH,
+                    'change': change,
+                    'rms': round(rms, 4),
+                }
+            )
 
     def add_effect(self, channel: str, effect_type: str) -> None:
         with self._lock:
@@ -83,12 +87,13 @@ class EventBuffer:
             now = self._now()
             if not is_playing:
                 self._beats_cut += sum(
-                    1 for beat in self._beats
-                    if beat['t'] + self._look_ahead_sec > now)
+                    1 for beat in self._beats if beat['t'] + self._look_ahead_sec > now
+                )
             self._sound_events.append({'t': now, 'playing': is_playing})
 
-    def set_intent(self, intent: str, song_sec: float | None = None,
-                   trigger: str = CLASSIFIER_TRIGGER) -> None:
+    def set_intent(
+        self, intent: str, song_sec: float | None = None, trigger: str = CLASSIFIER_TRIGGER
+    ) -> None:
         with self._lock:
             if (intent, trigger) == (self._current_intent, self._current_trigger):
                 return
@@ -136,9 +141,10 @@ class EventBuffer:
         labels: dict = {}
         for entry in log:
             labels.setdefault(entry['label'], []).append(entry)
-        return dict(cls._delivery(log),
-                    by_label={label: cls._delivery(entries)
-                              for label, entries in sorted(labels.items())})
+        return dict(
+            cls._delivery(log),
+            by_label={label: cls._delivery(entries) for label, entries in sorted(labels.items())},
+        )
 
     def sound_events(self) -> list:
         with self._lock:
@@ -160,8 +166,7 @@ class EventBuffer:
     def snapshot(self) -> dict:
         with self._lock:
             now = self._now()
-            cutoff = now - min(self._window_sec,
-                               self.SNAPSHOT_WINDOW_SEC + self._look_ahead_sec)
+            cutoff = now - min(self._window_sec, self.SNAPSHOT_WINDOW_SEC + self._look_ahead_sec)
             timing_stats = self._timing_stats(self._timing_log)
             return {
                 'now': now,
@@ -195,10 +200,7 @@ class EventBuffer:
                 all_intents[-1] = {**all_intents[-1], 'end': now}
 
             tlog = timing_log if timing_log is not None else self._timing_log
-            errors_ms = [
-                abs(e['actual_delta_sec'] - e['target_delta_sec']) * 1000
-                for e in tlog
-            ]
+            errors_ms = [abs(e['actual_delta_sec'] - e['target_delta_sec']) * 1000 for e in tlog]
             durations = [e['end'] - e['t'] for e in all_effects if 'end' in e]
             unique_channels = {e['channel'] for e in all_effects}
             all_beats = list(self._beats)
@@ -213,7 +215,8 @@ class EventBuffer:
                 )
             dominant_intent = (
                 max(intent_distribution, key=intent_distribution.__getitem__)
-                if intent_distribution else None
+                if intent_distribution
+                else None
             )
 
             return {
@@ -226,9 +229,7 @@ class EventBuffer:
                     'look_ahead_sec': self._look_ahead_sec,
                     'beats_detected': len(all_beats),
                     'bpm_last': all_beats[-1]['bpm'] if all_beats else 0.0,
-                    'timing_error_mean_ms': (
-                        sum(errors_ms) / len(errors_ms) if errors_ms else 0.0
-                    ),
+                    'timing_error_mean_ms': (sum(errors_ms) / len(errors_ms) if errors_ms else 0.0),
                     'timing_error_max_ms': max(errors_ms) if errors_ms else 0.0,
                     'unique_effects_count': len(unique_channels),
                     'effect_changes_count': len(all_effects),

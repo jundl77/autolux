@@ -30,8 +30,12 @@ import time
 from pathlib import Path
 
 _TRAINING_DIR = Path(__file__).resolve().parents[1]
-for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR),
-              str(_TRAINING_DIR / "raveform"), str(_TRAINING_DIR / "third_party")):
+for _path in (
+    str(_TRAINING_DIR.parent),
+    str(_TRAINING_DIR),
+    str(_TRAINING_DIR / "raveform"),
+    str(_TRAINING_DIR / "third_party"),
+):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
@@ -134,14 +138,20 @@ def build_command(corpus: Path, row) -> list:
     # The `--` separator is required: a YouTube id may start with `-`.
     return [
         "yt-dlp",
-        "-f", "bestaudio",
+        "-f",
+        "bestaudio",
         "-x",
-        "--audio-format", AUDIO_EXT,
-        "--audio-quality", "192K",
+        "--audio-format",
+        AUDIO_EXT,
+        "--audio-quality",
+        "192K",
         "--no-playlist",
-        "--retries", "3",
-        "--socket-timeout", "30",
-        "-o", str(target.with_suffix(".%(ext)s")),
+        "--retries",
+        "3",
+        "--socket-timeout",
+        "30",
+        "-o",
+        str(target.with_suffix(".%(ext)s")),
         "--",
         row.youtube_id,
     ]
@@ -178,8 +188,11 @@ def download_one(corpus: Path, row, timeout_sec: int) -> tuple:
         return False, classify_error(blob), blob
 
     if not target.exists():
-        return (False, "missing_output",
-                _tail(completed.stdout) or "yt-dlp exited 0 but wrote no mp3")
+        return (
+            False,
+            "missing_output",
+            _tail(completed.stdout) or "yt-dlp exited 0 but wrote no mp3",
+        )
     if target.stat().st_size == 0:
         target.unlink(missing_ok=True)
         return False, "empty_output", "yt-dlp exited 0 but wrote a zero-byte mp3 (deleted)"
@@ -211,29 +224,55 @@ def _tally(id_to_reason: dict) -> dict:
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--data-dir", type=Path, default=None,
-                        help="corpus root (default: the resolved corpus dir)")
-    parser.add_argument("--queue", type=Path, default=None,
-                        help="fetch queue csv "
-                             f"(default: <corpus>/third_party/{tp_fetch_queue.QUEUE_FILE})")
-    parser.add_argument("--limit", type=int, default=0,
-                        help="attempt at most N pending tracks; 0 = all "
-                             "(default: %(default)s)")
-    parser.add_argument("--retry-failed", action="store_true",
-                        help="re-attempt every track in failed.jsonl, whatever the reason")
-    parser.add_argument("--retry-reasons", default="", metavar="R1,R2",
-                        help="re-attempt only the failures whose recorded reason is in "
-                             "this comma list; the rest stay skipped. Worth retrying: "
-                             f"{','.join(sorted(RETRYABLE_REASONS))}. "
-                             f"Known: {','.join(sorted(KNOWN_REASONS))}")
-    parser.add_argument("--pause", type=float, default=DEFAULT_PAUSE_SEC,
-                        help="minimum pause between videos, seconds; the actual wait is "
-                             f"jittered up to {PAUSE_JITTER:g}x it (default: %(default)s)")
-    parser.add_argument("--max-consecutive-failures", type=int, default=5,
-                        help="stop after this many consecutive sign-in/rate-limit "
-                             "refusals; 0 disables the guard (default: %(default)s)")
-    parser.add_argument("--timeout-sec", type=int, default=DEFAULT_TIMEOUT_SEC,
-                        help="per-track wall-clock budget for yt-dlp (default: %(default)s)")
+    parser.add_argument(
+        "--data-dir", type=Path, default=None, help="corpus root (default: the resolved corpus dir)"
+    )
+    parser.add_argument(
+        "--queue",
+        type=Path,
+        default=None,
+        help=f"fetch queue csv (default: <corpus>/third_party/{tp_fetch_queue.QUEUE_FILE})",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="attempt at most N pending tracks; 0 = all (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="re-attempt every track in failed.jsonl, whatever the reason",
+    )
+    parser.add_argument(
+        "--retry-reasons",
+        default="",
+        metavar="R1,R2",
+        help="re-attempt only the failures whose recorded reason is in "
+        "this comma list; the rest stay skipped. Worth retrying: "
+        f"{','.join(sorted(RETRYABLE_REASONS))}. "
+        f"Known: {','.join(sorted(KNOWN_REASONS))}",
+    )
+    parser.add_argument(
+        "--pause",
+        type=float,
+        default=DEFAULT_PAUSE_SEC,
+        help="minimum pause between videos, seconds; the actual wait is "
+        f"jittered up to {PAUSE_JITTER:g}x it (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--max-consecutive-failures",
+        type=int,
+        default=5,
+        help="stop after this many consecutive sign-in/rate-limit "
+        "refusals; 0 disables the guard (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--timeout-sec",
+        type=int,
+        default=DEFAULT_TIMEOUT_SEC,
+        help="per-track wall-clock budget for yt-dlp (default: %(default)s)",
+    )
     args = parser.parse_args(argv)
 
     if args.pause < 0:
@@ -244,7 +283,8 @@ def main(argv: list | None = None) -> int:
     if unknown:
         parser.error(
             f"unknown --retry-reasons value(s): {', '.join(unknown)}; "
-            f"known reasons are {', '.join(sorted(KNOWN_REASONS))}")
+            f"known reasons are {', '.join(sorted(KNOWN_REASONS))}"
+        )
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(line_buffering=True)
@@ -265,9 +305,9 @@ def main(argv: list | None = None) -> int:
     }
     skip = set(archived) | (set(previously_failed) - retried)
     pending = [
-        row for row in rows
-        if row.track_id not in skip
-        and not audio_file(corpus, row.source, row.track_id).exists()
+        row
+        for row in rows
+        if row.track_id not in skip and not audio_file(corpus, row.source, row.track_id).exists()
     ]
     if args.limit > 0:
         pending = pending[: args.limit]
@@ -287,18 +327,22 @@ def main(argv: list | None = None) -> int:
     elif retry_reasons:
         retry_note = (
             f"{len(retried)} being retried ({','.join(sorted(retry_reasons))}), "
-            f"{len(previously_failed) - len(retried)} still skipped")
+            f"{len(previously_failed) - len(retried)} still skipped"
+        )
     else:
         retry_note = "skipped"
-    print(f"queue     : {len(rows)} track(s) | already downloaded {len(archived)} | "
-          f"previously failed {len(previously_failed)}  ({retry_note})")
+    print(
+        f"queue     : {len(rows)} track(s) | already downloaded {len(archived)} | "
+        f"previously failed {len(previously_failed)}  ({retry_note})"
+    )
     if previously_failed and not args.retry_failed:
-        print(f"            failure reasons on record: "
-              f"{_reason_line(_tally(previously_failed))}")
-    print(f"this run  : {len(pending)} track(s)"
-          + (f" (--limit {args.limit})" if args.limit > 0 else "")
-          + f" [{_reason_line(by_source) or 'none'}]"
-          + f", pausing {args.pause:g}-{args.pause * PAUSE_JITTER:g}s between videos")
+        print(f"            failure reasons on record: {_reason_line(_tally(previously_failed))}")
+    print(
+        f"this run  : {len(pending)} track(s)"
+        + (f" (--limit {args.limit})" if args.limit > 0 else "")
+        + f" [{_reason_line(by_source) or 'none'}]"
+        + f", pausing {args.pause:g}-{args.pause * PAUSE_JITTER:g}s between videos"
+    )
     print()
 
     done = 0
@@ -315,8 +359,7 @@ def main(argv: list | None = None) -> int:
             break
 
         if index > 1:
-            delay = random.Random(row.track_id).uniform(
-                args.pause, args.pause * PAUSE_JITTER)
+            delay = random.Random(row.track_id).uniform(args.pause, args.pause * PAUSE_JITTER)
             try:
                 time.sleep(delay)
             except KeyboardInterrupt:
@@ -331,8 +374,7 @@ def main(argv: list | None = None) -> int:
 
         if not ok and reason == INTERRUPT_REASON:
             interrupted = True
-            print(f"[{index}/{len(pending)}] cancelled  {row.track_id}  (not recorded)",
-                  flush=True)
+            print(f"[{index}/{len(pending)}] cancelled  {row.track_id}  (not recorded)", flush=True)
             break
 
         if ok:
@@ -340,22 +382,26 @@ def main(argv: list | None = None) -> int:
             consecutive_blocks = 0
             append_archive(archive_path(corpus), row.track_id)
             size_mb = audio_file(corpus, row.source, row.track_id).stat().st_size / (1 << 20)
-            print(f"[{index}/{len(pending)}] ok    {row.track_id}  {size_mb:.1f} MB",
-                  flush=True)
+            print(f"[{index}/{len(pending)}] ok    {row.track_id}  {size_mb:.1f} MB", flush=True)
         else:
             failed += 1
             reasons[reason] = reasons.get(reason, 0) + 1
-            append_failure(failed_path(corpus), {
-                "track_id": row.track_id,
-                "source": row.source,
-                "youtube_id": row.youtube_id,
-                "error": error,
-                "reason": reason,
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z",
-            })
+            append_failure(
+                failed_path(corpus),
+                {
+                    "track_id": row.track_id,
+                    "source": row.source,
+                    "youtube_id": row.youtube_id,
+                    "error": error,
+                    "reason": reason,
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + "Z",
+                },
+            )
             last_line = error.splitlines()[-1] if error else ""
-            print(f"[{index}/{len(pending)}] FAIL  {row.track_id}  [{reason}] "
-                  f"{last_line[:120]}", flush=True)
+            print(
+                f"[{index}/{len(pending)}] FAIL  {row.track_id}  [{reason}] {last_line[:120]}",
+                flush=True,
+            )
             if reason in BLOCK_REASONS:
                 consecutive_blocks += 1
                 if 0 < args.max_consecutive_failures <= consecutive_blocks:
@@ -382,33 +428,45 @@ def main(argv: list | None = None) -> int:
     remaining_total = sum(1 for row in rows if row.track_id not in on_disk)
     print(f"  queue       : {len(rows) - remaining_total}/{len(rows)} tracks on disk")
     if attempted and remaining_total:
-        print(f"  full-run ETA: "
-              f"{format_duration(elapsed / attempted * remaining_total)} "
-              f"for the remaining {remaining_total}")
+        print(
+            f"  full-run ETA: "
+            f"{format_duration(elapsed / attempted * remaining_total)} "
+            f"for the remaining {remaining_total}"
+        )
 
     recoverable = sorted(reason for reason in reasons if reason in RETRYABLE_REASONS)
     if recoverable:
         print()
-        print(f"  RECOVERABLE : {sum(reasons[reason] for reason in recoverable)} of this "
-              f"run's failures may not be permanent ({', '.join(recoverable)}).")
+        print(
+            f"  RECOVERABLE : {sum(reasons[reason] for reason in recoverable)} of this "
+            f"run's failures may not be permanent ({', '.join(recoverable)})."
+        )
         print(f"                A plain re-run SKIPS them. To re-attempt:  {RETRY_HINT}")
 
     blocks = reasons.get("bot_check", 0)
     if blocks:
         print()
-        print(f"  BOT CHECK   : {blocks} sign-in / rate-limit refusal(s). No cookie or "
-              "credential workaround was attempted -- this is an owner decision.")
+        print(
+            f"  BOT CHECK   : {blocks} sign-in / rate-limit refusal(s). No cookie or "
+            "credential workaround was attempted -- this is an owner decision."
+        )
     forbidden = reasons.get("http_403", 0)
     if forbidden:
         print()
-        print(f"  HTTP 403    : {forbidden} refusal(s) on the media URL -- a signature "
-              "challenge yt-dlp could not solve. These are NOT dead videos;")
+        print(
+            f"  HTTP 403    : {forbidden} refusal(s) on the media URL -- a signature "
+            "challenge yt-dlp could not solve. These are NOT dead videos;"
+        )
         print(f"                re-run with  {RETRY_HINT}  and let it work through them.")
     if aborted:
-        print(f"  ABORTED     : {consecutive_blocks} consecutive refusals hit the "
-              "--max-consecutive-failures guard.")
-        print("                Those tracks are now in failed.jsonl, so a PLAIN RE-RUN "
-              "WILL SKIP THEM. To bring them back:")
+        print(
+            f"  ABORTED     : {consecutive_blocks} consecutive refusals hit the "
+            "--max-consecutive-failures guard."
+        )
+        print(
+            "                Those tracks are now in failed.jsonl, so a PLAIN RE-RUN "
+            "WILL SKIP THEM. To bring them back:"
+        )
         print(f"                {RETRY_HINT}")
         return 2
     if interrupted:

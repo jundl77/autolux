@@ -1,4 +1,5 @@
 """An offline script may not let import order choose its decoder."""
+
 import re
 import subprocess
 import sys
@@ -62,11 +63,10 @@ def _scripts_naming_another_checkout():
     found = []
     corpus = REPO / "training" / "data"
     for path in sorted((REPO / "training").rglob("*.py")):
-        if corpus in path.parents:   # the gitignored corpus and its ops copies
+        if corpus in path.parents:  # the gitignored corpus and its ops copies
             continue
         text = path.read_text(encoding="utf-8")
-        if PHASE_B_MARKER in text and re.search(r"^\s*(from|import) training\.nn",
-                                                text, re.M):
+        if PHASE_B_MARKER in text and re.search(r"^\s*(from|import) training\.nn", text, re.M):
             found.append(path)
     return found
 
@@ -75,12 +75,12 @@ def test_the_pattern_is_still_worth_guarding():
     assert _scripts_naming_another_checkout()
 
 
-@pytest.mark.parametrize("script", _scripts_naming_another_checkout(),
-                         ids=lambda p: p.stem)
+@pytest.mark.parametrize("script", _scripts_naming_another_checkout(), ids=lambda p: p.stem)
 def test_a_script_naming_another_checkout_states_which_one_it_imports(script):
     assert "module_source.require(" in script.read_text(encoding="utf-8"), (
         f"{script.relative_to(REPO)} puts another checkout on sys.path without "
-        f"declaring which one its training.nn must come from")
+        f"declaring which one its training.nn must come from"
+    )
 
 
 def test_a_decoder_already_imported_from_elsewhere_is_refused(tmp_path):
@@ -92,8 +92,10 @@ def test_a_decoder_already_imported_from_elsewhere_is_refused(tmp_path):
         import training.nn.decoder
         runpy.run_path(r"{script}", run_name="probe")
         """)
-    proc = subprocess.run([sys.executable, "-c", program],
-                          capture_output=True, text=True, cwd=str(REPO))
+    proc = subprocess.run(
+        [sys.executable, "-c", program], capture_output=True, text=True, cwd=str(REPO)
+    )
     assert proc.returncode != 0, (
-        "the script accepted a training.nn that a previous import chose for it")
+        "the script accepted a training.nn that a previous import chose for it"
+    )
     assert "training.nn resolved to" in proc.stderr

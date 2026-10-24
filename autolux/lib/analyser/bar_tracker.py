@@ -15,6 +15,7 @@ forward that starts failing mid-show marks the tracker dead and the decoder
 runs on the counting grid — never through the watchdog's shed door, which
 would hold the whole section stage hostage to the optional stage (#332).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -39,16 +40,21 @@ STRIDE_FRAMES = int(round(STRIDE_SEC * FPS))
 
 _N_FFT = 1024
 _HOP_22K = 441
-_SRC_PER_FRAME = 882          # 44.1 kHz source samples per 50 fps frame
-_RESAMPLE_CTX_SRC = 1024      # measured: >=256 matches a whole-stream soxr resample
+_SRC_PER_FRAME = 882  # 44.1 kHz source samples per 50 fps frame
+_RESAMPLE_CTX_SRC = 1024  # measured: >=256 matches a whole-stream soxr resample
 _STRIDE_SRC = STRIDE_FRAMES * _SRC_PER_FRAME
 # The last frame of pass p needs source samples through end_f*882 - 882 + 1024
 # (its STFT support) plus the resampler context.
 _PASS_PAD_SRC = _N_FFT - _SRC_PER_FRAME + _RESAMPLE_CTX_SRC
 _RING_STRIDES = 8
 
-GEOMETRY = {"sample_rate": 22050, "fps": FPS, "chunk_frames": CHUNK_FRAMES,
-            "margin_frames": MARGIN_FRAMES, "stride_sec": STRIDE_SEC}
+GEOMETRY = {
+    "sample_rate": 22050,
+    "fps": FPS,
+    "chunk_frames": CHUNK_FRAMES,
+    "margin_frames": MARGIN_FRAMES,
+    "stride_sec": STRIDE_SEC,
+}
 
 
 class TrackerChunk(NamedTuple):
@@ -76,8 +82,7 @@ def artifacts(generation_dir) -> TrackerArtifacts:
             checkpoint = root / record["checkpoint"]
         except (OSError, ValueError, KeyError):
             checkpoint = None
-    return TrackerArtifacts(checkpoint=checkpoint or root / "checkpoint.ckpt",
-                            record=record_path)
+    return TrackerArtifacts(checkpoint=checkpoint or root / "checkpoint.ckpt", record=record_path)
 
 
 def tracker_present(generation_dir) -> bool:
@@ -96,20 +101,21 @@ def load_record(generation_dir) -> dict:
     found = artifacts(generation_dir)
     absent = found.missing()
     if absent:
-        raise FileNotFoundError(f"bar tracker artifacts missing: "
-                                f"{', '.join(absent)}")
+        raise FileNotFoundError(f"bar tracker artifacts missing: {', '.join(absent)}")
     record = json.loads(found.record.read_text(encoding="utf-8"))
     actual = _sha256(found.checkpoint)
     if actual != record["sha256"]:
         raise RuntimeError(
             f"bar tracker checkpoint sha {actual} is not the {record['sha256']} "
             f"the record beside it names — refusing to track bars with an "
-            f"unverified model")
+            f"unverified model"
+        )
     if record["geometry"] != GEOMETRY:
         raise RuntimeError(
             f"bar tracker record geometry {record['geometry']} disagrees with "
             f"the runtime's {GEOMETRY} — the checkpoint was recorded for a "
-            f"different framing")
+            f"different framing"
+        )
     return record
 
 
@@ -123,26 +129,28 @@ def load_bar_tracker(generation_dir, *, device: str | None = None):
     model, hparams = beat_this_infer.load_model(found.checkpoint, where)
     recorded = record.get("arch")
     if recorded is not None and recorded != hparams:
-        raise RuntimeError(f"bar tracker arch {hparams} is not the recorded "
-                           f"{recorded}")
-    logging.info(f'[tracker] {found.checkpoint.name} on {where} '
-                 f'(sha {record["sha256"][:12]})')
+        raise RuntimeError(f"bar tracker arch {hparams} is not the recorded {recorded}")
+    logging.info(f'[tracker] {found.checkpoint.name} on {where} (sha {record["sha256"][:12]})')
     return BarTrackerStream(model, device=where)
 
 
 class BarTrackerStream:
-    def __init__(self, model, *, device: str = "cpu",
-                 source_rate: int = SOURCE_SAMPLE_RATE) -> None:
+    def __init__(
+        self, model, *, device: str = "cpu", source_rate: int = SOURCE_SAMPLE_RATE
+    ) -> None:
         if int(source_rate) != SOURCE_SAMPLE_RATE:
-            raise ValueError(f"the tracker's framing constants assume "
-                             f"{SOURCE_SAMPLE_RATE} Hz source audio, "
-                             f"not {source_rate}")
+            raise ValueError(
+                f"the tracker's framing constants assume "
+                f"{SOURCE_SAMPLE_RATE} Hz source audio, "
+                f"not {source_rate}"
+            )
         from autolux.lib.vendor.beat_this_infer import LogMelSpect
 
         self._model = model
         self._device = device
         self._mel = LogMelSpect(device)
         from autolux.lib.vendor.beat_this_infer import N_MELS
+
         self._n_mels = N_MELS
         self._ring = SampleRing(_RING_STRIDES * _STRIDE_SRC)
         from collections import deque
@@ -170,8 +178,7 @@ class BarTrackerStream:
         self._ring.write(np.asarray(samples, dtype=np.float32).reshape(-1))
 
     def due(self) -> bool:
-        return (self.alive
-                and self._ring.written >= self._next_needed())
+        return self.alive and self._ring.written >= self._next_needed()
 
     def _next_needed(self) -> int:
         return (self.passes + 1) * _STRIDE_SRC + _PASS_PAD_SRC
@@ -189,9 +196,11 @@ class BarTrackerStream:
             return []
         except Exception as error:
             self.alive = False
-            logging.warning(f'[tracker] forward failed ({error!r}) — the bar '
-                            f'tracker is dead for this run; the decoder is on '
-                            f'the counting grid')
+            logging.warning(
+                f'[tracker] forward failed ({error!r}) — the bar '
+                f'tracker is dead for this run; the decoder is on '
+                f'the counting grid'
+            )
             return []
         self.pass_sec.append(time.perf_counter() - started)
         self.passes += 1
@@ -199,13 +208,14 @@ class BarTrackerStream:
 
     def resync(self) -> None:
         """Skip to the live edge after a stall: the hole is never back-filled."""
-        passes = max(self.passes,
-                     (self._ring.written - _PASS_PAD_SRC) // _STRIDE_SRC)
+        passes = max(self.passes, (self._ring.written - _PASS_PAD_SRC) // _STRIDE_SRC)
         skipped_to = passes * STRIDE_FRAMES
         if skipped_to > self._n_frames:
-            logging.warning(f'[tracker] resync: skipping frames '
-                            f'[{self._n_frames}, {skipped_to}) — evidence for '
-                            f'that span is lost')
+            logging.warning(
+                f'[tracker] resync: skipping frames '
+                f'[{self._n_frames}, {skipped_to}) — evidence for '
+                f'that span is lost'
+            )
             self._n_frames = skipped_to
             self._valid_from = skipped_to
             self._prev_safe = skipped_to
@@ -226,10 +236,12 @@ class BarTrackerStream:
             return None
         self._prev_safe = safe_end
         offset = end_f - CHUNK_FRAMES
-        return TrackerChunk(lo, safe_end,
-                            np.ascontiguousarray(
-                                logits[lo - offset:safe_end - offset]),
-                            self._avail_sec(end_f))
+        return TrackerChunk(
+            lo,
+            safe_end,
+            np.ascontiguousarray(logits[lo - offset : safe_end - offset]),
+            self._avail_sec(end_f),
+        )
 
     @staticmethod
     def _avail_sec(end_f: int) -> float:
@@ -249,17 +261,22 @@ class BarTrackerStream:
         segment = self._ring.snapshot(src_lo, src_hi)
         resampled = soxr.resample(segment, SOURCE_SAMPLE_RATE, 22050)
         start22 = src_lo // 2
-        span = resampled[max(0, lo22) - start22:hi22 - start22]
+        span = resampled[max(0, lo22) - start22 : hi22 - start22]
         if lo22 < 0:
             # torch's own reflect padding at the head of the whole stream.
-            span = np.concatenate([span[1:1 - lo22][::-1], span])
+            span = np.concatenate([span[1 : 1 - lo22][::-1], span])
         with torch.inference_mode():
-            frames = self._mel(torch.tensor(span, dtype=torch.float32,
-                                            device=self._device),
-                               center=False).cpu().numpy()
+            frames = (
+                self._mel(
+                    torch.tensor(span, dtype=torch.float32, device=self._device), center=False
+                )
+                .cpu()
+                .numpy()
+            )
         if frames.shape[0] != end_f - nf:
-            raise RuntimeError(f"framing arithmetic drifted: {frames.shape[0]} "
-                               f"frames for [{nf}, {end_f})")
+            raise RuntimeError(
+                f"framing arithmetic drifted: {frames.shape[0]} frames for [{nf}, {end_f})"
+            )
         self._window[np.arange(nf, end_f) % CHUNK_FRAMES] = frames
         self._n_frames = end_f
 
