@@ -3,7 +3,7 @@
   "implementation": {
     "rates": "autolux/lib/telemetry_history.py derives completed render and skipped deadline counter differences over renderer elapsed time. Repeated fresh reports hold the prior interval rate; restarts/outages clear it.",
     "duration": "starfire/src/live.rs measures engine.render_at duration; autolux/lib/telemetry_history.py exposes the last completed render sample in milliseconds, not a timestamp or average.",
-    "protocol": "proto/starfire/starfire.proto is the sole contract: Login carries controller-owned typed rig/profiles, Lua sources and initial settings; LoginReply means ready. Four command families are silent on success; ErrorReply reports rejection. Metrics and independent empty Heartbeat report progress and liveness. Parameter is a global enum type plus number/boolean value. PlaySequence uses one globally unique sequence_id; banks group supplied scripts. SetActiveEffect carries literal fixture properties and optional duration_seconds."
+    "protocol": "proto/starfire/starfire.proto defines messages and imports rig.proto for RigDefinition and fixture types. Login carries controller-owned typed rig/profiles, Lua sources and initial settings; LoginReply means ready. Four command families are silent on success; ErrorReply reports rejection. Metrics and independent empty Heartbeat report progress and liveness. Parameter is a global enum type plus number/boolean value. PlaySequence uses one globally unique sequence_id; banks group supplied scripts. SetActiveEffect carries literal fixture properties and optional duration_seconds."
   },
   "readers": {
     "fork_turns": "none",
@@ -188,6 +188,19 @@
         }
       ],
       "disposition": "Contextual exception: conventional progress-counter terminology; precise ordering/outcome semantics documented. Bounded review ends here."
+    },
+    {
+      "concept": "Complete fixture setup",
+      "implementation": "proto/starfire/rig.proto RigDefinition contains fixture instances, ordered groups and referenced profiles. Login.rig sends this declarative snapshot; starfire/src/fixtures.rs from_wire validates it into the runtime FixtureRig.",
+      "attempts": [
+        {
+          "names": ["RigDefinition"],
+          "reader": "/root/blind_rig_definition",
+          "prediction": "`RigDefinition` likely describes the structure or configuration of a “rig”: its components, connections, and settings. “Definition” suggests declarative data rather than an active runtime instance.\n\nAmbiguities:\n- “Rig” could mean an animation skeleton, equipment setup, test apparatus, or another assembled system.\n- The name does not clarify whether it represents a schema, a reusable template, or one specific configuration.\n- It gives no indication of validation or runtime behavior.",
+          "comparison": "Aligned on declarative configuration versus a runtime instance. Fixture contents and validation remain explicit in the schema and conversion boundary."
+        }
+      ],
+      "disposition": "User-selected name; blind reader confirms the intended configuration/runtime distinction."
     }
   ],
   "user_design_decisions": "Final names and protocol simplifications are explicitly user-selected, not a claimed blind-naming pass. Prior predictions are retained as review evidence; rejected abstractions are not part of the current schema."

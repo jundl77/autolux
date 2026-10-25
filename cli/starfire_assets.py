@@ -7,6 +7,7 @@ from pathlib import Path
 
 from cli.starfire import PROFILE_CATALOGUE
 from cli.starfire_protocol import COMMAND_ID_MAX_ENCODED_BYTES, MAX_MESSAGE_BYTES
+from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 ASSET_SCHEMA_VERSION = 1
@@ -69,7 +70,7 @@ def _movement(value):
     for source, target in (('min', 'minimum'), ('max', 'maximum')):
         if source in value:
             value[target] = _number(value.pop(source))
-    return wire.Fixture.MovementRange(**value)
+    return rig_wire.Fixture.MovementRange(**value)
 
 
 def _fixture(value):
@@ -77,7 +78,7 @@ def _fixture(value):
     for axis in ('pan', 'tilt'):
         if axis in value:
             value[axis] = _movement(value[axis])
-    return wire.Fixture(
+    return rig_wire.Fixture(
         fixture_id=value.pop('id'),
         profile_id=value.pop('profile'),
         universe=_integer(value.pop('universe')),
@@ -102,7 +103,7 @@ def _profile(profile_id, value):
             axis['coarse'] = _integer(axis['coarse'])
             if axis.get('fine') is not None:
                 axis['fine'] = _integer(axis['fine'])
-            value[name] = wire.FixtureProfile.AxisChannels(**axis)
+            value[name] = rig_wire.FixtureProfile.AxisChannels(**axis)
     if value.get('colour_wheel') is not None:
         wheel = _object(value['colour_wheel'])
         slots = []
@@ -112,18 +113,18 @@ def _profile(profile_id, value):
             if colour.keys() != {'red', 'green', 'blue'}:
                 raise ValueError('Colour-wheel slots require red, green and blue')
             slots.append(
-                wire.FixtureProfile.ColourWheel.Slot(
+                rig_wire.FixtureProfile.ColourWheel.Slot(
                     value=_integer(slot.pop('value')),
-                    colour=wire.RgbColor(
+                    colour=rig_wire.RgbColor(
                         **{name: _number(level) for name, level in colour.items()}
                     ),
                     **slot,
                 )
             )
-        value['colour_wheel'] = wire.FixtureProfile.ColourWheel(
+        value['colour_wheel'] = rig_wire.FixtureProfile.ColourWheel(
             channel=_integer(wheel.pop('channel')), slots=slots, **wheel
         )
-    return wire.FixtureProfile(profile_id=profile_id, **value)
+    return rig_wire.FixtureProfile(profile_id=profile_id, **value)
 
 
 def _scripts(directory):
@@ -166,13 +167,13 @@ def load_login(rig: Path, sequences: Path, artnet: str, parameters=()) -> wire.L
         for name, members in _object(patch.pop('groups', {})).items():
             if not isinstance(members, list):
                 raise TypeError('Fixture group members must be an array')
-            groups.append(wire.FixtureGroup(group_id=name, fixture_ids=members))
+            groups.append(rig_wire.FixtureGroup(group_id=name, fixture_ids=members))
         catalogue = _document(PROFILE_CATALOGUE)
         profiles = _object(catalogue.pop('profiles'))
         if catalogue:
             raise ValueError('Unknown fixture profile catalogue field')
         login = wire.Login(
-            rig=wire.Rig(
+            rig=rig_wire.RigDefinition(
                 fixtures=fixtures,
                 groups=groups,
                 profiles=[

@@ -18,7 +18,7 @@ def generate(output: Path) -> None:
             f'--proto_path={ROOT}',
             f'--python_out={output}',
             f'--pyi_out={output}',
-            str(ROOT / 'proto/starfire/starfire.proto'),
+            *(str(path) for path in sorted((ROOT / 'proto/starfire').glob('*.proto'))),
         ]
     )
     if result:

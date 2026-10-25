@@ -12,6 +12,7 @@ import pytest
 
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
+from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 
@@ -486,7 +487,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
                     effect_id='held_red',
                     fixture='cf805_pixel_1',
                     intensity=0.75,
-                    colour=wire.RgbColor(red=1.0),
+                    colour=rig_wire.RgbColor(red=1.0),
                 )
             )
             deadline = time.monotonic() + 2

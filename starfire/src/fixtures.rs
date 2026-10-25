@@ -319,7 +319,7 @@ pub struct FixtureRig {
 }
 
 impl FixtureRig {
-    pub fn from_wire(rig: &wire::Rig) -> Result<Self> {
+    pub fn from_wire(rig: &wire::RigDefinition) -> Result<Self> {
         let fixtures = rig
             .fixtures
             .iter()

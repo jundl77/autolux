@@ -9,8 +9,8 @@ use starfire::script::SequenceCatalog;
 const FRAME_RATE_HZ: u32 = 40;
 const RGB_RIG: &str = r#"{"schema_version":1,"fixtures":[{"id":"wash","profile":"generic_rgb","universe":0,"address":1},{"id":"mover","profile":"generic_rgb","universe":0,"address":4},{"id":"pixel","profile":"generic_rgb","universe":0,"address":7}],"groups":{"wash":["wash"],"movers":["mover"],"strip":["pixel"]}}"#;
 
-fn rig() -> wire::Rig {
-    wire::Rig {
+fn rig() -> wire::RigDefinition {
+    wire::RigDefinition {
         fixtures: ["wash", "mover", "pixel"]
             .into_iter()
             .enumerate()

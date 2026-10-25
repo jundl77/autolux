@@ -1,8 +1,9 @@
 # Starfire protocol
 
 Autolux is the client; its owned Starfire process is the server.
-The [single schema](../../proto/starfire/starfire.proto) generates the message
-classes. Only top-level wire messages have direction annotations.
+The [protocol](../../proto/starfire/starfire.proto) imports the
+[rig definition](../../proto/starfire/rig.proto); both generate the message classes.
+Only top-level wire messages have direction annotations.
 
 ## Four concepts
 
@@ -35,8 +36,9 @@ Removing an effect reveals the continuing baseline. There is no blend-mode API.
 
 Autolux owns fixture configuration and scripts. `Login` supplies a complete snapshot:
 
-- Typed fixtures, addresses, movement calibration and ordered groups.
-- Required DMX profiles, including safe channel values and colour-wheel mappings.
+- `RigDefinition`: fixtures, addresses, movement calibration, ordered groups and
+  required profiles. Each profile describes a fixture model/mode's DMX channel
+  mapping and safe values; fixtures reference it by ID.
 - Lua sources with globally unique sequence IDs and bank grouping metadata.
 - Initial parameters and the unicast Art-Net destination.
 

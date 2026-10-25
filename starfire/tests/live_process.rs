@@ -67,7 +67,7 @@ impl Renderer {
         });
         let login = wire::Login {
             command_id: 0,
-            rig: Some(wire::Rig {
+            rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     fixture_id: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
                 }],

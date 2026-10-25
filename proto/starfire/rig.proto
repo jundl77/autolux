@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package autolux.starfire;
+
+// Autolux owns and sends the complete patch and the profiles it uses.
+message RigDefinition {
+  repeated Fixture fixtures = 1;
+  repeated FixtureGroup groups = 2;
+  repeated FixtureProfile profiles = 3;
+}
+
+message Fixture {
+  string fixture_id = 1;
+  string profile_id = 2;
+  uint32 universe = 3;  // Art-Net universe, starting at zero.
+  uint32 address = 4;   // DMX address, starting at one.
+  MovementRange pan = 5;
+  MovementRange tilt = 6;
+
+  message MovementRange {
+    optional double minimum = 1;  // Default 0.
+    optional double maximum = 2;  // Default 1.
+    bool inverted = 3;
+  }
+}
+
+message FixtureGroup {
+  string group_id = 1;
+  repeated string fixture_ids = 2;
+}
+
+// Channel indices are zero-based offsets within safe_values.
+message FixtureProfile {
+  string profile_id = 1;
+  bytes safe_values = 2;
+  string source = 3;
+  string notes = 4;
+  optional uint32 dimmer = 5;
+  repeated uint32 rgb = 6;  // Empty or exactly [red, green, blue] channels.
+  optional uint32 white = 7;
+  AxisChannels pan = 8;
+  AxisChannels tilt = 9;
+  ColourWheel colour_wheel = 10;
+
+  message AxisChannels {
+    uint32 coarse = 1;
+    optional uint32 fine = 2;
+  }
+
+  message ColourWheel {
+    uint32 channel = 1;
+    repeated Slot slots = 2;
+
+    message Slot {
+      uint32 value = 1;  // DMX byte, 0..255.
+      RgbColor colour = 2;
+    }
+  }
+}
+
+message RgbColor {
+  double red = 1;  // Each channel is normalized to 0..1.
+  double green = 2;
+  double blue = 3;
+}

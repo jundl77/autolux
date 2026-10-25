@@ -399,7 +399,7 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
         let login = wire::Login {
-            rig: Some(wire::Rig {
+            rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     fixture_id: "lamp".into(),
                     profile_id: "rgb".into(),
