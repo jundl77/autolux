@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use starfire::engine::RenderedFrame;
+use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
-use starfire::model::Command;
+use starfire::model::{Command, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay};
 use starfire::script::SequenceCatalog;
 
@@ -243,5 +243,100 @@ fn the_same_sequences_work_on_a_different_rig_through_named_groups() {
                     .all(|state| state.intensity > 0.0 && state.strobe_hz == 0.0)
             );
         }
+    }
+}
+
+#[test]
+fn rhythmic_pulses_follow_authoritative_beats_while_movement_keeps_its_phase() {
+    let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+    let rig = FixtureRig::load(&root().join("rigs/room.json")).unwrap();
+    for (bank, sequence, low, high) in [
+        ("buildup", "current", 0.22, 0.48),
+        ("drop", "blue_impact", 0.55, 0.78),
+    ] {
+        let mut engine = Engine::new(rig.clone(), catalog.clone()).unwrap();
+        engine
+            .apply(
+                0.0,
+                &Command::Beat {
+                    position_beats: 0.0,
+                    bpm: 120.0,
+                },
+            )
+            .unwrap();
+        // Selection halfway between beats must not offset the recurring pulse.
+        engine
+            .apply(
+                0.25,
+                &Command::Select {
+                    bank: bank.into(),
+                    sequence: sequence.into(),
+                    transition: Transition::Cut,
+                },
+            )
+            .unwrap();
+        let selected = engine.render_at(0.25).unwrap();
+        within(
+            selected.fixture_properties_before_strobe["wash_left"].intensity,
+            ((low + high) / 2.0, (low + high) / 2.0),
+        );
+
+        for (seconds, beat, bpm, intensity) in [
+            (1.0, 1.0, 120.0, high),
+            (2.0, 2.0, 90.0, low),
+            (3.0, 5.0, 150.0, high),
+        ] {
+            if seconds == 2.0 {
+                engine
+                    .apply(1.25, &Command::SetSpeed { multiplier: 2.0 })
+                    .unwrap();
+            }
+            let before = engine.render_at(seconds).unwrap();
+            engine
+                .apply(
+                    seconds,
+                    &Command::Beat {
+                        position_beats: beat,
+                        bpm,
+                    },
+                )
+                .unwrap();
+            let corrected = engine.render_at(seconds).unwrap();
+            within(
+                corrected.fixture_properties_before_strobe["wash_left"].intensity,
+                (intensity, intensity),
+            );
+            for (id, before) in before.fixture_properties_before_strobe {
+                let after = &corrected.fixture_properties_before_strobe[&id];
+                assert_eq!(before.pan, after.pan);
+                assert_eq!(before.tilt, after.tilt);
+                assert_eq!(before.colour, after.colour);
+            }
+            if seconds == 2.0 {
+                let next_beat = engine.render_at(2.0 + 2.0 / 3.0).unwrap();
+                within(
+                    next_beat.fixture_properties_before_strobe["wash_left"].intensity,
+                    (high, high),
+                );
+            }
+        }
+
+        engine
+            .apply(3.4, &Command::SetSpeed { multiplier: 0.0 })
+            .unwrap();
+        let held_motion = engine.render_at(3.4).unwrap();
+        let next_beat = engine.render_at(3.8).unwrap();
+        within(
+            held_motion.fixture_properties_before_strobe["wash_left"].intensity,
+            (low, low),
+        );
+        within(
+            next_beat.fixture_properties_before_strobe["wash_left"].intensity,
+            (high, high),
+        );
+        assert_eq!(
+            held_motion.fixture_properties_before_strobe["spot_left"].pan,
+            next_beat.fixture_properties_before_strobe["spot_left"].pan
+        );
     }
 }

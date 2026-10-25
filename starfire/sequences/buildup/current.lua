@@ -9,7 +9,7 @@ local TILT_MIN, TILT_MAX = 0.32, 0.52
 return {
     render = function(ctx)
         return sf.scene {
-            sf.dimmer(sf.all(), sf.osc.sine(ctx.sequence_speed_scaled_elapsed_beats, PULSE_PERIOD_BEATS, LOW_LEVEL, HIGH_LEVEL)),
+            sf.dimmer(sf.all(), sf.osc.sine(ctx.beat_position, PULSE_PERIOD_BEATS, LOW_LEVEL, HIGH_LEVEL)),
             sf.each(sf.group("wash"), function(target, index, count)
                 local spread = (index - 1) / count
                 return sf.colour(target, sf.hsv(
