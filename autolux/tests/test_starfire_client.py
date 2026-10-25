@@ -30,10 +30,10 @@ def test_rejected_selection_does_not_change_cached_identity():
 
     client = StarfireClient(send)
     with pytest.raises(RuntimeError, match='queue full'):
-        client.select_autoloop('drop', 'blue_impact')
+        client.select_autoloop('drop', 'kick')
     assert client.selected_autoloop is None
-    assert client.select_autoloop('drop', 'blue_impact')
-    assert not client.select_autoloop('drop', 'blue_impact')
+    assert client.select_autoloop('drop', 'kick')
+    assert not client.select_autoloop('drop', 'kick')
     assert len(calls) == 2
 
 

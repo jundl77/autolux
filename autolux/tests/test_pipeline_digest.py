@@ -51,7 +51,7 @@ def _event(t=1.0, **command):
     return {'at_seconds': t, 'command': command}
 
 
-def _selection(t=1.0, bank='drop', autoloop='blue_impact'):
+def _selection(t=1.0, bank='drop', autoloop='kick'):
     return _event(t, kind='select', bank=bank, autoloop=autoloop)
 
 
@@ -68,7 +68,7 @@ def _drop_report():
         [_beat()],
         intents=[{'t': 1.0, 'end': 10.0, 'intent': 'drop'}],
         effects=[
-            {'t': 1.0, 'name': 'drop/blue_impact', 'type': 'AUTOLOOP'},
+            {'t': 1.0, 'name': 'drop/kick', 'type': 'AUTOLOOP'},
             {'t': 1.0, 'name': 'drop_arrival', 'type': 'ACCENT'},
         ],
     )
@@ -126,7 +126,7 @@ def test_command_time_must_not_go_backwards():
     ]
 
 
-@pytest.mark.parametrize('name', ['buildup/current', 'unknown/program'])
+@pytest.mark.parametrize('name', ['buildup/ramp', 'unknown/program'])
 def test_autoloop_must_belong_to_committed_intent(name):
     report = _drop_report()
     report['effects'][0]['name'] = name

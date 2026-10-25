@@ -58,6 +58,48 @@ function sf.hsv(hue_degrees, saturation, value)
     return sf.rgb(red + minimum, green + minimum, blue + minimum)
 end
 
+local BEATS_PER_BAR = 4
+
+-- Grid helpers assume beat 0 is a downbeat, so floor(beats) % 4 == 0 is "the one".
+function sf.beat_in_bar(beats) return beats % BEATS_PER_BAR end
+function sf.bar(beats) return math.floor(beats / BEATS_PER_BAR) end
+
+function sf.phrase_phase(beats, bars)
+    assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
+    return (beats / (bars * BEATS_PER_BAR)) % 1
+end
+
+-- Kick envelope: 1 on the beat edge, squared decay to 0 after `width` beats.
+function sf.on_beat(beats, width)
+    assert(finite(width) and width > 0, "beat envelope width must be positive and finite")
+    local remaining = math.max(0, 1 - (beats % 1) / width)
+    return remaining * remaining
+end
+
+-- Loops use palette slots only, so a genre swap is a one-word change per loop.
+local PALETTES = {
+    techno = {
+        primary = sf.rgb(1, 0.82, 0.6), -- warm white
+        secondary = sf.rgb(1, 0.55, 0.1), -- amber
+        accent = sf.rgb(0.75, 0, 0.02), -- deep red
+        cold = sf.rgb(0.75, 0.85, 1), -- cool white
+        black = sf.rgb(0, 0, 0)
+    },
+    house = {
+        primary = sf.rgb(1, 0.82, 0.6), -- warm white
+        secondary = sf.rgb(1, 0, 0.7), -- magenta
+        accent = sf.rgb(1, 0.4, 0), -- orange
+        cold = sf.rgb(0, 0.85, 1), -- cyan
+        black = sf.rgb(0, 0, 0)
+    }
+}
+
+function sf.palette(name)
+    local palette = PALETTES[name]
+    assert(palette ~= nil, "unknown palette")
+    return palette
+end
+
 function sf.group(name) return { group = name } end
 function sf.fixture(name) return { fixture = name } end
 function sf.all() return "all" end

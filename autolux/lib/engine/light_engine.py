@@ -13,6 +13,7 @@ from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import LightIntent, intent_for_class
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
+from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -55,7 +56,10 @@ class LightEngine(IMusicAnalyserHandler):
         self._section_class_at_playback: str | None = None
         self._pending_intents: list = []
         self._published_bpm: dict = {}
-        self._session_beat_count = 0
+        self._grid_beat: int | None = None
+        self._room_beat_phase: int | None = None
+        self._room_beat_at: float = float('-inf')
+        self._held_intent: LightIntent | None = None
         self._intent_commits: int = 0
         self._audio_sec: float = 0.0
         self._last_logged_latency_seconds: float | None = None
@@ -161,6 +165,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._startup_baseline_pending = False
         self._current_intent = None
         self._section_class_at_playback = None
+        self._held_intent = None
+        self._room_beat_phase = None
         self.lighting_client.stop()
         if self.event_buffer is not None:
             self.event_buffer.stop_effects()
@@ -230,8 +236,6 @@ class LightEngine(IMusicAnalyserHandler):
             )
 
     async def on_beat(self, beat_number: int, bpm: float, bpm_changed: bool) -> None:
-        self._session_beat_count += 1
-        session_beat_position = self._session_beat_count
         current_second = self.analyser.get_song_current_duration().total_seconds()
         rms_energy = self.analyser.get_rms_energy()
 
@@ -239,8 +243,11 @@ class LightEngine(IMusicAnalyserHandler):
         if self.event_buffer:
             self.event_buffer.add_beat(bpm, bpm_changed, rms=rms_energy)
 
+        phase = None
         if self.section_decoder is not None:
             await self._commit(self.section_decoder.push_beat(self._audio_sec))
+            phase = self.section_decoder.beat_phase
+        grid_beat = self._advance_grid(phase)
 
         published_bpm = self._publishable_bpm(self._published_bpm, self.analyser.get_detector_bpm())
         normalized_rms_level = rms_to_normalized_level(rms_energy)
@@ -248,12 +255,36 @@ class LightEngine(IMusicAnalyserHandler):
         async def publish():
             self.lighting_client.set_normalized_rms_level(normalized_rms_level)
             if published_bpm > 0:
-                self.lighting_client.beat(session_beat_position, published_bpm)
+                self.lighting_client.beat(grid_beat, published_bpm)
+            await self._on_room_beat(phase)
 
         if self.command_queue:
             await self.command_queue.enqueue('beat', publish)
         else:
             await publish()
+
+    def _advance_grid(self, phase: int | None) -> int:
+        # Starfire's clock rejects a beat behind the last one it saw, so a
+        # phase correction moves the grid forward to the next matching beat.
+        if self._grid_beat is None:
+            # With no bar phase the grid keeps the plain one-based beat count.
+            self._grid_beat = 1 if phase is None else phase
+        else:
+            self._grid_beat += 1
+            if phase is not None:
+                self._grid_beat += (phase - self._grid_beat) % BEATS_PER_BAR
+        return self._grid_beat
+
+    async def _on_room_beat(self, phase: int | None) -> None:
+        self._room_beat_phase = phase
+        self._room_beat_at = self._clock.monotonic()
+        if phase == 0:
+            await self._switch_held_intent()
+
+    async def _switch_held_intent(self) -> None:
+        intent, self._held_intent = self._held_intent, None
+        if intent is not None:
+            await self.effect_controller.change_effect(intent)
 
     @staticmethod
     def _publishable_bpm(state: dict, bpm: float) -> float:
@@ -409,7 +440,11 @@ class LightEngine(IMusicAnalyserHandler):
         self._current_intent = intent
         self._section_class_at_playback = section_label
         self._intent_commits += 1
-        await self.effect_controller.change_effect(intent)
+        # Loops switch on the room's downbeat; without a known bar phase there
+        # is no downbeat to wait for.
+        self._held_intent = intent
+        if self._room_beat_phase in (None, 0):
+            await self._switch_held_intent()
 
     async def on_note(self):
         LOGGER.debug('[engine] note detected')
@@ -429,6 +464,12 @@ class LightEngine(IMusicAnalyserHandler):
         await self._commit_intent(LightIntent.ATMOSPHERIC, self._playback_delay_sec)
 
     async def on_100ms_callback(self):
+        if (
+            self._held_intent is not None
+            and self._clock.monotonic() - self._room_beat_at > _BEAT_ABSENCE_SEC
+        ):
+            # The room's beats stopped, so no downbeat will release the hold.
+            await self._switch_held_intent()
         if not self.analyser.is_song_playing():
             return
         await self._floor_if_nothing_arrived()

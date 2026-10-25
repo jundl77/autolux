@@ -26,7 +26,7 @@ fn replay(duration_seconds: f64) -> Replay {
                 at_seconds: 0.0,
                 command: Command::Select {
                     bank: "atmospheric".into(),
-                    autoloop: "blue_tide".into(),
+                    autoloop: "cold_breathe".into(),
                     transition: Transition::Cut,
                 },
             },

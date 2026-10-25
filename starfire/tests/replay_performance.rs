@@ -52,12 +52,12 @@ fn mixed_show() -> Replay {
         );
     }
     for (at_seconds, bank, autoloop) in [
-        (0.0, "atmospheric", "blue_tide"),
-        (15.0, "breakdown", "violet_space"),
-        (30.0, "buildup", "current"),
-        (45.0, "drop", "blue_impact"),
-        (60.0, "buildup", "current"),
-        (75.0, "drop", "blue_impact"),
+        (0.0, "atmospheric", "cold_breathe"),
+        (15.0, "breakdown", "wide_space"),
+        (30.0, "buildup", "ramp"),
+        (45.0, "drop", "kick"),
+        (60.0, "buildup", "ramp"),
+        (75.0, "drop", "kick"),
     ] {
         push(
             at_seconds,

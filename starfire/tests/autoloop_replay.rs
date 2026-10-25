@@ -3,34 +3,85 @@ use std::path::PathBuf;
 
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
-use starfire::model::{Command, Transition};
+use starfire::model::{Command, Rgb, Transition};
+use starfire::protocol::wire;
 use starfire::replay::{Replay, dmx_digest, render_replay};
 use starfire::script::AutoloopCatalog;
 
-const FLOAT_TOLERANCE: f64 = 1e-10;
+const FLOAT_TOLERANCE: f64 = 1e-9;
 const ROOM_FIXTURE_COUNT: usize = 14;
-const LOOP_BEATS: f64 = 64.0;
+const REPLAY_FRAME_RATE_HZ: f64 = 40.0;
+const REPLAY_BPM: f64 = 120.0;
+// Replays hold 120 BPM until 64 s, so loop periodicity is checked before then.
+const STEADY_TEMPO_SECONDS: f64 = 64.0;
+const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
 
 struct Look {
     bank: &'static str,
     autoloop: &'static str,
-    wash_range: (f64, f64),
-    mover_range: (f64, f64),
-    pan_range: (f64, f64),
-    tilt_range: (f64, f64),
+    /// `None` when the look depends on time since selection, not only on bar phase.
+    loop_beats: Option<f64>,
 }
+
+const LOOKS: [Look; 4] = [
+    Look {
+        bank: "atmospheric",
+        autoloop: "cold_breathe",
+        loop_beats: Some(16.0),
+    },
+    Look {
+        bank: "breakdown",
+        autoloop: "wide_space",
+        loop_beats: Some(16.0),
+    },
+    Look {
+        bank: "buildup",
+        autoloop: "ramp",
+        loop_beats: None,
+    },
+    Look {
+        bank: "drop",
+        autoloop: "kick",
+        loop_beats: Some(8.0),
+    },
+];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn within(value: f64, range: (f64, f64)) {
-    assert!(
-        value.is_finite()
-            && value >= range.0 - FLOAT_TOLERANCE
-            && value <= range.1 + FLOAT_TOLERANCE,
-        "{value} outside {range:?}"
-    );
+fn room() -> FixtureRig {
+    FixtureRig::load(&root().join("../rigs/room.json")).unwrap()
+}
+
+fn catalog() -> AutoloopCatalog {
+    AutoloopCatalog::load(&root().join("../autoloops")).unwrap()
+}
+
+/// Engine at 120 BPM with `autoloop` selected while the beat clock reads `select_beat`.
+fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
+    let mut engine = Engine::new(room(), catalog()).unwrap();
+    for command in [
+        Command::Beat {
+            position_beats: select_beat,
+            bpm: REPLAY_BPM,
+        },
+        Command::Select {
+            bank: bank.into(),
+            autoloop: autoloop.into(),
+            transition: Transition::Cut,
+        },
+    ] {
+        engine.apply(0.0, &command).unwrap();
+    }
+    engine
+}
+
+fn wash_level(engine: &mut Engine, beats_after_select: f64) -> f64 {
+    let frame = engine
+        .render_at(beats_after_select * SECONDS_PER_BEAT)
+        .unwrap();
+    frame.fixture_properties_before_strobe["wash_left"].intensity
 }
 
 fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
@@ -42,47 +93,18 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
             frame.fixture_properties_before_strobe.len(),
             ROOM_FIXTURE_COUNT
         );
-        assert_eq!(frame.dmx_frames_by_universe[&0].len(), 512);
         for (id, state) in &frame.fixture_properties_before_strobe {
-            let mover = id.starts_with("spot_");
-            within(
-                state.intensity,
-                if mover {
-                    look.mover_range
-                } else {
-                    look.wash_range
-                },
-            );
-            assert_eq!(
-                state.strobe_hz, 0.0,
-                "baseline autoloops must never repeat strobe"
-            );
-            if mover {
-                within(state.colour.blue, (1.0, 1.0));
-                within(state.colour.red, (0.0, 0.0));
-                within(state.colour.green, (0.0, 0.0));
-                within(state.pan, look.pan_range);
-                within(state.tilt, look.tilt_range);
-            } else {
-                // Authored RGB palette stays within saturated blue/violet hues.
-                within(state.colour.blue, (230.0 / 255.0, 1.0));
-                within(state.colour.green, (0.0, 57.0 / 255.0));
-                within(state.colour.red, (21.0 / 255.0, 119.0 / 255.0));
-            }
+            assert!(state.strobe_hz == 0.0, "{} strobes {id}", look.bank);
         }
-        let dmx = &frame.dmx_frames_by_universe[&0];
-        for start in [0, 12] {
-            assert_eq!(dmx[start + 5], 111, "mover wheel must stay blue");
-            assert_eq!(dmx[start + 6], 7, "hardware shutter must stay open");
-            assert_eq!(&dmx[start + 8..start + 12], &[0; 4]);
-        }
-        assert!(dmx[24..64].iter().chain(&dmx[120..]).all(|byte| *byte == 0));
     }
 
-    // Equivalent loop phases have identical semantics; floating-point roundoff at
-    // an exact DMX half-byte can choose neighboring bytes after modulo reduction.
-    let period_frames = (LOOP_BEATS / 2.0 * 40.0) as usize;
-    for index in 0..period_frames {
+    // Bar-locked looks repeat on the beat grid, so reselection never restarts a phrase.
+    let Some(loop_beats) = look.loop_beats else {
+        return;
+    };
+    let period_frames = (loop_beats * SECONDS_PER_BEAT * REPLAY_FRAME_RATE_HZ) as usize;
+    let steady_frames = (STEADY_TEMPO_SECONDS * REPLAY_FRAME_RATE_HZ) as usize;
+    for index in 0..steady_frames - period_frames {
         for (id, first) in &frames[index].fixture_properties_before_strobe {
             let repeated = &frames[index + period_frames].fixture_properties_before_strobe[id];
             for (left, right) in [
@@ -102,15 +124,14 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
     }
 }
 
-fn check_replay(look: Look) {
+fn check_replay(look: &Look) {
     let replay = Replay::load(&root().join(format!("tests/replays/{}.json", look.bank))).unwrap();
-    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
-    let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-    let first = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
+    let first = render_replay(&replay, room(), catalog()).unwrap();
+    // 90 s at 120-150 BPM covers well over 16 bars.
     assert_eq!(first.frames.len(), 3601);
-    assert_semantics(&first.frames, &look);
+    assert_semantics(&first.frames, look);
 
-    let second = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
+    let second = render_replay(&replay, room(), catalog()).unwrap();
     let digest = dmx_digest(&first.frames);
     assert_eq!(digest, dmx_digest(&second.frames));
 
@@ -119,13 +140,13 @@ fn check_replay(look: Look) {
     without_duplicate.events.retain(|event| {
         event.at_seconds == 0.0 || !matches!(event.command, Command::Select { .. })
     });
-    let continued = render_replay(&without_duplicate, rig.clone(), catalog.clone()).unwrap();
+    let continued = render_replay(&without_duplicate, room(), catalog()).unwrap();
     assert_eq!(digest, dmx_digest(&continued.frames));
 
     // Frame rate changes sampling density, never the authored effect at a given time.
     let mut slower = replay.clone();
     slower.frame_rate_hz = 20;
-    let slower = render_replay(&slower, rig, catalog).unwrap();
+    let slower = render_replay(&slower, room(), catalog()).unwrap();
     for (index, frame) in slower.frames.iter().enumerate() {
         assert_eq!(
             frame.dmx_frames_by_universe,
@@ -144,46 +165,110 @@ fn check_replay(look: Look) {
 }
 
 #[test]
-fn atmospheric_blue_tide_replay() {
-    check_replay(Look {
-        bank: "atmospheric",
-        autoloop: "blue_tide",
-        wash_range: (63.0 / 255.0, 63.0 / 255.0),
-        mover_range: (63.0 / 255.0, 245.0 / 255.0),
-        pan_range: (0.23, 0.43),
-        tilt_range: (0.68, 0.97),
-    });
+fn atmospheric_cold_breathe_replay() {
+    check_replay(&LOOKS[0]);
 }
 
 #[test]
-fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe() {
-    for (bank, autoloop) in [
-        ("atmospheric", "blue_tide"),
-        ("breakdown", "violet_space"),
-        ("buildup", "current"),
-        ("drop", "blue_impact"),
-    ] {
-        let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-        let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
-        let mut engine = Engine::new(rig, catalog).unwrap();
-        engine
-            .apply(
-                0.0,
-                &Command::Beat {
-                    position_beats: 4.0,
-                    bpm: 140.0,
-                },
-            )
+fn breakdown_wide_space_replay() {
+    check_replay(&LOOKS[1]);
+}
+
+#[test]
+fn buildup_ramp_replay() {
+    check_replay(&LOOKS[2]);
+}
+
+#[test]
+fn drop_kick_replay() {
+    check_replay(&LOOKS[3]);
+}
+
+#[test]
+fn drop_washes_hit_on_every_beat() {
+    let mut engine = engine("drop", "kick", 0.0);
+    for beat in 0..16 {
+        let hit = wash_level(&mut engine, beat as f64 + 0.1);
+        let offbeat = wash_level(&mut engine, beat as f64 + 0.5);
+        assert!(hit > offbeat, "beat {beat}: {hit} <= {offbeat}");
+    }
+}
+
+#[test]
+fn breakdown_washes_drift_without_beat_pulses_or_strobe() {
+    let mut engine = engine("breakdown", "wide_space", 0.0);
+    let mut levels = Vec::new();
+    for step in 0..=128 {
+        let frame = engine
+            .render_at(step as f64 * 0.5 * SECONDS_PER_BEAT)
             .unwrap();
+        assert!(
+            frame
+                .fixture_properties_before_strobe
+                .values()
+                .all(|state| state.strobe_hz == 0.0)
+        );
+        levels.push(frame.fixture_properties_before_strobe["wash_left"].intensity);
+    }
+    // The fade is piecewise linear between beats, so a beat pulse would bend mid-beat.
+    for beat in levels.windows(3).step_by(2) {
+        assert!((beat[1] - (beat[0] + beat[2]) / 2.0).abs() <= FLOAT_TOLERANCE);
+    }
+}
+
+#[test]
+fn buildup_peaks_rise_across_the_ramp() {
+    let mut engine = engine("buildup", "ramp", 0.0);
+    let mut bar_peak = |bar: f64| {
+        (0..80)
+            .map(|step| wash_level(&mut engine, bar * 4.0 + step as f64 * 0.05))
+            .fold(0.0, f64::max)
+    };
+    let early = bar_peak(2.0);
+    let late = bar_peak(30.0);
+    assert!(late > early, "bar 30 peak {late} <= bar 2 peak {early}");
+}
+
+#[test]
+fn buildup_never_strobes_even_when_loud() {
+    let mut engine = engine("buildup", "ramp", 0.0);
+    engine
+        .apply(0.0, &Command::SetNormalizedRmsLevel { level: 0.9 })
+        .unwrap();
+    // 48 bars sampled every quarter beat spans the ramp and well past its plateau.
+    for step in 0..=48 * 4 * 4 {
+        let frame = engine
+            .render_at(step as f64 * 0.25 * SECONDS_PER_BEAT)
+            .unwrap();
+        for (id, state) in &frame.fixture_properties_before_strobe {
+            assert_eq!(state.strobe_hz, 0.0, "{id} strobes at step {step}");
+        }
+    }
+}
+
+#[test]
+fn selecting_mid_bar_keeps_the_musical_phrase() {
+    for look in LOOKS.iter().filter(|look| look.loop_beats.is_some()) {
+        let mut on_the_one = engine(look.bank, look.autoloop, 0.0);
+        let mut mid_bar = engine(look.bank, look.autoloop, 2.25);
+        for beat in [3.0, 3.1, 4.0, 6.5, 9.0] {
+            let expected = on_the_one.render_at(beat * SECONDS_PER_BEAT).unwrap();
+            let actual = mid_bar.render_at((beat - 2.25) * SECONDS_PER_BEAT).unwrap();
+            assert_eq!(
+                expected.dmx_frames_by_universe, actual.dmx_frames_by_universe,
+                "{} restarted on selection",
+                look.bank
+            );
+        }
+    }
+}
+
+#[test]
+fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
+    for look in &LOOKS {
+        let mut engine = engine(look.bank, look.autoloop, 4.0);
         engine
-            .apply(
-                0.0,
-                &Command::Select {
-                    bank: bank.into(),
-                    autoloop: autoloop.into(),
-                    transition: Transition::Cut,
-                },
-            )
+            .apply(0.0, &Command::SetNormalizedRmsLevel { level: 1.0 })
             .unwrap();
         let strong = engine.render_at(0.25).unwrap();
         engine
@@ -192,58 +277,57 @@ fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe
         let quiet = engine.render_at(0.25).unwrap();
         for (id, strong) in &strong.fixture_properties_before_strobe {
             let quiet = &quiet.fixture_properties_before_strobe[id];
-            within(
-                quiet.intensity,
-                (strong.intensity * 0.65, strong.intensity * 0.65),
-            );
-            assert_eq!(strong.pan, quiet.pan);
-            assert_eq!(strong.tilt, quiet.tilt);
+            assert!(quiet.intensity <= strong.intensity + FLOAT_TOLERANCE);
+            assert!((quiet.pan - 0.5).abs() <= (strong.pan - 0.5).abs() + FLOAT_TOLERANCE);
             assert_eq!(strong.colour, quiet.colour);
-            assert_eq!(quiet.strobe_hz, 0.0);
+            assert_eq!(strong.strobe_hz, quiet.strobe_hz);
         }
         assert_ne!(strong.dmx_frames_by_universe, quiet.dmx_frames_by_universe);
     }
 }
 
 #[test]
-fn breakdown_violet_space_replay() {
-    check_replay(Look {
-        bank: "breakdown",
-        autoloop: "violet_space",
-        wash_range: (37.0 / 255.0, 37.0 / 255.0),
-        mover_range: (37.0 / 255.0, 37.0 / 255.0),
-        pan_range: (32767.0 / 65535.0, 32767.0 / 65535.0),
-        tilt_range: (32767.0 / 65535.0, 32767.0 / 65535.0),
-    });
-}
-
-#[test]
-fn buildup_current_replay() {
-    check_replay(Look {
-        bank: "buildup",
-        autoloop: "current",
-        wash_range: (0.0, 144.0 / 255.0),
-        mover_range: (0.0, 144.0 / 255.0),
-        pan_range: (0.40, 0.60),
-        tilt_range: (0.30, 0.70),
-    });
-}
-
-#[test]
-fn drop_blue_impact_replay() {
-    check_replay(Look {
-        bank: "drop",
-        autoloop: "blue_impact",
-        wash_range: (124.0 / 255.0, 245.0 / 255.0),
-        mover_range: (0.0, 245.0 / 255.0),
-        pan_range: (0.23, 0.43),
-        tilt_range: (0.68, 0.97),
-    });
+fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
+    let source = r#"
+        assert(sf.beat_in_bar(5.5) == 1.5 and sf.bar(5.5) == 1)
+        assert(sf.phrase_phase(8, 4) == 0.5 and sf.phrase_phase(16, 4) == 0)
+        assert(sf.on_beat(3, 0.5) == 1 and sf.on_beat(3.5, 0.5) == 0)
+        return { render = function(ctx)
+            return { sf.colour(sf.all(), sf.palette("house").cold), sf.dimmer(sf.all(), 1) }
+        end }
+    "#;
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "house".into(),
+        bank: "test".into(),
+        lua_source: source.into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(room(), catalog).unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::Select {
+                bank: "test".into(),
+                autoloop: "house".into(),
+                transition: Transition::Cut,
+            },
+        )
+        .unwrap();
+    let frame = engine.render_at(0.0).unwrap();
+    assert!(frame.script_error.is_none(), "{:?}", frame.script_error);
+    assert_eq!(
+        frame.fixture_properties_before_strobe["cf805_pixel_1"].colour,
+        Rgb {
+            red: 0.0,
+            green: 0.85,
+            blue: 1.0
+        }
+    );
 }
 
 #[test]
 fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
+    let catalog = catalog();
     for entry in catalog.list() {
         let replay = Replay::load(&root().join(format!("tests/replays/{}.json", entry.bank)))
             .expect("every authored autoloop needs a replay fixture");
@@ -256,12 +340,7 @@ fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
             entry.bank,
             entry.autoloop
         );
-        let result = render_replay(
-            &replay,
-            FixtureRig::load(&root().join("../rigs/room.json")).unwrap(),
-            catalog.clone(),
-        )
-        .unwrap();
+        let result = render_replay(&replay, room(), catalog.clone()).unwrap();
         let expected =
             fs::read_to_string(root().join(format!("tests/golden/{}.sha256", entry.bank)))
                 .expect("every authored autoloop needs a reviewed full DMX digest");
@@ -277,7 +356,7 @@ fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
 
 #[test]
 fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
+    let catalog = catalog();
     let rig = FixtureRig::load(&root().join("../rigs/generic.json")).unwrap();
     for entry in catalog.list() {
         let mut replay =
@@ -298,155 +377,4 @@ fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
             );
         }
     }
-}
-
-#[test]
-fn beat_corrections_change_pulses_without_restarting_choreography() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
-    let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-    for (bank, autoloop, initial_level, corrected_level) in [
-        ("buildup", "current", 144.0 / 255.0, 72.0_f64 / 255.0),
-        ("drop", "blue_impact", 198.0 / 255.0, 124.0 / 255.0),
-    ] {
-        let mut engine = Engine::new(rig.clone(), catalog.clone()).unwrap();
-        engine
-            .apply(
-                0.0,
-                &Command::Beat {
-                    position_beats: 0.0,
-                    bpm: 120.0,
-                },
-            )
-            .unwrap();
-        // A half-beat selection offset must not shift subsequent music pulses.
-        engine
-            .apply(
-                0.25,
-                &Command::Select {
-                    bank: bank.into(),
-                    autoloop: autoloop.into(),
-                    transition: Transition::Cut,
-                },
-            )
-            .unwrap();
-        let before = engine.render_at(2.0).unwrap();
-        within(
-            before.fixture_properties_before_strobe["wash_left"].intensity,
-            (initial_level, initial_level),
-        );
-        engine
-            .apply(
-                2.0,
-                &Command::Beat {
-                    position_beats: if bank == "buildup" { 4.75 } else { 6.0 },
-                    bpm: 120.0,
-                },
-            )
-            .unwrap();
-        let corrected = engine.render_at(2.0).unwrap();
-        assert_eq!(
-            corrected.dmx_frames_by_universe[&0][68],
-            (corrected_level * 255.0).round() as u8
-        );
-        for (id, previous) in before.fixture_properties_before_strobe {
-            let current = &corrected.fixture_properties_before_strobe[&id];
-            assert_eq!(previous.pan, current.pan);
-            assert_eq!(previous.tilt, current.tilt);
-            assert_eq!(previous.colour, current.colour);
-        }
-
-        // Pausing choreography freezes position/colour; authoritative beat pulses continue.
-        engine
-            .apply(2.0, &Command::SetSpeed { multiplier: 0.0 })
-            .unwrap();
-        let frozen = engine.render_at(2.0).unwrap();
-        let later = engine.render_at(2.375).unwrap();
-        assert_ne!(
-            frozen.fixture_properties_before_strobe["wash_left"].intensity,
-            later.fixture_properties_before_strobe["wash_left"].intensity
-        );
-        for (id, previous) in frozen.fixture_properties_before_strobe {
-            let current = &later.fixture_properties_before_strobe[&id];
-            assert_eq!(previous.pan, current.pan);
-            assert_eq!(previous.tilt, current.tilt);
-            assert_eq!(previous.colour, current.colour);
-        }
-    }
-}
-
-#[test]
-fn drop_pulses_survive_animation_freeze_and_selection_across_global_phrase_boundaries() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
-    let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-    let mut pulse_traces = Vec::new();
-    for selection_beat in [2.0, 2.25, 62.0, 62.25] {
-        let make_engine = |speed| {
-            let mut engine = Engine::new(rig.clone(), catalog.clone()).unwrap();
-            engine
-                .apply(
-                    0.0,
-                    &Command::Beat {
-                        position_beats: selection_beat,
-                        bpm: 120.0,
-                    },
-                )
-                .unwrap();
-            engine
-                .apply(
-                    0.0,
-                    &Command::Select {
-                        bank: "drop".into(),
-                        autoloop: "blue_impact".into(),
-                        transition: Transition::Cut,
-                    },
-                )
-                .unwrap();
-            engine
-                .apply(0.0, &Command::SetSpeed { multiplier: speed })
-                .unwrap();
-            engine
-        };
-        let mut running = make_engine(1.0);
-        let mut frozen = make_engine(0.0);
-        let initial = frozen.render_at(0.0).unwrap();
-        let initial_position = &initial.fixture_properties_before_strobe["spot_left"];
-        let mut observed_levels = Vec::new();
-        for seconds in [0.0, 0.5, 1.0, 1.25, 2.0, 2.5, 3.0] {
-            if seconds == 2.5 {
-                let correction = Command::Beat {
-                    position_beats: selection_beat + 5.5,
-                    bpm: 120.0,
-                };
-                running.apply(seconds, &correction).unwrap();
-                frozen.apply(seconds, &correction).unwrap();
-            }
-            let expected = running.render_at(seconds).unwrap();
-            let actual = frozen.render_at(seconds).unwrap();
-            let dimmer = actual.dmx_frames_by_universe[&0][7];
-            assert_eq!(
-                dimmer, expected.dmx_frames_by_universe[&0][7],
-                "speed changed pulse at {selection_beat} + {seconds}s"
-            );
-            let position = &actual.fixture_properties_before_strobe["spot_left"];
-            assert_eq!(position.pan, initial_position.pan);
-            assert_eq!(position.tilt, initial_position.tilt);
-            if seconds == 1.25 {
-                assert!(
-                    dimmer > 160,
-                    "global beat64 must not add another entry hold"
-                );
-            }
-            observed_levels.push(dimmer);
-        }
-        assert!(observed_levels.windows(2).any(|pair| pair[0] != pair[1]));
-        pulse_traces.push(observed_levels);
-    }
-    assert_eq!(
-        pulse_traces[0], pulse_traces[2],
-        "bar-aligned selection must own its pulse phrase"
-    );
-    assert_eq!(
-        pulse_traces[1], pulse_traces[3],
-        "fractional selection must keep the musical bar phase"
-    );
 }

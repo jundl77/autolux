@@ -16,7 +16,7 @@
       "command": {
         "kind": "select",
         "bank": "buildup",
-        "autoloop": "current",
+        "autoloop": "ramp",
         "transition": {
           "kind": "cut"
         }
@@ -27,7 +27,7 @@
       "command": {
         "kind": "select",
         "bank": "buildup",
-        "autoloop": "current",
+        "autoloop": "ramp",
         "transition": {
           "kind": "cut"
         }

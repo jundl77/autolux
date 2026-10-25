@@ -129,6 +129,15 @@ class SectionDecoder:
         return list(self._edges)
 
     @property
+    def beat_phase(self) -> int | None:
+        """Bar position of the latest pushed beat; 0 is the downbeat."""
+        if self._phase is not None:
+            return self._phase_prev
+        if self._last_beat_sec is None:
+            return None
+        return (self._bar_position - 1) % BEATS_PER_BAR
+
+    @property
     def first_bar(self) -> int:
         return self._edge_base
 

@@ -10,7 +10,7 @@ from autolux.lib.audio_config import SAMPLE_RATE
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
-from autolux.lib.engine.effect_definitions import LightIntent
+from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
 from autolux.lib.engine.section_decoder import BarDecision, BarObservation
@@ -91,6 +91,9 @@ class FakeDecoder:
 
     class params:
         lag_bars = 2
+
+    # None is a grid with no bar phase; tests set 0..3 before a beat to place it.
+    beat_phase = None
 
     def __init__(self, script=None):
         self.beats: list = []
@@ -1220,3 +1223,69 @@ async def test_the_grid_travels_with_the_bar_numbers_that_name_it():
     state = light.event_buffer.snapshot()['decoder']
     assert state['first_bar'] == 41
     assert state['bar_sec'] == pytest.approx(FakeDecoder.bar_sec)
+
+
+async def beat_at_phase(light, decoder, phase, *, decision=None):
+    decoder.beat_phase = phase
+    if decision is not None:
+        decoder._script.append([BarDecision(0, decision, light.audio_sec)])
+    await light.on_beat(1, 128.0, False)
+
+
+def grid_positions(lighting):
+    return [
+        e['command']['position_beats'] for e in lighting.events if e['command']['kind'] == 'beat'
+    ]
+
+
+async def test_downbeats_land_on_bar_lines_and_a_phase_correction_never_rewinds_the_grid():
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    # The tracker skips phase 2 (a forward correction), then pulls the bar back a beat.
+    phases = [1, 2, 3, 0, 1, 3, 0, 1, 0]
+    for phase in phases:
+        await beat_at_phase(light, decoder, phase)
+
+    positions = grid_positions(lighting)
+    assert positions == [1, 2, 3, 4, 5, 7, 8, 9, 12]
+    assert all(pos % 4 == 0 for pos, phase in zip(positions, phases) if phase == 0)
+    assert positions == sorted(set(positions))
+
+
+async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest_one_wins():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 1)
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 2, decision='buildup')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    downbeat_reaches_room = clock.monotonic() + 14.0
+
+    clock.advance(13.9)
+    await queue.drain()
+    assert selections(lighting) == [], 'switched before the downbeat reached the room'
+    assert light.current_intent is LightIntent.DROP
+
+    clock.advance(0.2)
+    await queue.drain()
+    [selected] = selections(lighting)
+    assert selected['command']['autoloop'] == AUTOLOOP_BY_LIGHT_INTENT[LightIntent.DROP][1]
+    assert selected['at_seconds'] == pytest.approx(downbeat_reaches_room, abs=0.15)
+
+
+async def test_a_held_intent_is_released_when_the_rooms_beats_stop():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 1)
+    await beat_at_phase(light, decoder, 2, decision='breakdown')
+    assert selections(lighting) == []
+
+    clock.advance(3.0)
+    await light.on_100ms_callback()
+    assert [e['command']['autoloop'] for e in selections(lighting)] == [
+        AUTOLOOP_BY_LIGHT_INTENT[LightIntent.BREAKDOWN][1]
+    ]

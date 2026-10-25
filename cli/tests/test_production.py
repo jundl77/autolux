@@ -196,7 +196,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             return SimpleNamespace(
                 returncode=1,
                 stdout='',
-                stderr='autoloop atmospheric/blue_tide failed: unknown group strip',
+                stderr='autoloop atmospheric/cold_breathe failed: unknown group strip',
             )
         universes = [1] if failure == 'universe_mismatch' else [0]
         checked_autoloops = [

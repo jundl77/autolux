@@ -235,13 +235,13 @@ def test_brief_accent_preserves_the_active_autoloop_and_reports_its_lifetime():
     clock = VirtualClock()
     buffer = EventBuffer(clock=clock)
     buffer.start()
-    buffer.add_effect('drop/blue_impact', 'AUTOLOOP')
+    buffer.add_effect('drop/kick', 'AUTOLOOP')
     buffer.add_effect('drop_arrival', 'ACCENT', duration_seconds=1.0)
     clock.advance(10.0)
-    assert buffer.snapshot()['current_effect']['name'] == 'drop/blue_impact'
+    assert buffer.snapshot()['current_effect']['name'] == 'drop/kick'
     effects = buffer.to_report()['effects']
     assert [(effect['name'], effect['end']) for effect in effects] == [
-        ('drop/blue_impact', 10.0),
+        ('drop/kick', 10.0),
         ('drop_arrival', 1.0),
     ]
     buffer.stop_effects()

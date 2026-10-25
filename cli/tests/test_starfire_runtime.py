@@ -91,7 +91,7 @@ def test_control_adapter_rejects_invalid_gdtf_values(value):
         {'kind': 'set_normalized_rms_level', 'level': float('nan')},
         {'kind': 'set_master', 'intensity': float('inf')},
         {'kind': 'unknown'},
-        {'kind': 'stop', 'autoloop': {'bank_id': 'drop', 'autoloop_id': 'blue_impact'}},
+        {'kind': 'stop', 'autoloop': {'bank_id': 'drop', 'autoloop_id': 'kick'}},
         {'kind': 'select', 'bank': 'drop', 'autoloop': 'x', 'extra': 1},
         {
             'kind': 'select',
@@ -272,7 +272,7 @@ def _fake_runtime(tmp_path, mode='normal', **kwargs):
     )
     scripts = tmp_path / 'scripts'
     (scripts / 'drop').mkdir(parents=True)
-    (scripts / 'drop/blue_impact.lua').write_text('return {render=function(ctx) return {} end}')
+    (scripts / 'drop/kick.lua').write_text('return {render=function(ctx) return {} end}')
     runtime = starfire_runtime.StarfireRuntime(
         sys.executable,
         rig,
@@ -290,7 +290,7 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     runtime = _fake_runtime(tmp_path)
     with runtime:
         child = runtime.process
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'blue_impact'})
+        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
         runtime.send_command({'kind': 'stop'})
         runtime.send_command({'kind': 'heartbeat'})
         deadline = time.monotonic() + 2
@@ -304,7 +304,7 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     assert json.loads((tmp_path / 'commands.json').read_text()) == [
         {'id': 1, 'kind': 'Login'},
         {'kind': 'Heartbeat'},
-        {'id': 2, 'kind': 'PlayAutoloop', 'autoloop': 'drop/blue_impact'},
+        {'id': 2, 'kind': 'PlayAutoloop', 'autoloop': 'drop/kick'},
         {'id': 3, 'kind': 'PlayAutoloop'},
         {'kind': 'Heartbeat'},
     ]
@@ -328,7 +328,7 @@ def test_shutdown_discards_a_full_queue_and_closes_the_pipe_normally(tmp_path):
         runtime.send_command({'kind': 'stop'})
         assert blocked.wait(2)
         runtime._outgoing = queue.Queue(maxsize=1)
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'blue_impact'})
+        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
         threading.Timer(0.05, release.set).start()
         started = time.monotonic()
     assert time.monotonic() - started < 1
@@ -566,7 +566,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         )
         with runtime:
             runtime.send_command({'kind': 'beat', 'position_beats': 0.0, 'bpm': 120.0})
-            runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'blue_impact'})
+            runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
             runtime.send_command({'kind': 'set_normalized_rms_level', 'level': 0.8})
             runtime.send_command(
                 wire.SetActiveEffect(
@@ -657,5 +657,5 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
         (directory / f'{autoloop}.lua').write_text(
             'return { render = function(ctx) return {} end }'
         )
-    with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/blue_impact'):
+    with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
         starfire_runtime.validate_starfire(binary, root / 'rigs/room.json', tmp_path)

@@ -100,10 +100,10 @@ def test_all_four_intents_map_to_authored_autoloops_in_stable_order():
     assert [
         (event['command']['bank'], event['command']['autoloop']) for event in selections(result)
     ] == [
-        ('atmospheric', 'blue_tide'),
-        ('breakdown', 'violet_space'),
-        ('buildup', 'current'),
-        ('drop', 'blue_impact'),
+        ('atmospheric', 'cold_breathe'),
+        ('breakdown', 'wide_space'),
+        ('buildup', 'ramp'),
+        ('drop', 'kick'),
     ]
     assert report_to_replay(source) == report_to_replay(copy.deepcopy(source))
 

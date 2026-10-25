@@ -63,7 +63,7 @@ fn engine() -> Engine {
 
 #[test]
 fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
-    let selection = play("atmospheric", "blue_tide");
+    let selection = play("atmospheric", "cold_breathe");
     let mut data = encoded(selection.clone());
     assert_eq!(data[0], wire::MessageType::PlayAutoloop as u8);
     assert_eq!(
@@ -71,7 +71,7 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
         data.len() - 5
     );
     let payload = wire::PlayAutoloop::decode(&data[5..]).unwrap();
-    assert_eq!(payload.autoloop_id, "atmospheric/blue_tide");
+    assert_eq!(payload.autoloop_id, "atmospheric/cold_breathe");
     assert_eq!(payload.command_id, 1);
     data.extend(encoded(play("", "")));
     let mut input = Fragmented(Cursor::new(data));
@@ -99,7 +99,7 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
 
 #[test]
 fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
-    let message = encoded(play("atmospheric", "blue_tide"));
+    let message = encoded(play("atmospheric", "cold_breathe"));
     for length in 1..message.len() {
         assert!(read_control(&mut Cursor::new(&message[..length])).is_err());
     }
@@ -131,7 +131,7 @@ fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
 fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
     use wire::{ParameterType as Kind, parameter::Value};
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for invalid in [
         parameter(Kind::OutputBrightness, Value::Number(-1.0)),
@@ -173,17 +173,17 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
 #[test]
 fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for operation in [
         play("atmospheric", ""),
-        play("", "blue_tide"),
+        play("", "cold_breathe"),
         Operation::PlayAutoloop(wire::PlayAutoloop {
             transition: Some(wire::play_autoloop::Transition::default()),
             ..Default::default()
         }),
         Operation::PlayAutoloop(wire::PlayAutoloop {
-            autoloop_id: "atmospheric/blue_tide".into(),
+            autoloop_id: "atmospheric/cold_breathe".into(),
             transition: Some(wire::play_autoloop::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
@@ -200,7 +200,7 @@ fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
 #[test]
 fn optional_effect_properties_preserve_zero_and_invalid_replacements_preserve_expiry() {
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     let effect = wire::SetActiveEffect {
         command_id: 1,
         effect_id: "accent".into(),
@@ -271,10 +271,10 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         ),
         (
             0.0,
-            play("atmospheric", "blue_tide"),
+            play("atmospheric", "cold_breathe"),
             Command::Select {
                 bank: "atmospheric".into(),
-                autoloop: "blue_tide".into(),
+                autoloop: "cold_breathe".into(),
                 transition: Transition::Cut,
             },
         ),
@@ -291,7 +291,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (
             0.75,
             Operation::PlayAutoloop(wire::PlayAutoloop {
-                autoloop_id: "drop/blue_impact".into(),
+                autoloop_id: "drop/kick".into(),
                 transition: Some(wire::play_autoloop::Transition {
                     crossfade_beats: Some(2.0),
                 }),
@@ -299,7 +299,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             }),
             Command::Select {
                 bank: "drop".into(),
-                autoloop: "blue_impact".into(),
+                autoloop: "kick".into(),
                 transition: Transition::Crossfade {
                     duration_beats: 2.0,
                 },
