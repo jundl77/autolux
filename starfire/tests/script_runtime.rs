@@ -126,12 +126,32 @@ fn sandbox_exposes_no_ambient_inputs_or_budget_escape() {
     let mut sequence = sequence(
         r#"local forbidden = {"os", "io", "debug", "package", "require", "load", "loadfile",
           "dofile", "coroutine", "pcall", "xpcall", "collectgarbage", "pairs", "next",
-          "setmetatable", "getmetatable", "rawset", "print", "warn"}
+          "setmetatable", "getmetatable", "rawset", "print", "warn", "tostring"}
         for _, name in ipairs(forbidden) do assert(_G[name] == nil, name) end
-        assert(math.random == nil and math.randomseed == nil and string.dump == nil)
+        assert(math.random == nil and math.randomseed == nil and string.dump == nil and string.format == nil)
         return {render = function(ctx) return {sf.dimmer(sf.all(), 0.5)} end}"#,
     );
     assert_eq!(sequence.render(&snapshot(0.0)).unwrap().len(), 1);
+}
+
+#[test]
+fn pointer_identity_cannot_be_reflected_into_authored_effects() {
+    for expression in [
+        "tostring({})",
+        "tostring(function() end)",
+        "string.format('%p', {})",
+        "string.format('%s', {})",
+        "('%p'):format({})",
+    ] {
+        let source = format!(
+            "return {{render = function(ctx) local address = {expression}; return {{sf.dimmer(sf.all(), 0.5)}} end}}"
+        );
+        let error = sequence(&source).render(&snapshot(0.0)).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("nil value"),
+            "{expression}: {error:#}"
+        );
+    }
 }
 
 #[test]

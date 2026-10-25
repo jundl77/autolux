@@ -70,6 +70,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | P40 | Buildup and Drop intensity oscillators follow absolute musical beat position, including phase corrections and selection between beats. Movement and colour use the continuous speed-scaled sequence clock. | A free-running animation clock can drift from detected beats; a sequence-relative origin can offset every pulse after a mid-beat selection. Speed controls those animations without desynchronizing intensity from musical beats. |
 | P41 | Fixture rows retain their original identity during edits so renaming preserves ordered group membership. | Group order drives spatial phase; treating a renamed fixture as a new member silently changes choreography. |
 | P42 | Reject capture/summary paths that collide with replay input, rig input or each other before writing. | Explicit output paths must not accidentally destroy the audition inputs or replace a binary capture with its summary. |
+| P43 | Exclude Lua pointer/identity formatting from the authoring environment. | `tostring` on tables/functions and pointer-capable `string.format` expose allocator addresses, an ambient source of nondeterministic effects. Sequence math and ordinary string concatenation do not need them. |
 
 ## Open questions and defaults
 
@@ -130,3 +131,8 @@ Hardware audition is explicitly separate from deterministic offline validation.
   fixed group-order and dropdown/reload issues. Naming review is bounded to three
   API concepts. Full repository validation is compiling native dependencies;
   Python/GPU workloads remain serialized. Four core/build commits are recorded.
+- 2026-10-25 02:17 local: third checkpoint. Full native build, four Radius test
+  groups and 76 Rust tests pass. The 90-second root-CLI loopback audition delivered
+  all 3,602 packets in order with exact offline payload parity and final blackout;
+  maximum observed interval was 25.93 ms. Python tests are running without failures;
+  backtest/simulation follow serially. All delegated work is reviewed and committed.

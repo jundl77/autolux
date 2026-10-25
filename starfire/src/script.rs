@@ -181,6 +181,7 @@ impl LuaSequence {
             "loadfile",
             "require",
             "print",
+            "tostring",
             "warn",
             "rawset",
             "rawget",
@@ -204,6 +205,7 @@ impl LuaSequence {
         math.set("randomseed", Value::Nil)?;
         let string: Table = globals.get("string")?;
         string.set("dump", Value::Nil)?;
+        string.set("format", Value::Nil)?;
 
         let api: Table = lua
             .load(LIGHTING_API)
