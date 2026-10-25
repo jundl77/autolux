@@ -9,8 +9,6 @@ import pytest
 from autolux.lighting.fixture_setup import (
     FixtureStore,
     channel_occupancy,
-    next_free_address,
-    repatch_dmx_fixture,
 )
 
 PROFILES = {'rgb': {'channels': 3}, 'moving_head': {'channels': 12}}
@@ -26,26 +24,13 @@ def test_patch_occupancy_retains_both_owners_of_conflicting_channels():
     assert len(occupied) == 512
     assert occupied[:5] == [[0], [0], [0, 1], [1], [1]]
     assert errors == ['right overlaps left in universe 1.']
-    with pytest.raises(ValueError, match='overlaps'):
-        next_free_address(rows, PROFILES, 0, 3)
-
-
-def test_address_search_respects_gaps_footprints_and_universe_boundaries():
-    rows = [fixture_row(address=1), fixture_row('right', address=6), fixture_row('other', 4, 1)]
-    assert next_free_address(rows, PROFILES, 0, 2) == 4
-    assert next_free_address(rows, PROFILES, 0, 3) == 9
-    assert next_free_address(rows, PROFILES, 1, 3) == 1
-    assert channel_occupancy(rows, PROFILES, 1)[0][3:6] == [[2], [2], [2]]
 
 
 def test_last_channel_can_be_allocated_without_clipping_or_wrapping():
     profiles = {'large': {'channels': 509}, **PROFILES}
     rows = [fixture_row(profile='large')]
-    assert next_free_address(rows, profiles, 0, 3) == 510
     rows.append(fixture_row('last', 510))
     assert channel_occupancy(rows, profiles, 0)[0][-1] == [1]
-    with pytest.raises(ValueError, match='No room'):
-        next_free_address(rows, profiles, 0, 1)
     rows[-1]['address'] = 511
     occupied, errors = channel_occupancy(rows, profiles, 0)
     assert 'do not fit' in errors[0]
@@ -66,51 +51,15 @@ def test_last_channel_can_be_allocated_without_clipping_or_wrapping():
         ('id', ''),
     ],
 )
-def test_invalid_patch_cannot_be_used_for_automatic_address_allocation(field, value):
+def test_invalid_patch_is_rejected_before_persistence(field, value):
     row = fixture_row()
     row[field] = value
     assert channel_occupancy([row], PROFILES, 0)[1]
-    with pytest.raises(ValueError):
-        next_free_address([row], PROFILES, 0, 3)
 
 
 def test_identical_addresses_in_distinct_universes_are_independent():
     rows = [fixture_row(), fixture_row('other', universe=1)]
     assert not channel_occupancy(rows, PROFILES, 0)[1]
-    assert next_free_address(rows, PROFILES, 0, 3) == 4
-
-
-def test_repatch_can_overlap_its_own_old_footprint_and_preserves_fixture_identity():
-    rows = [dict(fixture_row(), _original_id='left', groups='wash', pan_min=0.2)]
-    moved = repatch_dmx_fixture(rows, PROFILES, 'left', 0, 2)
-    assert moved[0] == dict(rows[0], address=2)
-    assert rows[0]['address'] == 1
-    assert channel_occupancy(moved, PROFILES, 0)[0][:4] == [[], [0], [0], [0]]
-
-
-def test_repatch_crosses_map_rows_and_accepts_the_last_valid_address():
-    rows = [fixture_row(profile='moving_head')]
-    wrapped = repatch_dmx_fixture(rows, PROFILES, 'left', 0, 31)
-    assert channel_occupancy(wrapped, PROFILES, 0)[0][30:42] == [[0]] * 12
-    moved = repatch_dmx_fixture(wrapped, PROFILES, 'left', 1, 501)
-    assert channel_occupancy(moved, PROFILES, 1)[0][500:] == [[0]] * 12
-    assert not any(channel_occupancy(moved, PROFILES, 0)[0])
-
-
-@pytest.mark.parametrize(
-    'address,universe', [(4, 0), (511, 0), (0, 0), (1.5, 0), (True, 0), (1, -1)]
-)
-def test_invalid_drag_never_changes_the_draft(address, universe):
-    rows = [fixture_row(), fixture_row('right', 4)]
-    original = [dict(row) for row in rows]
-    with pytest.raises(ValueError):
-        repatch_dmx_fixture(rows, PROFILES, 'left', universe, address)
-    assert rows == original
-
-
-def test_drag_cannot_reassign_a_removed_or_renamed_fixture():
-    with pytest.raises(ValueError, match='fixture changed'):
-        repatch_dmx_fixture([fixture_row()], PROFILES, 'missing', 0, 10)
 
 
 @pytest.fixture

@@ -63,6 +63,7 @@ BEAT_TICK_COLOR = 'rgba(88,166,255,0.22)'
 REFRESH_MS = 250
 TELEMETRY_REFRESH_SECONDS = 1
 VIEW_EVERY_TICKS = 2
+VIEW_REFRESH_MS = REFRESH_MS * VIEW_EVERY_TICKS
 STALL_RELEASE_MS = 4000
 STALE_REFRESHES = 12
 
@@ -718,15 +719,23 @@ INDEX_TEMPLATE = (
 
 ANIMATION_JS = (
     '''
-function(sync) {
+function(sync, selected) {
     const ds = window.dash_clientside;
     const a = ds.ss = ds.ss || {};
-    if (ds.ss_gate) delete ds.ss_gate.inflight['anchor'];
+    a.selected = selected;
+    if (selected !== 'control' || document.hidden) {
+        cancelAnimationFrame(a.animationFrame);
+        a.running = false;
+        return ds.no_update;
+    }
     if (!sync) return ds.no_update;
 
-    a.frozen = a.now === sync.now || sync.now < a.now;
-    Object.assign(a, sync);
-    a.at = performance.now();
+    if (a.sync !== sync) {
+        a.frozen = a.now === sync.now || sync.now < a.now;
+        Object.assign(a, sync);
+        a.sync = sync;
+        a.at = performance.now();
+    }
     if (a.running) return ds.no_update;
     a.running = true;
 
@@ -836,6 +845,10 @@ function(sync) {
     };
 
     const frame = () => {
+        if (a.selected !== 'control' || document.hidden) {
+            a.running = false;
+            return;
+        }
         const drift = a.frozen ? 0 : Math.min(1.5, (performance.now() - a.at) / 1000);
         const now = a.now + drift;
         syncBeats();
@@ -843,9 +856,9 @@ function(sync) {
         seatBeats(document.querySelector('#timeline .js-plotly-plot'));
         tick('room-clock', '', a.room, drift);
         tick('song-clock', '', a.song, drift);
-        requestAnimationFrame(frame);
+        a.animationFrame = requestAnimationFrame(frame);
     };
-    requestAnimationFrame(frame);
+    a.animationFrame = requestAnimationFrame(frame);
     return ds.no_update;
 }
 '''
@@ -861,7 +874,6 @@ _GATE_STATE_JS = '''
         for (let i = 0; i < list.length; i++) {
             if (!list[i]) continue;
             if (list[i].id === 'sync') return 'anchor';
-            if (list[i].id === 'timeline') return 'view';
         }
         return null;
     };
@@ -876,25 +888,24 @@ REQUEST_PRE_JS = (
 }'''
 )
 
-VIEW_LANDED_JS = (
-    'function(drawn) {'
-    + _GATE_STATE_JS
-    + '''
-    delete gate.inflight['view'];
-    return drawn;
-}'''
-)
-
 CALLBACK_RESOLVED_JS = (
     'function(callback, result) {'
     + _GATE_STATE_JS
     + '''
+    const outputs = Array.isArray(callback.outputs) ? callback.outputs : [callback.outputs];
+    if (result.error && outputs.some((output) => output && output.id === 'fixture-server-result')) {
+        // A failed fetch bypasses Dash's runningOff cleanup.
+        ds.set_props('config-panel', {'aria-busy': 'false'});
+        ds.set_props('fixture-status', {children:
+            'Save/reload could not be confirmed. Your draft is intact; retry or reload the saved patch.'});
+    }
     const stream = streamOf(callback.outputs);
     if (!stream) return;
+    delete gate.inflight[stream];
     if (result.error) {
-        delete gate.inflight[stream];
         gate.sent = null;
         gate.behind = 0;
+        gate.viewAt = gate.metricsAt = 0;
         return;
     }
     if (stream !== 'anchor') return;
@@ -920,9 +931,15 @@ CALLBACK_RESOLVED_JS = (
 )
 
 GATE_JS = (
-    'function(n) {'
+    'function(n, selected) {'
     + _GATE_STATE_JS
     + '''
+    const changed = gate.tab !== selected || gate.hidden;
+    gate.tab = selected;
+    gate.hidden = document.hidden;
+    if (changed) gate.viewAt = gate.metricsAt = 0;
+    if (selected === 'config' || document.hidden) return ds.no_update;
+    const now = Date.now();
     const free = (stream) => {
         const since = gate.inflight[stream];
         if (since == null) return true;
@@ -935,11 +952,16 @@ GATE_JS = (
         delete gate.inflight[stream];
         return true;
     };
-    return [free('anchor') ? n : ds.no_update,
-            (n % '''
-    + str(VIEW_EVERY_TICKS)
-    + ''' === 0 && free('view'))
-                ? n : ds.no_update];
+    const metrics = now - (gate.metricsAt || 0) >= '''
+    + str(TELEMETRY_REFRESH_SECONDS * 1000)
+    + ''';
+    if (!free('anchor') || (selected === 'telemetry' && !metrics)) return ds.no_update;
+    const timeline = selected === 'control' && now - (gate.viewAt || 0) >= '''
+    + str(VIEW_REFRESH_MS)
+    + ''';
+    if (timeline) gate.viewAt = now;
+    if (metrics) gate.metricsAt = now;
+    return {tick: n, tab: selected, timeline: timeline, metrics: metrics};
 }'''
 )
 
@@ -1199,34 +1221,31 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             ),
             dcc.Interval(id='tick', interval=REFRESH_MS),
             dcc.Store(id='gate'),
-            dcc.Store(id='view-gate'),
             dcc.Store(id='sync'),
             dcc.Store(id='anim'),
-            dcc.Store(id='drawn'),
-            dcc.Store(id='taken'),
         ],
         className='dashboard',
     )
 
-    @app.callback(
+    app.clientside_callback(
+        '''function(selected) {
+            const panels = ['control', 'telemetry', 'config'].map((tab) =>
+                ({display: selected === tab ? 'block' : 'none'}));
+            return [...panels, {display: selected === 'config' ? 'none' : 'block'}];
+        }''',
         Output('control-panel', 'style'),
         Output('telemetry-panel', 'style'),
         Output('config-panel', 'style'),
         Output('telemetry-alerts', 'style'),
         Input('dashboard-tab', 'value'),
     )
-    def show_tab(selected):
-        panels = tuple(
-            {'display': 'block' if selected == tab else 'none'}
-            for tab in ('control', 'telemetry', 'config')
-        )
-        return *panels, {'display': 'none' if selected == 'config' else 'block'}
 
     app.clientside_callback(
-        GATE_JS, [Output('gate', 'data'), Output('view-gate', 'data')], Input('tick', 'n_intervals')
+        GATE_JS,
+        Output('gate', 'data'),
+        Input('tick', 'n_intervals'),
+        Input('dashboard-tab', 'value'),
     )
-
-    latest: dict = {}
 
     @app.callback(
         [
@@ -1234,56 +1253,45 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             Output('metrics', 'children'),
             Output('decoder', 'children'),
             Output('command-diagnostics', 'children'),
-        ],
-        Input('gate', 'data'),
-        prevent_initial_call=True,
-    )
-    def refresh(_):
-        snap = latest['snapshot'] = snapshot_source.snapshot()
-        return (
-            _anchor(snap),
-            _build_show_overview(snap),
-            _build_decoder(snap),
-            _build_command_diagnostics(snap),
-        )
-
-    @app.callback(
-        [Output('timeline', 'figure'), Output('drawn', 'data')],
-        Input('view-gate', 'data'),
-        prevent_initial_call=True,
-    )
-    def refresh_view(tick):
-        snap = latest.get('snapshot') or snapshot_source.snapshot()
-        if snap is latest.get('drawn'):
-            return dash.no_update, tick
-        latest['drawn'] = snap
-        return _build_timeline(snap), tick
-
-    @app.callback(
-        [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS]
-        + [
+            Output('timeline', 'figure'),
             Output('telemetry-alerts', 'children'),
             Output('performance-metrics', 'children'),
             Output('renderer-metrics', 'children'),
-        ],
-        Input('sync', 'data'),
+        ]
+        + [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
+        Input('gate', 'data'),
         prevent_initial_call=True,
     )
-    def refresh_telemetry(_):
-        # Reuse the one show snapshot and limit chart rendering to once per second.
+    def refresh(requested):
+        if not requested or requested.get('tab') not in ('control', 'telemetry'):
+            raise dash.exceptions.PreventUpdate
+        snap = snapshot_source.snapshot()
         now = time.time()
-        if now - latest.get('charts_at', 0) < TELEMETRY_REFRESH_SECONDS:
-            return [dash.no_update] * (len(system_metrics.PANELS) + 3)
-        latest['charts_at'] = now
-        snap = latest.get('snapshot') or {}
-        return system_metrics.build_system_health_charts(snap, now=now) + [
-            system_metrics.build_telemetry_notices(snap, now=now),
-            _build_performance_overview(snap, now),
-            _build_renderer_overview(snap, now),
-        ]
+        sync = metrics = decoder = commands = timeline = dash.no_update
+        notices = performance = renderer = dash.no_update
+        charts = [dash.no_update] * len(system_metrics.PANELS)
+        if requested['tab'] == 'control':
+            sync = _anchor(snap)
+            metrics = _build_show_overview(snap)
+            decoder = _build_decoder(snap)
+            commands = _build_command_diagnostics(snap)
+            if requested.get('timeline'):
+                timeline = _build_timeline(snap)
+            if requested.get('metrics'):
+                performance = _build_performance_overview(snap, now)
+        else:
+            charts = system_metrics.build_system_health_charts(snap, now=now)
+            renderer = _build_renderer_overview(snap, now)
+        if requested.get('metrics'):
+            notices = system_metrics.build_telemetry_notices(snap, now=now)
+        return sync, metrics, decoder, commands, timeline, notices, performance, renderer, *charts
 
-    app.clientside_callback(ANIMATION_JS, Output('anim', 'data'), Input('sync', 'data'))
-    app.clientside_callback(VIEW_LANDED_JS, Output('taken', 'data'), Input('drawn', 'data'))
+    app.clientside_callback(
+        ANIMATION_JS,
+        Output('anim', 'data'),
+        Input('sync', 'data'),
+        Input('dashboard-tab', 'value'),
+    )
     return app
 
 

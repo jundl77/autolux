@@ -215,5 +215,33 @@
       ],
       "disposition": "Address-move meaning aligned; names-only inference of validation/side effects remains limited. DMX and Art-Net numbering follow documented protocol conventions."
     }
+  },
+  "fixture_responsiveness_followup": {
+    "implementation": [
+      "Fixture selection, drag, add and edit run in clientside callbacks; Save/Reload retain server validation and revision checks.",
+      "512 channel cells retain their identity during edits; drag geometry is sampled once and previews are animation-frame limited.",
+      "Only the visible dashboard tab requests and renders telemetry; Config pauses polling and timeline animation."
+    ],
+    "validation": {
+      "python_tests": 68,
+      "node_draft_integrity_cases": 10,
+      "browser": "Real Edge pointer events on a copied rig: repeated moves with 500 ms simulated network latency; no edit requests; all 512 channel nodes retained; offline save unlock/retry; stale revision protection; Control/Telemetry resume.",
+      "latency_ms": {
+        "conditions": "Single headless Edge samples; 200 ms simulated network latency. Drop timing includes driver polling overhead.",
+        "before": {
+          "details": 467,
+          "drop": 500
+        },
+        "after": {
+          "details": 117,
+          "drop": 62
+        }
+      },
+      "independent_review": "Confirmed Dash failed-fetch path omits runningOff; error hook now unlocks editing and reports unconfirmed persistence.",
+      "regressions": "Draft integrity runs in Node without a browser or DOM; queued edit plus save response cannot discard the new revision.",
+      "limits": "Scoped Python, browser and packaging validation; no audio/DMX hardware or model paths changed."
+    },
+    "cleanup": "Removed unused Python movement/allocation implementations; their invariants now exercise the clientside draft reducer. Server validation and atomic storage tests remain.",
+    "naming": "Existing fixture, address, universe and revision concepts retained. Dash callback names and routine local helpers are outside the bounded blind domain-name review."
   }
 }

@@ -1,7 +1,7 @@
 """Fixture library, patch editor and DMX universe map for the Config tab."""
 
 import dash
-from dash import Input, Output, State, dcc, html
+from dash import ClientsideFunction, Input, Output, State, dcc, html
 
 from autolux.lighting.fixture_setup import (
     DMX_UNIVERSE_SIZE,
@@ -9,8 +9,6 @@ from autolux.lighting.fixture_setup import (
     channel_occupancy,
     fixture_patch,
     fixture_rows,
-    next_free_address,
-    repatch_dmx_fixture,
 )
 
 MAP_COLUMNS = 32
@@ -32,7 +30,8 @@ FIXTURE_CSS = '''
 .patch-universe-heading {display:flex;align-items:center;gap:14px;}
 .patch-universe-heading h3,.patch-info-heading h3 {margin:0;}
 .patch-info-heading {margin-bottom:14px;}
-#config-panel[aria-busy="true"] {pointer-events:none;}
+#config-panel[aria-busy="true"] {cursor:progress;}
+.patch-blocks {display:contents;}
 .patch-drag-label {position:fixed;z-index:1000;pointer-events:none;background:#152333;color:#e6edf3;border:1px solid #64b8a4;border-radius:4px;padding:6px 10px;font:12px Segoe UI;}
 .patch-drag-label.invalid {border-color:#e69478;color:#ffbd9f;}
 .patch-channel.drop-valid {background:#3a907d;outline:1px solid #a0ebd2;color:white;z-index:3;}
@@ -78,49 +77,6 @@ def _field(label, component):
 
 def _number(identifier, value=None, minimum=1, maximum=DMX_UNIVERSE_SIZE):
     return dcc.Input(id=identifier, type='number', value=value, min=minimum, max=maximum, step=1)
-
-
-def _channel_map(rows, occupied, selected):
-    cells = [
-        html.Div(
-            str(index + 1),
-            className='patch-channel',
-            **{'data-channel': index + 1},
-            style={'gridRow': index // MAP_COLUMNS + 1, 'gridColumn': index % MAP_COLUMNS + 1},
-        )
-        for index in range(DMX_UNIVERSE_SIZE)
-    ]
-    for row_index in sorted({owner for owners in occupied for owner in owners}):
-        channels = [index for index, owners in enumerate(occupied) if row_index in owners]
-        start, end = channels[0], channels[-1]
-        conflict = any(len(occupied[channel]) > 1 for channel in channels)
-        name = rows[row_index]['id']
-        title = f'{name} · {start + 1}–{end + 1}'
-        segment = start
-        while segment <= end:
-            stop = min(end + 1, (segment // MAP_COLUMNS + 1) * MAP_COLUMNS)
-            cells.append(
-                html.Button(
-                    title,
-                    **{
-                        'data-fixture-id': name,
-                        'data-start-address': start + 1,
-                        'data-channel-count': end - start + 1,
-                        'data-universe': rows[row_index]['universe'],
-                    },
-                    title=title,
-                    className='patch-block'
-                    + (' selected' if selected == row_index else '')
-                    + (' conflict' if conflict else ''),
-                    style={
-                        'gridRow': segment // MAP_COLUMNS + 1,
-                        'gridColumn': f'{segment % MAP_COLUMNS + 1} / span {stop - segment}',
-                        'background': FIXTURE_COLORS[row_index % len(FIXTURE_COLORS)],
-                    },
-                )
-            )
-            segment = stop
-    return cells
 
 
 def build_fixture_panel(app, store):
@@ -313,6 +269,21 @@ def build_fixture_panel(app, store):
                                 className='patch-heading',
                             ),
                             html.Div(
+                                [
+                                    *[
+                                        html.Div(
+                                            str(index + 1),
+                                            className='patch-channel',
+                                            **{'data-channel': index + 1},
+                                            style={
+                                                'gridRow': index // MAP_COLUMNS + 1,
+                                                'gridColumn': index % MAP_COLUMNS + 1,
+                                            },
+                                        )
+                                        for index in range(DMX_UNIVERSE_SIZE)
+                                    ],
+                                    html.Div(id='fixture-blocks', className='patch-blocks'),
+                                ],
                                 id='fixture-channel-map',
                                 className='patch-map',
                                 style={'--dmx-columns': MAP_COLUMNS},
@@ -342,6 +313,18 @@ def build_fixture_panel(app, store):
             dcc.Store(id='fixture-draft', data=rows),
             dcc.Store(id='fixture-selection', data=[]),
             dcc.Store(id='fixture-grid-action'),
+            dcc.Store(id='fixture-server-result'),
+            dcc.Store(
+                id='fixture-settings',
+                data={
+                    'profiles': profiles,
+                    'channelCount': DMX_UNIVERSE_SIZE,
+                    'maxUniverse': MAX_ARTNET_UNIVERSE,
+                    'maxQuantity': MAX_ADD_QUANTITY,
+                    'columns': MAP_COLUMNS,
+                    'colors': FIXTURE_COLORS,
+                },
+            ),
             dcc.Store(id='fixture-patch', data=patch),
             dcc.Store(id='fixture-revision', data=revision),
         ],
@@ -350,21 +333,15 @@ def build_fixture_panel(app, store):
         style={'display': 'none'},
     )
 
-    @app.callback(
-        Output('fixture-profile-info', 'children'), Input('fixture-library-profile', 'value')
+    app.clientside_callback(
+        ClientsideFunction(namespace='fixture_patch', function_name='describeProfile'),
+        Output('fixture-profile-info', 'children'),
+        Input('fixture-library-profile', 'value'),
+        State('fixture-settings', 'data'),
     )
-    def describe_profile(identifier):
-        profile = profiles.get(identifier)
-        return (
-            [
-                f'{profile["channels"]} DMX channels · {profile["dmx_mode"]}',
-            ]
-            if profile
-            else 'No fixture mode selected.'
-        )
-
-    @app.callback(
-        Output('fixture-channel-map', 'children'),
+    app.clientside_callback(
+        ClientsideFunction(namespace='fixture_patch', function_name='renderPatch'),
+        Output('fixture-blocks', 'children'),
         Output('fixture-map-summary', 'children'),
         Output('fixture-conflicts', 'children'),
         Output('fixture-save', 'disabled'),
@@ -373,19 +350,9 @@ def build_fixture_panel(app, store):
         Input('fixture-draft', 'data'),
         Input('fixture-map-universe', 'value'),
         Input('fixture-selection', 'data'),
+        Input('config-panel', 'aria-busy'),
+        State('fixture-settings', 'data'),
     )
-    def render_patch(draft, universe, selected):
-        occupied, errors = channel_occupancy(draft, profiles, universe)
-        universes = sorted({universe, 0, *(row['universe'] for row in draft)})
-        used = sum(bool(owners) for owners in occupied)
-        return (
-            _channel_map(draft, occupied, selected[0] if selected else None),
-            f'{used} / {DMX_UNIVERSE_SIZE} channels patched',
-            [html.Div(error) for error in errors],
-            bool(errors),
-            [{'label': f'Universe {number + 1}', 'value': number} for number in universes],
-            universe,
-        )
 
     edit_fields = [
         'name',
@@ -401,7 +368,8 @@ def build_fixture_panel(app, store):
         'tilt-inverted',
     ]
 
-    @app.callback(
+    app.clientside_callback(
+        ClientsideFunction(namespace='fixture_patch', function_name='inspectFixture'),
         *[Output(f'fixture-{name}', 'value') for name in edit_fields],
         Output('fixture-apply', 'disabled'),
         Output('fixture-remove', 'disabled'),
@@ -410,58 +378,20 @@ def build_fixture_panel(app, store):
         Output('fixture-detail-summary', 'children'),
         Input('fixture-selection', 'data'),
         Input('fixture-draft', 'data'),
+        State('fixture-settings', 'data'),
     )
-    def inspect_fixture(selected, draft):
-        if not selected or selected[0] >= len(draft):
-            return (
-                '',
-                None,
-                1,
-                1,
-                '',
-                0,
-                1,
-                [],
-                0,
-                1,
-                [],
-                True,
-                True,
-                {'display': 'none'},
-                'patch-workspace',
-                '',
-            )
-        row = draft[selected[0]]
-        values = [
-            row['id'],
-            row['profile'],
-            row['universe'] + 1,
-            row['address'],
-            row.get('groups', ''),
-        ]
-        for axis in ('pan', 'tilt'):
-            values.extend(
-                [
-                    row[f'{axis}_min'],
-                    row[f'{axis}_max'],
-                    ['invert'] if row[f'{axis}_inverted'] else [],
-                ]
-            )
-        count = profiles[row['profile']]['channels']
-        summary = f'{count} channels · {row["address"]}–{row["address"] + count - 1}'
-        return *values, False, False, {'display': 'block'}, 'patch-workspace has-selection', summary
-
-    @app.callback(
+    app.clientside_callback(
+        ClientsideFunction(namespace='fixture_patch', function_name='editPatch'),
         Output('fixture-draft', 'data'),
         Output('fixture-patch', 'data'),
         Output('fixture-revision', 'data'),
         Output('fixture-status', 'children'),
         Output('fixture-selection', 'data'),
-        *[
-            Input(f'fixture-{action}', 'n_clicks')
-            for action in ('add', 'apply', 'remove', 'reload', 'save', 'close')
-        ],
+        *[Input(f'fixture-{action}', 'n_clicks') for action in ('add', 'apply', 'remove', 'close')],
         Input('fixture-grid-action', 'data'),
+        Input('fixture-server-result', 'data'),
+        State('fixture-settings', 'data'),
+        State('config-panel', 'aria-busy'),
         State('fixture-draft', 'data'),
         State('fixture-patch', 'data'),
         State('fixture-revision', 'data'),
@@ -471,168 +401,37 @@ def build_fixture_panel(app, store):
         State('fixture-add-universe', 'value'),
         State('fixture-add-address', 'value'),
         *[State(f'fixture-{name}', 'value') for name in edit_fields],
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output('fixture-server-result', 'data'),
+        Input('fixture-reload', 'n_clicks'),
+        Input('fixture-save', 'n_clicks'),
+        State('fixture-draft', 'data'),
+        State('fixture-patch', 'data'),
+        State('fixture-revision', 'data'),
         running=[(Output('config-panel', 'aria-busy'), 'true', 'false')],
         prevent_initial_call=True,
     )
-    def edit_patch(
-        _add,
-        _apply,
-        _remove,
-        _reload,
-        _save,
-        _close,
-        grid_action,
-        draft,
-        previous,
-        expected_revision,
-        selected,
-        profile,
-        quantity,
-        universe,
-        address,
-        *values,
-    ):
-        unchanged = (dash.no_update, dash.no_update, dash.no_update)
-        action = dash.ctx.triggered_id
+    def persist_patch(_reload, _save, draft, previous, expected_revision):
         try:
-            if action == 'fixture-close':
-                return *unchanged, dash.no_update, []
-            if action == 'fixture-grid-action':
-                if not grid_action:
-                    raise dash.exceptions.PreventUpdate
-                matches = [
-                    index
-                    for index, row in enumerate(draft)
-                    if row['id'] == grid_action.get('fixture_id')
-                ]
-                if len(matches) != 1:
-                    raise ValueError('The fixture changed. Select it again.')
-                if grid_action.get('action') == 'select':
-                    return *unchanged, dash.no_update, matches
-                if grid_action.get('action') != 'move':
-                    raise ValueError('Unknown fixture action.')
-                row = draft[matches[0]]
-                if (row['address'], row['universe']) != (
-                    grid_action.get('original_address'),
-                    grid_action.get('original_universe'),
-                ):
-                    raise ValueError('The fixture moved while dragging. Try again.')
-                moved = repatch_dmx_fixture(
-                    draft,
-                    profiles,
-                    row['id'],
-                    grid_action.get('universe'),
-                    grid_action.get('address'),
-                )
-                return (
-                    moved,
-                    dash.no_update,
-                    dash.no_update,
-                    'Fixture moved · save the patch when finished.',
-                    matches if selected else [],
-                )
-            if action == 'fixture-reload':
+            reloading = dash.ctx.triggered_id == 'fixture-reload'
+            if reloading:
                 saved, version = store.load()
-                return (
-                    fixture_rows(saved),
-                    saved,
-                    version,
-                    'Saved patch loaded.',
-                    [],
-                )
-            if action == 'fixture-save':
+            else:
                 _, errors = channel_occupancy(draft, profiles, 0)
                 if errors:
                     raise ValueError(errors[0])
                 saved = fixture_patch(draft, previous)
                 version = store.save(saved, expected_revision)
-                return (
-                    fixture_rows(saved),
-                    saved,
-                    version,
-                    'Patch saved. It will be used by the next session.',
-                    selected,
-                )
-            draft = [dict(row) for row in draft]
-            if action == 'fixture-add':
-                if type(quantity) is not int or not 1 <= quantity <= MAX_ADD_QUANTITY:
-                    raise ValueError(f'Quantity must be from 1 to {MAX_ADD_QUANTITY}.')
-                if type(universe) is not int or not 1 <= universe <= MAX_ARTNET_UNIVERSE + 1:
-                    raise ValueError('Choose a valid universe.')
-                count = profiles[profile]['channels']
-                selected = [len(draft)]
-                for _ in range(quantity):
-                    start = (
-                        next_free_address(draft, profiles, universe - 1, count)
-                        if address is None
-                        else address
-                    )
-                    suffix = 1
-                    while f'{profile}_{suffix}' in {row['id'] for row in draft}:
-                        suffix += 1
-                    row = fixture_rows(
-                        {
-                            'fixtures': [
-                                {
-                                    'id': f'{profile}_{suffix}',
-                                    'profile': profile,
-                                    'universe': universe - 1,
-                                    'address': start,
-                                }
-                            ]
-                        }
-                    )[0]
-                    row.pop('_original_id')
-                    draft.append(row)
-                    if address is not None:
-                        address += count
-            elif action in ('fixture-apply', 'fixture-remove'):
-                if not selected or selected[0] >= len(draft):
-                    raise ValueError('Select a fixture first.')
-                index = selected[0]
-                if action == 'fixture-remove':
-                    draft.pop(index)
-                    selected = []
-                else:
-                    edits = dict(zip(edit_fields, values, strict=True))
-                    if type(edits['universe']) is not int:
-                        raise ValueError('Universe must be a whole number.')
-                    row = draft[index]
-                    row.update(
-                        id=(edits['name'] or '').strip(),
-                        profile=edits['profile'],
-                        universe=edits['universe'] - 1,
-                        address=edits['address'],
-                        groups=edits['groups'],
-                    )
-                    for axis in ('pan', 'tilt'):
-                        low, high = edits[f'{axis}-min'], edits[f'{axis}-max']
-                        if (
-                            not isinstance(low, (float, int))
-                            or not isinstance(high, (float, int))
-                            or not 0 <= low <= high <= 1
-                        ):
-                            raise ValueError(
-                                f'{axis.title()} limits must satisfy 0 ≤ min ≤ max ≤ 1.'
-                            )
-                        row.update(
-                            {
-                                f'{axis}_min': low,
-                                f'{axis}_max': high,
-                                f'{axis}_inverted': bool(edits[f'{axis}-inverted']),
-                            }
-                        )
-            _, errors = channel_occupancy(draft, profiles, 0)
-            if errors:
-                raise ValueError(errors[0])
-            return (
-                draft,
-                dash.no_update,
-                dash.no_update,
-                'Unsaved changes · save the patch when finished.',
-                selected,
-            )
+            return {
+                'draft': fixture_rows(saved),
+                'patch': saved,
+                'revision': version,
+                'reloaded': reloading,
+            }
         except (KeyError, AttributeError, TypeError, ValueError, OSError, RuntimeError) as error:
-            return *unchanged, f'Patch unchanged: {error}', dash.no_update
+            return {'error': str(error)}
 
     return panel

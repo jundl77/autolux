@@ -42,8 +42,9 @@ the next session.
 
 The dashboard's **Config** tab provides a fixture library and 512-channel DMX map.
 Drag fixtures to free addresses; click a fixture to edit its details, groups and
-movement limits. Universes are displayed from 1. Save validates the complete
-patch before replacing it; edits apply on the next session.
+movement limits. Universes are displayed from 1. Draft edits run locally; only
+Save and Reload contact the server. Save validates the complete patch and checks
+for concurrent changes before replacing it; edits apply on the next session.
 
 ## Run
 
