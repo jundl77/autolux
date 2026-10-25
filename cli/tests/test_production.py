@@ -72,22 +72,51 @@ def test_stalled_readiness_worker_is_killed_within_its_deadline(monkeypatch):
     assert {child.pid for child in multiprocessing.active_children()} == existing_children
 
 
+def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypatch):
+    from unittest.mock import Mock
+
+    from autolux.lib import section_chain
+    from autolux.lib.analyser import music_analyser
+    from autolux.lib.clients import pyaudio_client
+    from autolux.lib.clients.starfire_client import StarfireClient
+    from autolux.lib.main import AutoluxController
+
+    audio = Mock()
+    send = Mock()
+    monkeypatch.setattr(pyaudio_client, 'PyAudioClient', Mock(return_value=audio))
+    monkeypatch.setattr(music_analyser, 'MadmomRhythm', Mock())
+    monkeypatch.setattr(section_chain, 'artifacts_present', lambda: False)
+
+    app = AutoluxController(lighting_client=StarfireClient(send))
+    try:
+        audio.start_streams.assert_not_called()
+        send.assert_not_called()
+    finally:
+        app._shut_down()
+    audio.close.assert_called_once()
+    send.assert_called_once_with({'kind': 'stop'})
+
+
 @pytest.mark.parametrize(
-    'failure',
+    'failure,checking',
     [
-        'universe_mismatch',
-        'script_failure',
-        'missing_sequence',
-        'receiver_start',
-        'renderer_start',
-        'controller_run',
-        None,
+        ('universe_mismatch', False),
+        ('script_failure', False),
+        ('missing_sequence', False),
+        ('controller_init', False),
+        ('receiver_start', False),
+        ('transmitter_start', False),
+        ('renderer_start', False),
+        ('monitor_setup', False),
+        ('controller_run', False),
+        (None, False),
+        (None, True),
     ],
 )
 async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
-    tmp_path, monkeypatch, failure
+    tmp_path, monkeypatch, failure, checking
 ):
-    from cli import main, remote_runtime, windows_runtime, starfire_runtime
+    from cli import main, remote_runtime, windows_runtime, starfire_runtime, health_monitor
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
@@ -157,6 +186,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             events.append('ssh_check')
 
         def __enter__(self):
+            assert 'app_initialized' in events
             if failure == 'receiver_start':
                 raise RuntimeError('start failed')
             events.append('rx_start')
@@ -173,6 +203,9 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             Path(path).mkdir(parents=True)
 
         def __enter__(self):
+            assert 'app_initialized' in events
+            if failure == 'transmitter_start':
+                raise RuntimeError('transmitter start failed')
             events.append('tx_start')
             return self
 
@@ -185,17 +218,22 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     class Renderer:
         def __init__(self, binary, rig, sequences, artnet, directory):
             assert artnet == '127.0.0.1:6454'
+            self.process = None
 
         def __enter__(self):
+            assert 'app_initialized' in events
             if failure == 'renderer_start':
                 raise RuntimeError('renderer start failed')
+            self.process = object()
             events.append('starfire_start')
             return self
 
         def __exit__(self, *_):
             events.append('starfire_stop')
+            self.process = None
 
         def send_command(self, command):
+            assert self.process is not None, 'command sent before renderer readiness'
             events.append(command['kind'])
 
         def check_health(self):
@@ -206,13 +244,20 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
 
     class App:
         def __init__(self, *_, **kwargs):
-            assert kwargs['lighting_client'] is not None
+            assert not any(name in events for name in ('rx_start', 'tx_start', 'starfire_start'))
+            if failure == 'controller_init':
+                raise RuntimeError('model initialization failed')
+            self.lighting_client = kwargs['lighting_client']
             self.event_buffer = EventBuffer()
+            events.append('app_initialized')
 
         def _shut_down(self):
             events.append('app_stop')
+            self.lighting_client.stop()
 
         async def run(self):
+            assert all(name in events for name in ('rx_start', 'tx_start', 'starfire_start'))
+            events.append('app_run')
             try:
                 self.health_check()
                 if failure == 'controller_run':
@@ -225,21 +270,36 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     monkeypatch.setattr(production, 'NativeRuntime', Native)
     monkeypatch.setattr(main, 'AutoluxController', App)
     monkeypatch.setattr(production, 'StarfireRuntime', Renderer)
+    if failure == 'monitor_setup':
+        from unittest.mock import Mock
+
+        monkeypatch.setattr(
+            health_monitor, 'HealthMonitor', Mock(side_effect=RuntimeError('monitor setup failed'))
+        )
     if failure:
         with pytest.raises(
             RuntimeError, match='fixture universes' if failure == 'universe_mismatch' else None
         ):
             await production.run(args)
+    elif checking:
+        await production._run_session(args, checking=True)
     else:
         await production.run(args)
     preflight_failures = ('universe_mismatch', 'script_failure', 'missing_sequence')
-    pre_start_failures = (*preflight_failures, 'receiver_start', 'renderer_start')
-    assert events.count('app_stop') == (0 if failure in pre_start_failures else 1)
+    construction_failures = (*preflight_failures, 'controller_init')
+    assert events.count('app_stop') == (0 if checking or failure in construction_failures else 1)
     assert events[-1] == 'unlock'
     if failure in preflight_failures:
         assert events == ['unlock']
-    if failure not in (*preflight_failures, 'receiver_start'):
+    elif checking or failure == 'controller_init':
+        assert events == ['ssh_check', 'unlock']
+    if 'tx_stop' in events:
         assert events.index('tx_stop') < events.index('rx_stop')
-    if failure not in pre_start_failures:
+    if 'starfire_stop' in events:
         assert events.index('starfire_stop') < events.index('tx_stop')
+    if 'app_run' in events:
+        assert events.index('app_stop') < events.index('starfire_stop')
+        assert events.count('stop') == 1
+    else:
+        assert 'stop' not in events
     assert main.global_app is None

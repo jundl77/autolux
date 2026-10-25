@@ -186,6 +186,47 @@ class _FakeRhythm:
         return self._events(beats=[index / 100.0] if index in self.fire_on else [])
 
 
+@pytest.mark.parametrize('leading_silent_buffers', [0, 90])
+async def test_startup_wait_is_excluded_from_song_time_without_changing_song_boundaries(
+    monkeypatch, leading_silent_buffers
+):
+    monkeypatch.setattr(
+        'autolux.lib.analyser.music_analyser.MadmomRhythm', lambda *_: _FakeRhythm()
+    )
+
+    class _Recorder(_StubHandler):
+        def __init__(self):
+            self.events = []
+            self.index = 0
+
+        def on_sound_start(self):
+            self.events.append((self.index, 'start'))
+
+        def on_sound_stop(self):
+            self.events.append((self.index, 'stop'))
+
+    async def capture(startup_wait):
+        clock = VirtualClock()
+        handler = _Recorder()
+        analyser = _make_analyser(clock, handler)
+        clock.advance(startup_wait)
+        durations = []
+        levels = [0.0] * leading_silent_buffers + [0.2] * 180 + [0.0] * 90 + [0.2] * 180
+        for index, level in enumerate(levels):
+            handler.index = index
+            clock.advance(analyser.buffer_size / analyser.sample_rate)
+            await analyser.analyse(np.full(256, level, dtype=np.float32))
+            durations.append(analyser.get_song_current_duration())
+        return handler.events, durations, analyser._rhythm.resets
+
+    immediate = await capture(0.0)
+    delayed = await capture(8.0)
+    assert delayed == immediate
+    events, durations, _ = delayed
+    assert [kind for _, kind in events] == ['start', 'stop', 'start']
+    assert max(durations) < datetime.timedelta(seconds=2)
+
+
 async def test_the_note_event_follows_the_beat_stream():
     class _Recorder(_StubHandler):
         def __init__(self):

@@ -274,29 +274,35 @@ async def _run_session(args, *, checking=False):
             logging.info('[prod] Radius, Starfire, fixtures, model, capture and SSH checks passed')
             return
         logging.info('[prod] session logs: %s', run_dir)
+        renderer = StarfireRuntime(
+            args.starfire_binary,
+            rig,
+            args.sequences,
+            f"{tx.config['artnet_address']}:{tx.config.get('artnet_port', 6454)}",
+            run_dir / 'local/starfire',
+        )
+
+        def send_lighting_command(command):
+            if command['kind'] == 'stop' and renderer.process is None:
+                return
+            renderer.send_command(command)
+
+        from autolux.lib.clients.starfire_client import StarfireClient
+
+        logging.getLogger(__name__).info('[prod] preparing analysis models before starting audio')
+        app = main.AutoluxController(
+            lighting_client=StarfireClient(send_lighting_command),
+            input_device_index=input_index,
+            enable_ui=not args.no_ui,
+            ui_port=args.ui_port,
+            report_path=args.report,
+            enable_monitoring=True,
+            fixture_setup=fixture_setup(args),
+        )
         with ExitStack() as stack:
             stack.enter_context(remote)
             native = stack.enter_context(NativeRuntime([tx], run_dir / 'local'))
-            renderer = stack.enter_context(
-                StarfireRuntime(
-                    args.starfire_binary,
-                    rig,
-                    args.sequences,
-                    f"{tx.config['artnet_address']}:{tx.config.get('artnet_port', 6454)}",
-                    run_dir / 'local/starfire',
-                )
-            )
-            from autolux.lib.clients.starfire_client import StarfireClient
-
-            app = main.AutoluxController(
-                lighting_client=StarfireClient(renderer.send_command),
-                input_device_index=input_index,
-                enable_ui=not args.no_ui,
-                ui_port=args.ui_port,
-                report_path=args.report,
-                enable_monitoring=True,
-                fixture_setup=fixture_setup(args),
-            )
+            stack.enter_context(renderer)
             monitor = HealthMonitor(run_dir / 'local/radius_tx/health.json', tx.config['session'])
             health_log = HealthLogger()
             if args.no_ui:
