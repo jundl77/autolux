@@ -57,6 +57,12 @@ std::optional<Config> Config::FromFile(const std::string& file, AppType type)
 	c.mAudioEnabled = j.value("audio_enabled", true);
 	c.mDmxEnabled = j.value("dmx_enabled", true);
 	c.mArtnetEnabled = j.value("artnet_enabled", true);
+	const auto receiver = j.value("receiver", njson::object());
+	if (!receiver.is_object())
+		throw std::runtime_error("receiver must be an object");
+	c.mReceiverJitterBufferMs = Integer(receiver, "jitter_buffer_ms", c.mJitterBufferMs, 20, 150);
+	c.mReceiverAudioEnabled = receiver.value("audio_enabled", c.mAudioEnabled);
+	c.mReceiverLightingEnabled = receiver.value("lighting_enabled", c.mDmxEnabled);
 	c.mPlaybackDelaySeconds = j.value("playback_delay_seconds", 14.0);
 	if (!std::isfinite(c.mPlaybackDelaySeconds) || c.mPlaybackDelaySeconds < 0 || c.mPlaybackDelaySeconds > 120)
 		throw std::runtime_error("playback_delay_seconds must be 0..120");

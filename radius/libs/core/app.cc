@@ -97,15 +97,20 @@ int RunApp(EventLoop& eventLoop, App& app)
 		app.Start();
 		const char* runtimeDir = std::getenv("AUTOLUX_RUNTIME_DIR");
 		std::filesystem::path control = runtimeDir ? runtimeDir : "";
-		if (runtimeDir)
-		{
+		bool readyPublished = false;
+		const auto publishReady = [&] {
+			if (!runtimeDir || readyPublished || !app.IsReady())
+				return;
 			std::ofstream ready(control / "ready");
 			ready << "autolux-native-v1\n";
 			ready.close();
 			if (!ready)
 				throw std::runtime_error("unable to signal native readiness");
-		}
+			readyPublished = true;
+		};
+		publishReady();
 		auto stopPoll = eventLoop.AddTimer(100ms, [&]() {
+			publishReady();
 			if (sStopRequested || (runtimeDir && std::filesystem::exists(control / "stop")))
 				eventLoop.Stop();
 		});

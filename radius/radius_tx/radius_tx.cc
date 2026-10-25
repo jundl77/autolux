@@ -12,10 +12,16 @@ void RadiusTx::Start()
 {
 	ConfigureThread(mConfig.mCoreAffinity);
 	mBus.Open(mConfig.mBindAddress, mConfig.mPeerAddress, mConfig.mBusPort, false);
-	if (mConfig.mArtnetEnabled)
-		mArtnet.StartListening();
-	if (mConfig.mAudioEnabled)
-		mAudio.Start();
+	mLogin.set_command_id(Bus::LoginCommandId);
+	mLogin.set_session_id(mConfig.mSession);
+	mLogin.set_protocol_major(Bus::ProtocolMajor);
+	mLogin.set_protocol_minor(Bus::ProtocolMinor);
+	mLogin.set_sample_rate_hz(mConfig.mAudioSampleRate);
+	mLogin.set_channel_count(Bus::Channels);
+	mLogin.set_audio_enabled(mConfig.mReceiverAudioEnabled);
+	mLogin.set_lighting_enabled(mConfig.mReceiverLightingEnabled);
+	mLogin.set_jitter_buffer_ms(mConfig.mReceiverJitterBufferMs);
+	mLoginStartedAt = SteadyMs();
 	mPoll = mLoop.AddPoller([this] {
 		Tick();
 	});
@@ -23,27 +29,68 @@ void RadiusTx::Start()
 
 void RadiusTx::Tick()
 {
-	const auto now = SteadyMs();
+	auto now = SteadyMs();
 	if (mAudio.error)
 		throw std::runtime_error("audio capture failed: " + std::to_string(mAudio.error.load()));
-	mBus.Poll(mConfig.mSession, [&](const Bus::Envelope& p) {
-		if (p.has_heartbeat())
+	mBus.Poll(mConfig.mSession, [&](const Bus::Message& p) {
+		if (const auto* reply = std::get_if<Bus::LoginReply>(&p))
+		{
+			if (reply->command_id() != mLogin.command_id() || reply->protocol_major() != Bus::ProtocolMajor ||
+			    reply->protocol_minor() > Bus::ProtocolMinor || reply->max_message_bytes() != Bus::MaxDatagramBytes)
+				throw std::runtime_error("receiver returned an incompatible LoginReply");
+			if (!mReady)
+			{
+				if (mConfig.mArtnetEnabled)
+					mArtnet.StartListening();
+				if (mConfig.mAudioEnabled)
+					mAudio.Start();
+				mReady = true;
+				mLink = LinkState(SteadyMs());
+				mLink.Received(SteadyMs());
+			}
+			return;
+		}
+		if (const auto* error = std::get_if<Bus::ErrorReply>(&p))
+		{
+			if (error->command_id() == mLogin.command_id())
+				throw std::runtime_error("receiver rejected Login: " + error->message());
+			++mBus.invalidPackets;
+			return;
+		}
+		if (!mReady)
+		{
+			++mBus.invalidPackets;
+			return;
+		}
+		if (std::holds_alternative<Bus::Heartbeat>(p))
 		{
 			mLink.Received(now);
 			++mHeartbeatsReceived;
 		}
-		if (p.has_receiver_telemetry())
+		if (const auto* metrics = std::get_if<Bus::Metrics>(&p))
 		{
-			mReceiver = Bus::ReceiverTelemetryToJson(p.receiver_telemetry());
+			mReceiver = Bus::MetricsToJson(*metrics);
 			mReceiverAt = now;
 		}
 	});
+	now = SteadyMs();
+	if (!mReady)
+	{
+		if (now - mLoginStartedAt >= Bus::LoginTimeoutMilliseconds)
+			throw std::runtime_error("receiver Login timed out");
+		if (!mLoginSentAt || now - mLoginSentAt >= Bus::LoginRetryMilliseconds)
+		{
+			mBus.Send(mLogin);
+			mLoginSentAt = now;
+		}
+		return;
+	}
 	if (mLink.Expired(now))
 		throw std::runtime_error("receiver heartbeat timed out after 30 seconds");
 	if (mLink.Due(now))
 	{
-		auto p = Bus::NewEnvelope(mConfig.mSession);
-		p.mutable_heartbeat();
+		Bus::Heartbeat p;
+		p.set_session_id(mConfig.mSession);
 		if (mBus.Send(p))
 		{
 			mLink.Sent(now);
@@ -55,26 +102,25 @@ void RadiusTx::Tick()
 		const auto* block = mAudio.Front();
 		if (!block)
 			break;
-		auto p = Bus::NewEnvelope(mConfig.mSession);
+		Bus::Audio p;
+		p.set_session_id(mConfig.mSession);
 		p.set_audio_frame_position(block->watermark);
 		p.set_sequence_number(++mAudioSequence);
-		auto* audio = p.mutable_audio();
-		audio->set_sample_rate_hz(mConfig.mAudioSampleRate);
-		audio->set_channel_count(Bus::Channels);
-		audio->mutable_interleaved_samples()->Add(block->samples.begin(),
-		                                          block->samples.begin() + block->frames * Bus::Channels);
+		p.mutable_interleaved_samples()->Add(block->samples.begin(),
+		                                     block->samples.begin() + block->frames * Bus::Channels);
 		mBus.Send(p);
 		mAudio.Pop();
 	}
 	if (mConfig.mArtnetEnabled && now - mLastDmxSend >= DmxSendIntervalMilliseconds)
 	{
-		auto p = Bus::NewEnvelope(mConfig.mSession);
+		Bus::Lighting p;
+		p.set_session_id(mConfig.mSession);
 		p.set_audio_frame_position(mAudio.watermark.load());
 		p.set_sequence_number(++mDmxSequence);
 		std::array<uint8_t, DmxFrameSize> frame{};
 		if (mDmxAt && now - mDmxAt < DmxInputTimeoutMilliseconds)
 			frame = mDmx;
-		p.mutable_lighting()->set_channels(frame.data(), frame.size());
+		p.set_channels(frame.data(), frame.size());
 		mBus.Send(p);
 		mLastDmxSend = now;
 	}

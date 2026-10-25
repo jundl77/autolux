@@ -21,6 +21,9 @@ class RadiusTx : public App, private IArtnetHandler
 	njson mReceiver;
 	uint64_t mReceiverAt = 0, mDmxAt = 0, mHealthAt = 0, mLastDmxSend = 0, mHeartbeatsSent = 0, mHeartbeatsReceived = 0;
 	uint32_t mAudioSequence = 0, mDmxSequence = 0;
+	Bus::Login mLogin;
+	uint64_t mLoginStartedAt = 0, mLoginSentAt = 0;
+	bool mReady = false;
 	ScopedHandler mPoll;
 	void Tick();
 	void OnDmxMessage(const DmxFrame&, int) override;
@@ -35,6 +38,11 @@ public:
 	}
 
 	void Start() override;
+
+	bool IsReady() const override
+	{
+		return mReady;
+	}
 
 	const Config& GetConfig() const override
 	{

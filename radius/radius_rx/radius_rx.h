@@ -12,11 +12,13 @@ namespace Radius {
 class RadiusRx : public App
 {
 	static constexpr size_t DmxQueueCapacityPackets = 256;
-	const Config& mConfig;
+	Config mConfig;
 	EventLoop& mLoop;
 	BusSocket mBus;
 	LinkState mLink{SteadyMs()};
-	AudioPlayback mAudio;
+	std::unique_ptr<AudioPlayback> mAudio;
+	std::optional<Bus::Login> mLogin;
+	uint64_t mLastProcessedCommandId = 0;
 	EventLoop mDmxLoop;
 	std::thread mDmxThread;
 	SpscQueue<Bus::LightingFrame, DmxQueueCapacityPackets> mDmxQueue;
@@ -30,12 +32,12 @@ class RadiusRx : public App
 	ScopedHandler mPoll;
 	void Tick();
 	void StartDmx();
+	void Login(const Bus::Login& login);
 
 public:
 	RadiusRx(const Config& c, EventLoop& loop)
 	    : mConfig(c)
 	    , mLoop(loop)
-	    , mAudio(c)
 	{
 	}
 

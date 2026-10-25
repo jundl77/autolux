@@ -6,7 +6,7 @@ add_library(${name} ${sources})
 target_link_libraries(${name}
         radius_core_lib
         radius_network_lib
-        radius_proto_lib
+        radius_bus_lib
         libsoundio_shared)
 
 target_compile_options(${name} PRIVATE ${cxx_compile_options})

@@ -13,6 +13,12 @@ class App
 public:
 	virtual ~App() = default;
 	virtual void Start() = 0;
+
+	virtual bool IsReady() const
+	{
+		return true;
+	}
+
 	virtual const Config& GetConfig() const = 0;
 };
 

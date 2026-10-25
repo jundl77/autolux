@@ -1,7 +1,7 @@
 #pragma once
 #include <config/config.h>
 #include <core/spsc_queue.h>
-#include <proto/radius/radius.h>
+#include <bus/bus_protocol.h>
 #include <soundio/soundio.h>
 #include "audio_delay.h"
 

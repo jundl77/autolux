@@ -82,6 +82,7 @@ def test_health_file_readers_do_not_stop_endpoints_and_publishing_recovers(tmp_p
             runtime.check_health()
             assert time.monotonic() < deadline, 'Initial health reports missing'
             time.sleep(0.05)
+
         with ExitStack() as readers:
             # Python's Windows file handles deny replacement until they close.
             held = [readers.enter_context(path.open('rb')) for path in files]
@@ -97,3 +98,26 @@ def test_health_file_readers_do_not_stop_endpoints_and_publishing_recovers(tmp_p
                 break
             assert time.monotonic() < deadline, 'Health publishing did not recover'
             time.sleep(0.05)
+
+
+def test_pending_login_can_be_cancelled_without_starting_capture(tmp_path, monkeypatch):
+    # A silent listener keeps the startup pending without opening any real outputs.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+        receiver.bind(('127.0.0.1', 0))
+        port = receiver.getsockname()[1]
+        runtime = NativeRuntime([spec('tx', bus_port=port)], tmp_path / 'run', startup_timeout=0.5)
+        stopped = []
+        close = runtime.close
+
+        def close_and_record():
+            stopped.extend(process for _, process, _ in runtime.children)
+            close()
+
+        monkeypatch.setattr(runtime, 'close', close_and_record)
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='did not become ready'):
+            runtime.__enter__()
+        assert time.monotonic() - started < 3
+        assert not runtime.children
+        assert not (tmp_path / 'run/radius_tx/ready').exists()
+        assert len(stopped) == 1 and stopped[0].returncode == 0

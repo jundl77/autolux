@@ -27,6 +27,8 @@ struct Config
 	int mAudioSampleRate = 44100, mJitterBufferMs = 150;
 	double mPlaybackDelaySeconds = 14;
 	bool mAudioEnabled = true, mDmxEnabled = true, mArtnetEnabled = true;
+	int mReceiverJitterBufferMs = 150;
+	bool mReceiverAudioEnabled = true, mReceiverLightingEnabled = true;
 };
 
 } // namespace Radius

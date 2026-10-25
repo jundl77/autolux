@@ -44,12 +44,18 @@ void BusSocket::Open(const std::string& bindAddress, const std::string& peer, ui
 	mConnected = !receiver;
 }
 
-bool BusSocket::Send(const Bus::Envelope& packet)
+void BusSocket::ReleasePeer()
+{
+	if (mReceiver)
+		mConnected = false;
+}
+
+bool BusSocket::Send(const Bus::Message& packet)
 {
 	if (!mConnected)
 		return false;
 	std::array<uint8_t, Bus::MaxDatagramBytes> bytes{};
-	const auto size = Bus::SerializeEnvelope(packet, bytes);
+	const auto size = Bus::SerializeMessage(packet, bytes);
 	if (!size || sendto(mSocket, reinterpret_cast<const char*>(bytes.data()), static_cast<int>(size), 0,
 	                    reinterpret_cast<const sockaddr*>(&mPeer), sizeof(mPeer)) != size)
 	{
@@ -60,7 +66,7 @@ bool BusSocket::Send(const Bus::Envelope& packet)
 	return true;
 }
 
-void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Envelope&)>& handler)
+void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Message&)>& handler)
 {
 	// Drain bursts instead of reading one datagram per Windows scheduler tick.
 	for (int i = 0; i < MaxBusDatagramsPerPoll; ++i)
@@ -82,11 +88,18 @@ void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Envel
 			}
 			throw std::runtime_error("bus receive failed: " + std::to_string(error));
 		}
-		Bus::Envelope packet;
+		Bus::Message packet;
 		if (source.sin_addr.s_addr != mPeer.sin_addr.s_addr || (mConnected && source.sin_port != mPeer.sin_port) ||
-		    !Bus::ParseEnvelope(bytes.data(), size, session, packet) ||
-		    (mReceiver && packet.has_receiver_telemetry()) ||
-		    (!mReceiver && (packet.has_audio() || packet.has_lighting())))
+		    !Bus::ParseMessage(bytes.data(), size, session, packet))
+		{
+			++invalidPackets;
+			continue;
+		}
+		const auto type = Bus::TypeOf(packet);
+		const bool clientMessage = type == Bus::LOGIN || type == Bus::AUDIO || type == Bus::LIGHTING;
+		const bool serverMessage = type == Bus::LOGIN_REPLY || type == Bus::ERROR_REPLY || type == Bus::METRICS;
+		if ((mReceiver && serverMessage) || (!mReceiver && clientMessage) ||
+		    (mReceiver && !mConnected && type != Bus::LOGIN))
 		{
 			++invalidPackets;
 			continue;

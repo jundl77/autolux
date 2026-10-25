@@ -7,6 +7,8 @@
 using namespace Radius;
 using namespace std::chrono_literals;
 
+void CheckLoginLifecycle();
+
 void Check(bool condition)
 {
 	if (!condition)
@@ -55,23 +57,29 @@ void CheckBusPackets()
 		             sizeof(destination)) == data.size());
 	};
 	uint64_t accepted = 0;
-	const auto handler = [&](const Bus::Envelope& packet) {
-		Check(packet.has_heartbeat());
+	const auto handler = [&](const Bus::Message& packet) {
+		Check(std::holds_alternative<Bus::Login>(packet));
 		++accepted;
 	};
-	auto invalid = Bus::NewEnvelope(Session - 1);
-	invalid.mutable_heartbeat();
-	send(invalid.SerializeAsString());
-	invalid.set_session_id(Session);
-	invalid.set_protocol_version(Bus::ProtocolVersion + 1);
-	send(invalid.SerializeAsString());
-	invalid.set_protocol_version(Bus::ProtocolVersion);
-	invalid.clear_payload();
-	send(invalid.SerializeAsString());
-	auto* health = invalid.mutable_receiver_telemetry();
-	health->set_up(true);
-	health->set_buffer_target_seconds(0.15);
-	send(invalid.SerializeAsString()); // RX must not accept telemetry from TX.
+	const auto wire = [](const Bus::Message& message) {
+		std::array<uint8_t, Bus::MaxDatagramBytes> bytes{};
+		const auto size = Bus::SerializeMessage(message, bytes);
+		Check(size > 0);
+		return std::string(reinterpret_cast<const char*>(bytes.data()), size);
+	};
+	Bus::Heartbeat heartbeat;
+	heartbeat.set_session_id(Session - 1);
+	send(wire(heartbeat));
+	heartbeat.set_session_id(Session);
+	send(wire(heartbeat)); // No media or heartbeat may claim a receiver before Login.
+	Bus::Lighting lighting;
+	lighting.set_session_id(Session);
+	lighting.set_channels(std::string(DmxFrameSize, '\0'));
+	send(wire(lighting));
+	Bus::LoginReply reply;
+	reply.set_command_id(Bus::LoginCommandId);
+	reply.set_session_id(Session);
+	send(wire(reply)); // RX rejects server messages.
 	send(std::string(Bus::MaxDatagramBytes + 1, '\0'));
 	send(std::string(Bus::MaxDatagramBytes * 2, '\0'));
 	constexpr uint64_t InvalidPackets = 6;
@@ -85,9 +93,10 @@ void CheckBusPackets()
 	// Invalid input must not claim the peer's port; a different, valid TX can still connect.
 	BusSocket transmitter;
 	transmitter.Open("127.0.0.1", "127.0.0.1", ntohs(destination.sin_port), false);
-	auto heartbeat = Bus::NewEnvelope(Session);
-	heartbeat.mutable_heartbeat();
-	Check(transmitter.Send(heartbeat));
+	Bus::Login login;
+	login.set_command_id(Bus::LoginCommandId);
+	login.set_session_id(Session);
+	Check(transmitter.Send(login));
 	deadline = std::chrono::steady_clock::now() + PollTimeout;
 	while (accepted == 0 && std::chrono::steady_clock::now() < deadline)
 	{
@@ -95,21 +104,26 @@ void CheckBusPackets()
 		std::this_thread::sleep_for(1ms);
 	}
 	Check(accepted == 1 && receiver.receivedPackets == 1);
+	send(wire(login)); // The valid session cannot be taken over from another source port.
+	receiver.Poll(Session, handler);
+	Check(accepted == 1 && receiver.invalidPackets == InvalidPackets + 1);
 	Check(receiver.Send(heartbeat));
-	auto lighting = Bus::NewEnvelope(Session);
-	lighting.mutable_lighting()->set_channels(std::string(DmxFrameSize, '\0'));
 	Check(receiver.Send(lighting)); // TX rejects the wrong direction's media.
 	uint64_t replies = 0;
 	deadline = std::chrono::steady_clock::now() + PollTimeout;
 	while ((replies == 0 || transmitter.invalidPackets == 0) && std::chrono::steady_clock::now() < deadline)
 	{
-		transmitter.Poll(Session, [&](const Bus::Envelope& packet) {
-			Check(packet.has_heartbeat());
+		transmitter.Poll(Session, [&](const Bus::Message& packet) {
+			Check(std::holds_alternative<Bus::Heartbeat>(packet));
 			++replies;
 		});
 		std::this_thread::sleep_for(1ms);
 	}
 	Check(replies == 1 && transmitter.invalidPackets == 1);
+	receiver.ReleasePeer(); // Rejected initialization permits a corrected client to log in.
+	send(wire(login));
+	receiver.Poll(Session, handler);
+	Check(accepted == 2);
 	closesocket(raw);
 }
 
@@ -121,6 +135,7 @@ int main()
 	UdpServer server(LogModule{"TEST"}, loop, receiver, 4096);
 	server.Start(0, PollingMode::Poll1ms);
 	CheckBusPackets();
+	CheckLoginLifecycle();
 	SOCKET client = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	sockaddr_in destination{};
 	destination.sin_family = AF_INET;

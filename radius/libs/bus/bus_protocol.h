@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <variant>
 #include <core/njson.h>
 #include <core/types.h>
 
@@ -14,7 +15,13 @@ constexpr size_t Channels = 2;
 constexpr uint32_t SampleRateHz = 44100;
 constexpr size_t AudioBytesPerFrame = Channels * sizeof(float);
 constexpr size_t MaxDatagramBytes = 1200; // Serialized payload budget, excluding IP/UDP headers.
-constexpr uint32_t ProtocolVersion = 2;
+constexpr size_t FrameHeaderBytes = 5;
+constexpr uint32_t ProtocolMajor = 1, ProtocolMinor = 0;
+constexpr size_t MaxErrorBytes = 512;
+constexpr uint64_t LoginRetryMilliseconds = 250;
+constexpr uint64_t LoginTimeoutMilliseconds = 15000;
+constexpr uint64_t LoginCommandId = 1;
+constexpr uint32_t MinJitterBufferMilliseconds = 20, MaxJitterBufferMilliseconds = 150;
 constexpr uint64_t HeartbeatMilliseconds = 10000;
 constexpr uint64_t TimeoutMilliseconds = 30000;
 constexpr uint64_t HealthReportIntervalMilliseconds = 1000;
@@ -33,11 +40,13 @@ struct LightingFrame
 	std::array<uint8_t, DmxFrameSize> channels{};
 };
 
-Envelope NewEnvelope(uint64_t session);
-bool IsValidEnvelope(const Envelope& packet, uint64_t expectedSession = 0);
+using Message = std::variant<Login, LoginReply, ErrorReply, Audio, Lighting, Heartbeat, Metrics>;
+
+MessageType TypeOf(const Message& message);
+bool IsValidMessage(const Message& message, uint64_t expectedSession = 0);
 bool IsNewerSequenceNumber(uint32_t incoming, std::optional<uint32_t> previous);
-size_t SerializeEnvelope(const Envelope& packet, std::array<uint8_t, MaxDatagramBytes>& bytes);
-bool ParseEnvelope(const void* data, size_t size, uint64_t expectedSession, Envelope& packet);
-njson ReceiverTelemetryToJson(const ReceiverTelemetry& health);
+size_t SerializeMessage(const Message& message, std::array<uint8_t, MaxDatagramBytes>& bytes);
+bool ParseMessage(const void* data, size_t size, uint64_t expectedSession, Message& message);
+njson MetricsToJson(const Metrics& metrics);
 
 } // namespace Radius::Bus

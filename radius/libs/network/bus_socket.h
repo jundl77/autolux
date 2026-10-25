@@ -1,7 +1,7 @@
 #pragma once
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <proto/radius/radius.h>
+#include <bus/bus_protocol.h>
 #include <functional>
 #include <string>
 
@@ -18,8 +18,9 @@ public:
 	BusSocket() = default;
 	~BusSocket();
 	void Open(const std::string& bindAddress, const std::string& peer, uint16_t port, bool receiver);
-	bool Send(const Bus::Envelope&);
-	void Poll(uint64_t session, const std::function<void(const Bus::Envelope&)>&);
+	bool Send(const Bus::Message&);
+	void Poll(uint64_t session, const std::function<void(const Bus::Message&)>&);
+	void ReleasePeer();
 };
 
 } // namespace Radius

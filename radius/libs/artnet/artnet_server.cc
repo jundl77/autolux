@@ -1,5 +1,5 @@
 #include "artnet_server.h"
-#include <proto/radius/artdmx.h>
+#include <bus/artdmx.h>
 
 namespace Radius {
 

@@ -7,7 +7,7 @@ add_library(${name} ${sources} ${libenttec_sources})
 target_link_libraries(${name}
         radius_core_lib
         radius_config_lib
-        radius_proto_lib
+        radius_bus_lib
         )
 
 target_link_libraries(${name} ${FTD2XX_LIBRARY})
