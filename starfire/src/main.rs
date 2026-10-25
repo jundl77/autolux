@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -109,6 +109,7 @@ fn run(arguments: Arguments) -> Result<()> {
                 artnet.is_none() || realtime,
                 "network playback requires --realtime"
             );
+            validate_output_paths(&input, &rig, output.as_deref(), summary.as_deref())?;
             let replay = Replay::load(&input)?;
             let rig = FixtureRig::load(&rig)?;
             let catalogue = SequenceCatalog::load(&sequences)?;
@@ -162,6 +163,34 @@ fn run(arguments: Arguments) -> Result<()> {
                 )?;
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_output_paths(
+    input: &Path,
+    rig: &Path,
+    output: Option<&Path>,
+    summary: Option<&Path>,
+) -> Result<()> {
+    let mut paths = vec![input.canonicalize()?, rig.canonicalize()?];
+    for path in [output, summary].into_iter().flatten() {
+        let resolved = if path.exists() {
+            path.canonicalize()?
+        } else {
+            let parent = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            parent
+                .canonicalize()?
+                .join(path.file_name().context("output needs a file name")?)
+        };
+        ensure!(
+            !paths.contains(&resolved),
+            "capture and summary must not overwrite inputs or each other"
+        );
+        paths.push(resolved);
     }
     Ok(())
 }

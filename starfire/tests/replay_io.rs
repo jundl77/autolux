@@ -196,3 +196,35 @@ fn native_cli_rejects_unpaced_network_output_without_sending() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("requires --realtime"));
     assert!(receiver.recv(&mut [0; 1024]).is_err());
 }
+
+#[test]
+fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("replay.json");
+    let rig = directory.path().join("rig.json");
+    let shared = directory.path().join("capture");
+    let source = serde_json::to_vec(&replay(0.0)).unwrap();
+    let patch = include_bytes!("../rigs/room.json");
+    fs::write(&input, &source).unwrap();
+    fs::write(&rig, patch).unwrap();
+    for destination in [&input, &rig, &shared] {
+        let mut command = Process::new(env!("CARGO_BIN_EXE_starfire"));
+        command
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .arg("replay")
+            .arg(&input)
+            .arg("--rig")
+            .arg(&rig)
+            .args(["--sequences", "sequences", "--output"])
+            .arg(destination);
+        if destination == &shared {
+            command.arg("--summary").arg(&shared);
+        }
+        let output = command.output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("must not overwrite"));
+        assert_eq!(fs::read(&input).unwrap(), source);
+        assert_eq!(fs::read(&rig).unwrap(), patch);
+        assert!(!shared.exists());
+    }
+}
