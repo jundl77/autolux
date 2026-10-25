@@ -252,7 +252,12 @@ async def _run_session(args, *, checking=False):
             )
         input_index = resolve_devices(args.input_device, tx.config)
         rig = selected_rig(args.rig)
-        validate_starfire(args.starfire_binary, rig, args.sequences)
+        validate_starfire(
+            args.starfire_binary,
+            rig,
+            args.sequences,
+            expected_universe=tx.config['dmx_universe'],
+        )
         run_dir = (
             ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
         )

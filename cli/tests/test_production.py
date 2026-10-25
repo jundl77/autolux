@@ -72,18 +72,24 @@ def test_stalled_readiness_worker_is_killed_within_its_deadline(monkeypatch):
     assert {child.pid for child in multiprocessing.active_children()} == existing_children
 
 
-@pytest.mark.parametrize('failure', ['receiver_start', 'renderer_start', 'controller_run', None])
+@pytest.mark.parametrize(
+    'failure', ['universe_mismatch', 'receiver_start', 'renderer_start', 'controller_run', None]
+)
 async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     tmp_path, monkeypatch, failure
 ):
-    from cli import main, remote_runtime, windows_runtime
+    from cli import main, remote_runtime, windows_runtime, starfire_runtime
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
+    from types import SimpleNamespace
+    import json
 
     events = []
     parser = argparse.ArgumentParser()
     production.add_arguments(parser)
     args = parser.parse_args([])
+    args.starfire_binary = tmp_path / 'starfire.exe'
+    args.starfire_binary.touch()
     tx = NativeSpec(
         'radius_tx',
         Path('tx.exe'),
@@ -102,7 +108,12 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     monkeypatch.setattr(production, 'running_processes', lambda: [])
     monkeypatch.setattr(production, 'resolve_devices', lambda *_: 1)
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda: True)
-    monkeypatch.setattr(production, 'validate_starfire', lambda *_: None)
+
+    def validate_command(command, **kwargs):
+        universes = [1] if failure == 'universe_mismatch' else [0]
+        return SimpleNamespace(returncode=0, stdout=json.dumps({'universes': universes}), stderr='')
+
+    monkeypatch.setattr(starfire_runtime.subprocess, 'run', validate_command)
 
     class Lock:
         def __init__(self, *_):
@@ -188,14 +199,19 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     monkeypatch.setattr(main, 'AutoluxController', App)
     monkeypatch.setattr(production, 'StarfireRuntime', Renderer)
     if failure:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(
+            RuntimeError, match='fixture universes' if failure == 'universe_mismatch' else None
+        ):
             await production.run(args)
     else:
         await production.run(args)
-    assert events.count('app_stop') == (0 if failure in ('receiver_start', 'renderer_start') else 1)
+    pre_start_failures = ('universe_mismatch', 'receiver_start', 'renderer_start')
+    assert events.count('app_stop') == (0 if failure in pre_start_failures else 1)
     assert events[-1] == 'unlock'
-    if failure != 'receiver_start':
+    if failure == 'universe_mismatch':
+        assert events == ['unlock']
+    if failure not in ('universe_mismatch', 'receiver_start'):
         assert events.index('tx_stop') < events.index('rx_stop')
-    if failure not in ('receiver_start', 'renderer_start'):
+    if failure not in pre_start_failures:
         assert events.index('starfire_stop') < events.index('tx_stop')
     assert main.global_app is None

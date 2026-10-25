@@ -1,5 +1,6 @@
 """Own the live renderer and supervise its bounded protobuf control channel."""
 
+import json
 import logging
 import os
 from pathlib import Path
@@ -47,7 +48,7 @@ def fixture_setup(args):
     }
 
 
-def validate_starfire(binary, rig, sequences):
+def validate_starfire(binary, rig, sequences, *, expected_universe=None):
     binary = Path(binary).resolve()
     if not binary.is_file():
         raise RuntimeError(f'Starfire binary is missing: {binary}. Run build-starfire.ps1.')
@@ -66,6 +67,13 @@ def validate_starfire(binary, rig, sequences):
         )
         if result.returncode:
             raise RuntimeError(f'Starfire validation failed: {result.stderr.strip()}')
+        if arguments[0] == 'rig' and expected_universe is not None:
+            universes = json.loads(result.stdout).get('universes')
+            if universes != [expected_universe]:
+                raise RuntimeError(
+                    f'Starfire fixture universes {universes} do not match Radius TX universe '
+                    f'{expected_universe}. Production requires every fixture on that universe.'
+                )
 
 
 class StarfireRuntime:

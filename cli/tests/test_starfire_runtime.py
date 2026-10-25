@@ -223,3 +223,21 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             runtime.send_command({'kind': 'stop'})
             time.sleep(0.05)
         assert runtime.process is None
+
+
+def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    binary = root / 'starfire/target/debug/starfire.exe'
+    if not binary.is_file():
+        pytest.skip('Build Starfire to exercise native fixture validation')
+    patch = json.loads((root / 'starfire/rigs/room.json').read_text())
+    patch['fixtures'][0]['universe'] = 1
+    rig = tmp_path / 'multi-universe.json'
+    rig.write_text(json.dumps(patch))
+    sequences = root / 'starfire/sequences'
+    with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
+        starfire_runtime.validate_starfire(binary, rig, sequences, expected_universe=0)
+    starfire_runtime.validate_starfire(binary, rig, sequences)
+    starfire_runtime.validate_starfire(
+        binary, root / 'starfire/rigs/room.json', sequences, expected_universe=0
+    )
