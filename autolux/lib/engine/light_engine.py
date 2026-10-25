@@ -1,28 +1,29 @@
 from __future__ import annotations
-import contextlib
+
 import logging
 from typing import TYPE_CHECKING
-from autolux.lib.audio_config import SAMPLE_RATE
-from autolux.lib.engine.effect_controller import EffectController
-from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
-from autolux.lib.engine.effect_definitions import LightIntent, intent_for_class
-from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
-from autolux.lib.clients.midi_client import SETTLE_SEC, MidiClient
-from autolux.lib.clients.os2l_client import Os2lClient
-from autolux.lib.clients.overlay_client import OverlayClient, OverlayEffect
+
 from autolux.lib.analyser.bar_tracker import TrackerChunk
 from autolux.lib.analyser.music_analyser import MusicAnalyser
 from autolux.lib.analyser.music_analyser_handler import IMusicAnalyserHandler
-from autolux.lib.clock import Clock, SYSTEM_CLOCK
+from autolux.lib.audio_config import SAMPLE_RATE
+from autolux.lib.clients.starfire_client import StarfireClient, rms_to_normalized_level
+from autolux.lib.clock import SYSTEM_CLOCK, Clock
+from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
+from autolux.lib.engine.effect_controller import EffectController
+from autolux.lib.engine.effect_definitions import LightIntent, intent_for_class
+from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
+
+LOGGER = logging.getLogger(__name__)
 
 _BEAT_ABSENCE_SEC = 2.5
 
 _LATENCY_LOG_STEP_SEC = 0.25
 _SHED_PUBLISH_SEC = 1.0
-_BYPASSED_ON_STOP = ('sound', 'intent', 'overlay')
+_BYPASSED_ON_STOP = ('sound', 'intent', 'beat')
 COLD_START_FLOOR_MARGIN_SEC = 4.0
 
 
@@ -31,9 +32,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     def __init__(
         self,
-        midi_client: MidiClient,
-        os2l_client: Os2lClient,
-        overlay_client: OverlayClient,
+        lighting_client: StarfireClient,
         effect_controller: EffectController,
         command_queue: DelayedCommandQueue | None = None,
         event_buffer: EventBuffer | None = None,
@@ -44,9 +43,7 @@ class LightEngine(IMusicAnalyserHandler):
         silence_monitor=None,
         clock: Clock = SYSTEM_CLOCK,
     ):
-        self.midi_client: MidiClient = midi_client
-        self.os2l_client: Os2lClient = os2l_client
-        self.overlay_client: OverlayClient = overlay_client
+        self.lighting_client = lighting_client
         self.effect_controller: EffectController = effect_controller
         self.command_queue: DelayedCommandQueue | None = command_queue
         self.event_buffer: EventBuffer | None = event_buffer
@@ -57,11 +54,11 @@ class LightEngine(IMusicAnalyserHandler):
         self._silence_monitor = silence_monitor
         self._playback_delay_sec: float = playback_delay_sec
         self._clock: Clock = clock
-        self._note_counter: int = 0
         self._current_intent: LightIntent | None = None
         self._section_class_at_playback: str | None = None
         self._pending_intents: list = []
         self._published_bpm: dict = {}
+        self._session_beat_count = 0
         self._intent_commits: int = 0
         self._audio_sec: float = 0.0
         self._last_logged_latency_seconds: float | None = None
@@ -92,16 +89,14 @@ class LightEngine(IMusicAnalyserHandler):
         return self._intent_commits
 
     def on_sound_start(self):
-        logging.info('[engine] sound start')
+        LOGGER.info('[engine] sound start')
         self._bypass_due_at = None
-        self.os2l_client.on_sound_start(0, 0, 20000, 120)
         if self.event_buffer:
             self.event_buffer.set_playing(True)
         self._at_the_room('sound', self._show_sound_start)
 
     def on_sound_stop(self):
-        logging.info('[engine] sound stop')
-        self.os2l_client.on_sound_stop()
+        LOGGER.info('[engine] sound stop')
         if self.event_buffer:
             self.event_buffer.set_playing(False)
         self._bypass_due_at = self._clock.monotonic() + STOP_PERSISTENCE_SEC
@@ -113,7 +108,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self._clock.monotonic() < self._bypass_due_at:
             return
         self._bypass_due_at = None
-        logging.info(
+        LOGGER.info(
             f'[engine] silence held {STOP_PERSISTENCE_SEC:.1f}s — '
             f'cutting the tail the room has not reached'
         )
@@ -140,25 +135,12 @@ class LightEngine(IMusicAnalyserHandler):
             )
 
     def _show_sound_start(self) -> None:
-        with self._deliberate_stall():
-            self.midi_client.on_sound_start()
-            self.overlay_client.deactivate_all()
+        self.lighting_client.set_blackout(False)
 
     def _show_sound_stop(self) -> None:
-        with self._deliberate_stall():
-            self.midi_client.on_sound_stop()
-            self.overlay_client.deactivate_all()
-
-    @contextlib.contextmanager
-    def _deliberate_stall(self):
-        started = self._clock.monotonic()
-        try:
-            yield
-        finally:
-            if self._watchdog is not None:
-                self._watchdog.exclude_pause_from_drift(
-                    min(self._clock.monotonic() - started, SETTLE_SEC)
-                )
+        self.lighting_client.stop()
+        if self.event_buffer is not None:
+            self.event_buffer.stop_effects()
 
     def _at_the_room(self, label: str, action) -> None:
         if self.command_queue:
@@ -187,7 +169,7 @@ class LightEngine(IMusicAnalyserHandler):
             self.section_decoder.reset()
 
     async def on_cycle(self):
-        self.overlay_client.flush_messages()
+        pass
 
     def _publish_shed_state(self) -> None:
         if self.event_buffer is None or self._watchdog is None:
@@ -226,10 +208,12 @@ class LightEngine(IMusicAnalyserHandler):
             )
 
     async def on_beat(self, beat_number: int, bpm: float, bpm_changed: bool) -> None:
+        self._session_beat_count += 1
+        session_beat_position = self._session_beat_count
         current_second = self.analyser.get_song_current_duration().total_seconds()
         rms_energy = self.analyser.get_rms_energy()
 
-        logging.debug(f'[engine] [{current_second:.2f}s] beat #{beat_number}  bpm={bpm:.1f}')
+        LOGGER.debug(f'[engine] [{current_second:.2f}s] beat #{beat_number}  bpm={bpm:.1f}')
         if self.event_buffer:
             self.event_buffer.add_beat(bpm, bpm_changed, rms=rms_energy)
 
@@ -237,21 +221,21 @@ class LightEngine(IMusicAnalyserHandler):
             await self._commit(self.section_decoder.push_beat(self._audio_sec))
 
         published_bpm = self._publishable_bpm(self._published_bpm, bpm)
+        normalized_rms_level = rms_to_normalized_level(rms_energy)
+
+        async def publish():
+            self.lighting_client.set_normalized_rms_level(normalized_rms_level)
+            if published_bpm > 0:
+                self.lighting_client.beat(session_beat_position, published_bpm)
+
         if self.command_queue:
-            await self.command_queue.enqueue(
-                'beat',
-                lambda: self.os2l_client.send_beat(
-                    change=bpm_changed, pos=beat_number, bpm=published_bpm, strength=0.5
-                ),
-            )
+            await self.command_queue.enqueue('beat', publish)
         else:
-            await self.os2l_client.send_beat(
-                change=bpm_changed, pos=beat_number, bpm=published_bpm, strength=0.5
-            )
+            await publish()
 
     @staticmethod
     def _publishable_bpm(state: dict, bpm: float) -> float:
-        # OS2L consumers read a warm-up 0.0 as a tempo of zero, not as "unknown".
+        # A zero-tempo warm-up is unknown; retain an established tempo.
         if bpm > 0:
             state['last'] = bpm
             return bpm
@@ -262,7 +246,7 @@ class LightEngine(IMusicAnalyserHandler):
         for decision in decisions:
             intent = intent_for_class(decision.label)
 
-            logging.debug(
+            LOGGER.debug(
                 f'[engine] bar {decision.bar} @ {decision.start_sec:.2f}s  '
                 f'{decision.label} → {intent.name}'
             )
@@ -307,7 +291,7 @@ class LightEngine(IMusicAnalyserHandler):
     def _log_chain_latency(self) -> None:
         decoder = self.section_decoder
         if decoder is None:
-            logging.debug(
+            LOGGER.debug(
                 f'[engine] no section decoder — holding intent; '
                 f'playback delay {self._playback_delay_sec:.2f}s'
             )
@@ -318,7 +302,7 @@ class LightEngine(IMusicAnalyserHandler):
             and abs(latency - self._last_logged_latency_seconds) < _LATENCY_LOG_STEP_SEC
         ):
             return
-        log = logging.info if self._last_logged_latency_seconds is None else logging.debug
+        log = LOGGER.info if self._last_logged_latency_seconds is None else LOGGER.debug
         self._last_logged_latency_seconds = latency
         log(
             f'[engine] chain latency {latency:.2f}s = '
@@ -368,14 +352,14 @@ class LightEngine(IMusicAnalyserHandler):
         if late_sec > 0.0:
             if not self._committing_late:
                 self._committing_late = True
-                logging.warning(
+                LOGGER.warning(
                     f'[engine] the chain is older than the '
                     f'{self._playback_delay_sec:.2f}s playback delay — intents '
                     f'commit {late_sec:.2f}s late (slow tempo, accepted)'
                 )
         elif self._committing_late:
             self._committing_late = False
-            logging.info('[engine] the chain is back inside the playback delay')
+            LOGGER.info('[engine] the chain is back inside the playback delay')
 
     async def _apply_intent(
         self, entry, intent: LightIntent, song_sec: float | None, section_label: str | None
@@ -390,17 +374,7 @@ class LightEngine(IMusicAnalyserHandler):
         await self.effect_controller.change_effect(intent)
 
     async def on_note(self):
-        dmx_data = [0] * 24
-        self._note_counter = (self._note_counter + 3) % 24
-        dmx_data[self._note_counter] = 100
-        if self.command_queue:
-            await self.command_queue.enqueue('overlay', lambda: self._show_light_bar(dmx_data))
-        else:
-            self.overlay_client.update_overlay_data(OverlayEffect.LIGHT_BAR_24, dmx_data)
-        logging.debug('[engine] note detected')
-
-    async def _show_light_bar(self, dmx_data: list) -> None:
-        self.overlay_client.update_overlay_data(OverlayEffect.LIGHT_BAR_24, dmx_data)
+        LOGGER.debug('[engine] note detected')
 
     async def _floor_if_nothing_arrived(self) -> None:
         if not self._floor_armed:
@@ -409,7 +383,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self._audio_sec < chain + COLD_START_FLOOR_MARGIN_SEC:
             return
         self._floor_armed = False
-        logging.warning(
+        LOGGER.warning(
             f'[engine] no decision after {self._audio_sec:.1f}s of audio '
             f'(chain {chain:.1f}s) — lighting ATMOSPHERIC as the floor rather '
             f'than leaving the rig dark'
@@ -438,5 +412,5 @@ class LightEngine(IMusicAnalyserHandler):
         bpm = int(self.analyser.get_bpm())
         current_second = int(self.analyser.get_song_current_duration().total_seconds())
         intent_name = self._current_intent.name if self._current_intent else 'None'
-        logging.info('[music] bpm=%d | intent=%s | position=%ds', bpm, intent_name, current_second)
+        LOGGER.info('[music] bpm=%d | intent=%s | position=%ds', bpm, intent_name, current_second)
         self._log_chain_latency()

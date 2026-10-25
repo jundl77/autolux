@@ -1,7 +1,7 @@
 # Autolux CLI
 
 `autolux --prod` coordinates the show from the controller PC. It validates
-configuration, deploys the receiver, starts native processes and analysis, and
+configuration, deploys Radius RX, starts Radius TX, Starfire and analysis, and
 cleans up both endpoints on shutdown. `autolux status` reports health;
 `autolux stop` requests a graceful stop.
 
@@ -27,3 +27,9 @@ the receiver. Concurrent receiver sessions are refused. Session logs are retaine
 
 The default dashboard is port 8765, with Prometheus at `/metrics`. Headless mode
 serves metrics on port 8766. Use `--duration 90` for a bounded live test.
+
+Starfire uses an owned subprocess with framed protobuf over its pipes. Readiness
+precedes audio capture; heartbeat requests and replies run every ten seconds,
+with a thirty-second deadline. `--rig`, `--sequences` and `--starfire-binary`
+select the fixture patch, Lua catalogue and executable. Art-Net goes to the
+configured Radius TX ingress; the receiver alone drives the physical fixtures.

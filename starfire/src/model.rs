@@ -76,12 +76,26 @@ impl Default for FixtureState {
 
 pub type FixtureStates = BTreeMap<String, FixtureState>;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderContext {
     pub time_seconds: f64,
     pub beat_position: f64,
     pub sequence_elapsed_beats: f64,
     pub sequence_speed_scaled_elapsed_beats: f64,
+    /// Measured RMS mapped to 0..1, independent of operator brightness.
+    pub normalized_rms_level: f64,
+}
+
+impl Default for RenderContext {
+    fn default() -> Self {
+        Self {
+            time_seconds: 0.0,
+            beat_position: 0.0,
+            sequence_elapsed_beats: 0.0,
+            sequence_speed_scaled_elapsed_beats: 0.0,
+            normalized_rms_level: 1.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -142,6 +156,9 @@ pub enum Command {
     },
     SetMaster {
         intensity: f64,
+    },
+    SetNormalizedRmsLevel {
+        level: f64,
     },
     SetSpeed {
         multiplier: f64,

@@ -148,7 +148,6 @@ def _components(buffers: int) -> dict:
         'audio_client': _FiniteAudio(buffers),
         'music_analyser': idle,
         'light_engine': idle,
-        'midi_client': idle,
         'command_queue': _NoCommands(),
     }
 

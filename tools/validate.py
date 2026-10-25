@@ -23,7 +23,8 @@ def validation_steps(output_dir):
     return [
         (
             'python-format',
-            python + ['-m', 'ruff', 'format', '--check', 'autolux', 'cli', 'radius', 'tools'],
+            python
+            + ['-m', 'ruff', 'format', '--check', 'autolux', 'cli', 'radius', 'proto', 'tools'],
         ),
         ('cpp-format', python + ['-m', 'pre_commit', 'run', 'cpp-format', '--all-files']),
         ('rust-format', ['cargo', 'fmt', '--manifest-path', 'starfire/Cargo.toml', '--check']),

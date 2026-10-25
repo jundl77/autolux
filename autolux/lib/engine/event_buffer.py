@@ -1,13 +1,12 @@
 """Thread-safe store of pipeline events — the only state the Dash thread shares."""
 
-import threading
 import copy
+import math
+import threading
 from collections import deque
 
-from autolux.lib.clock import Clock, SYSTEM_CLOCK
+from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.telemetry_history import TelemetryHistory
-
-_UNMEASURED_BEAT_STRENGTH = 0.0
 
 CLASSIFIER_TRIGGER = 'classifier'
 SILENCE_TRIGGER = 'silence'
@@ -68,20 +67,38 @@ class EventBuffer:
                 {
                     't': self._now(),
                     'bpm': bpm,
-                    'strength': _UNMEASURED_BEAT_STRENGTH,
                     'change': change,
                     'rms': round(rms, 4),
                 }
             )
 
-    def add_effect(self, channel: str, effect_type: str) -> None:
+    def add_effect(
+        self, name: str, effect_type: str, *, duration_seconds: float | None = None
+    ) -> None:
+        if duration_seconds is not None and (
+            not math.isfinite(duration_seconds) or duration_seconds <= 0
+        ):
+            raise ValueError('Effect duration must be finite and positive')
         with self._lock:
             now = self._now()
-            if self._effects and 'end' not in self._effects[-1]:
-                self._effects[-1]['end'] = now
-            self._effects.append({'t': now, 'channel': channel, 'type': effect_type})
+            for effect in reversed(self._effects):
+                if effect['type'] == effect_type and (
+                    effect_type == 'SEQUENCE' or effect['name'] == name
+                ):
+                    effect['end'] = min(effect.get('end', now), now)
+                    break
+            effect = {'t': now, 'name': name, 'type': effect_type}
+            if duration_seconds is not None:
+                effect['end'] = now + duration_seconds
+            self._effects.append(effect)
             cutoff = now - self._window_sec * 2
             self._effects = [e for e in self._effects if e.get('end', now) >= cutoff]
+
+    def stop_effects(self) -> None:
+        with self._lock:
+            now = self._now()
+            for effect in self._effects:
+                effect['end'] = min(effect.get('end', now), now)
 
     def set_playing(self, is_playing: bool) -> None:
         with self._lock:
@@ -178,7 +195,14 @@ class EventBuffer:
                 'beats': self._beats_since(cutoff),
                 'effects': [e for e in self._effects if e.get('end', now) >= cutoff],
                 'intents': [e for e in self._intents if e.get('end', now) >= cutoff],
-                'current_effect': self._effects[-1] if self._effects else None,
+                'current_effect': next(
+                    (
+                        effect
+                        for effect in reversed(self._effects)
+                        if effect['type'] == 'SEQUENCE' and effect.get('end', float('inf')) > now
+                    ),
+                    None,
+                ),
                 'bpm': self._beats[-1]['bpm'] if self._beats else 0.0,
                 'beats_detected': self._beats_detected,
                 'beats_cut': self._beats_cut,
@@ -195,9 +219,9 @@ class EventBuffer:
         with self._lock:
             now = self._now()
 
-            all_effects = list(self._effects)
-            if all_effects and 'end' not in all_effects[-1]:
-                all_effects[-1] = {**all_effects[-1], 'end': now}
+            all_effects = [
+                {**effect, 'end': min(effect.get('end', now), now)} for effect in self._effects
+            ]
 
             all_intents = list(self._intents)
             if all_intents and 'end' not in all_intents[-1]:
@@ -206,7 +230,7 @@ class EventBuffer:
             tlog = timing_log if timing_log is not None else self._timing_log
             errors_ms = [abs(e['actual_delta_sec'] - e['target_delta_sec']) * 1000 for e in tlog]
             durations = [e['end'] - e['t'] for e in all_effects if 'end' in e]
-            unique_channels = {e['channel'] for e in all_effects}
+            unique_effect_names = {e['name'] for e in all_effects}
             all_beats = list(self._beats)
 
             intent_distribution: dict[str, float] = {}
@@ -235,12 +259,12 @@ class EventBuffer:
                     'bpm_last': all_beats[-1]['bpm'] if all_beats else 0.0,
                     'timing_error_mean_ms': (sum(errors_ms) / len(errors_ms) if errors_ms else 0.0),
                     'timing_error_max_ms': max(errors_ms) if errors_ms else 0.0,
-                    'unique_effects_count': len(unique_channels),
+                    'unique_effects_count': len(unique_effect_names),
                     'effect_changes_count': len(all_effects),
                     'avg_effect_duration_sec': (
                         sum(durations) / len(durations) if durations else 0.0
                     ),
-                    'unique_channels': sorted(unique_channels),
+                    'unique_effect_names': sorted(unique_effect_names),
                     'intent_changes_count': len(all_intents),
                     'unique_intents_count': len(intent_distribution),
                     'intent_distribution_sec': {

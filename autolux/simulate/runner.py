@@ -4,9 +4,11 @@ import logging
 import random
 import time
 
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
-from autolux.lib.clock import Clock, SYSTEM_CLOCK, VirtualClock
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.clock import SYSTEM_CLOCK, Clock, VirtualClock
 from autolux.simulate import cell_cache
+
+LOGGER = logging.getLogger(__name__)
 
 TIMING_TOLERANCE_SEC = 0.050
 # Must match lib/main.py's PLAYBACK_DELAY_SEC and the native audio sender's delay.
@@ -22,16 +24,14 @@ def build_simulation(
     threaded: bool = False,
     silence_monitor=None,
 ):
-    from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
     from autolux.lib.analyser.drift_watchdog import DriftWatchdog
+    from autolux.lib.analyser.music_analyser import MusicAnalyser
     from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
     from autolux.lib.engine.effect_controller import EffectController
     from autolux.lib.engine.light_engine import LightEngine
-    from autolux.lib.analyser.music_analyser import MusicAnalyser
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
-    midi_client = StubMidiClient(clock=clock)
-    os2l_client = StubOs2lClient(clock=clock)
-    overlay_client = StubOverlayClient(clock=clock)
+    lighting_client = RecordingStarfireClient(clock=clock)
     command_queue = DelayedCommandQueue(PLAYBACK_DELAY_SEC, clock=clock)
 
     watchdog = None
@@ -40,11 +40,9 @@ def build_simulation(
     if section is None:
         section = load_section_chain(watchdog=watchdog, audio_client=audio_client)
 
-    effect_controller = EffectController(midi_client, event_buffer=event_buffer)
+    effect_controller = EffectController(lighting_client, event_buffer=event_buffer)
     light_engine = LightEngine(
-        midi_client,
-        os2l_client,
-        overlay_client,
+        lighting_client,
         effect_controller,
         command_queue,
         event_buffer=event_buffer,
@@ -63,9 +61,7 @@ def build_simulation(
 
     return {
         'audio_client': audio_client,
-        'midi_client': midi_client,
-        'os2l_client': os2l_client,
-        'overlay_client': overlay_client,
+        'lighting_client': lighting_client,
         'command_queue': command_queue,
         'music_analyser': music_analyser,
         'light_engine': light_engine,
@@ -100,7 +96,7 @@ def load_section_chain(watchdog=None, audio_client=None):
         # One decision for both caches: a run is warm only when every stage
         # this machine would run can be replayed.
         if replay is not None and (tracker_plan is None or tracker_replay is not None):
-            logging.info(
+            LOGGER.info(
                 f'[sim] replaying cached extractor cells '
                 f'← {plan[0].name}'
                 + (
@@ -112,7 +108,7 @@ def load_section_chain(watchdog=None, audio_client=None):
             return section_chain.build_section_chain(
                 extractor=lambda _: replay, tracker=tracker_replay
             )
-        logging.info(
+        LOGGER.info(
             f'[sim] extractor cells: {reason} / tracker chunks: '
             f'{tracker_reason} — this run needs the GPU'
         )
@@ -133,7 +129,7 @@ def _artifacts_or_degrade() -> bool:
 
     if section_chain.artifacts_present():
         return True
-    logging.warning(
+    LOGGER.warning(
         '[sim] no NN artifacts on this machine — running '
         'the degradation state (beats, silence, held intent)'
     )
@@ -233,7 +229,7 @@ async def run_simulation(
     last_1s = clock.now()
     last_10s = clock.now()
 
-    logging.info(
+    LOGGER.info(
         f'[sim] starting simulation loop for {duration_sec:.1f}s '
         f'({"virtual" if is_virtual else "wall"} time)'
     )
@@ -260,7 +256,6 @@ async def run_simulation(
         if now - last_100ms > datetime.timedelta(milliseconds=100):
             last_100ms = now
             await components['light_engine'].on_100ms_callback()
-            await components['midi_client'].on_100ms_callback()
 
         if now - last_1s > datetime.timedelta(seconds=1):
             last_1s = now
@@ -286,11 +281,16 @@ async def run_simulation(
             if monitor is not None:
                 monitor.drain()
 
+    lighting_client = components.get('lighting_client')
+    if lighting_client is not None:
+        lighting_client.stop()
+    if event_buffer is not None:
+        event_buffer.stop_effects()
     audio_client.close()
     section = components.get('section')
     if section is not None:
         section.stop()
-    logging.info('[sim] simulation complete')
+    LOGGER.info('[sim] simulation complete')
 
 
 def print_timing_report(command_queue, tolerance_sec: float = TIMING_TOLERANCE_SEC):

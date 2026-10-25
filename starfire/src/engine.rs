@@ -42,7 +42,12 @@ struct ActiveSequence {
 }
 
 impl ActiveSequence {
-    fn render(&mut self, seconds: f64, time: ClockSample) -> Result<Vec<Effect>> {
+    fn render(
+        &mut self,
+        seconds: f64,
+        time: ClockSample,
+        normalized_rms_level: f64,
+    ) -> Result<Vec<Effect>> {
         self.script.render(&RenderContext {
             time_seconds: seconds,
             beat_position: time.beat_position,
@@ -50,6 +55,7 @@ impl ActiveSequence {
             sequence_speed_scaled_elapsed_beats: (time.animation_beats
                 - self.start_animation_beats)
                 .max(0.0),
+            normalized_rms_level,
         })
     }
 }
@@ -90,6 +96,7 @@ pub struct Engine {
     overrides: BTreeMap<String, ActiveOverride>,
     override_order: u64,
     master_intensity: f64,
+    normalized_rms_level: f64,
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
@@ -110,6 +117,7 @@ impl Engine {
             overrides: BTreeMap::new(),
             override_order: 0,
             master_intensity: 1.0,
+            normalized_rms_level: 1.0,
             blackout: false,
             script_error: None,
             last_output_states,
@@ -148,6 +156,10 @@ impl Engine {
             Command::SetMaster { intensity } => {
                 validate_unit(*intensity, "master intensity")?;
                 self.master_intensity = *intensity;
+            }
+            Command::SetNormalizedRmsLevel { level } => {
+                validate_unit(*level, "normalized RMS level")?;
+                self.normalized_rms_level = *level;
             }
             Command::SetSpeed { multiplier } => self.clock.set_speed(at_seconds, *multiplier)?,
             Command::SetBlackout { enabled } => self.blackout = *enabled,
@@ -296,7 +308,7 @@ impl Engine {
             return Ok(self.dark_states());
         };
         let effects = active
-            .render(seconds, time)
+            .render(seconds, time, self.normalized_rms_level)
             .with_context(|| format!("sequence {}/{} failed", active.bank, active.name))?;
         let destination = states_for_effects(&self.rig, &effects)?;
         let Some(fade) = &mut self.fade else {
@@ -305,7 +317,7 @@ impl Engine {
         let source = match &mut fade.source {
             FadeSource::Frozen(states) => states.clone(),
             FadeSource::Running(previous) => {
-                let effects = previous.render(seconds, time)?;
+                let effects = previous.render(seconds, time, self.normalized_rms_level)?;
                 states_for_effects(&self.rig, &effects)?
             }
         };

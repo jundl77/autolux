@@ -829,3 +829,60 @@ fn invalid_fade_duration_does_not_replace_the_running_sequence() {
         0.5,
     );
 }
+
+#[test]
+fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
+    let mut engine = engine(&[(
+        "energy",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), ctx.normalized_rms_level)} end}",
+    )]);
+    select(&mut engine, 0.0, "energy", Transition::Cut);
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        1.0,
+    );
+    engine
+        .apply(0.25, &Command::SetNormalizedRmsLevel { level: 0.8 })
+        .unwrap();
+    engine
+        .apply(0.25, &Command::SetMaster { intensity: 0.5 })
+        .unwrap();
+    near(
+        engine
+            .render_at(0.25)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.4,
+    );
+    for level in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+        assert!(
+            engine
+                .apply(0.5, &Command::SetNormalizedRmsLevel { level })
+                .is_err()
+        );
+    }
+    near(
+        engine
+            .render_at(0.5)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.4,
+    );
+    engine
+        .apply(0.75, &Command::SetNormalizedRmsLevel { level: 0.0 })
+        .unwrap();
+    near(
+        engine
+            .render_at(0.75)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.0,
+    );
+}

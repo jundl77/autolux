@@ -28,6 +28,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Starfire tests failed.' }
     & $Cargo build --manifest-path starfire/Cargo.toml --locked --release
     if ($LASTEXITCODE -ne 0) { throw 'Starfire release build failed.' }
+    uv run --locked python tools/build_proto.py
+    if ($LASTEXITCODE -ne 0) { throw 'Starfire protocol generation failed.' }
 }
 finally {
     $ErrorActionPreference = 'Stop'

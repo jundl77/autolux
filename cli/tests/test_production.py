@@ -72,7 +72,7 @@ def test_stalled_readiness_worker_is_killed_within_its_deadline(monkeypatch):
     assert {child.pid for child in multiprocessing.active_children()} == existing_children
 
 
-@pytest.mark.parametrize('failure', ['receiver_start', 'controller_run', None])
+@pytest.mark.parametrize('failure', ['receiver_start', 'renderer_start', 'controller_run', None])
 async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     tmp_path, monkeypatch, failure
 ):
@@ -87,16 +87,22 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     tx = NativeSpec(
         'radius_tx',
         Path('tx.exe'),
-        {'peer_address': '127.0.0.1', 'session': 17, 'overlay_port': 19001, 'dmx_universe': 0},
+        {
+            'peer_address': '127.0.0.1',
+            'session': 17,
+            'artnet_address': '127.0.0.1',
+            'dmx_universe': 0,
+        },
     )
     rx = NativeSpec('radius_rx', Path('rx.exe'), {})
     monkeypatch.setattr(production, 'ROOT', tmp_path)
     (tmp_path / '.live').mkdir()
     monkeypatch.setattr(production, 'native_specs', lambda *_: [tx, rx])
     monkeypatch.setattr(production, 'validate_native', lambda *_: None)
-    monkeypatch.setattr(production, 'running_processes', lambda: [{'Name': 'loopMIDI.exe'}])
-    monkeypatch.setattr(production, 'resolve_devices', lambda *_: (1, 2))
+    monkeypatch.setattr(production, 'running_processes', lambda: [])
+    monkeypatch.setattr(production, 'resolve_devices', lambda *_: 1)
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda: True)
+    monkeypatch.setattr(production, 'validate_starfire', lambda *_: None)
 
     class Lock:
         def __init__(self, *_):
@@ -138,9 +144,31 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         def check_health(self):
             pass
 
+    class Renderer:
+        def __init__(self, binary, rig, sequences, artnet, directory):
+            assert artnet == '127.0.0.1:6454'
+
+        def __enter__(self):
+            if failure == 'renderer_start':
+                raise RuntimeError('renderer start failed')
+            events.append('starfire_start')
+            return self
+
+        def __exit__(self, *_):
+            events.append('starfire_stop')
+
+        def send_command(self, command):
+            events.append(command['kind'])
+
+        def check_health(self):
+            pass
+
+        def snapshot(self):
+            return None
+
     class App:
         def __init__(self, *_, **kwargs):
-            assert kwargs['overlay_host'] == '127.0.0.1'
+            assert kwargs['lighting_client'] is not None
             self.event_buffer = EventBuffer()
 
         def _shut_down(self):
@@ -158,13 +186,16 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     monkeypatch.setattr(remote_runtime, 'RemoteRuntime', Remote)
     monkeypatch.setattr(production, 'NativeRuntime', Native)
     monkeypatch.setattr(main, 'AutoluxController', App)
+    monkeypatch.setattr(production, 'StarfireRuntime', Renderer)
     if failure:
         with pytest.raises(RuntimeError):
             await production.run(args)
     else:
         await production.run(args)
-    assert events.count('app_stop') == 1
+    assert events.count('app_stop') == (0 if failure in ('receiver_start', 'renderer_start') else 1)
     assert events[-1] == 'unlock'
     if failure != 'receiver_start':
         assert events.index('tx_stop') < events.index('rx_stop')
+    if failure not in ('receiver_start', 'renderer_start'):
+        assert events.index('starfire_stop') < events.index('tx_stop')
     assert main.global_app is None

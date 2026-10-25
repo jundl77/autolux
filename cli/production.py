@@ -17,6 +17,13 @@ import time
 import uuid
 
 from cli.native_runtime import NativeRuntime, NativeSpec, validate_native
+from cli.starfire_runtime import (
+    StarfireRuntime,
+    add_arguments as add_starfire_arguments,
+    selected_rig,
+    validate_starfire,
+    fixture_setup,
+)
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +38,7 @@ def add_arguments(parser):
     parser.add_argument('--radius-dir', type=Path, default=ROOT / 'radius')
     parser.add_argument('--tx-config', type=Path)
     parser.add_argument('--rx-config', type=Path)
-    parser.add_argument('--midi-port', default='loopMIDI Port 1')
+    add_starfire_arguments(parser)
     parser.add_argument('--input-device', default='CABLE Output')
     parser.add_argument('--receiver-host')
     parser.add_argument('--receiver-user', default='User')
@@ -98,7 +105,7 @@ def native_specs(args, delay):
 
 def running_processes():
     # Fixed script: no user paths or arguments are interpolated into shell code.
-    script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('radius_tx.exe','radius_rx.exe','loopMIDI.exe') } | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress"
+    script = "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('radius_tx.exe','radius_rx.exe','starfire.exe') } | Select-Object Name,ProcessId,ExecutablePath | ConvertTo-Json -Compress"
     result = subprocess.run(
         ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
         capture_output=True,
@@ -132,9 +139,8 @@ def endpoint_name(device_id, kind):
         return winreg.QueryValueEx(handle, '{a45c254e-df1c-4efd-8020-67d146a850e0},2')[0]
 
 
-def resolve_devices(midi_prefix, input_prefix, config):
+def resolve_devices(input_prefix, config):
     import pyaudio
-    import rtmidi
 
     audio = pyaudio.PyAudio()
     try:
@@ -149,25 +155,14 @@ def resolve_devices(midi_prefix, input_prefix, config):
         ]
     finally:
         audio.terminate()
-    midi = rtmidi.MidiOut()
-    try:
-        ports = [
-            (i, name)
-            for i, name in enumerate(midi.get_ports())
-            if name.casefold().startswith(midi_prefix.casefold())
-        ]
-    finally:
-        midi.delete()
-    if len(inputs) != 1 or len(ports) != 1:
-        raise RuntimeError(
-            f'Need one audio input and MIDI port; audio={inputs}, MIDI={ports}. Run autolux list.'
-        )
+    if len(inputs) != 1:
+        raise RuntimeError(f'Need one matching audio input; found {inputs}. Run autolux list.')
     source = endpoint_name(config['audio_device_id'], 'Capture')
     if not inputs[0]['name'].casefold().startswith(source.casefold()):
         raise RuntimeError(
             f'Capture mismatch: Python uses {inputs[0]["name"]}, native sender uses {source}.'
         )
-    return int(inputs[0]['index']), ports[0][0]
+    return int(inputs[0]['index'])
 
 
 async def run(args):
@@ -247,21 +242,17 @@ async def _run_session(args, *, checking=False):
     app_ran = False
     try:
         processes = running_processes()
-        check_conflicts([tx], processes)
+        renderer_spec = NativeSpec('starfire', args.starfire_binary, {})
+        check_conflicts([tx, renderer_spec], processes)
         from autolux.lib.section_chain import artifacts_present
 
         if not artifacts_present():
             raise RuntimeError(
                 'The shipped neural model is missing; refusing a degraded production show.'
             )
-        if not checking and not any(p['Name'].casefold() == 'loopmidi.exe' for p in processes):
-            exe = Path(os.environ['ProgramFiles(x86)']) / 'Tobias Erichsen/loopMIDI/loopMIDI.exe'
-            startup = subprocess.STARTUPINFO()
-            startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startup.wShowWindow = subprocess.SW_HIDE
-            subprocess.Popen([str(exe)], startupinfo=startup)
-            time.sleep(1)
-        input_index, midi_index = resolve_devices(args.midi_port, args.input_device, tx.config)
+        input_index = resolve_devices(args.input_device, tx.config)
+        rig = selected_rig(args.rig)
+        validate_starfire(args.starfire_binary, rig, args.sequences)
         run_dir = (
             ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
         )
@@ -275,23 +266,32 @@ async def _run_session(args, *, checking=False):
         )
         remote.check_connection()
         if checking:
-            logging.info('[prod] configs, model, capture, MIDI and SSH checks passed')
+            logging.info('[prod] Radius, Starfire, fixtures, model, capture and SSH checks passed')
             return
-        app = main.AutoluxController(
-            midi_index,
-            input_device_index=input_index,
-            enable_ui=not args.no_ui,
-            ui_port=args.ui_port,
-            report_path=args.report,
-            enable_monitoring=True,
-            overlay_host='127.0.0.1',
-            overlay_port=tx.config['overlay_port'],
-            overlay_universe=tx.config['dmx_universe'],
-        )
         logging.info('[prod] session logs: %s', run_dir)
         with ExitStack() as stack:
             stack.enter_context(remote)
             native = stack.enter_context(NativeRuntime([tx], run_dir / 'local'))
+            renderer = stack.enter_context(
+                StarfireRuntime(
+                    args.starfire_binary,
+                    rig,
+                    args.sequences,
+                    f"{tx.config['artnet_address']}:{tx.config.get('artnet_port', 6454)}",
+                    run_dir / 'local/starfire',
+                )
+            )
+            from autolux.lib.clients.starfire_client import StarfireClient
+
+            app = main.AutoluxController(
+                lighting_client=StarfireClient(renderer.send_command),
+                input_device_index=input_index,
+                enable_ui=not args.no_ui,
+                ui_port=args.ui_port,
+                report_path=args.report,
+                enable_monitoring=True,
+                fixture_setup=fixture_setup(args),
+            )
             monitor = HealthMonitor(run_dir / 'local/radius_tx/health.json', tx.config['session'])
             health_log = HealthLogger()
             if args.no_ui:
@@ -308,7 +308,9 @@ async def _run_session(args, *, checking=False):
             def check_health():
                 native.check_health()
                 remote.check_health()
+                renderer.check_health()
                 state = monitor.snapshot()
+                state['starfire'] = renderer.snapshot()
                 app.event_buffer.set_system_health(state)
                 health_log.update(
                     state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)

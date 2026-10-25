@@ -1,4 +1,4 @@
-"""Compact, diffable digest of one fast-sim run — the NN integration's golden fixture."""
+"""Compare source analysis and semantic lighting behavior from deterministic simulation."""
 
 from __future__ import annotations
 
@@ -9,19 +9,22 @@ import json
 import time
 from pathlib import Path
 
-SURVIVING_BEAT_COLUMNS = ('t', 'bpm', 'change', 'rms')
-RESCALED_BEAT_COLUMNS = ('strength',)
-DOOMED_BEAT_COLUMNS = ('onset_density', 'kick_strength', 'centroid_trend', 'sub_bass_ratio')
-DOOMED_METRIC_KEYS = ('onset_density_mean',)
+ANALYSIS_BEAT_COLUMNS = ('t', 'bpm', 'change', 'rms')
+ANALYSIS_DIGEST_KEYS = (
+    'beats_detected',
+    'beat_times_hash',
+    'beat_columns_hash',
+    'bpm_median',
+    'bpm_last',
+    'rms_mean',
+    'duration_sec',
+    'sound_events',
+)
 
 # Matches the command-timing tolerance tests/test_simulation.py holds the queue to.
 TIMING_ACCURACY_MAX_MS = 10.0
 
-_EFFECT_MIDI_LABELS = ('set_autoloop', 'set_special_effect')
-_MIDI_LABEL_TO_EFFECT_TYPE = {'set_autoloop': 'AUTOLOOP', 'set_special_effect': 'SPECIAL_EFFECT'}
-
-_STREAM_NAMES = ('sound', 'os2l', 'midi', 'overlay')
-_OVERLAY_LIGHT_BAR = 'LIGHT_BAR_24'
+_STREAM_NAMES = ('sound', 'lighting')
 
 
 def _hash(values) -> str:
@@ -63,20 +66,6 @@ def _sound_events(events: list) -> list:
     return [{'t': round(e['t'], 3), 'playing': e['playing']} for e in events]
 
 
-def _os2l_digest(events: list) -> dict:
-    beats = [e for e in events if e['label'] == 'beat']
-    wire = sorted(set(beats[0]) - {'label', 'time'}) if beats else []
-    return {
-        'beats': len(beats),
-        'wire_keys': wire,
-        'stream_hash': _hash(
-            [[e['change'], e['pos'], round(e['bpm'], 4), e['strength']] for e in beats]
-        ),
-        'strengths': sorted({e['strength'] for e in beats}),
-        'positions': [beats[0]['pos'], beats[-1]['pos']] if beats else [],
-    }
-
-
 def survives_digest(report: dict, streams: dict | None = None) -> dict:
     beats = report['beats']
     metrics = report['metrics']
@@ -84,31 +73,28 @@ def survives_digest(report: dict, streams: dict | None = None) -> dict:
     return {
         'beats_detected': metrics['beats_detected'],
         'beat_times_hash': _hash([round(b['t'], 4) for b in beats]),
-        'beat_columns_hash': _hash([[b[c] for c in SURVIVING_BEAT_COLUMNS] for b in beats]),
+        'beat_columns_hash': _hash([[b[c] for c in ANALYSIS_BEAT_COLUMNS] for b in beats]),
         'bpm_median': round(_median(sorted(b['bpm'] for b in beats if b['bpm'] > 0)), 4),
         'bpm_last': metrics['bpm_last'],
         'rms_mean': round(sum(b['rms'] for b in beats) / len(beats), 6) if beats else 0.0,
         'duration_sec': round(report['duration_sec'], 3),
         'sound_events': _sound_events(streams['sound']),
-        'os2l': _os2l_digest(streams['os2l']),
-        'timing_accuracy': {
-            'max_error_buffers': _queue_error_buffers(report),
-        },
-        'schema': {
-            'report_keys': sorted(report.keys()),
-            'metric_keys': sorted(set(metrics) - set(DOOMED_METRIC_KEYS)),
-            'beat_keys': (sorted(set(beats[0]) - set(DOOMED_BEAT_COLUMNS)) if beats else []),
-        },
     }
 
 
-def _effects_match_report(midi: list, report_effects: list) -> bool:
-    applied = [
-        (_MIDI_LABEL_TO_EFFECT_TYPE[e['label']], e['channel'])
-        for e in midi
-        if e['label'] in _EFFECT_MIDI_LABELS
+def _command_effect(command: dict) -> tuple[str, str] | None:
+    if command['kind'] == 'select':
+        return ('SEQUENCE', f"{command['bank']}/{command['sequence']}")
+    if command['kind'] == 'set_override':
+        return ('ACCENT', command['value']['id'])
+    return None
+
+
+def _effects_match_report(events: list, report_effects: list) -> bool:
+    applied = [_command_effect(event['command']) for event in events]
+    return [effect for effect in applied if effect is not None] == [
+        (event['type'], event['name']) for event in report_effects
     ]
-    return applied == [(e['type'], e['channel']) for e in report_effects]
 
 
 def _intent_at(intents: list, t: float) -> str | None:
@@ -119,30 +105,28 @@ def _intent_at(intents: list, t: float) -> str | None:
     return current
 
 
-def _channels_come_from_the_intents_pool(report: dict) -> bool:
-    from autolux.lib.clients.midi_message import MidiChannel
-    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
+def _effects_match_intents(report: dict) -> bool:
+    from autolux.lib.engine.effect_definitions import LightIntent, SEQUENCE_BY_LIGHT_INTENT
 
-    pools = {intent.value: {autoloop.name} for intent, autoloop in AUTOLOOP_BY_LIGHT_INTENT.items()}
-    pools[LightIntent.DROP.value].add(MidiChannel.SPECIAL_EFFECT_STROBE.name)
+    pools = {
+        intent.value: {f'{bank}/{sequence}'}
+        for intent, (bank, sequence) in SEQUENCE_BY_LIGHT_INTENT.items()
+    }
+    pools[LightIntent.DROP.value].add('drop_arrival')
     return all(
-        effect['channel'] in pools.get(_intent_at(report['intents'], effect['t']), ())
+        effect['name'] in pools.get(_intent_at(report['intents'], effect['t']), ())
         for effect in report['effects']
     )
 
 
 def relations_digest(report: dict, streams: dict | None = None) -> dict:
     streams = _normalise_streams(streams)
-    light_bar = [e for e in streams['overlay'] if e['effect'] == _OVERLAY_LIGHT_BAR]
+    events = streams['lighting']
     errors_ms = _queue_errors_ms(report)
     return {
-        'midi_arrives_in_enqueue_order': _non_decreasing(e['time'] for e in streams['midi']),
-        'midi_matches_the_report_effects': _effects_match_report(
-            streams['midi'], report['effects']
-        ),
-        'midi_channels_come_from_the_intents_pool': _channels_come_from_the_intents_pool(report),
-        'overlay_light_bar_fires': bool(light_bar),
-        'overlay_arrives_in_enqueue_order': _non_decreasing(e['time'] for e in light_bar),
+        'lighting_arrives_in_order': _non_decreasing(e['at_seconds'] for e in events),
+        'lighting_matches_report': _effects_match_report(events, report['effects']),
+        'sequences_match_intents': _effects_match_intents(report),
         'queue_error_within_tolerance': max(errors_ms, default=0.0) < TIMING_ACCURACY_MAX_MS,
     }
 
@@ -150,22 +134,17 @@ def relations_digest(report: dict, streams: dict | None = None) -> dict:
 def informational_digest(report: dict, streams: dict | None = None) -> dict:
     metrics = report['metrics']
     streams = _normalise_streams(streams)
-    midi = streams['midi']
+    lighting = streams['lighting']
     digest = {
         'intent_changes_count': metrics['intent_changes_count'],
         'effect_changes_count': metrics['effect_changes_count'],
         'unique_intents_count': metrics['unique_intents_count'],
         'dominant_intent': metrics['dominant_intent'],
         'intent_distribution_sec': metrics['intent_distribution_sec'],
-        'midi': {
-            'commands': len(midi),
-            'labels': sorted({e['label'] for e in midi}),
-            'ordering_hash': _hash([[e['label'], e['channel']] for e in midi]),
-        },
-        'overlay': {
-            'light_bar_updates': sum(
-                1 for e in streams['overlay'] if e['effect'] == _OVERLAY_LIGHT_BAR
-            ),
+        'lighting': {
+            'commands': len(lighting),
+            'kinds': sorted({event['command']['kind'] for event in lighting}),
+            'ordering_hash': _hash([event['command'] for event in lighting]),
         },
         'timing': {
             'target_delta_sec': sorted(
@@ -225,7 +204,10 @@ def check_digest(name: str, digest: dict, fixture: dict) -> list:
     if name not in fixture:
         return [f'{name}: not in the fixture']
     failures = []
-    expected = fixture[name]['survives']
+    recorded = fixture[name]['survives']
+    # Analysis invariants have their own contract; renderer payloads are checked
+    # by the semantic relations and Starfire's full-DMX replay tests.
+    expected = {key: recorded[key] for key in ANALYSIS_DIGEST_KEYS if key in recorded}
     if digest['survives'] != expected:
         moved = sorted(set(digest['survives']) | set(expected))
         moved = [k for k in moved if expected.get(k) != digest['survives'].get(k)]
@@ -239,9 +221,7 @@ def check_digest(name: str, digest: dict, fixture: dict) -> list:
 def capture_streams(components: dict) -> dict:
     return {
         'sound': components['event_buffer'].sound_events(),
-        'os2l': components['os2l_client'].events,
-        'midi': components['midi_client'].events,
-        'overlay': components['overlay_client'].events,
+        'lighting': components['lighting_client'].events,
     }
 
 

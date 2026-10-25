@@ -22,8 +22,8 @@ Link, telemetry and hardware faults appear only when they need attention.
 - **Buffer drift:** the default target is 150 ms to absorb Wi-Fi delivery bursts. Clock correction handles slow
   device-clock differences; repeated latency recovery indicates sustained stalls.
   Audio delivery-gap and signal-peak metrics distinguish delayed packets from silence.
-- **Lighting unavailable:** confirm SoundSwitch Performance Mode, Art-Net output to
-  localhost, the configured universe, and the receiver's Enttec connection.
+- **Lighting unavailable:** inspect the Starfire process log, fixture patch and Lua
+  sequence, the Radius Art-Net universe, and the receiver's Enttec connection.
 - **Analysis degraded:** inspect the GPU fault and timing panels. Rhythm continues
   while the analysis worker recovers.
 
@@ -45,5 +45,5 @@ Prometheus server if longer-term history is needed. Metrics use seconds, cumulat
 counters and fixed endpoint labels. Stale endpoint data is unavailable, never zero.
 
 `.live/current.json` identifies the latest session. Each session retains generated
-configs, TX output and receiver SSH output. The receiver keeps its own session
+configs, Starfire/TX output and receiver SSH output. The receiver keeps its own session
 logs under `%LOCALAPPDATA%\Autolux\runs`. No credentials are stored in the repo.

@@ -248,6 +248,11 @@ impl LuaSequence {
     }
 
     pub fn render(&mut self, context: &RenderContext) -> Result<Vec<Effect>> {
+        ensure!(
+            context.normalized_rms_level.is_finite()
+                && (0.0..=1.0).contains(&context.normalized_rms_level),
+            "normalized RMS level must be finite and between zero and one"
+        );
         for value in [
             context.time_seconds,
             context.beat_position,

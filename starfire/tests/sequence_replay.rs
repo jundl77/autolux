@@ -149,6 +149,56 @@ fn atmospheric_blue_tide_replay() {
 }
 
 #[test]
+fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe() {
+    for (bank, sequence) in [
+        ("atmospheric", "blue_tide"),
+        ("breakdown", "violet_space"),
+        ("buildup", "current"),
+        ("drop", "blue_impact"),
+    ] {
+        let rig = FixtureRig::load(&root().join("rigs/room.json")).unwrap();
+        let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+        let mut engine = Engine::new(rig, catalog).unwrap();
+        engine
+            .apply(
+                0.0,
+                &Command::Beat {
+                    position_beats: 4.0,
+                    bpm: 140.0,
+                },
+            )
+            .unwrap();
+        engine
+            .apply(
+                0.0,
+                &Command::Select {
+                    bank: bank.into(),
+                    sequence: sequence.into(),
+                    transition: Transition::Cut,
+                },
+            )
+            .unwrap();
+        let strong = engine.render_at(0.25).unwrap();
+        engine
+            .apply(0.25, &Command::SetNormalizedRmsLevel { level: 0.0 })
+            .unwrap();
+        let quiet = engine.render_at(0.25).unwrap();
+        for (id, strong) in &strong.fixture_properties_before_strobe {
+            let quiet = &quiet.fixture_properties_before_strobe[id];
+            within(
+                quiet.intensity,
+                (strong.intensity * 0.65, strong.intensity * 0.65),
+            );
+            assert_eq!(strong.pan, quiet.pan);
+            assert_eq!(strong.tilt, quiet.tilt);
+            assert_eq!(strong.colour, quiet.colour);
+            assert_eq!(quiet.strobe_hz, 0.0);
+        }
+        assert_ne!(strong.dmx_frames_by_universe, quiet.dmx_frames_by_universe);
+    }
+}
+
+#[test]
 fn breakdown_violet_space_replay() {
     check_replay(Look {
         bank: "breakdown",

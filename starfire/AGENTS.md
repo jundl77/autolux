@@ -3,7 +3,7 @@
 - Rust owns rendering, composition and fixture encoding; Lua authors baseline
   sequences. Autolux selects sequences, transitions and overrides. Radius owns
   audio/DMX synchronization. Keep these boundaries explicit.
-- Afterglow guides the effect API; SoundSwitch guides fixtures, groups and banks.
+- Afterglow guides the effect API; fixtures, named groups and banks organize shows.
 - Live and replay use the same renderer. Supply musical time explicitly; forbid
   ambient clocks and unseeded randomness. Every sequence needs a DMX replay test.
 - Selecting the active sequence never restarts it. Overrides affect only their

@@ -68,6 +68,7 @@ def add_subparser(subparsers) -> None:
     ui = actions.add_parser('ui', help='Open the existing dashboard with fixture setup')
     ui.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT)
     ui.add_argument('--rig-store', type=Path, default=DEFAULT_FIXTURE_STORE)
+    ui.add_argument('--snapshot-port', type=int, help='Read the running controller snapshot')
     ui.set_defaults(func=run_ui)
 
 
@@ -193,4 +194,11 @@ async def run_ui(args: argparse.Namespace) -> None:
     store = FixtureStore(
         patch, PROFILE_CATALOGUE, lambda candidate: _validate_patch(binary, candidate)
     )
-    run_app(EventBuffer(), port=args.port, fixture_store=store)
+    source = EventBuffer()
+    if getattr(args, 'snapshot_port', None) is not None:
+        from autolux.simulate.visualizer_app import SnapshotPoller
+
+        if not 1 <= args.snapshot_port <= MAX_TCP_PORT:
+            raise ValueError(f'Snapshot port must be in 1..{MAX_TCP_PORT}')
+        source = SnapshotPoller(port=args.snapshot_port)
+    run_app(source, port=args.port, fixture_store=store)

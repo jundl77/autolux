@@ -78,7 +78,7 @@ def test_native_formatting_skips_deleted_tracked_files(tmp_path, source_director
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows PowerShell build workflow')
-@pytest.mark.parametrize('failed_step', [None, 'fmt', 'test'])
+@pytest.mark.parametrize('failed_step', [None, 'fmt', 'test', 'protocol'])
 def test_starfire_build_stops_on_failure_and_accepts_progress_on_stderr(tmp_path, failed_step):
     shutil.copyfile(
         Path(__file__).resolve().parents[2] / 'build-starfire.ps1',
@@ -92,6 +92,12 @@ def test_starfire_build_stops_on_failure_and_accepts_progress_on_stderr(tmp_path
         f'if "%1" == "{failed_step}" exit /b 7\n'
         'exit /b 0\n'
     )
+    (tmp_path / 'uv.cmd').write_text(
+        '@echo off\n'
+        'echo %*>>"%~dp0protocol-invocations.txt"\n'
+        'echo protocol compiler progress 1>&2\n'
+        f'exit /b {7 if failed_step == "protocol" else 0}\n'
+    )
     result = subprocess.run(
         [
             'powershell.exe',
@@ -104,8 +110,22 @@ def test_starfire_build_stops_on_failure_and_accepts_progress_on_stderr(tmp_path
         ],
         capture_output=True,
         timeout=30,
+        env={**os.environ, 'PATH': str(tmp_path) + os.pathsep + os.environ['PATH']},
     )
     assert (result.returncode == 0) == (failed_step is None)
     invocations = (tmp_path / 'cargo-invocations.txt').read_text().splitlines()
-    assert invocations[-1] == (failed_step or 'build')
+    expected = ['fmt', 'clippy', 'test', 'build']
+    if failed_step in expected:
+        expected = expected[: expected.index(failed_step) + 1]
+    assert invocations == expected
+    protocol_invocations = tmp_path / 'protocol-invocations.txt'
+    if failed_step in (None, 'protocol'):
+        assert protocol_invocations.read_text().splitlines() == [
+            'run --locked python tools/build_proto.py'
+        ]
+        assert b'protocol compiler progress' in result.stderr
+    else:
+        assert not protocol_invocations.exists()
+    if failed_step == 'protocol':
+        assert b'Starfire protocol generation failed' in result.stderr
     assert b'compiler progress' in result.stderr

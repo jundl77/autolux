@@ -1,3 +1,5 @@
+local MIN_AUDIO_LEVEL_BRIGHTNESS = 0.65
+local AUDIO_LEVEL_BRIGHTNESS_RANGE = 0.35
 local WASH_LEVEL = 0.10
 local MOVER_LEVEL = 0.12
 local VIOLET_HUE = 275
@@ -7,10 +9,11 @@ local REST_TILT = 0.42
 
 return {
     render = function(ctx)
+        local brightness = MIN_AUDIO_LEVEL_BRIGHTNESS + AUDIO_LEVEL_BRIGHTNESS_RANGE * ctx.normalized_rms_level
         return sf.scene {
             sf.colour(sf.all(), sf.hsv(VIOLET_HUE, SATURATION, 1)),
-            sf.dimmer(sf.group("wash"), WASH_LEVEL),
-            sf.dimmer(sf.group("movers"), MOVER_LEVEL),
+            sf.dimmer(sf.group("wash"), WASH_LEVEL * brightness),
+            sf.dimmer(sf.group("movers"), MOVER_LEVEL * brightness),
             sf.pan_tilt(sf.group("movers"), REST_PAN, REST_TILT)
         }
     end

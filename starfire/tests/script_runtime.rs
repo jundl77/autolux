@@ -33,6 +33,7 @@ fn snapshot(beats: f64) -> RenderContext {
         beat_position: beats,
         sequence_elapsed_beats: beats,
         sequence_speed_scaled_elapsed_beats: beats,
+        normalized_rms_level: 1.0,
     }
 }
 

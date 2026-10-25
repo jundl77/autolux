@@ -122,11 +122,25 @@ class SnapshotServer:
         self._http.server_close()
 
 
-def viewer_command(ui_port: int) -> list:
-    return [
+def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
+    command = [
         sys.executable,
         '-m',
         VIEWER_MODULE,
+    ]
+    if fixture_setup is not None:
+        command = [
+            sys.executable,
+            '-m',
+            'autolux',
+            'starfire',
+            '--binary',
+            str(fixture_setup['binary']),
+            'ui',
+            '--rig-store',
+            str(fixture_setup['rig_store']),
+        ]
+    return command + [
         '--port',
         str(ui_port),
         '--snapshot-port',
@@ -192,7 +206,7 @@ class UiBridge:
         self._server.stop()
 
 
-def start(event_buffer, ui_port: int) -> UiBridge | None:
+def start(event_buffer, ui_port: int, *, fixture_setup: dict | None = None) -> UiBridge | None:
     try:
         server = SnapshotServer(event_buffer, snapshot_port(ui_port))
         server.start()
@@ -204,7 +218,7 @@ def start(event_buffer, ui_port: int) -> UiBridge | None:
         )
         return None
     try:
-        viewer = _spawn(viewer_command(ui_port))
+        viewer = _spawn(viewer_command(ui_port, fixture_setup))
     except OSError as error:
         logging.warning(
             f'[ui] the viewer process did not start ({error!r}) — the show runs without it'

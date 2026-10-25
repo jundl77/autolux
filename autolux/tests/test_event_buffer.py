@@ -79,7 +79,7 @@ def test_a_song_outlasting_the_storage_window_still_knows_where_it_started():
 
 
 def test_the_sound_events_are_never_windowed():
-    buffer, clock = _ui_session(minutes=20.0)
+    buffer, _clock = _ui_session(minutes=20.0)
     assert buffer.snapshot()['sound_events'][0]['t'] == 0.0
 
 
@@ -157,14 +157,14 @@ def test_infinite_window_keeps_old_events():
     buf = EventBuffer(window_sec=float('inf'), clock=clock)
     buf.start()
     buf.set_intent('GROOVE')
-    buf.add_effect('CH_A', 'AUTOLOOP')
+    buf.add_effect('CH_A', 'SEQUENCE')
     clock.advance(500.0)
     buf.set_intent('DROP')
-    buf.add_effect('CH_B', 'AUTOLOOP')
+    buf.add_effect('CH_B', 'SEQUENCE')
     report = buf.to_report()
     assert [e['intent'] for e in report['intents']] == ['GROOVE', 'DROP']
     assert report['intents'][0]['t'] == 0.0
-    assert [e['channel'] for e in report['effects']] == ['CH_A', 'CH_B']
+    assert [e['name'] for e in report['effects']] == ['CH_A', 'CH_B']
 
 
 def test_mark_end_freezes_timeline():
@@ -193,15 +193,15 @@ def test_default_window_prunes_old_effects():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=60.0, clock=clock)
     buf.start()
-    buf.add_effect('CH_A', 'AUTOLOOP')
+    buf.add_effect('CH_A', 'SEQUENCE')
     clock.advance(1.0)
-    buf.add_effect('CH_B', 'AUTOLOOP')
+    buf.add_effect('CH_B', 'SEQUENCE')
     clock.advance(500.0)
-    buf.add_effect('CH_C', 'AUTOLOOP')
+    buf.add_effect('CH_C', 'SEQUENCE')
     report = buf.to_report()
-    channels = [e['channel'] for e in report['effects']]
-    assert 'CH_A' not in channels
-    assert 'CH_B' in channels and 'CH_C' in channels
+    names = [e['name'] for e in report['effects']]
+    assert 'CH_A' not in names
+    assert 'CH_B' in names and 'CH_C' in names
 
 
 def test_a_beat_row_carries_only_what_the_pipeline_still_measures():
@@ -210,7 +210,7 @@ def test_a_beat_row_carries_only_what_the_pipeline_still_measures():
     buf.start()
     buf.add_beat(128.0, False, rms=0.42)
     beat = buf.to_report()['beats'][0]
-    assert set(beat) == {'t', 'bpm', 'strength', 'change', 'rms'}
+    assert set(beat) == {'t', 'bpm', 'change', 'rms'}
     assert beat['rms'] == pytest.approx(0.42)
 
 
@@ -221,7 +221,6 @@ def test_add_beat_defaults_are_neutral():
     buf.add_beat(128.0, False)
     beat = buf.to_report()['beats'][0]
     assert beat['rms'] == 0.0
-    assert beat['strength'] == 0.0
 
 
 def test_report_records_look_ahead_offset():
@@ -230,6 +229,25 @@ def test_report_records_look_ahead_offset():
     buf.start()
     buf.add_beat(128.0, False)
     assert buf.to_report()['metrics']['look_ahead_sec'] == pytest.approx(2.5)
+
+
+def test_brief_accent_preserves_the_active_sequence_and_reports_its_lifetime():
+    clock = VirtualClock()
+    buffer = EventBuffer(clock=clock)
+    buffer.start()
+    buffer.add_effect('drop/blue_impact', 'SEQUENCE')
+    buffer.add_effect('drop_arrival', 'ACCENT', duration_seconds=1.0)
+    clock.advance(10.0)
+    assert buffer.snapshot()['current_effect']['name'] == 'drop/blue_impact'
+    effects = buffer.to_report()['effects']
+    assert [(effect['name'], effect['end']) for effect in effects] == [
+        ('drop/blue_impact', 10.0),
+        ('drop_arrival', 1.0),
+    ]
+    buffer.stop_effects()
+    clock.advance(1.0)
+    assert buffer.snapshot()['current_effect'] is None
+    assert buffer.to_report()['effects'][0]['end'] == 10.0
 
 
 def test_report_look_ahead_defaults_to_zero():

@@ -11,9 +11,14 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ctrlc = { version = "3.5", features = ["termination"] }
 mlua = { version = "0.12.2", features = ["lua54", "vendored", "serde", "error-send"] }
+prost = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+
+[build-dependencies]
+prost-build = "0.14"
+protoc-bin-vendored = "3"
 
 [dev-dependencies]
 tempfile = "3"

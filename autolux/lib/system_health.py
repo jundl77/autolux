@@ -13,6 +13,17 @@ MAX_DMX_LATENESS_SECONDS = 0.05
 AUDIO_INPUT_STALE_SECONDS = 1
 DMX_INPUT_STALE_SECONDS = 3
 MILLISECONDS_PER_SECOND = 1000
+RENDERER_TELEMETRY_STALE_SECONDS = 30
+
+
+def renderer_is_fresh(system, age):
+    renderer = system.get('starfire') or {}
+    measured_age = renderer.get('age_seconds')
+    return (
+        age < TELEMETRY_STALE_SECONDS
+        and finite(measured_age)
+        and measured_age + age < RENDERER_TELEMETRY_STALE_SECONDS
+    )
 
 
 def health_summary(snapshot, *, now=None):
@@ -60,8 +71,11 @@ def health_summary(snapshot, *, now=None):
     input_age = rx.get('audio_input_age_seconds')
     audio_fresh = rx_fresh and input_age is not None and input_age + age < AUDIO_INPUT_STALE_SECONDS
     dmx_age = tx.get('dmx_input_age_seconds')
+    renderer = system.get('starfire') or {}
+    renderer_ready = renderer_is_fresh(system, age) and not renderer.get('script_error')
     lights = (
         link
+        and renderer_ready
         and rx.get('dmx_connected')
         and dmx_age is not None
         and dmx_age + age < DMX_INPUT_STALE_SECONDS
@@ -97,7 +111,14 @@ def health_summary(snapshot, *, now=None):
         (
             'Lighting',
             'Ready' if lights else 'Waiting / offline',
-            'Enttec output and SoundSwitch input',
+            str(
+                renderer.get('script_error')
+                or (
+                    'Enttec output and Starfire renderer'
+                    if renderer_ready
+                    else 'Starfire telemetry unavailable'
+                )
+            ),
             bool(lights),
         ),
         (
@@ -164,6 +185,47 @@ class HealthCollector:
             'Analysis is recovering from a fault.',
             value=int(bool(shed.get('fault'))),
         )
+        renderer = system.get('starfire') or {}
+        renderer_fresh = renderer_is_fresh(system, age)
+        yield GaugeMetricFamily(
+            'starfire_up',
+            'Renderer heartbeat is fresh and its script is healthy.',
+            value=int(renderer_fresh and not renderer.get('script_error')),
+        )
+        if renderer_fresh:
+            for key, name, description, factory, scale in (
+                (
+                    'rendered_frames',
+                    'starfire_rendered_frames_total',
+                    'Frames rendered.',
+                    CounterMetricFamily,
+                    1,
+                ),
+                (
+                    'skipped_frames',
+                    'starfire_skipped_frames_total',
+                    'Render deadlines skipped after a scheduling stall.',
+                    CounterMetricFamily,
+                    1,
+                ),
+                (
+                    'queued_commands',
+                    'starfire_queued_commands',
+                    'Commands awaiting the next render frame.',
+                    GaugeMetricFamily,
+                    1,
+                ),
+                (
+                    'last_render_ms',
+                    'starfire_last_render_duration_seconds',
+                    'Duration of the last completed render.',
+                    GaugeMetricFamily,
+                    1 / MILLISECONDS_PER_SECOND,
+                ),
+            ):
+                value = renderer.get(key)
+                if finite(value):
+                    yield factory(name, description, value=value * scale)
         timing = (snapshot.get('timing_stats') or {}).get('mean_error_ms')
         if timing is not None:
             yield GaugeMetricFamily(

@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import math
 
+from autolux.lib.clients.starfire_client import rms_to_normalized_level
+from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
+
 REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
 SEQUENCE_BY_INTENT = {
-    'atmospheric': ('atmospheric', 'blue_tide'),
-    'breakdown': ('breakdown', 'violet_space'),
-    'buildup': ('buildup', 'current'),
-    'drop': ('drop', 'blue_impact'),
+    intent.value: sequence for intent, sequence in SEQUENCE_BY_LIGHT_INTENT.items()
 }
 
 
@@ -68,6 +68,16 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
         if not previous_beat_time <= at <= duration:
             raise ValueError('beat times must be ordered and within the report duration')
         previous_beat_time = at
+        if 'rms' in beat:
+            events.append(
+                {
+                    'at_seconds': at,
+                    'command': {
+                        'kind': 'set_normalized_rms_level',
+                        'level': rms_to_normalized_level(_nonnegative(beat['rms'], 'beat.rms')),
+                    },
+                }
+            )
         bpm = _nonnegative(beat.get('bpm'), 'beat.bpm')
         if bpm > MAX_TEMPO_BPM:
             raise ValueError(f'beat.bpm exceeds {MAX_TEMPO_BPM:g}')

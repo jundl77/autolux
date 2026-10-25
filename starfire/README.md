@@ -2,7 +2,7 @@
 
 Rust lighting renderer with banked Lua sequences, fixture-aware composition and
 deterministic DMX replay. Autolux chooses sequences and accents; Radius owns
-synchronized transport. Production SoundSwitch remains available separately.
+synchronized transport.
 
 ```powershell
 .\build-starfire.ps1
@@ -18,6 +18,8 @@ next session. Native commands are also available in
 
 Sequences return semantic effects from `render(ctx)`. Use supplied musical time,
 named groups and helpers in `src/lua/lighting.lua`; never depend on render count.
+`ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, separate from master
+brightness; bundled sequences use it for restrained brightness variation.
 The supplied sequences expect `wash` and `movers` groups in the rig.
 Selecting the current bank/name keeps it running. Overrides affect only their
 properties; clearing reveals the continuing baseline.
@@ -27,8 +29,12 @@ Every sequence has a checked full-DMX replay plus behavior assertions. Run
 rustfmt, Clippy and release compilation. Toolchain and formatting are pinned at
 the repository root.
 
+Live mode receives framed Protobuf commands through owned process pipes and
+renders Art-Net at 40 Hz. Heartbeats expire after 30 seconds; EOF and failures
+black out output. The contract is in `../proto/starfire/starfire.proto`.
+
 The room rig includes verified Spot 110 and SePar profiles. Other hardware,
-physical calibration and live Radius clock integration require review before
-production use. See the [design and diagrams](../docs/starfire-design.md) and
+physical calibration and exact Radius clock handoff require review.
+See the [design and diagrams](../docs/starfire-design.md) and
 [decision log](../docs/starfire/decisions.md).
 See [validation](../docs/starfire/validation.md) for tested behavior and hardware limits.

@@ -3,8 +3,11 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "autolux*"]
+include = ["cli*", "autolux*", "proto", "proto.starfire"]
 exclude = ["*.tests*", "autolux.training.data*"]
+
+[tool.setuptools.cmdclass]
+build_py = "tools.build_proto.BuildPy"
 
 [project.scripts]
 autolux = "cli.main:run_sync"
@@ -14,18 +17,16 @@ name = "autolux"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "python-rtmidi>=1.5,<2",
+    "protobuf>=4.25,<5",
     "cython",
     "madmom",
     "numpy>=1.26,<2",
     "pyaudio",
     "scipy",
-    "python-osc",
     "scikit-learn",
     "librosa",
     "argcomplete",
     "zeroconf",
-    "netifaces",
     "prometheus-client>=0.21,<1",
     "setuptools<71",
     # torch stays at 2.11: only the legacy TorchScript ONNX exporter keeps a GRU's

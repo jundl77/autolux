@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package autolux.starfire.v1;
+
+// Local owned-process IPC: 4-byte big-endian payload length, then one message.
+// Both directions require schema_version = 1 and limit payloads to 64 KiB.
+message Control {
+  uint32 schema_version = 1;
+  oneof command {
+    Beat beat = 10;
+    Select select = 11;
+    LightingOverride set_override = 12;
+    ClearOverride clear_override = 13;
+    SetMaster set_master = 14;
+    SetSpeed set_speed = 15;
+    SetBlackout set_blackout = 16;
+    Empty stop = 17;
+    SetNormalizedRmsLevel set_normalized_rms_level = 18;
+    Empty heartbeat = 19;
+  }
+}
+
+message Empty {}
+
+message Beat {
+  double position_beats = 1;
+  double bpm = 2;
+}
+
+message Select {
+  string bank = 1;
+  string sequence = 2;
+  // Omitted transition means cut. Selecting the active identity is a no-op.
+  Transition transition = 3;
+}
+
+message Transition {
+  oneof policy {
+    Empty cut = 1;
+    double crossfade_beats = 2;
+  }
+}
+
+message Target {
+  oneof selection {
+    Empty all = 1;
+    string group = 2;
+    string fixture = 3;
+  }
+}
+
+message Colour {
+  double red = 1;
+  double green = 2;
+  double blue = 3;
+}
+
+message Properties {
+  optional double intensity = 1;
+  Colour colour = 2;
+  optional double pan = 3;
+  optional double tilt = 4;
+  optional double strobe_hz = 5;
+}
+
+message Lifetime {
+  oneof duration {
+    Empty until_cleared = 1;
+    double beats = 2;
+    double seconds = 3;
+  }
+}
+
+message LightingOverride {
+  string id = 1;
+  Target target = 2;
+  Properties values = 3;
+  optional double intensity_multiplier = 4;
+  // Omitted lifetime means until explicitly cleared.
+  Lifetime lifetime = 5;
+  sint32 priority = 6;
+}
+
+message ClearOverride {
+  string id = 1;
+}
+message SetMaster {
+  double intensity = 1;
+}
+message SetSpeed {
+  double multiplier = 1;
+}
+message SetBlackout {
+  bool enabled = 1;
+}
+// Measured RMS mapped through -48..-12 dBFS and clamped to 0..1; independent of master.
+message SetNormalizedRmsLevel {
+  double level = 1;
+}
+
+message RendererEvent {
+  uint32 schema_version = 1;
+  oneof event {
+    Ready ready = 10;
+    Health health = 11;
+    Error error = 12;
+  }
+}
+
+message Ready {
+  uint32 frame_rate_hz = 1;
+}
+
+message Health {
+  double elapsed_seconds = 1;
+  uint64 rendered_frames = 2;
+  uint64 skipped_frames = 3;
+  uint32 queued_commands = 4;
+  double last_render_ms = 5;
+  string active_bank = 6;
+  string active_sequence = 7;
+  string script_error = 8;
+}
+
+message Error {
+  string message = 1;
+}

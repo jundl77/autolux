@@ -23,6 +23,7 @@ def healthy():
             'underruns_total': 2,
         },
         'recent': {},
+        'starfire': {'age_seconds': 0.2, 'script_error': ''},
     }
 
 
@@ -31,6 +32,34 @@ def test_old_counters_do_not_make_a_recovered_show_permanently_unhealthy():
     assert health_summary(snapshot)['state'] == 'healthy'
     snapshot['system']['recent'] = {'underruns': 1}
     assert health_summary(snapshot)['state'] == 'degraded'
+
+
+def test_renderer_metrics_use_measured_counts_and_seconds_and_expire():
+    buffer = EventBuffer()
+    state = healthy()
+    state['starfire'].update(
+        rendered_frames=80, skipped_frames=2, queued_commands=1, last_render_ms=2.5
+    )
+    buffer.set_system_health(state)
+    text = metrics(buffer).decode()
+    assert 'starfire_rendered_frames_total 80.0' in text
+    assert 'starfire_skipped_frames_total 2.0' in text
+    assert 'starfire_last_render_duration_seconds 0.0025' in text
+    state['starfire']['age_seconds'] = 31
+    buffer.set_system_health(state)
+    assert health_summary(buffer.snapshot())['state'] == 'degraded'
+    text = metrics(buffer).decode()
+    assert 'starfire_up 0.0' in text
+    assert 'starfire_last_render_duration_seconds' not in text
+
+
+def test_script_fault_or_missing_renderer_cannot_look_like_healthy_lighting():
+    for renderer in (None, {'age_seconds': 0.1, 'script_error': 'Lua budget exceeded'}):
+        state = healthy()
+        state['starfire'] = renderer
+        summary = health_summary({'system': state})
+        assert summary['state'] == 'degraded'
+        assert not summary['cards'][4][3]
 
 
 def test_missing_buffer_measurements_do_not_invent_a_zero_or_default_target():

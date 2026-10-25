@@ -44,6 +44,7 @@ async def test_actual_event_buffer_queue_delivery_is_aligned_to_source_time_once
     replay = report_to_replay(saved)
     assert [(event['at_seconds'], event['command']['kind']) for event in replay['events']] == [
         (1.0, 'beat'),
+        (1.0, 'set_normalized_rms_level'),
         (1.0, 'select'),
         (16.0, 'stop'),
     ]
@@ -105,6 +106,24 @@ def test_all_four_intents_map_to_authored_sequences_in_stable_order():
         ('drop', 'blue_impact'),
     ]
     assert report_to_replay(source) == report_to_replay(copy.deepcopy(source))
+
+
+def test_replay_preserves_measured_loudness_instead_of_a_fixed_strength():
+    from autolux.lib.clients.starfire_client import rms_to_normalized_level
+
+    source = report()
+    source['beats'][0]['rms'] = 0.01
+    source['beats'][1]['rms'] = 0.1
+    energies = [
+        event
+        for event in report_to_replay(source)['events']
+        if event['command']['kind'] == 'set_normalized_rms_level'
+    ]
+    assert [event['at_seconds'] for event in energies] == [1.0, 1.5]
+    assert [event['command']['level'] for event in energies] == [
+        rms_to_normalized_level(0.01),
+        rms_to_normalized_level(0.1),
+    ]
 
 
 def test_zero_tempo_warmup_is_skipped_without_losing_detected_beat_count():

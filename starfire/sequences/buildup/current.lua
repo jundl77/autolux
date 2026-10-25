@@ -1,3 +1,5 @@
+local MIN_AUDIO_LEVEL_BRIGHTNESS = 0.65
+local AUDIO_LEVEL_BRIGHTNESS_RANGE = 0.35
 local PULSE_PERIOD_BEATS = 2
 local MOVEMENT_PERIOD_BEATS = 16
 local LOW_LEVEL, HIGH_LEVEL = 0.22, 0.48
@@ -8,8 +10,9 @@ local TILT_MIN, TILT_MAX = 0.32, 0.52
 
 return {
     render = function(ctx)
+        local brightness = MIN_AUDIO_LEVEL_BRIGHTNESS + AUDIO_LEVEL_BRIGHTNESS_RANGE * ctx.normalized_rms_level
         return sf.scene {
-            sf.dimmer(sf.all(), sf.osc.sine(ctx.beat_position, PULSE_PERIOD_BEATS, LOW_LEVEL, HIGH_LEVEL)),
+            sf.dimmer(sf.all(), sf.osc.sine(ctx.beat_position, PULSE_PERIOD_BEATS, LOW_LEVEL, HIGH_LEVEL) * brightness),
             sf.each(sf.group("wash"), function(target, index, count)
                 local spread = (index - 1) / count
                 return sf.colour(target, sf.hsv(

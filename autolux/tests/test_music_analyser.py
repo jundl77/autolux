@@ -160,7 +160,7 @@ async def test_no_beat_means_no_note_event(analyser):
     assert await analyser._track_note([], now) is False
 
 
-async def test_a_burst_of_beats_in_one_buffer_cannot_strobe_the_overlay_bar(analyser):
+async def test_a_burst_of_beats_in_one_buffer_emits_one_note_callback(analyser):
     now = analyser._clock.now()
     analyser.last_note_detected = now - datetime.timedelta(seconds=1)
     assert await analyser._track_note([1.0], now) is True
@@ -186,7 +186,7 @@ class _FakeRhythm:
         return self._events(beats=[index / 100.0] if index in self.fire_on else [])
 
 
-async def test_the_overlay_note_event_follows_the_beat_stream():
+async def test_the_note_event_follows_the_beat_stream():
     class _Recorder(_StubHandler):
         def __init__(self):
             self.beats: list[int] = []
@@ -410,7 +410,7 @@ async def test_debug_clicks_are_mixed_into_the_returned_audio():
     assert on.beat_buffers, 'no beats on 20 s of the anchor track'
     assert clicked_on == on.beat_buffers, 'clicks did not land exactly on the beats'
     assert on.note_buffers == on.beat_buffers, (
-        'the overlay light bar is no longer following the beat stream'
+        'the note callback is no longer following the beat stream'
     )
     assert not clicked_off, 'audio was modified with -d off'
 

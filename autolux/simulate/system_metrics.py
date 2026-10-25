@@ -235,7 +235,7 @@ def build_telemetry_notices(snapshot, *, now=None):
             and tx_age + age < TELEMETRY_STALE_SECONDS
             and (not finite(dmx_age) or dmx_age + age >= DMX_INPUT_STALE_SECONDS)
         ):
-            messages.append('No recent lighting input from SoundSwitch.')
+            messages.append('No recent lighting input from Starfire.')
     shed = snapshot.get('shed') or {}
     fault = shed.get('fault')
     if fault or shed.get('level', 'NONE') != 'NONE':
