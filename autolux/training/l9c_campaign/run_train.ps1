@@ -6,8 +6,14 @@ param(
     [string]$ExtraArgs = ""
 )
 $ErrorActionPreference = "Stop"
-$Py = "C:\Users\Julian\Projects\soundswitch-exp-ceiling-worktree\.venv\Scripts\python.exe"
-$TreePB = "C:\Users\Julian\Projects\soundswitch-phase-b-worktree"
+$Py = $env:AUTOLUX_EXPERIMENT_PYTHON
+$TreePB = $env:AUTOLUX_PHASE_B_CHECKOUT
+if (-not $TreePB -or -not (Test-Path -LiteralPath (Join-Path $TreePB "training/nn") -PathType Container)) {
+    throw "Set AUTOLUX_PHASE_B_CHECKOUT to the required experiment checkout containing training/nn."
+}
+if (-not $Py -or -not (Test-Path -LiteralPath $Py -PathType Leaf)) {
+    throw "Set AUTOLUX_EXPERIMENT_PYTHON to the experiment Python executable."
+}
 $Data = (Resolve-Path (Join-Path $PSScriptRoot "../data/raveform")).Path
 $Camp = "$Data\models\l9c_campaign"
 $FeatDir = "$Data\features_stream\MERT-v1-330M_L6-22_F3_hop1"
