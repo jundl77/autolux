@@ -23,6 +23,8 @@ prototype assumptions can change after an offline review and hardware audition.
 | U13 | Every Lua sequence has a deterministic beatgrid-to-DMX replay test. | Identical input, rig, controls and program produce identical DMX; live and replay share the renderer. |
 | U14 | Work in an isolated worktree; commit meaningful slices to a branch. | Production master remains separate from prototype integration. |
 | U15 | Delegate work, review it centrally and check progress every 15 minutes. | Three implementation workstreams; integration, decisions and final validation stay with the lead. |
+| U16 | Calibrate the four Lua loops against captured output from the authored SoundSwitch loops. | Compare controlled beatgrids, levels, fixture encoding and timing; thematic similarity alone is insufficient. |
+| U17 | Continue calibration while the user is away; speakers cannot be tested now. | Capture local Art-Net only; leave Radius and physical outputs stopped. Audible validation remains pending. |
 
 ## Prototype decisions
 
@@ -91,6 +93,13 @@ approved removing SoundSwitch connectivity and requested the live contract in
   attempts blackout. Do not add triple buffering or a backlog of completed DMX
   frames; consider a latest-frame handoff only if output separation is measured
   to be necessary. Radius's intentional synchronized playback buffer is separate.
+- P58: Keep SoundSwitch reference control and comparison helpers in development
+  tools or ignored validation artifacts. Production remains Starfire-only. Record
+  original asset hashes, supplied controls and captured DMX; distinguish exact
+  channel agreement from phase alignment and intentional profile differences.
+- P59: Run the standalone dashboard synchronously from the CLI main thread.
+  Its blocking server and mDNS registration must not occupy an asyncio event
+  loop or an executor worker that prevents bounded Ctrl-C shutdown.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -203,7 +212,14 @@ Hardware audition is explicitly separate from deterministic offline validation.
   passes. Twenty native replays reproduce each track's DMX digest exactly. All
   91 Rust tests pass, including performance floors: release measurements are
   530.4x for the room and 82.2x for 64 fixtures. Nonblocking output and production
-  universe validation are covered. Publishing final slices and stopping the timer.
+  universe validation are covered. Final slices published; the timer continues
+  for the subsequently requested hardware run and reference calibration.
+- 2026-10-25 09:57 local: hardware run completed with user-confirmed lighting.
+  Audio transport had no packet loss, buffer overflows or buffer underruns; the
+  speaker was off, so audible output remains unconfirmed. The run exposed an
+  mDNS/dashboard lifecycle defect, now under regression review. Reference-loop
+  calibration takes priority while the user is away; local and remote Radius
+  processes are absent, and SoundSwitch output is captured on localhost only.
 
 - 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
   engine suites pass independently. Lead reviewed public boundaries and found

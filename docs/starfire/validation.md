@@ -4,7 +4,7 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 
 | Check | Result |
 | --- | --- |
-| Python | Full run: 2,331 passed, two failures subsequently fixed and retested. Another 260 focused checks passed after the input API rename; final CLI validation passed all 50 cases. |
+| Python | Full run: 2,331 passed, two failures subsequently fixed and retested. Another 260 focused checks passed after the input API rename; final CLI validation passed all 53 cases, including actual dashboard HTTP/mDNS startup and bounded Ctrl-C shutdown. |
 | Rust | 91 tests passed, including all Lua sequences, protocol/lifecycle handling and performance gates. Strict Clippy and rustfmt passed. |
 | Radius | Both executables built; all four native test groups passed. |
 | Distribution | Product build, wheel/source package and formatting passed. Generated Protobuf descriptors are packaged; isolated codec import passed. |
@@ -12,6 +12,7 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 | Analysis/backtest | All ten tracks preserve 9,298 beats, complete section boundaries, sound events and every analysis score/count. Full-report hashes reflect verified lighting changes; the strict comparison gate and previously failing benchmark test pass. |
 | Recorded command replay | All ten actual command streams rendered twice: 168,114 DMX frames per pass, identical repeated digests, zero script errors. Slowest run: 551.74x real time. |
 | Live loopback | Python ownership to Protobuf IPC to native Art-Net: all four banks observed over 90 seconds; 3,602 packets, no sequence gaps, final blackout preserving movement. |
+| Physical pipeline | A 90-second Spotify run drove Starfire, Radius TX, the remote RX and Enttec; the user confirmed working lights. Audio transport was active, but the speaker was off, so hearing remains unconfirmed. The dashboard startup defect exposed by this run is fixed and regression-tested. |
 | Failure handling | Real heartbeat expiry exited at 30.000 seconds with blackout. Malformed/oversized messages, script failures, full-queue shutdown and mismatched production universes are covered. |
 | Diagram | Mermaid rendered; all 12 nodes have explanations and all three application boundaries are dotted rectangles. |
 
@@ -38,8 +39,12 @@ worst-case measurements.
 
 ## Scope and reproduction
 
-No validation output drove physical fixtures or speakers. Wi-Fi, USB latency,
-colour, movement calibration and the physical show still need a joint audition.
+The physical run reported no lost or late audio packets, buffer overflows, buffer
+underruns or dropped DMX frames. One device underrun occurred during startup;
+the counter stayed at one. Maximum audio packet gap was 28 ms. These are observed
+session measurements, not guarantees for every Wi-Fi condition. SoundSwitch
+reference calibration is in progress with local capture and physical output off.
+Audible output and the calibrated looks still need a joint audition.
 Radius currently stamps Art-Net ingress at receipt; exact future render targets
 need a further timing handoff. The RMS input updates on detected beats.
 

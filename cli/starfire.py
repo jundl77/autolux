@@ -173,7 +173,7 @@ def _validate_patch(binary: Path, patch: Path) -> None:
         raise ValueError(completed.stderr.strip() or 'Starfire rejected the fixture patch')
 
 
-async def run_ui(args: argparse.Namespace) -> None:
+def run_ui(args: argparse.Namespace) -> None:
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lighting.fixture_setup import FixtureStore
     from autolux.simulate.visualizer_app import run_app

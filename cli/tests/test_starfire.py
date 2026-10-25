@@ -1,7 +1,13 @@
 import argparse
 import asyncio
 import json
+import os
+import socket
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -122,3 +128,87 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
         str(saved),
         str(explicit),
     ]
+
+
+@pytest.mark.parametrize('shutdown', ['owned_process', 'keyboard_interrupt'])
+def test_dashboard_http_readiness_and_bounded_shutdown(tmp_path, shutdown):
+    from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.lib.ui_bridge import SnapshotServer, kill_tree
+
+    if not starfire.DEFAULT_BINARY.is_file():
+        pytest.skip('Build Starfire to validate the dashboard entry process')
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1', 0))
+        port = reservation.getsockname()[1]
+    source = SnapshotServer(EventBuffer(), 0)
+    source.start()
+    process = None
+    log_path = tmp_path / 'dashboard.log'
+    interrupt_file = tmp_path / 'interrupt'
+    entry = ['-m', 'autolux']
+    if shutdown == 'keyboard_interrupt':
+        entry = [
+            '-c',
+            'import _thread, sys, threading, time\n'
+            'from pathlib import Path\n'
+            'from cli.main import run_sync\n'
+            'interrupt_file = Path(sys.argv.pop(1))\n'
+            'def interrupt():\n'
+            '    while not interrupt_file.exists():\n'
+            '        time.sleep(0.05)\n'
+            '    _thread.interrupt_main()\n'
+            'threading.Thread(target=interrupt, daemon=True).start()\n'
+            'run_sync()\n',
+            str(interrupt_file),
+        ]
+    try:
+        with log_path.open('wb') as log:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    *entry,
+                    'starfire',
+                    'ui',
+                    '--port',
+                    str(port),
+                    '--snapshot-port',
+                    str(source.port),
+                    '--rig-store',
+                    str(tmp_path / 'rig.json'),
+                ],
+                cwd=starfire.ROOT,
+                stdin=subprocess.DEVNULL,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                **(
+                    {
+                        'creationflags': subprocess.CREATE_NO_WINDOW
+                        | subprocess.CREATE_NEW_PROCESS_GROUP
+                    }
+                    if os.name == 'nt'
+                    else {'start_new_session': True}
+                ),
+            )
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            assert process.poll() is None, log_path.read_text(errors='replace')
+            try:
+                with urllib.request.urlopen(
+                    f'http://127.0.0.1:{port}/metrics', timeout=0.5
+                ) as response:
+                    assert response.status == 200
+                    assert b'autolux_up' in response.read()
+                break
+            except urllib.error.URLError:
+                time.sleep(0.05)
+        else:
+            pytest.fail(f'Dashboard readiness timed out:\n{log_path.read_text(errors="replace")}')
+        assert 'EventLoopBlocked' not in log_path.read_text(errors='replace')
+        if shutdown == 'keyboard_interrupt':
+            interrupt_file.touch()
+            assert process.wait(timeout=5) == 0, log_path.read_text(errors='replace')
+    finally:
+        if process is not None:
+            kill_tree(process)
+        source.stop()
+    assert process.poll() is not None

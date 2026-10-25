@@ -107,7 +107,12 @@ def run_sync():
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     try:
-        asyncio.run(main())
+        args = _parse_command()
+        if args is not None:
+            if asyncio.iscoroutinefunction(args.func):
+                asyncio.run(args.func(args))
+            else:
+                args.func(args)
     except KeyboardInterrupt:
         pass
     except (RuntimeError, OSError, ValueError) as error:
@@ -208,7 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def main():
+def _parse_command():
     parser = build_parser()
     argcomplete.autocomplete(parser)
     arguments = sys.argv[1:]
@@ -223,4 +228,14 @@ async def main():
         parser.print_help()
         return
 
+    return args
+
+
+async def main():
+    """Async entry for analysis and simulation callers."""
+    args = _parse_command()
+    if args is None:
+        return
+    if not asyncio.iscoroutinefunction(args.func):
+        raise RuntimeError('This command owns a blocking server; launch it through autolux.')
     await args.func(args)
