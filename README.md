@@ -7,7 +7,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | --- | --- |
 | `cli/` | Startup, SSH deployment, supervision and shutdown |
 | `autolux/lib/` | Music analysis and lighting decisions |
-| `autolux/lighting/` | Authored SoundSwitch section loops |
+| `autolux/lighting/` | SoundSwitch assets, Starfire report adapter and fixture storage |
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |

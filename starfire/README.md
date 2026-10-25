@@ -18,6 +18,7 @@ next session. Native commands are also available in
 
 Sequences return semantic effects from `render(ctx)`. Use supplied musical time,
 named groups and helpers in `src/lua/lighting.lua`; never depend on render count.
+The supplied sequences expect `wash` and `movers` groups in the rig.
 Selecting the current bank/name keeps it running. Overrides affect only their
 properties; clearing reveals the continuing baseline.
 
@@ -30,3 +31,4 @@ The room rig includes verified Spot 110 and SePar profiles. Other hardware,
 physical calibration and live Radius clock integration require review before
 production use. See the [design and diagrams](../docs/starfire-design.md) and
 [decision log](../docs/starfire/decisions.md).
+See [validation](../docs/starfire/validation.md) for tested behavior and hardware limits.

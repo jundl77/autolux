@@ -136,3 +136,15 @@ Hardware audition is explicitly separate from deterministic offline validation.
   all 3,602 packets in order with exact offline payload parity and final blackout;
   maximum observed interval was 25.93 ms. Python tests are running without failures;
   backtest/simulation follow serially. All delegated work is reviewed and committed.
+- 2026-10-25 02:32 local: fourth checkpoint. Python completed with 2,343 passes
+  and one missing-warm-cache skip; that case will be rerun after cache generation.
+  The final Lua identity-reflection fix is committed; 77 Rust tests, strict
+  Clippy and the release rebuild pass. Final executable capture remains identical
+  to the paced reference. Backtest is at 5/10 tracks, generating missing caches
+  in this worktree. No baseline updates or additional feature work are planned.
+- 2026-10-25 02:41 local: final checkpoint. Full validation passed; all ten
+  backtest reports match the committed baseline and standalone simulation passes.
+  The initially skipped warm-cache case now passes, completing all 2,344 Python
+  cases. Final Rust checks cover 77 tests and the release capture matches the
+  paced reference. See [validation](validation.md) for evidence and limits.
+  Publishing the review branch and stopping the owned checkpoint timer.
