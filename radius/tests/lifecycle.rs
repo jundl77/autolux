@@ -135,14 +135,22 @@ fn old_run_cannot_claim_receiver_before_the_owned_run_logs_in() {
 }
 
 #[test]
-fn embedded_tx_and_rx_exchange_bidirectional_heartbeats_and_stop_cleanly() {
+fn embedded_tx_and_rx_keep_heartbeats_when_health_files_are_unwritable() {
     let config = config(free_port());
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let worker_config = config.clone();
-    let worker = thread::spawn(move || run_receiver(worker_config, worker_stop, None, None));
     // A directory cannot be replaced by a report: telemetry failures must not stop transport.
     let unwritable_health_file = tempfile::tempdir().unwrap();
+    let receiver_health_file = unwritable_health_file.path().to_path_buf();
+    let worker = thread::spawn(move || {
+        run_receiver(
+            worker_config,
+            worker_stop,
+            None,
+            Some(&receiver_health_file),
+        )
+    });
     let tx = RadiusTx::start(TxConfig {
         peer_address: "127.0.0.1".into(),
         bus_port: config.bus_port,

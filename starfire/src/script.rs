@@ -269,8 +269,10 @@ impl LuaAutoloop {
         math.set("random", Value::Nil)?;
         math.set("randomseed", Value::Nil)?;
         let string: Table = globals.get("string")?;
-        string.set("dump", Value::Nil)?;
-        string.set("format", Value::Nil)?;
+        // Native pattern backtracking cannot be interrupted by Lua instruction hooks.
+        for name in ["dump", "format", "find", "match", "gmatch", "gsub"] {
+            string.set(name, Value::Nil)?;
+        }
 
         let api: Table = lua
             .load(LIGHTING_API)

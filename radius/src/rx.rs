@@ -26,6 +26,7 @@ const DMX_POLL_INTERVAL: Duration = Duration::from_millis(5);
 const DMX_FRAME_INTERVAL: Duration = Duration::from_millis(25);
 const OUTPUT_START_TIMEOUT: Duration = Duration::from_secs(10);
 const CALLBACK_STALE_TIMEOUT: Duration = Duration::from_secs(1);
+const HEALTH_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Resolves lighting before admission. TCP guarantees each reference targets the
 /// most recent preceding light state; no independently advancing lighting clock.
@@ -351,6 +352,7 @@ fn run_connected(
     let mut audio_at = None;
     let mut audio_max_gap: f64 = 0.0;
     let mut audio_peak: f32 = 0.0;
+    let mut health_error_at: Option<Instant> = None;
     let output_started = Instant::now();
     while !stop.load(Ordering::Acquire) {
         for message in connection.poll()? {
@@ -452,11 +454,15 @@ fn run_connected(
                 connection.send(&Message::Metrics(metrics))?,
                 "Radius client is not reading receiver metrics"
             );
-            if let Some(path) = health_file {
-                std::fs::write(
+            if let Some(path) = health_file
+                && let Err(error) = std::fs::write(
                     path,
                     serde_json::to_vec(&serde_json::json!({"run_id":config.run_id,"rx":metrics}))?,
-                )?;
+                )
+                && health_error_at.is_none_or(|at| at.elapsed() >= HEALTH_ERROR_LOG_INTERVAL)
+            {
+                eprintln!("Radius receiver telemetry unavailable: {error}");
+                health_error_at = Some(Instant::now());
             }
             metrics_at = Instant::now();
             audio_max_gap = 0.0;

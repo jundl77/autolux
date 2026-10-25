@@ -247,7 +247,16 @@ impl Engine {
 
         let mut encoded_states = states.clone();
         apply_software_strobe(time_seconds, &mut encoded_states);
-        let universes = self.rig.encode(&encoded_states)?;
+        let universes = match self.rig.encode(&encoded_states) {
+            Ok(universes) => universes,
+            Err(error) => {
+                self.stop_on_script_error(&error);
+                states = self.dark_states();
+                self.rig
+                    .encode(&states)
+                    .context("encode safe darkness after render failure")?
+            }
+        };
         self.last_time_seconds = time_seconds;
         self.last_output_states = states.clone();
         Ok(RenderedFrame {

@@ -340,22 +340,12 @@ impl GdtfProfile {
             active_function_ends[index] =
                 channel.active_function_ends(&values, &active_function_ends, &self.channels);
             let dimmer = channel.has_dimmer;
-            let rgb = channel.has_rgb;
-            let white = if channel.has_white && rgb {
-                state
-                    .colour
-                    .red
-                    .min(state.colour.green)
-                    .min(state.colour.blue)
-            } else {
-                0.0
-            };
             let mut requested = None;
             for (function_index, function) in channel.functions.iter().enumerate() {
                 let Some(last) = active_function_ends[index][function_index] else {
                     continue;
                 };
-                if let Some(value) = semantic_value(function, last, state, dimmer, rgb, white) {
+                if let Some(value) = semantic_value(function, last, state, channel) {
                     ensure!(
                         requested.is_none(),
                         "ambiguous semantic GDTF attribute on {}",
@@ -564,11 +554,23 @@ fn semantic_value(
     function: &Function,
     last: u32,
     state: &FixtureState,
-    dimmer: bool,
-    rgb: bool,
-    white: f64,
+    channel: &Channel,
 ) -> Option<u32> {
-    let gain = if dimmer { 1.0 } else { state.intensity };
+    let rgb = channel.has_rgb;
+    let gain = if channel.has_dimmer {
+        1.0
+    } else {
+        state.intensity
+    };
+    let white = if channel.has_white && rgb {
+        state
+            .colour
+            .red
+            .min(state.colour.green)
+            .min(state.colour.blue)
+    } else {
+        0.0
+    };
     let wheel = !function.sets.is_empty() && function.sets.iter().any(|set| set.colour.is_some());
     if wheel && function.attribute.starts_with("Color") {
         let requested = if rgb {
@@ -588,14 +590,31 @@ fn semantic_value(
             .map(|(set, _)| set.first);
     }
     let value = match function.attribute.as_str() {
-        "Dimmer" => state.intensity * if rgb { 1.0 } else { colour_peak(state.colour) },
+        "Dimmer" => {
+            state.intensity
+                * if rgb || channel.has_white {
+                    1.0
+                } else {
+                    colour_peak(state.colour)
+                }
+        }
         "ColorAdd_R" => (state.colour.red - white) * gain,
         "ColorAdd_G" => (state.colour.green - white) * gain,
         "ColorAdd_B" => (state.colour.blue - white) * gain,
-        "ColorAdd_W" => white * gain,
+        "ColorAdd_W" => {
+            (if rgb {
+                white
+            } else {
+                colour_peak(state.colour)
+            }) * gain
+        }
         "ColorSub_C" => 1.0 - state.colour.red * gain,
         "ColorSub_M" => 1.0 - state.colour.green * gain,
         "ColorSub_Y" => 1.0 - state.colour.blue * gain,
+        // Extra emitters require explicit physical attributes; their defaults
+        // must never turn them on during idle, blackout or script failure.
+        attribute if attribute.starts_with("ColorAdd_") => 0.0,
+        attribute if attribute.starts_with("ColorSub_") => 1.0,
         "Pan" => state.pan,
         "Tilt" => state.tilt,
         _ => return None,

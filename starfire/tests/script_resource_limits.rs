@@ -1,4 +1,6 @@
 use std::fs;
+use std::process::{Command as ProcessCommand, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 use starfire::engine::MAX_SCRIPT_ERROR_BYTES;
@@ -37,6 +39,70 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) 
         }],
     };
     (replay, rig, catalog)
+}
+
+#[test]
+fn native_pattern_matching_cannot_bypass_the_script_budget() {
+    const PROCESS_TIMEOUT: Duration = Duration::from_secs(5);
+    const EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+    let directory = tempfile::tempdir().unwrap();
+    let autoloops = directory.path().join("autoloops");
+    fs::create_dir_all(autoloops.join("test")).unwrap();
+    let rig = directory.path().join("rig.json");
+    fs::write(&rig, simple_rig().to_string()).unwrap();
+    let profiles = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs/profiles.json");
+
+    for expression in [
+        "string.find(text, pattern)",
+        "string.match(text, pattern)",
+        "string.gmatch(text, pattern)()",
+        "string.gsub(text, pattern, '')",
+        "text:find(pattern)",
+        "text:match(pattern)",
+        "text:gmatch(pattern)()",
+        "text:gsub(pattern, '')",
+    ] {
+        fs::write(
+            autoloops.join("test/pattern.lua"),
+            format!(
+                "return {{render=function(ctx) local text=string.rep('a',24); \
+                 local pattern=string.rep('a*',24)..'b'; {expression}; return {{}} end}}"
+            ),
+        )
+        .unwrap();
+        let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_starfire"))
+            .arg("check")
+            .arg("--rig")
+            .arg(&rig)
+            .arg("--profiles")
+            .arg(&profiles)
+            .arg("--autoloops")
+            .arg(&autoloops)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + PROCESS_TIMEOUT;
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("native pattern escaped the Lua budget: {expression}");
+            }
+            std::thread::sleep(EXIT_POLL_INTERVAL);
+        };
+        let output = child.wait_with_output().unwrap();
+        let diagnostic = String::from_utf8_lossy(&output.stderr);
+        assert!(!status.success(), "accepted {expression}");
+        assert!(
+            diagnostic.contains("nil value"),
+            "{expression}: {diagnostic}"
+        );
+    }
 }
 
 #[test]

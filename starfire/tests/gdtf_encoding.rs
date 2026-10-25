@@ -1,7 +1,7 @@
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::gdtf::GdtfProfile;
-use starfire::model::{AttributeValue, Command, FixtureState, Transition};
+use starfire::model::{AttributeValue, Command, FixtureState, Rgb, Transition};
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
@@ -15,6 +15,9 @@ fn description(channels: &str) -> String {
       <Attribute Name="ColorAdd_R" Pretty="Red" Feature="Control.Control" PhysicalUnit="Percent"/>
       <Attribute Name="ColorAdd_G" Pretty="Green" Feature="Control.Control" PhysicalUnit="Percent"/>
       <Attribute Name="ColorAdd_B" Pretty="Blue" Feature="Control.Control" PhysicalUnit="Percent"/>
+      <Attribute Name="ColorAdd_W" Pretty="White" Feature="Control.Control" PhysicalUnit="Percent"/>
+      <Attribute Name="ColorAdd_A" Pretty="Amber" Feature="Control.Control" PhysicalUnit="Percent"/>
+      <Attribute Name="ColorSub_UV" Pretty="UV filter" Feature="Control.Control" PhysicalUnit="Percent"/>
       </Attributes></AttributeDefinitions>
       <Geometries><Geometry Position="{{1,0,0,0}}{{0,1,0,0}}{{0,0,1,0}}{{0,0,0,1}}" Name="Base"><Geometry Position="{{1,0,0,0}}{{0,1,0,0}}{{0,0,1,0}}{{0,0,0,1}}" Name="Head1"/><Geometry Position="{{1,0,0,0}}{{0,1,0,0}}{{0,0,1,0}}{{0,0,0,1}}" Name="Head2"/></Geometry></Geometries>
       <DMXModes><DMXMode Name="Control" Geometry="Base"><DMXChannels>{channels}</DMXChannels></DMXMode></DMXModes>
@@ -516,8 +519,8 @@ fn malformed_offsets_cycles_and_unsupported_modes_fail_at_initialization() {
     assert!(GdtfProfile::from_xml(&description(&normal), "missing").is_err());
 }
 
-fn engine(channels: &str, source: &str) -> Engine {
-    let rig = FixtureRig::from_wire(&wire::RigDefinition {
+fn rig(channels: &str) -> FixtureRig {
+    FixtureRig::from_wire(&wire::RigDefinition {
         fixtures: vec![wire::Fixture {
             fixture_id: "fixture".into(),
             profile_id: "test".into(),
@@ -531,14 +534,17 @@ fn engine(channels: &str, source: &str) -> Engine {
         }],
         ..Default::default()
     })
-    .unwrap();
+    .unwrap()
+}
+
+fn engine(channels: &str, source: &str) -> Engine {
     let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
         autoloop_id: "test".into(),
         bank: "test".into(),
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(rig, catalog).unwrap();
+    let mut engine = Engine::new(rig(channels), catalog).unwrap();
     engine
         .apply(
             0.0,
@@ -593,6 +599,181 @@ fn explicit_dimmer_values_respect_master_and_blackout() {
         engine.render_at(0.1).unwrap().dmx_frames_by_universe[&0][0],
         0
     );
+}
+
+#[test]
+fn white_only_emitters_follow_intensity_without_applying_colour_brightness_twice() {
+    for with_dimmer in [false, true] {
+        let mut channels = channel(
+            "ColorAdd_W",
+            "Base",
+            "1",
+            &function("ColorAdd_W", r#"Default="255/1""#),
+        );
+        if with_dimmer {
+            channels += &channel("Dimmer", "Base", "2", &function("Dimmer", ""));
+        }
+        let profile = profile(&channels);
+        for (intensity, expected) in [(0.0, 0), (0.5, 128), (1.0, 255)] {
+            let output = encode(
+                &profile,
+                &FixtureState {
+                    intensity,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                output,
+                if with_dimmer {
+                    vec![255, expected]
+                } else {
+                    vec![expected]
+                }
+            );
+        }
+        let half_white = FixtureState {
+            intensity: 0.5,
+            colour: Rgb {
+                red: 0.5,
+                green: 0.5,
+                blue: 0.5,
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            encode(&profile, &half_white),
+            if with_dimmer {
+                vec![128, 128]
+            } else {
+                vec![64]
+            }
+        );
+    }
+}
+
+#[test]
+fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults() {
+    for (attribute, default, dark, dimmed) in [
+        ("ColorAdd_A", "255/1", 0, 64),
+        ("ColorSub_UV", "0/1", 255, 192),
+    ] {
+        let channels = channel(
+            attribute,
+            "Base",
+            "1",
+            &function(attribute, &format!(r#"Default="{default}""#)),
+        );
+        assert_eq!(
+            encode(&profile(&channels), &FixtureState::default()),
+            [dark]
+        );
+        let mut engine = engine(
+            &channels,
+            &format!(
+                "return {{render=function(ctx) if ctx.time_seconds >= 1 then error('fixture fault') end; return {{sf.physical_attribute(sf.all(), '{attribute}', 50)}} end}}"
+            ),
+        );
+        assert_eq!(
+            engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],
+            128
+        );
+        for (master, expected) in [(0.5, dimmed), (0.0, dark), (1.0, 128)] {
+            engine
+                .apply(0.0, &Command::SetMaster { intensity: master })
+                .unwrap();
+            assert_eq!(
+                engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],
+                expected
+            );
+        }
+        engine
+            .apply(0.1, &Command::SetBlackout { enabled: true })
+            .unwrap();
+        assert_eq!(
+            engine.render_at(0.1).unwrap().dmx_frames_by_universe[&0][0],
+            dark
+        );
+        engine
+            .apply(0.2, &Command::SetBlackout { enabled: false })
+            .unwrap();
+        assert_eq!(
+            engine.render_at(0.2).unwrap().dmx_frames_by_universe[&0][0],
+            128
+        );
+        engine.apply(0.3, &Command::Stop).unwrap();
+        assert_eq!(
+            engine.render_at(0.3).unwrap().dmx_frames_by_universe[&0][0],
+            dark
+        );
+        engine
+            .apply(
+                0.4,
+                &Command::Select {
+                    bank: "test".into(),
+                    autoloop: "test".into(),
+                    transition: Transition::Cut,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine.render_at(0.4).unwrap().dmx_frames_by_universe[&0][0],
+            128
+        );
+        let failed = engine.render_at(1.0).unwrap();
+        assert!(failed.script_error.unwrap().contains("fixture fault"));
+        assert_eq!(failed.dmx_frames_by_universe[&0][0], dark);
+    }
+}
+
+#[test]
+fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloop() {
+    for (zoom_condition, extra_effect, diagnostic) in [
+        (
+            r#"ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1""#,
+            "sf.physical_attribute(sf.all(), 'Zoom', 50)",
+            "inactive",
+        ),
+        (
+            "",
+            "sf.physical_attribute(sf.all(), 'Zoom', 50), sf.physical_attribute(sf.all(), 'Base.Zoom', 75)",
+            "conflicting",
+        ),
+    ] {
+        let channels = channel("Dimmer", "Base", "1", &function("Dimmer", ""))
+            + &channel("Pan", "Base", "2", &function("Pan", ""))
+            + &channel("Mode", "Base", "3", &function("Mode", ""))
+            + &channel("Zoom", "Base", "4", &function("Zoom", zoom_condition));
+        let broken = format!(
+            "return {{render=function(ctx) if ctx.time_seconds == 0 then return {{sf.dimmer(sf.all(), 0.5), sf.pan_tilt(sf.all(), 0.25, 0.5)}} end; return {{sf.dimmer(sf.all(), 1), sf.pan_tilt(sf.all(), 0.9, 0.5), {extra_effect}}} end}}"
+        );
+        let catalog = AutoloopCatalog::from_definitions(&[
+            wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "broken".into(), lua_source: broken },
+            wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "healthy".into(), lua_source: "return {render=function(ctx) return {sf.dimmer(sf.all(), 0.75), sf.pan_tilt(sf.all(), 0.75, 0.5)} end}".into() },
+        ]).unwrap();
+        let mut engine = Engine::new(rig(&channels), catalog).unwrap();
+        engine
+            .play_autoloop(0.0, "broken", Transition::Cut)
+            .unwrap();
+        assert_eq!(
+            &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][..2],
+            &[128, 64]
+        );
+        let failed = engine.render_at(0.1).unwrap();
+        assert!(failed.script_error.as_ref().unwrap().contains(diagnostic));
+        assert_eq!(&failed.dmx_frames_by_universe[&0][..2], &[0, 64]);
+        let latched = engine.render_at(0.2).unwrap();
+        assert_eq!(latched.script_error, failed.script_error);
+        assert_eq!(
+            latched.dmx_frames_by_universe,
+            failed.dmx_frames_by_universe
+        );
+        engine
+            .play_autoloop(0.3, "healthy", Transition::Cut)
+            .unwrap();
+        let recovered = engine.render_at(0.3).unwrap();
+        assert!(recovered.script_error.is_none());
+        assert_eq!(&recovered.dmx_frames_by_universe[&0][..2], &[191, 191]);
+    }
 }
 
 #[test]
