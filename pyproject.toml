@@ -9,6 +9,9 @@ exclude = ["*.tests*", "autolux.training.data*"]
 [tool.setuptools.cmdclass]
 build_py = "tools.build_proto.BuildPy"
 
+[tool.setuptools.package-data]
+"autolux.simulate" = ["assets/*.js"]
+
 [project.scripts]
 autolux = "cli.main:run_sync"
 

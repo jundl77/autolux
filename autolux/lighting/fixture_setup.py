@@ -76,6 +76,21 @@ def next_free_address(rows: list[dict], profiles: dict, universe: int, channel_c
     )
 
 
+def repatch_dmx_fixture(
+    rows: list[dict], profiles: dict, fixture_id: str, artnet_universe: int, dmx_start_address: int
+) -> list[dict]:
+    """Return a valid draft with one fixture moved; universes are zero-based, addresses one-based."""
+    matches = [index for index, row in enumerate(rows) if row['id'] == fixture_id]
+    if len(matches) != 1:
+        raise ValueError('The fixture changed. Select it again before moving it.')
+    moved = [dict(row) for row in rows]
+    moved[matches[0]].update(universe=artnet_universe, address=dmx_start_address)
+    _, errors = channel_occupancy(moved, profiles, artnet_universe)
+    if errors:
+        raise ValueError(errors[0])
+    return moved
+
+
 class FixtureStore:
     def __init__(self, patch_path: Path, profiles_path: Path, validate: Callable[[Path], None]):
         self.patch_path = Path(patch_path)

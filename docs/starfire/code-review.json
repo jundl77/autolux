@@ -173,5 +173,47 @@
   },
   "user_decisions": [
     "Manual corrections override published annotations for already admitted training tracks; evaluation holdouts remain excluded."
-  ]
+  ],
+  "fixture_drag_followup": {
+    "behavior": [
+      "Grid is the primary patch editor; click opens fixture details.",
+      "Drag preserves the grabbed channel offset and validates the complete fixture footprint.",
+      "Overlaps, invalid addresses and stale moves leave the draft unchanged.",
+      "Universe selector sits beside the grid heading; manufacturer controls and patch table are removed."
+    ],
+    "validation": {
+      "fixture_and_gdtf_tests": 58,
+      "browser": "Real Edge pointer events on a copied rig: row wrapping, offset, collision, bounds, Escape/outside cancellation, details, save/reload and group order.",
+      "asset_packaging": "JavaScript verified byte-for-byte in wheel and source distribution.",
+      "independent_review": "Pointer/callback/persistence review complete; click suppression now expires after the pointer release."
+    },
+    "naming": {
+      "implementation": "autolux/lighting/fixture_setup.py:repatch_dmx_fixture returns a validated draft after changing one identified fixture\u2019s Art-Net universe and DMX start address; no persistence or hardware output.",
+      "attempts": [
+        {
+          "names": [
+            "repatch_fixture",
+            "fixture_id",
+            "universe",
+            "start_address"
+          ],
+          "reader": "/root/blind_repatch_fixture; fresh names-only context, low effort, no tools",
+          "prediction": "Together, these suggest reassigning a fixture identified by fixture_id to an address range beginning at start_address within universe. They do not reveal whether the operation also changes physical connections, reserves a range, or checks collisions.",
+          "comparison": "Core address reassignment aligned; domain was ambiguous. Renamed function and address inputs to name DMX/Art-Net explicitly."
+        },
+        {
+          "names": [
+            "repatch_dmx_fixture",
+            "fixture_id",
+            "artnet_universe",
+            "dmx_start_address"
+          ],
+          "reader": "/root/blind_repatch_dmx_fixture; fresh names-only context, low effort, no tools",
+          "prediction": "Together, these suggest changing a fixture\u2019s destination group and starting address, but the names alone do not establish validation rules, side effects, or whether the operation persists changes.",
+          "comparison": "Address reassignment aligned. Protocol terms retained; indexing, validation and absence of persistence are explicit in the boundary docstring/tests, not inferred from names."
+        }
+      ],
+      "disposition": "Address-move meaning aligned; names-only inference of validation/side effects remains limited. DMX and Art-Net numbering follow documented protocol conventions."
+    }
+  }
 }

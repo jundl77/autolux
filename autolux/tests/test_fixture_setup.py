@@ -6,7 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy, next_free_address
+from autolux.lighting.fixture_setup import (
+    FixtureStore,
+    channel_occupancy,
+    next_free_address,
+    repatch_dmx_fixture,
+)
 
 PROFILES = {'rgb': {'channels': 3}, 'moving_head': {'channels': 12}}
 
@@ -73,6 +78,39 @@ def test_identical_addresses_in_distinct_universes_are_independent():
     rows = [fixture_row(), fixture_row('other', universe=1)]
     assert not channel_occupancy(rows, PROFILES, 0)[1]
     assert next_free_address(rows, PROFILES, 0, 3) == 4
+
+
+def test_repatch_can_overlap_its_own_old_footprint_and_preserves_fixture_identity():
+    rows = [dict(fixture_row(), _original_id='left', groups='wash', pan_min=0.2)]
+    moved = repatch_dmx_fixture(rows, PROFILES, 'left', 0, 2)
+    assert moved[0] == dict(rows[0], address=2)
+    assert rows[0]['address'] == 1
+    assert channel_occupancy(moved, PROFILES, 0)[0][:4] == [[], [0], [0], [0]]
+
+
+def test_repatch_crosses_map_rows_and_accepts_the_last_valid_address():
+    rows = [fixture_row(profile='moving_head')]
+    wrapped = repatch_dmx_fixture(rows, PROFILES, 'left', 0, 31)
+    assert channel_occupancy(wrapped, PROFILES, 0)[0][30:42] == [[0]] * 12
+    moved = repatch_dmx_fixture(wrapped, PROFILES, 'left', 1, 501)
+    assert channel_occupancy(moved, PROFILES, 1)[0][500:] == [[0]] * 12
+    assert not any(channel_occupancy(moved, PROFILES, 0)[0])
+
+
+@pytest.mark.parametrize(
+    'address,universe', [(4, 0), (511, 0), (0, 0), (1.5, 0), (True, 0), (1, -1)]
+)
+def test_invalid_drag_never_changes_the_draft(address, universe):
+    rows = [fixture_row(), fixture_row('right', 4)]
+    original = [dict(row) for row in rows]
+    with pytest.raises(ValueError):
+        repatch_dmx_fixture(rows, PROFILES, 'left', universe, address)
+    assert rows == original
+
+
+def test_drag_cannot_reassign_a_removed_or_renamed_fixture():
+    with pytest.raises(ValueError, match='fixture changed'):
+        repatch_dmx_fixture([fixture_row()], PROFILES, 'missing', 0, 10)
 
 
 @pytest.fixture

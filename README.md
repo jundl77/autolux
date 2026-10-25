@@ -40,10 +40,10 @@ See [receiver setup](cli/README.md). Fixture patches and profiles live in `rigs/
 named Lua autoloops live in `autoloops/`. Saved fixture edits apply on
 the next session.
 
-The dashboard's **Config** tab provides a manufacturer/mode library, fixture patch
-list and 512-channel DMX map. Add fixtures at the first free address or choose an
-address, then assign groups and movement limits in the selected-fixture editor.
-Universes are displayed from 1. Save validates the complete patch before replacing it.
+The dashboard's **Config** tab provides a fixture library and 512-channel DMX map.
+Drag fixtures to free addresses; click a fixture to edit its details, groups and
+movement limits. Universes are displayed from 1. Save validates the complete
+patch before replacing it; edits apply on the next session.
 
 ## Run
 

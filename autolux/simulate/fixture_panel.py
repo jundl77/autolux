@@ -1,7 +1,7 @@
 """Fixture library, patch editor and DMX universe map for the Config tab."""
 
 import dash
-from dash import ALL, Input, Output, State, dash_table, dcc, html
+from dash import Input, Output, State, dcc, html
 
 from autolux.lighting.fixture_setup import (
     DMX_UNIVERSE_SIZE,
@@ -10,6 +10,7 @@ from autolux.lighting.fixture_setup import (
     fixture_patch,
     fixture_rows,
     next_free_address,
+    repatch_dmx_fixture,
 )
 
 MAP_COLUMNS = 32
@@ -21,11 +22,24 @@ FIXTURE_CSS = '''
 .patch-toolbar {margin-bottom:18px;}
 .patch-toolbar h2 {margin:0;font-size:19px;}
 .patch-toolbar p {margin:5px 0 0;color:#8293a6;font-size:12px;}
-.patch-workspace {display:grid;grid-template-columns:250px minmax(480px,1fr) 285px;gap:16px;align-items:start;}
+.patch-workspace {display:grid;grid-template-columns:230px minmax(480px,1fr);gap:16px;align-items:start;}
 .patch-card {background:#121a24;border:1px solid #273345;border-radius:6px;padding:16px;min-width:0;}
 .patch-card h3 {margin:0 0 14px;font-size:13px;font-weight:600;}
-.patch-library {grid-row:span 2;}
-.patch-map-card {grid-column:2 / 4;}
+.patch-workspace.has-selection {grid-template-columns:230px minmax(480px,1fr) 300px;}
+.patch-library {grid-column:1;grid-row:1;}
+.patch-map-card {grid-column:2;grid-row:1;}
+#fixture-info {grid-column:3;grid-row:1;}
+.patch-universe-heading {display:flex;align-items:center;gap:14px;}
+.patch-universe-heading h3,.patch-info-heading h3 {margin:0;}
+.patch-info-heading {margin-bottom:14px;}
+#config-panel[aria-busy="true"] {pointer-events:none;}
+.patch-drag-label {position:fixed;z-index:1000;pointer-events:none;background:#152333;color:#e6edf3;border:1px solid #64b8a4;border-radius:4px;padding:6px 10px;font:12px Segoe UI;}
+.patch-drag-label.invalid {border-color:#e69478;color:#ffbd9f;}
+.patch-channel.drop-valid {background:#3a907d;outline:1px solid #a0ebd2;color:white;z-index:3;}
+.patch-channel.drop-invalid {background:#984c38;outline:1px solid #f8ad92;color:white;z-index:3;}
+#config-panel .patch-block.dragging {opacity:.35;}
+#config-panel .patch-block {cursor:grab;user-select:none;touch-action:none;}
+#config-panel .patch-block:active {cursor:grabbing;}
 .patch-field {display:block;margin:0 0 12px;min-width:0;}
 .patch-field>span {display:block;color:#94a6b9;font-size:11px;margin-bottom:5px;}
 .patch-field input {box-sizing:border-box;width:100%;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:8px;font:inherit;font-size:12px;}
@@ -41,7 +55,7 @@ FIXTURE_CSS = '''
 .patch-muted,#fixture-status {font-size:12px;color:#93a5b9;line-height:1.6;}
 #fixture-status {margin:12px 0;min-height:19px;}
 .patch-profile-info {min-height:65px;margin:12px 0 18px;font-size:12px;color:#93a5b9;line-height:1.7;}
-.patch-map {display:grid;grid-template-columns:repeat(32,minmax(0,1fr));grid-auto-rows:23px;gap:2px;margin-top:12px;}
+.patch-map {display:grid;grid-template-columns:repeat(var(--dmx-columns),minmax(0,1fr));grid-auto-rows:29px;gap:2px;margin-top:12px;}
 .patch-channel {background:#192432;color:#65798f;font-size:9px;display:flex;align-items:center;justify-content:center;border-radius:2px;}
 #config-panel .patch-block {padding:0 4px;border:0;border-radius:2px;color:#fff;font-size:10px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:1;}
 #config-panel .patch-block.selected {outline:2px solid #e2efff;outline-offset:-2px;z-index:2;}
@@ -71,6 +85,7 @@ def _channel_map(rows, occupied, selected):
         html.Div(
             str(index + 1),
             className='patch-channel',
+            **{'data-channel': index + 1},
             style={'gridRow': index // MAP_COLUMNS + 1, 'gridColumn': index % MAP_COLUMNS + 1},
         )
         for index in range(DMX_UNIVERSE_SIZE)
@@ -87,7 +102,12 @@ def _channel_map(rows, occupied, selected):
             cells.append(
                 html.Button(
                     title,
-                    id={'type': 'fixture-map-block', 'row': row_index, 'segment': segment},
+                    **{
+                        'data-fixture-id': name,
+                        'data-start-address': start + 1,
+                        'data-channel-count': end - start + 1,
+                        'data-universe': rows[row_index]['universe'],
+                    },
                     title=title,
                     className='patch-block'
                     + (' selected' if selected == row_index else '')
@@ -97,7 +117,6 @@ def _channel_map(rows, occupied, selected):
                         'gridColumn': f'{segment % MAP_COLUMNS + 1} / span {stop - segment}',
                         'background': FIXTURE_COLORS[row_index % len(FIXTURE_COLORS)],
                     },
-                    n_clicks=0,
                 )
             )
             segment = stop
@@ -138,24 +157,6 @@ def build_fixture_panel(app, store):
                     html.Div(
                         [
                             html.H3('Fixture library'),
-                            _field(
-                                'Manufacturer',
-                                dcc.Dropdown(
-                                    id='fixture-manufacturer',
-                                    clearable=False,
-                                    value='*',
-                                    options=[{'label': 'All manufacturers', 'value': '*'}]
-                                    + [
-                                        {'label': name, 'value': name}
-                                        for name in sorted(
-                                            {
-                                                profile['manufacturer']
-                                                for profile in profiles.values()
-                                            }
-                                        )
-                                    ],
-                                ),
-                            ),
                             _field(
                                 'Fixture / mode',
                                 dcc.Dropdown(
@@ -200,55 +201,12 @@ def build_fixture_panel(app, store):
                         [
                             html.Div(
                                 [
-                                    html.H3('Patched fixtures'),
-                                    html.Span(id='fixture-count', className='patch-muted'),
+                                    html.H3('Fixture details'),
+                                    html.Button('Close', id='fixture-close'),
                                 ],
-                                className='patch-heading',
+                                className='patch-heading patch-info-heading',
                             ),
-                            dash_table.DataTable(
-                                id='fixture-table',
-                                data=[],
-                                row_selectable='single',
-                                selected_rows=[0] if rows else [],
-                                columns=[
-                                    {'name': label, 'id': key}
-                                    for label, key in (
-                                        ('Fixture', 'name'),
-                                        ('Mode', 'mode'),
-                                        ('Universe', 'universe'),
-                                        ('DMX address', 'address'),
-                                        ('Groups', 'groups'),
-                                    )
-                                ],
-                                style_table={
-                                    'height': '314px',
-                                    'overflowY': 'auto',
-                                    'overflowX': 'auto',
-                                },
-                                style_cell={
-                                    'backgroundColor': '#121a24',
-                                    'color': '#dce8f5',
-                                    'borderColor': '#273345',
-                                    'fontFamily': 'Segoe UI',
-                                    'fontSize': '12px',
-                                    'padding': '10px',
-                                    'textAlign': 'left',
-                                },
-                                style_header={'backgroundColor': '#0b121c', 'fontWeight': '600'},
-                                style_data_conditional=[
-                                    {
-                                        'if': {'state': 'selected'},
-                                        'backgroundColor': '#23394f',
-                                        'border': '1px solid #527eaa',
-                                    }
-                                ],
-                            ),
-                        ],
-                        className='patch-card',
-                    ),
-                    html.Div(
-                        [
-                            html.H3('Selected fixture'),
+                            html.P(id='fixture-detail-summary', className='patch-muted'),
                             _field('Name', dcc.Input(id='fixture-name', type='text')),
                             _field(
                                 'Fixture / mode',
@@ -329,31 +287,47 @@ def build_fixture_panel(app, store):
                                 className='patch-actions',
                             ),
                         ],
+                        id='fixture-info',
                         className='patch-card',
+                        style={'display': 'none'},
                     ),
                     html.Div(
                         [
                             html.Div(
                                 [
-                                    html.H3('DMX universe'),
-                                    dcc.Dropdown(
-                                        id='fixture-map-universe',
-                                        options=[{'label': 'Universe 1', 'value': 0}],
-                                        value=0,
-                                        clearable=False,
-                                        style={'width': '170px'},
+                                    html.Div(
+                                        [
+                                            html.H3('DMX universe'),
+                                            dcc.Dropdown(
+                                                id='fixture-map-universe',
+                                                options=[{'label': 'Universe 1', 'value': 0}],
+                                                value=0,
+                                                clearable=False,
+                                                style={'width': '170px'},
+                                            ),
+                                        ],
+                                        className='patch-universe-heading',
                                     ),
                                     html.Span(id='fixture-map-summary', className='patch-muted'),
                                 ],
                                 className='patch-heading',
                             ),
-                            html.Div(id='fixture-channel-map', className='patch-map'),
+                            html.Div(
+                                id='fixture-channel-map',
+                                className='patch-map',
+                                style={'--dmx-columns': MAP_COLUMNS},
+                                **{
+                                    'data-columns': MAP_COLUMNS,
+                                    'data-channel-count': DMX_UNIVERSE_SIZE,
+                                    'data-universe': 0,
+                                },
+                            ),
                             html.Div(id='fixture-conflicts', className='patch-conflicts'),
                             html.Div(
                                 [
                                     html.Span('Colour = fixture footprint'),
                                     html.Span('Striped = address conflict'),
-                                    html.Span('Click a fixture to edit'),
+                                    html.Span('Drag to move · click for details'),
                                 ],
                                 className='patch-map-legend',
                             ),
@@ -361,29 +335,20 @@ def build_fixture_panel(app, store):
                         className='patch-card patch-map-card',
                     ),
                 ],
+                id='fixture-workspace',
                 className='patch-workspace',
             ),
             html.P('Changes are saved for the next session.', id='fixture-status', role='status'),
             dcc.Store(id='fixture-draft', data=rows),
+            dcc.Store(id='fixture-selection', data=[]),
+            dcc.Store(id='fixture-grid-action'),
             dcc.Store(id='fixture-patch', data=patch),
             dcc.Store(id='fixture-revision', data=revision),
         ],
         id='config-panel',
+        **{'aria-busy': 'false'},
         style={'display': 'none'},
     )
-
-    @app.callback(
-        Output('fixture-library-profile', 'options'),
-        Output('fixture-library-profile', 'value'),
-        Input('fixture-manufacturer', 'value'),
-    )
-    def filter_library(manufacturer):
-        options = [
-            option
-            for option in profile_options
-            if manufacturer == '*' or profiles[option['value']]['manufacturer'] == manufacturer
-        ]
-        return options, options[0]['value'] if options else None
 
     @app.callback(
         Output('fixture-profile-info', 'children'), Input('fixture-library-profile', 'value')
@@ -392,8 +357,6 @@ def build_fixture_panel(app, store):
         profile = profiles.get(identifier)
         return (
             [
-                html.Strong(profile['manufacturer']),
-                html.Br(),
                 f'{profile["channels"]} DMX channels · {profile["dmx_mode"]}',
             ]
             if profile
@@ -401,42 +364,27 @@ def build_fixture_panel(app, store):
         )
 
     @app.callback(
-        Output('fixture-table', 'data'),
         Output('fixture-channel-map', 'children'),
         Output('fixture-map-summary', 'children'),
         Output('fixture-conflicts', 'children'),
         Output('fixture-save', 'disabled'),
-        Output('fixture-count', 'children'),
         Output('fixture-map-universe', 'options'),
+        Output('fixture-channel-map', 'data-universe'),
         Input('fixture-draft', 'data'),
         Input('fixture-map-universe', 'value'),
-        Input('fixture-table', 'selected_rows'),
+        Input('fixture-selection', 'data'),
     )
     def render_patch(draft, universe, selected):
         occupied, errors = channel_occupancy(draft, profiles, universe)
-        table = []
-        for row in draft:
-            profile = profiles.get(row['profile'], {})
-            count = profile.get('channels', 0)
-            table.append(
-                {
-                    'name': row['id'],
-                    'mode': profile.get('dmx_mode', '?'),
-                    'universe': row['universe'] + 1,
-                    'address': f'{row["address"]}–{row["address"] + count - 1}',
-                    'groups': row.get('groups', ''),
-                }
-            )
         universes = sorted({universe, 0, *(row['universe'] for row in draft)})
         used = sum(bool(owners) for owners in occupied)
         return (
-            table,
             _channel_map(draft, occupied, selected[0] if selected else None),
             f'{used} / {DMX_UNIVERSE_SIZE} channels patched',
             [html.Div(error) for error in errors],
             bool(errors),
-            f'{len(draft)} fixtures',
             [{'label': f'Universe {number + 1}', 'value': number} for number in universes],
+            universe,
         )
 
     edit_fields = [
@@ -457,12 +405,32 @@ def build_fixture_panel(app, store):
         *[Output(f'fixture-{name}', 'value') for name in edit_fields],
         Output('fixture-apply', 'disabled'),
         Output('fixture-remove', 'disabled'),
-        Input('fixture-table', 'selected_rows'),
+        Output('fixture-info', 'style'),
+        Output('fixture-workspace', 'className'),
+        Output('fixture-detail-summary', 'children'),
+        Input('fixture-selection', 'data'),
         Input('fixture-draft', 'data'),
     )
     def inspect_fixture(selected, draft):
         if not selected or selected[0] >= len(draft):
-            return '', None, 1, 1, '', 0, 1, [], 0, 1, [], True, True
+            return (
+                '',
+                None,
+                1,
+                1,
+                '',
+                0,
+                1,
+                [],
+                0,
+                1,
+                [],
+                True,
+                True,
+                {'display': 'none'},
+                'patch-workspace',
+                '',
+            )
         row = draft[selected[0]]
         values = [
             row['id'],
@@ -479,28 +447,31 @@ def build_fixture_panel(app, store):
                     ['invert'] if row[f'{axis}_inverted'] else [],
                 ]
             )
-        return *values, False, False
+        count = profiles[row['profile']]['channels']
+        summary = f'{count} channels · {row["address"]}–{row["address"] + count - 1}'
+        return *values, False, False, {'display': 'block'}, 'patch-workspace has-selection', summary
 
     @app.callback(
         Output('fixture-draft', 'data'),
         Output('fixture-patch', 'data'),
         Output('fixture-revision', 'data'),
         Output('fixture-status', 'children'),
-        Output('fixture-table', 'selected_rows'),
+        Output('fixture-selection', 'data'),
         *[
             Input(f'fixture-{action}', 'n_clicks')
-            for action in ('add', 'apply', 'remove', 'reload', 'save')
+            for action in ('add', 'apply', 'remove', 'reload', 'save', 'close')
         ],
-        Input({'type': 'fixture-map-block', 'row': ALL, 'segment': ALL}, 'n_clicks'),
+        Input('fixture-grid-action', 'data'),
         State('fixture-draft', 'data'),
         State('fixture-patch', 'data'),
         State('fixture-revision', 'data'),
-        State('fixture-table', 'selected_rows'),
+        State('fixture-selection', 'data'),
         State('fixture-library-profile', 'value'),
         State('fixture-quantity', 'value'),
         State('fixture-add-universe', 'value'),
         State('fixture-add-address', 'value'),
         *[State(f'fixture-{name}', 'value') for name in edit_fields],
+        running=[(Output('config-panel', 'aria-busy'), 'true', 'false')],
         prevent_initial_call=True,
     )
     def edit_patch(
@@ -509,7 +480,8 @@ def build_fixture_panel(app, store):
         _remove,
         _reload,
         _save,
-        map_clicks,
+        _close,
+        grid_action,
         draft,
         previous,
         expected_revision,
@@ -523,10 +495,42 @@ def build_fixture_panel(app, store):
         unchanged = (dash.no_update, dash.no_update, dash.no_update)
         action = dash.ctx.triggered_id
         try:
-            if isinstance(action, dict):
-                if not any(map_clicks):
+            if action == 'fixture-close':
+                return *unchanged, dash.no_update, []
+            if action == 'fixture-grid-action':
+                if not grid_action:
                     raise dash.exceptions.PreventUpdate
-                return *unchanged, dash.no_update, [action['row']]
+                matches = [
+                    index
+                    for index, row in enumerate(draft)
+                    if row['id'] == grid_action.get('fixture_id')
+                ]
+                if len(matches) != 1:
+                    raise ValueError('The fixture changed. Select it again.')
+                if grid_action.get('action') == 'select':
+                    return *unchanged, dash.no_update, matches
+                if grid_action.get('action') != 'move':
+                    raise ValueError('Unknown fixture action.')
+                row = draft[matches[0]]
+                if (row['address'], row['universe']) != (
+                    grid_action.get('original_address'),
+                    grid_action.get('original_universe'),
+                ):
+                    raise ValueError('The fixture moved while dragging. Try again.')
+                moved = repatch_dmx_fixture(
+                    draft,
+                    profiles,
+                    row['id'],
+                    grid_action.get('universe'),
+                    grid_action.get('address'),
+                )
+                return (
+                    moved,
+                    dash.no_update,
+                    dash.no_update,
+                    'Fixture moved · save the patch when finished.',
+                    matches if selected else [],
+                )
             if action == 'fixture-reload':
                 saved, version = store.load()
                 return (
@@ -534,7 +538,7 @@ def build_fixture_panel(app, store):
                     saved,
                     version,
                     'Saved patch loaded.',
-                    [0] if saved['fixtures'] else [],
+                    [],
                 )
             if action == 'fixture-save':
                 _, errors = channel_occupancy(draft, profiles, 0)
@@ -588,7 +592,7 @@ def build_fixture_panel(app, store):
                 index = selected[0]
                 if action == 'fixture-remove':
                     draft.pop(index)
-                    selected = [min(index, len(draft) - 1)] if draft else []
+                    selected = []
                 else:
                     edits = dict(zip(edit_fields, values, strict=True))
                     if type(edits['universe']) is not int:
