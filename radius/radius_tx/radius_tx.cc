@@ -13,7 +13,7 @@ void RadiusTx::Start()
 	ConfigureThread(mConfig.mCoreAffinity);
 	mBus.Open(mConfig.mBindAddress, mConfig.mPeerAddress, mConfig.mBusPort, false);
 	mLogin.set_command_id(Bus::LoginCommandId);
-	mLogin.set_session_id(mConfig.mSession);
+	mLogin.set_run_id(mConfig.mRunId);
 	mLogin.set_protocol_major(Bus::PROTOCOL_MAJOR);
 	mLogin.set_protocol_minor(Bus::PROTOCOL_MINOR);
 	mLogin.set_sample_rate_hz(mConfig.mAudioSampleRate);
@@ -32,7 +32,7 @@ void RadiusTx::Tick()
 	auto now = SteadyMs();
 	if (mAudio.error)
 		throw std::runtime_error("audio capture failed: " + std::to_string(mAudio.error.load()));
-	mBus.Poll(mConfig.mSession, [&](const Bus::Message& p) {
+	mBus.Poll(mConfig.mRunId, [&](const Bus::Message& p) {
 		if (const auto* reply = std::get_if<Bus::LoginReply>(&p))
 		{
 			if (reply->command_id() != mLogin.command_id() || reply->protocol_major() != Bus::PROTOCOL_MAJOR ||
@@ -90,7 +90,7 @@ void RadiusTx::Tick()
 	if (mLink.Due(now))
 	{
 		Bus::Heartbeat p;
-		p.set_session_id(mConfig.mSession);
+		p.set_run_id(mConfig.mRunId);
 		if (mBus.Send(p))
 		{
 			mLink.Sent(now);
@@ -103,7 +103,7 @@ void RadiusTx::Tick()
 		if (!block)
 			break;
 		Bus::AudioFrame p;
-		p.set_session_id(mConfig.mSession);
+		p.set_run_id(mConfig.mRunId);
 		p.set_audio_frame_position(block->watermark);
 		p.set_sequence_number(++mAudioSequence);
 		p.mutable_interleaved_samples()->Add(block->samples.begin(),
@@ -114,7 +114,7 @@ void RadiusTx::Tick()
 	if (mConfig.mArtnetEnabled && now - mLastDmxSend >= DmxSendIntervalMilliseconds)
 	{
 		Bus::LightFrame p;
-		p.set_session_id(mConfig.mSession);
+		p.set_run_id(mConfig.mRunId);
 		p.set_audio_frame_position(mAudio.watermark.load());
 		p.set_sequence_number(++mDmxSequence);
 		std::array<uint8_t, DmxFrameSize> frame{};
@@ -139,7 +139,7 @@ void RadiusTx::Tick()
 		    {"invalid_packets_total", mBus.invalidPackets},
 		    {"playback_delay_seconds", mConfig.mPlaybackDelaySeconds},
 		    {"dmx_input_age_seconds", mDmxAt ? njson((now - mDmxAt) / double(MillisecondsPerSecond)) : njson(nullptr)}};
-		WriteHealth({{"session", mConfig.mSession},
+		WriteHealth({{"run_id", mConfig.mRunId},
 		             {"tx", tx},
 		             {"rx", mReceiver},
 		             {"rx_age_seconds",

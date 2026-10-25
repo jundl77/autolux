@@ -29,7 +29,7 @@ void RadiusRx::Login(const Bus::Login& login)
 	mLastProcessedCommandId = (std::max)(mLastProcessedCommandId, login.command_id());
 	const auto reject = [&](std::string reason) {
 		Bus::ErrorReply reply;
-		reply.set_session_id(mConfig.mSession);
+		reply.set_run_id(mConfig.mRunId);
 		reply.set_command_id(login.command_id());
 		reply.set_message(reason.substr(0, Bus::MaxErrorBytes));
 		mBus.Send(reply);
@@ -38,7 +38,7 @@ void RadiusRx::Login(const Bus::Login& login)
 	};
 	if (mLogin && mLogin->SerializeAsString() != login.SerializeAsString())
 	{
-		reject("receiver session is already logged in");
+		reject("receiver run is already logged in");
 		return;
 	}
 	if (!mLogin)
@@ -82,7 +82,7 @@ void RadiusRx::Login(const Bus::Login& login)
 	}
 	Bus::LoginReply reply;
 	reply.set_command_id(login.command_id());
-	reply.set_session_id(mConfig.mSession);
+	reply.set_run_id(mConfig.mRunId);
 	reply.set_protocol_major(Bus::PROTOCOL_MAJOR);
 	reply.set_protocol_minor((std::min<uint32_t>)(login.protocol_minor(), Bus::PROTOCOL_MINOR));
 	reply.set_max_message_bytes(Bus::MaxDatagramBytes);
@@ -164,7 +164,7 @@ void RadiusRx::Tick()
 		throw std::runtime_error("audio playback failed: " + std::to_string(mAudio->error.load()));
 	if (mDmxFailed)
 		throw std::runtime_error("DMX output worker failed");
-	mBus.Poll(mConfig.mSession, [&](const Bus::Message& p) {
+	mBus.Poll(mConfig.mRunId, [&](const Bus::Message& p) {
 		if (const auto* login = std::get_if<Bus::Login>(&p))
 		{
 			Login(*login);
@@ -220,7 +220,7 @@ void RadiusRx::Tick()
 	if (mLink.Due(now))
 	{
 		Bus::Heartbeat p;
-		p.set_session_id(mConfig.mSession);
+		p.set_run_id(mConfig.mRunId);
 		if (mBus.Send(p))
 		{
 			mLink.Sent(now);
@@ -231,7 +231,7 @@ void RadiusRx::Tick()
 	{
 		const auto& audio = mAudio->playout;
 		Bus::Metrics health;
-		health.set_session_id(mConfig.mSession);
+		health.set_run_id(mConfig.mRunId);
 		health.set_last_processed_command_id(mLastProcessedCommandId);
 		health.set_up(true);
 		health.set_link_up(mLink.Up(now));
@@ -262,7 +262,7 @@ void RadiusRx::Tick()
 		health.set_invalid_packets_total(mBus.invalidPackets);
 		health.set_send_failures_total(mBus.sendFailures);
 		mBus.Send(health);
-		WriteHealth({{"session", mConfig.mSession}, {"rx", Bus::MetricsToJson(health)}});
+		WriteHealth({{"run_id", mConfig.mRunId}, {"rx", Bus::MetricsToJson(health)}});
 		mHealthAt = now;
 		mAudioMaxGap = 0;
 		mAudioPeak = 0;

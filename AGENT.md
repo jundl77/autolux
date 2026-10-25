@@ -22,7 +22,8 @@ bar timing; MERT and the section model produce immutable bar decisions. Only
 committed decisions select lighting intents. Startup and silence are explicit.
 
 Apply the show delay once, in TX audio and scheduled controller commands.
-Radius carries a session ID and 64-bit audio-frame watermark. RX schedules DMX
+Autolux supplies one random run_id to Starfire and Radius at startup. Radius
+carries it with every audio/light frame and a 64-bit audio-frame watermark. RX schedules DMX
 against audible audio; jitter buffering is separate from the show delay.
 
 Audio callbacks must not allocate, log, block or perform network/USB I/O.

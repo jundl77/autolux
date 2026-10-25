@@ -40,7 +40,7 @@ flowchart TB
     Timing -->|"Starfire Protobuf / pipes: LoginReply, errors, metrics, heartbeat"| Decisions
     Replay -->|"Versioned JSON replay file"| Timing
     Dashboard -->|"Starfire Protobuf Login: rig, profiles, Lua sources"| Timing
-    Frames -->|"Art-Net ArtDmx / UDP 6454"| TX
+    Frames -->|"Art-Net ArtDmx / private loopback UDP port"| TX
     TX -->|"Local health JSON / Python monitoring"| Dashboard
     RX -->|"WASAPI audio output"| Speakers
     RX -->|"ENTTEC USB Pro / USB, then DMX512"| Lights
@@ -63,7 +63,7 @@ flowchart TB
 - **Compose effects and encode DMX:** combines baseline, overrides, master and blackout;
   maps fixture properties to complete universe frames.
 - **TX: capture, delay and transmit:** holds audio, receives DMX and stamps outgoing media
-  with the Radius session and audio-frame position.
+  with the shared run_id and audio-frame position.
 - **RX: buffer and synchronized playback:** absorbs jitter and schedules DMX against audible
   audio. Audio and USB output use separate threads.
 - **Recorded show inputs:** timed commands replay through the same engine for deterministic
@@ -75,7 +75,7 @@ The CLI launches local processes and deploys/starts RX using **SCP over SSH**.
 [Starfire's contract](../proto/starfire/starfire.proto) uses a one-byte message type
 and four-byte big-endian payload length before each standalone Protobuf message
 on owned stdin/stdout pipes.
-Login carries the complete rig, required profiles, Lua sources and initial settings;
+Login carries the run_id, complete rig, required profiles, Lua sources and initial settings;
 LoginReply confirms readiness. Asset edits apply on a new session.
 The four control families are PlayAutoloop, active effects, UpdateBeat and
 SetParameter. Rejections use ErrorReply; Metrics reports command progress.
@@ -85,6 +85,10 @@ See the [protocol](starfire/protocol-design.md).
 Login protocols require equal major versions and negotiate the lower minor.
 Version constants come from the schema enums and generated language bindings.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
+Autolux creates one random 64-bit run_id at startup for all three components.
+Radius rejects media from another run; Starfire binds its owned control stream
+to the Login identity and echoes it in metrics. Standard Art-Net has no run_id,
+so production uses an exclusive private loopback input instead of shared port 6454.
 
 ## What "clock" means
 

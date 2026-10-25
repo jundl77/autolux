@@ -77,10 +77,13 @@ void UdpServer::StartServer(uint32_t listenPort, const std::string& address, boo
 		WSACleanup();
 		throw std::runtime_error("invalid UDP bind address");
 	}
-	if (reuse)
+	const int yes = 1;
+	const int ownership = reuse ? SO_REUSEADDR : SO_EXCLUSIVEADDRUSE;
+	if (setsockopt(mSocket, SOL_SOCKET, ownership, reinterpret_cast<const char*>(&yes), sizeof(yes)))
 	{
-		const int yes = 1;
-		setsockopt(mSocket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+		closesocket(mSocket);
+		WSACleanup();
+		throw std::runtime_error("unable to configure UDP socket ownership");
 	}
 
 	if (bind(mSocket, (LPSOCKADDR)&addr, sizeof(addr)) == SOCKET_ERROR)

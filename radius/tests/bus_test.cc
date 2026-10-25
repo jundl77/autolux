@@ -47,9 +47,9 @@ void CheckProtocol()
 	Check(!IsInputStale(ReceivedAtMilliseconds - 1, ReceivedAtMilliseconds, InputTimeoutMilliseconds),
 	      "concurrent future input timestamp must not underflow into a timeout");
 	Check(!IsInputStale(0, UINT64_MAX, InputTimeoutMilliseconds), "full-range future input remains fresh");
-	constexpr uint64_t Session = UINT64_MAX;
+	constexpr uint64_t RunId = UINT64_MAX;
 	Bus::AudioFrame audio;
-	audio.set_session_id(Session);
+	audio.set_run_id(RunId);
 	audio.set_audio_frame_position(UINT64_MAX - Bus::AudioFrames);
 	audio.set_sequence_number(UINT32_MAX);
 	const std::array<float, 4> extremes = {std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest(),
@@ -62,9 +62,9 @@ void CheckProtocol()
 	Check(wire[0] == Bus::AUDIO_FRAME && wire[1] == 0 && wire[2] == 0, "standalone generated type and length header");
 	Check((uint32_t(wire[3]) << 8 | wire[4]) == size - Bus::FrameHeaderBytes, "big endian payload length");
 	Bus::Message decoded;
-	Check(Bus::ParseMessage(wire.data(), size, Session, decoded), "protobuf audio round trip");
+	Check(Bus::ParseMessage(wire.data(), size, RunId, decoded), "protobuf audio round trip");
 	const auto& decodedAudio = std::get<Bus::AudioFrame>(decoded);
-	Check(decodedAudio.session_id() == Session && decodedAudio.audio_frame_position() == audio.audio_frame_position() &&
+	Check(decodedAudio.run_id() == RunId && decodedAudio.audio_frame_position() == audio.audio_frame_position() &&
 	          decodedAudio.sequence_number() == UINT32_MAX,
 	      "exact 64-bit identifiers and sequence");
 	Check(decodedAudio.interleaved_samples_size() == Bus::AudioFrames * Bus::Channels, "audio sample count");
@@ -72,19 +72,19 @@ void CheckProtocol()
 	                  Bus::AudioFrames * Bus::AudioBytesPerFrame) == 0,
 	      "IEEE float samples preserve bits");
 	for (size_t n = 0; n < size; ++n)
-		Check(!Bus::ParseMessage(wire.data(), n, Session, decoded), "truncated frame accepted");
-	Check(!Bus::ParseMessage(wire.data(), size, Session - 1, decoded), "wrong session accepted");
+		Check(!Bus::ParseMessage(wire.data(), n, RunId, decoded), "truncated frame accepted");
+	Check(!Bus::ParseMessage(wire.data(), size, RunId - 1, decoded), "wrong run ID accepted");
 	std::array<uint8_t, Bus::MaxDatagramBytes + 1> oversized{};
-	Check(!Bus::ParseMessage(oversized.data(), oversized.size(), Session, decoded), "oversize datagram accepted");
+	Check(!Bus::ParseMessage(oversized.data(), oversized.size(), RunId, decoded), "oversize datagram accepted");
 	auto invalidWire = wire;
 	invalidWire[0] = 255;
-	Check(!Bus::ParseMessage(invalidWire.data(), size, Session, decoded), "unknown message type accepted");
+	Check(!Bus::ParseMessage(invalidWire.data(), size, RunId, decoded), "unknown message type accepted");
 	invalidWire = wire;
 	++invalidWire[4];
-	Check(!Bus::ParseMessage(invalidWire.data(), size, Session, decoded), "wrong declared length accepted");
+	Check(!Bus::ParseMessage(invalidWire.data(), size, RunId, decoded), "wrong declared length accepted");
 	invalidWire = wire;
 	invalidWire[0] = Bus::HEARTBEAT;
-	Check(Bus::ParseMessage(invalidWire.data(), size, Session, decoded),
+	Check(Bus::ParseMessage(invalidWire.data(), size, RunId, decoded),
 	      "unknown protobuf fields remain minor-compatible");
 
 	const auto rejects = [&](const Bus::Message& invalid) {
@@ -100,11 +100,11 @@ void CheckProtocol()
 		for (size_t i = 1; i < Bus::FrameHeaderBytes; ++i)
 			framed[i] = static_cast<char>(raw.size() >> (8 * (Bus::FrameHeaderBytes - i - 1)));
 		framed += raw;
-		Check(!Bus::ParseMessage(framed.data(), framed.size(), Session, decoded), "invalid incoming message accepted");
+		Check(!Bus::ParseMessage(framed.data(), framed.size(), RunId, decoded), "invalid incoming message accepted");
 	};
-	audio.set_session_id(0);
+	audio.set_run_id(0);
 	rejects(audio);
-	audio.set_session_id(Session);
+	audio.set_run_id(RunId);
 	audio.set_audio_frame_position(UINT64_MAX - Bus::AudioFrames + 1);
 	rejects(audio);
 	audio.set_audio_frame_position(0);
@@ -120,17 +120,17 @@ void CheckProtocol()
 	audio.add_interleaved_samples(0);
 	rejects(audio);
 	Bus::Heartbeat heartbeat;
-	heartbeat.set_session_id(Session);
-	Check(Bus::SerializeMessage(heartbeat, wire) > 0, "heartbeat session without command ID");
+	heartbeat.set_run_id(RunId);
+	Check(Bus::SerializeMessage(heartbeat, wire) > 0, "heartbeat run ID without command ID");
 	Bus::LightFrame lighting;
-	lighting.set_session_id(Session);
+	lighting.set_run_id(RunId);
 	lighting.set_audio_frame_position(UINT64_MAX);
 	std::string dmx(DmxFrameSize, '\0');
 	for (size_t channel = 0; channel < dmx.size(); ++channel)
 		dmx[channel] = static_cast<char>(channel);
 	lighting.set_channels(dmx);
 	const auto lightingSize = Bus::SerializeMessage(lighting, wire);
-	Check(lightingSize && Bus::ParseMessage(wire.data(), lightingSize, Session, decoded) &&
+	Check(lightingSize && Bus::ParseMessage(wire.data(), lightingSize, RunId, decoded) &&
 	          std::get<Bus::LightFrame>(decoded).audio_frame_position() == UINT64_MAX &&
 	          std::get<Bus::LightFrame>(decoded).channels() == dmx,
 	      "lighting bytes and maximum watermark");
@@ -140,7 +140,7 @@ void CheckProtocol()
 	rejects(lighting);
 
 	Bus::Login login;
-	login.set_session_id(Session);
+	login.set_run_id(RunId);
 	rejects(login);
 	login.set_command_id(Bus::LoginCommandId);
 	login.set_protocol_major(Bus::PROTOCOL_MAJOR);
@@ -151,18 +151,18 @@ void CheckProtocol()
 	login.set_lighting_enabled(true);
 	login.set_jitter_buffer_ms(150);
 	const auto loginSize = Bus::SerializeMessage(login, wire);
-	Check(loginSize && Bus::ParseMessage(wire.data(), loginSize, Session, decoded) &&
+	Check(loginSize && Bus::ParseMessage(wire.data(), loginSize, RunId, decoded) &&
 	          std::get<Bus::Login>(decoded).protocol_minor() == Bus::PROTOCOL_MINOR + 1,
 	      "login preserves initialization and negotiable version");
 	Bus::ErrorReply error;
-	error.set_session_id(Session);
+	error.set_run_id(RunId);
 	error.set_command_id(Bus::LoginCommandId);
 	rejects(error);
 	error.set_message(std::string(Bus::MaxErrorBytes + 1, 'x'));
 	rejects(error);
 
 	Bus::Metrics health;
-	health.set_session_id(Session);
+	health.set_run_id(RunId);
 	health.set_last_processed_command_id(Bus::LoginCommandId);
 	health.set_up(true);
 	health.set_link_up(true);
@@ -186,7 +186,7 @@ void CheckProtocol()
 	health.set_invalid_packets_total(UINT64_MAX);
 	health.set_send_failures_total(UINT64_MAX);
 	auto metricsSize = Bus::SerializeMessage(health, wire);
-	Check(metricsSize && Bus::ParseMessage(wire.data(), metricsSize, Session, decoded), "metrics round trip");
+	Check(metricsSize && Bus::ParseMessage(wire.data(), metricsSize, RunId, decoded), "metrics round trip");
 	auto json = Bus::MetricsToJson(std::get<Bus::Metrics>(decoded));
 	Check(json.size() == 24 && json["up"] == true && json["link_up"] == true && json["dmx_connected"] == false,
 	      "dashboard health schema");
@@ -205,7 +205,7 @@ void CheckProtocol()
 	health.set_audio_input_age_seconds(0);
 	health.set_audio_max_gap_seconds(0);
 	metricsSize = Bus::SerializeMessage(health, wire);
-	Check(metricsSize && Bus::ParseMessage(wire.data(), metricsSize, Session, decoded), "zero input age round trip");
+	Check(metricsSize && Bus::ParseMessage(wire.data(), metricsSize, RunId, decoded), "zero input age round trip");
 	json = Bus::MetricsToJson(std::get<Bus::Metrics>(decoded));
 	Check(json["audio_input_age_seconds"] == 0 && json["audio_max_gap_seconds"] == 0,
 	      "measured zero remains distinct from unavailable");

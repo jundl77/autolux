@@ -42,10 +42,10 @@ struct LightingFrame
 using Message = std::variant<Login, LoginReply, ErrorReply, AudioFrame, LightFrame, Heartbeat, Metrics>;
 
 MessageType TypeOf(const Message& message);
-bool IsValidMessage(const Message& message, uint64_t expectedSession = 0);
+bool IsValidMessage(const Message& message, uint64_t expectedRunId = 0);
 bool IsNewerSequenceNumber(uint32_t incoming, std::optional<uint32_t> previous);
 size_t SerializeMessage(const Message& message, std::array<uint8_t, MaxDatagramBytes>& bytes);
-bool ParseMessage(const void* data, size_t size, uint64_t expectedSession, Message& message);
+bool ParseMessage(const void* data, size_t size, uint64_t expectedRunId, Message& message);
 njson MetricsToJson(const Metrics& metrics);
 
 } // namespace Radius::Bus

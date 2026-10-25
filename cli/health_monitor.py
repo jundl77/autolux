@@ -48,8 +48,8 @@ class HealthLogger:
 
 
 class HealthMonitor:
-    def __init__(self, path, session=None):
-        self.path, self.session = Path(path), session
+    def __init__(self, path, run_id=None):
+        self.path, self.run_id = Path(path), run_id
         self._history = deque(maxlen=MAX_HEALTH_HISTORY_SAMPLES)
         self._last = {}
         self._read_at = 0
@@ -59,8 +59,8 @@ class HealthMonitor:
         if now - self._read_at >= HEALTH_SAMPLE_INTERVAL_SECONDS:
             try:
                 value = json.loads(self.path.read_text())
-                if self.session is not None and value.get('session') != self.session:
-                    raise ValueError('Native health belongs to a different session')
+                if self.run_id is not None and value.get('run_id') != self.run_id:
+                    raise ValueError('Native health belongs to a different run')
                 self._last = value
             except (OSError, json.JSONDecodeError):
                 pass
@@ -90,7 +90,7 @@ class HealthMonitor:
             'tx': tx,
             'rx': rx,
             'sample_timestamp': report.get('timestamp'),
-            'session': report.get('session'),
+            'run_id': report.get('run_id'),
             'tx_age_seconds': age,
             'rx_age_seconds': None if age is None or rx_age is None else age + rx_age,
             'recent': {key: max(0, value - baseline[key]) for key, value in counters.items()},

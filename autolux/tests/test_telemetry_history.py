@@ -9,11 +9,11 @@ from autolux.simulate.system_metrics import (
 )
 
 
-def report(stamp=100, *, session=1):
+def report(stamp=100, *, run_id=1):
     return {
         'sample_timestamp': stamp,
         'updated_at': stamp,
-        'session': session,
+        'run_id': run_id,
         'tx_age_seconds': 0.1,
         'rx_age_seconds': 0.3,
         'tx': {'link_up': True, 'dmx_input_age_seconds': 0.01, 'capture_overruns_total': 0},
@@ -31,8 +31,8 @@ def report(stamp=100, *, session=1):
     }
 
 
-def renderer_report(stamp, elapsed, frames, *, skipped=0, age=0.1, session=1):
-    state = report(stamp, session=session)
+def renderer_report(stamp, elapsed, frames, *, skipped=0, age=0.1, run_id=1):
+    state = report(stamp, run_id=run_id)
     state['starfire'] = {
         'elapsed_seconds': elapsed,
         'rendered_frames': frames,
@@ -88,10 +88,10 @@ def test_session_report_retains_health_history_without_exposing_mutable_state():
     assert retained['system_history'][0]['buffer_ms'] == 152
 
 
-def test_new_session_clears_history_including_when_timestamp_moves_backwards():
+def test_new_run_clears_history_including_when_timestamp_moves_backwards():
     history = TelemetryHistory()
     history.append(report(100), {})
-    history.append(report(90, session=2), {})
+    history.append(report(90, run_id=2), {})
     assert [s['at'] for s in history.samples] == [90]
 
 
@@ -193,7 +193,7 @@ def test_renderer_time_or_counter_resets_never_become_rate_spikes(elapsed, frame
     assert history.snapshot()[-1]['starfire_measured_render_frames_per_second'] == 40
 
 
-def test_renderer_does_not_average_across_missing_observations_or_new_sessions():
+def test_renderer_does_not_average_across_missing_observations_or_new_runs():
     history = TelemetryHistory()
     history.append(renderer_report(100, 10, 400), {})
     history.append(renderer_report(110, 20, 800), {})
@@ -201,7 +201,7 @@ def test_renderer_does_not_average_across_missing_observations_or_new_sessions()
     assert history.snapshot()[-1]['starfire_measured_render_frames_per_second'] is None
     history.append(renderer_report(160, 40, 1600), {})
     assert history.snapshot()[-1]['starfire_measured_render_frames_per_second'] == 40
-    history.append(renderer_report(161, 50, 2000, session=2), {})
+    history.append(renderer_report(161, 50, 2000, run_id=2), {})
     assert history.snapshot()[-1]['starfire_measured_render_frames_per_second'] is None
 
 

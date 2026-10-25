@@ -49,6 +49,10 @@ prototype assumptions can change after an offline review and hardware audition.
 | U39 | Store authored autoloops in root autoloops/. | Directory paths are plural; the autoloop API concept remains singular. |
 | U40 | Use GDTF and MVR exclusively for fixture and rig assets. | Replace custom JSON fixture/patch storage; preserve standard archives and their resources. Implementation is pending. |
 | U41 | Keep the physical rig independent of scripts. | Fixture selection belongs to show programming. MVR scene organization must not require Lua-specific role names. The selection API is under discussion. |
+| U42 | Configure, save and load named fixture selections in the existing dashboard. | Store ordered, overlapping selections separately from the physical MVR scene. |
+| U43 | Autolux generates one random run_id for Radius and Starfire at each start. | Use a nonzero random 64-bit value; reject Radius audio/light packets from another run and expose the same identity in renderer telemetry. |
+| U44 | Keep the top Autolux title and place horizontal Control, Telemetry and Config tabs directly beside it. | No sidebar or centered navigation; remove decorative component/tagline labels. |
+| U45 | Defer a Rust Radius rewrite and hosting TX inside Starfire on a separate thread/core. | Keep current process boundaries for this implementation; RX remains the remote output endpoint. |
 
 ## Prototype decisions
 
@@ -257,6 +261,22 @@ Starfire is the lighting backend. Its live contract is
 
 - P85: Keep GDTF physical controls distinct from fixed global parameters.
   Lua physical_attribute/channel_preset and SetActiveEffect.attributes target fixture capabilities. SetParameter remains the closed global enum. Unknown/ambiguous properties, unsafe brightness mappings and inactive requested functions reject.
+
+- P86: Production gives Starfire a private loopback Art-Net destination on a
+  fresh UDP port, exclusively bound by Radius. Standalone Art-Net retains 6454.
+  Standard ArtDmx has no run identifier: shared ingress could otherwise stamp
+  unrelated traffic with the current run_id. A port-claim race fails startup.
+
+- P87: Keep automatic lighting dark until sound has started and its delayed
+  room-playback deadline is reached. Silence predictions cannot select a loop or
+  trigger an accent. A silence cutoff invalidates pending intent callbacks;
+  preserve the existing two-second persistent-silence cutoff policy.
+
+- P88: Starfire accepts one nonzero run_id at Login and returns it in LoginReply
+  and Metrics. Its owned process stream scopes subsequent commands to that run;
+  no repeated identifier is needed on every command. Radius carries run_id on
+  every datagram. This identity is separate from replay seeds and media timing,
+  and is not network authentication.
 
 ## Open questions and defaults
 

@@ -75,7 +75,7 @@ def native_specs(args, delay):
     import socket
 
     root = args.radius_dir.resolve()
-    session = secrets.randbits(63) or 1
+    run_id = secrets.randbits(64) or 1
     configs = [
         read_config(getattr(args, f'{role}_config') or root / f'radius_{role}/radius_{role}.json')
         for role in ('tx', 'rx')
@@ -88,7 +88,10 @@ def native_specs(args, delay):
         controller_address = route.getsockname()[0]
     rx['peer_address'] = controller_address
     rx['bus_port'] = tx['bus_port']
-    tx.setdefault('artnet_address', '127.0.0.1')
+    # The owned renderer must never share another application's Art-Net input.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as artnet:
+        artnet.bind(('127.0.0.1', 0))
+        tx['artnet_address'], tx['artnet_port'] = artnet.getsockname()
     tx['playback_delay_seconds'] = delay
     tx['receiver'] = {
         'audio_enabled': rx.get('audio_enabled', True),
@@ -101,7 +104,7 @@ def native_specs(args, delay):
         exe = root / 'cmake-build-release' / name / f'{name}.exe'
         if not exe.is_file():
             raise RuntimeError(f'Missing {exe}. Run build-radius.ps1 first.')
-        config['session'] = session
+        config['run_id'] = run_id
         if config.get('sample_rate') != 44100:
             raise RuntimeError('Production requires matching 44.1 kHz stereo audio.')
         specs.append(NativeSpec(name, exe, config))
@@ -287,6 +290,7 @@ async def _run_session(args, *, checking=False):
             f"{tx.config['artnet_address']}:{tx.config.get('artnet_port', 6454)}",
             run_dir / 'local/starfire',
             profiles=args.profiles,
+            run_id=tx.config['run_id'],
         )
 
         def send_lighting_command(command):
@@ -310,7 +314,7 @@ async def _run_session(args, *, checking=False):
             stack.enter_context(remote)
             native = stack.enter_context(NativeRuntime([tx], run_dir / 'local'))
             stack.enter_context(renderer)
-            monitor = HealthMonitor(run_dir / 'local/radius_tx/health.json', tx.config['session'])
+            monitor = HealthMonitor(run_dir / 'local/radius_tx/health.json', tx.config['run_id'])
             health_log = HealthLogger()
             if args.no_ui:
                 from autolux.lib.ui_bridge import SnapshotServer

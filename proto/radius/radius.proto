@@ -29,12 +29,12 @@ enum MessageType {
 }
 
 // [CLIENT -> SERVER]
-// Own one output session. Repeating the identical Login retries its reply without
-// restarting output. A changed Login cannot replace an initialized session.
+// Own one output run; every packet must carry its configured run_id. Repeating the identical Login
+// retries its reply without restarting output. A changed Login cannot replace an initialized run.
 // Device selection and worker affinity remain receiver-local deployment policy.
 message Login {
   uint64 command_id = 1;
-  fixed64 session_id = 2;
+  fixed64 run_id = 2;  // Fresh nonzero random 64-bit ID, shared by TX and RX for this run.
   uint32 protocol_major = 3;
   uint32 protocol_minor = 4;
   uint32 sample_rate_hz = 5;  // Supported: 44100.
@@ -48,7 +48,7 @@ message Login {
 // Output resources are initialized; the client may start media transmission.
 message LoginReply {
   uint64 command_id = 1;
-  fixed64 session_id = 2;
+  fixed64 run_id = 2;
   uint32 protocol_major = 3;
   uint32 protocol_minor = 4;  // Negotiated minor version.
   uint32 max_message_bytes = 5;
@@ -57,21 +57,21 @@ message LoginReply {
 // [SERVER -> CLIENT]
 message ErrorReply {
   uint64 command_id = 1;
-  fixed64 session_id = 2;
+  fixed64 run_id = 2;
   string message = 3;
 }
 
 // [CLIENT -> SERVER]
 message AudioFrame {
-  fixed64 session_id = 1;
-  fixed64 audio_frame_position = 2;  // Session stereo frame index of the first sample.
+  fixed64 run_id = 1;
+  fixed64 audio_frame_position = 2;  // Run stereo frame index of the first sample.
   fixed32 sequence_number = 3;       // Per media kind; wraps modulo 2^32.
   repeated float interleaved_samples = 4 [packed = true];  // 1..128 finite stereo frames.
 }
 
 // [CLIENT -> SERVER]
 message LightFrame {
-  fixed64 session_id = 1;
+  fixed64 run_id = 1;
   fixed64 audio_frame_position = 2;  // Target audible audio-frame watermark.
   fixed32 sequence_number = 3;
   bytes channels = 4;  // Exactly 512 DMX channel values.
@@ -79,13 +79,13 @@ message LightFrame {
 
 // [CLIENT -> SERVER] [SERVER -> CLIENT]
 message Heartbeat {
-  fixed64 session_id = 1;  // Session routing only; no command ID or echo.
+  fixed64 run_id = 1;  // Run routing only; no command ID or echo.
 }
 
 // [SERVER -> CLIENT]
 // Counters stay integers; optional ages distinguish missing input from zero age.
 message Metrics {
-  fixed64 session_id = 25;
+  fixed64 run_id = 25;
   uint64 last_processed_command_id = 26;
   bool up = 1;
   bool link_up = 2;

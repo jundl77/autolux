@@ -3,7 +3,6 @@
 
 namespace Radius {
 
-constexpr uint16_t ArtnetListenPort = 6454;
 constexpr size_t ArtnetReceiveBufferBytes = 2048;
 
 ArtnetServer::ArtnetServer(const Config& c, EventLoop& loop, IArtnetHandler& handler)
@@ -15,7 +14,8 @@ ArtnetServer::ArtnetServer(const Config& c, EventLoop& loop, IArtnetHandler& han
 
 void ArtnetServer::StartListening()
 {
-	mSocket.Start(ArtnetListenPort, PollingMode::HotPoll, mConfig.mArtnetAddress, true);
+	mSocket.Start(mConfig.mArtnetPort, PollingMode::HotPoll, mConfig.mArtnetAddress,
+	              mConfig.mArtnetPort == DefaultArtnetPort);
 }
 
 void ArtnetServer::OnData(const void* data, size_t size)

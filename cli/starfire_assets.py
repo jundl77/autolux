@@ -132,10 +132,18 @@ def _autoloop_definitions(directory):
 
 
 def load_login(
-    rig: Path, autoloops: Path, artnet: str, parameters=(), *, profiles: Path | None = None
+    rig: Path,
+    autoloops: Path,
+    artnet: str,
+    parameters=(),
+    *,
+    run_id: int,
+    profiles: Path | None = None,
 ) -> wire.Login:
     """Load one immutable asset snapshot before starting the owned renderer."""
     try:
+        if type(run_id) is not int or not 0 < run_id < 1 << 64:
+            raise ValueError('run_id must be a nonzero uint64')
         patch = _document(rig)
         fixtures = [_fixture(value) for value in patch.pop('fixtures')]
         groups = []
@@ -148,6 +156,7 @@ def load_login(
         if catalogue:
             raise ValueError('Unknown fixture profile catalogue field')
         login = wire.Login(
+            run_id=run_id,
             protocol_major=wire.PROTOCOL_MAJOR,
             protocol_minor=wire.PROTOCOL_MINOR,
             rig=rig_wire.RigDefinition(

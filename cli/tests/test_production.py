@@ -6,8 +6,18 @@ from cli import production
 from cli.native_runtime import NativeSpec
 
 
-def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path):
+def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path, monkeypatch):
     import json
+    import secrets
+
+    random_values = iter([0, 2**64 - 1])
+    requested_bits = []
+
+    def random_run_id(bits):
+        requested_bits.append(bits)
+        return next(random_values)
+
+    monkeypatch.setattr(secrets, 'randbits', random_run_id)
 
     for role in ('tx', 'rx'):
         config = {
@@ -17,6 +27,8 @@ def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path):
             'jitter_buffer_ms': 75,
             'audio_enabled': False,
             'dmx_enabled': False,
+            'artnet_address': '0.0.0.0',
+            'artnet_port': 6454,
         }
         directory = tmp_path / f'radius_{role}'
         directory.mkdir()
@@ -28,12 +40,19 @@ def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path):
         radius_dir=tmp_path, tx_config=None, rx_config=None, receiver_host=None
     )
     transmitter, receiver = production.native_specs(args, 14)
-    assert transmitter.config['session'] == receiver.config['session']
+    assert transmitter.config['run_id'] == receiver.config['run_id']
+    assert transmitter.config['run_id'] == 1
+    assert transmitter.config['artnet_address'] == '127.0.0.1'
+    assert 0 < transmitter.config['artnet_port'] <= 65535
+    assert transmitter.config['artnet_port'] != 6454
     assert transmitter.config['receiver'] == {
         'audio_enabled': False,
         'lighting_enabled': False,
         'jitter_buffer_ms': 75,
     }
+    restarted_tx, restarted_rx = production.native_specs(args, 14)
+    assert restarted_tx.config['run_id'] == restarted_rx.config['run_id'] == 2**64 - 1
+    assert requested_bits == [64, 64]
 
 
 @pytest.mark.parametrize('exit_code', [0, 7])
@@ -164,7 +183,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         Path('tx.exe'),
         {
             'peer_address': '127.0.0.1',
-            'session': 17,
+            'run_id': 17,
             'artnet_address': '127.0.0.1',
             'dmx_universe': 0,
         },
@@ -248,6 +267,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     class Renderer:
         def __init__(self, binary, rig, autoloops, artnet, directory, **kwargs):
             assert artnet == '127.0.0.1:6454'
+            assert kwargs['run_id'] == tx.config['run_id']
             self.process = None
 
         def __enter__(self):

@@ -8,8 +8,8 @@ Radius is Autolux's audiovisual bus, with two C++ applications:
   the speakers and Enttec USB device on separate threads.
 
 Build and test from the root with `.\build-radius.ps1`. Start the complete system
-with `uv run autolux --prod`. The CLI supplies a unique session and deploys RX over
-SSH. Each binary also accepts a config path, or `--check-config <path>`.
+with `uv run autolux --prod`. The CLI supplies a fresh random 64-bit `run_id` and
+deploys RX over SSH. Each binary also accepts a config path, or `--check-config <path>`.
 
 ## Timing and transport
 
@@ -19,10 +19,10 @@ length, and protobuf payload. [`radius.proto`](../proto/radius/radius.proto)
 defines Login, LoginReply, ErrorReply, AudioFrame, LightFrame, Heartbeat and Metrics.
 Login negotiates protocol major/minor and initializes playback settings; the
 reply means receiver outputs are ready. TX retries identical logins until a
-reply arrives, then starts capture. Session IDs and audio watermarks use
+reply arrives, then starts capture. Run IDs and audio watermarks use
 `fixed64`; samples use packed protobuf floats at 44.1 kHz stereo.
 
-TX holds the show delay. Login selects RX's 20â€“150 ms jitter target; bounded
+TX holds the show delay. Login selects RX's 20-150 ms jitter target; bounded
 clock correction follows the playback device. Device selection and thread
 affinity stay local. Network and audio-device latency are additional.
 
@@ -42,13 +42,17 @@ CMake downloads SHA256-pinned Protobuf v33.5 and Abseil 20250512.1, builds match
 lite runtime without reflection; generated code is neither checked in nor formatted.
 Framing, media validation and ArtDmx parsing live in [`libs/bus`](libs/bus).
 The first build needs internet access. Major versions must match; the negotiated
-minor is the lower supported version. Wrong sessions, unexpected sender ports,
+minor is the lower supported version. Wrong run IDs, unexpected sender ports,
 invalid message kinds, malformed packets and invalid media values are rejected.
 The receiver pins its sender only after Login. Its local ready file means the
-listener is available; the transmitter's means the session and capture are ready.
+listener is available; the transmitter's means the run and capture are ready.
 Dashboard `health.json` uses seconds, integer counters and null ages for missing input.
 
 `audio_core`, `network_core` and `dmx_core` optionally pin separate threads;
-`-1` leaves scheduling to Windows. Starfire's local Art-Net output feeds
-`127.0.0.1:6454`. Only the Radius bus crosses
-the network, on UDP 19002 by default.
+`-1` leaves scheduling to Windows. Production assigns Starfire and TX a private
+loopback UDP port, preventing other Art-Net producers from entering the show.
+Standalone TX defaults to `artnet_port: 6454`; custom ports bind exclusively.
+Only the Radius bus crosses the network, on UDP 19002 by default.
+
+Every Radius packet carries `run_id`; mismatched runs are rejected before media
+enters playback buffers. A restart generates a new ID for both audio and lighting.

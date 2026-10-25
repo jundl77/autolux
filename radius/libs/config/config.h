@@ -6,6 +6,8 @@
 
 namespace Radius {
 
+constexpr uint16_t DefaultArtnetPort = 6454;
+
 enum class AppType
 {
 	Tx,
@@ -22,7 +24,8 @@ struct Config
 	uint16_t mDmxUniverse = 0;
 	std::string mPeerAddress, mBindAddress = "0.0.0.0", mArtnetAddress;
 	uint16_t mBusPort = 19002;
-	uint64_t mSession = 0;
+	uint16_t mArtnetPort = DefaultArtnetPort;
+	uint64_t mRunId = 0;
 	std::string mAudioDeviceId;
 	int mAudioSampleRate = 44100, mJitterBufferMs = 150;
 	double mPlaybackDelaySeconds = 14;

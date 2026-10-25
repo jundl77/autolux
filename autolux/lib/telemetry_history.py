@@ -56,7 +56,7 @@ class TelemetryHistory:
 
     def __init__(self):
         self.samples = deque(maxlen=HISTORY_WINDOW_SECONDS + 1)
-        self.session = None
+        self.run_id = None
         self._reset_renderer()
 
     def _reset_renderer(self):
@@ -98,10 +98,10 @@ class TelemetryHistory:
         stamp = state.get('sample_timestamp')
         if not finite(stamp):
             return
-        session = state.get('session')
-        if session != self.session:
+        run_id = state.get('run_id')
+        if run_id != self.run_id:
             self.samples.clear()
-            self.session = session
+            self.run_id = run_id
             self._reset_renderer()
         if self.samples and stamp <= self.samples[-1]['at']:
             return

@@ -187,7 +187,7 @@ def build_system_health_charts(snapshot, *, now=None):
                 'rangemode': 'tozero',
             },
             hovermode='x unified',
-            uirevision=f'{panel}-{(snapshot.get("system") or {}).get("session")}',
+            uirevision=f'{panel}-{(snapshot.get("system") or {}).get("run_id")}',
         )
         if panel == 'signal':
             fig.update_yaxes(range=[-90, 0], dtick=30)

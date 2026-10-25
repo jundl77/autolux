@@ -121,11 +121,13 @@ class StarfireRuntime:
         artnet,
         run_dir,
         *,
+        run_id: int,
         startup_timeout=STARTUP_TIMEOUT_SECONDS,
         stop_timeout=STOP_TIMEOUT_SECONDS,
         initial_parameters=(),
         profiles=PROFILE_CATALOGUE,
     ):
+        self.run_id = run_id
         self.command = [str(Path(binary).resolve()), 'live']
         self._rig_path = Path(rig).resolve()
         self._profiles_path = Path(profiles).resolve()
@@ -162,6 +164,7 @@ class StarfireRuntime:
                 self._artnet_destination,
                 parameters=self._initial_parameters,
                 profiles=self._profiles_path,
+                run_id=self.run_id,
             )
             self._autoloop_ids = frozenset(script.autoloop_id for script in self._login.autoloops)
             self.run_dir.mkdir(parents=True, exist_ok=False)
@@ -230,12 +233,15 @@ class StarfireRuntime:
                     )
                 if isinstance(event, wire.Metrics):
                     metrics = event
+                    if metrics.run_id != self.run_id:
+                        raise ValueError('Starfire metrics belong to a different run_id')
                     if metrics.runtime_error:
                         raise RuntimeError(f'Starfire renderer failed: {metrics.runtime_error}')
                     if not self._ready.is_set():
                         raise ValueError('Starfire sent metrics before login')
                     self._record_progress(metrics.last_processed_command_id)
                     self._health = {
+                        'run_id': metrics.run_id,
                         'elapsed_seconds': metrics.elapsed_seconds,
                         'rendered_frames': metrics.rendered_frames,
                         'skipped_frames': metrics.missed_render_deadlines,
@@ -266,6 +272,7 @@ class StarfireRuntime:
                         or event.max_message_bytes != MAX_MESSAGE_BYTES
                         or event.protocol_major != wire.PROTOCOL_MAJOR
                         or event.protocol_minor > wire.PROTOCOL_MINOR
+                        or event.run_id != self.run_id
                     ):
                         raise ValueError('Unexpected Starfire login reply')
                     self._record_progress(event.command_id)

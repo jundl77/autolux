@@ -36,7 +36,7 @@ struct Receiver : IUdpServerHandler
 
 void CheckBusPackets()
 {
-	constexpr uint64_t Session = UINT64_MAX;
+	constexpr uint64_t RunId = UINT64_MAX;
 	constexpr auto PollTimeout = 2s;
 	BusSocket receiver;
 	// Reserve an ephemeral local port before opening the receiver there.
@@ -68,17 +68,17 @@ void CheckBusPackets()
 		return std::string(reinterpret_cast<const char*>(bytes.data()), size);
 	};
 	Bus::Heartbeat heartbeat;
-	heartbeat.set_session_id(Session - 1);
+	heartbeat.set_run_id(RunId - 1);
 	send(wire(heartbeat));
-	heartbeat.set_session_id(Session);
+	heartbeat.set_run_id(RunId);
 	send(wire(heartbeat)); // No media or heartbeat may claim a receiver before Login.
 	Bus::LightFrame lighting;
-	lighting.set_session_id(Session);
+	lighting.set_run_id(RunId);
 	lighting.set_channels(std::string(DmxFrameSize, '\0'));
 	send(wire(lighting));
 	Bus::LoginReply reply;
 	reply.set_command_id(Bus::LoginCommandId);
-	reply.set_session_id(Session);
+	reply.set_run_id(RunId);
 	send(wire(reply)); // RX rejects server messages.
 	send(std::string(Bus::MaxDatagramBytes + 1, '\0'));
 	send(std::string(Bus::MaxDatagramBytes * 2, '\0'));
@@ -86,7 +86,7 @@ void CheckBusPackets()
 	auto deadline = std::chrono::steady_clock::now() + PollTimeout;
 	while (receiver.invalidPackets < InvalidPackets && std::chrono::steady_clock::now() < deadline)
 	{
-		receiver.Poll(Session, handler);
+		receiver.Poll(RunId, handler);
 		std::this_thread::sleep_for(1ms);
 	}
 	Check(receiver.invalidPackets == InvalidPackets && accepted == 0);
@@ -95,17 +95,17 @@ void CheckBusPackets()
 	transmitter.Open("127.0.0.1", "127.0.0.1", ntohs(destination.sin_port), false);
 	Bus::Login login;
 	login.set_command_id(Bus::LoginCommandId);
-	login.set_session_id(Session);
+	login.set_run_id(RunId);
 	Check(transmitter.Send(login));
 	deadline = std::chrono::steady_clock::now() + PollTimeout;
 	while (accepted == 0 && std::chrono::steady_clock::now() < deadline)
 	{
-		receiver.Poll(Session, handler);
+		receiver.Poll(RunId, handler);
 		std::this_thread::sleep_for(1ms);
 	}
 	Check(accepted == 1 && receiver.receivedPackets == 1);
 	send(wire(login)); // The valid session cannot be taken over from another source port.
-	receiver.Poll(Session, handler);
+	receiver.Poll(RunId, handler);
 	Check(accepted == 1 && receiver.invalidPackets == InvalidPackets + 1);
 	Check(receiver.Send(heartbeat));
 	Check(receiver.Send(lighting)); // TX rejects the wrong direction's media.
@@ -113,16 +113,56 @@ void CheckBusPackets()
 	deadline = std::chrono::steady_clock::now() + PollTimeout;
 	while ((replies == 0 || transmitter.invalidPackets == 0) && std::chrono::steady_clock::now() < deadline)
 	{
-		transmitter.Poll(Session, [&](const Bus::Message& packet) {
+		transmitter.Poll(RunId, [&](const Bus::Message& packet) {
 			Check(std::holds_alternative<Bus::Heartbeat>(packet));
 			++replies;
 		});
 		std::this_thread::sleep_for(1ms);
 	}
 	Check(replies == 1 && transmitter.invalidPackets == 1);
+	// Delayed media from a previous run must not reach the audio/DMX consumers,
+	// even from the accepted sender's port and with otherwise valid payloads.
+	Bus::AudioFrame audio;
+	audio.set_run_id(RunId - 1);
+	audio.set_audio_frame_position(UINT64_MAX - Bus::AudioFrames);
+	audio.set_sequence_number(UINT32_MAX);
+	audio.add_interleaved_samples(0.5f);
+	audio.add_interleaved_samples(0.5f);
+	lighting.set_run_id(RunId - 1);
+	lighting.set_audio_frame_position(UINT64_MAX);
+	lighting.set_sequence_number(UINT32_MAX);
+	Check(transmitter.Send(audio) && transmitter.Send(lighting));
+	audio.set_run_id(RunId);
+	audio.set_audio_frame_position(0);
+	audio.set_sequence_number(1);
+	lighting.set_run_id(RunId);
+	lighting.set_audio_frame_position(0);
+	lighting.set_sequence_number(1);
+	Check(transmitter.Send(audio) && transmitter.Send(lighting));
+	unsigned audioFrames = 0, lightFrames = 0;
+	deadline = std::chrono::steady_clock::now() + PollTimeout;
+	while (audioFrames + lightFrames < 2 && std::chrono::steady_clock::now() < deadline)
+	{
+		receiver.Poll(RunId, [&](const Bus::Message& packet) {
+			if (const auto* frame = std::get_if<Bus::AudioFrame>(&packet))
+			{
+				Check(frame->run_id() == RunId && frame->audio_frame_position() == 0 && frame->sequence_number() == 1);
+				++audioFrames;
+			}
+			else if (const auto* frame = std::get_if<Bus::LightFrame>(&packet))
+			{
+				Check(frame->run_id() == RunId && frame->audio_frame_position() == 0 && frame->sequence_number() == 1);
+				++lightFrames;
+			}
+			else
+				Check(false);
+		});
+		std::this_thread::sleep_for(1ms);
+	}
+	Check(audioFrames == 1 && lightFrames == 1 && receiver.invalidPackets == InvalidPackets + 3);
 	receiver.ReleasePeer(); // Rejected initialization permits a corrected client to log in.
 	send(wire(login));
-	receiver.Poll(Session, handler);
+	receiver.Poll(RunId, handler);
 	Check(accepted == 2);
 	closesocket(raw);
 }

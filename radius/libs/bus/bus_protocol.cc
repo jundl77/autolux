@@ -97,12 +97,11 @@ bool IsNewerSequenceNumber(uint32_t incoming, std::optional<uint32_t> previous)
 	return !previous || static_cast<int32_t>(incoming - *previous) > 0;
 }
 
-bool IsValidMessage(const Message& message, uint64_t expectedSession)
+bool IsValidMessage(const Message& message, uint64_t expectedRunId)
 {
 	return std::visit(
 	    [&](const auto& value) {
-		    return value.session_id() && (!expectedSession || value.session_id() == expectedSession) &&
-			       ValidPayload(value);
+		    return value.run_id() && (!expectedRunId || value.run_id() == expectedRunId) && ValidPayload(value);
 	    },
 	    message);
 }
@@ -125,7 +124,7 @@ size_t SerializeMessage(const Message& message, std::array<uint8_t, MaxDatagramB
 	    message);
 }
 
-bool ParseMessage(const void* data, size_t size, uint64_t expectedSession, Message& message)
+bool ParseMessage(const void* data, size_t size, uint64_t expectedRunId, Message& message)
 {
 	if (!data || size < FrameHeaderBytes || size > MaxDatagramBytes)
 		return false;
@@ -163,7 +162,7 @@ bool ParseMessage(const void* data, size_t size, uint64_t expectedSession, Messa
 	default:
 		return false;
 	}
-	return parsed && IsValidMessage(message, expectedSession);
+	return parsed && IsValidMessage(message, expectedRunId);
 }
 
 njson MetricsToJson(const Metrics& health)

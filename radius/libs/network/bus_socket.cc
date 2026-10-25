@@ -66,7 +66,7 @@ bool BusSocket::Send(const Bus::Message& packet)
 	return true;
 }
 
-void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Message&)>& handler)
+void BusSocket::Poll(uint64_t runId, const std::function<void(const Bus::Message&)>& handler)
 {
 	// Drain bursts instead of reading one datagram per Windows scheduler tick.
 	for (int i = 0; i < MaxBusDatagramsPerPoll; ++i)
@@ -90,7 +90,7 @@ void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Messa
 		}
 		Bus::Message packet;
 		if (source.sin_addr.s_addr != mPeer.sin_addr.s_addr || (mConnected && source.sin_port != mPeer.sin_port) ||
-		    !Bus::ParseMessage(bytes.data(), size, session, packet))
+		    !Bus::ParseMessage(bytes.data(), size, runId, packet))
 		{
 			++invalidPackets;
 			continue;

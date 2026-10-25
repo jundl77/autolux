@@ -66,6 +66,7 @@ impl Renderer {
             }
         });
         let login = wire::Login {
+            run_id: u64::MAX,
             command_id: 0,
             protocol_major: starfire::live::PROTOCOL_MAJOR,
             protocol_minor: starfire::live::PROTOCOL_MINOR,
@@ -103,18 +104,16 @@ impl Renderer {
 
     fn logged_in() -> Self {
         let mut renderer = Self::start();
-        assert!(matches!(
-            renderer.reply(Operation::Login(renderer.login.clone())),
-            Event::LoginReply(wire::LoginReply {
-                frame_rate_hz: 40,
-                max_message_bytes: 65536,
-                ..
-            })
-        ));
-        assert_eq!(
-            renderer.next_metrics().last_processed_command_id,
-            renderer.command_id
-        );
+        let Event::LoginReply(reply) = renderer.reply(Operation::Login(renderer.login.clone()))
+        else {
+            panic!("renderer did not accept login");
+        };
+        assert_eq!(reply.frame_rate_hz, 40);
+        assert_eq!(reply.max_message_bytes, 65536);
+        assert_eq!(reply.run_id, renderer.login.run_id);
+        let metrics = renderer.next_metrics();
+        assert_eq!(metrics.run_id, renderer.login.run_id);
+        assert_eq!(metrics.last_processed_command_id, renderer.command_id);
         renderer
     }
 
@@ -256,6 +255,7 @@ fn login_is_required_and_duplicate_login_preserves_owned_scene() {
     renderer.send(play("energy"));
     renderer.wait_for_red(128);
     let mut replacement = renderer.login.clone();
+    replacement.run_id = 1;
     replacement.parameters.push(setting(
         wire::ParameterType::OutputBlackout,
         wire::parameter::Value::Boolean(true),
@@ -263,8 +263,26 @@ fn login_is_required_and_duplicate_login_preserves_owned_scene() {
     assert!(
         matches!(renderer.reply(Operation::Login(replacement)), Event::ErrorReply(value) if value.message.contains("already"))
     );
-    assert!(renderer.metrics().runtime_error.is_empty());
+    let metrics = renderer.metrics();
+    assert!(metrics.runtime_error.is_empty());
+    assert_eq!(metrics.run_id, renderer.login.run_id);
     renderer.wait_for_red(128);
+}
+
+#[test]
+fn zero_run_id_cannot_acquire_output_and_a_valid_run_can_retry() {
+    let mut renderer = Renderer::start();
+    let mut login = renderer.login.clone();
+    login.run_id = 0;
+    assert!(
+        matches!(renderer.reply(Operation::Login(login)), Event::ErrorReply(value) if value.message.contains("run_id"))
+    );
+    renderer.assert_no_output();
+    let Event::LoginReply(reply) = renderer.reply(Operation::Login(renderer.login.clone())) else {
+        panic!("valid run did not become ready");
+    };
+    assert_eq!(reply.run_id, u64::MAX);
+    assert_eq!(renderer.metrics().run_id, u64::MAX);
 }
 
 #[test]

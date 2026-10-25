@@ -19,7 +19,7 @@ public:
 	~BusSocket();
 	void Open(const std::string& bindAddress, const std::string& peer, uint16_t port, bool receiver);
 	bool Send(const Bus::Message&);
-	void Poll(uint64_t session, const std::function<void(const Bus::Message&)>&);
+	void Poll(uint64_t runId, const std::function<void(const Bus::Message&)>&);
 	void ReleasePeer();
 };
 

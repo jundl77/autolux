@@ -11,7 +11,7 @@
 - Prefer deletion and direct code over new layers. Reduce duplication without
   making the control flow harder to follow; fewer lines alone is not readability.
 - Validate lengths, ranges and overflow before access or conversion. Preserve
-  session/watermark ordering. Fail with actionable errors; never silently discard
+  run-ID/watermark ordering. Fail with actionable errors; never silently discard
   a failure or report missing measurements as zero.
 - Audio callbacks must not allocate, log, block or perform network/USB I/O.
   Keep queue ownership explicit and DMX on its own worker. Bound every wait.

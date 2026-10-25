@@ -61,7 +61,8 @@ def login_assets(tmp_path, monkeypatch):
 def test_login_preserves_exact_gdtf_source_and_explicit_zero_movement_limit(login_assets):
     rig, autoloops, _ = login_assets
     parameter = wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0)
-    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', [parameter])
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', [parameter], run_id=(1 << 64) - 1)
+    assert login.run_id == (1 << 64) - 1
     assert login.command_id == 0
     assert login.protocol_major == wire.PROTOCOL_MAJOR
     assert login.protocol_minor == wire.PROTOCOL_MINOR
@@ -88,7 +89,7 @@ def test_login_preserves_exact_gdtf_source_and_explicit_zero_movement_limit(logi
 
 
 def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts():
-    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454')
+    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     rig = json.loads(DEFAULT_RIG.read_text(encoding='utf-8'))
     profiles = json.loads(PROFILE_CATALOGUE.read_text(encoding='utf-8'))['profiles']
     assert [fixture.fixture_id for fixture in login.rig.fixtures] == [
@@ -128,7 +129,7 @@ def test_unknown_fields_are_not_silently_dropped(login_assets, location):
     target['typo'] = None
     path.write_text(json.dumps(data), encoding='utf-8')
     with pytest.raises(ValueError, match='Invalid Starfire login assets'):
-        assets.load_login(rig, autoloops, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 
 @pytest.mark.parametrize(
@@ -144,7 +145,7 @@ def test_invalid_json_shapes_and_duplicate_fields_are_rejected(login_assets, doc
     rig, autoloops, _ = login_assets
     rig.write_text(document, encoding='utf-8')
     with pytest.raises(ValueError, match='Invalid Starfire login assets'):
-        assets.load_login(rig, autoloops, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 
 @pytest.mark.parametrize('field,value', [('gdtf_xml', ''), ('gdtf_xml', 5), ('dmx_mode', None)])
@@ -154,13 +155,13 @@ def test_invalid_gdtf_payload_is_not_coerced(login_assets, field, value):
     data['profiles']['test_mover'][field] = value
     profiles.write_text(json.dumps(data), encoding='utf-8')
     with pytest.raises(ValueError, match='Invalid Starfire login assets'):
-        assets.load_login(rig, autoloops, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 
 def test_login_uses_selected_profile_catalogue(login_assets, monkeypatch):
     rig, autoloops, profiles = login_assets
     monkeypatch.setattr(assets, 'PROFILE_CATALOGUE', profiles.with_name('missing.json'))
-    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', profiles=profiles)
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1, profiles=profiles)
     assert login.rig.profiles[0].gdtf_xml == GDTF_XML
 
 
@@ -170,11 +171,11 @@ def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_as
         ' ' * protocol.MAX_MESSAGE_BYTES, encoding='utf-8'
     )
     with pytest.raises(ValueError, match='Login assets exceed the renderer message limit'):
-        assets.load_login(rig, autoloops, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 
 def test_invalid_autoloop_name_is_rejected(login_assets):
     rig, autoloops, _ = login_assets
     (autoloops / 'atmospheric/blue.lua').rename(autoloops / 'atmospheric/Blue Sky.lua')
     with pytest.raises(ValueError, match='Invalid autoloop name'):
-        assets.load_login(rig, autoloops, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)

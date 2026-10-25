@@ -219,6 +219,7 @@ if mode == 'malformed':
     sys.stdout.buffer.flush()
 commands = []
 last_processed = 0
+run_id = 0
 while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
     message_type, length = FRAME_HEADER.unpack(prefix)
     value = COMMAND_MESSAGES[message_type].FromString(sys.stdin.buffer.read(length))
@@ -231,6 +232,8 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
         record['autoloop'] = value.autoloop_id
     commands.append(record)
     if isinstance(value, wire.Login) and mode != 'no_login_reply':
+        run_id = value.run_id
+        assert run_id > 0
         assert value.command_id == 1
         assert value.HasField('rig') and value.rig.fixtures and value.autoloops
         assert value.artnet_destination
@@ -239,6 +242,7 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
             event(wire.ErrorReply(command_id=value.command_id, message='fixture patch is missing'))
         else:
             event(wire.LoginReply(command_id=value.command_id,
+                run_id=run_id if mode != 'wrong_login_run' else 1,
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
                 protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
                 protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply')
@@ -246,7 +250,8 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
             event(wire.Heartbeat())
-        event(wire.Metrics(rendered_frames=len(commands), last_processed_command_id=last_processed))
+        event(wire.Metrics(rendered_frames=len(commands), last_processed_command_id=last_processed,
+            run_id=run_id if mode != 'wrong_metrics_run' else 1))
     elif isinstance(value, wire.SetParameter) and mode == 'reject':
         event(wire.ErrorReply(command_id=value.command_id, message='brightness is out of range'))
 with open(recording, 'w') as output:
@@ -269,7 +274,13 @@ def _fake_runtime(tmp_path, mode='normal', **kwargs):
     (scripts / 'drop').mkdir(parents=True)
     (scripts / 'drop/blue_impact.lua').write_text('return {render=function(ctx) return {} end}')
     runtime = starfire_runtime.StarfireRuntime(
-        sys.executable, rig, scripts, '127.0.0.1:6454', tmp_path / 'run', **kwargs
+        sys.executable,
+        rig,
+        scripts,
+        '127.0.0.1:6454',
+        tmp_path / 'run',
+        run_id=kwargs.pop('run_id', (1 << 64) - 1),
+        **kwargs,
     )
     runtime.command = [sys.executable, '-c', _CHILD, mode, str(tmp_path / 'commands.json')]
     return runtime
@@ -343,7 +354,7 @@ def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason)
     assert all(not thread.is_alive() for thread in runtime._threads)
 
 
-@pytest.mark.parametrize('mode', ['wrong_major_reply', 'newer_minor_reply'])
+@pytest.mark.parametrize('mode', ['wrong_major_reply', 'newer_minor_reply', 'wrong_login_run'])
 def test_login_rejects_an_incompatible_server_version_and_reaps_it(tmp_path, mode):
     runtime = _fake_runtime(tmp_path, mode)
     with pytest.raises(RuntimeError, match='Unexpected Starfire login reply'):
@@ -361,6 +372,26 @@ def test_startup_waits_for_login_reply_before_sending_any_other_command(tmp_path
     assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'Login'}]
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
+
+
+@pytest.mark.parametrize('run_id', [0, -1, 1 << 64, True, 1.5])
+def test_invalid_run_id_is_rejected_before_starting_a_renderer(tmp_path, run_id):
+    runtime = _fake_runtime(tmp_path, run_id=run_id)
+    with pytest.raises(ValueError, match='nonzero uint64'), runtime:
+        pytest.fail('invalid run_id started a renderer')
+    assert runtime.process is None
+    assert not runtime.run_dir.exists()
+
+
+def test_metrics_from_a_different_run_fail_the_owned_connection(tmp_path):
+    runtime = _fake_runtime(tmp_path, 'wrong_metrics_run')
+    with pytest.raises(RuntimeError, match='metrics belong to a different run_id'), runtime:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            runtime.check_health()
+            time.sleep(0.01)
+        pytest.fail('mismatched metrics were accepted')
+    assert runtime.process is None
 
 
 def test_rejected_login_reports_initialization_error_and_reaps_owned_process(tmp_path):
@@ -530,6 +561,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             root / 'autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
+            run_id=(1 << 64) - 1,
             initial_parameters=[wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0.5)],
         )
         with runtime:

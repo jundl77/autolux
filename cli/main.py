@@ -4,6 +4,7 @@ import argparse
 import argcomplete
 import asyncio
 import logging
+import secrets
 import signal
 import sys
 from pathlib import Path
@@ -36,6 +37,7 @@ async def run_cmd(args: argparse.Namespace):
         args.autoloops,
         args.artnet,
         ROOT / '.live' / 'starfire' / f'live-{uuid.uuid4().hex}',
+        run_id=secrets.randbits(64) or 1,
         profiles=getattr(args, 'profiles', PROFILE_CATALOGUE),
     ) as renderer:
         global_app = AutoluxController(

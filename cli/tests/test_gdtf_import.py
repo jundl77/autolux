@@ -61,10 +61,10 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
         receiver.bind(('127.0.0.1', 0))
         receiver.settimeout(TEST_TIMEOUT_SECONDS)
         destination = f'127.0.0.1:{receiver.getsockname()[1]}'
-        login = load_login(rig, autoloops, destination, profiles=profiles)
+        login = load_login(rig, autoloops, destination, run_id=1, profiles=profiles)
         assert login.rig.profiles[0].gdtf_xml.encode('utf-8') == xml
         with StarfireRuntime(
-            BINARY, rig, autoloops, destination, tmp_path / 'run', profiles=profiles
+            BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1, profiles=profiles
         ) as runtime:
             runtime.send_command({'kind': 'select', 'bank': 'test', 'autoloop': 'dimmer'})
             deadline = time.monotonic() + TEST_TIMEOUT_SECONDS

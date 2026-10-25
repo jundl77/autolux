@@ -3,7 +3,7 @@
   "peer_address": "192.168.178.22",
   "bus_port": 19002,
   "sample_rate": 44100,
-  "session": 1,
+  "run_id": 1,
   "network_core": 0,
   "audio_core": 1,
   "dmx_core": 2,

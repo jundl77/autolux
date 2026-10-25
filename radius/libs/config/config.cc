@@ -48,6 +48,7 @@ std::optional<Config> Config::FromFile(const std::string& file, AppType type)
 	c.mDmxCore = Integer(j, "dmx_core", -1, -1, 31);
 	c.mDmxUniverse = Integer(j, "dmx_universe", 0, 0, 255);
 	c.mBusPort = Integer(j, "bus_port", 19002, 1, 65535);
+	c.mArtnetPort = Integer(j, "artnet_port", DefaultArtnetPort, 1, UINT16_MAX);
 	c.mAudioSampleRate = Integer(j, "sample_rate", 44100, 44100, 44100);
 	c.mJitterBufferMs = Integer(j, "jitter_buffer_ms", 150, 20, 150);
 	c.mPeerAddress = j.at("peer_address").get<std::string>();
@@ -66,15 +67,15 @@ std::optional<Config> Config::FromFile(const std::string& file, AppType type)
 	c.mPlaybackDelaySeconds = j.value("playback_delay_seconds", 14.0);
 	if (!std::isfinite(c.mPlaybackDelaySeconds) || c.mPlaybackDelaySeconds < 0 || c.mPlaybackDelaySeconds > 120)
 		throw std::runtime_error("playback_delay_seconds must be 0..120");
-	if (j.contains("session"))
+	if (j.contains("run_id"))
 	{
-		const auto& session = j.at("session");
-		if (!session.is_number_unsigned() && (!session.is_number_integer() || session.get<int64_t>() <= 0))
-			throw std::runtime_error("session must be a positive 64-bit integer");
-		c.mSession = session.get<uint64_t>();
+		const auto& runId = j.at("run_id");
+		if (!runId.is_number_unsigned() && (!runId.is_number_integer() || runId.get<int64_t>() <= 0))
+			throw std::runtime_error("run_id must be a positive 64-bit integer");
+		c.mRunId = runId.get<uint64_t>();
 	}
-	if (!c.mSession)
-		throw std::runtime_error("session must be a positive 64-bit integer");
+	if (!c.mRunId)
+		throw std::runtime_error("run_id must be a positive 64-bit integer");
 	return c;
 }
 

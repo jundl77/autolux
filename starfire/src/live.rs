@@ -33,6 +33,7 @@ pub const PROTOCOL_MINOR: u32 = wire::ProtocolVersion::ProtocolMinor as u32;
 type SharedFailure = Arc<Mutex<Option<String>>>;
 
 struct LiveSession {
+    run_id: u64,
     rig: FixtureRig,
     engine: Engine,
     output: Option<ArtNetOutput>,
@@ -42,6 +43,7 @@ struct LiveSession {
 
 impl LiveSession {
     fn login(login: &wire::Login) -> Result<Self> {
+        ensure!(login.run_id != 0, "login run_id must be nonzero");
         ensure!(
             login.protocol_major == PROTOCOL_MAJOR,
             "incompatible protocol major {}; expected {}",
@@ -83,6 +85,7 @@ impl LiveSession {
         let output = ArtNetOutput::bind(local, destination)?;
         let last_states = rig.empty_states();
         Ok(Self {
+            run_id: login.run_id,
             rig,
             engine,
             output: Some(output),
@@ -109,6 +112,7 @@ impl LiveSession {
             .context("rendering session is closed")?
             .send_frame(&frame.dmx_frames_by_universe)?;
         Ok(wire::Metrics {
+            run_id: self.run_id,
             elapsed_seconds: frame.time_seconds,
             rendered_frames,
             missed_render_deadlines,
@@ -286,6 +290,7 @@ pub fn run_live(
                         };
                         match result {
                             Ok(created) => {
+                                metrics.run_id = created.run_id;
                                 session = Some(created);
                                 last_client_heartbeat = Instant::now();
                                 last_server_heartbeat = Instant::now();
@@ -296,6 +301,7 @@ pub fn run_live(
                                 send_event(
                                     &events,
                                     ServerMessage::LoginReply(wire::LoginReply {
+                                        run_id: login.run_id,
                                         command_id: login.command_id,
                                         frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
                                         max_message_bytes: MAX_MESSAGE_BYTES as u32,
@@ -413,6 +419,7 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
         let login = wire::Login {
+            run_id: 1,
             protocol_major: PROTOCOL_MAJOR,
             protocol_minor: PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {

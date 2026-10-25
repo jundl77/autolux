@@ -278,14 +278,17 @@ async def _soak(args) -> dict:
     from autolux.lib.clients.starfire_client import StarfireClient
     from cli.starfire import ROOT
     from cli.starfire_runtime import StarfireRuntime, selected_rig
+    import secrets
     import uuid
 
     with StarfireRuntime(
         args.starfire_binary,
         selected_rig(args.rig),
-        args.sequences,
+        args.autoloops,
         args.artnet,
         ROOT / '.live' / 'starfire' / f'soak-{uuid.uuid4().hex}',
+        run_id=secrets.randbits(64) or 1,
+        profiles=args.profiles,
     ) as renderer:
         app = AutoluxController(
             lighting_client=StarfireClient(renderer.send_command),
