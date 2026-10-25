@@ -10,7 +10,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/lighting/` | Starfire control, report replay and fixture storage |
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
-| `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
+| `radius/` | Rust audiovisual transport: embedded TX and remote `radius_rx` |
 | `starfire/` | Rust/Lua lighting renderer, fixture setup and deterministic replay |
 | `autoloops/` | Banked Lua lighting programs |
 | `rigs/` | Shared fixture patches and DMX profiles |
@@ -22,11 +22,10 @@ Each component keeps its own `tests/` directory.
 
 ## Setup
 
-Windows, Python 3.11, uv and Visual Studio C++ Build Tools are required.
-Install Rust through rustup for Starfire; `rust-toolchain.toml` selects its version.
+Windows, Python 3.11, uv, Rust and the Visual Studio MSVC build tools are required.
+Install Rust through rustup; `rust-toolchain.toml` selects its version.
 
 ```powershell
-git submodule update --init --recursive
 uv sync --extra dev --extra visualizer
 uv run pre-commit install
 .\build.ps1
@@ -51,8 +50,9 @@ uv run autolux stop
 ```
 
 The CLI copies the receiver bundle over SCP, starts it over SSH, then starts
-Radius TX, Starfire and Autolux. Ctrl-C stops the owned session at both ends. RDP is not
-needed during operation. Config templates live beside the two Radius apps;
+Starfire with its Radius TX worker, then Autolux. Ctrl-C stops the owned session at both ends.
+RDP is not needed during operation. Config templates are `radius/transmitter.json` and
+`radius/receiver.json`;
 `--tx-config`, `--rx-config` and `--receiver-host` override them.
 
 Open **http://autolux.local:8765** for analysis, lighting and system health.
@@ -86,12 +86,12 @@ setup, and the [system design](docs/starfire-design.md) for timing and protocols
 
 ## Formatting
 
-Build scripts format Python with Ruff, C++/Protobuf with clang-format and Rust
+Build scripts format Python with Ruff, Protobuf with clang-format and Rust
 with rustfmt. Run `uv run pre-commit run --all-files` to apply saved policies across the
 repository. Commit hooks format staged source files; re-stage any changes they make.
 
-Python uses four spaces, a 100-column target and preserved quotes. C++ uses tabs
-at width four, a 120-column target, expanded function/control braces and blank
-lines between definitions. Settings live in `pyproject.toml`, `.clang-format`
-`.editorconfig` and `rustfmt.toml`. Dependencies, generated files and training data
-are excluded. Starfire's build also runs Clippy with warnings denied.
+Python and Rust use four spaces and a 100-column target. Settings live in
+`pyproject.toml`, `.clang-format`, `.editorconfig` and `rustfmt.toml`. Dependencies,
+generated files and training data are excluded. Native builds run Clippy with warnings
+denied, tests and release compilation. The root build checks the Rust workspace once;
+component build scripts select Radius or Starfire.

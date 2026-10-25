@@ -22,16 +22,18 @@ flowchart TB
         Timing["Beat timing and live controls"]
         Scripts["Banked Lua autoloops"]
         Frames["Compose effects and encode DMX"]
+        subgraph RadiusTX["RADIUS TX (embedded Rust worker)"]
+            TX["Capture, delay and transmit"]
+        end
         Timing -->|"Embedded Lua 5.4: time and measured audio level"| Scripts
         Scripts -->|"Lua effect tables: fixture properties"| Frames
         Timing -->|"Rust API: accents, master, blackout"| Frames
     end
-    subgraph Radius["RADIUS (C++)"]
-        TX["TX: capture, delay and transmit"]
-        RX["RX: buffer and synchronized playback"]
-        TX -->|"Protobuf / UDP 19002: Login, AudioFrame, LightFrame, heartbeat"| RX
-        RX -->|"Protobuf / UDP 19002: LoginReply, errors, metrics, heartbeat"| TX
+    subgraph RadiusRX["RADIUS RX (remote Rust process)"]
+        RX["Buffer and synchronized playback"]
     end
+    TX -->|"Protobuf / TCP 19002: Login, AudioFrame, LightFrame, heartbeat"| RX
+    RX -->|"Protobuf / TCP 19002: LoginReply, errors, metrics, heartbeat"| TX
     Speakers["Focusrite speakers"]
     Lights["Enttec adapter and lighting fixtures"]
     Music -->|"PCM / PyAudio capture"| Analysis
@@ -40,13 +42,15 @@ flowchart TB
     Timing -->|"Starfire Protobuf / pipes: LoginReply, errors, metrics, heartbeat"| Decisions
     Replay -->|"Versioned JSON replay file"| Timing
     Dashboard -->|"Starfire Protobuf Login: rig, profiles, Lua sources"| Timing
-    Frames -->|"Art-Net ArtDmx / private loopback UDP port"| TX
-    TX -->|"Local health JSON / Python monitoring"| Dashboard
+    Frames -->|"In-process Rust API: complete DMX frame"| TX
+    TX -->|"Radius health snapshot / JSON file"| Dashboard
+    Decisions -->|"Python snapshots / HTTP 8765"| Dashboard
     RX -->|"WASAPI audio output"| Speakers
     RX -->|"ENTTEC USB Pro / USB, then DMX512"| Lights
     style Autolux fill:transparent,stroke:#728196,stroke-width:2px,stroke-dasharray:5 5
     style Starfire fill:transparent,stroke:#728196,stroke-width:2px,stroke-dasharray:5 5
-    style Radius fill:transparent,stroke:#728196,stroke-width:2px,stroke-dasharray:5 5
+    style RadiusTX fill:transparent,stroke:#728196,stroke-width:2px,stroke-dasharray:5 5
+    style RadiusRX fill:transparent,stroke:#728196,stroke-width:2px,stroke-dasharray:5 5
 ```
 
 - **Music input:** the same feed is captured independently for analysis and room playback.
@@ -62,9 +66,9 @@ flowchart TB
   Atmospheric, Breakdown, Buildup and Drop are the first banks.
 - **Compose effects and encode DMX:** combines baseline, overrides, master and blackout;
   maps fixture properties to complete universe frames.
-- **TX: capture, delay and transmit:** holds audio, receives DMX and stamps outgoing media
-  with the shared run_id and audio-frame position.
-- **RX: buffer and synchronized playback:** absorbs jitter and schedules DMX against audible
+- **Capture, delay and transmit:** holds audio, binds each audio block to its lighting state
+  and sends both with the shared run_id and audio-frame position. Its worker runs inside Starfire.
+- **Buffer and synchronized playback:** absorbs jitter and schedules DMX against audible
   audio. Audio and USB output use separate threads.
 - **Recorded show inputs:** timed commands replay through the same engine for deterministic
   tests. Converted analysis reports omit unrecorded controls.
@@ -81,20 +85,21 @@ The four control families are PlayAutoloop, active effects, UpdateBeat and
 SetParameter. Rejections use ErrorReply; Metrics reports command progress.
 See the [protocol](starfire/protocol-design.md).
 [Radius's contract](../proto/radius/radius.proto) uses the same framing inside
-1,200-byte UDP datagrams. TX waits for LoginReply before capturing media. Both
+messages bounded to 1,200 bytes on one ordered TCP stream. TX waits for LoginReply before capturing media. Both
 Login protocols require equal major versions and negotiate the lower minor.
 Version constants come from the schema enums and generated language bindings.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
 Autolux creates one random 64-bit run_id at startup for all three components.
 Radius rejects media from another run; Starfire binds its owned control stream
-to the Login identity and echoes it in metrics. Standard Art-Net has no run_id,
-so production uses an exclusive private loopback input instead of shared port 6454.
+to the Login identity and echoes it in metrics. Production passes DMX directly
+from the renderer to its owned TX worker; it does not accept external Art-Net input.
+Explicit Art-Net output remains available for standalone rendering and replay.
 
 ## What "clock" means
 
 - **Musical position:** where we are in the music. Beat messages provide position and BPM.
   At 120 BPM, position advances two beats per second; halfway between beats 10 and 11
-  it is 10.5. New anchors correct the estimate. Starfire never receives audio.
+  it is 10.5. New anchors correct the estimate. The renderer uses these anchors, not audio analysis.
 - **Animation position:** how far an autoloop has moved. It advances with tempo and requested
   animation speed without jumping when speed changes. Beat pulses use musical position;
   movement can use animation position.
@@ -106,19 +111,19 @@ so production uses an exclusive private loopback input instead of shared port 64
   independently of calendar time. The engine receives explicit seconds, so replay is
   independent of computer speed and wall time.
 - **Audio-frame position:** Radius's media clock counts stereo sample frames since session
-  start. At 44.1 kHz, 44,100 frames represent one second. Its 64-bit watermark identifies
-  audio/DMX alignment; it adds no delay itself.
+  start. At 44.1 kHz, 44,100 frames represent one second. This 64-bit frame index identifies
+  the audible position; it adds no delay itself. Lighting sequences attach DMX state to audio.
 
 The **14-second show delay** gives analysis time to decide. It is applied once
 to TX audio and once to the matching control stream. The receiver's approximately
-**150 ms jitter buffer** is additional and shared by audio/DMX scheduling.
+**500 ms jitter buffer** is additional and shared by audio/DMX scheduling.
 An event at source second 10 reaches the transport around second 24, then plays
 after receiver/device buffering.
 
-Art-Net carries DMX values, not Radius watermarks. TX stamps the latest frame when
-it samples DMX; render/output cadence adds uncertainty. Physical fixture response
-is not sample-exact. Preserving an explicit future target needs a further Radius
-handoff change, tracked in the [decision log](starfire/decisions.md).
+Each audio block references its preceding lighting state. RX queues them together
+and releases lighting only when the corresponding audio becomes audible, including
+reported device latency. The 40 Hz output cadence and physical fixture response
+remain separate from this sample-position gate.
 
 ## Show behavior
 
@@ -144,10 +149,11 @@ The test suite requires at least 10x real-time speed for the 14-fixture room and
 2x for a 64-fixture patch, using a 90-second show with transitions and accents.
 These measure rendering headroom, not hardware latency or a worst-case deadline.
 
-Control/status pipes run separately with bounded queues. Art-Net sends are
-nonblocking; overdue render ticks are skipped. There is no queue of completed
-frames or triple buffering. If output needs another worker, prefer a latest-frame
-handoff so old frames cannot accumulate latency. Radius's playback buffer remains separate.
+Control/status pipes, rendering, transport, audio and USB output have separate
+workers with bounded handoffs. The render and transport workers can use separate
+CPU cores; CPAL manages audio callback scheduling. Overdue render ticks are skipped.
+Audio callbacks allocate nothing and never log, block or access the network or USB.
+Starvation darkens the output until 500 ms of synchronized media is buffered again.
 
 See [authoring and commands](../starfire/README.md),
 [decisions](starfire/decisions.md) and [validation evidence](starfire/validation.md).

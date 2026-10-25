@@ -304,6 +304,33 @@ Starfire is the lighting backend. Its live contract is
   allocation, network and USB operations. USB remains on a separate worker;
   driver bindings do not require retaining application C++.
 
+- P93: Radius uses one ordered duplex TCP stream with bounded protobuf records.
+  Send each changed lighting state before audio referencing its sequence. RX
+  resolves that state into the admitted playback block; network arrival never
+  advances physical lighting. No reverse dependency or custom ACK/retry.
+- P94: Fill/refill 500 ms of audio at RX; consume valid buffered audio before
+  silence and blackout. Bounded queues fail explicitly on overflow. CPAL's
+  audible-source clock accounts for output-device latency and starvation tails.
+- P95: Associate delayed audio with lighting at block assembly time, retaining
+  that association during TCP backpressure. Initial show-delay fill transmits
+  silence. Keep the 14-second analysis lead separate from receiver buffering.
+- P96: Starfire owns the TX worker by RAII; CLI owns Starfire and remote RX.
+  Network, render and DMX workers support explicit CPU affinity. CPAL/Windows
+  schedule audio callbacks; no ignored callback-affinity configuration remains.
+- P97: Receiver `ready` means its TCP listener is available. Radius LoginReply
+  means physical outputs are initialized; Starfire LoginReply includes that
+  readiness. Remote preflight deploys/checks without starting playback.
+- P98: Remove all application C++ and its build/vendor dependencies after the
+  successful Rust hardware proof. Build both crates from one Cargo workspace.
+  A generated ignored legacy build directory remains locally because automatic
+  approval review blocked its deletion; it is not part of the repository.
+
+- P99: Keep Starfire and Radius protobuf contracts independent. Starfire may use
+  the Radius Rust library, but its schema must not import Radius messages.
+  Radius writes its transport-health snapshot; Starfire emits renderer Metrics.
+  Autolux combines both for the existing dashboard. This supersedes the short-lived
+  cross-protocol metrics import; no duplicated transport message definitions.
+
 ## Open questions and defaults
 
 | ID | Question | Prototype default |
@@ -313,7 +340,7 @@ Starfire is the lighting backend. Its live contract is
 | Q03 | Named calibrated movement targets or direct pan/tilt first? | Direct normalized pan/tilt with calibrated bounds; API leaves room for named positions without needing a 3D editor. |
 | Q04 | What is the verified Mini Kinta IRC control profile? | Keep it dark. CF805's saved 24-channel mode is verified and represented by eight RGB cells at addresses 97-120. |
 | Q05 | Which manual controls belong in the first webapp tab? | Patch/groups now; live audition, master and blackout follow the live-session integration. No browser code editor. |
-| Q06 | Where does Art-Net sit when Radius preserves exact render targets? | Preserve existing local Art-Net ingress in the prototype; document measured scheduling limits. Clock mapping remains Radius implementation work. |
+| Q06 | Where does Art-Net sit? | Standalone renderer output only. Production passes complete DMX through the embedded Radius Rust API. |
 | Q07 | Are multiple universes needed immediately? | Encoder/output support universe identity; current Radius deployment remains its existing configured universe. |
 | Q08 | How should exact beat source times and physical-output latency be measured? | Preserve the successful pulse audition as evidence, not a sample-exact guarantee. Beat timestamps currently lose batching age; USB cadence and fixture response remain outside command-delay metrics. Measure these before adding compensation. |
 

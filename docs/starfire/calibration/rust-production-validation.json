@@ -1,0 +1,183 @@
+{
+  "date": "2026-10-25",
+  "path": "Spotify/CABLE capture -> Autolux + Starfire embedded Rust Radius TX -> TCP -> Rust Radius RX -> Focusrite + ENTTEC",
+  "show_delay_seconds": 14,
+  "receiver_buffer_seconds": 0.5,
+  "binary_sha256": {
+    "starfire.exe": "98623138f4138509e1430fdc4cdb0afc9ae76361dde5342a2011973adb434d68",
+    "radius_rx.exe": "27f6f365214e63a760a23908b41e6da671918a998c5405d48a7f60daafb02304"
+  },
+  "runs": [
+    {
+      "requested_seconds": 300,
+      "controller_duration_seconds": 300.080753199989,
+      "wall_seconds": 319.5,
+      "exit_code": 0,
+      "run_id": 4505433487589230979,
+      "user_observation": "Audio and lights work and follow the music; startup not observed.",
+      "transport_samples": 300,
+      "audio_buffer_seconds": {
+        "minimum_while_playing": 0.4708843537414966,
+        "maximum_while_playing": 0.5158503401360545,
+        "target": 0.5
+      },
+      "maximum_observed_audio_gap_seconds": 0.1131502,
+      "rx_counter_maxima": {
+        "underruns_total": 0,
+        "device_underruns_total": 0,
+        "concealed_frames_total": 0,
+        "lost_frames_total": 0,
+        "overflow_frames_total": 0,
+        "late_packets_total": 0,
+        "latency_trims_total": 0,
+        "dmx_dropped_total": 0,
+        "invalid_packets_total": 0,
+        "send_failures_total": 0,
+        "rebuffer_count": 0
+      },
+      "tx_counter_maxima": {
+        "capture_overruns_total": 0,
+        "queue_dropped_frames_total": 0,
+        "send_failures_total": 0,
+        "invalid_packets_total": 0
+      },
+      "last_rx": {
+        "audio_buffer_seconds": 0.4965079365079365,
+        "audio_input_age_seconds": 0.0179608,
+        "audio_max_gap_seconds": 0.0267646,
+        "audio_signal_peak": 0.32790374755859375,
+        "buffer_target_seconds": 0.5,
+        "clock_correction_ppm": -1,
+        "concealed_frames_total": 0,
+        "device_underruns_total": 0,
+        "dmx_connected": true,
+        "dmx_dropped_total": 0,
+        "dmx_frames_total": 4990,
+        "dmx_lateness_seconds": 0.006326530612244898,
+        "heartbeat_age_seconds": 8.8582489,
+        "heartbeats_received": 29,
+        "heartbeats_sent": 29,
+        "invalid_packets_total": 0,
+        "last_processed_command_id": 1,
+        "late_packets_total": 0,
+        "latency_trims_total": 0,
+        "link_up": true,
+        "lost_frames_total": 0,
+        "overflow_frames_total": 0,
+        "playing": true,
+        "rebuffer_count": 0,
+        "run_id": 4505433487589230979,
+        "send_failures_total": 0,
+        "underruns_total": 0,
+        "up": true
+      },
+      "renderer": {
+        "run_id": 4505433487589230979,
+        "elapsed_seconds": 300.025,
+        "rendered_frames": 11963,
+        "skipped_frames": 39,
+        "queued_commands": 0,
+        "last_render_ms": 0.16349999999999998,
+        "active_bank": "atmospheric",
+        "active_autoloop": "atmospheric/blue_tide",
+        "script_error": "",
+        "last_processed_command_id": 1090,
+        "age_seconds": 0.015000000013969839
+      },
+      "distinct_intents": [
+        "atmospheric",
+        "breakdown",
+        "buildup",
+        "drop"
+      ],
+      "controller_report_sha256": "0416efffd73d6b0fcc1f5d251afdae62829fc994003403851f1a3b20833d828f"
+    },
+    {
+      "requested_seconds": 30,
+      "controller_duration_seconds": 30.099973800010048,
+      "wall_seconds": 49.07799999997951,
+      "exit_code": 0,
+      "run_id": 11183357847960071976,
+      "user_observation": "First audible music and lights start at the same time.",
+      "transport_samples": 31,
+      "audio_buffer_seconds": {
+        "minimum_while_playing": 0.4852154195011338,
+        "maximum_while_playing": 0.5190476190476191,
+        "target": 0.5
+      },
+      "maximum_observed_audio_gap_seconds": 0.0756161,
+      "rx_counter_maxima": {
+        "underruns_total": 0,
+        "device_underruns_total": 0,
+        "concealed_frames_total": 0,
+        "lost_frames_total": 0,
+        "overflow_frames_total": 0,
+        "late_packets_total": 0,
+        "latency_trims_total": 0,
+        "dmx_dropped_total": 0,
+        "invalid_packets_total": 0,
+        "send_failures_total": 0,
+        "rebuffer_count": 0
+      },
+      "tx_counter_maxima": {
+        "capture_overruns_total": 0,
+        "queue_dropped_frames_total": 0,
+        "send_failures_total": 0,
+        "invalid_packets_total": 0
+      },
+      "last_rx": {
+        "audio_buffer_seconds": 0.5060544217687075,
+        "audio_input_age_seconds": 1.5e-06,
+        "audio_max_gap_seconds": 0.025013,
+        "audio_signal_peak": 0.4517402648925781,
+        "buffer_target_seconds": 0.5,
+        "clock_correction_ppm": 87,
+        "concealed_frames_total": 0,
+        "device_underruns_total": 0,
+        "dmx_connected": true,
+        "dmx_dropped_total": 0,
+        "dmx_frames_total": 28,
+        "dmx_lateness_seconds": 0.009319727891156463,
+        "heartbeat_age_seconds": 0.1810418,
+        "heartbeats_received": 3,
+        "heartbeats_sent": 3,
+        "invalid_packets_total": 0,
+        "last_processed_command_id": 1,
+        "late_packets_total": 0,
+        "latency_trims_total": 0,
+        "link_up": true,
+        "lost_frames_total": 0,
+        "overflow_frames_total": 0,
+        "playing": true,
+        "rebuffer_count": 0,
+        "run_id": 11183357847960071976,
+        "send_failures_total": 0,
+        "underruns_total": 0,
+        "up": true
+      },
+      "renderer": {
+        "run_id": 11183357847960071976,
+        "elapsed_seconds": 30.025,
+        "rendered_frames": 1202,
+        "skipped_frames": 0,
+        "queued_commands": 0,
+        "last_render_ms": 0.1838,
+        "active_bank": "breakdown",
+        "active_autoloop": "breakdown/violet_space",
+        "script_error": "",
+        "last_processed_command_id": 70,
+        "age_seconds": 0.0779999999795109
+      },
+      "distinct_intents": [
+        "atmospheric",
+        "breakdown"
+      ],
+      "controller_report_sha256": "fd0943d95fb42c4ee991abefcc344c4672c7856b8a3c2ca79bc09c4534f42fa8"
+    }
+  ],
+  "limits": [
+    "Physical alignment judged by user; no photodiode or audio-loopback latency measurement.",
+    "39 renderer deadlines missed in the300secondrun; renderer held latest state, audio continuity preserved.",
+    "Audio delivery gaps combine capture scheduling, TCP and network delay; these observations do not identify their cause."
+  ]
+}

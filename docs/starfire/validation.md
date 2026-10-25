@@ -1,103 +1,71 @@
 # Starfire validation
 
-Validation covers the native renderer, controller integration, transport and
-fixture definitions. Hardware observations are separate from deterministic checks.
+## Current system
 
-## Current integration status
+Autolux starts Starfire with an embedded Rust Radius TX worker and deploys Rust RX
+through SSH. One TCP connection carries audio, lighting, metrics and heartbeats.
+The 14-second analysis delay and 500 ms receiver buffer are separate. Audio
+references its lighting state; RX schedules that state against audible audio.
+Starfire and Radius have independent protobuf contracts and telemetry.
 
-Autolux supplies one nonzero 64-bit `run_id` to Starfire and both Radius endpoints.
-Production uses a private loopback Art-Net ingress. The dashboard retains its top
-title with Control, Telemetry and Config directly beside it; decorative labels
-are removed.
+## Physical validation
 
-The startup baseline now begins at the 14-second room-audio delay without waiting
-for a committed section. This correction passes automated tests but has not yet
-been repeated on hardware. The requested 300-second audition did not complete.
+- A 300-second production run completed with clean shutdown at both ends. The user
+  confirmed music and responsive lighting. All four lighting categories appeared.
+- A fresh 30-second run also completed cleanly. The user confirmed that the first
+  audible music and lighting started together.
+- Both runs recorded zero audio/device underruns, rebuffer events, capture
+  overruns, lost/concealed/overflow audio, and dropped DMX frames.
+- During the five-minute run the playing buffer ranged from 471 to 516 ms. The
+  largest sampled audio delivery gap was 113 ms; buffering absorbed it without
+  interrupting playback. The measurements do not identify the gap's cause.
+- Starfire rendered 11,963 frames and missed 39 render deadlines over 300 seconds
+  (about 39.9 FPS). The startup repeat missed none. No Lua errors occurred.
+- The dashboard and Prometheus endpoint served current renderer and transport
+  measurements. Both local Starfire and remote RX were absent after shutdown.
+
+See [production evidence](calibration/rust-production-validation.json) and the
+[earlier Rust hardware proof](calibration/rust-device-proof.json). Physical timing
+was judged by the user, not measured with an audio loopback or photodiode.
 
 ## Automated coverage
 
-- Every authored autoloop has a full-DMX replay digest and behavior assertions.
-  Tests cover timing corrections, selection continuity, transitions, accents,
-  blackout, bounded Lua and repeatable rendering.
-- Generated Python-to-Rust messages exercise Login initialization, major/minor
-  negotiation, typed parameters, command ordering, errors, heartbeats and cleanup.
-- Imported GDTF profiles are tested through real Login and loopback output,
-  including exact 8/16-bit encoding. All five shipped definitions pass the
-  official GDTF XML schema. Unsupported mappings fail before acquiring output.
-- The latest Radius build passes all four native test groups after capture
-  diagnostic changes. Earlier transport validation passed 20 process/lifecycle
-  checks. Media waits for LoginReply; retries preserve initialized resources.
-  Endpoint tests
-  disable hardware output.
-- Latest focused Python checks pass: 151 startup/controller cases and four
-  capture-diagnostic cases. The shared-run protocol slice passed 79 Python
-  checks; these are separate, overlapping runs, not one combined suite. The
-  earlier full Starfire suite passed 124 tests.
-- Source/wheel builds, isolated generated-binding imports, Rustfmt, Clippy and
-  production readiness pass. `uv run autolux --prod --check` has a 45-second
-  deadline; full suites and GPU backtests remain separate.
-- Ten cached backtest reports retain every analysis value and score after the
-  autoloop rename. Only 120 effect labels and resulting full-report checksums
-  change. See [analysis parity](analysis-parity.json) and
-  [report parity](autoloop-report-parity.json).
+- Radius: 38 Rust tests covering framed TCP, ordering, run identity, backpressure,
+  audio/light association, 500 ms buffering, clock drift, starvation tails,
+  exact ENTTEC packets, bounded shutdown and bidirectional ten-second heartbeats.
+- Starfire: 133 Rust tests covering deterministic Lua-to-DMX replay, fixture
+  encoding, protocol validation, composition, process ownership and embedded TX.
+- Strict Clippy and Rust formatting pass. Workspace builds run these checks and
+  generate language bindings from the root schemas.
+- The broad Python run passed 2,452 tests and exposed one startup-report baseline
+  mismatch. The reviewed correction changes initial lighting coverage only;
+  [the ten-track audit](startup-report-parity.json) records exact hashes and score
+  deltas. The failed benchmark then passed in 124.31 seconds; all three fresh
+  reports exactly matched the audited expectations. Later decisions, beats,
+  timing, labels and gate tolerances are unchanged.
+- CLI/tooling checks passed 142 tests, including a wheel built from its source
+  distribution and isolated imports of both generated protocols. Focused startup
+  and evaluation checks passed 204 tests. These runs overlap.
+- Production readiness completed in 4.8 seconds. `--prod --check` has a 45-second
+  deadline; full builds, suites, backtests and simulations use `--check-full`.
 
 ## Rendering performance
 
-The ordinary Rust suite renders a 90-second show with all four banks,
-transitions, accents, tempo changes, measured RMS, speed and brightness controls.
+The Rust suite renders a 90-second replay with all four banks, transitions,
+accents, tempo, measured RMS, speed and brightness. It requires at least 10x real
+time for the 14-fixture room and 2x for 64 fixtures. These are throughput checks,
+not guarantees of physical output latency. Every authored autoloop retains a
+checked full-DMX digest and behavior assertions.
 
-| Patch | Required minimum | Release measurement |
-| --- | --- | --- |
-| Room: 14 fixtures | 10x real time | 349x, 0.258 seconds |
-| Stress: 64 fixtures | 2x real time | 81x, 1.110 seconds |
+## Scope still open
 
-The factor includes command application, Lua, composition and fixture encoding;
-it excludes file output and network pacing. It measures throughput rather than
-worst-case frame latency.
-
-## Physical observations
-
-An earlier 90-second Spotify run through Starfire, Radius, Focusrite and Enttec
-received user confirmation that audio and lights worked. A white beat pulse was judged
-on-beat. After preparing models before capture, the repeat was also judged
-synchronized. The dashboard measured 40 renderer frames per second.
-
-That session had no lost audio frames, queue overflows, audio queue underruns or
-dropped DMX frames. One audio-device underrun occurred at startup and stayed at
-one. The maximum observed packet gap was 88 ms. These are session measurements,
-not guarantees for every network condition. See
-[physical evidence](calibration/physical-validation.json) and
-[native loopback evidence](calibration/live-loopback.json).
-
-The 2026-10-25 17:02 UTC attempt requested 300 seconds and ended about 51 seconds
-after media startup. Both audio captures failed when a Windows RDP-session
-disconnect was observed at 18:03:54 local time; this correlation does not by itself
-prove the cause. The user heard audio and saw lighting, described synchronization
-as partial, and reported lighting starting about five seconds late.
-
-The final transport snapshot showed zero queue drops, lost/overflow/late audio
-frames, or dropped DMX frames. One startup audio-device underrun remained; the
-maximum audio packet gap was 28 ms. These counters do not turn the interrupted
-run into a successful 300-second test. See the
-[interrupted-run evidence](calibration/interrupted-system-test.json).
-
-Software scheduling and USB write counters do not measure physical flash
-latency or DMX refresh. Radius stamps Art-Net ingress at receipt; explicit future
-render targets remain a timing improvement. Measured RMS updates on detected beats.
-
-## Limits and reproduction
-
-GDTF support is a validated subset. The 64 KiB live Login budget includes all
-fixture XML and Lua sources; importing a large definition does not enlarge it.
-Full GDTF/MVR asset preservation and broader fixture interpretation remain pending.
-The proposed paired audio/light transport is not implemented; Radius currently
-transports separate audio and light frames. A complete 300-second hardware run,
-including startup timing, is still required. No full GPU analysis rerun accompanied
-these integration changes.
+GDTF interpretation remains a validated subset. Complete GDTF/MVR asset
+preservation and replacing custom rig/profile JSON remain pending.
+The 64 KiB Login limit includes fixture XML and Lua sources. XML carriage
+alone is not full renderer conformance.
 
 ```powershell
-.\build-starfire.ps1
-uv run autolux starfire replay starfire/tests/replays/drop.json --output .live/drop.dmx
+.\build.ps1
 uv run autolux --prod --check
 uv run autolux --prod --check-full
 ```

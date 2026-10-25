@@ -14,7 +14,7 @@ uv run autolux starfire ui
 Replay is offline unless an explicit Art-Net destination and real-time pacing
 are requested. Fixture setup uses the existing dashboard; saved patches apply
 next session. Native commands are also available in
-`starfire/target/release/starfire.exe --help`.
+`target/release/starfire.exe --help`.
 
 Authored looks live in root `autoloops/`, grouped by bank. Autoloops return semantic
 effects from `render(ctx)`. Use supplied musical time,
@@ -37,9 +37,11 @@ Lua and fixture encoding, excluding file output and network pacing. Performance
 tests require 10x for the room rig and 2x for 64 fixtures over a 90-second show.
 
 Live mode starts without output resources. Autolux supplies the complete typed
-fixture patch, profiles, banked Lua sources, unicast Art-Net destination and
+fixture patch, profiles, banked Lua sources, Radius transport settings and
 initial parameters in `Login`. Starfire validates every script against this rig
 before `LoginReply` confirms readiness at 40 Hz; live mode loads no asset files.
+Production runs Radius TX in an owned worker and passes DMX directly to it.
+Standalone rendering can instead use an explicit unicast Art-Net destination.
 Closing the session blacks out and releases output. Independent heartbeats run
 both ways every ten seconds and expire after thirty seconds. Only login has a
 success reply; rejected commands produce `ErrorReply`, and `Metrics` reports the

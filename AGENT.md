@@ -23,8 +23,9 @@ committed decisions select lighting intents. Startup and silence are explicit.
 
 Apply the show delay once, in TX audio and scheduled controller commands.
 Autolux supplies one random run_id to Starfire and Radius at startup. Radius
-carries it with every audio/light frame and a 64-bit audio-frame watermark. RX schedules DMX
-against audible audio; jitter buffering is separate from the show delay.
+carries it with every audio/light frame over TCP. Audio references the preceding
+lighting sequence; RX schedules DMX against audible audio with a 500 ms buffer.
+TX runs inside Starfire; only RX is deployed remotely.
 
 Audio callbacks must not allocate, log, block or perform network/USB I/O.
 Use bounded queues with clear ownership. Keep audio and DMX output on separate
