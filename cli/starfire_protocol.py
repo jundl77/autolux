@@ -66,9 +66,10 @@ def build_command(command: dict | Message) -> Message:
                     'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
                     'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
                 }[kind]
-                message = wire.SetParameter(
-                    parameter=wire.Parameter(type=parameter, **{value_type: value.pop(field)})
-                )
+                setting = wire.Parameter(type=parameter, **{value_type: value.pop(field)})
+                if kind == 'set_master':
+                    setting.fade_seconds = value.pop('fade_seconds', 0.0)
+                message = wire.SetParameter(parameter=setting)
                 if value:
                     raise ValueError('Parameter command contains unexpected fields')
             elif kind == 'set_override':

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import tempfile
 import threading
@@ -12,6 +13,15 @@ from autolux.lighting.gdtf import MAX_CATALOGUE_BYTES, profile_metadata, read_bo
 
 DMX_UNIVERSE_SIZE = 512
 MAX_ARTNET_UNIVERSE = 32767
+MOVEMENT_OFFSET_LIMITS_DEGREES = {'pan': 540, 'tilt': 270}
+
+
+def movement_offset(axis: str, value):
+    """Validate a rig orientation offset in physical degrees."""
+    limit = MOVEMENT_OFFSET_LIMITS_DEGREES[axis]
+    if type(value) not in (int, float) or not math.isfinite(value) or abs(value) > limit:
+        raise ValueError(f'{axis} offset must be a number within ±{limit} degrees.')
+    return value
 
 
 def channel_occupancy(
@@ -124,6 +134,7 @@ def fixture_rows(patch):
                     f'{axis}_min': limits.get('min', 0.0),
                     f'{axis}_max': limits.get('max', 1.0),
                     f'{axis}_inverted': limits.get('inverted', False),
+                    f'{axis}_offset_degrees': fixture.get(f'{axis}_offset_degrees', 0),
                 }
             )
         rows.append(row)
@@ -150,6 +161,8 @@ def fixture_patch(rows, previous):
                 'max': row.get(f'{axis}_max'),
                 'inverted': row.get(f'{axis}_inverted'),
             }
+            if offset := movement_offset(axis, row.get(f'{axis}_offset_degrees', 0)):
+                fixture[f'{axis}_offset_degrees'] = offset
         fixtures.append(fixture)
         membership = row.get('groups') or ''
         if not isinstance(membership, str):

@@ -96,7 +96,7 @@ pub struct Engine {
     fade: Option<Crossfade>,
     overrides: BTreeMap<String, ActiveOverride>,
     override_order: u64,
-    master_intensity: f64,
+    master: MasterFade,
     normalized_rms_level: Option<f64>,
     blackout: bool,
     script_error: Option<String>,
@@ -117,7 +117,7 @@ impl Engine {
             fade: None,
             overrides: BTreeMap::new(),
             override_order: 0,
-            master_intensity: 1.0,
+            master: MasterFade::steady(1.0),
             normalized_rms_level: None,
             blackout: false,
             script_error: None,
@@ -157,9 +157,16 @@ impl Engine {
                 validate_identifier(id)?;
                 self.overrides.remove(id);
             }
-            Command::SetMaster { intensity } => {
+            Command::SetMaster {
+                intensity,
+                fade_seconds,
+            } => {
                 validate_unit(*intensity, "master intensity")?;
-                self.master_intensity = *intensity;
+                ensure!(
+                    fade_seconds.is_finite() && *fade_seconds >= 0.0,
+                    "master fade must be finite and nonnegative"
+                );
+                self.master.retarget(at_seconds, *intensity, *fade_seconds);
             }
             Command::SetNormalizedRmsLevel { level } => {
                 validate_unit(*level, "normalized RMS level")?;
@@ -203,7 +210,13 @@ impl Engine {
             parameter.value.as_ref(),
         ) {
             (Ok(ParameterType::OutputBrightness), Some(Value::Number(value))) => {
-                Command::SetMaster { intensity: *value }
+                Command::SetMaster {
+                    intensity: *value,
+                    fade_seconds: parameter.fade_seconds,
+                }
+            }
+            _ if parameter.fade_seconds != 0.0 => {
+                anyhow::bail!("only output brightness accepts a fade")
             }
             (Ok(ParameterType::AnimationSpeed), Some(Value::Number(value))) => {
                 Command::SetSpeed { multiplier: *value }
@@ -236,9 +249,10 @@ impl Engine {
 
         if self.script_error.is_none() {
             self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states);
+            let master = self.master.level_at(time_seconds);
             for state in states.values_mut() {
-                state.intensity = state.intensity.clamp(0.0, 1.0) * self.master_intensity;
-                state.attribute_brightness = self.master_intensity;
+                state.intensity = state.intensity.clamp(0.0, 1.0) * master;
+                state.attribute_brightness = master;
             }
         }
         if self.blackout {
@@ -502,6 +516,46 @@ fn validate_identifier(value: &str) -> Result<()> {
         "invalid identifier length"
     );
     Ok(())
+}
+
+/// Master brightness eased over wall-clock seconds rather than beats, so an
+/// operator fade still completes during silence when the beat clock is idle.
+#[derive(Clone, Copy, Debug)]
+struct MasterFade {
+    from: f64,
+    to: f64,
+    start_seconds: f64,
+    duration_seconds: f64,
+}
+
+impl MasterFade {
+    fn steady(level: f64) -> Self {
+        Self {
+            from: level,
+            to: level,
+            start_seconds: 0.0,
+            duration_seconds: 0.0,
+        }
+    }
+
+    fn level_at(&self, time_seconds: f64) -> f64 {
+        if self.duration_seconds <= 0.0 {
+            return self.to;
+        }
+        let progress =
+            ((time_seconds - self.start_seconds) / self.duration_seconds).clamp(0.0, 1.0);
+        self.from + (self.to - self.from) * progress
+    }
+
+    /// Starts from the currently visible level so a re-target mid-fade never jumps.
+    fn retarget(&mut self, time_seconds: f64, to: f64, duration_seconds: f64) {
+        *self = Self {
+            from: self.level_at(time_seconds),
+            to,
+            start_seconds: time_seconds,
+            duration_seconds,
+        };
+    }
 }
 
 fn validate_unit(value: f64, name: &str) -> Result<()> {

@@ -1,8 +1,14 @@
 import datetime
+import json
 import logging
+import os
+import queue
+import tempfile
+from pathlib import Path
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 LOGGER = logging.getLogger(__name__)
@@ -11,6 +17,87 @@ LOGGER = logging.getLogger(__name__)
 # simulate/runner.py uses the same delay for replay.
 PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
+# Beside the Config page's saved rig; the rig file itself is Starfire's schema.
+SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
+CONTROL_QUEUE_SIZE = 16
+
+
+def load_show_settings(path: Path) -> ShowSettings:
+    try:
+        config = json.loads(Path(path).read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return ShowSettings()
+    try:
+        return ShowSettings.from_dict(config.get('settings', {}))
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError(f'{path}: invalid show settings ({error})') from None
+
+
+def save_show_settings(path: Path, settings: ShowSettings) -> None:
+    path = Path(path)
+    try:
+        config = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        config = {}
+    config['settings'] = settings.to_dict()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Replace atomically so a crash mid-write cannot leave a file that blocks startup.
+    with tempfile.NamedTemporaryFile(
+        'w', encoding='utf-8', dir=path.parent, prefix='.show-', suffix='.json', delete=False
+    ) as staged:
+        json.dump(config, staged, indent=2, allow_nan=False)
+        staged.write('\n')
+    try:
+        os.replace(staged.name, path)
+    except OSError:
+        Path(staged.name).unlink(missing_ok=True)
+        raise
+
+
+class ShowControl:
+    """Operator commands from the dashboard, applied on the audio loop that owns the engine."""
+
+    def __init__(self, config_path: Path, event_buffer=None):
+        self.config_path = Path(config_path)
+        self.settings = load_show_settings(self.config_path)
+        self.commands: queue.Queue = queue.Queue(maxsize=CONTROL_QUEUE_SIZE)
+        self._event_buffer = event_buffer
+
+    async def apply_pending(self, light_engine) -> None:
+        applied = False
+        while True:
+            try:
+                command = self.commands.get_nowait()
+            except queue.Empty:
+                break
+            applied = True
+            action = command['action']
+            if action == 'pause':
+                light_engine.pause()
+            elif action == 'play':
+                await light_engine.resume()
+            elif action == 'master':
+                light_engine.set_master_level(command['level'])
+            elif action == 'settings':
+                try:
+                    save_show_settings(self.config_path, command['settings'])
+                except OSError:
+                    # Unsaved settings would silently revert on restart.
+                    LOGGER.exception('[main] show settings were not saved; keeping the old ones')
+                    continue
+                self.settings = command['settings']
+                light_engine.settings_changed()
+                LOGGER.info('[main] show settings %s', self.settings.to_dict())
+        if applied:
+            self.publish(light_engine)
+
+    def publish(self, light_engine) -> None:
+        if self._event_buffer is not None:
+            self._event_buffer.set_control_state(
+                paused=light_engine.paused,
+                master_brightness=light_engine.master_level,
+                settings=self.settings.to_dict(),
+            )
 
 
 class AutoluxController:
@@ -25,6 +112,7 @@ class AutoluxController:
         report_path: str | None = None,
         enable_monitoring: bool = False,
         fixture_setup: dict | None = None,
+        show_config_path: Path = SHOW_CONFIG_PATH,
     ):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.clients.pyaudio_client import PyAudioClient
@@ -76,8 +164,11 @@ class AutoluxController:
                 '(beats and silence still run)'
             )
 
+        self.control = ShowControl(show_config_path, self.event_buffer)
         self.effect_controller: EffectController = EffectController(
-            self.lighting_client, event_buffer=self.event_buffer
+            self.lighting_client,
+            event_buffer=self.event_buffer,
+            settings=lambda: self.control.settings,
         )
         self.light_engine: LightEngine = LightEngine(
             self.lighting_client,
@@ -88,7 +179,9 @@ class AutoluxController:
             section_chain=None if self.section is None else self.section.stream,
             section_decoder=None if self.section is None else self.section.decoder,
             watchdog=self.drift_watchdog,
+            settings=lambda: self.control.settings,
         )
+        self.control.publish(self.light_engine)
 
         self.music_analyser: MusicAnalyser = MusicAnalyser(
             SAMPLE_RATE,
@@ -122,6 +215,7 @@ class AutoluxController:
             self._ui = ui_bridge.start(
                 self.event_buffer,
                 self._ui_port,
+                commands=self.control.commands,
                 **({'fixture_setup': self._fixture_setup} if self._fixture_setup else {}),
             )
         if self._stop_requested:
@@ -180,6 +274,7 @@ class AutoluxController:
     async def _do_100ms_callback(self):
         if self.health_check is not None:
             self.health_check()
+        await self.control.apply_pending(self.light_engine)
         await self.light_engine.on_100ms_callback()
 
     async def _do_1s_callback(self):

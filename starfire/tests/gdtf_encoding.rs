@@ -586,7 +586,13 @@ fn explicit_dimmer_values_respect_master_and_blackout() {
         "return {render=function(ctx) return sf.scene {sf.physical_attribute(sf.all(), 'Dimmer', 100)} end}",
     );
     engine
-        .apply(0.0, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     assert_eq!(
         engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],
@@ -679,7 +685,13 @@ fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults()
         );
         for (master, expected) in [(0.5, dimmed), (0.0, dark), (1.0, 128)] {
             engine
-                .apply(0.0, &Command::SetMaster { intensity: master })
+                .apply(
+                    0.0,
+                    &Command::SetMaster {
+                        intensity: master,
+                        fade_seconds: 0.0,
+                    },
+                )
                 .unwrap();
             assert_eq!(
                 engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],

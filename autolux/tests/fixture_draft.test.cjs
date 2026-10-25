@@ -14,10 +14,11 @@ vm.runInNewContext(
     }
 );
 const settings = {
-    profiles: { spot: { channels: 12 }, rgb: { channels: 3 } },
+    profiles: { spot: { channels: 12, movement: ["pan", "tilt"] }, rgb: { channels: 3 } },
     channelCount: 512,
     maxUniverse: 32767,
-    maxQuantity: 64
+    maxQuantity: 64,
+    offsetLimits: { pan: 540, tilt: 270 }
 };
 const fixture = (id, address, universe = 0) => ({
     id,
@@ -203,10 +204,13 @@ test("a queued edit cannot discard the save response and its new revision", () =
 test("invalid detail edits leave the fixture and identity intact", () => {
     const rows = [fixture("left", 1), fixture("right", 13)];
     for (const values of [
-        ["right", "spot", 1, 31, "movers", 0, 1, [], 0, 1, []],
-        ["left", "spot", 1, 31, "movers", 0.8, 0.2, [], 0, 1, []],
-        ["left", "spot", null, 31, "movers", 0, 1, [], 0, 1, []],
-        ["left", "spot", true, 31, "movers", 0, 1, [], 0, 1, []]
+        ["right", "spot", 1, 31, "movers", 0, 1, [], 0, 0, 1, [], 0],
+        ["left", "spot", 1, 31, "movers", 0.8, 0.2, [], 0, 0, 1, [], 0],
+        ["left", "spot", null, 31, "movers", 0, 1, [], 0, 0, 1, [], 0],
+        ["left", "spot", true, 31, "movers", 0, 1, [], 0, 0, 1, [], 0],
+        ["left", "spot", 1, 31, "movers", 0, 1, [], 541, 0, 1, [], 0],
+        ["left", "spot", 1, 31, "movers", 0, 1, [], 0, 0, 1, [], -271],
+        ["left", "spot", 1, 31, "movers", 0, 1, [], null, 0, 1, [], 0]
     ]) {
         assert.equal(
             edit(rows, null, { trigger: "fixture-apply", selected: [0], values })[0],
@@ -214,4 +218,20 @@ test("invalid detail edits leave the fixture and identity intact", () => {
         );
     }
     assert.equal(rows[0].address, 1);
+});
+
+test("orientation offsets apply in degrees and are dropped for profiles without movement", () => {
+    const rows = [fixture("left", 1)];
+    const apply = (profile, pan) =>
+        edit(rows, null, {
+            trigger: "fixture-apply",
+            selected: [0],
+            values: ["left", profile, 1, 1, "", 0, 1, [], pan, 0, 1, [], -45.5]
+        })[0][0];
+    const turned = apply("spot", 180);
+    assert.equal(turned.pan_offset_degrees, 180);
+    assert.equal(turned.tilt_offset_degrees, -45.5);
+    const fixed = apply("rgb", 180);
+    assert.equal(fixed.pan_offset_degrees, 0);
+    assert.equal(fixed.tilt_offset_degrees, 0);
 });

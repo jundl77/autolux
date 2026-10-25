@@ -76,6 +76,16 @@ function sf.on_beat(beats, width)
     return remaining * remaining
 end
 
+-- RMS is normalised over -48..-12 dBFS, so a quiet room or a stopped track reads ~0.
+-- The 0.08 floor keeps the rig barely alive instead of black; full level from rms 0.8.
+-- nil means no measurement yet, treated as a typical 0.6.
+local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
+
+function sf.loudness_gain(rms)
+    rms = rms or UNMEASURED_RMS
+    return sf.lerp(LOUDNESS_FLOOR, 1, math.min(1, math.max(0, rms / LOUDNESS_FULL_RMS)))
+end
+
 -- Loops use palette slots only, so a genre swap is a one-word change per loop.
 local PALETTES = {
     techno = {

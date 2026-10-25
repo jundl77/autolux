@@ -155,30 +155,38 @@
                     1,
                     [],
                     0,
+                    0,
                     1,
                     [],
+                    0,
                     true,
                     true,
                     { display: "none" },
                     "patch-workspace",
-                    ""
+                    "",
+                    { display: "none" },
+                    { display: "none" }
                 ];
             const values = [row.id, row.profile, row.universe + 1, row.address, row.groups || ""];
             for (const axis of ["pan", "tilt"]) {
                 values.push(
                     row[`${axis}_min`],
                     row[`${axis}_max`],
-                    row[`${axis}_inverted`] ? ["invert"] : []
+                    row[`${axis}_inverted`] ? ["invert"] : [],
+                    row[`${axis}_offset_degrees`] ?? 0
                 );
             }
-            const count = settings.profiles[row.profile].channels;
+            const { channels: count, movement = [] } = settings.profiles[row.profile];
             return [
                 ...values,
                 false,
                 false,
                 { display: "block" },
                 "patch-workspace has-selection",
-                `${count} channels · ${row.address}–${row.address + count - 1}`
+                `${count} channels · ${row.address}–${row.address + count - 1}`,
+                ...["pan", "tilt"].map((axis) => ({
+                    display: movement.includes(axis) ? "block" : "none"
+                }))
             ];
         },
 
@@ -293,7 +301,9 @@
                             pan_inverted: false,
                             tilt_min: 0,
                             tilt_max: 1,
-                            tilt_inverted: false
+                            tilt_inverted: false,
+                            pan_offset_degrees: 0,
+                            tilt_offset_degrees: 0
                         });
                         if (address != null) address += count;
                     }
@@ -314,8 +324,18 @@
                             address,
                             groups
                         });
+                        const movement = settings.profiles[profile]?.movement || [];
                         ["pan", "tilt"].forEach((axis, index) => {
-                            const [low, high, inverted] = limits.slice(index * 3, index * 3 + 3);
+                            const [low, high, inverted, shown] = limits.slice(
+                                index * 4,
+                                index * 4 + 4
+                            );
+                            // A hidden offset cannot be reviewed, so it never survives a profile change.
+                            const offset = movement.includes(axis) ? shown : 0;
+                            const limit = settings.offsetLimits[axis];
+                            if (!Number.isFinite(offset) || Math.abs(offset) > limit) {
+                                throw new Error(`${axis} offset must be within ±${limit} degrees.`);
+                            }
                             if (
                                 !Number.isFinite(low) ||
                                 !Number.isFinite(high) ||
@@ -326,7 +346,8 @@
                             Object.assign(row, {
                                 [`${axis}_min`]: low,
                                 [`${axis}_max`]: high,
-                                [`${axis}_inverted`]: inverted.includes("invert")
+                                [`${axis}_inverted`]: inverted.includes("invert"),
+                                [`${axis}_offset_degrees`]: offset
                             });
                         });
                     }

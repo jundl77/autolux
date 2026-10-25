@@ -20,6 +20,9 @@ pub const MAX_RIG_INPUT_BYTES: usize = 1024 * 1024;
 pub const MAX_FIXTURES: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
 const MAX_IDENTIFIER_BYTES: usize = 128;
+const MAX_PAN_OFFSET_DEGREES: f64 = 540.0;
+const MAX_TILT_OFFSET_DEGREES: f64 = 270.0;
+const FULL_TURN_DEGREES: f64 = 360.0;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,6 +44,10 @@ struct FixturePatch {
     pan: MovementRange,
     #[serde(default)]
     tilt: MovementRange,
+    #[serde(default)]
+    pan_offset_degrees: f64,
+    #[serde(default)]
+    tilt_offset_degrees: f64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -123,6 +130,8 @@ impl FixtureRig {
                     address: fixture.address as usize,
                     pan: MovementRange::from_wire(&fixture.pan),
                     tilt: MovementRange::from_wire(&fixture.tilt),
+                    pan_offset_degrees: fixture.pan_offset_degrees,
+                    tilt_offset_degrees: fixture.tilt_offset_degrees,
                 })
             })
             .collect::<Result<_>>()?;
@@ -268,6 +277,31 @@ impl FixtureRig {
                 .tilt
                 .validate()
                 .with_context(|| format!("fixture {} tilt bounds", patch.id))?;
+            for (axis, attribute, offset, limit) in [
+                (
+                    "pan",
+                    "Pan",
+                    patch.pan_offset_degrees,
+                    MAX_PAN_OFFSET_DEGREES,
+                ),
+                (
+                    "tilt",
+                    "Tilt",
+                    patch.tilt_offset_degrees,
+                    MAX_TILT_OFFSET_DEGREES,
+                ),
+            ] {
+                ensure!(
+                    offset.is_finite() && offset.abs() <= limit,
+                    "fixture {} {axis} offset must be finite and within +/-{limit} degrees",
+                    patch.id
+                );
+                ensure!(
+                    offset == 0.0 || profile.movement_range(attribute).is_some(),
+                    "fixture {} has a {axis} offset but its profile has no continuous {attribute}",
+                    patch.id
+                );
+            }
         }
         for (group, members) in &groups {
             validate_identifier(group)?;
@@ -378,20 +412,67 @@ impl FixtureRig {
                 .entry(fixture.universe)
                 .or_insert_with(|| vec![0; DMX_CHANNELS]);
             let start = fixture.address - 1;
+            let pan_range = profile.movement_range("Pan");
+            let tilt_range = profile.movement_range("Tilt");
+            let pan = |position| {
+                pan_range.map_or(position, |(from, to)| {
+                    offset_pan(
+                        fixture.pan.map(position),
+                        fixture.pan_offset_degrees,
+                        from,
+                        to,
+                    )
+                })
+            };
+            let tilt = |position| {
+                tilt_range.map_or(position, |(from, to)| {
+                    offset_tilt(
+                        fixture.tilt.map(position),
+                        fixture.tilt_offset_degrees,
+                        from,
+                        to,
+                    )
+                })
+            };
             let mut calibrated = state.clone();
-            calibrated.pan = fixture.pan.map(state.pan);
-            calibrated.tilt = fixture.tilt.map(state.tilt);
+            calibrated.pan = pan(state.pan);
+            calibrated.tilt = tilt(state.tilt);
             profile
                 .encode_calibrated(
                     &calibrated,
                     &mut frame[start..start + profile.footprint()],
-                    |position| fixture.pan.map(position),
-                    |position| fixture.tilt.map(position),
+                    pan,
+                    tilt,
                 )
                 .with_context(|| format!("fixture {}", fixture.id))?;
         }
         Ok(universes)
     }
+}
+
+// The rig declares where each head's home is, so autoloops can address
+// normalised directions without knowing how a fixture was hung.
+fn offset_pan(position: f64, offset_degrees: f64, from: f64, to: f64) -> f64 {
+    if offset_degrees == 0.0 || from == to {
+        return position;
+    }
+    let (low, high) = (from.min(to), from.max(to));
+    let mut degrees = from + position * (to - from) + offset_degrees;
+    // Whole turns preserve beam direction; modulo travel would not on a 540-degree head.
+    if degrees > high {
+        degrees -= FULL_TURN_DEGREES * ((degrees - high) / FULL_TURN_DEGREES).ceil();
+    }
+    if degrees < low {
+        degrees += FULL_TURN_DEGREES * ((low - degrees) / FULL_TURN_DEGREES).ceil();
+    }
+    ((degrees.clamp(low, high) - from) / (to - from)).clamp(0.0, 1.0)
+}
+
+fn offset_tilt(position: f64, offset_degrees: f64, from: f64, to: f64) -> f64 {
+    if offset_degrees == 0.0 || from == to {
+        return position;
+    }
+    (position + offset_degrees / (to - from)).clamp(0.0, 1.0)
 }
 
 fn validate_identifier(identifier: &str) -> Result<()> {
@@ -441,4 +522,45 @@ fn read_rig_file(path: &Path) -> Result<String> {
         "fixture data exceeds input byte limit"
     );
     Ok(json)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{offset_pan, offset_tilt};
+
+    fn degrees(position: f64, travel: f64) -> f64 {
+        position * travel
+    }
+
+    #[test]
+    fn pan_offset_moves_home_in_physical_degrees() {
+        assert!((degrees(offset_pan(0.5, 180.0, 0.0, 540.0), 540.0) - 450.0).abs() < 1e-9);
+        assert!((degrees(offset_pan(0.5, -180.0, 0.0, 540.0), 540.0) - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pan_offset_wraps_by_whole_turns_to_keep_beam_direction() {
+        // 420 + 180 = 600 points like 240; 600 mod 540 = 60 would face the opposite way.
+        let wrapped = degrees(offset_pan(420.0 / 540.0, 180.0, 0.0, 540.0), 540.0);
+        assert!((wrapped - 240.0).abs() < 1e-9);
+        let below = degrees(offset_pan(0.0, -90.0, 0.0, 540.0), 540.0);
+        assert!((below - 270.0).abs() < 1e-9);
+        // Short travel holds at the end stop when no whole turn reaches it.
+        assert_eq!(offset_pan(0.5, 180.0, 0.0, 270.0), 1.0);
+    }
+
+    #[test]
+    fn tilt_offset_clamps_at_end_stops() {
+        assert_eq!(offset_tilt(0.9, 90.0, 0.0, 270.0), 1.0);
+        assert_eq!(offset_tilt(0.1, -90.0, 0.0, 270.0), 0.0);
+        assert!((degrees(offset_tilt(0.5, 45.0, 0.0, 270.0), 270.0) - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn zero_offset_is_identity_including_travel_ends() {
+        for position in [0.0, 0.25, 0.5, 1.0] {
+            assert_eq!(offset_pan(position, 0.0, 0.0, 540.0), position);
+            assert_eq!(offset_tilt(position, 0.0, 0.0, 270.0), position);
+        }
+    }
 }

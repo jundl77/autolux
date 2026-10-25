@@ -189,4 +189,7 @@ message Parameter {
     double number = 2;
     bool boolean = 3;
   }
+  // OUTPUT_BRIGHTNESS only: linear ease from the current level over wall-clock seconds,
+  // not beats, so fades also complete in silence. 0 is instant; must be finite and >= 0.
+  double fade_seconds = 4;
 }

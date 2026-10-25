@@ -261,6 +261,15 @@ impl GdtfProfile {
         self.footprint
     }
 
+    /// Physical travel `(from, to)` of the continuous function semantic movement drives.
+    pub fn movement_range(&self, attribute: &str) -> Option<(f64, f64)> {
+        self.channels
+            .iter()
+            .flat_map(|channel| &channel.functions)
+            .find(|function| function.attribute == attribute && function.sets.is_empty())
+            .map(|function| (function.physical_from, function.physical_to))
+    }
+
     pub fn validate_attributes(&self, attributes: &BTreeMap<String, AttributeValue>) -> Result<()> {
         ensure!(
             attributes.len() <= MAX_ATTRIBUTE_VALUES,

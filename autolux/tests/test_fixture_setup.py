@@ -245,3 +245,42 @@ def test_reusing_removed_fixture_name_does_not_duplicate_group_members(patch_fil
     saved = fixture_patch(rows, original)
     assert saved['groups']['wash'] == ['right']
     assert len(saved['fixtures']) == 1
+
+
+def test_orientation_offsets_round_trip_through_dashboard_save(patch_file):
+    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
+
+    seen = []
+    store = store_for(patch_file, lambda staged: seen.append(json.loads(staged.read_bytes())))
+    original, revision = store.load()
+    rows = fixture_rows(original)
+    assert [row['pan_offset_degrees'] for row in rows] == [0, 0]
+    rows[0].update(pan_offset_degrees=180, tilt_offset_degrees=-22.5)
+    store.save(fixture_patch(rows, original), revision)
+    saved, _ = store.load()
+    assert seen == [saved]
+    assert saved['fixtures'][0]['pan_offset_degrees'] == 180
+    assert saved['fixtures'][0]['tilt_offset_degrees'] == -22.5
+    assert 'pan_offset_degrees' not in saved['fixtures'][1]
+    reloaded = fixture_rows(saved)[0]
+    assert (reloaded['pan_offset_degrees'], reloaded['tilt_offset_degrees']) == (180, -22.5)
+
+
+@pytest.mark.parametrize(
+    'field,value',
+    [
+        ('pan_offset_degrees', 540.5),
+        ('tilt_offset_degrees', -271),
+        ('pan_offset_degrees', float('nan')),
+        ('pan_offset_degrees', '180'),
+        ('tilt_offset_degrees', True),
+    ],
+)
+def test_invalid_orientation_offset_is_rejected_before_persistence(patch_file, field, value):
+    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
+
+    original, _revision = store_for(patch_file, lambda _staged: None).load()
+    rows = fixture_rows(original)
+    rows[0][field] = value
+    with pytest.raises(ValueError, match='offset'):
+        fixture_patch(rows, original)

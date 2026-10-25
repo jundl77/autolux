@@ -148,3 +148,13 @@ def test_archive_crc_damage_is_rejected(tmp_path):
     archive.write_bytes(archive.read_bytes().replace(b'Test Dimmer', b'Bad! Dimmer', 1))
     with pytest.raises(ValueError, match='CRC'):
         gdtf.read_description(archive)
+
+
+def test_metadata_reports_movement_axes_that_accept_orientation_offsets():
+    profiles = json.loads((Path(__file__).parents[2] / 'rigs/profiles.json').read_bytes())
+    movement = {
+        name: gdtf.profile_metadata(profile['gdtf_xml'], profile['dmx_mode'])['movement']
+        for name, profile in profiles['profiles'].items()
+    }
+    assert movement['chauvet_intimidator_spot_110_12ch'] == ['pan', 'tilt']
+    assert movement['generic_rgb'] == []

@@ -46,6 +46,18 @@ fn parameter(kind: wire::ParameterType, value: wire::parameter::Value) -> Operat
         parameter: Some(wire::Parameter {
             r#type: kind as i32,
             value: Some(value),
+            ..Default::default()
+        }),
+    })
+}
+
+fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation {
+    Operation::SetParameter(wire::SetParameter {
+        command_id: 1,
+        parameter: Some(wire::Parameter {
+            r#type: kind as i32,
+            value: Some(wire::parameter::Value::Number(value)),
+            fade_seconds,
         }),
     })
 }
@@ -139,11 +151,15 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
         parameter(Kind::OutputBlackout, Value::Number(0.0)),
         parameter(Kind::AudioRmsNormalized, Value::Boolean(false)),
         parameter(Kind::Unspecified, Value::Number(0.5)),
+        // A fade on any parameter but brightness would be silently dropped, so reject it.
+        faded(Kind::AnimationSpeed, 1.0, 1.0),
+        faded(Kind::OutputBrightness, 0.5, -1.0),
         Operation::SetParameter(wire::SetParameter {
             command_id: 1,
             parameter: Some(wire::Parameter {
                 r#type: 999,
                 value: Some(Value::Number(0.5)),
+                ..Default::default()
             }),
         }),
     ] {
@@ -286,7 +302,18 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (
             0.5,
             parameter(Kind::OutputBrightness, Value::Number(0.6)),
-            Command::SetMaster { intensity: 0.6 },
+            Command::SetMaster {
+                intensity: 0.6,
+                fade_seconds: 0.0,
+            },
+        ),
+        (
+            0.6,
+            faded(Kind::OutputBrightness, 0.3, 0.5),
+            Command::SetMaster {
+                intensity: 0.3,
+                fade_seconds: 0.5,
+            },
         ),
         (
             0.75,

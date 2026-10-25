@@ -37,6 +37,17 @@ def test_rejected_selection_does_not_change_cached_identity():
     assert len(calls) == 2
 
 
+def test_master_fade_is_passed_through_and_instant_by_default():
+    calls = []
+    client = StarfireClient(calls.append)
+    client.set_master(0.15, fade_seconds=1.0)
+    client.set_master(0.5)
+    assert calls == [
+        {'kind': 'set_master', 'intensity': 0.15, 'fade_seconds': 1.0},
+        {'kind': 'set_master', 'intensity': 0.5},
+    ]
+
+
 async def test_measured_energy_and_beat_share_the_playback_delay():
     from autolux.tests.test_light_engine import engine
 

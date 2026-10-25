@@ -42,6 +42,7 @@ fn setting(kind: wire::ParameterType, value: wire::parameter::Value) -> wire::Pa
     wire::Parameter {
         r#type: kind as i32,
         value: Some(value),
+        ..Default::default()
     }
 }
 

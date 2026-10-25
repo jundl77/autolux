@@ -21,8 +21,10 @@ return {
         local energy = ctx.normalized_rms_level or 0.6
         -- Time alone stops short of full; only a loud track reaches the top 15%.
         local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
+        -- Applied to the final levels, not just drive, so the lerp floors also fade in silence.
+        local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local depth = sf.lerp(0.2, 0.9, ramp)
-        local wash = sf.lerp(0.35, 1, drive) * (1 - depth * (1 - sf.on_beat(beat, 0.5)))
+        local wash = sf.lerp(0.35, 1, drive) * gain * (1 - depth * (1 - sf.on_beat(beat, 0.5)))
         -- Whole laps per loop keep the chase continuous across the loop wrap.
         local laps = 2 ^ math.min(3, math.floor(elapsed / CHASE_DOUBLING_BEATS))
         local head = beat / LOOP_BEATS * laps % 1
@@ -35,10 +37,10 @@ return {
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local behind = (head * count - (index - 1)) % count
                 local lit = math.max(0, 1 - behind / CHASE_TAIL_PIXELS)
-                return sf.dimmer(pixel, sf.lerp(0.3, 1, drive) * lit)
+                return sf.dimmer(pixel, sf.lerp(0.3, 1, drive) * gain * lit)
             end),
             sf.colour(sf.group("movers"), palette.cold),
-            sf.dimmer(sf.group("movers"), sf.lerp(0.3, 0.8, drive)),
+            sf.dimmer(sf.group("movers"), sf.lerp(0.3, 0.8, drive) * gain),
             sf.each(sf.group("movers"), function(mover, index)
                 local side = index % 2 == 1 and -1 or 1
                 return sf.pan_tilt(mover, CENTRE_PAN + side * pan, TILT)

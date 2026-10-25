@@ -326,7 +326,7 @@ async def _run_session(args, *, checking=False):
             if args.no_ui:
                 from autolux.lib.ui_bridge import SnapshotServer
 
-                server = SnapshotServer(app.event_buffer, args.ui_port + 1)
+                server = SnapshotServer(app.event_buffer, args.ui_port + 1, app.control.commands)
                 server.start()
                 stack.callback(server.stop)
             (ROOT / '.live/current.json').write_text(

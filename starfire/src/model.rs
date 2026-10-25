@@ -178,6 +178,8 @@ pub enum Command {
     },
     SetMaster {
         intensity: f64,
+        #[serde(default)]
+        fade_seconds: f64,
     },
     SetNormalizedRmsLevel {
         level: f64,

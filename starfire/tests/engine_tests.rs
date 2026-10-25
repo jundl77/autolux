@@ -283,7 +283,13 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
         set_override(&mut engine, 0.0, value);
     }
     engine
-        .apply(0.0, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     near(
         engine
@@ -616,7 +622,13 @@ fn invalid_commands_do_not_mutate_the_active_show() {
         );
         assert!(
             engine
-                .apply(2.0, &Command::SetMaster { intensity: value })
+                .apply(
+                    2.0,
+                    &Command::SetMaster {
+                        intensity: value,
+                        fade_seconds: 0.0
+                    }
+                )
                 .is_err()
         );
     }
@@ -832,7 +844,13 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
         .apply(0.25, &Command::SetNormalizedRmsLevel { level: 0.8 })
         .unwrap();
     engine
-        .apply(0.25, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.25,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     near(
         engine
@@ -918,4 +936,78 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
             .intensity,
         0.8,
     );
+}
+
+fn master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
+    // CONSTANT renders dimmer 0.5, so output intensity is half the master level.
+    engine
+        .render_at(time_seconds)
+        .unwrap()
+        .fixture_properties_before_strobe["left"]
+        .intensity
+        / 0.5
+}
+
+#[test]
+fn master_fades_linearly_over_wall_time() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    engine
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.15,
+                fade_seconds: 1.0,
+            },
+        )
+        .unwrap();
+    near(master_at(&mut engine, 0.0), 1.0);
+    near(master_at(&mut engine, 0.5), 0.575);
+    near(master_at(&mut engine, 1.0), 0.15);
+    near(master_at(&mut engine, 3.0), 0.15);
+}
+
+#[test]
+fn master_retarget_mid_fade_starts_from_the_visible_level() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    let fade = |intensity| Command::SetMaster {
+        intensity,
+        fade_seconds: 1.0,
+    };
+    engine.apply(0.0, &fade(0.0)).unwrap();
+    engine.apply(0.5, &fade(1.0)).unwrap();
+    near(master_at(&mut engine, 0.5), 0.5);
+    near(master_at(&mut engine, 1.0), 0.75);
+    near(master_at(&mut engine, 1.5), 1.0);
+}
+
+#[test]
+fn zero_master_fade_is_instant_and_invalid_fades_are_rejected() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    engine
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.2,
+                fade_seconds: 0.0,
+            },
+        )
+        .unwrap();
+    near(master_at(&mut engine, 0.0), 0.2);
+    for fade_seconds in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            engine
+                .apply(
+                    0.0,
+                    &Command::SetMaster {
+                        intensity: 1.0,
+                        fade_seconds,
+                    },
+                )
+                .is_err()
+        );
+    }
+    near(master_at(&mut engine, 0.0), 0.2);
 }

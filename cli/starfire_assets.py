@@ -5,6 +5,7 @@ import math
 import re
 from pathlib import Path
 
+from autolux.lighting.fixture_setup import movement_offset
 from autolux.lighting.gdtf import MAX_CATALOGUE_BYTES, MAX_DESCRIPTION_BYTES
 from cli.starfire import PROFILE_CATALOGUE
 from cli.starfire_protocol import (
@@ -80,6 +81,8 @@ def _fixture(value):
     for axis in ('pan', 'tilt'):
         if axis in value:
             value[axis] = _movement(value[axis])
+        if (key := f'{axis}_offset_degrees') in value:
+            value[key] = movement_offset(axis, value[key])
     return rig_wire.Fixture(
         fixture_id=value.pop('id'),
         profile_id=value.pop('profile'),

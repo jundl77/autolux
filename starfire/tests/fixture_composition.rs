@@ -56,7 +56,13 @@ fn lighting_override(id: &str, target: Target, values: PropertyValues) -> Comman
 fn partial_lua_properties_compose_before_master_and_profile_encoding() {
     let mut engine = steady_room();
     engine
-        .apply(0.0, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
     for state in frame.fixture_properties_before_strobe.values() {
@@ -70,10 +76,11 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
             }
         );
     }
+    // The room rig turns spot pan home by 180 degrees: 0.25 -> 315 of 540.
     for start in [0, 12] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 12],
-            &[64, 0, 191, 255, 0, 111, 7, 102, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 111, 7, 102, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -142,7 +149,7 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][..4],
-        &[64, 0, 191, 255]
+        &[149, 85, 191, 255]
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][6..12],

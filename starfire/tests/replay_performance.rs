@@ -77,8 +77,20 @@ fn mixed_show() -> Replay {
     for (at_seconds, level) in [(5.0, 0.2), (25.0, 0.85), (45.0, 1.0), (80.0, 0.4)] {
         push(at_seconds, Command::SetNormalizedRmsLevel { level });
     }
-    push(12.0, Command::SetMaster { intensity: 0.8 });
-    push(64.0, Command::SetMaster { intensity: 0.9 });
+    push(
+        12.0,
+        Command::SetMaster {
+            intensity: 0.8,
+            fade_seconds: 0.0,
+        },
+    );
+    push(
+        64.0,
+        Command::SetMaster {
+            intensity: 0.9,
+            fade_seconds: 0.0,
+        },
+    );
     push(36.0, Command::SetSpeed { multiplier: 1.4 });
     push(70.0, Command::SetSpeed { multiplier: 0.5 });
     for at_seconds in [8.0, 32.0, 46.0, 62.0, 76.0] {

@@ -3,8 +3,9 @@ import logging
 import pytest
 
 from autolux.lib.clock import VirtualClock
-from autolux.lib.engine.effect_controller import STROBE_DURATION_SEC, EffectController
+from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
+    STROBE_BURST_SECONDS,
     STROBE_COOLDOWN_SECONDS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
@@ -51,8 +52,8 @@ async def test_strobe_is_an_expiring_accent_over_the_drop_autoloop(
     assert [command['kind'] for command in commands] == ['select', 'select', 'set_override']
     accent = commands[-1]['value']
     assert accent['values'] == {'strobe_hz': 8.0}
-    assert accent['lifetime'] == {'kind': 'seconds', 'duration_seconds': STROBE_DURATION_SEC}
-    assert STROBE_DURATION_SEC == 1.0
+    assert accent['lifetime'] == {'kind': 'seconds', 'duration_seconds': STROBE_BURST_SECONDS}
+    assert STROBE_BURST_SECONDS == 1.0
 
 
 async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, recorded_lighting):
@@ -105,9 +106,9 @@ async def test_drop_strobe_respects_cooldown_but_the_drop_still_cuts(recorded_li
     assert 'drop strobe suppressed' in caplog.text
 
     # Cooldown counts from the first burst, not from the suppressed drop.
-    third = await _drop_after(controller, recorded_lighting, clock, 121 - 30)
+    third = await _drop_after(controller, recorded_lighting, clock, 61 - 30)
     assert [e['command']['kind'] for e in third] == ['select', 'set_override']
-    assert STROBE_COOLDOWN_SECONDS == 120
+    assert STROBE_COOLDOWN_SECONDS == 60
 
 
 @pytest.mark.parametrize('bpm', [None, 60.0, 128.0, 600.0])
@@ -120,3 +121,16 @@ async def test_strobe_burst_stays_within_two_bars_four_seconds_and_eight_hz(reco
     assert duration <= STROBE_MAX_BURST_SECONDS
     if bpm:
         assert duration <= 8 * 60.0 / bpm
+
+
+async def test_a_cooldown_change_applies_to_the_next_drop_without_a_restart(recorded_lighting):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+
+    clock = VirtualClock()
+    settings = ShowSettings()
+    controller = EffectController(recorded_lighting, clock=clock, settings=lambda: settings)
+    await _drop_after(controller, recorded_lighting, clock, 0)
+
+    settings = ShowSettings(drop_strobe_cooldown_seconds=10)
+    later = await _drop_after(controller, recorded_lighting, clock, 11)
+    assert [e['command']['kind'] for e in later] == ['select', 'set_override']

@@ -113,6 +113,28 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
     assert login.ByteSize() + protocol.COMMAND_ID_MAX_ENCODED_BYTES <= protocol.MAX_MESSAGE_BYTES
 
 
+def test_login_carries_rig_orientation_offsets(login_assets):
+    rig, autoloops, _ = login_assets
+    data = json.loads(rig.read_text(encoding='utf-8'))
+    data['fixtures'][0].update(pan_offset_degrees=180, tilt_offset_degrees=-12.5)
+    rig.write_text(json.dumps(data), encoding='utf-8')
+    fixture = assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1).rig.fixtures[0]
+    assert (fixture.pan_offset_degrees, fixture.tilt_offset_degrees) == (180, -12.5)
+
+
+@pytest.mark.parametrize(
+    'field,value',
+    [('pan_offset_degrees', 541), ('tilt_offset_degrees', 270.5), ('pan_offset_degrees', None)],
+)
+def test_invalid_orientation_offset_is_not_sent_to_renderer(login_assets, field, value):
+    rig, autoloops, _ = login_assets
+    data = json.loads(rig.read_text(encoding='utf-8'))
+    data['fixtures'][0][field] = value
+    rig.write_text(json.dumps(data), encoding='utf-8')
+    with pytest.raises(ValueError, match='Invalid Starfire login assets'):
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+
+
 @pytest.mark.parametrize('location', ['root', 'fixture', 'movement', 'profile'])
 def test_unknown_fields_are_not_silently_dropped(login_assets, location):
     rig, autoloops, profiles = login_assets

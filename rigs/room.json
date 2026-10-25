@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "fixtures": [
-    {"id": "spot_left", "profile": "chauvet_intimidator_spot_110_12ch", "universe": 0, "address": 1},
-    {"id": "spot_right", "profile": "chauvet_intimidator_spot_110_12ch", "universe": 0, "address": 13},
+    {"id": "spot_left", "profile": "chauvet_intimidator_spot_110_12ch", "universe": 0, "address": 1, "pan_offset_degrees": 180},
+    {"id": "spot_right", "profile": "chauvet_intimidator_spot_110_12ch", "universe": 0, "address": 13, "pan_offset_degrees": 180},
     {"id": "wash_left", "profile": "fun_generation_separ_quad_uv_8ch", "universe": 0, "address": 65},
     {"id": "wash_mid_left", "profile": "fun_generation_separ_quad_uv_8ch", "universe": 0, "address": 73},
     {"id": "wash_mid_right", "profile": "fun_generation_separ_quad_uv_8ch", "universe": 0, "address": 81},

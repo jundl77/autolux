@@ -287,6 +287,61 @@ fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
 }
 
 #[test]
+fn silence_drops_wash_to_a_tenth_of_loud_level() {
+    for look in &LOOKS {
+        let mean_wash = |level: f64| {
+            let mut engine = engine(look.bank, look.autoloop, 0.0);
+            engine
+                .apply(0.0, &Command::SetNormalizedRmsLevel { level })
+                .unwrap();
+            // 32 bars at quarter beats covers every loop period and the buildup ramp.
+            let steps = 32 * 4 * 4;
+            (0..steps)
+                .map(|step| wash_level(&mut engine, step as f64 * 0.25))
+                .sum::<f64>()
+                / steps as f64
+        };
+        let (silent, loud) = (mean_wash(0.0), mean_wash(0.9));
+        assert!(
+            silent < 0.15 * loud,
+            "{}: silent wash {silent} vs loud {loud}",
+            look.bank
+        );
+    }
+}
+
+#[test]
+fn loudness_gain_floors_silence_and_saturates_when_loud() {
+    let source = r#"
+        local function near(a, b) return math.abs(a - b) < 1e-12 end
+        assert(near(sf.loudness_gain(0), 0.08))
+        assert(near(sf.loudness_gain(0.8), 1) and near(sf.loudness_gain(1), 1))
+        assert(near(sf.loudness_gain(nil), sf.loudness_gain(0.6)))
+        assert(sf.loudness_gain(0.2) < sf.loudness_gain(0.4))
+        return { render = function(ctx) return {} end }
+    "#;
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "gain".into(),
+        bank: "test".into(),
+        lua_source: source.into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(room(), catalog).unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::Select {
+                bank: "test".into(),
+                autoloop: "gain".into(),
+                transition: Transition::Cut,
+            },
+        )
+        .unwrap();
+    let frame = engine.render_at(0.0).unwrap();
+    assert!(frame.script_error.is_none(), "{:?}", frame.script_error);
+}
+
+#[test]
 fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     let source = r#"
         assert(sf.beat_in_bar(5.5) == 1.5 and sf.bar(5.5) == 1)

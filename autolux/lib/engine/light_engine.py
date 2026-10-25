@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from autolux.lib.analyser.bar_tracker import TrackerChunk
@@ -11,7 +12,14 @@ from autolux.lib.clients.starfire_client import StarfireClient, rms_to_normalize
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
-from autolux.lib.engine.effect_definitions import LightIntent, intent_for_class
+from autolux.lib.engine.effect_definitions import (
+    BEAT_LOSS_SECONDS,
+    QUIET_HOLD_SECONDS,
+    QUIET_RMS,
+    LightIntent,
+    ShowSettings,
+    intent_for_class,
+)
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 
@@ -20,11 +28,10 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-_BEAT_ABSENCE_SEC = 2.5
-
 _LATENCY_LOG_STEP_SEC = 0.25
 _SHED_PUBLISH_SEC = 1.0
 COLD_START_FLOOR_MARGIN_SEC = 4.0
+BRIGHTNESS_FADE_SECONDS = 1.0
 
 
 class LightEngine(IMusicAnalyserHandler):
@@ -41,8 +48,10 @@ class LightEngine(IMusicAnalyserHandler):
         section_decoder=None,
         watchdog=None,
         clock: Clock = SYSTEM_CLOCK,
+        settings: Callable[[], ShowSettings] = ShowSettings,
     ):
         self.lighting_client = lighting_client
+        self._settings = settings
         self.effect_controller: EffectController = effect_controller
         self.command_queue: DelayedCommandQueue | None = command_queue
         self.event_buffer: EventBuffer | None = event_buffer
@@ -72,6 +81,14 @@ class LightEngine(IMusicAnalyserHandler):
         self._pending_silence: tuple[float, float | None] | None = None
         self._shed_published_at: float = float('-inf')
         self._committed = None
+        self._quiet_since: float | None = None
+        self._source_quiet = False
+        # The quiet state as the room hears it, after the playback delay.
+        self._room_quiet = False
+        self._paused = False
+        self._master_level = 1.0
+        # Starfire boots at full brightness, so only a change needs sending.
+        self._sent_brightness = 1.0
         self._log_chain_latency()
 
     def set_analyser(self, analyser: MusicAnalyser):
@@ -84,6 +101,55 @@ class LightEngine(IMusicAnalyserHandler):
     @property
     def decided_intent(self) -> LightIntent | None:
         return self._pending_intents[-1][1] if self._pending_intents else self._current_intent
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    @property
+    def master_level(self) -> float:
+        return self._master_level
+
+    def pause(self) -> None:
+        """Freeze the look: the running loop continues, decisions stop switching it."""
+        if self._paused:
+            return
+        LOGGER.info('[engine] paused by the operator')
+        self._paused = True
+        self._held_intent = None
+        self._send_brightness()
+
+    async def resume(self) -> None:
+        if not self._paused:
+            return
+        LOGGER.info('[engine] resumed by the operator')
+        self._paused = False
+        self._send_brightness()
+        # The model kept deciding while paused; its latest intent takes the
+        # next downbeat like any committed change.
+        if self._current_intent is not None and self._room_playing:
+            self._held_intent = self._current_intent
+            if self._room_beat_phase is None:
+                await self._switch_held_intent()
+
+    def set_master_level(self, level: float) -> None:
+        if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
+            raise ValueError('master brightness must be within 0..1')
+        self._master_level = float(level)
+        # The operator is turning a knob now, so this skips the playback delay.
+        self._send_brightness()
+
+    def settings_changed(self) -> None:
+        self._send_brightness()
+
+    def _send_brightness(self) -> None:
+        dimmed = self._room_quiet or self._paused
+        brightness = self._master_level * (self._settings().quiet_brightness if dimmed else 1.0)
+        if brightness == self._sent_brightness:
+            return
+        self._sent_brightness = brightness
+        LOGGER.info(f'[engine] master brightness {brightness:.3f}')
+        self.lighting_client.set_master(brightness, fade_seconds=BRIGHTNESS_FADE_SECONDS)
 
     @property
     def audio_sec(self) -> float:
@@ -283,7 +349,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
-        if intent is not None:
+        if intent is not None and not self._paused:
             await self.effect_controller.change_effect(intent)
 
     @staticmethod
@@ -440,6 +506,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._current_intent = intent
         self._section_class_at_playback = section_label
         self._intent_commits += 1
+        if self._paused:
+            return
         # Loops switch on the room's downbeat; without a known bar phase there
         # is no downbeat to wait for.
         self._held_intent = intent
@@ -463,10 +531,49 @@ class LightEngine(IMusicAnalyserHandler):
         )
         await self._commit_intent(LightIntent.ATMOSPHERIC, self._playback_delay_sec)
 
+    def _source_is_quiet(self) -> bool:
+        if not self.analyser.is_song_playing():
+            return True
+        if self.analyser.get_seconds_since_last_beat() > BEAT_LOSS_SECONDS:
+            return True
+        now = self._clock.monotonic()
+        if rms_to_normalized_level(self.analyser.get_rms_energy()) >= QUIET_RMS:
+            self._quiet_since = None
+            return False
+        if self._quiet_since is None:
+            self._quiet_since = now
+        return now - self._quiet_since >= QUIET_HOLD_SECONDS
+
+    def _update_master_brightness(self) -> None:
+        quiet = self._source_is_quiet()
+        if quiet == self._source_quiet:
+            return
+        self._source_quiet = quiet
+        LOGGER.info(
+            f'[engine] source {"quiet" if quiet else "loud"} — the rig follows '
+            f'when the room hears it'
+        )
+
+        # Quiet is judged on source audio, so the dim waits out the playback
+        # delay like beats do; sent at once it would dim before the room fades.
+        def apply():
+            self._room_quiet = quiet
+            self._send_brightness()
+
+        if self.command_queue:
+
+            async def command():
+                apply()
+
+            self.command_queue.schedule('brightness', command)
+        else:
+            apply()
+
     async def on_100ms_callback(self):
+        self._update_master_brightness()
         if (
             self._held_intent is not None
-            and self._clock.monotonic() - self._room_beat_at > _BEAT_ABSENCE_SEC
+            and self._clock.monotonic() - self._room_beat_at > BEAT_LOSS_SECONDS
         ):
             # The room's beats stopped, so no downbeat will release the hold.
             await self._switch_held_intent()
@@ -475,7 +582,7 @@ class LightEngine(IMusicAnalyserHandler):
         await self._floor_if_nothing_arrived()
         if (
             self.decided_intent is None
-            and self.analyser.get_seconds_since_last_beat() > _BEAT_ABSENCE_SEC
+            and self.analyser.get_seconds_since_last_beat() > BEAT_LOSS_SECONDS
         ):
             await self._commit_intent(LightIntent.ATMOSPHERIC, 0.0)
 

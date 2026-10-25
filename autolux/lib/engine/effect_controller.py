@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from autolux.lib.clients.starfire_client import StarfireClient
@@ -8,11 +9,11 @@ from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
     AUTOLOOP_BY_LIGHT_INTENT,
     STROBE_BURST_BEATS,
-    STROBE_COOLDOWN_SECONDS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
-    TRANSITION_BY_LIGHT_INTENT,
     LightIntent,
+    ShowSettings,
+    transition_for,
 )
 
 if TYPE_CHECKING:
@@ -20,14 +21,13 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-STROBE_DURATION_SEC = 1.0
 DROP_STROBE_HZ = STROBE_RATE_HZ
 DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 
 
-def strobe_burst_seconds(bpm: float | None) -> float:
-    duration = min(STROBE_DURATION_SEC, STROBE_MAX_BURST_SECONDS)
+def strobe_burst_seconds(bpm: float | None, burst_seconds: float) -> float:
+    duration = min(burst_seconds, STROBE_MAX_BURST_SECONDS)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
     return duration
@@ -39,16 +39,19 @@ class EffectController:
         lighting_client: StarfireClient,
         event_buffer: EventBuffer | None = None,
         clock: Clock = SYSTEM_CLOCK,
+        settings: Callable[[], ShowSettings] = ShowSettings,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
         self.clock = clock
+        # Read at use so a dashboard edit applies to the next change.
+        self._settings = settings
         self._last_strobe_started_at: float | None = None
 
     async def change_effect(self, intent: LightIntent, bpm: float | None = None) -> None:
         bank, autoloop = AUTOLOOP_BY_LIGHT_INTENT[intent]
         if not self.lighting_client.select_autoloop(
-            bank, autoloop, transition=dict(TRANSITION_BY_LIGHT_INTENT[intent])
+            bank, autoloop, transition=transition_for(intent, self._settings())
         ):
             return
         if self.event_buffer:
@@ -59,17 +62,19 @@ class EffectController:
             self._strobe_unless_cooling_down(bpm)
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
+        settings = self._settings()
+        cooldown = settings.drop_strobe_cooldown_seconds
         now = self.clock.monotonic()
         last = self._last_strobe_started_at
-        if last is not None and now - last < STROBE_COOLDOWN_SECONDS:
+        if last is not None and now - last < cooldown:
             LOGGER.info(
                 '[lighting] drop strobe suppressed | cooldown %.0fs of %.0fs left',
-                STROBE_COOLDOWN_SECONDS - (now - last),
-                STROBE_COOLDOWN_SECONDS,
+                cooldown - (now - last),
+                cooldown,
             )
             return
         self._last_strobe_started_at = now
-        duration = strobe_burst_seconds(bpm)
+        duration = strobe_burst_seconds(bpm, settings.strobe_burst_seconds)
         self.lighting_client.set_override(
             {
                 'id': DROP_ACCENT_ID,

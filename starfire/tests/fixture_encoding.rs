@@ -59,10 +59,11 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         };
     }
     let frame = &rig.encode(&states).unwrap()[&0];
+    // The room rig turns spot pan home by 180 degrees: 0.25 -> 315 of 540.
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
-            &[64, 0, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -158,6 +159,54 @@ fn movement_calibration_maps_inverted_endpoints_without_touching_macros() {
     assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[191, 255, 128, 0]);
     states.get_mut("test").unwrap().pan = 1.0;
     assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[64, 0, 128, 0]);
+}
+
+#[test]
+fn rig_pan_offset_shifts_home_in_degrees_and_zero_offset_matches_legacy_dmx() {
+    let degrees =
+        |frame: &[u8]| f64::from(u16::from_be_bytes([frame[0], frame[1]])) / 65535.0 * 540.0;
+    let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+    let legacy = rig(json!([patch.clone()]));
+    patch["pan_offset_degrees"] = json!(0.0);
+    patch["tilt_offset_degrees"] = json!(0.0);
+    let zero = rig(json!([patch.clone()]));
+    patch["pan_offset_degrees"] = json!(180.0);
+    let turned = rig(json!([patch]));
+    for pan in [0.0, 0.25, 0.5, 1.0] {
+        let mut states = legacy.empty_states();
+        states.get_mut("test").unwrap().pan = pan;
+        assert_eq!(
+            zero.encode(&states).unwrap(),
+            legacy.encode(&states).unwrap()
+        );
+    }
+    let mut states = turned.empty_states();
+    states.get_mut("test").unwrap().pan = 0.5;
+    assert!((degrees(&turned.encode(&states).unwrap()[&0]) - 450.0).abs() < 0.01);
+}
+
+#[test]
+fn patch_rejects_out_of_range_offsets_and_offsets_on_fixed_fixtures() {
+    for (profile, field, value) in [
+        (
+            "chauvet_intimidator_spot_110_12ch",
+            "pan_offset_degrees",
+            540.5,
+        ),
+        (
+            "chauvet_intimidator_spot_110_12ch",
+            "tilt_offset_degrees",
+            -271.0,
+        ),
+        ("generic_rgb", "pan_offset_degrees", 90.0),
+    ] {
+        let mut patch = fixture(profile, 1);
+        patch[field] = json!(value);
+        assert!(
+            FixtureRig::from_json(&json!({"schema_version":1,"fixtures":[patch]}).to_string())
+                .is_err()
+        );
+    }
 }
 
 #[test]

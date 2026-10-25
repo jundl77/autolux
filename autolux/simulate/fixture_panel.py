@@ -6,6 +6,7 @@ from dash import ClientsideFunction, Input, Output, State, dcc, html
 from autolux.lighting.fixture_setup import (
     DMX_UNIVERSE_SIZE,
     MAX_ARTNET_UNIVERSE,
+    MOVEMENT_OFFSET_LIMITS_DEGREES,
     channel_occupancy,
     fixture_patch,
     fixture_rows,
@@ -188,8 +189,12 @@ def build_fixture_panel(app, store):
                             ),
                             html.Details(
                                 [
-                                    html.Summary('Movement limits'),
-                                    html.P('Normalized travel: 0–1.', className='patch-muted'),
+                                    html.Summary('Movement'),
+                                    html.P(
+                                        'Limits are normalized travel (0–1). Offsets turn the '
+                                        'home direction in physical degrees.',
+                                        className='patch-muted',
+                                    ),
                                     *[
                                         html.Div(
                                             [
@@ -228,9 +233,22 @@ def build_fixture_panel(app, store):
                                                     ],
                                                     value=[],
                                                 ),
+                                                html.Div(
+                                                    _field(
+                                                        f'{axis.title()} offset · degrees',
+                                                        dcc.Input(
+                                                            id=f'fixture-{axis}-offset',
+                                                            type='number',
+                                                            min=-limit,
+                                                            max=limit,
+                                                            step='any',
+                                                        ),
+                                                    ),
+                                                    id=f'fixture-{axis}-offset-field',
+                                                ),
                                             ]
                                         )
-                                        for axis in ('pan', 'tilt')
+                                        for axis, limit in MOVEMENT_OFFSET_LIMITS_DEGREES.items()
                                     ],
                                 ],
                                 className='patch-advanced',
@@ -321,6 +339,7 @@ def build_fixture_panel(app, store):
                     'channelCount': DMX_UNIVERSE_SIZE,
                     'maxUniverse': MAX_ARTNET_UNIVERSE,
                     'maxQuantity': MAX_ADD_QUANTITY,
+                    'offsetLimits': MOVEMENT_OFFSET_LIMITS_DEGREES,
                     'columns': MAP_COLUMNS,
                     'colors': FIXTURE_COLORS,
                 },
@@ -363,9 +382,11 @@ def build_fixture_panel(app, store):
         'pan-min',
         'pan-max',
         'pan-inverted',
+        'pan-offset',
         'tilt-min',
         'tilt-max',
         'tilt-inverted',
+        'tilt-offset',
     ]
 
     app.clientside_callback(
@@ -376,6 +397,8 @@ def build_fixture_panel(app, store):
         Output('fixture-info', 'style'),
         Output('fixture-workspace', 'className'),
         Output('fixture-detail-summary', 'children'),
+        Output('fixture-pan-offset-field', 'style'),
+        Output('fixture-tilt-offset-field', 'style'),
         Input('fixture-selection', 'data'),
         Input('fixture-draft', 'data'),
         State('fixture-settings', 'data'),

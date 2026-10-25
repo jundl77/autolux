@@ -16,6 +16,9 @@ message Fixture {
   uint32 address = 4;   // DMX address, starting at one.
   MovementRange pan = 5;
   MovementRange tilt = 6;
+  // Physical degrees added after movement limits; locates the rig's home direction.
+  double pan_offset_degrees = 7;   // Within +/-540; wraps by full turns.
+  double tilt_offset_degrees = 8;  // Within +/-270; clamps at travel ends.
 
   message MovementRange {
     optional double minimum = 1;  // Default 0.

@@ -138,6 +138,19 @@ def test_controls_use_typed_parameters(kind, field, parameter, value_type, value
     assert getattr(setting, value_type) == value
 
 
+def test_master_fade_maps_to_brightness_parameter():
+    command = protocol.build_command({'kind': 'set_master', 'intensity': 0.15, 'fade_seconds': 1.0})
+    assert command.parameter.type == wire.OUTPUT_BRIGHTNESS
+    assert (command.parameter.number, command.parameter.fade_seconds) == (0.15, 1.0)
+    decoded = wire.SetParameter.FromString(command.SerializeToString())
+    assert decoded.parameter.fade_seconds == 1.0
+    assert (
+        protocol.build_command({'kind': 'set_master', 'intensity': 0.5}).parameter.fade_seconds == 0
+    )
+    with pytest.raises(ValueError, match='unexpected fields'):
+        protocol.build_command({'kind': 'set_speed', 'multiplier': 1.0, 'fade_seconds': 1.0})
+
+
 def test_typed_commands_are_copied_before_queueing():
     command = wire.SetParameter(
         command_id=93,

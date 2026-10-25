@@ -113,6 +113,14 @@ def profile_metadata(xml: str, mode_name: str) -> dict:
             'manufacturer': fixture.manufacturer,
             'dmx_mode': mode_name,
             'channels': mode.dmx_channels_count,
+            'movement': sorted(
+                {
+                    str(logical.attribute).lower()
+                    for channel in mode.dmx_channels
+                    for logical in channel.logical_channels
+                }
+                & {'pan', 'tilt'}
+            ),
             'notes': f'{fixture.manufacturer} {fixture.name} · {mode_name} · '
             f'{mode.dmx_channels_count} DMX channels. {fixture.description or ""}'.rstrip(),
         }
