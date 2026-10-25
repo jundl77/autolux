@@ -64,6 +64,9 @@ class LightEngine(IMusicAnalyserHandler):
         self._last_logged_latency_seconds: float | None = None
         self._committing_late: bool = False
         self._floor_armed: bool = True
+        self._source_playing = False
+        self._room_playing = False
+        self._room_start_monotonic_seconds: float | None = None
         self._bypass_due_at: float | None = None
         self._shed_published_at: float = float('-inf')
         self._committed = None
@@ -90,6 +93,9 @@ class LightEngine(IMusicAnalyserHandler):
 
     def on_sound_start(self):
         LOGGER.info('[engine] sound start')
+        self._source_playing = True
+        delay_sec = self.command_queue.delay_sec if self.command_queue else 0.0
+        self._room_start_monotonic_seconds = self._clock.monotonic() + delay_sec
         self._bypass_due_at = None
         if self.event_buffer:
             self.event_buffer.set_playing(True)
@@ -97,6 +103,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     def on_sound_stop(self):
         LOGGER.info('[engine] sound stop')
+        self._source_playing = False
         if self.event_buffer:
             self.event_buffer.set_playing(False)
         self._bypass_due_at = self._clock.monotonic() + STOP_PERSISTENCE_SEC
@@ -117,6 +124,10 @@ class LightEngine(IMusicAnalyserHandler):
         self._quiet_the_room_now()
 
     def _quiet_the_room_now(self) -> None:
+        # Invalidate callbacks already removed from the queue by drain(), too.
+        self._room_playing = False
+        self._room_start_monotonic_seconds = None
+        self._pending_intents.clear()
         if self.command_queue:
             for label in _BYPASSED_ON_STOP:
                 self.command_queue.drop_pending(label, float('-inf'), inclusive=True)
@@ -135,9 +146,15 @@ class LightEngine(IMusicAnalyserHandler):
             )
 
     def _show_sound_start(self) -> None:
+        if self._room_start_monotonic_seconds is None:
+            return
+        self._room_playing = True
         self.lighting_client.set_blackout(False)
 
     def _show_sound_stop(self) -> None:
+        self._room_playing = False
+        self._current_intent = None
+        self._section_class_at_playback = None
         self.lighting_client.stop()
         if self.event_buffer is not None:
             self.event_buffer.stop_effects()
@@ -317,11 +334,13 @@ class LightEngine(IMusicAnalyserHandler):
     async def _commit_intent(
         self, intent: LightIntent, age_sec: float, *, section_label: str | None = None
     ) -> None:
+        if not self._source_playing:
+            return
         self._floor_armed = False
         now = self._clock.monotonic()
         fire_at = now - age_sec + self._playback_delay_sec
         self._note_lateness(now - fire_at)
-        fire_at = max(fire_at, now)
+        fire_at = max(fire_at, now, self._room_start_monotonic_seconds or now)
 
         if self.command_queue:
             self.command_queue.drop_pending('intent', fire_at)
@@ -364,8 +383,12 @@ class LightEngine(IMusicAnalyserHandler):
     async def _apply_intent(
         self, entry, intent: LightIntent, song_sec: float | None, section_label: str | None
     ) -> None:
-        if entry is not None and self._pending_intents and self._pending_intents[0] is entry:
-            self._pending_intents.pop(0)
+        if entry is not None:
+            if not any(pending is entry for pending in self._pending_intents):
+                return
+            self._pending_intents.remove(entry)
+        if not self._room_playing:
+            return
         if self.event_buffer:
             self.event_buffer.set_intent(intent.value, song_sec=song_sec)
         self._current_intent = intent

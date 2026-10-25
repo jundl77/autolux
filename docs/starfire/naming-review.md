@@ -154,3 +154,24 @@ closed without claiming exhaustive naming clarity. The interrupted
 `blind_gdtf_attributes` attempt used an unintended candidate and is discarded.
 User-selected AutoloopDefinition/PlayAutoloop and protocol major/minor terminology
 are explicit naming requirements, not additional blind passes.
+
+## Playback startup gate
+
+Implementation: `LightEngine.on_sound_start` records detected source playback and
+the delayed room-start deadline; `_show_sound_start` opens the room lighting gate.
+These are controller states, not measurements of a physical speaker.
+
+Fresh low-effort, names-only reader `blind_room_playback_gate` inferred separate
+source and room playback states but found `_room_playback_starts_at` ambiguous:
+
+> A timestamp when room playback begins or is scheduled to begin. Unclear whether it records a past start or gates a future start, and which clock or units it uses.
+
+Renamed the deadline to `_room_start_monotonic_seconds`. Fresh low-effort reader
+`blind_room_start_time` predicted:
+
+> `_room_start_monotonic_seconds` likely stores a room's start timestamp, expressed in seconds from a monotonic clock. The leading underscore suggests an internal attribute.
+
+Clock and units now align. Room/source terminology remains a contextual exception
+defined by the controller lifecycle; these names do not claim hardware feedback.
+The user-selected `run_id` is an explicit protocol naming requirement. Regression
+coverage checks startup silence, delayed first playback and stale queued intents.

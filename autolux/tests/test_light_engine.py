@@ -116,7 +116,14 @@ class FakeDecoder:
 
 
 def engine(
-    *, decoder=None, chain=None, playback_delay_sec=14.0, clock=None, queue=True, events=False
+    *,
+    decoder=None,
+    chain=None,
+    playback_delay_sec=14.0,
+    clock=None,
+    queue=True,
+    events=False,
+    playing=True,
 ):
     clock = clock or VirtualClock()
     lighting = RecordingStarfireClient(clock=clock)
@@ -140,6 +147,11 @@ def engine(
         clock=clock,
     )
     light.set_analyser(FakeAnalyser())
+    # Most tests begin during an established show; startup tests use playing=False.
+    light.analyser.playing = playing
+    light._source_playing = playing
+    light._room_playing = playing
+    light._room_start_monotonic_seconds = clock.monotonic() if playing else None
     return light, command_queue, clock, lighting
 
 
@@ -335,6 +347,93 @@ async def test_a_missing_chain_is_the_degradation_state_rather_than_a_crash():
     await light.on_audio(np.zeros(256, dtype=np.float32))
     await light.on_beat(1, 128.0, False)
     assert light.current_intent is None
+
+
+@pytest.mark.parametrize('queued', [False, True])
+async def test_startup_silence_keeps_inference_running_without_selecting_an_autoloop(queued):
+    decoder = FakeDecoder([decisions('drop')])
+    chain = FakeChain([_posterior(0.0, 0.9)])
+    light, queue, clock, lighting = engine(
+        decoder=decoder, chain=chain, queue=queued, playing=False
+    )
+
+    await elapse(light, clock, 30.0)
+    await light.on_100ms_callback()
+    if queue:
+        await queue.drain()
+
+    assert chain.samples == 30 * SAMPLE_RATE
+    assert decoder.cells == [(0.0, 0.9)]
+    assert selections(lighting) == []
+    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
+    assert light.current_intent is None
+    assert light.intent_commits == 0
+
+
+async def test_an_aged_decision_waits_for_the_first_audible_music_before_drop_and_accent():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder, playing=False)
+    await elapse(light, clock, 30.0)
+    light.analyser.playing = True
+    light.on_sound_start()
+    await commit(light, decoder, clock, 'drop', age_sec=30.0)
+
+    clock.advance(13.9)
+    await queue.drain()
+    assert selections(lighting) == []
+    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
+
+    clock.advance(0.1)
+    await queue.drain()
+    assert len(selections(lighting)) == 1
+    assert len([e for e in lighting.events if e['command']['kind'] == 'set_override']) == 1
+    assert light.current_intent is LightIntent.DROP
+
+
+async def test_the_startup_fallback_also_waits_for_delayed_music():
+    light, queue, clock, lighting = engine(playing=False)
+    light.analyser.playing = True
+    light.on_sound_start()
+    await tick_100ms(light, clock, 5.0)
+    await queue.drain()
+    assert selections(lighting) == []
+
+    clock.advance(9.1)
+    await queue.drain()
+    assert light.current_intent is LightIntent.ATMOSPHERIC
+
+
+async def test_source_stop_discards_queued_intents_and_ignores_new_silence_predictions():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 30.0)
+    await commit(light, decoder, clock, 'breakdown', age_sec=13.0)
+    light.analyser.playing = False
+    light.on_sound_stop()
+    await commit(light, decoder, clock, 'drop', age_sec=30.0)
+
+    clock.advance(1.0)
+    await queue.drain()
+    assert light.current_intent is None
+    assert selections(lighting) == []
+    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
+
+
+async def test_a_silence_cutoff_invalidates_an_intent_already_extracted_by_queue_drain():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 30.0)
+    await commit(light, decoder, clock, 'drop', age_sec=13.0)
+    deliver = queued_intents(queue)[0][-1]
+    light.on_sound_stop()
+    await hold_silence(light, clock)
+
+    await deliver()
+    await queue.drain()
+    await commit(light, decoder, clock, 'drop', age_sec=30.0)
+    await queue.drain()
+    assert selections(lighting) == []
+    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
 
 
 async def test_a_song_boundary_resets_both_stages_and_the_grid():

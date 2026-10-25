@@ -301,6 +301,7 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, m
         clock=clock,
     )
     engine.set_analyser(FakeAnalyser())
+    engine.on_sound_start()
 
     try:
         block = np.zeros(256, dtype=np.float32)
