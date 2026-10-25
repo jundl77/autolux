@@ -1,0 +1,315 @@
+{
+  "cause": "Startup atmospheric lighting begins with delayed room sound instead of waiting for the first decoded section.",
+  "changed_report_fields": [
+    "intents[0].t",
+    "intents[0].song_t",
+    "effects[0].t",
+    "metrics.avg_effect_duration_sec",
+    "metrics.intent_distribution_sec"
+  ],
+  "unchanged": [
+    "source audio",
+    "all detected beats/BPM/RMS",
+    "all subsequent section and lighting boundaries",
+    "all command timing",
+    "all boundary/flicker metrics",
+    "ground truth, label vocabularies and gate tolerances"
+  ],
+  "aggregate_changes": {
+    "owner.raw9.macro_f1": [
+      0.573701,
+      0.573914
+    ],
+    "owner.raw9.accuracy": [
+      0.737007,
+      0.737138
+    ],
+    "owner.legacy_v1.macro_f1": [
+      0.677502,
+      0.677577
+    ],
+    "owner.legacy_v1.accuracy": [
+      0.737007,
+      0.737138
+    ],
+    "published.raw9.macro_f1": [
+      0.555342,
+      0.555556
+    ],
+    "published.raw9.accuracy": [
+      0.758906,
+      0.759025
+    ],
+    "published.legacy_v1.macro_f1": [
+      0.687004,
+      0.687078
+    ],
+    "published.legacy_v1.accuracy": [
+      0.758906,
+      0.759025
+    ]
+  },
+  "tracks": {
+    "0064.hzIFjGcOKbg": {
+      "previous_report_sha256": "e98fb8f2d90d7041dc09146bde884be57ec5ac1d0840a11a5329ca161fde9da5",
+      "current_report_sha256": "f53fd6b4c1e1fff95ae9a777b235aaad3142cbd50c86f31c86caf04f327c95f8",
+      "previous_initial_lighting_seconds": 15.313560090702339,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "a337b736681bc8f52e4bdd282357e52e480f8d0348dc721a4c1f805718ced18f",
+      "expected_score_changes": {
+        "owner.late": [
+          1,
+          0
+        ],
+        "owner.raw9.macro_f1": [
+          0.610667,
+          0.610966
+        ],
+        "owner.raw9.accuracy": [
+          0.801711,
+          0.801932
+        ],
+        "owner.legacy_v1.macro_f1": [
+          0.795468,
+          0.79552
+        ],
+        "owner.legacy_v1.accuracy": [
+          0.801711,
+          0.801932
+        ],
+        "published.late": [
+          1,
+          0
+        ],
+        "published.raw9.macro_f1": [
+          0.542815,
+          0.543081
+        ],
+        "published.raw9.accuracy": [
+          0.801711,
+          0.801932
+        ],
+        "published.legacy_v1.macro_f1": [
+          0.667932,
+          0.667973
+        ],
+        "published.legacy_v1.accuracy": [
+          0.801711,
+          0.801932
+        ]
+      },
+      "observed_run_checksum_prefix": null
+    },
+    "0096.PNpXKsge4xM": {
+      "previous_report_sha256": "fa341f72e4102f2831fdfc76cec2b54fee3dc4bf65e035e1ce7c93a2b98627fd",
+      "current_report_sha256": "5c954d029a568f667b99ce271307fb55c058dd3f917390843300a04c24c059f6",
+      "previous_initial_lighting_seconds": 14.425396825396266,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "4dd2bad4594108320dfb681026e7a50da52871d5331321745830ac0e4bc5786d",
+      "expected_score_changes": {},
+      "observed_run_checksum_prefix": "5c954d029a56"
+    },
+    "0136.FO566BKY2Jc": {
+      "previous_report_sha256": "84ad3432d32696b27260788c434a99f1063d94b82211b1e44cb62c345eb0712d",
+      "current_report_sha256": "6d2f734806641ec0793f61f32a7ef44cf687594d8233ca8534749a85c811405c",
+      "previous_initial_lighting_seconds": 14.355736961450692,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "844dca753671ed12ac8e86d22f8bbf0b738913794bbc83e2b7f5d2b0accd0e77",
+      "expected_score_changes": {},
+      "observed_run_checksum_prefix": null
+    },
+    "0434.SBnxzXkc_qw": {
+      "previous_report_sha256": "19b47fa398404f10920160e37d54ca1f775688c01210323f97bfdeadf8ab7a2f",
+      "current_report_sha256": "e999cc9e83f574b912de96e43f4cd1e5ad1de501d114ef4f5792532871f310c2",
+      "previous_initial_lighting_seconds": 16.91573696145055,
+      "room_sound_start_seconds": 14.907210884353155,
+      "unchanged_audio_sha256": "be465a508d38cf378c7b700c29b38cb1a3a86e9a0e7e29e05fc4291ccfc14029",
+      "expected_score_changes": {
+        "owner.late": [
+          1,
+          0
+        ],
+        "published.late": [
+          1,
+          0
+        ]
+      },
+      "observed_run_checksum_prefix": "e999cc9e83f5"
+    },
+    "0485.MRRgXXq-0rc": {
+      "previous_report_sha256": "c7578ab6042e9925f04ea42f94f3981aac78fee0fade57b12de74dc5e1a028cb",
+      "current_report_sha256": "9c01499be5bdee5ccffba6e169aa4968c37a0f108fe055495f8c98deffa6d92a",
+      "previous_initial_lighting_seconds": 14.576326530611677,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "bfa286c8a26eacea1ce00498ca944dde262113a48b860d1aba76898c7aefb7ce",
+      "expected_score_changes": {
+        "owner.raw9.macro_f1": [
+          0.5667,
+          0.566707
+        ],
+        "owner.raw9.accuracy": [
+          0.862973,
+          0.863133
+        ],
+        "owner.legacy_v1.macro_f1": [
+          0.831362,
+          0.831387
+        ],
+        "owner.legacy_v1.accuracy": [
+          0.862973,
+          0.863133
+        ],
+        "published.raw9.macro_f1": [
+          0.5667,
+          0.566707
+        ],
+        "published.raw9.accuracy": [
+          0.862973,
+          0.863133
+        ],
+        "published.legacy_v1.macro_f1": [
+          0.831362,
+          0.831387
+        ],
+        "published.legacy_v1.accuracy": [
+          0.862973,
+          0.863133
+        ]
+      },
+      "observed_run_checksum_prefix": null
+    },
+    "0501.hwdjIgtMFq8": {
+      "previous_report_sha256": "3bcfe62b5e45b36994d1a0a3513545375ca060e8db283fe4ad621b0066dd351f",
+      "current_report_sha256": "4eb25f0e7d118e5a4a970a380bafe7b2d48caf93889b443df1636bf3b62fce38",
+      "previous_initial_lighting_seconds": 14.355736961450692,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "17a3d873d16a46ab33ff1020d4aa169a80385c1b031ea752121bc6d3c0b0d4b2",
+      "expected_score_changes": {},
+      "observed_run_checksum_prefix": null
+    },
+    "0640.4o4joooH5tg": {
+      "previous_report_sha256": "1c00348c4f47148d9498c8d49d3d5263a8aa04da45096df39f13edfac186042a",
+      "current_report_sha256": "7203d3c208daed9550e6e269303ccaaeb130517e08e1b9a0fb51f76569b1b4bb",
+      "previous_initial_lighting_seconds": 22.163446712017148,
+      "room_sound_start_seconds": 21.849977324262063,
+      "unchanged_audio_sha256": "cab600016b259776fbb659a69861d4188eed4091d825f7a6e7dd3f3f0e1d58eb",
+      "expected_score_changes": {},
+      "observed_run_checksum_prefix": null
+    },
+    "0834.NyEKXA7_6z0": {
+      "previous_report_sha256": "cb853376e2082d8951a32fc4a8f2e3c5ddf466fd094461f1c62dbb07086ce17b",
+      "current_report_sha256": "2c055e3dc9d5ed7e5710ee2969563641e8247f98a47dbfc08664f66f50d3ecc3",
+      "previous_initial_lighting_seconds": 14.669206349205776,
+      "room_sound_start_seconds": 14.605351473922333,
+      "unchanged_audio_sha256": "af92fbd43834e6ea02267c6df0dfe59a060b5c700ed58a2dd99d7a7d9d1df183",
+      "expected_score_changes": {
+        "owner.raw9.macro_f1": [
+          0.28104,
+          0.28137
+        ],
+        "owner.raw9.accuracy": [
+          0.34403,
+          0.344977
+        ],
+        "owner.legacy_v1.macro_f1": [
+          0.222183,
+          0.222476
+        ],
+        "owner.legacy_v1.accuracy": [
+          0.34403,
+          0.344977
+        ],
+        "published.raw9.macro_f1": [
+          0.418154,
+          0.418485
+        ],
+        "published.raw9.accuracy": [
+          0.581399,
+          0.582006
+        ],
+        "published.legacy_v1.macro_f1": [
+          0.442704,
+          0.442997
+        ],
+        "published.legacy_v1.accuracy": [
+          0.581399,
+          0.582006
+        ]
+      },
+      "observed_run_checksum_prefix": "2c055e3dc9d5"
+    },
+    "0911.hSCcLy_OBLM": {
+      "previous_report_sha256": "57dcceb416d96a2959914066714a359f7911a55e3ee8f0d0e1312334b1f776c4",
+      "current_report_sha256": "3d7f374350acae4fe63551bfb8e71fe77b81c202bf7635687794d72bb4125174",
+      "previous_initial_lighting_seconds": 14.454421768706922,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "b7180316fcd5421fb1a03257ce5457245c0db6483961ab14feb78af7f8f09a9a",
+      "expected_score_changes": {},
+      "observed_run_checksum_prefix": null
+    },
+    "1110.DnhxAxnCbrY": {
+      "previous_report_sha256": "6a698100503a7f2f4334e4cbf3f5ef3c5a2aed2ff59b274ac0e27f2ead1e0517",
+      "current_report_sha256": "d150c5423c92ad9286ad117da6e4e11eebf5df64e2969c682b79671fca5ff611",
+      "previous_initial_lighting_seconds": 14.547301587301021,
+      "room_sound_start_seconds": 14.303492063491511,
+      "unchanged_audio_sha256": "239fbb22740b3640b0890326b6b2c7e918377641c809ddfe204b2267741d6b5d",
+      "expected_score_changes": {
+        "owner.raw9.macro_f1": [
+          0.448646,
+          0.449408
+        ],
+        "owner.raw9.accuracy": [
+          0.617498,
+          0.617883
+        ],
+        "owner.legacy_v1.macro_f1": [
+          0.672029,
+          0.673405
+        ],
+        "owner.legacy_v1.accuracy": [
+          0.617498,
+          0.617883
+        ],
+        "published.raw9.macro_f1": [
+          0.448646,
+          0.449408
+        ],
+        "published.raw9.accuracy": [
+          0.617498,
+          0.617883
+        ],
+        "published.legacy_v1.macro_f1": [
+          0.672029,
+          0.673405
+        ],
+        "published.legacy_v1.accuracy": [
+          0.617498,
+          0.617883
+        ]
+      },
+      "observed_run_checksum_prefix": null
+    }
+  },
+  "score_layout": "Scores below are grouped by annotation source and label space. Top-level scores mirror published.raw9; per-truth scores mirror that truth.raw9.",
+  "initial_audit_reran_pipeline": false,
+  "subsequent_pipeline_verification": {
+    "test": "autolux/tests/test_simulation.py::test_eval_set_head_matches_the_committed_baseline",
+    "result": "passed",
+    "seconds": 124.31,
+    "gpu_extraction_refused": true,
+    "tracks": {
+      "0096.PNpXKsge4xM": {
+        "sha256": "5c954d029a568f667b99ce271307fb55c058dd3f917390843300a04c24c059f6",
+        "fresh_report_equals_audited_report": true
+      },
+      "0434.SBnxzXkc_qw": {
+        "sha256": "e999cc9e83f574b912de96e43f4cd1e5ad1de501d114ef4f5792532871f310c2",
+        "fresh_report_equals_audited_report": true
+      },
+      "0834.NyEKXA7_6z0": {
+        "sha256": "2c055e3dc9d5ed7e5710ee2969563641e8247f98a47dbfc08664f66f50d3ecc3",
+        "fresh_report_equals_audited_report": true
+      }
+    }
+  }
+}

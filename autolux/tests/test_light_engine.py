@@ -445,6 +445,32 @@ async def test_startup_baseline_preserves_a_committed_section_due_after_room_sta
     assert len([e for e in lighting.events if e['command']['kind'] == 'set_override']) == 1
 
 
+async def test_first_decoded_intro_preserves_room_start_coverage_in_the_report():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder, playing=False, events=True)
+    clock.advance(0.3)
+    light.analyser.playing = True
+    light.on_sound_start()
+    clock.advance(11.7)
+    await commit(light, decoder, clock, 'intro', age_sec=11.5)
+
+    clock.advance(2.3)
+    await queue.drain()
+    room_start = light.event_buffer.to_report()
+    assert room_start['intents'][0]['t'] == pytest.approx(14.3)
+    assert room_start['intents'][0]['song_t'] == pytest.approx(0.3)
+
+    clock.advance(0.2)
+    await queue.drain()
+    after_decoded_intro = light.event_buffer.to_report()
+    assert len(after_decoded_intro['intents']) == len(after_decoded_intro['effects']) == 1
+    assert after_decoded_intro['intents'][0]['t'] == pytest.approx(14.3)
+    assert after_decoded_intro['intents'][0]['song_t'] == pytest.approx(0.3)
+    assert after_decoded_intro['effects'][0]['t'] == pytest.approx(14.3)
+    assert after_decoded_intro['beats'] == room_start['beats']
+    assert len(selections(lighting)) == 1
+
+
 async def test_queue_free_playback_starts_its_baseline_on_the_first_audio_cycle():
     light, _, _, lighting = engine(queue=False, playing=False)
     light.analyser.playing = True
