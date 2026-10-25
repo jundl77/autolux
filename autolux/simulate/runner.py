@@ -22,7 +22,6 @@ def build_simulation(
     clock: Clock = SYSTEM_CLOCK,
     section: object | None = None,
     threaded: bool = False,
-    silence_monitor=None,
 ):
     from autolux.lib.analyser.drift_watchdog import DriftWatchdog
     from autolux.lib.analyser.music_analyser import MusicAnalyser
@@ -50,7 +49,6 @@ def build_simulation(
         section_chain=None if section is None else section.stream,
         section_decoder=None if section is None else section.decoder,
         watchdog=watchdog,
-        silence_monitor=silence_monitor,
         clock=clock,
     )
 

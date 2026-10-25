@@ -23,7 +23,6 @@ _BEAT_ABSENCE_SEC = 2.5
 
 _LATENCY_LOG_STEP_SEC = 0.25
 _SHED_PUBLISH_SEC = 1.0
-_BYPASSED_ON_STOP = ('sound', 'intent', 'beat')
 COLD_START_FLOOR_MARGIN_SEC = 4.0
 
 
@@ -40,7 +39,6 @@ class LightEngine(IMusicAnalyserHandler):
         section_chain=None,
         section_decoder=None,
         watchdog=None,
-        silence_monitor=None,
         clock: Clock = SYSTEM_CLOCK,
     ):
         self.lighting_client = lighting_client
@@ -51,7 +49,6 @@ class LightEngine(IMusicAnalyserHandler):
         self.section_chain = section_chain
         self.section_decoder = section_decoder
         self._watchdog = watchdog
-        self._silence_monitor = silence_monitor
         self._playback_delay_sec: float = playback_delay_sec
         self._clock: Clock = clock
         self._current_intent: LightIntent | None = None
@@ -68,7 +65,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._room_playing = False
         self._room_start_monotonic_seconds: float | None = None
         self._startup_baseline_pending = False
-        self._bypass_due_at: float | None = None
+        self._pending_silence: tuple[float, float | None] | None = None
         self._shed_published_at: float = float('-inf')
         self._committed = None
         self._log_chain_latency()
@@ -97,11 +94,10 @@ class LightEngine(IMusicAnalyserHandler):
         self._source_playing = True
         delay_sec = self.command_queue.delay_sec if self.command_queue else 0.0
         self._room_start_monotonic_seconds = self._clock.monotonic() + delay_sec
-        self._bypass_due_at = None
+        self._pending_silence = None
         if self.event_buffer:
             self.event_buffer.set_playing(True)
-        self._restart_for_the_next_song()
-        self._startup_baseline_pending = True
+        self._reset_source_analysis()
         if self.command_queue:
 
             async def command():
@@ -115,56 +111,54 @@ class LightEngine(IMusicAnalyserHandler):
     def on_sound_stop(self):
         LOGGER.info('[engine] sound stop')
         self._source_playing = False
-        self._startup_baseline_pending = False
         if self.event_buffer:
             self.event_buffer.set_playing(False)
-        self._bypass_due_at = self._clock.monotonic() + STOP_PERSISTENCE_SEC
-        self._restart_for_the_next_song()
-
-    def _bypass_if_the_silence_held(self) -> None:
-        if self._bypass_due_at is None:
-            return
-        if self._clock.monotonic() < self._bypass_due_at:
-            return
-        self._bypass_due_at = None
-        LOGGER.info(
-            f'[engine] silence held {STOP_PERSISTENCE_SEC:.1f}s — '
-            f'cutting the tail the room has not reached'
+        self._pending_silence = (
+            self._clock.monotonic(),
+            self.event_buffer.elapsed() if self.event_buffer else None,
         )
-        if self._silence_monitor is not None:
-            self._silence_monitor()
-        self._quiet_the_room_now()
+        self._reset_source_analysis()
 
-    def _quiet_the_room_now(self) -> None:
-        # Invalidate callbacks already removed from the queue by drain(), too.
-        self._room_playing = False
-        self._room_start_monotonic_seconds = None
-        self._pending_intents.clear()
+    def _schedule_confirmed_silence(self) -> None:
+        if self._pending_silence is None:
+            return
+        stopped_at, song_sec = self._pending_silence
+        now = self._clock.monotonic()
+        if now < stopped_at + STOP_PERSISTENCE_SEC:
+            return
+        self._pending_silence = None
+        LOGGER.info('[engine] silence confirmed; lighting stops with the buffered audio')
+
+        def stop():
+            self._show_sound_stop()
+            if self.event_buffer:
+                self.event_buffer.set_intent(
+                    LightIntent.ATMOSPHERIC.value,
+                    song_sec=song_sec,
+                    trigger=SILENCE_TRIGGER,
+                )
+
         if self.command_queue:
-            for label in _BYPASSED_ON_STOP:
-                self.command_queue.drop_pending(label, float('-inf'), inclusive=True)
 
             async def command():
-                self._show_sound_stop()
+                stop()
 
-            self.command_queue.schedule('sound', command, delay_sec=0.0)
-        else:
-            self._show_sound_stop()
-        if self.event_buffer:
-            self.event_buffer.set_intent(
-                LightIntent.ATMOSPHERIC.value,
-                song_sec=self.event_buffer.elapsed(),
-                trigger=SILENCE_TRIGGER,
+            self.command_queue.schedule(
+                'sound',
+                command,
+                delay_sec=max(0.0, stopped_at + self.command_queue.delay_sec - now),
             )
+        else:
+            stop()
 
     def _show_sound_start(self) -> None:
-        if self._room_start_monotonic_seconds is None:
-            return
         self._room_playing = True
+        self._startup_baseline_pending = True
         self.lighting_client.set_blackout(False)
 
     def _show_sound_stop(self) -> None:
         self._room_playing = False
+        self._startup_baseline_pending = False
         self._current_intent = None
         self._section_class_at_playback = None
         self.lighting_client.stop()
@@ -175,8 +169,6 @@ class LightEngine(IMusicAnalyserHandler):
         if not self._startup_baseline_pending or not self._room_playing:
             return
         now = self._clock.monotonic()
-        if self._room_start_monotonic_seconds is None or now < self._room_start_monotonic_seconds:
-            return
         self._startup_baseline_pending = False
         if self._current_intent is not None or any(
             item[0] <= now for item in self._pending_intents
@@ -188,13 +180,8 @@ class LightEngine(IMusicAnalyserHandler):
         song_sec = None if self.event_buffer is None else self.event_buffer.elapsed() - delay_sec
         await self._apply_intent(None, LightIntent.ATMOSPHERIC, song_sec, None)
 
-    def _restart_for_the_next_song(self) -> None:
-        self._current_intent = None
-        self._section_class_at_playback = None
+    def _reset_source_analysis(self) -> None:
         self._floor_armed = True
-        if self.command_queue:
-            self.command_queue.drop_pending('intent', float('-inf'))
-        self._pending_intents = []
         self._committed = None
         self._audio_sec = 0.0
         if self.section_chain is not None:
@@ -221,7 +208,7 @@ class LightEngine(IMusicAnalyserHandler):
         )
 
     async def on_audio(self, audio_signal) -> None:
-        self._bypass_if_the_silence_held()
+        self._schedule_confirmed_silence()
         await self._start_room_baseline()
         self._publish_shed_state()
         self._audio_sec += len(audio_signal) / SAMPLE_RATE
@@ -255,7 +242,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self.section_decoder is not None:
             await self._commit(self.section_decoder.push_beat(self._audio_sec))
 
-        published_bpm = self._publishable_bpm(self._published_bpm, bpm)
+        published_bpm = self._publishable_bpm(self._published_bpm, self.analyser.get_detector_bpm())
         normalized_rms_level = rms_to_normalized_level(rms_energy)
 
         async def publish():
@@ -363,12 +350,22 @@ class LightEngine(IMusicAnalyserHandler):
         if self.command_queue:
             self.command_queue.drop_pending('intent', fire_at)
         self._pending_intents = [item for item in self._pending_intents if item[0] <= fire_at]
-        decided_section_label = (
-            self._pending_intents[-1][2]
-            if self._pending_intents
-            else self._section_class_at_playback
+        source_start = (
+            self._room_start_monotonic_seconds
+            if self._room_start_monotonic_seconds is not None
+            else now
         )
-        if intent is self.decided_intent and (
+        source_pending = [item for item in self._pending_intents if item[0] >= source_start]
+        if source_pending:
+            _, decided_intent, decided_section_label = source_pending[-1]
+        elif source_start <= now:
+            decided_intent, decided_section_label = (
+                self._current_intent,
+                self._section_class_at_playback,
+            )
+        else:
+            decided_intent = decided_section_label = None
+        if intent is decided_intent and (
             section_label is None or section_label == decided_section_label
         ):
             return

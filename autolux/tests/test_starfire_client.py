@@ -41,6 +41,7 @@ async def test_measured_energy_and_beat_share_the_playback_delay():
     from autolux.tests.test_light_engine import engine
 
     light, queue, clock, lighting = engine()
+    light.analyser.bpm = 120.0
     light.analyser.get_rms_energy = lambda: 0.01
     await light.on_beat(5, 120.0, False)
     light.analyser.get_rms_energy = lambda: 0.1
@@ -65,12 +66,15 @@ async def test_warmup_never_sends_zero_tempo_and_song_stop_preserves_beat_ordina
     from autolux.tests.test_light_engine import engine
 
     light, _, _, lighting = engine(queue=False)
+    light.analyser.bpm = 0.0
     await light.on_beat(1, 0.0, False)
     assert [event['command']['kind'] for event in lighting.events] == ['set_normalized_rms_level']
+    light.analyser.bpm = 120.0
     await light.on_beat(2, 120.0, False)
     light.on_sound_stop()
     light._show_sound_stop()
     light.on_sound_start()
+    light.analyser.bpm = 0.0
     await light.on_beat(3, 0.0, False)
     anchors = [event['command'] for event in lighting.events if event['command']['kind'] == 'beat']
     assert [anchor['position_beats'] for anchor in anchors] == [2, 3]

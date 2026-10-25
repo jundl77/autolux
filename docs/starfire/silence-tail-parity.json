@@ -1,0 +1,67 @@
+{
+  "cause": "Persistent source silence stops lighting when the buffered audio reaches the room; tail beat commands remain scheduled.",
+  "checks": [
+    "All ten raw reference reports reproduce the committed baseline checksums.",
+    "Audio hashes and every detected beat, tempo and RMS value are identical.",
+    "All classified section starts, autoloop choices and accents are unchanged.",
+    "Only confirmed trailing silence moves: last active effect/intent ends, silence marker and its source timestamp, retained tail beats and derived duration/timing summaries.",
+    "All commands other than the trailing stop retain their order and timing; added tail commands stay within one audio buffer of their deadlines.",
+    "Every per-track and aggregate score, count, annotator reading and label-space reading is identical.",
+    "Ground truth, evaluation set, tolerances and scoring rules are unchanged."
+  ],
+  "report_time_limit": "The report timeline remains clipped to source-file duration; command timing records the later audible stop.",
+  "tracks": {
+    "0064.hzIFjGcOKbg": {
+      "previous_report_sha256": "f53fd6b4c1e1fff95ae9a777b235aaad3142cbd50c86f31c86caf04f327c95f8",
+      "current_report_sha256": "f53fd6b4c1e1fff95ae9a777b235aaad3142cbd50c86f31c86caf04f327c95f8"
+    },
+    "0096.PNpXKsge4xM": {
+      "previous_report_sha256": "5c954d029a568f667b99ce271307fb55c058dd3f917390843300a04c24c059f6",
+      "current_report_sha256": "5c954d029a568f667b99ce271307fb55c058dd3f917390843300a04c24c059f6"
+    },
+    "0136.FO566BKY2Jc": {
+      "previous_report_sha256": "6d2f734806641ec0793f61f32a7ef44cf687594d8233ca8534749a85c811405c",
+      "current_report_sha256": "6d2f734806641ec0793f61f32a7ef44cf687594d8233ca8534749a85c811405c"
+    },
+    "0434.SBnxzXkc_qw": {
+      "previous_report_sha256": "e999cc9e83f574b912de96e43f4cd1e5ad1de501d114ef4f5792532871f310c2",
+      "current_report_sha256": "e999cc9e83f574b912de96e43f4cd1e5ad1de501d114ef4f5792532871f310c2"
+    },
+    "0485.MRRgXXq-0rc": {
+      "previous_report_sha256": "9c01499be5bdee5ccffba6e169aa4968c37a0f108fe055495f8c98deffa6d92a",
+      "current_report_sha256": "92bb8d15b29e3da5661fadca1a70239f93b9bf2203fbeb552a68c2cd636035f8",
+      "source_stop_seconds": 410.53460317481205,
+      "previous_stop_seconds": 412.53732426324854,
+      "current_stop_seconds": 424.53623582788106,
+      "retained_beat_commands": 24
+    },
+    "0501.hwdjIgtMFq8": {
+      "previous_report_sha256": "4eb25f0e7d118e5a4a970a380bafe7b2d48caf93889b443df1636bf3b62fce38",
+      "current_report_sha256": "c64d8bc379eed28f85c3aae6814548666e46bec35e186bca72358c8cc45cebcb",
+      "source_stop_seconds": 411.53886621336136,
+      "previous_stop_seconds": 413.54158730179785,
+      "current_stop_seconds": 425.54049886643037,
+      "retained_beat_commands": 21
+    },
+    "0640.4o4joooH5tg": {
+      "previous_report_sha256": "7203d3c208daed9550e6e269303ccaaeb130517e08e1b9a0fb51f76569b1b4bb",
+      "current_report_sha256": "7203d3c208daed9550e6e269303ccaaeb130517e08e1b9a0fb51f76569b1b4bb"
+    },
+    "0834.NyEKXA7_6z0": {
+      "previous_report_sha256": "2c055e3dc9d5ed7e5710ee2969563641e8247f98a47dbfc08664f66f50d3ecc3",
+      "current_report_sha256": "ea26cb672e2206ffd3087f59e9d968f465155b11555afeb2a92c4c365b399c39",
+      "source_stop_seconds": 362.35319727909365,
+      "previous_stop_seconds": 364.35591836753014,
+      "current_stop_seconds": 376.35482993216266,
+      "retained_beat_commands": 23
+    },
+    "0911.hSCcLy_OBLM": {
+      "previous_report_sha256": "3d7f374350acae4fe63551bfb8e71fe77b81c202bf7635687794d72bb4125174",
+      "current_report_sha256": "3d7f374350acae4fe63551bfb8e71fe77b81c202bf7635687794d72bb4125174"
+    },
+    "1110.DnhxAxnCbrY": {
+      "previous_report_sha256": "d150c5423c92ad9286ad117da6e4e11eebf5df64e2969c682b79671fca5ff611",
+      "current_report_sha256": "d150c5423c92ad9286ad117da6e4e11eebf5df64e2969c682b79671fca5ff611"
+    }
+  }
+}

@@ -32,6 +32,9 @@ class FakeAnalyser:
     def get_bpm(self):
         return self.bpm
 
+    def get_detector_bpm(self):
+        return self.bpm
+
     def get_rms_energy(self):
         return 0.1
 
@@ -187,11 +190,6 @@ async def hold_silence(light, clock, sec: float = STOP_PERSISTENCE_SEC + 0.1) ->
         clock.advance(step)
         await light.on_audio(np.zeros(int(step * SAMPLE_RATE), dtype=np.float32))
         remaining -= step
-
-
-async def hold_silence_on_a_real_clock(light) -> None:
-    light._bypass_due_at = light._clock.monotonic()
-    await light.on_audio(np.zeros(1, dtype=np.float32))
 
 
 async def _noop() -> None:
@@ -479,7 +477,7 @@ async def test_queue_free_playback_starts_its_baseline_on_the_first_audio_cycle(
     assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric']
 
 
-async def test_silence_before_delayed_room_start_cancels_the_startup_baseline():
+async def test_a_short_song_keeps_its_delayed_start_and_stop():
     light, queue, clock, lighting = engine(playing=False)
     light.analyser.playing = True
     light.on_sound_start()
@@ -487,12 +485,17 @@ async def test_silence_before_delayed_room_start_cancels_the_startup_baseline():
     light.analyser.playing = False
     light.on_sound_stop()
     await hold_silence(light, clock)
-    clock.advance(14.0)
+    clock.advance(14.0 - clock.monotonic())
     await queue.drain()
-    assert selections(lighting) == []
+    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric']
+    assert light._room_playing
+    clock.advance(1.0)
+    await queue.drain()
+    assert not light._room_playing
+    assert lighting.events[-1] == {'at_seconds': 15.0, 'command': {'kind': 'stop'}}
 
 
-async def test_source_stop_discards_queued_intents_and_ignores_new_silence_predictions():
+async def test_source_stop_preserves_queued_intents_and_ignores_new_silence_predictions():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)
     await elapse(light, clock, 30.0)
@@ -503,12 +506,12 @@ async def test_source_stop_discards_queued_intents_and_ignores_new_silence_predi
 
     clock.advance(1.0)
     await queue.drain()
-    assert light.current_intent is None
-    assert selections(lighting) == []
+    assert light.current_intent is LightIntent.BREAKDOWN
+    assert [event['command']['bank'] for event in selections(lighting)] == ['breakdown']
     assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
 
 
-async def test_a_silence_cutoff_invalidates_an_intent_already_extracted_by_queue_drain():
+async def test_a_confirmed_silence_does_not_cancel_an_already_due_tail_intent():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)
     await elapse(light, clock, 30.0)
@@ -521,8 +524,11 @@ async def test_a_silence_cutoff_invalidates_an_intent_already_extracted_by_queue
     await queue.drain()
     await commit(light, decoder, clock, 'drop', age_sec=30.0)
     await queue.drain()
-    assert selections(lighting) == []
-    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
+    assert [event['command']['bank'] for event in selections(lighting)] == ['drop']
+    assert light._room_playing
+    clock.advance(44.0 - clock.monotonic())
+    await queue.drain()
+    assert not light._room_playing
 
 
 async def test_a_song_boundary_resets_both_stages_and_the_grid():
@@ -658,7 +664,7 @@ async def test_the_stream_is_deduplicated_against_what_it_will_show():
     assert len(queued_intents(queue)) == 1
 
 
-async def test_the_stage_goes_dark_once_the_detected_silence_has_persisted():
+async def test_the_stage_goes_dark_when_the_confirmed_silence_reaches_the_room():
     light, queue, clock, lighting = engine(decoder=FakeDecoder())
     blackout = []
     lighting.stop = lambda: blackout.append(clock.monotonic())
@@ -668,9 +674,10 @@ async def test_the_stage_goes_dark_once_the_detected_silence_has_persisted():
 
     await hold_silence(light, clock)
     await queue.drain()
-    assert blackout == [pytest.approx(at_stop + STOP_PERSISTENCE_SEC, abs=0.2)], (
-        'the blackout did not wait for the silence, or waited for the room'
-    )
+    assert blackout == []
+    clock.advance(at_stop + queue.delay_sec - clock.monotonic())
+    await queue.drain()
+    assert blackout == [at_stop + queue.delay_sec]
 
 
 async def test_the_engines_own_bookkeeping_at_a_boundary_is_not_delayed():
@@ -819,6 +826,10 @@ async def test_a_new_song_re_arms_the_floor_and_commits_a_second_time():
     assert commits == 1
 
     light.on_sound_stop()
+    stopped_at = clock.monotonic()
+    await hold_silence(light, clock)
+    clock.advance(stopped_at + queue.delay_sec - clock.monotonic())
+    await queue.drain()
     light.on_sound_start()
     await tick_100ms(light, clock, decoder.chain_latency_sec + 10.0)
     await settle(light, clock, queue)
@@ -1023,7 +1034,7 @@ async def test_a_feature_gap_forgets_the_commit_cursor():
     assert state['lag_bars'] is None
 
 
-async def test_a_song_boundary_clears_the_intents_still_in_flight():
+async def test_a_song_boundary_keeps_the_intents_for_buffered_audio():
     decoder, chain = FakeDecoder(), FakeChain()
     light, queue, clock, _lighting = engine(decoder=decoder, chain=chain, events=True)
     await held(light, decoder, chain, clock, queue, label='drop')
@@ -1034,8 +1045,8 @@ async def test_a_song_boundary_clears_the_intents_still_in_flight():
 
     light.on_sound_stop()
 
-    assert queued_intents(queue) == []
-    assert light.decided_intent is None
+    assert len(queued_intents(queue)) == 1
+    assert light.decided_intent is LightIntent.BREAKDOWN
 
 
 def test_the_grid_never_tears_itself_down_before_the_show_has_gone_quiet():
@@ -1048,131 +1059,99 @@ def test_the_grid_never_tears_itself_down_before_the_show_has_gone_quiet():
     )
 
 
-async def test_a_persistent_stop_silences_the_monitor_without_waiting_for_the_room():
-    light, queue, clock, _ = engine()
-    cut = []
-    light._silence_monitor = lambda: cut.append(queue.pending)
-    light.on_sound_stop()
-    assert cut == [], 'the monitor was cut before the silence had persisted'
-    await hold_silence(light, clock)
-    assert cut == [0]
-
-
-async def test_a_show_with_no_monitor_still_stops_cleanly():
-    light, _, clock, _ = engine()
-    light.on_sound_stop()
-    await hold_silence(light, clock)
-
-
-async def test_a_gap_between_songs_never_cuts_the_tail_the_room_is_hearing():
+async def test_a_brief_gap_between_songs_preserves_the_audible_tail():
     light, queue, clock, lighting = engine(events=True)
-    blackout, cut = [], []
+    blackout = []
     lighting.stop = lambda: blackout.append(clock.monotonic())
-    light._silence_monitor = lambda: cut.append(clock.monotonic())
-
     await elapse(light, clock, 5.0)
     light.on_sound_stop()
-    await hold_silence(light, clock, 1.5)
+    await hold_silence(light, clock, STOP_PERSISTENCE_SEC - 0.1)
     light.on_sound_start()
     await hold_silence(light, clock, 30.0)
     await queue.drain()
-
-    assert (blackout, cut) == ([], []), (
-        'an inter-song gap cut the tail the room had not reached yet'
-    )
-    assert [
-        b for b in light.event_buffer.to_report()['intents'] if b['trigger'] == SILENCE_TRIGGER
-    ] == []
-
-
-async def test_a_resume_inside_the_window_cancels_the_pending_bypass():
-    light, queue, clock, lighting = engine(events=True)
-    blackout = []
-    lighting.stop = lambda: blackout.append(clock.monotonic())
-
-    await elapse(light, clock, 5.0)
-    light.on_sound_stop()
-    await hold_silence(light, clock, STOP_PERSISTENCE_SEC - 0.1)
     assert blackout == []
-
-    light.on_sound_start()
-    await hold_silence(light, clock, 10.0)
-    await queue.drain()
-    assert blackout == [], 'a cancelled bypass fired anyway'
+    assert not any(
+        block['trigger'] == SILENCE_TRIGGER for block in light.event_buffer.to_report()['intents']
+    )
 
 
-async def test_the_whole_bypass_package_waits_on_the_same_gate():
+async def test_confirmed_stop_preserves_commands_until_the_tail_finishes():
     light, queue, clock, lighting = engine(events=True)
     fired = []
-    lighting.stop = lambda: fired.append('floor')
-    light._silence_monitor = lambda: fired.append('monitor')
+    lighting.stop = lambda: fired.append(('stop', clock.monotonic()))
 
-    await elapse(light, clock, 5.0)
-    queue.schedule('beat', _noop)
+    async def beat():
+        fired.append(('beat', clock.monotonic()))
+
+    queue.schedule('beat', beat)
+    clock.advance(1.0)
     light.on_sound_stop()
-    await hold_silence(light, clock, STOP_PERSISTENCE_SEC - 0.1)
+    await hold_silence(light, clock)
     await queue.drain()
     assert fired == []
-    assert queue.pending == 1, 'the pending lighting was flushed early'
-
-    await hold_silence(light, clock, 0.2)
+    clock.advance(14.0 - clock.monotonic())
     await queue.drain()
-    assert fired == ['monitor', 'floor']
-    assert [b['trigger'] for b in light.event_buffer.to_report()['intents']] == [SILENCE_TRIGGER]
-
-
-async def test_a_detected_stop_drops_the_lighting_the_room_has_not_seen():
-    light, queue, clock, _ = engine(events=True)
-    ran = []
-
-    async def stale():
-        ran.append('stale')
-
-    queue.schedule('intent', stale)
-    queue.schedule('beat', stale)
-    light.on_sound_stop()
-    await hold_silence(light, clock)
-    clock.advance(30.0)
+    assert fired == [('beat', 14.0)]
+    clock.advance(1.0)
     await queue.drain()
-    assert ran == []
+    assert fired == [('beat', 14.0), ('stop', 15.0)]
 
 
-async def test_a_persistent_stop_darkens_the_room_on_the_next_drain():
-    light, queue, clock, lighting = engine(events=True)
-    blackout = []
-    lighting.stop = lambda: blackout.append(clock.monotonic())
+async def test_a_later_song_survives_the_previous_songs_delayed_stop():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder, playing=False)
+    light.on_sound_start()
+    clock.advance(1.0)
     light.on_sound_stop()
     await hold_silence(light, clock)
-    assert blackout == []
+    light.on_sound_start()
+    second_start = clock.monotonic() + queue.delay_sec
+    await commit(light, decoder, clock, 'drop', age_sec=0.0)
+
+    clock.advance(14.0 - clock.monotonic())
     await queue.drain()
-    assert blackout == [pytest.approx(clock.monotonic(), abs=0.01)]
+    assert light.current_intent is LightIntent.ATMOSPHERIC
+    clock.advance(1.0)
+    await queue.drain()
+    assert not light._room_playing
+    clock.advance(second_start - clock.monotonic())
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP
+    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric', 'drop']
 
 
-async def test_a_persistent_stop_records_the_quiet_floor():
-    light, _, clock, _ = engine(events=True)
+async def test_same_intent_is_sent_again_after_a_confirmed_stop_before_the_next_song():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    await commit(light, decoder, clock, 'drop', age_sec=14.0)
+    await queue.drain()
     light.on_sound_stop()
     await hold_silence(light, clock)
-    assert light.event_buffer.snapshot()['intent'] == 'atmospheric'
+    light.on_sound_start()
+    await commit(light, decoder, clock, 'drop', age_sec=0.0)
+    clock.advance(14.0 - clock.monotonic())
+    await queue.drain()
+    assert not light._room_playing
+    clock.advance(2.1)
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP
+    assert len(selections(lighting)) == 2
 
 
-async def test_the_quiet_floor_is_recorded_as_an_operator_action_not_a_classification():
-    light, _, clock, _ = engine(events=True)
-    light.on_sound_stop()
-    await hold_silence(light, clock)
-    blocks = light.event_buffer.to_report()['intents']
-    assert [(b['intent'], b['trigger']) for b in blocks] == [('atmospheric', 'silence')]
-
-
-async def test_the_quiet_floor_records_the_song_instant_it_happened_at():
-    light, _, clock, _ = engine(events=True)
-    light.event_buffer.start()
+@pytest.mark.parametrize('queued', [False, True])
+async def test_quiet_floor_reports_source_and_room_time_separately(queued):
+    light, queue, clock, _ = engine(events=True, queue=queued)
     clock.advance(37.0)
     light.on_sound_stop()
     await hold_silence(light, clock)
+    if queue:
+        assert light.event_buffer.to_report()['intents'] == []
+        clock.advance(51.0 - clock.monotonic())
+        await queue.drain()
     block = light.event_buffer.to_report()['intents'][-1]
-    assert block['trigger'] == 'silence'
-    assert block['song_t'] == pytest.approx(block['t'], abs=1e-6)
-    assert block['t'] == pytest.approx(37.0 + STOP_PERSISTENCE_SEC, abs=0.2)
+    assert block['trigger'] == SILENCE_TRIGGER
+    assert block['song_t'] == 37.0
+    assert block['t'] == pytest.approx(51.0 if queued else 39.0, abs=0.2)
 
 
 async def test_the_engine_publishes_what_the_watchdog_knows_about_shedding():

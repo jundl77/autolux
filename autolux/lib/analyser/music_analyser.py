@@ -92,9 +92,13 @@ class MusicAnalyser:
             return 0
 
     def get_bpm(self) -> float:
+        return self._fold_bpm(self.get_detector_bpm())
+
+    def get_detector_bpm(self) -> float:
+        """Tempo in the same beat units as the emitted detector events."""
         if not self.is_playing:
             return 0
-        return self._fold_bpm(self._measured_bpm())
+        return self._measured_bpm()
 
     def _measured_bpm(self) -> float:
         if len(self._beat_stream_times) < 3:

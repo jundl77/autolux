@@ -88,7 +88,6 @@ class AutoluxController:
             section_chain=None if self.section is None else self.section.stream,
             section_decoder=None if self.section is None else self.section.decoder,
             watchdog=self.drift_watchdog,
-            silence_monitor=self._silence_monitor,
         )
 
         self.music_analyser: MusicAnalyser = MusicAnalyser(
@@ -102,9 +101,6 @@ class AutoluxController:
 
     def _play_monitored(self, audio) -> None:
         self.audio_client.play(audio)
-
-    def _silence_monitor(self) -> None:
-        self._monitor.silence()
 
     def list_devices(self):
         self.audio_client.list_devices()

@@ -107,7 +107,7 @@ def _elided(event: dict, snapshot: dict) -> bool:
 
 def _room_stops(snapshot: dict) -> list:
     return [
-        event['t'] + STOP_PERSISTENCE_SEC
+        event['t'] + max(snapshot.get('look_ahead_sec', 0.0), STOP_PERSISTENCE_SEC)
         for event in snapshot.get('sound_events', [])
         if not event['playing'] and not _elided(event, snapshot)
     ]
@@ -116,17 +116,14 @@ def _room_stops(snapshot: dict) -> list:
 def _room_sound_events(snapshot: dict) -> list:
     delay = snapshot.get('look_ahead_sec', 0.0)
     now = snapshot.get('now', 0.0)
-    stops = _room_stops(snapshot)
     heard = []
     for event in snapshot.get('sound_events', []):
         if _elided(event, snapshot):
             continue
         if event['playing']:
             reaches_room_at = event['t'] + delay
-            if any(event['t'] < stop <= reaches_room_at for stop in stops):
-                continue
         else:
-            reaches_room_at = event['t'] + STOP_PERSISTENCE_SEC
+            reaches_room_at = event['t'] + max(delay, STOP_PERSISTENCE_SEC)
         if reaches_room_at <= now:
             heard.append(dict(event, t=reaches_room_at))
     return heard
@@ -147,11 +144,9 @@ def _room_beats(snapshot: dict, horizon_sec: float = 0.0) -> list:
     delay = snapshot.get('look_ahead_sec', 0.0)
     limit = snapshot.get('now', 0.0) + horizon_sec
     beats = []
-    stops = _room_stops(snapshot)
     for beat in snapshot.get('beats', []):
         reaches_room_at = beat['t'] + delay
-        cut = any(beat['t'] < stop <= reaches_room_at for stop in stops)
-        if reaches_room_at <= limit and not cut:
+        if reaches_room_at <= limit:
             beats.append(dict(beat, t=reaches_room_at))
     return beats
 

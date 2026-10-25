@@ -142,6 +142,31 @@ def test_bpm_is_octave_folded_from_the_beat_stream(analyser):
     assert analyser.get_bpm() == pytest.approx(150.0)
 
 
+@pytest.mark.parametrize('detector_bpm', [64.0, 128.0, 180.0, 256.0])
+async def test_renderer_beat_anchors_and_tempo_have_the_same_units(detector_bpm):
+    from autolux.tests.test_light_engine import engine
+
+    light, _, clock, lighting = engine(queue=False)
+    analyser = _make_analyser(clock, light)
+    analyser.is_playing = True
+    light.set_analyser(analyser)
+    interval = 60.0 / detector_bpm
+    for beat in range(6):
+        clock.advance(interval)
+        await analyser._track_beat([beat * interval], clock.now())
+
+    anchors = [event for event in lighting.events if event['command']['kind'] == 'beat']
+    assert len(anchors) == 4
+    assert analyser.get_bpm() == pytest.approx(MusicAnalyser._fold_bpm(detector_bpm))
+    for previous, current in zip(anchors, anchors[1:]):
+        anchor = previous['command']
+        extrapolated = (
+            anchor['position_beats']
+            + (current['at_seconds'] - previous['at_seconds']) * anchor['bpm'] / 60.0
+        )
+        assert extrapolated == pytest.approx(current['command']['position_beats'])
+
+
 def test_an_unmeasured_bpm_is_not_a_bpm_change(analyser):
     analyser.is_playing = True
     analyser.last_bpm = 128.0

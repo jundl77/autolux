@@ -318,7 +318,7 @@ def test_a_repeat_of_the_same_intent_and_trigger_is_still_one_block():
     assert len(buf.to_report()['intents']) == 1
 
 
-def test_a_stop_banks_the_beats_that_never_reached_the_room():
+def test_source_stop_preserves_beats_waiting_for_room_playback():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     buf.start()
@@ -327,10 +327,11 @@ def test_a_stop_banks_the_beats_that_never_reached_the_room():
         buf.add_beat(bpm=128.0, change=False)
     clock.advance(5.0)
     buf.set_playing(False)
-    assert buf.snapshot()['beats_cut'] == 2
+    assert [beat['t'] for beat in buf.snapshot()['beats']] == [50.0, 55.0]
+    assert [beat['t'] for beat in buf.to_report()['beats']] == [10.0, 50.0, 55.0]
 
 
-def test_the_banked_beats_survive_the_window_they_were_counted_in():
+def test_buffered_beats_remain_in_the_report_after_leaving_the_display_window():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     buf.start()
@@ -339,7 +340,8 @@ def test_the_banked_beats_survive_the_window_they_were_counted_in():
     clock.advance(10.0)
     buf.set_playing(False)
     clock.advance(300.0)
-    assert buf.snapshot()['beats_cut'] == 1
+    assert buf.snapshot()['beats'] == []
+    assert [beat['t'] for beat in buf.to_report()['beats']] == [50.0]
 
 
 def test_the_shed_state_reaches_the_payload_and_stays_out_of_the_report():

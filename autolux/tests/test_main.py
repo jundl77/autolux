@@ -166,27 +166,22 @@ def test_the_live_view_keeps_its_rolling_window(monkeypatch):
     assert buffer._window_sec == 60.0
 
 
-def test_the_monitor_delay_is_rearmed_after_a_stop():
-    from autolux.lib.clock import VirtualClock
+async def test_source_silence_keeps_the_monitor_audio_tail():
     from autolux.lib.delayed_monitor import DelayedMonitor
     from autolux.lib.main import PLAYBACK_DELAY_SEC
+    from autolux.tests.test_light_engine import engine, hold_silence
 
-    clock = VirtualClock()
+    light, queue, clock, _ = engine()
     played = []
-    app = _app(enable_ui=False, event_buffer=None)
-    app._monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, played.append, clock=clock)
+    monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, played.append, clock=clock)
     for _ in range(20):
         clock.advance(1.0)
-        app._monitor.feed(b'old song')
-    assert app._monitor.started and played
-
-    app._silence_monitor()
-
-    assert app._monitor.buffered == 0, 'the tail was left to play out'
-    assert not app._monitor.started
-
-    heard = len(played)
-    for _ in range(int(PLAYBACK_DELAY_SEC) - 1):
-        clock.advance(1.0)
-        app._monitor.feed(b'next song')
-    assert len(played) == heard, 'the delay collapsed after the stop'
+        monitor.feed(b'music')
+    assert monitor.started and played
+    buffered = monitor.buffered
+    light.on_sound_stop()
+    await hold_silence(light, clock)
+    await queue.drain()
+    assert monitor.buffered == buffered
+    monitor.feed(b'silence')
+    assert played[-1] == b'music'
