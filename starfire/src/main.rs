@@ -153,7 +153,10 @@ fn run(arguments: Arguments) -> Result<()> {
             let catalogue = SequenceCatalog::load(&sequences)?;
             let started = Instant::now();
             let result = render_replay(&replay, rig.clone(), catalogue)?;
-            let render_seconds = started.elapsed().as_secs_f64();
+            let render_elapsed_seconds = started.elapsed().as_secs_f64();
+            let render_realtime_factor = (replay.duration_seconds > 0.0
+                && render_elapsed_seconds > 0.0)
+                .then(|| replay.duration_seconds / render_elapsed_seconds);
             let failures: BTreeSet<_> = result
                 .frames
                 .iter()
@@ -167,7 +170,8 @@ fn run(arguments: Arguments) -> Result<()> {
                 "duration_seconds": replay.duration_seconds,
                 "frame_rate_hz": replay.frame_rate_hz,
                 "dmx_sha256": dmx_digest(&result.frames),
-                "render_seconds": render_seconds,
+                "render_elapsed_seconds": render_elapsed_seconds,
+                "render_realtime_factor": render_realtime_factor,
                 "script_errors": failures,
             });
             let report = serde_json::to_string_pretty(&report)?;

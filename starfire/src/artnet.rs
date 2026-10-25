@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
-use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 
@@ -16,7 +15,6 @@ const ARTDMX_OPCODE: u16 = 0x5000;
 const ARTNET_PROTOCOL_VERSION: u16 = 14;
 const FIRST_SEQUENCE: u8 = 1;
 const MIN_DMX_PAYLOAD: usize = 2;
-const UDP_WRITE_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Serialize ArtDmx per the Artistic Licence specification. Sequence zero disables ordering.
 pub fn encode_artdmx(universe: u16, sequence: u8, channels: &[u8]) -> Result<Vec<u8>> {
@@ -80,7 +78,8 @@ impl ArtNetOutput {
         let socket =
             UdpSocket::bind(local).with_context(|| format!("bind Art-Net output {local}"))?;
         socket.set_broadcast(broadcast)?;
-        socket.set_write_timeout(Some(UDP_WRITE_TIMEOUT))?;
+        // Backpressure fails the show explicitly; it must not block the 25 ms render loop.
+        socket.set_nonblocking(true)?;
         Ok(Self {
             socket,
             destination,
@@ -114,5 +113,32 @@ impl ArtNetOutput {
             self.sequence + 1
         };
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn output_socket_cannot_wait_for_network_progress() {
+        const BLOCKING_GUARD: Duration = Duration::from_secs(1);
+        const NONBLOCKING_BUDGET: Duration = Duration::from_millis(500);
+        let output = ArtNetOutput::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:6454".parse().unwrap(),
+        )
+        .unwrap();
+        // The timeout bounds a regression to blocking mode instead of hanging this test.
+        output
+            .socket
+            .set_read_timeout(Some(BLOCKING_GUARD))
+            .unwrap();
+        let started = Instant::now();
+        let error = output.socket.recv(&mut [0; 1]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::WouldBlock);
+        assert!(started.elapsed() < NONBLOCKING_BUDGET);
     }
 }

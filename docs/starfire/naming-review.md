@@ -1,9 +1,12 @@
 # Starfire naming review
 
-Scope: three important API concepts. Every reader was a fresh agent with no
+Scope: important API concepts. Every reader was a fresh agent with no
 inherited conversation, low reasoning and an explicit no-tools instruction.
 The neutral names-only prompt came from the personal blind-naming-test skill.
 Routine locals and protocol-standard terminology were excluded.
+
+The measured input review is recorded separately in
+[normalized RMS naming evidence](naming-review-audio-level.json).
 
 ## Output stages
 

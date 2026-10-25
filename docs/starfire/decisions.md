@@ -74,6 +74,23 @@ approved removing SoundSwitch connectivity and requested the live contract in
   "music energy" with perceptual intensity and general "audio level" with volume
   control. The final name exposes the measured quantity and normalization;
   numerical mapping remains an explicit protocol/API contract.
+- P54: Production rejects fixture universes that do not match Radius's single
+  configured universe before starting the receiver or audio. Standalone Starfire
+  retains multiple-universe support; silently dropping patched fixtures is invalid.
+- P55: Refresh full-report benchmark checksums only after reproducing the old
+  baseline and proving all ten tracks retain identical raw beat, section and
+  sound events, scores and counts. Verify each lighting/schema difference against
+  the declared behavior. Keep comparison gates and every other baseline field.
+- P56: Report replay performance as represented show seconds divided by elapsed
+  rendering seconds. Include command application, Lua, composition and encoding;
+  exclude file parsing/output and network pacing. Default tests render a mixed
+  90-second show: minimum 10x real time for the six-fixture room and 2x for a
+  64-fixture patch. These are conservative regression floors, not hard deadlines.
+- P57: Use nonblocking Art-Net sends instead of a 100 ms socket timeout on the
+  render thread. A send failure retains the existing fail-closed policy and
+  attempts blackout. Do not add triple buffering or a backlog of completed DMX
+  frames; consider a latest-frame handoff only if output separation is measured
+  to be necessary. Radius's intentional synchronized playback buffer is separate.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -175,6 +192,18 @@ Hardware audition is explicitly separate from deterministic offline validation.
   Review fixed per-song beat resets and full-queue shutdown. Full Python tests
   are running, with analysis baselines unchanged. Naming review found the new
   measured-level API should distinguish RMS measurement from perceived intensity.
+- 2026-10-25 09:27 local: complete product build and 260 focused final checks pass.
+  The 90-second live Protobuf/Art-Net loopback delivered all 3,602 packets without
+  sequence gaps, exercised all four banks and shut down with blackout preserving
+  movement. Production readiness passed in under three seconds. Full Python run
+  found the expected changed-report hash and an incomplete build test; the latter
+  is fixed. Strict old/new ten-track analysis comparison continues separately.
+- 2026-10-25 09:42 local: final review. All ten tracks retain identical analysis;
+  only verified output-report hashes changed, and the failed benchmark test now
+  passes. Twenty native replays reproduce each track's DMX digest exactly. All
+  91 Rust tests pass, including performance floors: release measurements are
+  530.4x for the room and 82.2x for 64 fixtures. Nonblocking output and production
+  universe validation are covered. Publishing final slices and stopping the timer.
 
 - 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
   engine suites pass independently. Lead reviewed public boundaries and found

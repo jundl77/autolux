@@ -1,80 +1,53 @@
 # Starfire validation
 
-Current branch uses Starfire for live lighting. Runtime reference: `04ccbfa`.
-Validated on Windows on 2026-10-25. The full ten-track comparison is in progress;
-its report hashes must be reconciled before the validation set is complete.
-Physical fixture audition and exact future-watermark handoff remain separate.
-
-## Current live integration
+Validated on Windows on 2026-10-25. Starfire is this branch's live lighting backend.
 
 | Check | Result |
 | --- | --- |
-| Full Python run | 2,331 passed; two failures identified. The build-test dependency is fixed; full report checksum comparison is still in progress. |
-| Focused final checks | 260 passed after the measured-RMS API rename, including the build-test fix and Python-to-Rust process integration. |
-| Rust | 88 tests passed; strict Clippy, rustfmt and release build passed. All four sequence reference digests remain unchanged at default RMS level. |
-| Radius | Both executables built; four native test groups passed. |
-| Distribution | Full product build, wheel and source package passed. Protobuf descriptors ship inside the wheel. |
-| Production readiness | The new branch's `autolux --prod --check` passed in under three seconds, including Starfire, fixtures, model, capture and SSH checks. |
-| Live loopback | 90 seconds through Python process ownership, Protobuf IPC and native Art-Net: all four banks observed; 3,602 packets, zero sequence gaps, final blackout with movement preserved. |
-| Failure handling | Missing-controller timeout exited at 30.000 seconds with blackout; malformed/oversized messages, script failures and full-queue shutdown are covered. |
-| Diagram | Mermaid rendered successfully; all 12 nodes have explanations and all three application boundaries are dotted rectangles. |
+| Python | Full run: 2,331 passed, two failures subsequently fixed and retested. Another 260 focused checks passed after the input API rename; final CLI validation passed all 50 cases. |
+| Rust | 91 tests passed, including all Lua sequences, protocol/lifecycle handling and performance gates. Strict Clippy and rustfmt passed. |
+| Radius | Both executables built; all four native test groups passed. |
+| Distribution | Product build, wheel/source package and formatting passed. Generated Protobuf descriptors are packaged; isolated codec import passed. |
+| Production readiness | This branch's `autolux --prod --check` passed in under three seconds: binaries, fixtures, model, capture and SSH. |
+| Analysis/backtest | All ten tracks preserve 9,298 beats, complete section boundaries, sound events and every analysis score/count. Full-report hashes reflect verified lighting changes; the strict comparison gate and previously failing benchmark test pass. |
+| Recorded command replay | All ten actual command streams rendered twice: 168,114 DMX frames per pass, identical repeated digests, zero script errors. Slowest run: 551.74x real time. |
+| Live loopback | Python ownership to Protobuf IPC to native Art-Net: all four banks observed over 90 seconds; 3,602 packets, no sequence gaps, final blackout preserving movement. |
+| Failure handling | Real heartbeat expiry exited at 30.000 seconds with blackout. Malformed/oversized messages, script failures, full-queue shutdown and mismatched production universes are covered. |
+| Diagram | Mermaid rendered; all 12 nodes have explanations and all three application boundaries are dotted rectangles. |
+
+## Rendering performance
+
+Both performance tests are part of the ordinary Rust suite. They render a
+90-second show with four banks, crossfades, accents, tempo changes, measured RMS,
+speed and master controls.
+
+| Patch | Required minimum | Debug measurement | Release measurement |
+| --- | --- | --- | --- |
+| Room: 6 fixtures | 10x real time | 132.6x | 530.4x |
+| Stress: 64 fixtures, 2 universes | 2x real time | 21.9x | 82.2x |
+
+The factor covers replay validation, engine construction, commands, Lua,
+composition and fixture encoding. File parsing/output and network pacing are
+excluded. These are regression budgets and measured throughput, not hard
+real-time guarantees.
 
 The live loopback used 187 recorded beat anchors and 15 authored controls.
-Packet intervals: median 25.036 ms, p99 25.498 ms, maximum 26.658 ms.
-It exercised the real local control/output path without speakers or physical fixtures.
+Packet intervals were median 25.036 ms, p99 25.498 ms and maximum 26.658 ms.
+Periodic render samples were 0.094-0.213 ms; those sparse samples are not
+worst-case measurements.
 
-Current evidence: `.live/starfire-validation/migration-*.log`,
-`live-pipeline-90s/validation.json` and `live-heartbeat-timeout.json`.
+## Scope and reproduction
 
-## Deterministic renderer reference
+No validation output drove physical fixtures or speakers. Wi-Fi, USB latency,
+colour, movement calibration and the physical show still need a joint audition.
+Radius currently stamps Art-Net ingress at receipt; exact future render targets
+need a further timing handoff. The RMS input updates on detected beats.
 
-The preceding renderer baseline established these additional checks:
-
-| Check | Result |
-| --- | --- |
-| Full Python suite | 2,343 passed; one missing-warm-cache case subsequently passed after simulation populated the cache. All 2,344 collected cases exercised. |
-| Rust | 77 tests passed, including every registered Lua sequence; rustfmt and Clippy with warnings denied passed; release executable built. |
-| Radius | Both executables built; all four native test groups passed. |
-| Packaging and formatting | Python wheel/source package built; Python, C++/Protobuf and Rust formatting passed. |
-| Committed backtest | All ten tracks match the recorded baseline, including complete report checksums. No baseline changes. |
-| Standalone simulation | Passed; four lighting intents and 16 intent transitions observed. |
-| Fixture setup | Manual Edge exercise passed: save, inversion, invalid-input rejection, reload, group-order preservation and tab switching. No UI rendering tests added. |
-| Root CLI lifecycle | Loopback cancellation produced blackout, terminated the owned renderer and removed its temporary stop signal. |
-
-## Deterministic and paced output
-
-The 90-second audition used 187 recorded beat anchors and ten explicitly authored
-control events: four banks, fades, a short strobe, master intensity and one held
-fixture colour followed by clearing. This evaluates rendering/control behavior;
-the authored schedule is not evidence of music-classifier accuracy.
-
-- Two offline captures were byte-identical. The final release executable also
-  reproduced that capture after the final runtime fixes.
-- All 3,602 loopback datagrams matched the expected payloads in order: 3,601
-  rendered frames plus the final blackout. No frame drops or sequence gaps.
-- Paced duration: 90.00038 seconds. Median interval: 25.034 ms; p99: 25.416 ms;
-  maximum: 25.925 ms. Maximum relative schedule error: 0.930 ms.
-- Final blackout preserved mover positions; the child exited successfully.
-- DMX digest: `0fdc23a028c35f0910a93295cc1627e79f0ed6a64981760b603a0a31253adfa6`.
-
-These are controller-local loopback measurements under concurrent compilation.
-They do not establish Wi-Fi, USB, physical fixture timing, colour or calibration.
-No overnight test sent output to real fixtures or speakers.
-
-## Evidence and reproduction
-
-Local artifacts in this worktree:
-
-- `.live/validation/20261025-015658/`: complete build, Python, backtest and
-  simulation logs/results. Its revision field records the run-start revision;
-  runtime slices were committed during the run.
-- `.live/starfire-validation/final-rust-build.log`: final Rust checks/release build.
-- `.live/starfire-validation/warm-cache-retest.log`: the initially skipped case.
-- `.live/starfire-validation/paced-90s/`: replay input, authored control schedule,
-  captures, packet timing, received datagrams and validation results.
-- `.live/starfire-validation/fixture-tab.png`: manually reviewed fixture setup.
-- `.live/starfire-validation/pointer-identity/`: reproduced allocator-identity
-  nondeterminism before removal of pointer formatting from Lua.
+[Analysis parity evidence](analysis-parity.json) records reference/current
+hashes and the exact unchanged analysis checks. Local detailed evidence lives in
+`.live/starfire-validation/`: `migration-*.log`, `backend-parity/`,
+`live-pipeline-90s/validation.json`, `live-heartbeat-timeout.json` and
+`performance-native-check.log`.
 
 ```powershell
 .\build-starfire.ps1
@@ -82,11 +55,7 @@ uv run autolux starfire replay starfire/tests/replays/drop.json --output .live/d
 uv run autolux --prod --check-full
 ```
 
-The fresh worktree's native build took 17m42s, Python suite 9m47s, backtest
-15m01s and standalone simulation 55s. Native dependencies and analysis caches
-were cold. The ordinary `--prod --check` remains a separate readiness check with
-a 45-second timeout; it does not run these full suites.
-
-Validation reused the existing Python environment with synchronization disabled,
-while imports resolved to this worktree. GPU workloads ran serially. Models and
-corpus data were not copied into the worktree.
+The full suite/backtest takes several minutes. Ordinary `--prod --check` is a
+separate readiness check with a 45-second deadline. Validation used the existing
+Python environment, explicitly resolving imports to this worktree; model/GPU
+analysis ran serially and data was not copied.

@@ -119,5 +119,18 @@ handoff change, tracked in the [decision log](starfire/decisions.md).
 - Queues and script work are bounded. Faults darken fixtures while preserving movement
   positions; there is no automatic sequence retry.
 
+## Performance
+
+Each 40 Hz frame has a 25 ms budget. Replay reports `render_realtime_factor`:
+show duration divided by rendering time, including commands, Lua and fixture encoding.
+The test suite requires at least 10x real-time speed for the six-fixture room and
+2x for a 64-fixture patch, using a 90-second show with transitions and accents.
+These measure rendering headroom, not hardware latency or a worst-case deadline.
+
+Control/status pipes run separately with bounded queues. Art-Net sends are
+nonblocking; overdue render ticks are skipped. There is no queue of completed
+frames or triple buffering. If output needs another worker, prefer a latest-frame
+handoff so old frames cannot accumulate latency. Radius's playback buffer remains separate.
+
 See [authoring and commands](../starfire/README.md),
 [decisions](starfire/decisions.md) and [validation evidence](starfire/validation.md).
