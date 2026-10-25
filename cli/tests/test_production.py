@@ -73,7 +73,16 @@ def test_stalled_readiness_worker_is_killed_within_its_deadline(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    'failure', ['universe_mismatch', 'receiver_start', 'renderer_start', 'controller_run', None]
+    'failure',
+    [
+        'universe_mismatch',
+        'script_failure',
+        'missing_sequence',
+        'receiver_start',
+        'renderer_start',
+        'controller_run',
+        None,
+    ],
 )
 async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     tmp_path, monkeypatch, failure
@@ -81,6 +90,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     from cli import main, remote_runtime, windows_runtime, starfire_runtime
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
     from types import SimpleNamespace
     import json
 
@@ -110,8 +120,25 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda: True)
 
     def validate_command(command, **kwargs):
+        assert command[1] == 'check'
+        if failure == 'script_failure':
+            return SimpleNamespace(
+                returncode=1,
+                stdout='',
+                stderr='sequence atmospheric/blue_tide failed: unknown group strip',
+            )
         universes = [1] if failure == 'universe_mismatch' else [0]
-        return SimpleNamespace(returncode=0, stdout=json.dumps({'universes': universes}), stderr='')
+        checked_sequences = [
+            {'bank': bank, 'sequence': sequence}
+            for bank, sequence in SEQUENCE_BY_LIGHT_INTENT.values()
+        ]
+        if failure == 'missing_sequence':
+            checked_sequences.pop()
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({'universes': universes, 'checked_sequences': checked_sequences}),
+            stderr='',
+        )
 
     monkeypatch.setattr(starfire_runtime.subprocess, 'run', validate_command)
 
@@ -205,12 +232,13 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             await production.run(args)
     else:
         await production.run(args)
-    pre_start_failures = ('universe_mismatch', 'receiver_start', 'renderer_start')
+    preflight_failures = ('universe_mismatch', 'script_failure', 'missing_sequence')
+    pre_start_failures = (*preflight_failures, 'receiver_start', 'renderer_start')
     assert events.count('app_stop') == (0 if failure in pre_start_failures else 1)
     assert events[-1] == 'unlock'
-    if failure == 'universe_mismatch':
+    if failure in preflight_failures:
         assert events == ['unlock']
-    if failure not in ('universe_mismatch', 'receiver_start'):
+    if failure not in (*preflight_failures, 'receiver_start'):
         assert events.index('tx_stop') < events.index('rx_stop')
     if failure not in pre_start_failures:
         assert events.index('starfire_stop') < events.index('tx_stop')

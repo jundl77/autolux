@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from pathlib import Path
 import queue
 import socket
@@ -241,3 +242,36 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     starfire_runtime.validate_starfire(
         binary, root / 'starfire/rigs/room.json', sequences, expected_universe=0
     )
+
+
+def test_preflight_renders_sequences_against_the_selected_patch(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+    if not binary.is_file():
+        pytest.skip('Build Starfire to exercise native sequence validation')
+    patch = json.loads((root / 'starfire/rigs/room.json').read_text())
+    del patch['groups']['strip']
+    rig = tmp_path / 'missing-strip.json'
+    rig.write_text(json.dumps(patch))
+    with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*sequence ') as error:
+        starfire_runtime.validate_starfire(binary, rig, root / 'starfire/sequences')
+    assert 'strip' in str(error.value)
+
+
+def test_preflight_rejects_valid_catalog_missing_an_autolux_sequence(tmp_path):
+    from autolux.lib.engine.effect_definitions import LightIntent, SEQUENCE_BY_LIGHT_INTENT
+
+    root = Path(__file__).resolve().parents[2]
+    binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+    if not binary.is_file():
+        pytest.skip('Build Starfire to exercise native sequence validation')
+    for intent, (bank, sequence) in SEQUENCE_BY_LIGHT_INTENT.items():
+        if intent == LightIntent.DROP:
+            continue
+        directory = tmp_path / bank
+        directory.mkdir()
+        (directory / f'{sequence}.lua').write_text(
+            'return { render = function(ctx) return {} end }'
+        )
+    with pytest.raises(RuntimeError, match='missing Autolux sequences: drop/blue_impact'):
+        starfire_runtime.validate_starfire(binary, root / 'starfire/rigs/room.json', tmp_path)

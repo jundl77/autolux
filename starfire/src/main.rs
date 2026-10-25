@@ -11,8 +11,9 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 
 use starfire::artnet::ArtNetOutput;
-use starfire::engine::RenderedFrame;
+use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
+use starfire::model::{Command, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::SequenceCatalog;
 
@@ -30,6 +31,13 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Action {
+    /// Render each sequence once at beat zero against the patch, without output.
+    Check {
+        #[arg(long, default_value = DEFAULT_RIG)]
+        rig: PathBuf,
+        #[arg(long, default_value = DEFAULT_SEQUENCES)]
+        sequences: PathBuf,
+    },
     /// Render live controls from framed protobuf on stdin; status uses stdout.
     Live {
         #[arg(long, default_value = DEFAULT_RIG)]
@@ -86,6 +94,39 @@ fn main() -> std::process::ExitCode {
 
 fn run(arguments: Arguments) -> Result<()> {
     match arguments.command {
+        Action::Check { rig, sequences } => {
+            let rig = FixtureRig::load(&rig)?;
+            let catalog = SequenceCatalog::load(&sequences)?;
+            let sequences = catalog.list();
+            for sequence in &sequences {
+                let mut engine = Engine::new(rig.clone(), catalog.clone())?;
+                engine.apply(
+                    0.0,
+                    &Command::Select {
+                        bank: sequence.bank.clone(),
+                        sequence: sequence.sequence.clone(),
+                        transition: Transition::Cut,
+                    },
+                )?;
+                let frame = engine.render_at(0.0).with_context(|| {
+                    format!("check sequence {}/{}", sequence.bank, sequence.sequence)
+                })?;
+                if let Some(error) = frame.script_error {
+                    anyhow::bail!("{error}");
+                }
+            }
+            let universes = rig
+                .encode(&rig.empty_states())?
+                .into_keys()
+                .collect::<Vec<_>>();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "fixtures": rig.fixture_ids(), "groups": rig.groups(),
+                    "universes": universes, "checked_sequences": sequences,
+                }))?
+            );
+        }
         Action::Live {
             rig,
             sequences,

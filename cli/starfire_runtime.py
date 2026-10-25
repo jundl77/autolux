@@ -14,6 +14,7 @@ from google.protobuf.message import DecodeError
 from proto.starfire.codec import encode_control, read_event
 from cli.starfire import DEFAULT_BINARY, DEFAULT_FIXTURE_STORE, DEFAULT_RIG, DEFAULT_SEQUENCES, ROOT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
+from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
 
 HEARTBEAT_INTERVAL_SECONDS = 10.0
 HEARTBEAT_TIMEOUT_SECONDS = 30.0
@@ -53,27 +54,39 @@ def validate_starfire(binary, rig, sequences, *, expected_universe=None):
     if not binary.is_file():
         raise RuntimeError(f'Starfire binary is missing: {binary}. Run build-starfire.ps1.')
     encode_control({'kind': 'heartbeat'})
-    for arguments in (
-        ['rig', str(Path(rig).resolve())],
-        ['list', '--sequences', str(Path(sequences).resolve())],
-    ):
-        result = subprocess.run(
-            [str(binary), *arguments],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=STARTUP_TIMEOUT_SECONDS,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-        )
-        if result.returncode:
-            raise RuntimeError(f'Starfire validation failed: {result.stderr.strip()}')
-        if arguments[0] == 'rig' and expected_universe is not None:
-            universes = json.loads(result.stdout).get('universes')
-            if universes != [expected_universe]:
-                raise RuntimeError(
-                    f'Starfire fixture universes {universes} do not match Radius TX universe '
-                    f'{expected_universe}. Production requires every fixture on that universe.'
-                )
+    result = subprocess.run(
+        [
+            str(binary),
+            'check',
+            '--rig',
+            str(Path(rig).resolve()),
+            '--sequences',
+            str(Path(sequences).resolve()),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=STARTUP_TIMEOUT_SECONDS,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+    )
+    if result.returncode:
+        raise RuntimeError(f'Starfire validation failed: {result.stderr.strip()}')
+    report = json.loads(result.stdout)
+    checked_sequences = {
+        (sequence['bank'], sequence['sequence']) for sequence in report['checked_sequences']
+    }
+    missing_sequences = set(SEQUENCE_BY_LIGHT_INTENT.values()) - checked_sequences
+    if missing_sequences:
+        names = ', '.join(f'{bank}/{sequence}' for bank, sequence in sorted(missing_sequences))
+        raise RuntimeError(f'Starfire is missing Autolux sequences: {names}')
+    if expected_universe is not None:
+        universes = report.get('universes')
+        if universes != [expected_universe]:
+            raise RuntimeError(
+                f'Starfire fixture universes {universes} do not match Radius TX universe '
+                f'{expected_universe}. Production requires every fixture on that universe.'
+            )
 
 
 class StarfireRuntime:
