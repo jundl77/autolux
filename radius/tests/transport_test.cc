@@ -1,6 +1,7 @@
 #include <network/udp_server.h>
 #include <network/bus_socket.h>
 #include <core/clock.h>
+#include <soundio/audio_utils.h>
 #include <thread>
 #include <iostream>
 
@@ -169,6 +170,10 @@ void CheckBusPackets()
 
 int main()
 {
+	const auto captureError = AudioStreamError("audio capture", SoundIoErrorStreaming);
+	Check(captureError.find("audio capture failed: unrecoverable streaming failure") != std::string::npos);
+	Check(captureError.find("RDP audio redirection") != std::string::npos);
+	Check(AudioStreamError("audio playback", SoundIoErrorNoMem).find("RDP") == std::string::npos);
 	// Real UDP proves that a short datagram never exposes the stale buffer tail.
 	EventLoop loop;
 	Receiver receiver(loop);

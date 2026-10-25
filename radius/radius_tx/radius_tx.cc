@@ -1,5 +1,6 @@
 #include "radius_tx.h"
 #include <core/thread_config.h>
+#include <soundio/audio_utils.h>
 #include <algorithm>
 
 namespace Radius {
@@ -31,7 +32,7 @@ void RadiusTx::Tick()
 {
 	auto now = SteadyMs();
 	if (mAudio.error)
-		throw std::runtime_error("audio capture failed: " + std::to_string(mAudio.error.load()));
+		throw std::runtime_error(AudioStreamError("audio capture", mAudio.error.load()));
 	mBus.Poll(mConfig.mRunId, [&](const Bus::Message& p) {
 		if (const auto* reply = std::get_if<Bus::LoginReply>(&p))
 		{

@@ -278,6 +278,16 @@ Starfire is the lighting backend. Its live contract is
   every datagram. This identity is separate from replay seeds and media timing,
   and is not network authentication.
 
+- P89: Start an atmospheric baseline at the delayed room-start deadline if no
+  committed intent is due. Preserve future scheduled intents and skip the
+  baseline when a committed section is already ready. Startup must not wait for
+  classifier warmup after audible music begins.
+
+- P90: Surface audio backend failures with their descriptive error and preserve
+  the cause. Windows session/device changes can invalidate both capture clients;
+  do not mislabel this as buffer overflow or silently switch audio devices.
+  Recovery currently requires starting a fresh run after the device stabilizes.
+
 ## Open questions and defaults
 
 | ID | Question | Prototype default |

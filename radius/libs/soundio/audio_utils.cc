@@ -5,6 +5,16 @@
 
 namespace Radius {
 
+std::string AudioStreamError(const char* operation, int error)
+{
+	std::string message =
+	    std::string(operation) + " failed: " + soundio_strerror(error) + " (libsoundio " + std::to_string(error) + ")";
+	if (error == SoundIoErrorStreaming)
+		message += ". The audio device may have been reconfigured, including by RDP audio redirection. "
+		           "Restart Autolux after the device and RDP session are stable.";
+	return message;
+}
+
 SoundIo* CreateSoundIo(SoundIoBackend backend)
 {
 	SoundIo* soundIo = soundio_create();

@@ -1,5 +1,6 @@
 #include "radius_rx.h"
 #include <core/thread_config.h>
+#include <soundio/audio_utils.h>
 #include <enttec/usb_client.h>
 #include <future>
 
@@ -161,7 +162,7 @@ void RadiusRx::Tick()
 {
 	auto now = SteadyMs();
 	if (mAudio && mAudio->error)
-		throw std::runtime_error("audio playback failed: " + std::to_string(mAudio->error.load()));
+		throw std::runtime_error(AudioStreamError("audio playback", mAudio->error.load()));
 	if (mDmxFailed)
 		throw std::runtime_error("DMX output worker failed");
 	mBus.Poll(mConfig.mRunId, [&](const Bus::Message& p) {

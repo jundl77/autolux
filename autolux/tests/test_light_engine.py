@@ -403,6 +403,69 @@ async def test_the_startup_fallback_also_waits_for_delayed_music():
     assert light.current_intent is LightIntent.ATMOSPHERIC
 
 
+async def test_room_audio_starts_with_atmospheric_without_waiting_for_section_warmup():
+    light, queue, clock, lighting = engine(decoder=FakeDecoder(), playing=False, events=True)
+    light.analyser.playing = True
+    light.on_sound_start()
+
+    clock.advance(13.9)
+    await queue.drain()
+    assert selections(lighting) == []
+    clock.advance(0.1)
+    await queue.drain()
+
+    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric']
+    assert light.current_intent is LightIntent.ATMOSPHERIC
+    assert light.intent_commits == 1
+    assert light.event_buffer.to_report()['intents'][0]['song_t'] == pytest.approx(0.0)
+    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
+    await tick_100ms(light, clock, 20.0)
+    await queue.drain()
+    assert len(selections(lighting)) == 1
+    assert light.intent_commits == 1
+
+
+async def test_startup_baseline_preserves_a_committed_section_due_after_room_start():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder, playing=False)
+    light.analyser.playing = True
+    light.on_sound_start()
+    clock.advance(4.0)
+    await commit(light, decoder, clock, 'drop', age_sec=2.0)
+
+    clock.advance(10.0)
+    await queue.drain()
+    assert light.current_intent is LightIntent.ATMOSPHERIC
+    assert len(queued_intents(queue)) == 1
+    assert not any(event['command']['kind'] == 'set_override' for event in lighting.events)
+
+    clock.advance(2.0)
+    await queue.drain()
+    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric', 'drop']
+    assert len([e for e in lighting.events if e['command']['kind'] == 'set_override']) == 1
+
+
+async def test_queue_free_playback_starts_its_baseline_on_the_first_audio_cycle():
+    light, _, _, lighting = engine(queue=False, playing=False)
+    light.analyser.playing = True
+    light.on_sound_start()
+    await light.on_audio(np.zeros(256, dtype=np.float32))
+    assert [event['command']['bank'] for event in selections(lighting)] == ['atmospheric']
+
+
+async def test_silence_before_delayed_room_start_cancels_the_startup_baseline():
+    light, queue, clock, lighting = engine(playing=False)
+    light.analyser.playing = True
+    light.on_sound_start()
+    clock.advance(1.0)
+    light.analyser.playing = False
+    light.on_sound_stop()
+    await hold_silence(light, clock)
+    clock.advance(14.0)
+    await queue.drain()
+    assert selections(lighting) == []
+
+
 async def test_source_stop_discards_queued_intents_and_ignores_new_silence_predictions():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)

@@ -67,6 +67,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._source_playing = False
         self._room_playing = False
         self._room_start_monotonic_seconds: float | None = None
+        self._startup_baseline_pending = False
         self._bypass_due_at: float | None = None
         self._shed_published_at: float = float('-inf')
         self._committed = None
@@ -99,11 +100,22 @@ class LightEngine(IMusicAnalyserHandler):
         self._bypass_due_at = None
         if self.event_buffer:
             self.event_buffer.set_playing(True)
-        self._at_the_room('sound', self._show_sound_start)
+        self._restart_for_the_next_song()
+        self._startup_baseline_pending = True
+        if self.command_queue:
+
+            async def command():
+                self._show_sound_start()
+                await self._start_room_baseline()
+
+            self.command_queue.schedule('sound', command)
+        else:
+            self._show_sound_start()
 
     def on_sound_stop(self):
         LOGGER.info('[engine] sound stop')
         self._source_playing = False
+        self._startup_baseline_pending = False
         if self.event_buffer:
             self.event_buffer.set_playing(False)
         self._bypass_due_at = self._clock.monotonic() + STOP_PERSISTENCE_SEC
@@ -159,17 +171,22 @@ class LightEngine(IMusicAnalyserHandler):
         if self.event_buffer is not None:
             self.event_buffer.stop_effects()
 
-    def _at_the_room(self, label: str, action) -> None:
-        if self.command_queue:
-
-            async def command():
-                action()
-
-            self.command_queue.schedule(label, command)
-        else:
-            action()
-
-        self._restart_for_the_next_song()
+    async def _start_room_baseline(self) -> None:
+        if not self._startup_baseline_pending or not self._room_playing:
+            return
+        now = self._clock.monotonic()
+        if self._room_start_monotonic_seconds is None or now < self._room_start_monotonic_seconds:
+            return
+        self._startup_baseline_pending = False
+        if self._current_intent is not None or any(
+            item[0] <= now for item in self._pending_intents
+        ):
+            return
+        # Do not supersede a committed section that belongs to later room audio.
+        self._floor_armed = False
+        delay_sec = self.command_queue.delay_sec if self.command_queue else 0.0
+        song_sec = None if self.event_buffer is None else self.event_buffer.elapsed() - delay_sec
+        await self._apply_intent(None, LightIntent.ATMOSPHERIC, song_sec, None)
 
     def _restart_for_the_next_song(self) -> None:
         self._current_intent = None
@@ -205,6 +222,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def on_audio(self, audio_signal) -> None:
         self._bypass_if_the_silence_held()
+        await self._start_room_baseline()
         self._publish_shed_state()
         self._audio_sec += len(audio_signal) / SAMPLE_RATE
         if self.section_chain is None or self.section_decoder is None:

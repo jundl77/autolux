@@ -5,6 +5,8 @@
 
 namespace Radius {
 
+std::string AudioStreamError(const char* operation, int error);
+
 static SoundIoBackend DEFAULT_SOUNDIO_BACKEND = SoundIoBackend::SoundIoBackendWasapi;
 
 SoundIo* CreateSoundIo(SoundIoBackend);
