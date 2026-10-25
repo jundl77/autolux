@@ -39,16 +39,7 @@ enum Action {
         sequences: PathBuf,
     },
     /// Render live controls from framed protobuf on stdin; status uses stdout.
-    Live {
-        #[arg(long, default_value = DEFAULT_RIG)]
-        rig: PathBuf,
-        #[arg(long, default_value = DEFAULT_SEQUENCES)]
-        sequences: PathBuf,
-        #[arg(long)]
-        artnet: SocketAddrV4,
-        #[arg(long)]
-        broadcast: bool,
-    },
+    Live,
     /// Validate and render recorded input. Network output requires --artnet.
     Replay {
         input: PathBuf,
@@ -127,32 +118,12 @@ fn run(arguments: Arguments) -> Result<()> {
                 }))?
             );
         }
-        Action::Live {
-            rig,
-            sequences,
-            artnet,
-            broadcast,
-        } => {
-            let rig = FixtureRig::load(&rig)?;
-            let catalog = SequenceCatalog::load(&sequences)?;
-            let local = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-            let mut sender = if broadcast {
-                ArtNetOutput::bind_broadcast(local, artnet)?
-            } else {
-                ArtNetOutput::bind(local, artnet)?
-            };
+        Action::Live => {
             let stop = Arc::new(AtomicBool::new(false));
             let handler_stop = Arc::clone(&stop);
             ctrlc::set_handler(move || handler_stop.store(true, Ordering::Relaxed))
                 .context("install live stop handler")?;
-            starfire::live::run_live(
-                rig,
-                catalog,
-                &mut sender,
-                std::io::stdin(),
-                std::io::stdout(),
-                &stop,
-            )?;
+            starfire::live::run_live(std::io::stdin(), std::io::stdout(), &stop)?;
         }
         Action::List { sequences } => {
             println!(

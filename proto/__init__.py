@@ -1,1 +1,1 @@
-"""Shared protocol contracts and codecs."""
+"""Shared protocol contracts and generated bindings."""

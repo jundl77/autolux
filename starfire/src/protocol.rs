@@ -1,59 +1,63 @@
-//! Typed local control messages; framing is shared with the Python coordinator.
+//! Generated message types, bounded framing and command dispatch.
 
 use std::io::{Read, Write};
 
 use anyhow::{Context, Result, bail, ensure};
 use prost::Message;
 
-use crate::model::{
-    Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
-};
+use crate::engine::Engine;
+use crate::model::{Command, Transition};
 
-pub const SCHEMA_VERSION: u32 = 1;
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+pub const MAX_ERROR_BYTES: usize = 1024;
 const LENGTH_BYTES: usize = 4;
 
 pub mod wire {
-    include!(concat!(env!("OUT_DIR"), "/autolux.starfire.v1.rs"));
+    include!(concat!(env!("OUT_DIR"), "/autolux.starfire.rs"));
+}
+
+pub fn error_message(error: &anyhow::Error) -> String {
+    let mut message = format!("{error:#}");
+    if message.len() > MAX_ERROR_BYTES {
+        message.truncate(message.floor_char_boundary(MAX_ERROR_BYTES));
+    }
+    message
 }
 
 /// A clean EOF is allowed only between complete messages.
-pub fn read_control(input: &mut impl Read) -> Result<Option<wire::Control>> {
+pub fn read_control(input: &mut impl Read) -> Result<Option<wire::RendererCommand>> {
     let mut length = [0; LENGTH_BYTES];
     loop {
         match input.read(&mut length[..1]) {
             Ok(0) => return Ok(None),
             Ok(_) => break,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(error).context("read control prefix"),
+            Err(error) => return Err(error).context("read command prefix"),
         }
     }
     input
         .read_exact(&mut length[1..])
-        .context("truncated control prefix")?;
+        .context("truncated command prefix")?;
     let length = u32::from_be_bytes(length) as usize;
     ensure!(
         (1..=MAX_MESSAGE_BYTES).contains(&length),
-        "control message length must be between 1 and {MAX_MESSAGE_BYTES} bytes"
+        "invalid command message length"
     );
     let mut payload = vec![0; length];
     input
         .read_exact(&mut payload)
-        .context("truncated control payload")?;
-    let control = wire::Control::decode(payload.as_slice()).context("decode control protobuf")?;
+        .context("truncated command payload")?;
+    let command =
+        wire::RendererCommand::decode(payload.as_slice()).context("decode command protobuf")?;
+    ensure!(command.command_id > 0, "command ID must be positive");
     ensure!(
-        control.schema_version == SCHEMA_VERSION,
-        "unsupported control schema version"
+        command.command.is_some(),
+        "renderer command requires an operation"
     );
-    ensure!(control.command.is_some(), "control requires a command");
-    Ok(Some(control))
+    Ok(Some(command))
 }
 
-pub fn write_event(output: &mut impl Write, event: wire::renderer_event::Event) -> Result<()> {
-    let message = wire::RendererEvent {
-        schema_version: SCHEMA_VERSION,
-        event: Some(event),
-    };
+pub fn write_event(output: &mut impl Write, message: &wire::RendererEvent) -> Result<()> {
     let payload = message.encode_to_vec();
     ensure!(
         payload.len() <= MAX_MESSAGE_BYTES,
@@ -64,101 +68,63 @@ pub fn write_event(output: &mut impl Write, event: wire::renderer_event::Event) 
     output.flush().context("flush renderer event")
 }
 
-/// Heartbeat has no musical meaning and therefore is absent from replay commands.
-pub fn musical_command(control: wire::control::Command) -> Result<Option<Command>> {
-    use wire::control::Command as Wire;
-    Ok(Some(match control {
-        Wire::Heartbeat(_) => return Ok(None),
-        Wire::Beat(value) => Command::Beat {
-            position_beats: value.position_beats,
-            bpm: value.bpm,
-        },
-        Wire::Select(value) => Command::Select {
-            bank: value.bank,
-            sequence: value.sequence,
-            transition: transition(value.transition)?,
-        },
-        Wire::SetOverride(value) => Command::SetOverride {
-            value: lighting_override(value)?,
-        },
-        Wire::ClearOverride(value) => Command::ClearOverride { id: value.id },
-        Wire::SetMaster(value) => Command::SetMaster {
-            intensity: value.intensity,
-        },
-        Wire::SetSpeed(value) => Command::SetSpeed {
-            multiplier: value.multiplier,
-        },
-        Wire::SetBlackout(value) => Command::SetBlackout {
-            enabled: value.enabled,
-        },
-        Wire::SetNormalizedRmsLevel(value) => Command::SetNormalizedRmsLevel { level: value.level },
-        Wire::Stop(_) => Command::Stop,
-    }))
+/// Decode and validate against the state left by preceding accepted commands.
+pub fn apply_command(
+    engine: &mut Engine,
+    at_seconds: f64,
+    command: &wire::renderer_command::Command,
+) -> Result<()> {
+    use wire::renderer_command::Command as Wire;
+    match command {
+        Wire::Login(_) => bail!("login is handled by the process host"),
+        Wire::Heartbeat(_) => Ok(()),
+        Wire::UpdateBeat(value) => engine.apply(
+            at_seconds,
+            &Command::Beat {
+                position_beats: value.position_beats,
+                bpm: value.tempo_bpm,
+            },
+        ),
+        Wire::PlaySequence(value) => {
+            let Some(sequence) = value.sequence.as_ref() else {
+                ensure!(
+                    value.transition.is_none(),
+                    "idle does not accept a transition"
+                );
+                return engine.apply(at_seconds, &Command::Stop);
+            };
+            engine.apply(
+                at_seconds,
+                &Command::Select {
+                    bank: sequence.bank_id.clone(),
+                    sequence: sequence.sequence_id.clone(),
+                    transition: transition(value.transition.as_ref())?,
+                },
+            )
+        }
+        Wire::SetParameter(value) => engine.set_parameter(at_seconds, value),
+        Wire::SetActiveEffect(value) => engine.set_active_effect(at_seconds, value),
+        Wire::UnsetActiveEffect(value) => engine.apply(
+            at_seconds,
+            &Command::ClearOverride {
+                id: value.effect_id.clone(),
+            },
+        ),
+    }
 }
 
-fn transition(value: Option<wire::Transition>) -> Result<Transition> {
+fn transition(value: Option<&wire::Transition>) -> Result<Transition> {
     Ok(match value {
         None => Transition::Cut,
-        Some(value) => match value.policy.context("transition requires a policy")? {
-            wire::transition::Policy::Cut(_) => Transition::Cut,
-            wire::transition::Policy::CrossfadeBeats(duration_beats) => {
-                Transition::Crossfade { duration_beats }
-            }
-        },
-    })
-}
-
-fn lighting_override(value: wire::LightingOverride) -> Result<LightingOverride> {
-    let target = value.target.context("override requires a target")?;
-    let target = match target
-        .selection
-        .context("override target requires a selection")?
-    {
-        wire::target::Selection::All(_) => Target::All,
-        wire::target::Selection::Group(name) => Target::Group(name),
-        wire::target::Selection::Fixture(name) => Target::Fixture(name),
-    };
-    let values = value.values.unwrap_or_default();
-    let lifetime = match value.lifetime {
-        None => OverrideLifetime::UntilCleared,
-        Some(lifetime) => match lifetime
-            .duration
-            .context("override lifetime requires a duration")?
+        Some(value) => match value
+            .policy
+            .as_ref()
+            .context("transition requires a policy")?
         {
-            wire::lifetime::Duration::UntilCleared(_) => OverrideLifetime::UntilCleared,
-            wire::lifetime::Duration::Beats(duration_beats) => {
-                OverrideLifetime::Beats { duration_beats }
-            }
-            wire::lifetime::Duration::Seconds(duration_seconds) => {
-                OverrideLifetime::Seconds { duration_seconds }
-            }
+            wire::transition::Policy::Cut(_) => Transition::Cut,
+            wire::transition::Policy::CrossfadeBeats(duration_beats) => Transition::Crossfade {
+                duration_beats: *duration_beats,
+            },
         },
-    };
-    if values.intensity.is_none()
-        && values.colour.is_none()
-        && values.pan.is_none()
-        && values.tilt.is_none()
-        && values.strobe_hz.is_none()
-        && value.intensity_multiplier.is_none()
-    {
-        bail!("override must change at least one property");
-    }
-    Ok(LightingOverride {
-        id: value.id,
-        target,
-        values: PropertyValues {
-            intensity: values.intensity,
-            colour: values.colour.map(|colour| Rgb {
-                red: colour.red,
-                green: colour.green,
-                blue: colour.blue,
-            }),
-            pan: values.pan,
-            tilt: values.tilt,
-            strobe_hz: values.strobe_hz,
-        },
-        intensity_multiplier: value.intensity_multiplier,
-        lifetime,
-        priority: value.priority,
     })
 }

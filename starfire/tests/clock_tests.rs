@@ -110,3 +110,15 @@ fn authoritative_beat_jumps_and_tempo_changes_preserve_integrated_animation_phas
     assert_eq!(later.animation_beats, 10.0);
     assert_eq!(later.beat_position, 104.0);
 }
+
+#[test]
+fn musical_elapsed_beats_ignore_phase_corrections_and_animation_speed() {
+    let mut clock = MusicalClock::default();
+    clock.set_beat_anchor(0.0, 0.0, 120.0).unwrap();
+    clock.set_speed(0.5, 0.0).unwrap();
+    clock.set_beat_anchor(1.0, 100.0, 60.0).unwrap();
+    let sample = clock.sample_at(3.0).unwrap();
+    assert_eq!(sample.beat_position, 102.0);
+    assert_eq!(sample.elapsed_musical_beats, 4.0);
+    assert_eq!(sample.animation_beats, 1.0);
+}

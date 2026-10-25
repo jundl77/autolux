@@ -4,11 +4,11 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 
 | Check | Result |
 | --- | --- |
-| Python | Full run: 2,331 passed, two failures subsequently fixed and retested. Another 260 focused API checks passed; final CLI validation passed 57 cases and DMX comparison passed 15 cases. Actual dashboard HTTP/mDNS startup and bounded Ctrl-C shutdown are covered. |
+| Python | Current protocol/production checks: 54 passed, including generated Python-to-Rust messages, initialization/runtime parameter changes and shutdown darkness. Full-suite rerun is in progress. Actual dashboard HTTP/mDNS startup and bounded Ctrl-C shutdown are covered. |
 | Startup/dashboard follow-up | 226 tests passed: CLI lifecycle, delayed capture/song clocks, telemetry freshness/rates, controller/client/replay, simulation and committed analysis digest comparisons. Desktop browser review covered Control, Telemetry and Config without browser errors or horizontal overflow. |
-| Rust | 97 tests passed, including all Lua sequences, 80 independent captured-value anchors, protocol/lifecycle handling and performance gates. Strict Clippy and rustfmt passed. |
+| Rust | 112 tests passed, including all Lua sequences, captured-value anchors, Login/RAII cleanup, operation replies, bidirectional heartbeats and performance gates. Existing authored-loop DMX hashes are unchanged. Strict Clippy, rustfmt and release build passed. |
 | Radius | Both executables built; all four native test groups passed. |
-| Distribution | Product build, wheel/source package and formatting passed. Generated Protobuf descriptors are packaged; isolated codec import passed. |
+| Distribution | Wheel/source package and formatting passed. Standard generated Python Protobuf bindings and typing stubs are packaged; isolated wheel import and message round-trip passed without repository access. Eight build failure/propagation tests passed. |
 | Production readiness | This branch's `autolux --prod --check` passed in 2.0 seconds: binaries, Lua against the saved fixtures, required sequence identities, model, capture and SSH. |
 | Analysis/backtest | All ten tracks preserve 9,298 beats, complete section boundaries, sound events and every analysis score/count. Full-report hashes reflect verified lighting changes; the strict comparison gate and previously failing benchmark test pass. |
 | Recorded command replay | All ten actual command streams rendered twice on the calibrated 14-fixture patch: 168,114 DMX frames per pass, identical repeated digests, zero script errors. Final release also matches the prior build exactly; slowest run: 473.1x real time. |

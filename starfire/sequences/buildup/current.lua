@@ -25,7 +25,7 @@ end
 return {
     render = function(ctx)
         local beat = ctx.sequence_speed_scaled_elapsed_beats % LOOP_BEATS
-        local brightness = MIN_AUDIO_BRIGHTNESS + AUDIO_BRIGHTNESS_RANGE * ctx.normalized_rms_level
+        local brightness = MIN_AUDIO_BRIGHTNESS + AUDIO_BRIGHTNESS_RANGE * (ctx.normalized_rms_level or 1)
         local pulse_phase = ctx.beat_position % 1
         local level = PULSE_LEVEL
         if pulse_phase > PULSE_HOLD_BEATS then

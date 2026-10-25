@@ -3,8 +3,10 @@ syntax = "proto3";
 package Radius.Bus;
 option optimize_for = LITE_RUNTIME;
 
+// CLIENT = radius_tx; SERVER = radius_rx.
 // One complete UDP payload, at most 1200 bytes. Both endpoints must agree on
 // protocol_version. Each datagram contains exactly one typed payload.
+// [CLIENT -> SERVER] [SERVER -> CLIENT]
 message Envelope {
   uint32 protocol_version = 1;
   fixed64 session_id = 2;            // Nonzero, exact 64-bit session identifier.
@@ -18,20 +20,24 @@ message Envelope {
   }
 }
 
+// [CLIENT -> SERVER]
 message Audio {
   uint32 sample_rate_hz = 1;                               // Exactly 44100.
   uint32 channel_count = 2;                                // Exactly 2, left then right.
   repeated float interleaved_samples = 3 [packed = true];  // 1..128 finite stereo frames.
 }
 
+// [CLIENT -> SERVER]
 message Lighting {
   bytes channels = 1;  // Exactly 512 DMX channel values, scheduled at audio_frame_position.
 }
 
+// [CLIENT -> SERVER] [SERVER -> CLIENT]
 message Heartbeat {}
 
 // Counters stay integers. Optional ages distinguish missing input from zero age.
 // Units and names match the dashboard's local health.json boundary.
+// [SERVER -> CLIENT]
 message ReceiverTelemetry {
   bool up = 1;
   bool link_up = 2;

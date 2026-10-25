@@ -121,7 +121,7 @@ def test_starfire_build_stops_on_failure_and_accepts_progress_on_stderr(tmp_path
     protocol_invocations = tmp_path / 'protocol-invocations.txt'
     if failed_step in (None, 'protocol'):
         assert protocol_invocations.read_text().splitlines() == [
-            'run --locked python tools/build_proto.py'
+            'run --no-project --with grpcio-tools==1.62.3 --with setuptools python tools/build_proto.py'
         ]
         assert b'protocol compiler progress' in result.stderr
     else:

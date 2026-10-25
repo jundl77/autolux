@@ -274,7 +274,7 @@ fn beat_and_second_expiry_reveal_current_baseline_at_the_exact_deadline() {
 }
 
 #[test]
-fn multiplier_product_is_clamped_once_before_master_and_blackout() {
+fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
     let mut engine = engine(&[("constant", CONSTANT)]);
     select(&mut engine, 0.0, "constant", Transition::Cut);
     for (id, multiplier) in [("boost1", 8.0), ("boost2", 8.0), ("attenuate", 0.01)] {
@@ -291,7 +291,7 @@ fn multiplier_product_is_clamped_once_before_master_and_blackout() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.16,
+        0.005,
     );
     engine
         .apply(
@@ -651,7 +651,13 @@ fn expired_overrides_release_capacity_even_without_an_intervening_render() {
     let mut engine = engine(&[("constant", CONSTANT)]);
     select(&mut engine, 0.0, "constant", Transition::Cut);
     for index in 0..128 {
-        let mut value = lighting_override(&format!("short_{index}"), PropertyValues::default());
+        let mut value = lighting_override(
+            &format!("short_{index}"),
+            PropertyValues {
+                intensity: Some(0.5),
+                ..Default::default()
+            },
+        );
         value.lifetime = OverrideLifetime::Seconds {
             duration_seconds: 1.0,
         };
@@ -799,29 +805,6 @@ fn invalid_fade_duration_does_not_replace_the_running_sequence() {
                 .is_err()
         );
     }
-    engine
-        .apply(
-            1.0,
-            &Command::Beat {
-                position_beats: f64::MAX,
-                bpm: 120.0,
-            },
-        )
-        .unwrap();
-    assert!(
-        engine
-            .apply(
-                1.0,
-                &Command::Select {
-                    bank: "test".into(),
-                    sequence: "blue".into(),
-                    transition: Transition::Crossfade {
-                        duration_beats: 1.0
-                    }
-                }
-            )
-            .is_err()
-    );
     let frame = engine.render_at(1.0).unwrap();
     assert_eq!(frame.active_sequence.as_deref(), Some("constant"));
     near(
@@ -834,7 +817,7 @@ fn invalid_fade_duration_does_not_replace_the_running_sequence() {
 fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
     let mut engine = engine(&[(
         "energy",
-        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), ctx.normalized_rms_level)} end}",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), ctx.normalized_rms_level or 0)} end}",
     )]);
     select(&mut engine, 0.0, "energy", Transition::Cut);
     near(
@@ -843,7 +826,7 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        1.0,
+        0.0,
     );
     engine
         .apply(0.25, &Command::SetNormalizedRmsLevel { level: 0.8 })
@@ -884,5 +867,55 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
             .fixture_properties_before_strobe["left"]
             .intensity,
         0.0,
+    );
+}
+
+#[test]
+fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
+    let mut engine = engine(&[("red", RED), ("blue", BLUE)]);
+    select(&mut engine, 0.0, "red", Transition::Cut);
+    select(
+        &mut engine,
+        0.0,
+        "blue",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    engine
+        .apply(0.5, &Command::SetSpeed { multiplier: 0.0 })
+        .unwrap();
+    engine
+        .apply(
+            1.0,
+            &Command::Beat {
+                position_beats: 100.0,
+                bpm: 60.0,
+            },
+        )
+        .unwrap();
+    near(
+        engine
+            .render_at(1.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.5,
+    );
+    near(
+        engine
+            .render_at(2.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.65,
+    );
+    near(
+        engine
+            .render_at(3.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.8,
     );
 }

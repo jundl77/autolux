@@ -83,7 +83,7 @@ pub struct RenderContext {
     pub sequence_elapsed_beats: f64,
     pub sequence_speed_scaled_elapsed_beats: f64,
     /// Measured RMS mapped to 0..1, independent of operator brightness.
-    pub normalized_rms_level: f64,
+    pub normalized_rms_level: Option<f64>,
 }
 
 impl Default for RenderContext {
@@ -93,7 +93,7 @@ impl Default for RenderContext {
             beat_position: 0.0,
             sequence_elapsed_beats: 0.0,
             sequence_speed_scaled_elapsed_beats: 0.0,
-            normalized_rms_level: 1.0,
+            normalized_rms_level: None,
         }
     }
 }

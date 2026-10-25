@@ -1,9 +1,9 @@
 {
-  "scope": "Bounded names-only review of renderer telemetry and proposed protocol primitives; not exhaustive and not a protocol correctness proof.",
+  "scope": "Bounded names-only review of renderer telemetry and protocol primitives; includes explicit user-selected naming. Not exhaustive or a correctness proof.",
   "implementation": {
     "rates": "autolux/lib/telemetry_history.py derives completed render and skipped deadline counter differences over renderer elapsed time. Repeated fresh reports hold the prior interval rate; restarts/outages clear it.",
     "duration": "starfire/src/live.rs measures engine.render_at duration; autolux/lib/telemetry_history.py exposes the last completed render sample in milliseconds, not a timestamp or average.",
-    "protocol": "proto/starfire/v2/starfire.proto and docs/starfire/protocol-design.md define a proposal. Existing v1 remains live. Parameter patches preserve omitted values; named layers replace their entire runtime state; active sequence identity never restarts."
+    "protocol": "proto/starfire/starfire.proto and docs/starfire/protocol-design.md define the sole live contract. Four command families, operation-specific replies, typed parameter alternatives, initialization via Login, Metrics and heartbeats. Same sequence continues; named active effects replace complete runtime state."
   },
   "readers": {
     "fork_turns": "none",
@@ -128,6 +128,53 @@
         }
       ],
       "disposition": "Core concepts aligned; FixtureSelection is a source-grounded clarification, not separately blind-tested. No claim that names alone specify all contracts."
+    },
+    {
+      "concept": "User-selected core vocabulary and typed parameter variants",
+      "implementation": "proto/starfire/starfire.proto: RendererCommand, SetParameter, PlaySequence, SetActiveEffect and their replies. Built-in parameter oneof binds each identity to its value type; dynamic names only identify declared Lua controls.",
+      "attempts": [
+        {
+          "names": [
+            "SetActiveEffect",
+            "UnsetActiveEffect",
+            "effect_id",
+            "attributes",
+            "priority",
+            "lifetime"
+          ],
+          "reader": "/root/blind_simple_effect",
+          "prediction": "- `SetActiveEffect`: Makes an effect active, likely replacing or selecting the current effect. Unclear whether it creates an effect, changes its settings, or supports several active effects.\n- `UnsetActiveEffect`: Clears the current active effect. Unclear whether it takes an identifier, removes one among several effects, or restores a previous effect.\n- `effect_id`: Identifier for an effect. Could identify an effect type, definition, or running instance.\n- `attributes`: Properties associated with something. Too broad to infer supported fields or whether these configure an effect.\n- `priority`: Relative importance or precedence. Unclear whether higher or lower numbers win and how ties resolve.\n- `lifetime`: How long something exists or remains active. Could be a duration, expiration timestamp, or lifecycle policy; units and default behavior are unspecified.\n\nNo unclear abbreviations beyond conventional `id` meaning ?identifier.?",
+          "comparison": "Reader recognizes setting/removing effects; identity scope and composition cannot be inferred from names alone. User explicitly selected these names; schema documents active-instance identity, replacement, ordering and expiry. Not a blind pass on all invariants."
+        },
+        {
+          "names": [
+            "PlaySequence",
+            "SequenceReference",
+            "bank_id",
+            "sequence_id",
+            "transition"
+          ],
+          "reader": "/root/blind_play_sequence",
+          "prediction": "- `PlaySequence`: Likely a command or function that starts playing an ordered series of items. ?Play? suggests timed execution or media, but whether it runs once, loops, or waits for completion is unclear.\n- `SequenceReference`: Likely an identifier or handle pointing to a sequence rather than containing its full data. Could also mean a wrapper containing location metadata.\n- `bank_id`: Identifies a collection or grouping called a bank. Its relationship to a sequence is unclear; it might supply the namespace in which `sequence_id` is unique.\n- `sequence_id`: Identifies a sequence. Unclear whether globally unique, unique within a bank, or actually a numeric position.\n- `transition`: Could describe how to move between items or sequences, a duration, an effect, or an action that changes state. This is the most ambiguous name without a type or qualifier.\n\nTogether, the names suggest starting a sequence selected by a bank-and-sequence pair, with some configurable transition behavior. `id` conventionally means ?identifier?; there are no unusual abbreviations.",
+          "comparison": "Reader identifies bank-qualified playback. Same-identity continuation and absence-as-idle are explicit contracts, not established by names. User selected PlaySequence instead of EnsureSequencePlaying."
+        },
+        {
+          "names": [
+            "SetParameters",
+            "ParameterTarget",
+            "engine",
+            "analysis_inputs",
+            "sequence",
+            "assignments",
+            "parameter_key",
+            "ParameterValue"
+          ],
+          "reader": "/root/blind_set_parameters",
+          "prediction": "- `SetParameters`: Likely sets multiple parameter values. Could also name a command, data structure, or parameter collection; unclear whether it validates, replaces, or merges values.\n- `ParameterTarget`: The object or location receiving a parameter change. Could instead identify a particular parameter.\n- `engine`: A central component that performs processing. Its responsibility is unspecified.\n- `analysis_inputs`: Data supplied to an analysis operation. Does not reveal the expected shape or whether these are raw data or configuration.\n- `sequence`: An ordered collection or series of steps. Could also mean a sequence identifier; element type is unclear.\n- `assignments`: Mappings or operations assigning values to destinations. Could mean task allocations instead.\n- `parameter_key`: An identifier used to look up a parameter, probably in a mapping. Unclear whether it is a string, enum, or compound identifier.\n- `ParameterValue`: A parameter?s value, possibly a typed wrapper or union of supported value types. Does not reveal whether it contains metadata or validation rules.\n\nNo obvious abbreviations. The main ambiguity is how `ParameterTarget`, `parameter_key`, and `assignments` relate: destination object versus individual parameter versus value mapping.",
+          "comparison": "Rejected abstraction: the user requested SetParameter with closed typed parameter concepts. Removed generic target/key/assignment shapes for built-ins; the final singular name is explicitly user-selected, not claimed as a fresh blind pass."
+        }
+      ],
+      "disposition": "User-selected vocabulary is a contextual exception. Behaviors and units are explicit in schema and tested; removed misleading generic parameter target/key structures."
     }
   ]
 }

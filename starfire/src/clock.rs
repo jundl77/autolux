@@ -9,6 +9,7 @@ pub const MAX_SPEED_MULTIPLIER: f64 = 8.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClockSample {
     pub beat_position: f64,
+    pub elapsed_musical_beats: f64,
     pub animation_beats: f64,
 }
 
@@ -16,6 +17,7 @@ pub struct ClockSample {
 pub struct MusicalClock {
     anchor_seconds: f64,
     anchor_beat: f64,
+    anchor_elapsed_musical_beats: f64,
     anchor_animation_beats: f64,
     tempo_bpm: f64,
     speed_multiplier: f64,
@@ -27,6 +29,7 @@ impl Default for MusicalClock {
         Self {
             anchor_seconds: 0.0,
             anchor_beat: 0.0,
+            anchor_elapsed_musical_beats: 0.0,
             anchor_animation_beats: 0.0,
             tempo_bpm: 0.0,
             speed_multiplier: 1.0,
@@ -46,10 +49,13 @@ impl MusicalClock {
             (time_seconds - self.anchor_seconds) * self.tempo_bpm / SECONDS_PER_MINUTE;
         let sample = ClockSample {
             beat_position: self.anchor_beat + elapsed_beats,
+            elapsed_musical_beats: self.anchor_elapsed_musical_beats + elapsed_beats,
             animation_beats: self.anchor_animation_beats + elapsed_beats * self.speed_multiplier,
         };
         ensure!(
-            sample.beat_position.is_finite() && sample.animation_beats.is_finite(),
+            sample.beat_position.is_finite()
+                && sample.elapsed_musical_beats.is_finite()
+                && sample.animation_beats.is_finite(),
             "musical clock overflow"
         );
         Ok(sample)
@@ -73,6 +79,7 @@ impl MusicalClock {
         let before = self.sample_at(time_seconds)?;
         self.anchor_seconds = time_seconds;
         self.anchor_beat = beat;
+        self.anchor_elapsed_musical_beats = before.elapsed_musical_beats;
         // Beat measurements correct musical phase; integrated animation stays continuous.
         self.anchor_animation_beats = before.animation_beats;
         self.tempo_bpm = bpm;
@@ -88,6 +95,7 @@ impl MusicalClock {
         let before = self.sample_at(time_seconds)?;
         self.anchor_seconds = time_seconds;
         self.anchor_beat = before.beat_position;
+        self.anchor_elapsed_musical_beats = before.elapsed_musical_beats;
         self.anchor_animation_beats = before.animation_beats;
         self.speed_multiplier = multiplier;
         Ok(())

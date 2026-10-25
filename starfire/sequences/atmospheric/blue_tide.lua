@@ -45,7 +45,7 @@ end
 return {
     render = function(ctx)
         local beat = ctx.sequence_speed_scaled_elapsed_beats % LOOP_BEATS
-        local brightness = MIN_AUDIO_BRIGHTNESS + AUDIO_BRIGHTNESS_RANGE * ctx.normalized_rms_level
+        local brightness = MIN_AUDIO_BRIGHTNESS + AUDIO_BRIGHTNESS_RANGE * (ctx.normalized_rms_level or 1)
         return sf.scene {
             sf.colour(sf.all(), colour(beat)),
             sf.colour(sf.group("movers"), MOVER_BLUE),

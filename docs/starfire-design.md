@@ -37,7 +37,7 @@ flowchart TB
     Music -->|"PCM / PyAudio capture"| Analysis
     Music -->|"PCM / WASAPI capture"| TX
     Decisions -->|"Starfire Protobuf / framed process pipes"| Timing
-    Timing -->|"Starfire Protobuf / process pipes: health"| Decisions
+    Timing -->|"Starfire Protobuf / process pipes: replies, metrics, heartbeat"| Decisions
     Replay -->|"Versioned JSON replay file"| Timing
     Dashboard -->|"Validated rig JSON: loaded at startup"| Frames
     Frames -->|"Art-Net ArtDmx / UDP 6454"| TX
@@ -73,6 +73,9 @@ flowchart TB
 The CLI launches local processes and deploys/starts RX using **SCP over SSH**.
 [Starfire's contract](../proto/starfire/starfire.proto) uses four-byte big-endian
 length framing around Protobuf messages on owned stdin/stdout pipes.
+Login carries initialization settings; its reply confirms the owned session.
+The four control families are PlaySequence, active effects, UpdateBeat and
+SetParameter; each has a typed reply. See the [protocol](starfire/protocol-design.md).
 [Radius's contract](../proto/radius/radius.proto) uses Protobuf UDP datagrams.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
 
@@ -84,6 +87,9 @@ Both links exchange 10-second heartbeats and time out after 30 seconds.
 - **Animation position:** how far a sequence has moved. It advances with tempo and requested
   animation speed without jumping when speed changes. Beat pulses use musical position;
   movement can use animation position.
+- **Elapsed musical beats:** accumulated beats at the current tempo, without phase jumps.
+  Crossfade and accent durations use this, so a corrected beat estimate cannot expire
+  an accent early or lengthen a transition.
 - **Render cadence:** when another frame is computed. **40 Hz means every 25 ms**:
   20 updates per beat at 120 BPM, 10 at 240 BPM. BPM does not set the frame rate.
 - **Monotonic elapsed time:** paces the live host and expires timeouts. It only moves forward,

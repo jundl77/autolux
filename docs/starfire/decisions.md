@@ -27,6 +27,10 @@ prototype assumptions can change after an offline review and hardware audition.
 | U17 | Continue calibration while the user is away; speakers cannot be tested now. | Capture local Art-Net only; leave Radius and physical outputs stopped. Audible validation remains pending. |
 | U18 | Bounded hardware auditions are authorized when the user is present. | Audio and lights were confirmed working; the isolated beat pulse was judged on-beat. Startup alignment is a separate requirement. |
 | U19 | Use centered Control, Telemetry and Config tabs in the existing dashboard. | Control keeps essential performance, the timeline and horizontal diagnostics; detailed graphs live in Telemetry; Config owns fixture setup. |
+| U20 | Keep one current protocol; overwrite it in place and commit directly to this branch. | Both implementations change together; Git provides history, with no parallel v2 schema or compatibility layer. |
+| U21 | Use four command families: PlaySequence, active effects, UpdateBeat and SetParameter. | SetActiveEffect/UnsetActiveEffect share one concept; replies use the corresponding names. Built-in parameters are typed alternatives, not arbitrary key/value pairs. |
+| U22 | Initialization belongs in Login, confirmed by LoginReply; resources use RAII. | Login carries the rig, sequences, output destination and initial parameters. The owned session releases resources on partial initialization and shutdown. |
+| U23 | Use Metrics and heartbeats; denote direction on both shared protocols. | No separate Ready, StopPlayback, CommandResult or Health messages. Define client/server roles and directional comments in Starfire and Radius schemas. |
 
 ## Prototype decisions
 
@@ -36,7 +40,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 
 - P44: Use typed Google Protobuf commands and renderer events over the owned
   subprocess's stdin/stdout, framed with a four-byte big-endian payload length.
-  Cap each payload at 64 KiB and validate protocol version 1. The root CLI owns
+  Cap each payload at 64 KiB. The root CLI owns
   launch, readiness and shutdown; no separately exposed control listener.
 - P45: Apply accepted commands on the next 40 Hz render timestamp. The engine
   receives explicit time; monotonic pacing stays in the host. This preserves
@@ -50,14 +54,15 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P47: Supply measured music energy separately from user master brightness.
   Normalize the analyser's smoothed RMS through a named -48 to -12 dBFS range,
   clamped to 0..1. This is measured loudness, not perceptual musical intensity.
-  Missing energy in older replays defaults to 1; baseline programs may use a
-  modest 0.65..1 brightness factor while maintaining their section character.
+  Missing measured energy stays unknown; programs explicitly choose their
+  baseline brightness until a measurement arrives.
 - P48: Remove the external channel-overlay protocol and mixer. Starfire owns
   all composition; Radius transports its complete DMX frames with audio.
-- P49: Generate the Starfire Python descriptor with `protoc` in build output;
-  load it through the official Protobuf runtime. Include it in built wheels so
-  runtime installations need no compiler. Build/packaging hooks live in `tools/`,
-  with the schema and codec under `proto/starfire`; no handwritten wire fields.
+- P49: Generate normal Python message classes and typing stubs with the official
+  Protobuf compiler in build output; bundle them in wheels. Use the compiler
+  bundled in build-only `grpcio-tools==1.62.3` for the installed Protobuf 4.25
+  runtime. Rust uses prost generation. Build hooks stay in `tools/`; bounded
+  process framing stays beside its CLI consumer. No dynamic descriptor loading.
 - P50: The existing show-delay queue dispatches beat and measured energy
   together. Replace channel-level note chasing with the selected Lua baseline.
   Drop entry requests `drop_arrival`: 8 Hz strobe, one second, priority 100.
@@ -158,15 +163,24 @@ approved removing SoundSwitch connectivity and requested the live contract in
   section-dependent looks and accents in the temporary audition. Verify the
   envelope and deterministic DMX replay before physical output. Do not apply a
   guessed phase offset after the user confirms the pulse is on-beat.
-- P70: Propose v2 as stable renderer operations plus typed, registered parameters
-  and named active layers. Keep v1 live during discussion. Generate language
-  bindings from canonical paths beneath root `proto/`; do not duplicate message
-  models or hand-write serialization. See [protocol](protocol-design.md).
-- P71: Layer expiry and crossfade duration in proposed v2 use continuous musical
+- P70: Maintain one unversioned Starfire schema with typed renderer operations,
+  built-in parameter alternatives and enum fixture attributes. Keep Lua-defined
+  names scoped to the active program's declared controls. See [protocol](protocol-design.md).
+- P71: Effect expiry and crossfade duration use continuous musical
   elapsed time, independent of beat-phase corrections and animation speed. Apply
   queued commands in order against the result of preceding accepted commands;
-  reject each invalid patch atomically. The contract review resolved five edge
-  cases before presenting the proposal.
+  reject invalid commands without changing accepted state.
+- P72: An absent sequence in PlaySequence enters idle and clears the baseline
+  and active effects. This expresses the idle playback state without a separate
+  stop message; an explicitly present empty identity is invalid. Idle rejects
+  a transition policy, while same-identity play validates but never restarts.
+- P73: Each command receives its named reply; empty error means success. The
+  event envelope correlates command ID and reply kind. Unsolicited metrics and
+  server heartbeats use ID zero. No retries or generic result/error event types.
+- P74: A failed Login releases partially acquired resources and replies with an
+  error. It remains idle under the original startup deadline until corrected or
+  disconnected; production closes immediately on that error. A second Login
+  cannot replace a successfully initialized session.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |

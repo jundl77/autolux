@@ -1,21 +1,22 @@
 //! Stateful playback and property composition; no wall clock or hardware I/O.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::clock::{ClockSample, MusicalClock, validate_time};
+use crate::effects::{self, MAX_ATTRIBUTES, MAX_MULTIPLIER};
 use crate::fixtures::FixtureRig;
 use crate::model::{
-    Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
-    OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
+    Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ, PropertyValues,
+    RenderContext, Rgb, Transition,
 };
+use crate::protocol::wire;
 use crate::script::{LuaSequence, SequenceCatalog};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
-const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
@@ -46,7 +47,7 @@ impl ActiveSequence {
         &mut self,
         seconds: f64,
         time: ClockSample,
-        normalized_rms_level: f64,
+        normalized_rms_level: Option<f64>,
     ) -> Result<Vec<Effect>> {
         self.script.render(&RenderContext {
             time_seconds: seconds,
@@ -61,7 +62,7 @@ impl ActiveSequence {
 }
 
 enum FadeSource {
-    Running(ActiveSequence),
+    Running(Box<ActiveSequence>),
     Frozen(FixtureStates),
 }
 
@@ -72,7 +73,7 @@ struct Crossfade {
 }
 
 struct ActiveOverride {
-    value: LightingOverride,
+    value: wire::SetActiveEffect,
     fixture_ids: Vec<String>,
     order: u64,
     expires_seconds: Option<f64>,
@@ -96,7 +97,7 @@ pub struct Engine {
     overrides: BTreeMap<String, ActiveOverride>,
     override_order: u64,
     master_intensity: f64,
-    normalized_rms_level: f64,
+    normalized_rms_level: Option<f64>,
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
@@ -117,7 +118,7 @@ impl Engine {
             overrides: BTreeMap::new(),
             override_order: 0,
             master_intensity: 1.0,
-            normalized_rms_level: 1.0,
+            normalized_rms_level: None,
             blackout: false,
             script_error: None,
             last_output_states,
@@ -140,6 +141,9 @@ impl Engine {
                 sequence,
                 transition,
             } => {
+                validate_identifier(bank)?;
+                validate_identifier(sequence)?;
+                validate_transition(transition, time.elapsed_musical_beats)?;
                 if !self
                     .active
                     .as_ref()
@@ -148,7 +152,7 @@ impl Engine {
                     self.select(at_seconds, time, bank, sequence, transition)?;
                 }
             }
-            Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
+            Command::SetOverride { value } => self.set_override(at_seconds, value)?,
             Command::ClearOverride { id } => {
                 validate_identifier(id)?;
                 self.overrides.remove(id);
@@ -159,7 +163,7 @@ impl Engine {
             }
             Command::SetNormalizedRmsLevel { level } => {
                 validate_unit(*level, "normalized RMS level")?;
-                self.normalized_rms_level = *level;
+                self.normalized_rms_level = Some(*level);
             }
             Command::SetSpeed { multiplier } => self.clock.set_speed(at_seconds, *multiplier)?,
             Command::SetBlackout { enabled } => self.blackout = *enabled,
@@ -191,7 +195,7 @@ impl Engine {
         };
 
         if self.script_error.is_none() {
-            self.compose_overrides(time_seconds, time.beat_position, &mut states);
+            self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states)?;
             for state in states.values_mut() {
                 state.intensity = state.intensity.clamp(0.0, 1.0) * self.master_intensity;
             }
@@ -235,15 +239,6 @@ impl Engine {
     ) -> Result<()> {
         validate_identifier(bank)?;
         validate_identifier(sequence)?;
-        if let Transition::Crossfade { duration_beats } = transition {
-            ensure!(
-                duration_beats.is_finite()
-                    && *duration_beats > 0.0
-                    && *duration_beats <= MAX_TRANSITION_BEATS,
-                "crossfade duration is outside the supported range"
-            );
-            expiry(time.beat_position, *duration_beats)?;
-        }
         let script = self
             .catalog
             .instantiate(bank, sequence, &self.rig)
@@ -274,13 +269,13 @@ impl Engine {
                 } else if self.script_error.is_some() {
                     FadeSource::Frozen(self.dark_states())
                 } else if let Some(previous) = previous {
-                    FadeSource::Running(previous)
+                    FadeSource::Running(Box::new(previous))
                 } else {
                     FadeSource::Frozen(self.dark_states())
                 };
                 Some(Crossfade {
                     source,
-                    start_beat: time.beat_position,
+                    start_beat: time.elapsed_musical_beats,
                     duration_beats: *duration_beats,
                 })
             }
@@ -300,7 +295,7 @@ impl Engine {
         if self
             .fade
             .as_ref()
-            .is_some_and(|fade| time.beat_position >= fade.start_beat + fade.duration_beats)
+            .is_some_and(|fade| time.elapsed_musical_beats >= fade.start_beat + fade.duration_beats)
         {
             self.fade = None;
         }
@@ -321,43 +316,124 @@ impl Engine {
                 states_for_effects(&self.rig, &effects)?
             }
         };
-        let amount = ((time.beat_position - fade.start_beat) / fade.duration_beats).clamp(0.0, 1.0);
+        let amount =
+            ((time.elapsed_musical_beats - fade.start_beat) / fade.duration_beats).clamp(0.0, 1.0);
         Ok(blend_states(source, destination, amount))
     }
 
-    fn set_override(
-        &mut self,
-        seconds: f64,
-        time: ClockSample,
-        value: &LightingOverride,
-    ) -> Result<()> {
-        validate_identifier(&value.id)?;
+    pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::SetParameter) -> Result<()> {
+        use wire::set_parameter::Parameter;
+        self.validate_time(seconds)?;
+        match parameter
+            .parameter
+            .as_ref()
+            .context("parameter is required")?
+        {
+            Parameter::OutputBrightness(value) => {
+                validate_unit(*value, "output brightness")?;
+                self.master_intensity = *value;
+            }
+            Parameter::AnimationSpeed(value) => self.clock.set_speed(seconds, *value)?,
+            Parameter::OutputBlackout(value) => self.blackout = *value,
+            Parameter::AudioRmsNormalized(value) => {
+                validate_unit(*value, "normalized RMS level")?;
+                self.normalized_rms_level = Some(*value);
+            }
+            Parameter::SequenceParameter(parameter) => {
+                let identity = parameter
+                    .sequence
+                    .as_ref()
+                    .context("sequence parameter requires its sequence identity")?;
+                let active = self.active.as_mut().context("no sequence is active")?;
+                ensure!(
+                    active.bank == identity.bank_id && active.name == identity.sequence_id,
+                    "parameter target does not match the active sequence"
+                );
+                active.script.set_parameter(
+                    &parameter.name,
+                    parameter
+                        .value
+                        .as_ref()
+                        .context("sequence parameter requires a value")?,
+                )?;
+            }
+        }
+        self.last_time_seconds = seconds;
+        Ok(())
+    }
+    pub fn sequence_reply(&self, error: String) -> wire::PlaySequenceReply {
+        wire::PlaySequenceReply {
+            error,
+            sequence: self.active.as_ref().map(|active| wire::SequenceReference {
+                bank_id: active.bank.clone(),
+                sequence_id: active.name.clone(),
+            }),
+            parameters: self
+                .active
+                .as_ref()
+                .map(|active| active.script.parameter_definitions().to_vec())
+                .unwrap_or_default(),
+        }
+    }
+    fn set_override(&mut self, seconds: f64, value: &LightingOverride) -> Result<()> {
         validate_properties(&value.values)?;
         if let Some(multiplier) = value.intensity_multiplier {
             ensure!(
-                multiplier.is_finite() && (0.0..=MAX_INTENSITY_MULTIPLIER).contains(&multiplier),
+                multiplier.is_finite() && (0.0..=MAX_MULTIPLIER).contains(&multiplier),
                 "intensity multiplier is outside the supported range"
             );
+        }
+        self.set_active_effect(seconds, &effects::from_override(value))
+    }
+
+    pub fn set_active_effect(&mut self, seconds: f64, value: &wire::SetActiveEffect) -> Result<()> {
+        self.validate_time(seconds)?;
+        let time = self.clock.sample_at(seconds)?;
+        validate_identifier(&value.effect_id)?;
+        ensure!(
+            !value.attributes.is_empty() && value.attributes.len() <= MAX_ATTRIBUTES,
+            "effect must contain 1..{MAX_ATTRIBUTES} attributes"
+        );
+        let mut keys = BTreeSet::new();
+        for attribute in &value.attributes {
+            ensure!(
+                keys.insert(attribute.attribute),
+                "duplicate effect attribute"
+            );
+            effects::validate_attribute(attribute)?;
         }
         let other_active_count = self
             .overrides
             .values()
             .filter(|existing| {
-                existing.value.id != value.id && !existing.expired(seconds, time.beat_position)
+                existing.value.effect_id != value.effect_id
+                    && !existing.expired(seconds, time.elapsed_musical_beats)
             })
             .count();
         ensure!(
             other_active_count < MAX_ACTIVE_OVERRIDES,
             "too many active lighting overrides"
         );
-        let fixture_ids = self.rig.resolve(&value.target)?;
-        let (expires_seconds, expires_beat) = match value.lifetime {
-            OverrideLifetime::UntilCleared => (None, None),
-            OverrideLifetime::Beats { duration_beats } => {
-                (None, Some(expiry(time.beat_position, duration_beats)?))
-            }
-            OverrideLifetime::Seconds { duration_seconds } => {
-                (Some(expiry(seconds, duration_seconds)?), None)
+        let target = effects::fixture_target(
+            value
+                .fixtures
+                .as_ref()
+                .context("effect fixtures are required")?,
+        )?;
+        let fixture_ids = self.rig.resolve(&target)?;
+        let expiration = value
+            .lifetime
+            .as_ref()
+            .and_then(|lifetime| lifetime.expiration.as_ref())
+            .context("effect lifetime is required")?;
+        let (expires_seconds, expires_beat) = match expiration {
+            wire::effect_lifetime::Expiration::UntilRemoved(_) => (None, None),
+            wire::effect_lifetime::Expiration::DurationBeats(duration_beats) => (
+                None,
+                Some(expiry(time.elapsed_musical_beats, *duration_beats)?),
+            ),
+            wire::effect_lifetime::Expiration::DurationSeconds(duration_seconds) => {
+                (Some(expiry(seconds, *duration_seconds)?), None)
             }
         };
         let order = self
@@ -365,9 +441,9 @@ impl Engine {
             .checked_add(1)
             .context("override ordering exhausted")?;
         self.overrides
-            .retain(|_, existing| !existing.expired(seconds, time.beat_position));
+            .retain(|_, existing| !existing.expired(seconds, time.elapsed_musical_beats));
         self.overrides.insert(
-            value.id.clone(),
+            value.effect_id.clone(),
             ActiveOverride {
                 value: value.clone(),
                 fixture_ids,
@@ -377,10 +453,16 @@ impl Engine {
             },
         );
         self.override_order = order;
+        self.last_time_seconds = seconds;
         Ok(())
     }
 
-    fn compose_overrides(&mut self, seconds: f64, beat: f64, states: &mut FixtureStates) {
+    fn compose_overrides(
+        &mut self,
+        seconds: f64,
+        beat: f64,
+        states: &mut FixtureStates,
+    ) -> Result<()> {
         self.overrides
             .retain(|_, value| !value.expired(seconds, beat));
         let mut ordered: Vec<_> = self.overrides.values().collect();
@@ -388,20 +470,13 @@ impl Engine {
         for value in &ordered {
             for id in &value.fixture_ids {
                 if let Some(state) = states.get_mut(id) {
-                    apply_properties(state, &value.value.values);
-                }
-            }
-        }
-        // Multipliers modulate the selected absolute value, including held looks.
-        for value in ordered {
-            if let Some(multiplier) = value.value.intensity_multiplier {
-                for id in &value.fixture_ids {
-                    if let Some(state) = states.get_mut(id) {
-                        state.intensity *= multiplier;
+                    for attribute in &value.value.attributes {
+                        effects::apply_attribute(state, attribute)?;
                     }
                 }
             }
         }
+        Ok(())
     }
 
     fn dark_states(&self) -> FixtureStates {
@@ -423,6 +498,19 @@ impl Engine {
         self.fade = None;
         self.overrides.clear();
     }
+}
+
+fn validate_transition(transition: &Transition, elapsed_beats: f64) -> Result<()> {
+    if let Transition::Crossfade { duration_beats } = transition {
+        ensure!(
+            duration_beats.is_finite()
+                && *duration_beats > 0.0
+                && *duration_beats <= MAX_TRANSITION_BEATS,
+            "crossfade duration is outside the supported range"
+        );
+        expiry(elapsed_beats, *duration_beats)?;
+    }
+    Ok(())
 }
 
 fn expiry(start: f64, duration: f64) -> Result<f64> {
