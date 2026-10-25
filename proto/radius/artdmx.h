@@ -6,7 +6,7 @@
 
 namespace Radius {
 
-// Art-Net ArtDmx, protocol version 14. SoundSwitch supplies local unicast output.
+// Art-Net ArtDmx, protocol version 14. Starfire supplies complete fixture frames.
 inline bool DecodeArtDmx(const void* raw, size_t size, std::array<uint8_t, DmxFrameSize>& frame, uint16_t& universe)
 {
 	if (size < 18)

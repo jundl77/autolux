@@ -10,6 +10,5 @@
   "dmx_universe": 0,
   "audio_device_id": "{0.0.1.00000000}.{d81e9c3d-c36d-4eef-ae2b-4f1ab90a5749}",
   "playback_delay_seconds": 14.0,
-  "overlay_port": 19001,
   "artnet_address": "127.0.0.1"
 }

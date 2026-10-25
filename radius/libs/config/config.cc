@@ -46,7 +46,6 @@ std::optional<Config> Config::FromFile(const std::string& file, AppType type)
 	c.mCoreAffinity = Integer(j, "network_core", -1, -1, 31);
 	c.mAudioCore = Integer(j, "audio_core", -1, -1, 31);
 	c.mDmxCore = Integer(j, "dmx_core", -1, -1, 31);
-	c.mOverlayListenPort = Integer(j, "overlay_port", 19001, 1, 65535);
 	c.mDmxUniverse = Integer(j, "dmx_universe", 0, 0, 255);
 	c.mBusPort = Integer(j, "bus_port", 19002, 1, 65535);
 	c.mAudioSampleRate = Integer(j, "sample_rate", 44100, 44100, 44100);

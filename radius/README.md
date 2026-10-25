@@ -2,8 +2,8 @@
 
 Radius is Autolux's audiovisual bus, with two C++ applications:
 
-- `radius_tx`: captures stereo audio, applies the show delay, combines local
-  SoundSwitch ArtDmx with Autolux overlays, and sends the stream.
+- `radius_tx`: captures stereo audio, applies the show delay, receives complete
+  Starfire ArtDmx frames, and sends synchronized audio and lighting.
 - `radius_rx`: buffers audio, follows its media clock for DMX playback, and drives
   the speakers and Enttec USB device on separate threads.
 
@@ -39,6 +39,6 @@ packets and invalid media values are rejected and counted. Dashboard `health.jso
 retains its existing keys, units, integer counters and null ages for missing input.
 
 `audio_core`, `network_core` and `dmx_core` optionally pin separate threads;
-`-1` leaves scheduling to Windows. SoundSwitch's local Art-Net output feeds
-`127.0.0.1:6454`; Autolux overlays feed port 19001. Only the Radius bus crosses
+`-1` leaves scheduling to Windows. Starfire's local Art-Net output feeds
+`127.0.0.1:6454`. Only the Radius bus crosses
 the network, on UDP 19002 by default.

@@ -1,5 +1,4 @@
 #include <proto/radius/radius.h>
-#include <proto/radius/dmx_state.h>
 #include <proto/radius/artdmx.h>
 #include <network/link_state.h>
 #include <soundio/playout.h>
@@ -208,7 +207,7 @@ int main()
 	std::array<uint8_t, 512> channels{};
 	uint16_t universe = 0;
 	Check(DecodeArtDmx(art.data(), art.size(), channels, universe) && universe == 1 && channels[0] == 255,
-	      "SoundSwitch ArtDmx");
+	      "Starfire ArtDmx");
 	Check(!DecodeArtDmx(art.data(), 529, channels, universe), "truncated ArtDmx");
 	art[16] = 3;
 	Check(!DecodeArtDmx(art.data(), 530, channels, universe), "oversized ArtDmx");
@@ -221,20 +220,6 @@ int main()
 	link.Received(1);
 	Check(!link.Due(9999) && link.Due(10000), "10-second heartbeat");
 	Check(link.Up(30000) && link.Expired(30001), "missing heartbeat timeout");
-	// Clearing an overlay must restore the current base without waiting for a new Art-Net frame.
-	DmxState dmx;
-	std::array<uint8_t, 512> base{};
-	base[10] = 5;
-	dmx.Base(DmxFrame(base));
-	OverlayIdl::OverlayMessage overlay{};
-	overlay.mNumOverlays = 1;
-	overlay.mOverlays[0] = {10, 1};
-	overlay.mDmxData[10] = 255;
-	dmx.Overlay(overlay);
-	Check(dmx.Compose()[10] == 255, "overlay application");
-	overlay.mNumOverlays = 0;
-	dmx.Overlay(overlay);
-	Check(dmx.Compose()[10] == 5, "overlay release");
 	SpscQueue<uint64_t, 64> queue;
 	std::thread producer([&] {
 		for (uint64_t i = 0; i < 1000000; ++i)
@@ -355,5 +340,5 @@ int main()
 	};
 	Check(burstUnderruns(80) > 0, "jitter test did not exercise starvation");
 	Check(burstUnderruns(150) == 0, "Wi-Fi burst exceeds default jitter protection");
-	std::cout << "MTU, watermark, heartbeat, overlay release, SPSC stress, loss, overload and clock drift passed\n";
+	std::cout << "MTU, watermark, heartbeat, ArtDmx, SPSC stress, loss, overload and clock drift passed\n";
 }

@@ -1,5 +1,6 @@
 #include "radius_tx.h"
 #include <core/thread_config.h>
+#include <algorithm>
 
 namespace Radius {
 
@@ -12,10 +13,7 @@ void RadiusTx::Start()
 	ConfigureThread(mConfig.mCoreAffinity);
 	mBus.Open(mConfig.mBindAddress, mConfig.mPeerAddress, mConfig.mBusPort, false);
 	if (mConfig.mArtnetEnabled)
-	{
 		mArtnet.StartListening();
-		mOverlay.Start();
-	}
 	if (mConfig.mAudioEnabled)
 		mAudio.Start();
 	mPoll = mLoop.AddPoller([this] {
@@ -75,7 +73,7 @@ void RadiusTx::Tick()
 		p.set_sequence_number(++mDmxSequence);
 		std::array<uint8_t, DmxFrameSize> frame{};
 		if (mDmxAt && now - mDmxAt < DmxInputTimeoutMilliseconds)
-			frame = mDmx.Compose();
+			frame = mDmx;
 		p.mutable_lighting()->set_channels(frame.data(), frame.size());
 		mBus.Send(p);
 		mLastDmxSend = now;
@@ -108,14 +106,8 @@ void RadiusTx::OnDmxMessage(const DmxFrame& frame, int universe)
 {
 	if (universe != mConfig.mDmxUniverse)
 		return;
-	mDmx.Base(frame);
+	std::copy(frame.begin(), frame.end(), mDmx.begin());
 	mDmxAt = SteadyMs();
-}
-
-void RadiusTx::OnOverlayMessage(const OverlayIdl::OverlayMessage& overlay)
-{
-	if (overlay.mUniverse == mConfig.mDmxUniverse)
-		mDmx.Overlay(overlay);
 }
 
 } // namespace Radius

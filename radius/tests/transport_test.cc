@@ -1,4 +1,3 @@
-#include <proto/radius/validation.h>
 #include <network/udp_server.h>
 #include <network/bus_socket.h>
 #include <core/clock.h>
@@ -116,19 +115,6 @@ void CheckBusPackets()
 
 int main()
 {
-	OverlayIdl::OverlayMessage overlay{}, parsed{};
-	overlay.mNumOverlays = 1;
-	overlay.mOverlays[0] = {0, 512};
-	Check(DecodeOverlayPacket(&overlay, sizeof(overlay), parsed));
-	Check(!DecodeOverlayPacket(&overlay, 7, parsed));
-	overlay.mNumOverlays = 101;
-	Check(!DecodeOverlayPacket(&overlay, sizeof(overlay), parsed));
-	overlay.mNumOverlays = 1;
-	overlay.mOverlays[0] = {511, 2};
-	Check(!DecodeOverlayPacket(&overlay, sizeof(overlay), parsed));
-	overlay.mOverlays[0] = {65535, 65535};
-	Check(!DecodeOverlayPacket(&overlay, sizeof(overlay), parsed));
-
 	// Real UDP proves that a short datagram never exposes the stale buffer tail.
 	EventLoop loop;
 	Receiver receiver(loop);
