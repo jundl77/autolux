@@ -122,6 +122,12 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P63: After reconstructing the programs, record a fresh 156 BPM reference run
   before evaluating it. Keep the formulas and alignment policy fixed for that
   final check; 120/140 BPM captures remain available for detailed diagnostics.
+- P64: Readiness must execute each registered Lua program once against the
+  selected fixture patch, with no network output, and reject script/group errors
+  before starting Radius. Parsing a rig and listing filenames cannot detect an
+  incompatible saved patch. This is a startup probe; replay tests cover the
+  programs' later branches. Preserve custom saved patches; update this machine's
+  saved default only after confirming it is the unchanged six-fixture default.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -248,6 +254,12 @@ Hardware audition is explicitly separate from deterministic offline validation.
   Both 120 and 140 BPM reference captures completed, covering two full cycles of
   every look. Native palette/keyframe extraction and independent curve comparison
   continue. No Radius, renderer or physical-output process is running.
+- 2026-10-25 10:27 local: native files and independent captures establish compact
+  colour, intensity and movement formulas. Lua reconstruction and 14-fixture room
+  patch are under regression review. Comparison budgets are frozen from reference
+  cadence before candidate evaluation; direct captured-value anchors will check
+  finer waveform accuracy. Review found startup did not execute scripts against
+  the saved rig; that readiness defect is being fixed before final publication.
 
 - 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
   engine suites pass independently. Lead reviewed public boundaries and found
