@@ -638,14 +638,13 @@ STYLESHEET = (
 body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', sans-serif; }
 .dashboard { max-width: 1680px; margin: auto; padding: 26px 32px 32px; }
 .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
-.masthead { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+.masthead { display: flex; justify-content: flex-start; align-items: center; gap: 28px;
             margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid #1b2735; }
 .masthead h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -.6px; }
-.dashboard-nav { justify-self: center; }
+.dashboard-nav { flex: 0 0 auto; }
 .dashboard-tabs { gap: 6px; }
 .dashboard-tab:hover { color: #e6edf3 !important; background: #131c27 !important; }
 .subtitle, .section-heading p { color: #9baabb; font-size: 12px; margin: 0; }
-.window-label { font-size: 11px; color: #9baabb; text-align: right; }
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
@@ -693,7 +692,7 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .fixture-actions button:hover { background: #223449; }
 #fixture-status { color: #9baabb; font-size: 12px; }
 #config-panel details { margin-top: 22px; color: #9baabb; font-size: 12px; line-height: 1.8; }
-.footer { display: flex; justify-content: space-between; color: #8293a6; font-size: 11px; margin-top: 18px; }
+.footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
            height: '''
@@ -1305,7 +1304,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                             for label in ('Control', 'Telemetry', 'Config')
                         ],
                     ),
-                    html.Div('Audio · light · control', className='window-label'),
                 ],
                 className='masthead',
             ),
@@ -1416,7 +1414,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             config_panel,
             html.Footer(
                 [
-                    html.Span('Autolux · Starfire · Radius'),
                     html.A('Prometheus metrics', href='/metrics'),
                 ],
                 className='footer',
