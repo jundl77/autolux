@@ -179,6 +179,23 @@ impl Engine {
         Ok(())
     }
 
+    pub fn play_sequence(
+        &mut self,
+        at_seconds: f64,
+        sequence_id: &str,
+        transition: Transition,
+    ) -> Result<()> {
+        let (bank, sequence) = self.catalog.resolve(sequence_id)?.clone();
+        self.apply(
+            at_seconds,
+            &Command::Select {
+                bank,
+                sequence,
+                transition,
+            },
+        )
+    }
+
     pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
         use wire::{ParameterType, parameter::Value};
         let command = match (

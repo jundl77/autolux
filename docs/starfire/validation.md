@@ -4,9 +4,9 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 
 | Check | Result |
 | --- | --- |
-| Python | Full suite: 2,398 passed in 7m50s. Final standalone protocol: 44 focused checks passed, including generated Python-to-Rust messages, initialization/runtime brightness changes, framing, reply correlation and shutdown darkness. |
+| Python | Prior full suite: 2,398 passed in 7m50s. Controller-owned Login: 76 focused CLI/production checks passed, including generated Python-to-Rust messages, asset preservation/bounds, initialization/runtime brightness, error replies, stalled progress and shutdown darkness. |
 | Startup/dashboard follow-up | 226 tests passed: CLI lifecycle, delayed capture/song clocks, telemetry freshness/rates, controller/client/replay, simulation and committed analysis digest comparisons. Desktop browser review covered Control, Telemetry and Config without browser errors or horizontal overflow. |
-| Rust | Final simplification: 42 focused protocol, lifecycle, engine and replay checks passed. Authored-loop DMX hashes are unchanged. The preceding full suite and performance gates passed; strict Clippy, rustfmt and the final release build pass. |
+| Rust | Controller-owned Login: 41 focused protocol, lifecycle, fixture and replay checks passed. Supplied assets reproduce file-loaded DMX; probing leaves no playback state. Authored-loop hashes are unchanged. The preceding full suite and performance gates passed; strict Clippy, rustfmt and the release build pass. |
 | Radius | Both executables built; all four native test groups passed. |
 | Distribution | Wheel/source package and formatting passed. Standard generated Python Protobuf bindings and typing stubs are packaged; isolated wheel import and message round-trip passed without repository access. Eight build failure/propagation tests passed. |
 | Production readiness | This branch's `autolux --prod --check` passed in 2.2 seconds: binaries, Lua against the saved fixtures, required sequence identities, model, capture and SSH. |

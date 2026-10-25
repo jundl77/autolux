@@ -37,9 +37,9 @@ flowchart TB
     Music -->|"PCM / PyAudio capture"| Analysis
     Music -->|"PCM / WASAPI capture"| TX
     Decisions -->|"Starfire Protobuf / framed process pipes"| Timing
-    Timing -->|"Starfire Protobuf / process pipes: replies, metrics, heartbeat"| Decisions
+    Timing -->|"Starfire Protobuf / pipes: LoginReply, errors, metrics, heartbeat"| Decisions
     Replay -->|"Versioned JSON replay file"| Timing
-    Dashboard -->|"Validated rig JSON: loaded at startup"| Frames
+    Dashboard -->|"Starfire Protobuf Login: rig, profiles, Lua sources"| Timing
     Frames -->|"Art-Net ArtDmx / UDP 6454"| TX
     TX -->|"Local health JSON / Python monitoring"| Dashboard
     RX -->|"WASAPI audio output"| Speakers
@@ -51,10 +51,11 @@ flowchart TB
 
 - **Music input:** the same feed is captured independently for analysis and room playback.
 - **Audio analysis:** detects beats, tempo and nine section classes; measures smoothed RMS loudness.
-- **Lighting decisions and show delay:** commits sections, selects bank/name, requests transitions
+- **Lighting decisions and show delay:** commits sections, selects a sequence ID, requests transitions
   and accents, and delays commands to match TX audio.
-- **Dashboard and fixture setup:** monitors the show and edits addresses, profiles, calibration
-  and named groups. Browser access uses HTTP on port 8765.
+- **Dashboard and fixture setup:** monitors the show and owns addresses, profiles, calibration
+  and named groups. Autolux supplies these and its Lua sources at login. Browser access
+  uses HTTP on port 8765.
 - **Beat timing and live controls:** receives typed commands, interpolates musical position
   between beats and supplies explicit time to the renderer.
 - **Banked Lua sequences:** describe baseline colour, brightness and movement using groups.
@@ -74,9 +75,11 @@ The CLI launches local processes and deploys/starts RX using **SCP over SSH**.
 [Starfire's contract](../proto/starfire/starfire.proto) uses a one-byte message type
 and four-byte big-endian payload length before each standalone Protobuf message
 on owned stdin/stdout pipes.
-Login carries initialization settings; its reply confirms the owned session.
+Login carries the complete rig, required profiles, Lua sources and initial settings;
+LoginReply confirms readiness. Asset edits apply on a new session.
 The four control families are PlaySequence, active effects, UpdateBeat and
-SetParameter; each has a typed reply. See the [protocol](starfire/protocol-design.md).
+SetParameter. Rejections use ErrorReply; Metrics reports command progress.
+See the [protocol](starfire/protocol-design.md).
 [Radius's contract](../proto/radius/radius.proto) uses Protobuf UDP datagrams.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
 
@@ -89,11 +92,10 @@ Both links exchange 10-second heartbeats and time out after 30 seconds.
   animation speed without jumping when speed changes. Beat pulses use musical position;
   movement can use animation position.
 - **Elapsed musical beats:** accumulated beats at the current tempo, without phase jumps.
-  Crossfade and accent durations use this, so a corrected beat estimate cannot expire
-  an accent early or lengthen a transition.
+  Crossfades use this so a corrected beat estimate cannot change their duration.
 - **Render cadence:** when another frame is computed. **40 Hz means every 25 ms**:
   20 updates per beat at 120 BPM, 10 at 240 BPM. BPM does not set the frame rate.
-- **Monotonic elapsed time:** paces the live host and expires timeouts. It only moves forward,
+- **Monotonic elapsed time:** paces the live host, expires timed accents and timeouts. It only moves forward,
   independently of calendar time. The engine receives explicit seconds, so replay is
   independent of computer speed and wall time.
 - **Audio-frame position:** Radius's media clock counts stereo sample frames since session
@@ -113,7 +115,8 @@ handoff change, tracked in the [decision log](starfire/decisions.md).
 
 ## Show behavior
 
-- Selecting the active bank/name continues its loop. A different selection changes the look;
+- Selecting the active sequence ID continues its loop. Banks group the supplied scripts.
+  A different selection changes the look;
   transitions are cuts or crossfades measured in beats.
 - Accents and persistent overrides affect only their targeted properties. Clearing them
   reveals the continuing baseline. Master brightness and blackout act last.

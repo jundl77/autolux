@@ -23,36 +23,24 @@ COMMAND_MESSAGES = {
 }
 EVENT_MESSAGES = {
     wire.LOGIN_REPLY: wire.LoginReply,
-    wire.PLAY_SEQUENCE_REPLY: wire.PlaySequenceReply,
-    wire.SET_ACTIVE_EFFECT_REPLY: wire.SetActiveEffectReply,
-    wire.UNSET_ACTIVE_EFFECT_REPLY: wire.UnsetActiveEffectReply,
-    wire.UPDATE_BEAT_REPLY: wire.UpdateBeatReply,
-    wire.SET_PARAMETER_REPLY: wire.SetParameterReply,
+    wire.ERROR_REPLY: wire.ErrorReply,
     wire.HEARTBEAT: wire.Heartbeat,
     wire.METRICS: wire.Metrics,
 }
 MESSAGE_TYPE_BY_CLASS = {
     message: message_type for message_type, message in (COMMAND_MESSAGES | EVENT_MESSAGES).items()
 }
-REPLY_TYPES = {
-    wire.Login: wire.LoginReply,
-    wire.PlaySequence: wire.PlaySequenceReply,
-    wire.SetActiveEffect: wire.SetActiveEffectReply,
-    wire.UnsetActiveEffect: wire.UnsetActiveEffectReply,
-    wire.UpdateBeat: wire.UpdateBeatReply,
-    wire.SetParameter: wire.SetParameterReply,
-    wire.Heartbeat: wire.Heartbeat,
-}
 
 
 def build_command(command: dict | Message) -> Message:
     """Copy a generated command, or adapt the application's replay command shape."""
     if isinstance(command, Message):
-        if type(command) not in REPLY_TYPES:
+        if type(command) not in COMMAND_MESSAGES.values():
             raise ValueError('Expected a Starfire client command')
         message = type(command)()
         message.CopyFrom(command)
-        message.command_id = 0
+        if not isinstance(message, wire.Heartbeat):
+            message.command_id = 0
     else:
         _finite(command)
         try:
@@ -67,8 +55,7 @@ def build_command(command: dict | Message) -> Message:
             elif kind == 'select':
                 transition = value.pop('transition', {'kind': 'cut'})
                 message = wire.PlaySequence(
-                    bank=value.pop('bank'),
-                    sequence=value.pop('sequence'),
+                    sequence_id=f'{value.pop("bank")}/{value.pop("sequence")}',
                     transition=_transition(transition),
                     **value,
                 )
@@ -145,9 +132,9 @@ def _active_effect(value):
 
 
 def encode_command(message: Message) -> bytes:
-    if type(message) not in REPLY_TYPES:
+    if type(message) not in COMMAND_MESSAGES.values():
         raise ValueError('Expected a Starfire client command')
-    if not 0 < message.command_id <= MAX_COMMAND_ID:
+    if not isinstance(message, wire.Heartbeat) and not 0 < message.command_id <= MAX_COMMAND_ID:
         raise ValueError('Starfire command ID must be positive')
     payload = message.SerializeToString()
     if len(payload) > MAX_MESSAGE_BYTES:

@@ -3,7 +3,7 @@
   "implementation": {
     "rates": "autolux/lib/telemetry_history.py derives completed render and skipped deadline counter differences over renderer elapsed time. Repeated fresh reports hold the prior interval rate; restarts/outages clear it.",
     "duration": "starfire/src/live.rs measures engine.render_at duration; autolux/lib/telemetry_history.py exposes the last completed render sample in milliseconds, not a timestamp or average.",
-    "protocol": "proto/starfire/starfire.proto is the sole contract: standalone Login/Reply, four command families with named replies, Metrics and Heartbeat. Parameter is a global enum type plus number/boolean value. PlaySequence carries bank/sequence strings directly. SetActiveEffect carries literal fixture properties and optional duration_seconds. User explicitly removed generic catalogs, sequence parameter scopes, blend operations and lifetime structures."
+    "protocol": "proto/starfire/starfire.proto is the sole contract: Login carries controller-owned typed rig/profiles, Lua sources and initial settings; LoginReply means ready. Four command families are silent on success; ErrorReply reports rejection. Metrics and independent empty Heartbeat report progress and liveness. Parameter is a global enum type plus number/boolean value. PlaySequence uses one globally unique sequence_id; banks group supplied scripts. SetActiveEffect carries literal fixture properties and optional duration_seconds."
   },
   "readers": {
     "fork_turns": "none",
@@ -131,7 +131,7 @@
     },
     {
       "concept": "User-selected core vocabulary and typed parameter variants",
-      "implementation": "proto/starfire/starfire.proto: RendererCommand, SetParameter, PlaySequence, SetActiveEffect and their replies. Built-in parameter oneof binds each identity to its value type; dynamic names only identify declared Lua controls.",
+      "implementation": "proto/starfire/starfire.proto: standalone SetParameter, PlaySequence and SetActiveEffect. ParameterType defines global identities; a number/boolean value is validated against the enum. User-selected Login includes all typed fixture assets and Lua source, with readiness confirmed by LoginReply.",
       "attempts": [
         {
           "names": [
@@ -175,6 +175,19 @@
         }
       ],
       "disposition": "User-selected vocabulary is a contextual exception. Behaviors and units are explicit in schema and tested; removed misleading generic parameter target/key structures."
+    },
+    {
+      "concept": "Ordered command processing progress",
+      "implementation": "starfire/src/live.rs run_live advances last_processed_command_id for every accepted or rejected command in input order; proto/starfire/starfire.proto Metrics documents both outcomes. cli/starfire_runtime.py _record_progress rejects backward/unsent IDs and detects stalled processing independently of liveness.",
+      "attempts": [
+        {
+          "names": ["last_processed_command_id"],
+          "reader": "/root/blind_processed_progress",
+          "prediction": "`last_processed_command_id` likely stores the identifier of the most recent command whose processing has completed.\n\nAmbiguities:\n- “Processed” could mean attempted, successfully completed, or merely acknowledged.\n- “Last” could mean most recently completed or highest identifier in an ordered sequence.\n- It does not indicate whether this is a checkpoint for skipping earlier commands or just diagnostic state.\n\nNo unclear abbreviations.",
+          "comparison": "Aligned on completed command progress, but names alone do not establish accepted-or-rejected semantics or ordered processing. Retain the concise name with explicit schema contract and behavioral tests; not a blind pass on those invariants."
+        }
+      ],
+      "disposition": "Contextual exception: conventional progress-counter terminology; precise ordering/outcome semantics documented. Bounded review ends here."
     }
   ],
   "user_design_decisions": "Final names and protocol simplifications are explicitly user-selected, not a claimed blind-naming pass. Prior predictions are retained as review evidence; rejected abstractions are not part of the current schema."

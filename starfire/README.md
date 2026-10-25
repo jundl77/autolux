@@ -21,7 +21,7 @@ named groups and helpers in `src/lua/lighting.lua`; never depend on render count
 `ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, or `nil` until
 measured. Bundled sequences keep their baseline brightness when it is unknown.
 The supplied sequences expect `wash`, `movers` and `strip` groups in the rig.
-Selecting the current bank/name keeps it running. Overrides affect only their
+Selecting the current sequence ID keeps it running. Overrides affect only their
 properties; clearing reveals the continuing baseline. Global brightness,
 animation speed, blackout and measured audio level use typed parameters.
 
@@ -35,11 +35,14 @@ of 20 means 20 seconds of show rendered per wall-clock second. This includes
 Lua and fixture encoding, excluding file output and network pacing. Performance
 tests require 10x for the room rig and 2x for 64 fixtures over a 90-second show.
 
-Live mode starts without output resources. `Login` supplies rig, sequences,
-Art-Net destination and initial typed parameters; a successful reply owns one
-session rendering at 40 Hz. Closing the session blacks out and releases output.
-Heartbeats run both ways every ten seconds and expire after thirty seconds.
-Standalone commands and replies are generated from [starfire.proto](../proto/starfire/starfire.proto).
+Live mode starts without output resources. Autolux supplies the complete typed
+fixture patch, profiles, banked Lua sources, unicast Art-Net destination and
+initial parameters in `Login`. Starfire validates every script against this rig
+before `LoginReply` confirms readiness at 40 Hz; live mode loads no asset files.
+Closing the session blacks out and releases output. Independent heartbeats run
+both ways every ten seconds and expire after thirty seconds. Only login has a
+success reply; rejected commands produce `ErrorReply`, and `Metrics` reports the
+last processed command ID. Standalone messages are generated from [starfire.proto](../proto/starfire/starfire.proto).
 Each frame carries a message type, bounded length and generated Protobuf payload.
 An empty `PlaySequence` enters idle; no sequence restarts on repeated selection.
 

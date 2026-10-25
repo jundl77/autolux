@@ -2,7 +2,6 @@
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
@@ -13,7 +12,7 @@ use anyhow::{Context, Result, bail, ensure};
 use crate::artnet::ArtNetOutput;
 use crate::engine::Engine;
 use crate::fixtures::FixtureRig;
-use crate::model::{DEFAULT_FRAME_RATE_HZ, FixtureStates};
+use crate::model::{Command, DEFAULT_FRAME_RATE_HZ, FixtureStates, Transition};
 use crate::protocol::{
     ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message, read_control,
     wire, write_event,
@@ -22,7 +21,7 @@ use crate::script::SequenceCatalog;
 
 const MAX_QUEUED_CONTROLS: usize = 1024;
 const MAX_CONTROLS_PER_FRAME: usize = 32;
-// Each queued command can produce its reply plus a metrics event.
+// Rejections and state changes can each produce one event per command.
 const MAX_QUEUED_EVENTS: usize = 2 * MAX_QUEUED_CONTROLS + 4;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -41,26 +40,39 @@ struct LiveSession {
 
 impl LiveSession {
     fn login(login: &wire::Login) -> Result<Self> {
-        ensure!(
-            !login.rig_path.is_empty() && !login.sequences_path.is_empty(),
-            "login requires rig and sequence paths"
-        );
         let destination: SocketAddrV4 = login
             .artnet_destination
             .parse()
             .context("invalid Art-Net IPv4 destination")?;
-        let rig = FixtureRig::load(Path::new(&login.rig_path))?;
-        let catalog = SequenceCatalog::load(Path::new(&login.sequences_path))?;
+        let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
+        let catalog = SequenceCatalog::from_scripts(&login.scripts)?;
+        let sequences = catalog.list();
+        let mut probe = Engine::new(rig.clone(), catalog.clone())?;
+        for parameter in &login.parameters {
+            probe.set_parameter(0.0, parameter)?;
+        }
+        for sequence in sequences {
+            probe.apply(
+                0.0,
+                &Command::Select {
+                    bank: sequence.bank,
+                    sequence: sequence.sequence,
+                    transition: Transition::Cut,
+                },
+            )?;
+            let frame = probe.render_at(0.0)?;
+            if let Some(error) = frame.script_error {
+                bail!(error);
+            }
+        }
+        drop(probe);
+        // Probing must not carry fixture positions or script state into playback.
         let mut engine = Engine::new(rig.clone(), catalog)?;
         for parameter in &login.parameters {
             engine.set_parameter(0.0, parameter)?;
         }
         let local = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-        let output = if login.broadcast {
-            ArtNetOutput::bind_broadcast(local, destination)?
-        } else {
-            ArtNetOutput::bind(local, destination)?
-        };
+        let output = ArtNetOutput::bind(local, destination)?;
         let last_states = rig.empty_states();
         Ok(Self {
             rig,
@@ -77,6 +89,7 @@ impl LiveSession {
         rendered_frames: u64,
         missed_render_deadlines: u64,
         queued_commands: usize,
+        last_processed_command_id: u64,
     ) -> Result<wire::Metrics> {
         let started = Instant::now();
         let frame = self.engine.render_at(at_seconds)?;
@@ -97,6 +110,7 @@ impl LiveSession {
             active_sequence: frame.active_sequence.unwrap_or_default(),
             script_error: frame.script_error.unwrap_or_default(),
             runtime_error: String::new(),
+            last_processed_command_id,
         })
     }
 
@@ -145,14 +159,16 @@ fn receive_controls(
     loop {
         match read_control(&mut input) {
             Ok(Some(control)) => {
-                if control.command_id() <= last_command_id {
-                    record_failure(
-                        &failure,
-                        "command IDs must increase within the renderer session".into(),
-                    );
-                    return;
+                if let Some(command_id) = control.command_id() {
+                    if command_id <= last_command_id {
+                        record_failure(
+                            &failure,
+                            "command IDs must increase within the renderer session".into(),
+                        );
+                        return;
+                    }
+                    last_command_id = command_id;
                 }
-                last_command_id = control.command_id();
                 queued.fetch_add(1, Ordering::Relaxed);
                 if let Err(error) = sender.try_send(control) {
                     queued.fetch_sub(1, Ordering::Relaxed);
@@ -177,32 +193,6 @@ fn send_event(events: &mpsc::SyncSender<ServerMessage>, event: ServerMessage) ->
         .context("renderer event queue overflow or reader closed")
 }
 
-fn operation_reply(command: &ClientMessage, error: String) -> ServerMessage {
-    let command_id = command.command_id();
-    match command {
-        ClientMessage::PlaySequence(_) => {
-            ServerMessage::PlaySequenceReply(wire::PlaySequenceReply { command_id, error })
-        }
-        ClientMessage::SetActiveEffect(_) => {
-            ServerMessage::SetActiveEffectReply(wire::SetActiveEffectReply { command_id, error })
-        }
-        ClientMessage::UnsetActiveEffect(_) => {
-            ServerMessage::UnsetActiveEffectReply(wire::UnsetActiveEffectReply {
-                command_id,
-                error,
-            })
-        }
-        ClientMessage::UpdateBeat(_) => {
-            ServerMessage::UpdateBeatReply(wire::UpdateBeatReply { command_id, error })
-        }
-        ClientMessage::SetParameter(_) => {
-            ServerMessage::SetParameterReply(wire::SetParameterReply { command_id, error })
-        }
-        ClientMessage::Login(_) | ClientMessage::Heartbeat(_) => {
-            unreachable!("session operations have their own replies")
-        }
-    }
-}
 /// Readers and writers cannot block the renderer or its final blackout. The owned
 /// process exits without joining a pipe reader still waiting on its parent.
 pub fn run_live(
@@ -239,6 +229,7 @@ pub fn run_live(
     let mut next_frame = 0_u64;
     let mut rendered_frames = 0_u64;
     let mut missed_render_deadlines = 0_u64;
+    let mut last_processed_command_id = 0;
     let mut metrics = wire::Metrics::default();
     let playback = (|| -> Result<()> {
         while !stop.load(Ordering::Relaxed) {
@@ -274,6 +265,9 @@ pub fn run_live(
                 };
                 queued.fetch_sub(1, Ordering::Relaxed);
                 let command = control;
+                if let Some(command_id) = command.command_id() {
+                    last_processed_command_id = command_id;
+                }
                 match &command {
                     ClientMessage::Login(login) => {
                         let result = if session.is_some() {
@@ -281,40 +275,34 @@ pub fn run_live(
                         } else {
                             LiveSession::login(login)
                         };
-                        let error = match result {
+                        match result {
                             Ok(created) => {
                                 session = Some(created);
                                 last_client_heartbeat = Instant::now();
                                 last_server_heartbeat = Instant::now();
-                                String::new()
+                                report_metrics = true;
+                                send_event(
+                                    &events,
+                                    ServerMessage::LoginReply(wire::LoginReply {
+                                        command_id: login.command_id,
+                                        frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
+                                        max_message_bytes: MAX_MESSAGE_BYTES as u32,
+                                    }),
+                                )?;
                             }
-                            Err(error) => error_message(&error),
-                        };
-                        let success = error.is_empty();
-                        send_event(
-                            &events,
-                            ServerMessage::LoginReply(wire::LoginReply {
-                                command_id: command.command_id(),
-                                error,
-                                frame_rate_hz: if success { DEFAULT_FRAME_RATE_HZ } else { 0 },
-                                max_message_bytes: if success {
-                                    MAX_MESSAGE_BYTES as u32
-                                } else {
-                                    0
-                                },
-                            }),
-                        )?;
+                            Err(error) => send_event(
+                                &events,
+                                ServerMessage::ErrorReply(wire::ErrorReply {
+                                    command_id: login.command_id,
+                                    message: error_message(&error),
+                                }),
+                            )?,
+                        }
                     }
                     ClientMessage::Heartbeat(_) => {
                         ensure!(session.is_some(), "login is required before heartbeat");
                         last_client_heartbeat = Instant::now();
                         report_metrics = true;
-                        send_event(
-                            &events,
-                            ServerMessage::Heartbeat(wire::Heartbeat {
-                                command_id: command.command_id(),
-                            }),
-                        )?;
                     }
                     _ => {
                         let result = match &mut session {
@@ -325,11 +313,15 @@ pub fn run_live(
                                 "login is required before playback commands"
                             )),
                         };
-                        let error = result
-                            .err()
-                            .map(|error| error_message(&error))
-                            .unwrap_or_default();
-                        send_event(&events, operation_reply(&command, error))?;
+                        if let Err(error) = result {
+                            send_event(
+                                &events,
+                                ServerMessage::ErrorReply(wire::ErrorReply {
+                                    command_id: last_processed_command_id,
+                                    message: error_message(&error),
+                                }),
+                            )?;
+                        }
                     }
                 }
             }
@@ -348,12 +340,10 @@ pub fn run_live(
                 rendered_frames,
                 missed_render_deadlines,
                 queued.load(Ordering::Relaxed),
+                last_processed_command_id,
             )?;
             if last_server_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
-                send_event(
-                    &events,
-                    ServerMessage::Heartbeat(wire::Heartbeat { command_id: 0 }),
-                )?;
+                send_event(&events, ServerMessage::Heartbeat(wire::Heartbeat {}))?;
                 last_server_heartbeat = Instant::now();
                 report_metrics = true;
             }
@@ -375,6 +365,7 @@ pub fn run_live(
     };
     if let Err(error) = &result {
         metrics.runtime_error = error_message(error);
+        metrics.last_processed_command_id = last_processed_command_id;
         let _ = send_event(&events, ServerMessage::Metrics(metrics));
     }
     result
@@ -403,27 +394,45 @@ mod tests {
 
     #[test]
     fn dropping_a_session_blacks_out_and_releases_its_socket() {
-        let directory = tempfile::tempdir().unwrap();
-        let rig = directory.path().join("rig.json");
-        std::fs::write(&rig, r#"{"schema_version":1,"fixtures":[{"id":"lamp","profile":"generic_rgb","universe":0,"address":1}]}"#).unwrap();
-        let sequences = directory.path().join("sequences");
-        std::fs::create_dir_all(sequences.join("test")).unwrap();
-        std::fs::write(
-            sequences.join("test/steady.lua"),
-            "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(),1)} end}",
-        )
-        .unwrap();
         let listener = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         listener
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
         let login = wire::Login {
-            rig_path: rig.to_str().unwrap().into(),
-            sequences_path: sequences.to_str().unwrap().into(),
+            rig: Some(wire::Rig {
+                fixtures: vec![wire::Fixture {
+                    fixture_id: "lamp".into(),
+                    profile_id: "rgb".into(),
+                    address: 1,
+                    ..Default::default()
+                }],
+                profiles: vec![wire::FixtureProfile {
+                    profile_id: "rgb".into(),
+                    safe_values: vec![0; 3],
+                    rgb: vec![0, 1, 2],
+                    source: "test".into(),
+                    notes: "RGB fixture".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            scripts: vec![wire::Script {
+                sequence_id: "steady".into(),
+                bank: "test".into(),
+                lua_source:
+                    "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(),1), sf.pan_tilt(sf.all(),0.2,0.8)} end}"
+                        .into(),
+            }],
             artnet_destination: listener.local_addr().unwrap().to_string(),
             ..Default::default()
         };
         let mut session = LiveSession::login(&login).unwrap();
+        let idle = session.engine.render_at(0.0).unwrap();
+        assert_eq!(
+            idle.fixture_properties_before_strobe,
+            session.rig.empty_states(),
+            "preflight must not leak script positions into idle"
+        );
         session
             .engine
             .apply(
@@ -436,7 +445,7 @@ mod tests {
             )
             .unwrap();
         let source = session.output.as_ref().unwrap().local_addr().unwrap();
-        session.render(0.0, 1, 0, 0).unwrap();
+        session.render(0.0, 1, 0, 0, 1).unwrap();
         let mut packet = [0; 1024];
         listener.recv(&mut packet).unwrap();
         assert_eq!(

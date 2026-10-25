@@ -1,16 +1,17 @@
 import io
 import json
 import os
-from pathlib import Path
 import queue
 import socket
 import sys
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
-from cli import starfire_protocol as protocol, starfire_runtime
+from cli import starfire_protocol as protocol
+from cli import starfire_runtime
 from proto.starfire import starfire_pb2 as wire
 
 
@@ -162,7 +163,7 @@ _CHILD = r'''
 import json, sys, time
 from proto.starfire import starfire_pb2 as wire
 from cli.starfire_protocol import (
-    FRAME_HEADER, MAX_MESSAGE_BYTES, COMMAND_MESSAGES, MESSAGE_TYPE_BY_CLASS, REPLY_TYPES,
+    FRAME_HEADER, MAX_MESSAGE_BYTES, COMMAND_MESSAGES, MESSAGE_TYPE_BY_CLASS,
 )
 mode, recording = sys.argv[1:]
 def event(value):
@@ -175,19 +176,24 @@ if mode == 'malformed':
     sys.stdout.buffer.write(FRAME_HEADER.pack(wire.METRICS, MAX_MESSAGE_BYTES + 1))
     sys.stdout.buffer.flush()
 commands = []
+last_processed = 0
 while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
     message_type, length = FRAME_HEADER.unpack(prefix)
     value = COMMAND_MESSAGES[message_type].FromString(sys.stdin.buffer.read(length))
-    record = {'id': value.command_id, 'kind': type(value).__name__}
-    if isinstance(value, wire.PlaySequence) and value.sequence:
-        record['sequence'] = value.sequence
+    record = {'kind': type(value).__name__}
+    if not isinstance(value, wire.Heartbeat):
+        record['id'] = value.command_id
+        if mode != 'no_progress' or isinstance(value, wire.Login):
+            last_processed = value.command_id
+    if isinstance(value, wire.PlaySequence) and value.sequence_id:
+        record['sequence'] = value.sequence_id
     commands.append(record)
     if isinstance(value, wire.Login) and mode != 'no_login_reply':
         assert value.command_id == 1
-        assert value.rig_path and value.sequences_path
+        assert value.HasField('rig') and value.rig.fixtures and value.scripts
         assert value.artnet_destination
         if mode == 'login_error':
-            event(wire.LoginReply(command_id=value.command_id, error='fixture patch is missing'))
+            event(wire.ErrorReply(command_id=value.command_id, message='fixture patch is missing'))
         else:
             event(wire.LoginReply(command_id=value.command_id,
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES
@@ -195,20 +201,30 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
             event(wire.Heartbeat())
-            if mode != 'no_replies':
-                event(wire.Heartbeat(command_id=value.command_id))
-        event(wire.Metrics(rendered_frames=len(commands)))
-    elif not isinstance(value, wire.Login) and mode != 'no_replies':
-        error = 'unknown sequence' if mode == 'reject' and 'sequence' in record else ''
-        event(REPLY_TYPES[type(value)](command_id=value.command_id, error=error))
+        event(wire.Metrics(rendered_frames=len(commands), last_processed_command_id=last_processed))
+    elif isinstance(value, wire.SetParameter) and mode == 'reject':
+        event(wire.ErrorReply(command_id=value.command_id, message='brightness is out of range'))
 with open(recording, 'w') as output:
     json.dump(commands, output)
 '''
 
 
 def _fake_runtime(tmp_path, mode='normal', **kwargs):
+    rig = tmp_path / 'rig.json'
+    rig.write_text(
+        json.dumps(
+            {
+                'schema_version': 1,
+                'fixtures': [{'id': 'lamp', 'profile': 'generic_rgb', 'universe': 0, 'address': 1}],
+                'groups': {'wash': ['lamp']},
+            }
+        )
+    )
+    scripts = tmp_path / 'scripts'
+    (scripts / 'drop').mkdir(parents=True)
+    (scripts / 'drop/blue_impact.lua').write_text('return {render=function(ctx) return {} end}')
     runtime = starfire_runtime.StarfireRuntime(
-        sys.executable, tmp_path, tmp_path, '127.0.0.1:6454', tmp_path / 'run', **kwargs
+        sys.executable, rig, scripts, '127.0.0.1:6454', tmp_path / 'run', **kwargs
     )
     runtime.command = [sys.executable, '-c', _CHILD, mode, str(tmp_path / 'commands.json')]
     return runtime
@@ -231,10 +247,10 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     assert child.poll() == 0
     assert json.loads((tmp_path / 'commands.json').read_text()) == [
         {'id': 1, 'kind': 'Login'},
-        {'id': 2, 'kind': 'Heartbeat'},
-        {'id': 3, 'kind': 'PlaySequence', 'sequence': 'blue_impact'},
-        {'id': 4, 'kind': 'PlaySequence'},
-        {'id': 5, 'kind': 'Heartbeat'},
+        {'kind': 'Heartbeat'},
+        {'id': 2, 'kind': 'PlaySequence', 'sequence': 'drop/blue_impact'},
+        {'id': 3, 'kind': 'PlaySequence'},
+        {'kind': 'Heartbeat'},
     ]
     assert all(not thread.is_alive() for thread in runtime._threads)
 
@@ -294,9 +310,7 @@ def test_startup_waits_for_login_reply_before_sending_any_other_command(tmp_path
 
 def test_rejected_login_reports_initialization_error_and_reaps_owned_process(tmp_path):
     runtime = _fake_runtime(tmp_path, 'login_error')
-    with pytest.raises(
-        RuntimeError, match='LoginReply rejected command 1: fixture patch is missing'
-    ):
+    with pytest.raises(RuntimeError, match='rejected command 1: fixture patch is missing'):
         with runtime:
             pytest.fail('failed initialization became ready')
     assert runtime.process is None
@@ -325,7 +339,7 @@ def test_thread_start_failure_closes_pipes_without_masking_the_original_error(
     assert all(not thread.is_alive() for thread in runtime._threads)
 
 
-def test_missing_heartbeat_reply_fails_health_and_shutdown_is_bounded(tmp_path, monkeypatch):
+def test_missing_server_heartbeat_fails_health_and_shutdown_is_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(starfire_runtime, 'HEARTBEAT_TIMEOUT_SECONDS', 0.25)
     with _fake_runtime(tmp_path, 'no_heartbeat') as runtime:
         child = runtime.process
@@ -335,37 +349,37 @@ def test_missing_heartbeat_reply_fails_health_and_shutdown_is_bounded(tmp_path, 
     assert child.poll() == 0
 
 
-def test_missing_command_replies_fail_even_if_heartbeats_and_metrics_continue(
+def test_stalled_command_progress_fails_even_if_heartbeats_and_metrics_continue(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(starfire_runtime, 'HEARTBEAT_TIMEOUT_SECONDS', 0.25)
     monkeypatch.setattr(starfire_runtime, 'HEARTBEAT_INTERVAL_SECONDS', 0.05)
-    with _fake_runtime(tmp_path, 'no_replies') as runtime:
+    with _fake_runtime(tmp_path, 'no_progress') as runtime:
+        runtime.send_command({'kind': 'stop'})
         time.sleep(0.3)
         assert runtime.snapshot()['age_seconds'] < 0.2
-        with pytest.raises(RuntimeError, match='acknowledgement timed out'):
+        with pytest.raises(RuntimeError, match='command processing stalled'):
             runtime.check_health()
 
 
 def test_rejected_command_reports_reason_and_reaps_renderer(tmp_path):
     with _fake_runtime(tmp_path, 'reject') as runtime:
         child = runtime.process
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'sequence': 'missing'})
+        runtime.send_command({'kind': 'set_master', 'intensity': 2.0})
         deadline = time.monotonic() + 2
         while runtime._fault is None and time.monotonic() < deadline:
             time.sleep(0.01)
-        with pytest.raises(RuntimeError, match='rejected command 3: unknown sequence'):
+        with pytest.raises(RuntimeError, match='rejected command 2: brightness is out of range'):
             runtime.check_health()
     assert child.poll() == 0
 
 
-def test_injected_heartbeat_ids_follow_pipe_order_and_fast_responses_are_registered(
-    tmp_path, monkeypatch
-):
+def test_heartbeats_do_not_consume_command_ids_or_require_replies(tmp_path, monkeypatch):
     from unittest.mock import Mock
 
     runtime = _fake_runtime(tmp_path)
     runtime.process = Mock()
+    runtime._login = wire.Login()
     runtime._outgoing.put(protocol.build_command({'kind': 'stop'}))
     runtime._outgoing.put(protocol.build_command({'kind': 'stop'}))
     runtime._outgoing.put(None)
@@ -373,64 +387,62 @@ def test_injected_heartbeat_ids_follow_pipe_order_and_fast_responses_are_registe
     monkeypatch.setattr(starfire_runtime.time, 'monotonic', lambda: now)
     recorded = []
 
-    def write_and_acknowledge(encoded):
+    def write_and_observe(encoded):
         nonlocal now
-        message_type, _ = protocol.FRAME_HEADER.unpack(encoded[: protocol.FRAME_HEADER.size])
-        command = protocol.COMMAND_MESSAGES[message_type].FromString(
-            encoded[protocol.FRAME_HEADER.size :]
-        )
-        recorded.append((command.command_id, type(command).__name__))
-        # Simulate a child replying while the write is still in progress.
-        runtime._accept_reply(protocol.REPLY_TYPES[type(command)](command_id=command.command_id))
+        kind, _ = protocol.FRAME_HEADER.unpack(encoded[: protocol.FRAME_HEADER.size])
+        command = protocol.COMMAND_MESSAGES[kind].FromString(encoded[protocol.FRAME_HEADER.size :])
+        recorded.append((getattr(command, 'command_id', None), type(command).__name__))
         if isinstance(command, wire.Login):
+            runtime._record_progress(command.command_id)
             runtime._ready.set()
-        if command.command_id == 3:
+        elif isinstance(command, wire.PlaySequence) and command.command_id == 2:
             now += starfire_runtime.HEARTBEAT_INTERVAL_SECONDS
 
-    runtime._write = write_and_acknowledge
+    runtime._write = write_and_observe
     runtime._write_commands()
     assert recorded == [
         (1, 'Login'),
-        (2, 'Heartbeat'),
+        (None, 'Heartbeat'),
+        (2, 'PlaySequence'),
+        (None, 'Heartbeat'),
         (3, 'PlaySequence'),
-        (4, 'Heartbeat'),
-        (5, 'PlaySequence'),
     ]
-    assert runtime._last_reply_id == runtime._last_sent_id == 5
-    assert not runtime._pending_replies
+    assert runtime._last_sent_id == 3
+    assert runtime._last_processed_id == 1
+    runtime._record_progress(3)
+    assert runtime._progress_deadline_at is None
     assert runtime._fault is None
     runtime.process.stdin.close.assert_called_once()
 
 
-@pytest.mark.parametrize(
-    'command_id,reply_type',
-    [
-        (0, wire.SetParameterReply),
-        (2, wire.SetParameterReply),
-        (1, wire.UpdateBeatReply),
-    ],
-)
-def test_unsolicited_out_of_order_and_wrong_operation_replies_are_rejected(
-    tmp_path, command_id, reply_type
-):
+@pytest.mark.parametrize('command_id', [0, 3])
+def test_backward_and_unsent_command_progress_is_rejected(tmp_path, command_id):
     runtime = _fake_runtime(tmp_path)
-    runtime._last_sent_id = 1
-    runtime._pending_replies.append((1, wire.SetParameterReply, time.monotonic() + 1))
-    with pytest.raises(ValueError):
-        runtime._accept_reply(reply_type(command_id=command_id))
-    assert runtime._last_reply_id == 0
-    assert len(runtime._pending_replies) == 1
+    runtime._last_sent_id = 2
+    runtime._last_processed_id = 1
+    with pytest.raises(ValueError, match='command progress'):
+        runtime._record_progress(command_id)
+    assert runtime._last_processed_id == 1
 
 
-def test_command_backlog_is_bounded_without_waiting_on_audio_thread(tmp_path, monkeypatch):
+def test_repeated_metrics_do_not_hide_stalled_command_progress(tmp_path, monkeypatch):
     runtime = _fake_runtime(tmp_path)
-    runtime._write = lambda _: None
-    monkeypatch.setattr(starfire_runtime, 'MAX_PENDING_COMMANDS', 2)
-    runtime._write_command(protocol.build_command({'kind': 'heartbeat'}))
-    runtime._write_command(protocol.build_command({'kind': 'stop'}))
-    with pytest.raises(RuntimeError, match='too many unacknowledged'):
-        runtime._write_command(protocol.build_command({'kind': 'stop'}))
-    assert runtime._last_sent_id == 2
+    runtime._last_sent_id = 3
+    runtime._last_processed_id = 1
+    runtime._progress_deadline_at = 10.0
+    monkeypatch.setattr(starfire_runtime.time, 'monotonic', lambda: 9.0)
+    runtime._record_progress(1)
+    assert runtime._progress_deadline_at == 10.0
+    runtime._record_progress(2)
+    assert runtime._progress_deadline_at == 9.0 + starfire_runtime.HEARTBEAT_TIMEOUT_SECONDS
+
+
+def test_unknown_sequence_is_rejected_before_queueing(tmp_path):
+    with _fake_runtime(tmp_path) as runtime:
+        with pytest.raises(ValueError, match='Unknown Starfire sequence'):
+            runtime.send_command(wire.PlaySequence(sequence_id='missing'))
+        assert runtime._outgoing.empty()
+        runtime.check_health()
 
 
 def test_full_command_queue_fails_instead_of_blocking_audio_thread(tmp_path):
@@ -488,10 +500,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
                     break
             else:
                 pytest.fail('no rendered lighting arrived')
-            while runtime._last_reply_id < 6 and time.monotonic() < deadline:
-                runtime.check_health()
-                time.sleep(0.01)
-            assert runtime._last_reply_id == 6
+            # Successful commands have no reply; their actual DMX proves application.
             runtime.send_command(
                 wire.SetParameter(parameter=wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=1.0))
             )
@@ -547,7 +556,7 @@ def test_preflight_renders_sequences_against_the_selected_patch(tmp_path):
 
 
 def test_preflight_rejects_valid_catalog_missing_an_autolux_sequence(tmp_path):
-    from autolux.lib.engine.effect_definitions import LightIntent, SEQUENCE_BY_LIGHT_INTENT
+    from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT, LightIntent
 
     root = Path(__file__).resolve().parents[2]
     binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')

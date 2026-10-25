@@ -62,26 +62,22 @@ messages!(ClientMessage {
 });
 messages!(ServerMessage {
     LoginReply,
-    PlaySequenceReply,
-    SetActiveEffectReply,
-    UnsetActiveEffectReply,
-    UpdateBeatReply,
-    SetParameterReply,
+    ErrorReply,
     Heartbeat,
     Metrics
 });
 
 impl ClientMessage {
-    pub fn command_id(&self) -> u64 {
-        match self {
+    pub fn command_id(&self) -> Option<u64> {
+        Some(match self {
             Self::Login(value) => value.command_id,
             Self::PlaySequence(value) => value.command_id,
             Self::SetActiveEffect(value) => value.command_id,
             Self::UnsetActiveEffect(value) => value.command_id,
             Self::UpdateBeat(value) => value.command_id,
             Self::SetParameter(value) => value.command_id,
-            Self::Heartbeat(value) => value.command_id,
-        }
+            Self::Heartbeat(_) => return None,
+        })
     }
 
     pub fn set_command_id(&mut self, command_id: u64) {
@@ -92,7 +88,7 @@ impl ClientMessage {
             Self::UnsetActiveEffect(value) => value.command_id = command_id,
             Self::UpdateBeat(value) => value.command_id = command_id,
             Self::SetParameter(value) => value.command_id = command_id,
-            Self::Heartbeat(value) => value.command_id = command_id,
+            Self::Heartbeat(_) => {}
         }
     }
 }
@@ -101,13 +97,8 @@ impl ServerMessage {
     pub fn command_id(&self) -> Option<u64> {
         Some(match self {
             Self::LoginReply(value) => value.command_id,
-            Self::PlaySequenceReply(value) => value.command_id,
-            Self::SetActiveEffectReply(value) => value.command_id,
-            Self::UnsetActiveEffectReply(value) => value.command_id,
-            Self::UpdateBeatReply(value) => value.command_id,
-            Self::SetParameterReply(value) => value.command_id,
-            Self::Heartbeat(value) => value.command_id,
-            Self::Metrics(_) => return None,
+            Self::ErrorReply(value) => value.command_id,
+            Self::Heartbeat(_) | Self::Metrics(_) => return None,
         })
     }
 }
@@ -155,7 +146,7 @@ pub fn read_control(input: &mut impl Read) -> Result<Option<ClientMessage>> {
     };
     let command = ClientMessage::decode(kind, &payload)?;
     ensure!(
-        command.command_id() > 0,
+        command.command_id().is_none_or(|id| id > 0),
         "client command ID must be positive"
     );
     Ok(Some(command))
@@ -185,7 +176,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
             },
         ),
         ClientMessage::PlaySequence(value) => {
-            if value.bank.is_empty() && value.sequence.is_empty() {
+            if value.sequence_id.is_empty() {
                 ensure!(
                     value.transition.is_none(),
                     "idle does not accept a transition"
@@ -198,14 +189,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 .and_then(|value| value.crossfade_beats)
                 .map(|duration_beats| Transition::Crossfade { duration_beats })
                 .unwrap_or(Transition::Cut);
-            engine.apply(
-                at_seconds,
-                &Command::Select {
-                    bank: value.bank.clone(),
-                    sequence: value.sequence.clone(),
-                    transition,
-                },
-            )
+            engine.play_sequence(at_seconds, &value.sequence_id, transition)
         }
         ClientMessage::SetParameter(value) => engine.set_parameter(
             at_seconds,

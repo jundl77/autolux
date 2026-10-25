@@ -3,27 +3,26 @@
 import json
 import logging
 import os
-from collections import deque
-from pathlib import Path
 import queue
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
-from proto.starfire import starfire_pb2 as wire
+from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
+from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
+from cli.starfire import DEFAULT_BINARY, DEFAULT_FIXTURE_STORE, DEFAULT_RIG, DEFAULT_SEQUENCES, ROOT
+from cli.starfire_assets import load_login
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
-    REPLY_TYPES,
     build_command,
     encode_command,
     read_event,
 )
-from cli.starfire import DEFAULT_BINARY, DEFAULT_FIXTURE_STORE, DEFAULT_RIG, DEFAULT_SEQUENCES, ROOT
-from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
-from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
+from proto.starfire import starfire_pb2 as wire
 
 HEARTBEAT_INTERVAL_SECONDS = 10.0
 HEARTBEAT_TIMEOUT_SECONDS = 30.0
@@ -111,17 +110,15 @@ class StarfireRuntime:
         *,
         startup_timeout=STARTUP_TIMEOUT_SECONDS,
         stop_timeout=STOP_TIMEOUT_SECONDS,
-        broadcast=False,
         initial_parameters=(),
     ):
         self.command = [str(Path(binary).resolve()), 'live']
-        self._login = wire.Login(
-            rig_path=str(Path(rig).resolve()),
-            sequences_path=str(Path(sequences).resolve()),
-            artnet_destination=artnet,
-            broadcast=broadcast,
-            parameters=initial_parameters,
-        )
+        self._rig_path = Path(rig).resolve()
+        self._sequence_directory = Path(sequences).resolve()
+        self._artnet_destination = artnet
+        self._initial_parameters = initial_parameters
+        self._login = None
+        self._sequence_ids = frozenset()
         self.run_dir = Path(run_dir)
         self.startup_timeout = startup_timeout
         self.stop_timeout = stop_timeout
@@ -139,11 +136,18 @@ class StarfireRuntime:
         self._job = None
         self._command_lock = threading.Lock()
         self._last_sent_id = 0
-        self._last_reply_id = 0
-        self._pending_replies = deque()
+        self._last_processed_id = 0
+        self._progress_deadline_at = None
 
     def __enter__(self):
         try:
+            self._login = load_login(
+                self._rig_path,
+                self._sequence_directory,
+                self._artnet_destination,
+                parameters=self._initial_parameters,
+            )
+            self._sequence_ids = frozenset(script.sequence_id for script in self._login.scripts)
             self.run_dir.mkdir(parents=True, exist_ok=False)
             with (self.run_dir / 'process.log').open('wb') as log:
                 self.process = subprocess.Popen(
@@ -184,6 +188,12 @@ class StarfireRuntime:
         if self._closing:
             raise RuntimeError('Starfire control channel is closing')
         message = build_command(command)
+        if (
+            isinstance(message, wire.PlaySequence)
+            and message.sequence_id
+            and message.sequence_id not in self._sequence_ids
+        ):
+            raise ValueError(f'Unknown Starfire sequence: {message.sequence_id}')
         # Leave room for the writer-assigned uint64 ID, including its field tag.
         if message.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES > MAX_MESSAGE_BYTES:
             raise ValueError('Starfire command exceeds the message limit')
@@ -196,12 +206,19 @@ class StarfireRuntime:
     def _read_events(self):
         try:
             while (event := read_event(self.process.stdout)) is not None:
+                if isinstance(event, wire.ErrorReply):
+                    if not 0 < event.command_id <= self._last_sent_id or not event.message:
+                        raise ValueError('Invalid Starfire error reply')
+                    raise RuntimeError(
+                        f'Starfire rejected command {event.command_id}: {event.message}'
+                    )
                 if isinstance(event, wire.Metrics):
                     metrics = event
                     if metrics.runtime_error:
                         raise RuntimeError(f'Starfire renderer failed: {metrics.runtime_error}')
                     if not self._ready.is_set():
                         raise ValueError('Starfire sent metrics before login')
+                    self._record_progress(metrics.last_processed_command_id)
                     self._health = {
                         'elapsed_seconds': metrics.elapsed_seconds,
                         'rendered_frames': metrics.rendered_frames,
@@ -212,31 +229,31 @@ class StarfireRuntime:
                         'active_bank': metrics.active_bank,
                         'active_sequence': metrics.active_sequence,
                         'script_error': metrics.script_error,
+                        'last_processed_command_id': metrics.last_processed_command_id,
                     }
                     self._health_at = time.monotonic()
                     if metrics.script_error:
                         raise RuntimeError(f'Starfire script failed: {metrics.script_error}')
                     continue
-                if isinstance(event, wire.Heartbeat) and event.command_id == 0:
+                if isinstance(event, wire.Heartbeat):
                     if not self._ready.is_set():
                         raise ValueError('Starfire sent a heartbeat before login')
                     self._heartbeat_at = time.monotonic()
                     continue
-                self._accept_reply(event)
                 if isinstance(event, wire.LoginReply):
                     if (
                         self._ready.is_set()
+                        or self._login is None
+                        or event.command_id != self._login.command_id
+                        or event.command_id == 0
                         or event.frame_rate_hz != DEFAULT_FRAME_RATE_HZ
                         or event.max_message_bytes != MAX_MESSAGE_BYTES
                     ):
                         raise ValueError('Unexpected Starfire login reply')
+                    self._record_progress(event.command_id)
                     self._heartbeat_at = time.monotonic()
                     self._ready.set()
                     continue
-                if not self._ready.is_set():
-                    raise ValueError('Starfire sent an event before readiness')
-                if isinstance(event, wire.Heartbeat):
-                    self._heartbeat_at = time.monotonic()
             if not self._closing:
                 raise RuntimeError('Starfire closed its event channel')
         except (OSError, RuntimeError, ValueError, DecodeError) as error:
@@ -248,7 +265,7 @@ class StarfireRuntime:
     def _write_commands(self):
         heartbeat_at = 0.0
         try:
-            self._write_command(build_command(self._login))
+            self._write_command(self._login)
             if not self._ready.wait(self.startup_timeout):
                 raise RuntimeError('Starfire did not become ready before its startup deadline')
             if self._closing or self._fault:
@@ -282,35 +299,30 @@ class StarfireRuntime:
             remaining = remaining[written:]
 
     def _write_command(self, message):
-        # Only the writer assigns IDs, including heartbeats inserted between controls.
+        if isinstance(message, wire.Heartbeat):
+            self._write(encode_command(message))
+            return
+        # Only the writer assigns command IDs; heartbeats are independent.
         with self._command_lock:
-            if len(self._pending_replies) >= MAX_PENDING_COMMANDS:
-                raise RuntimeError('Starfire has too many unacknowledged commands')
             message.command_id = self._last_sent_id + 1
             encoded = encode_command(message)
-            reply_type = REPLY_TYPES[type(message)]
-            self._pending_replies.append(
-                (message.command_id, reply_type, time.monotonic() + HEARTBEAT_TIMEOUT_SECONDS)
-            )
+            if self._last_sent_id == self._last_processed_id:
+                self._progress_deadline_at = time.monotonic() + HEARTBEAT_TIMEOUT_SECONDS
             self._last_sent_id = message.command_id
         # Register before writing: a fast child may respond during the write itself.
         self._write(encoded)
 
-    def _accept_reply(self, event):
+    def _record_progress(self, command_id):
         with self._command_lock:
-            if not self._pending_replies or self._pending_replies[0][:2] != (
-                event.command_id,
-                type(event),
-            ):
-                raise ValueError(
-                    f'Unexpected Starfire reply {type(event).__name__} for command {event.command_id}'
+            if not self._last_processed_id <= command_id <= self._last_sent_id:
+                raise ValueError(f'Invalid Starfire command progress: {command_id}')
+            if command_id > self._last_processed_id:
+                self._last_processed_id = command_id
+                self._progress_deadline_at = (
+                    time.monotonic() + HEARTBEAT_TIMEOUT_SECONDS
+                    if command_id < self._last_sent_id
+                    else None
                 )
-            self._pending_replies.popleft()
-            self._last_reply_id = event.command_id
-        if not isinstance(event, wire.Heartbeat) and event.error:
-            raise RuntimeError(
-                f'Starfire {type(event).__name__} rejected command {event.command_id}: {event.error}'
-            )
 
     def check_health(self):
         if self._fault:
@@ -326,8 +338,11 @@ class StarfireRuntime:
         if time.monotonic() - last_response >= HEARTBEAT_TIMEOUT_SECONDS:
             raise RuntimeError('Starfire heartbeat response timed out')
         with self._command_lock:
-            if self._pending_replies and time.monotonic() >= self._pending_replies[0][2]:
-                raise RuntimeError('Starfire command acknowledgement timed out')
+            if (
+                self._progress_deadline_at is not None
+                and time.monotonic() >= self._progress_deadline_at
+            ):
+                raise RuntimeError('Starfire command processing stalled')
 
     def snapshot(self):
         if self._health is None:

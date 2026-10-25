@@ -28,11 +28,14 @@ prototype assumptions can change after an offline review and hardware audition.
 | U18 | Bounded hardware auditions are authorized when the user is present. | Audio and lights were confirmed working; the isolated beat pulse was judged on-beat. Startup alignment is a separate requirement. |
 | U19 | Use centered Control, Telemetry and Config tabs in the existing dashboard. | Control keeps essential performance, the timeline and horizontal diagnostics; detailed graphs live in Telemetry; Config owns fixture setup. |
 | U20 | Keep one current protocol; overwrite it in place and commit directly to this branch. | Both implementations change together; Git provides history, with no parallel v2 schema or compatibility layer. |
-| U21 | Use four command families: PlaySequence, active effects, UpdateBeat and SetParameter. | SetActiveEffect/UnsetActiveEffect share one concept; replies use the corresponding names. Built-in parameters are typed alternatives, not arbitrary key/value pairs. |
+| U21 | Use four command families: PlaySequence, active effects, UpdateBeat and SetParameter. | SetActiveEffect/UnsetActiveEffect share one concept. Parameters use defined enum types and values. |
 | U22 | Initialization belongs in Login, confirmed by LoginReply; resources use RAII. | Login carries the rig, sequences, output destination and initial parameters. The owned session releases resources on partial initialization and shutdown. |
 | U23 | Use Metrics and heartbeats; denote direction on both shared protocols. | No separate Ready, StopPlayback, CommandResult or Health messages. Define client/server roles and directional comments in Starfire and Radius schemas. |
 | U24 | Commands and replies are standalone messages, without Render envelopes. | A typed frame header identifies each generated message. Only first-order messages have direction annotations; Transition is nested in PlaySequence. Remove the custom Empty marker. |
 | U25 | Parameters are global enum types plus values; keep the API simple. | Remove sequence parameters, sequence-reference objects, arbitrary names, blend operations and lifetime structures. Effects use direct properties and optional duration_seconds. Run focused checks for the final simplification. |
+| U26 | Autolux owns fixture configuration and scripts; send everything in Login. | Typed rig, required profiles, Lua sources and initial settings initialize the session. LoginReply means ready; no paths, discovery handshake, RunConfig or OnReady. |
+| U27 | Successful commands need no reply except Login. | ErrorReply identifies rejections; independent heartbeats show liveness and Metrics reports command progress. |
+| U28 | Sequence IDs identify playback independently of banks. | Banks group supplied scripts; PlaySequence uses a globally unique ID only. |
 
 ## Prototype decisions
 
@@ -169,18 +172,18 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P70: Maintain one unversioned Starfire schema with standalone operations and
   global enum parameter types plus validated values. Effects use direct fixture
   properties. See [protocol](protocol-design.md).
-- P71: Effect expiry and crossfade duration use continuous musical
-  elapsed time, independent of beat-phase corrections and animation speed. Apply
+- P71: Effect expiry uses elapsed seconds; crossfade duration uses accumulated
+  musical beats, independent of beat-phase corrections and animation speed. Apply
   queued commands in order against the result of preceding accepted commands;
   reject invalid commands without changing accepted state.
-- P72: Empty bank and sequence names in PlaySequence enter idle and clear the baseline
+- P72: An empty sequence ID in PlaySequence enters idle and clears the baseline
   and active effects. This expresses the idle playback state without a separate
-  stop message; a partially supplied identity is invalid. Idle rejects
+  stop message. Idle rejects
   a transition policy, while same-identity play validates but never restarts.
-- P73: Each command receives its named reply; empty error means success. Each
-  standalone reply carries the command ID; its frame identifies the reply type.
-  Metrics carry no ID; unsolicited server heartbeats use zero. No retries or
-  generic result/error event types.
+- P73: Only Login has a success reply. ErrorReply carries a rejected command's
+  ID and reason. Metrics.last_processed_command_id includes accepted and rejected
+  commands, in input order. Independent heartbeats have no ID or echo. A stalled
+  progress counter cannot be kept healthy by continued metrics or heartbeats.
 - P74: A failed Login releases partially acquired resources and replies with an
   error. It remains idle under the original startup deadline until corrected or
   disconnected; production closes immediately on that error. A second Login
@@ -194,6 +197,14 @@ approved removing SoundSwitch connectivity and requested the live contract in
   Transition has an optional positive crossfade duration. Effect properties are
   literal overrides; optional duration_seconds replaces a lifetime object.
   Omitted effect target means all fixtures. No generic Empty marker is necessary.
+- P77: Load the controller's patch, used profiles and Lua sources before launching
+  Starfire. Send this immutable snapshot through typed Login fields. Keep the
+  existing 64 KiB message bound; the room's 14 fixtures and four scripts use about
+  15 KiB. Oversized input fails before launch rather than adding asset-transfer machinery.
+- P78: Validate all supplied scripts with initial parameters in an output-free
+  probe engine, then discard it. The real session begins pristine; script probes
+  must not leak movement positions, Lua state or selection into idle. Acquire
+  unicast Art-Net output only after validation. Asset edits apply on a new session.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -283,7 +294,8 @@ DMX. Integrate animation beats continuously through speed changes while keeping
 the musical beatgrid unchanged. Per-group speed remains a later extension.
 
 The fixtures tab maps named roles to concrete fixtures. Sequence identity is a
-registered bank/name pair, never an arbitrary caller-provided file path.
+globally unique ID supplied with source at login. Banks are grouping metadata;
+playback never accepts a server-side file path.
 
 ## Validation and checkpoints
 

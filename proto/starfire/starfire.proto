@@ -6,7 +6,8 @@ package autolux.starfire;
 // Frame: one byte MessageType, four-byte big-endian payload length, then the
 // standalone Protobuf message (at most 64 KiB). No message envelope.
 // Login comes first. Commands apply in order at render boundaries after login.
-// Command IDs increase within the session; replies echo the ID. Empty error = success.
+// Command IDs increase within the session; only Login has a success reply.
+// Rejections use ErrorReply. Metrics report the last processed command ID.
 // Both endpoints send heartbeats every 10 seconds; timeout is 30 seconds.
 
 enum MessageType {
@@ -14,56 +15,51 @@ enum MessageType {
   LOGIN = 1;
   LOGIN_REPLY = 2;
   PLAY_SEQUENCE = 3;
-  PLAY_SEQUENCE_REPLY = 4;
+  ERROR_REPLY = 4;
   SET_ACTIVE_EFFECT = 5;
-  SET_ACTIVE_EFFECT_REPLY = 6;
   UNSET_ACTIVE_EFFECT = 7;
-  UNSET_ACTIVE_EFFECT_REPLY = 8;
   UPDATE_BEAT = 9;
-  UPDATE_BEAT_REPLY = 10;
   SET_PARAMETER = 11;
-  SET_PARAMETER_REPLY = 12;
   HEARTBEAT = 13;
   METRICS = 14;
 }
 
 // [CLIENT -> SERVER]
-// Initialize one owned session. Failure releases partially acquired resources.
+// Supply the complete controller-owned setup for one session; no server-side paths.
+// Failure releases partially acquired resources. Asset edits require a new session.
 message Login {
   uint64 command_id = 1;
-  string rig_path = 2;
-  string sequences_path = 3;
+  Rig rig = 2;
+  repeated Script scripts = 3;
   string artnet_destination = 4;  // IPv4:port.
-  bool broadcast = 5;
   repeated Parameter parameters = 6;
 }
 
 // [SERVER -> CLIENT]
+// The supplied rig, scripts, parameters and output are initialized and ready.
 message LoginReply {
   uint64 command_id = 1;
-  string error = 2;
   uint32 frame_rate_hz = 3;
   uint32 max_message_bytes = 4;
 }
 
+// [SERVER -> CLIENT]
+message ErrorReply {
+  uint64 command_id = 1;
+  string message = 2;
+}
+
 // [CLIENT -> SERVER]
 // One sequence plays at a time; repeating its identity never restarts it.
-// Both names empty enters idle, clears effects and outputs darkness.
+// An empty ID enters idle, clears effects and outputs darkness.
 message PlaySequence {
   uint64 command_id = 1;
-  string bank = 2;
-  string sequence = 3;
+  string sequence_id = 2;
   Transition transition = 4;  // Omitted means cut; idle accepts no transition.
 
   message Transition {
     optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
   }
-}
-
-// [SERVER -> CLIENT]
-message PlaySequenceReply {
-  uint64 command_id = 1;
-  string error = 2;
 }
 
 // [CLIENT -> SERVER]
@@ -85,22 +81,10 @@ message SetActiveEffect {
   optional double duration_seconds = 11;  // Positive; absent lasts until unset.
 }
 
-// [SERVER -> CLIENT]
-message SetActiveEffectReply {
-  uint64 command_id = 1;
-  string error = 2;
-}
-
 // [CLIENT -> SERVER]
 message UnsetActiveEffect {
   uint64 command_id = 1;
   string effect_id = 2;  // Removing an absent ID does nothing.
-}
-
-// [SERVER -> CLIENT]
-message UnsetActiveEffectReply {
-  uint64 command_id = 1;
-  string error = 2;
 }
 
 // [CLIENT -> SERVER]
@@ -111,28 +95,14 @@ message UpdateBeat {
   double tempo_bpm = 3;
 }
 
-// [SERVER -> CLIENT]
-message UpdateBeatReply {
-  uint64 command_id = 1;
-  string error = 2;
-}
-
 // [CLIENT -> SERVER]
 message SetParameter {
   uint64 command_id = 1;
   Parameter parameter = 2;  // One global setting; other values remain unchanged.
 }
 
-// [SERVER -> CLIENT]
-message SetParameterReply {
-  uint64 command_id = 1;
-  string error = 2;
-}
-
 // [CLIENT -> SERVER] [SERVER -> CLIENT]
-message Heartbeat {
-  uint64 command_id = 1;  // Zero for unsolicited server heartbeats; otherwise echo client ID.
-}
+message Heartbeat {}  // Independent liveness signal; no echo or command ID.
 
 // [SERVER -> CLIENT]
 message Metrics {
@@ -145,6 +115,70 @@ message Metrics {
   string active_sequence = 7;
   string script_error = 8;
   string runtime_error = 9;
+  uint64 last_processed_command_id = 10;  // Includes accepted and rejected commands.
+}
+
+// Autolux owns and sends the complete patch and the profiles it uses.
+message Rig {
+  repeated Fixture fixtures = 1;
+  repeated FixtureGroup groups = 2;
+  repeated FixtureProfile profiles = 3;
+}
+
+message Fixture {
+  string fixture_id = 1;
+  string profile_id = 2;
+  uint32 universe = 3;  // Art-Net universe, starting at zero.
+  uint32 address = 4;   // DMX address, starting at one.
+  MovementRange pan = 5;
+  MovementRange tilt = 6;
+
+  message MovementRange {
+    optional double minimum = 1;  // Default 0.
+    optional double maximum = 2;  // Default 1.
+    bool inverted = 3;
+  }
+}
+
+message FixtureGroup {
+  string group_id = 1;
+  repeated string fixture_ids = 2;
+}
+
+// Channel indices are zero-based offsets within safe_values.
+message FixtureProfile {
+  string profile_id = 1;
+  bytes safe_values = 2;
+  string source = 3;
+  string notes = 4;
+  optional uint32 dimmer = 5;
+  repeated uint32 rgb = 6;  // Empty or exactly [red, green, blue] channels.
+  optional uint32 white = 7;
+  AxisChannels pan = 8;
+  AxisChannels tilt = 9;
+  ColourWheel colour_wheel = 10;
+
+  message AxisChannels {
+    uint32 coarse = 1;
+    optional uint32 fine = 2;
+  }
+
+  message ColourWheel {
+    uint32 channel = 1;
+    repeated Slot slots = 2;
+
+    message Slot {
+      uint32 value = 1;  // DMX byte, 0..255.
+      RgbColor colour = 2;
+    }
+  }
+}
+
+// Supplied source is sandboxed and bounded by Starfire; no file loading at runtime.
+message Script {
+  string sequence_id = 1;  // Unique across all banks; PlaySequence uses only this ID.
+  string bank = 2;         // Grouping metadata.
+  string lua_source = 3;
 }
 
 // Shared by initialization and runtime updates. Independent of the active sequence.

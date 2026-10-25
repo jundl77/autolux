@@ -31,8 +31,11 @@ impl Read for Fragmented {
 fn play(bank: &str, sequence: &str) -> Operation {
     Operation::PlaySequence(wire::PlaySequence {
         command_id: 1,
-        bank: bank.into(),
-        sequence: sequence.into(),
+        sequence_id: if bank.is_empty() && sequence.is_empty() {
+            String::new()
+        } else {
+            format!("{bank}/{sequence}")
+        },
         transition: None,
     })
 }
@@ -66,13 +69,18 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
         data.len() - 5
     );
     let payload = wire::PlaySequence::decode(&data[5..]).unwrap();
-    assert_eq!(payload.sequence, "blue_tide");
+    assert_eq!(payload.sequence_id, "atmospheric/blue_tide");
     assert_eq!(payload.command_id, 1);
     data.extend(encoded(play("", "")));
     let mut input = Fragmented(Cursor::new(data));
     assert_eq!(read_control(&mut input).unwrap(), Some(selection));
     assert_eq!(read_control(&mut input).unwrap(), Some(play("", "")));
     assert!(read_control(&mut input).unwrap().is_none());
+    let heartbeat = Operation::Heartbeat(wire::Heartbeat {});
+    assert_eq!(
+        read_control(&mut Cursor::new(encoded(heartbeat.clone()))).unwrap(),
+        Some(heartbeat)
+    );
     for message in [
         ServerMessage::Heartbeat(wire::Heartbeat::default()),
         ServerMessage::Metrics(wire::Metrics::default()),
@@ -89,7 +97,7 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
 
 #[test]
 fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
-    let message = encoded(Operation::Heartbeat(wire::Heartbeat::default()));
+    let message = encoded(play("atmospheric", "blue_tide"));
     for length in 1..message.len() {
         assert!(read_control(&mut Cursor::new(&message[..length])).is_err());
     }
@@ -106,7 +114,7 @@ fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
     }
     assert!(
         read_control(&mut Cursor::new([
-            wire::MessageType::Heartbeat as u8,
+            wire::MessageType::PlaySequence as u8,
             0,
             0,
             0,
@@ -161,7 +169,7 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
 }
 
 #[test]
-fn playback_requires_both_names_or_idle_and_validates_repeated_selection() {
+fn playback_resolves_sequence_ids_or_idle_and_validates_repeated_selection() {
     let mut engine = engine();
     apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
@@ -173,8 +181,7 @@ fn playback_requires_both_names_or_idle_and_validates_repeated_selection() {
             ..Default::default()
         }),
         Operation::PlaySequence(wire::PlaySequence {
-            bank: "atmospheric".into(),
-            sequence: "blue_tide".into(),
+            sequence_id: "atmospheric/blue_tide".into(),
             transition: Some(wire::play_sequence::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
@@ -282,8 +289,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (
             0.75,
             Operation::PlaySequence(wire::PlaySequence {
-                bank: "drop".into(),
-                sequence: "blue_impact".into(),
+                sequence_id: "drop/blue_impact".into(),
                 transition: Some(wire::play_sequence::Transition {
                     crossfade_beats: Some(2.0),
                 }),

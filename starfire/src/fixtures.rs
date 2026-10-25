@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::model::{DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
+use crate::protocol::wire;
 
 const RIG_SCHEMA_VERSION: u32 = 1;
 const PROFILE_SCHEMA_VERSION: u32 = 1;
@@ -62,6 +63,14 @@ impl Default for MovementRange {
 }
 
 impl MovementRange {
+    fn from_wire(value: &Option<wire::fixture::MovementRange>) -> Self {
+        value.as_ref().map_or_else(Self::default, |value| Self {
+            min: value.minimum.unwrap_or(0.0),
+            max: value.maximum.unwrap_or(1.0),
+            inverted: value.inverted,
+        })
+    }
+
     fn validate(&self) -> Result<()> {
         unit_interval("movement minimum", self.min)?;
         unit_interval("movement maximum", self.max)?;
@@ -123,6 +132,63 @@ struct AxisChannels {
 }
 
 impl FixtureProfile {
+    fn from_wire(value: &wire::FixtureProfile) -> Result<Self> {
+        let rgb = if value.rgb.is_empty() {
+            None
+        } else {
+            ensure!(value.rgb.len() == 3, "RGB requires exactly three channels");
+            Some([
+                value.rgb[0] as usize,
+                value.rgb[1] as usize,
+                value.rgb[2] as usize,
+            ])
+        };
+        let axis = |value: &wire::fixture_profile::AxisChannels| AxisChannels {
+            coarse: value.coarse as usize,
+            fine: value.fine.map(|channel| channel as usize),
+        };
+        let colour_wheel = value
+            .colour_wheel
+            .as_ref()
+            .map(|wheel| -> Result<_> {
+                let slots = wheel
+                    .slots
+                    .iter()
+                    .map(|slot| -> Result<_> {
+                        let colour = slot
+                            .colour
+                            .as_ref()
+                            .context("colour wheel slot requires colour")?;
+                        Ok(ColourSlot {
+                            value: u8::try_from(slot.value)
+                                .context("colour wheel value exceeds DMX byte")?,
+                            colour: Rgb {
+                                red: colour.red,
+                                green: colour.green,
+                                blue: colour.blue,
+                            },
+                        })
+                    })
+                    .collect::<Result<_>>()?;
+                Ok(ColourWheel {
+                    channel: wheel.channel as usize,
+                    slots,
+                })
+            })
+            .transpose()?;
+        Ok(Self {
+            source: value.source.clone(),
+            notes: value.notes.clone(),
+            safe_values: value.safe_values.clone(),
+            dimmer: value.dimmer.map(|channel| channel as usize),
+            rgb,
+            white: value.white.map(|channel| channel as usize),
+            colour_wheel,
+            pan: value.pan.as_ref().map(axis),
+            tilt: value.tilt.as_ref().map(axis),
+        })
+    }
+
     fn validate(&self) -> Result<()> {
         ensure!(!self.source.trim().is_empty(), "profile source is required");
         ensure!(!self.notes.trim().is_empty(), "profile notes are required");
@@ -253,6 +319,47 @@ pub struct FixtureRig {
 }
 
 impl FixtureRig {
+    pub fn from_wire(rig: &wire::Rig) -> Result<Self> {
+        let fixtures = rig
+            .fixtures
+            .iter()
+            .map(|fixture| -> Result<_> {
+                Ok(FixturePatch {
+                    id: fixture.fixture_id.clone(),
+                    profile: fixture.profile_id.clone(),
+                    universe: u16::try_from(fixture.universe)
+                        .context("fixture universe exceeds range")?,
+                    address: fixture.address as usize,
+                    pan: MovementRange::from_wire(&fixture.pan),
+                    tilt: MovementRange::from_wire(&fixture.tilt),
+                })
+            })
+            .collect::<Result<_>>()?;
+        let mut groups = BTreeMap::new();
+        for group in &rig.groups {
+            ensure!(
+                groups
+                    .insert(group.group_id.clone(), group.fixture_ids.clone())
+                    .is_none(),
+                "duplicate fixture group ID {}",
+                group.group_id
+            );
+        }
+        let mut profiles = BTreeMap::new();
+        for profile in &rig.profiles {
+            let converted = FixtureProfile::from_wire(profile)
+                .with_context(|| format!("profile {}", profile.profile_id))?;
+            ensure!(
+                profiles
+                    .insert(profile.profile_id.clone(), converted)
+                    .is_none(),
+                "duplicate fixture profile ID {}",
+                profile.profile_id
+            );
+        }
+        Self::from_parts(fixtures, groups, profiles)
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let mut json = String::new();
         File::open(path)
@@ -273,21 +380,34 @@ impl FixtureRig {
             definition.schema_version == RIG_SCHEMA_VERSION,
             "unsupported rig schema version"
         );
-        ensure!(
-            !definition.fixtures.is_empty() && definition.fixtures.len() <= MAX_FIXTURES,
-            "rig must contain 1..{MAX_FIXTURES} fixtures"
-        );
-        ensure!(
-            definition.groups.len() <= MAX_FIXTURE_GROUPS,
-            "fixture group count exceeds limit"
-        );
         let catalogue: ProfileCatalogue =
             serde_json::from_str(PROFILE_CATALOGUE).context("parse fixture profiles")?;
         ensure!(
             catalogue.schema_version == PROFILE_SCHEMA_VERSION,
             "unsupported fixture profile version"
         );
-        for (id, profile) in &catalogue.profiles {
+        Self::from_parts(definition.fixtures, definition.groups, catalogue.profiles)
+    }
+
+    fn from_parts(
+        fixtures: Vec<FixturePatch>,
+        groups: BTreeMap<String, Vec<String>>,
+        profiles: BTreeMap<String, FixtureProfile>,
+    ) -> Result<Self> {
+        ensure!(
+            !fixtures.is_empty() && fixtures.len() <= MAX_FIXTURES,
+            "rig must contain 1..{MAX_FIXTURES} fixtures"
+        );
+        ensure!(
+            groups.len() <= MAX_FIXTURE_GROUPS,
+            "fixture group count exceeds limit"
+        );
+        ensure!(
+            profiles.len() <= MAX_FIXTURES,
+            "fixture profile count exceeds limit"
+        );
+        for (id, profile) in &profiles {
+            validate_identifier(id)?;
             profile
                 .validate()
                 .with_context(|| format!("profile {id}"))?;
@@ -295,7 +415,7 @@ impl FixtureRig {
 
         let mut ids = BTreeSet::new();
         let mut occupied = BTreeMap::<u16, BTreeSet<usize>>::new();
-        for patch in &definition.fixtures {
+        for patch in &fixtures {
             validate_identifier(&patch.id)?;
             validate_identifier(&patch.profile)?;
             ensure!(
@@ -308,8 +428,7 @@ impl FixtureRig {
                 "fixture {} has invalid universe",
                 patch.id
             );
-            let profile = catalogue
-                .profiles
+            let profile = profiles
                 .get(&patch.profile)
                 .with_context(|| format!("unknown fixture profile {}", patch.profile))?;
             ensure!(
@@ -341,7 +460,7 @@ impl FixtureRig {
                 .validate()
                 .with_context(|| format!("fixture {} tilt bounds", patch.id))?;
         }
-        for (group, members) in &definition.groups {
+        for (group, members) in &groups {
             validate_identifier(group)?;
             ensure!(!members.is_empty(), "fixture group {group} is empty");
             ensure!(
@@ -361,9 +480,9 @@ impl FixtureRig {
             }
         }
         Ok(Self {
-            fixtures: definition.fixtures,
-            groups: definition.groups,
-            profiles: catalogue.profiles,
+            fixtures,
+            groups,
+            profiles,
         })
     }
 

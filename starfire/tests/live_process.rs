@@ -12,7 +12,6 @@ use starfire::protocol::{MAX_MESSAGE_BYTES, read_event, wire};
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SILENT_CHECK_TIMEOUT: Duration = Duration::from_millis(80);
 const ARTNET_HEADER_BYTES: usize = 18;
-const RIG: &str = r#"{"schema_version":1,"fixtures":[{"id":"lamp","profile":"generic_rgb","universe":0,"address":1}],"groups":{"wash":["lamp"]}}"#;
 
 struct Renderer {
     child: Child,
@@ -21,14 +20,12 @@ struct Renderer {
     socket: UdpSocket,
     login: wire::Login,
     command_id: u64,
-    _directory: tempfile::TempDir,
 }
 
 fn play(name: &str) -> Operation {
     Operation::PlaySequence(wire::PlaySequence {
         command_id: 1,
-        bank: "test".into(),
-        sequence: name.into(),
+        sequence_id: name.into(),
         transition: None,
     })
 }
@@ -49,18 +46,6 @@ fn setting(kind: wire::ParameterType, value: wire::parameter::Value) -> wire::Pa
 
 impl Renderer {
     fn start() -> Self {
-        let directory = tempfile::tempdir().unwrap();
-        let rig = directory.path().join("rig.json");
-        std::fs::write(&rig, RIG).unwrap();
-        let sequences = directory.path().join("sequences");
-        std::fs::create_dir_all(sequences.join("test")).unwrap();
-        std::fs::write(sequences.join("test/energy.lua"),
-            "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}").unwrap();
-        std::fs::write(
-            sequences.join("test/fault.lua"),
-            "return {render=function(ctx) error('test script fault') end}",
-        )
-        .unwrap();
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_starfire"))
@@ -82,10 +67,21 @@ impl Renderer {
         });
         let login = wire::Login {
             command_id: 0,
-            rig_path: rig.to_str().unwrap().into(),
-            sequences_path: sequences.to_str().unwrap().into(),
+            rig: Some(wire::Rig {
+                fixtures: vec![wire::Fixture {
+                    fixture_id: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
+                }],
+                groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()] }],
+                profiles: vec![wire::FixtureProfile {
+                    profile_id: "rgb".into(), source: "test".into(), notes: "RGB fixture".into(),
+                    safe_values: vec![0;3], rgb: vec![0,1,2], ..Default::default()
+                }],
+            }),
+            scripts: vec![
+                wire::Script { sequence_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into() },
+                wire::Script { sequence_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into() },
+            ],
             artnet_destination: socket.local_addr().unwrap().to_string(),
-            broadcast: false,
             parameters: vec![],
         };
         Self {
@@ -95,20 +91,30 @@ impl Renderer {
             socket,
             login,
             command_id: 0,
-            _directory: directory,
         }
     }
 
     fn logged_in() -> Self {
         let mut renderer = Self::start();
-        assert!(
-            matches!(renderer.reply(Operation::Login(renderer.login.clone())), Event::LoginReply(wire::LoginReply { error, frame_rate_hz: 40, max_message_bytes: 65536, .. }) if error.is_empty())
+        assert!(matches!(
+            renderer.reply(Operation::Login(renderer.login.clone())),
+            Event::LoginReply(wire::LoginReply {
+                frame_rate_hz: 40,
+                max_message_bytes: 65536,
+                ..
+            })
+        ));
+        assert_eq!(
+            renderer.next_metrics().last_processed_command_id,
+            renderer.command_id
         );
         renderer
     }
 
     fn send(&mut self, command: Operation) -> u64 {
-        self.command_id += 1;
+        if command.command_id().is_some() {
+            self.command_id += 1;
+        }
         self.send_with_id(self.command_id, command);
         self.command_id
     }
@@ -148,17 +154,16 @@ impl Renderer {
                 .events
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
-            if let Event::Metrics(metrics) = event {
+            if let Event::Metrics(metrics) = event
+                && metrics.last_processed_command_id >= self.command_id
+            {
                 return metrics;
             }
         }
     }
 
     fn metrics(&mut self) -> wire::Metrics {
-        assert!(matches!(
-            self.reply(Operation::Heartbeat(wire::Heartbeat::default())),
-            Event::Heartbeat(_)
-        ));
+        self.send(Operation::Heartbeat(wire::Heartbeat {}));
         self.next_metrics()
     }
 
@@ -215,15 +220,14 @@ fn login_is_required_and_duplicate_login_preserves_owned_scene() {
     assert!(renderer.events.recv_timeout(SILENT_CHECK_TIMEOUT).is_err());
     renderer.assert_no_output();
     assert!(
-        matches!(renderer.reply(play("energy")), Event::PlaySequenceReply(value) if value.error.contains("login"))
+        matches!(renderer.reply(play("energy")), Event::ErrorReply(value) if value.message.contains("login"))
     );
     renderer.assert_no_output();
-    assert!(
-        matches!(renderer.reply(Operation::Login(renderer.login.clone())), Event::LoginReply(value) if value.error.is_empty())
-    );
-    assert!(
-        matches!(renderer.reply(play("energy")), Event::PlaySequenceReply(value) if value.error.is_empty())
-    );
+    assert!(matches!(
+        renderer.reply(Operation::Login(renderer.login.clone())),
+        Event::LoginReply(_)
+    ));
+    renderer.send(play("energy"));
     renderer.wait_for_red(128);
     let mut replacement = renderer.login.clone();
     replacement.parameters.push(setting(
@@ -231,7 +235,7 @@ fn login_is_required_and_duplicate_login_preserves_owned_scene() {
         wire::parameter::Value::Boolean(true),
     ));
     assert!(
-        matches!(renderer.reply(Operation::Login(replacement)), Event::LoginReply(value) if value.error.contains("already"))
+        matches!(renderer.reply(Operation::Login(replacement)), Event::ErrorReply(value) if value.message.contains("already"))
     );
     assert!(renderer.metrics().runtime_error.is_empty());
     renderer.wait_for_red(128);
@@ -241,9 +245,9 @@ fn login_is_required_and_duplicate_login_preserves_owned_scene() {
 fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() {
     let mut renderer = Renderer::start();
     let mut missing_rig = renderer.login.clone();
-    missing_rig.rig_path.push_str(".missing");
+    missing_rig.rig = None;
     let mut missing_sequences = renderer.login.clone();
-    missing_sequences.sequences_path.push_str(".missing");
+    missing_sequences.scripts.clear();
     let mut invalid_output = renderer.login.clone();
     invalid_output.artnet_destination = "0.0.0.0:0".into();
     let mut invalid_parameter = renderer.login.clone();
@@ -264,7 +268,7 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
         invalid_parameter,
     ] {
         assert!(
-            matches!(renderer.reply(Operation::Login(login)), Event::LoginReply(value) if !value.error.is_empty())
+            matches!(renderer.reply(Operation::Login(login)), Event::ErrorReply(value) if !value.message.is_empty())
         );
         renderer.assert_no_output();
         assert!(renderer.child.try_wait().unwrap().is_none());
@@ -273,12 +277,11 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
         wire::ParameterType::OutputBrightness,
         wire::parameter::Value::Number(0.6),
     ));
-    assert!(
-        matches!(renderer.reply(Operation::Login(renderer.login.clone())), Event::LoginReply(value) if value.error.is_empty())
-    );
-    assert!(
-        matches!(renderer.reply(play("energy")), Event::PlaySequenceReply(value) if value.error.is_empty())
-    );
+    assert!(matches!(
+        renderer.reply(Operation::Login(renderer.login.clone())),
+        Event::LoginReply(_)
+    ));
+    renderer.send(play("energy"));
     renderer.wait_for_red(77);
     let metrics = renderer.metrics();
     assert!(
@@ -289,26 +292,52 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
 }
 
 #[test]
+fn login_probes_every_script_without_output_and_uses_initial_parameters() {
+    let mut renderer = Renderer::start();
+    for source in [
+        "this is not Lua",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.group('missing'), 1)} end}",
+        "return {render=function(ctx) error('invalid supplied script') end}",
+    ] {
+        let mut login = renderer.login.clone();
+        login.scripts[0].lua_source = source.into();
+        assert!(matches!(
+            renderer.reply(Operation::Login(login)),
+            Event::ErrorReply(_)
+        ));
+        renderer.assert_no_output();
+    }
+    renderer.login.scripts[0].lua_source = "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), ctx.normalized_rms_level * 0.5)} end}".into();
+    renderer.login.parameters.push(setting(
+        wire::ParameterType::AudioRmsNormalized,
+        wire::parameter::Value::Number(0.8),
+    ));
+    assert!(matches!(
+        renderer.reply(Operation::Login(renderer.login.clone())),
+        Event::LoginReply(_)
+    ));
+    renderer.send(play("energy"));
+    renderer.wait_for_red(102);
+}
+
+#[test]
 fn typed_controls_drive_artnet_idle_retains_settings_and_eof_blacks_out() {
     let mut renderer = Renderer::logged_in();
-    assert!(
-        matches!(renderer.reply(play("energy")), Event::PlaySequenceReply(value) if value.error.is_empty())
-    );
-    assert!(
-        matches!(renderer.reply(parameter(setting(wire::ParameterType::AudioRmsNormalized, wire::parameter::Value::Number(0.8)))), Event::SetParameterReply(value) if value.error.is_empty())
-    );
+    renderer.send(play("energy"));
+    renderer.send(parameter(setting(
+        wire::ParameterType::AudioRmsNormalized,
+        wire::parameter::Value::Number(0.8),
+    )));
     let first = renderer.metrics();
     assert_eq!(first.active_sequence, "energy");
     renderer.wait_for_red(102);
-    assert!(
-        matches!(renderer.reply(Operation::PlaySequence(wire::PlaySequence::default())), Event::PlaySequenceReply(value) if value.error.is_empty())
-    );
+    renderer.send(Operation::PlaySequence(wire::PlaySequence::default()));
     let idle = renderer.metrics();
     assert!(idle.active_sequence.is_empty());
     assert!(idle.rendered_frames >= first.rendered_frames);
     renderer.wait_for_red(0);
     assert!(renderer.child.try_wait().unwrap().is_none());
-    renderer.reply(play("energy"));
+    renderer.send(play("energy"));
     renderer.metrics();
     renderer.wait_for_red(102);
     renderer.input.take();
@@ -317,18 +346,19 @@ fn typed_controls_drive_artnet_idle_retains_settings_and_eof_blacks_out() {
 }
 
 #[test]
-fn semantic_rejections_preserve_scene_and_replies_follow_large_bursts() {
+fn semantic_rejections_preserve_scene_and_metrics_track_silent_command_bursts() {
     let mut renderer = Renderer::logged_in();
-    renderer.reply(play("energy"));
+    renderer.send(play("energy"));
     renderer.wait_for_red(128);
     assert!(
-        matches!(renderer.reply(play("missing")), Event::PlaySequenceReply(value) if !value.error.is_empty())
+        matches!(renderer.reply(play("missing")), Event::ErrorReply(value) if !value.message.is_empty())
     );
     assert!(
-        matches!(renderer.reply(parameter(setting(wire::ParameterType::OutputBrightness, wire::parameter::Value::Number(-1.0)))), Event::SetParameterReply(value) if !value.error.is_empty())
+        matches!(renderer.reply(parameter(setting(wire::ParameterType::OutputBrightness, wire::parameter::Value::Number(-1.0)))), Event::ErrorReply(value) if !value.message.is_empty())
     );
+    let rejected_id = renderer.command_id;
+    assert_eq!(renderer.metrics().last_processed_command_id, rejected_id);
     renderer.wait_for_red(128);
-    let first_id = renderer.command_id + 1;
     const BURST_COMMANDS: u64 = 128;
     for _ in 0..BURST_COMMANDS {
         renderer.send(parameter(setting(
@@ -336,11 +366,12 @@ fn semantic_rejections_preserve_scene_and_replies_follow_large_bursts() {
             wire::parameter::Value::Number(0.8),
         )));
     }
-    for id in first_id..first_id + BURST_COMMANDS {
-        assert!(
-            matches!(renderer.receive_reply(id), Event::SetParameterReply(value) if value.error.is_empty())
-        );
-    }
+    let metrics = renderer.metrics();
+    assert_eq!(metrics.last_processed_command_id, renderer.command_id);
+    assert!(
+        renderer.events.recv_timeout(SILENT_CHECK_TIMEOUT).is_err(),
+        "successful commands must not produce replies"
+    );
     renderer.wait_for_red(102);
     assert!(renderer.metrics().runtime_error.is_empty());
 }
@@ -349,7 +380,7 @@ fn semantic_rejections_preserve_scene_and_replies_follow_large_bursts() {
 fn malformed_frames_and_reused_command_ids_fail_closed() {
     for reuse_id in [false, true] {
         let mut renderer = Renderer::logged_in();
-        renderer.reply(play("energy"));
+        renderer.send(play("energy"));
         renderer.metrics();
         renderer.wait_for_red(128);
         if reuse_id {
@@ -373,7 +404,7 @@ fn malformed_frames_and_reused_command_ids_fail_closed() {
 #[test]
 fn script_fault_and_recovery_publish_metrics_without_waiting_for_heartbeat() {
     let mut renderer = Renderer::logged_in();
-    renderer.reply(play("fault"));
+    renderer.send(play("fault"));
     assert!(
         renderer
             .next_metrics()
@@ -382,7 +413,7 @@ fn script_fault_and_recovery_publish_metrics_without_waiting_for_heartbeat() {
     );
     renderer.wait_for_red(0);
     assert!(renderer.child.try_wait().unwrap().is_none());
-    renderer.reply(play("energy"));
+    renderer.send(play("energy"));
     assert!(renderer.next_metrics().script_error.is_empty());
     renderer.wait_for_red(128);
 }
@@ -395,7 +426,7 @@ fn server_sends_ten_second_heartbeats_without_waiting_for_requests() {
         .events
         .recv_timeout(Duration::from_secs(12))
         .unwrap();
-    assert_eq!(event.command_id(), Some(0));
+    assert_eq!(event.command_id(), None);
     assert!(matches!(event, Event::Heartbeat(_)));
     assert!(started.elapsed() >= Duration::from_secs(9));
     assert!(renderer.next_metrics().rendered_frames >= 360);

@@ -15,11 +15,13 @@ use serde::Serialize;
 
 use crate::fixtures::{FixtureRig, MAX_FIXTURES};
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
+use crate::protocol::wire;
 
 const MAX_SOURCE_BYTES: usize = 128 * 1024;
 const MAX_CATALOGUE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SEQUENCES: usize = 256;
 const MAX_IDENTIFIER_BYTES: usize = 64;
+const MAX_SEQUENCE_ID_BYTES: usize = 128;
 const LUA_MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
@@ -35,6 +37,7 @@ pub struct SequenceInfo {
 #[derive(Clone, Debug)]
 pub struct SequenceCatalog {
     sources: BTreeMap<(String, String), String>,
+    identities: BTreeMap<String, (String, String)>,
 }
 
 impl SequenceCatalog {
@@ -101,7 +104,68 @@ impl SequenceCatalog {
             !sources.is_empty(),
             "sequence catalogue contains no Lua sequences"
         );
-        Ok(Self { sources })
+        let identities = sources
+            .keys()
+            .map(|(bank, sequence)| {
+                (
+                    format!("{bank}/{sequence}"),
+                    (bank.clone(), sequence.clone()),
+                )
+            })
+            .collect();
+        Ok(Self {
+            sources,
+            identities,
+        })
+    }
+
+    pub fn from_scripts(scripts: &[wire::Script]) -> Result<Self> {
+        ensure!(
+            !scripts.is_empty() && scripts.len() <= MAX_SEQUENCES,
+            "catalogue must contain 1..{MAX_SEQUENCES} scripts"
+        );
+        let mut sources = BTreeMap::new();
+        let mut identities = BTreeMap::new();
+        let mut source_bytes = 0;
+        for script in scripts {
+            validate_identifier(&script.bank)?;
+            ensure!(
+                !script.sequence_id.is_empty()
+                    && script.sequence_id.len() <= MAX_SEQUENCE_ID_BYTES
+                    && script.sequence_id.trim() == script.sequence_id
+                    && !script.sequence_id.chars().any(char::is_control),
+                "sequence ID must contain 1..{MAX_SEQUENCE_ID_BYTES} non-control bytes without surrounding whitespace"
+            );
+            ensure!(
+                script.lua_source.len() <= MAX_SOURCE_BYTES,
+                "sequence {} exceeds source limit",
+                script.sequence_id
+            );
+            source_bytes += script.lua_source.len();
+            ensure!(
+                source_bytes <= MAX_CATALOGUE_BYTES,
+                "sequence catalogue exceeds source limit"
+            );
+            let identity = (script.bank.clone(), script.sequence_id.clone());
+            ensure!(
+                identities
+                    .insert(script.sequence_id.clone(), identity.clone())
+                    .is_none(),
+                "duplicate sequence ID {}",
+                script.sequence_id
+            );
+            sources.insert(identity, script.lua_source.clone());
+        }
+        Ok(Self {
+            sources,
+            identities,
+        })
+    }
+
+    pub fn resolve(&self, sequence_id: &str) -> Result<&(String, String)> {
+        self.identities
+            .get(sequence_id)
+            .with_context(|| format!("unknown sequence ID {sequence_id}"))
     }
 
     pub fn list(&self) -> Vec<SequenceInfo> {

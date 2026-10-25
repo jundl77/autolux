@@ -28,9 +28,10 @@ the receiver. Concurrent receiver sessions are refused. Session logs are retaine
 The default dashboard is port 8765, with Prometheus at `/metrics`. Headless mode
 serves metrics on port 8766. Use `--duration 90` for a bounded live test.
 
-Starfire uses an owned subprocess with framed protobuf over its pipes. Model
-preparation precedes audio capture; heartbeat requests and replies run every ten seconds,
-with a thirty-second deadline. `--rig`, `--sequences` and `--starfire-binary`
+Starfire uses an owned subprocess with framed protobuf over its pipes. Autolux
+loads the fixture patch, required profiles and Lua sources into Login; LoginReply
+confirms readiness. Model preparation precedes audio capture. Independent heartbeats
+run every ten seconds with a thirty-second deadline. `--rig`, `--sequences` and `--starfire-binary`
 select the fixture patch, Lua catalogue and executable. Art-Net goes to the
 configured Radius TX ingress; the receiver alone drives the physical fixtures.
 
