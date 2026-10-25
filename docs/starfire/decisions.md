@@ -31,6 +31,8 @@ prototype assumptions can change after an offline review and hardware audition.
 | U21 | Use four command families: PlaySequence, active effects, UpdateBeat and SetParameter. | SetActiveEffect/UnsetActiveEffect share one concept; replies use the corresponding names. Built-in parameters are typed alternatives, not arbitrary key/value pairs. |
 | U22 | Initialization belongs in Login, confirmed by LoginReply; resources use RAII. | Login carries the rig, sequences, output destination and initial parameters. The owned session releases resources on partial initialization and shutdown. |
 | U23 | Use Metrics and heartbeats; denote direction on both shared protocols. | No separate Ready, StopPlayback, CommandResult or Health messages. Define client/server roles and directional comments in Starfire and Radius schemas. |
+| U24 | Commands and replies are standalone messages, without Render envelopes. | A typed frame header identifies each generated message. Only first-order messages have direction annotations; Transition is nested in PlaySequence. Remove the custom Empty marker. |
+| U25 | Parameters are global enum types plus values; keep the API simple. | Remove sequence parameters, sequence-reference objects, arbitrary names, blend operations and lifetime structures. Effects use direct properties and optional duration_seconds. Run focused checks for the final simplification. |
 
 ## Prototype decisions
 
@@ -38,8 +40,9 @@ Latest scope: Starfire is the sole lighting backend on this branch. The user
 approved removing SoundSwitch connectivity and requested the live contract in
 `proto/starfire/starfire.proto`; 40 Hz remains the output cadence.
 
-- P44: Use typed Google Protobuf commands and renderer events over the owned
-  subprocess's stdin/stdout, framed with a four-byte big-endian payload length.
+- P44: Use standalone Google Protobuf messages over the owned subprocess's
+  stdin/stdout. Frame each with a generated MessageType byte and a four-byte
+  big-endian payload length.
   Cap each payload at 64 KiB. The root CLI owns
   launch, readiness and shutdown; no separately exposed control listener.
 - P45: Apply accepted commands on the next 40 Hz render timestamp. The engine
@@ -163,24 +166,34 @@ approved removing SoundSwitch connectivity and requested the live contract in
   section-dependent looks and accents in the temporary audition. Verify the
   envelope and deterministic DMX replay before physical output. Do not apply a
   guessed phase offset after the user confirms the pulse is on-beat.
-- P70: Maintain one unversioned Starfire schema with typed renderer operations,
-  built-in parameter alternatives and enum fixture attributes. Keep Lua-defined
-  names scoped to the active program's declared controls. See [protocol](protocol-design.md).
+- P70: Maintain one unversioned Starfire schema with standalone operations and
+  global enum parameter types plus validated values. Effects use direct fixture
+  properties. See [protocol](protocol-design.md).
 - P71: Effect expiry and crossfade duration use continuous musical
   elapsed time, independent of beat-phase corrections and animation speed. Apply
   queued commands in order against the result of preceding accepted commands;
   reject invalid commands without changing accepted state.
-- P72: An absent sequence in PlaySequence enters idle and clears the baseline
+- P72: Empty bank and sequence names in PlaySequence enter idle and clear the baseline
   and active effects. This expresses the idle playback state without a separate
-  stop message; an explicitly present empty identity is invalid. Idle rejects
+  stop message; a partially supplied identity is invalid. Idle rejects
   a transition policy, while same-identity play validates but never restarts.
-- P73: Each command receives its named reply; empty error means success. The
-  event envelope correlates command ID and reply kind. Unsolicited metrics and
-  server heartbeats use ID zero. No retries or generic result/error event types.
+- P73: Each command receives its named reply; empty error means success. Each
+  standalone reply carries the command ID; its frame identifies the reply type.
+  Metrics carry no ID; unsolicited server heartbeats use zero. No retries or
+  generic result/error event types.
 - P74: A failed Login releases partially acquired resources and replies with an
   error. It remains idle under the original startup deadline until corrected or
   disconnected; production closes immediately on that error. A second Login
   cannot replace a successfully initialized session.
+- P75: Keep frame dispatch small: MessageType comes from the shared schema,
+  payload serialization is generated, and runtime code handles only framing and
+  typed dispatch. Zero-length bodies are valid for unsolicited heartbeats/metrics.
+  Unknown types, wrong directions, oversized and truncated frames are rejected.
+- P76: Shared Parameter enum/value pairs initialize Login and update global
+  runtime state through SetParameter. Cut is PlaySequence's default; its nested
+  Transition has an optional positive crossfade duration. Effect properties are
+  literal overrides; optional duration_seconds replaces a lifetime object.
+  Omitted effect target means all fixtures. No generic Empty marker is necessary.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |

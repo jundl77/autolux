@@ -22,9 +22,8 @@ named groups and helpers in `src/lua/lighting.lua`; never depend on render count
 measured. Bundled sequences keep their baseline brightness when it is unknown.
 The supplied sequences expect `wash`, `movers` and `strip` groups in the rig.
 Selecting the current bank/name keeps it running. Overrides affect only their
-properties; clearing reveals the continuing baseline. Optional Lua `parameters`
-declare `value_type`, `default_value`, bounds and choices. Read the active values
-through `ctx.parameters`; typed updates validate before changing a value.
+properties; clearing reveals the continuing baseline. Global brightness,
+animation speed, blackout and measured audio level use typed parameters.
 
 Every sequence has a checked full-DMX replay plus behavior assertions. Run
 `cargo test --locked --manifest-path starfire/Cargo.toml`. The build also runs
@@ -40,7 +39,8 @@ Live mode starts without output resources. `Login` supplies rig, sequences,
 Art-Net destination and initial typed parameters; a successful reply owns one
 session rendering at 40 Hz. Closing the session blacks out and releases output.
 Heartbeats run both ways every ten seconds and expire after thirty seconds.
-Commands and replies are generated from [starfire.proto](../proto/starfire/starfire.proto).
+Standalone commands and replies are generated from [starfire.proto](../proto/starfire/starfire.proto).
+Each frame carries a message type, bounded length and generated Protobuf payload.
 An empty `PlaySequence` enters idle; no sequence restarts on repeated selection.
 
 The room rig has two Spot 110 movers, four SePar washes and eight RGB cells of

@@ -1,82 +1,58 @@
 # Starfire protocol
 
-Autolux is the client; its owned Starfire process is the server. The single
-[schema](../../proto/starfire/starfire.proto) generates Python and Rust bindings.
-Every wire message states its direction. Application code owns bounded framing,
-validation, rendering and process lifetime.
+Autolux is the client; its owned Starfire process is the server.
+The [single schema](../../proto/starfire/starfire.proto) generates the message
+classes. Only top-level wire messages have direction annotations.
 
-## Four command families
+## Four concepts
 
-| Concept | Contract |
+| Command | Behavior |
 | --- | --- |
-| `PlaySequence` | Play a bank-qualified Lua sequence until changed. The active identity continues without restarting. A different identity uses a cut or beat-duration crossfade. An absent sequence enters idle: clear the baseline and active effects and output darkness. |
-| `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent above the continuing baseline. Setting replaces its complete state, including lifetime. Removing an absent ID does nothing. |
-| `UpdateBeat` | Supply fractional musical position and BPM. Starfire interpolates position between updates; animation speed is independent. |
-| `SetParameter` | Change one defined, typed parameter. All other settings stay unchanged. |
+| `PlaySequence` | Play one bank/sequence until changed. Repeating its identity continues the loop. Both names empty enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
+| `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. |
+| `UpdateBeat` | Supply fractional beat position and tempo. Starfire interpolates between updates; animation speed does not change musical phase. |
+| `SetParameter` | Change one global parameter, independently of the active sequence. |
 
-Built-in parameters are generated typed alternatives, not string keys:
+Each `Parameter` contains a defined enum type and a number or boolean value.
+It is shared by Login's initial settings and runtime updates.
 
-| Parameter | Type / range | Meaning |
-| --- | --- | --- |
-| `output_brightness` | Number, 0..1 | Final output multiplier. |
-| `animation_speed` | Number, 0..8 | Animation rate; does not move musical phase. |
-| `output_blackout` | Boolean | Final darkness gate, after all effects. |
-| `audio_rms_normalized` | Number, 0..1 | Measured RMS, independent of operator brightness. |
-| `sequence_parameter` | Active sequence, declared name and typed value | Change a control defined by that Lua program. |
+| Parameter type | Value |
+| --- | --- |
+| `OUTPUT_BRIGHTNESS` | Number, 0..1; final brightness multiplier. |
+| `ANIMATION_SPEED` | Number, 0..8; animation rate independent of musical phase. |
+| `OUTPUT_BLACKOUT` | Boolean; final darkness gate. |
+| `AUDIO_RMS_NORMALIZED` | Number, 0..1; measured RMS, unknown until supplied. |
 
-The built-in value type is enforced by Protobuf's `oneof`. Lua declares custom
-names, types, defaults and bounds; unknown names, stale sequence identities,
-wrong types and invalid values are rejected. Missing measured RMS remains unknown.
-Selecting the active sequence preserves its phase and parameters. Newly activated
-sequences start with their declared defaults.
+Unknown parameter types, wrong value types and invalid ranges are rejected.
+There are no arbitrary parameter names or sequence-owned parameters.
 
-## Session and replies
+Effects target all fixtures by default, or a named group/fixture. They replace
+only specified intensity, colour, pan, tilt or strobe values. Higher priority
+wins; command order breaks ties. Global brightness and blackout apply last.
+Removing an effect reveals the continuing baseline. There is no blend-mode API.
 
-`Login` contains the rig path, sequence directory, Art-Net destination, broadcast
-choice and initial `SetParameter` values. Rust constructs one owning session,
-validates initialization and then sends `LoginReply`. Failed initialization drops
-partially acquired resources; the server remains idle until EOF or its startup
-deadline, allowing a corrected login. The coordinator closes on a login error.
-Duplicate login cannot replace a running session.
-Closing the process pipe tears down the session and attempts fixture-aware darkness.
+## Session and transport
 
-Each operation has its own reply: `PlaySequenceReply`, `SetActiveEffectReply`,
-`UnsetActiveEffectReply`, `UpdateBeatReply` or `SetParameterReply`. An empty `error`
-means success; a nonempty error explains rejection. `PlaySequenceReply` also gives
-the active identity and its Lua parameter definitions. There is no generic command
-result, separate stop operation or standalone parameter-catalog message.
+`Login` supplies the rig, sequence directory, Art-Net destination and initial
+parameters. Rust constructs one owning session and sends `LoginReply` after
+successful initialization. RAII releases partial initialization and attempts
+darkness on shutdown. Failed login leaves no session; duplicate login cannot
+replace a running one. Closing the process pipe closes the session.
 
-Commands have positive, increasing IDs within the process session; replies carry
-the corresponding ID and operation type. At each render boundary, commands apply
-in received order against preceding accepted state. Validation rejection leaves
-that state intact. A reply confirms renderer application, not physical illumination.
-There are no automatic retries or parallel protocol versions.
+Commands and replies are standalone messages. Each frame contains a one-byte
+`MessageType`, a four-byte big-endian payload length, then the generated Protobuf
+payload, bounded to 64 KiB. There are no Render envelopes or custom serializers.
+Wrong directions, unknown types, oversized and truncated frames are rejected.
 
-`Metrics` reports elapsed time, completed frames, missed deadlines, command queue
-depth, last render duration, active sequence and script/runtime faults. The dashboard
-derives FPS from frame-count and elapsed-time differences. Heartbeats run every ten
-seconds; thirty seconds without a response fails the session. Metrics may also be
-sent unsolicited, using command ID zero. Server heartbeats may also use zero;
-replies to client heartbeats carry that command's ID.
+Every command has a positive increasing ID. Its named reply echoes that ID;
+empty `error` means success. Commands apply in order at render boundaries,
+and rejection preserves accepted state. There are no automatic retries.
 
-## Effect composition and time
+`Metrics` reports completed frames, missed deadlines, queue depth, render duration,
+active sequence and faults. FPS comes from frame-count and elapsed-time differences.
+Both endpoints send ten-second heartbeats and time out after thirty seconds.
+Unsolicited server heartbeats use ID zero; metrics have no command ID.
+Final fault metrics are best-effort; exit status and stderr remain authoritative.
 
-- Targets are all fixtures, a named group or a fixture ID. Attributes and blend
-  operations are enums. Ordinary effects cannot write raw reset or macro channels.
-- Each attribute replaces a value or multiplies a continuous number. Multipliers
-  are bounded to 0..8; colour uses replacement. Invalid targets, duplicate attributes
-  and incompatible types reject the complete effect.
-- Effects compose in ascending priority; higher priority wins, with command order
-  breaking ties. Clamp each numeric result to its attribute range after each effect.
-  Final brightness and blackout apply afterward.
-- Lifetime is explicitly until removal, positive beats or positive seconds.
-  Replacing an effect starts its new lifetime; removal reveals the continuing loop.
-- Beat-duration expiry and crossfades use continuously accumulated musical beats.
-  Tempo changes affect their rate; beat-phase corrections and animation speed do not.
-  Seconds use explicit monotonic elapsed time.
-
-Pipes use a four-byte big-endian length followed by Protobuf, bounded to 64 KiB.
-Framing corruption, heartbeat expiry and fatal rendering faults produce darkness
-and an explicit failure. Final fault metrics are best-effort; process exit and
-stderr remain authoritative if the status pipe cannot flush. Radius owns audio watermarks and synchronized DMX playback;
-this contract does not add a second media clock.
+Radius owns audio watermarks and synchronized DMX playback. A command reply confirms
+renderer application, not physical illumination.

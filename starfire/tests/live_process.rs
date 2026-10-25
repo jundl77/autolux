@@ -1,14 +1,13 @@
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::UdpSocket;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use prost::Message;
-use starfire::protocol::{MAX_MESSAGE_BYTES, wire};
-use wire::renderer_command::Command as Operation;
-use wire::renderer_event::Event;
+use starfire::protocol::ClientMessage as Operation;
+use starfire::protocol::ServerMessage as Event;
+use starfire::protocol::{MAX_MESSAGE_BYTES, read_event, wire};
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(5);
 const SILENT_CHECK_TIMEOUT: Duration = Duration::from_millis(80);
@@ -18,7 +17,7 @@ const RIG: &str = r#"{"schema_version":1,"fixtures":[{"id":"lamp","profile":"gen
 struct Renderer {
     child: Child,
     input: Option<ChildStdin>,
-    events: mpsc::Receiver<wire::RendererEvent>,
+    events: mpsc::Receiver<Event>,
     socket: UdpSocket,
     login: wire::Login,
     command_id: u64,
@@ -27,18 +26,25 @@ struct Renderer {
 
 fn play(name: &str) -> Operation {
     Operation::PlaySequence(wire::PlaySequence {
-        sequence: Some(wire::SequenceReference {
-            bank_id: "test".into(),
-            sequence_id: name.into(),
-        }),
+        command_id: 1,
+        bank: "test".into(),
+        sequence: name.into(),
         transition: None,
     })
 }
 
-fn parameter(value: wire::set_parameter::Parameter) -> Operation {
+fn parameter(value: wire::Parameter) -> Operation {
     Operation::SetParameter(wire::SetParameter {
+        command_id: 1,
         parameter: Some(value),
     })
+}
+
+fn setting(kind: wire::ParameterType, value: wire::parameter::Value) -> wire::Parameter {
+    wire::Parameter {
+        r#type: kind as i32,
+        value: Some(value),
+    }
 }
 
 impl Renderer {
@@ -68,24 +74,14 @@ impl Renderer {
         let mut output = child.stdout.take().unwrap();
         let (sender, events) = mpsc::channel();
         thread::spawn(move || {
-            loop {
-                let mut prefix = [0; 4];
-                if output.read_exact(&mut prefix).is_err() {
-                    break;
-                }
-                let size = u32::from_be_bytes(prefix) as usize;
-                assert!(size <= MAX_MESSAGE_BYTES);
-                let mut data = vec![0; size];
-                output.read_exact(&mut data).unwrap();
-                if sender
-                    .send(wire::RendererEvent::decode(data.as_slice()).unwrap())
-                    .is_err()
-                {
+            while let Some(event) = read_event(&mut output).unwrap() {
+                if sender.send(event).is_err() {
                     break;
                 }
             }
         });
         let login = wire::Login {
+            command_id: 0,
             rig_path: rig.to_str().unwrap().into(),
             sequences_path: sequences.to_str().unwrap().into(),
             artnet_destination: socket.local_addr().unwrap().to_string(),
@@ -106,7 +102,7 @@ impl Renderer {
     fn logged_in() -> Self {
         let mut renderer = Self::start();
         assert!(
-            matches!(renderer.reply(Operation::Login(renderer.login.clone())), Event::LoginReply(wire::LoginReply { error, frame_rate_hz: 40, max_message_bytes: 65536 }) if error.is_empty())
+            matches!(renderer.reply(Operation::Login(renderer.login.clone())), Event::LoginReply(wire::LoginReply { error, frame_rate_hz: 40, max_message_bytes: 65536, .. }) if error.is_empty())
         );
         renderer
     }
@@ -117,18 +113,10 @@ impl Renderer {
         self.command_id
     }
 
-    fn send_with_id(&mut self, command_id: u64, command: Operation) {
-        let data = wire::RendererCommand {
-            command_id,
-            command: Some(command),
-        }
-        .encode_to_vec();
-        let input = self.input.as_mut().unwrap();
-        input.write_all(&(data.len() as u32).to_be_bytes()).unwrap();
-        input.write_all(&data).unwrap();
-        input.flush().unwrap();
+    fn send_with_id(&mut self, command_id: u64, mut command: Operation) {
+        command.set_command_id(command_id);
+        command.write(self.input.as_mut().unwrap()).unwrap();
     }
-
     fn receive_reply(&self, id: u64) -> Event {
         let deadline = Instant::now() + TEST_TIMEOUT;
         loop {
@@ -136,14 +124,15 @@ impl Renderer {
                 .events
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
-            if event.command_id == 0 {
+            if event.command_id().unwrap_or(0) == 0 {
                 continue;
             }
             assert_eq!(
-                event.command_id, id,
+                event.command_id(),
+                Some(id),
                 "replies must follow accepted command order"
             );
-            return event.event.unwrap();
+            return event;
         }
     }
 
@@ -159,8 +148,7 @@ impl Renderer {
                 .events
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap();
-            if let Some(Event::Metrics(metrics)) = event.event {
-                assert_eq!(event.command_id, 0);
+            if let Event::Metrics(metrics) = event {
                 return metrics;
             }
         }
@@ -168,7 +156,7 @@ impl Renderer {
 
     fn metrics(&mut self) -> wire::Metrics {
         assert!(matches!(
-            self.reply(Operation::Heartbeat(wire::Heartbeat {})),
+            self.reply(Operation::Heartbeat(wire::Heartbeat::default())),
             Event::Heartbeat(_)
         ));
         self.next_metrics()
@@ -238,9 +226,10 @@ fn login_is_required_and_duplicate_login_preserves_owned_scene() {
     );
     renderer.wait_for_red(128);
     let mut replacement = renderer.login.clone();
-    replacement.parameters.push(wire::SetParameter {
-        parameter: Some(wire::set_parameter::Parameter::OutputBlackout(true)),
-    });
+    replacement.parameters.push(setting(
+        wire::ParameterType::OutputBlackout,
+        wire::parameter::Value::Boolean(true),
+    ));
     assert!(
         matches!(renderer.reply(Operation::Login(replacement)), Event::LoginReply(value) if value.error.contains("already"))
     );
@@ -259,12 +248,14 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
     invalid_output.artnet_destination = "0.0.0.0:0".into();
     let mut invalid_parameter = renderer.login.clone();
     invalid_parameter.parameters = vec![
-        wire::SetParameter {
-            parameter: Some(wire::set_parameter::Parameter::OutputBrightness(0.1)),
-        },
-        wire::SetParameter {
-            parameter: Some(wire::set_parameter::Parameter::AnimationSpeed(-1.0)),
-        },
+        setting(
+            wire::ParameterType::OutputBrightness,
+            wire::parameter::Value::Number(0.1),
+        ),
+        setting(
+            wire::ParameterType::AnimationSpeed,
+            wire::parameter::Value::Number(-1.0),
+        ),
     ];
     for login in [
         missing_rig,
@@ -278,9 +269,10 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
         renderer.assert_no_output();
         assert!(renderer.child.try_wait().unwrap().is_none());
     }
-    renderer.login.parameters.push(wire::SetParameter {
-        parameter: Some(wire::set_parameter::Parameter::OutputBrightness(0.6)),
-    });
+    renderer.login.parameters.push(setting(
+        wire::ParameterType::OutputBrightness,
+        wire::parameter::Value::Number(0.6),
+    ));
     assert!(
         matches!(renderer.reply(Operation::Login(renderer.login.clone())), Event::LoginReply(value) if value.error.is_empty())
     );
@@ -303,16 +295,16 @@ fn typed_controls_drive_artnet_idle_retains_settings_and_eof_blacks_out() {
         matches!(renderer.reply(play("energy")), Event::PlaySequenceReply(value) if value.error.is_empty())
     );
     assert!(
-        matches!(renderer.reply(parameter(wire::set_parameter::Parameter::AudioRmsNormalized(0.8))), Event::SetParameterReply(value) if value.error.is_empty())
+        matches!(renderer.reply(parameter(setting(wire::ParameterType::AudioRmsNormalized, wire::parameter::Value::Number(0.8)))), Event::SetParameterReply(value) if value.error.is_empty())
     );
     let first = renderer.metrics();
-    assert_eq!(first.active_sequence.unwrap().sequence_id, "energy");
+    assert_eq!(first.active_sequence, "energy");
     renderer.wait_for_red(102);
     assert!(
-        matches!(renderer.reply(Operation::PlaySequence(wire::PlaySequence::default())), Event::PlaySequenceReply(value) if value.error.is_empty() && value.sequence.is_none())
+        matches!(renderer.reply(Operation::PlaySequence(wire::PlaySequence::default())), Event::PlaySequenceReply(value) if value.error.is_empty())
     );
     let idle = renderer.metrics();
-    assert!(idle.active_sequence.is_none());
+    assert!(idle.active_sequence.is_empty());
     assert!(idle.rendered_frames >= first.rendered_frames);
     renderer.wait_for_red(0);
     assert!(renderer.child.try_wait().unwrap().is_none());
@@ -330,17 +322,18 @@ fn semantic_rejections_preserve_scene_and_replies_follow_large_bursts() {
     renderer.reply(play("energy"));
     renderer.wait_for_red(128);
     assert!(
-        matches!(renderer.reply(play("missing")), Event::PlaySequenceReply(value) if !value.error.is_empty() && value.sequence.as_ref().unwrap().sequence_id == "energy")
+        matches!(renderer.reply(play("missing")), Event::PlaySequenceReply(value) if !value.error.is_empty())
     );
     assert!(
-        matches!(renderer.reply(parameter(wire::set_parameter::Parameter::OutputBrightness(-1.0))), Event::SetParameterReply(value) if !value.error.is_empty())
+        matches!(renderer.reply(parameter(setting(wire::ParameterType::OutputBrightness, wire::parameter::Value::Number(-1.0)))), Event::SetParameterReply(value) if !value.error.is_empty())
     );
     renderer.wait_for_red(128);
     let first_id = renderer.command_id + 1;
     const BURST_COMMANDS: u64 = 128;
     for _ in 0..BURST_COMMANDS {
-        renderer.send(parameter(wire::set_parameter::Parameter::OutputBrightness(
-            0.8,
+        renderer.send(parameter(setting(
+            wire::ParameterType::OutputBrightness,
+            wire::parameter::Value::Number(0.8),
         )));
     }
     for id in first_id..first_id + BURST_COMMANDS {
@@ -362,15 +355,15 @@ fn malformed_frames_and_reused_command_ids_fail_closed() {
         if reuse_id {
             renderer.send_with_id(
                 renderer.command_id,
-                parameter(wire::set_parameter::Parameter::OutputBrightness(0.9)),
+                parameter(setting(
+                    wire::ParameterType::OutputBrightness,
+                    wire::parameter::Value::Number(0.9),
+                )),
             );
         } else {
-            renderer
-                .input
-                .as_mut()
-                .unwrap()
-                .write_all(&((MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes())
-                .unwrap();
+            let mut header = vec![wire::MessageType::Heartbeat as u8];
+            header.extend(((MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes());
+            renderer.input.as_mut().unwrap().write_all(&header).unwrap();
         }
         assert!(!renderer.wait_exit().success());
         renderer.wait_for_red(0);
@@ -402,8 +395,8 @@ fn server_sends_ten_second_heartbeats_without_waiting_for_requests() {
         .events
         .recv_timeout(Duration::from_secs(12))
         .unwrap();
-    assert_eq!(event.command_id, 0);
-    assert!(matches!(event.event, Some(Event::Heartbeat(_))));
+    assert_eq!(event.command_id(), Some(0));
+    assert!(matches!(event, Event::Heartbeat(_)));
     assert!(started.elapsed() >= Duration::from_secs(9));
     assert!(renderer.next_metrics().rendered_frames >= 360);
     assert!(renderer.child.try_wait().unwrap().is_none());

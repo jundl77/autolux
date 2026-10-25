@@ -3,19 +3,54 @@
 import math
 import struct
 
+from google.protobuf.message import Message
+
 from proto.starfire import starfire_pb2 as wire
 
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
-MAX_INTENSITY_MULTIPLIER = 8.0
-LENGTH_PREFIX = struct.Struct('!I')
+FRAME_HEADER = struct.Struct('!BI')
+
+COMMAND_MESSAGES = {
+    wire.LOGIN: wire.Login,
+    wire.PLAY_SEQUENCE: wire.PlaySequence,
+    wire.SET_ACTIVE_EFFECT: wire.SetActiveEffect,
+    wire.UNSET_ACTIVE_EFFECT: wire.UnsetActiveEffect,
+    wire.UPDATE_BEAT: wire.UpdateBeat,
+    wire.SET_PARAMETER: wire.SetParameter,
+    wire.HEARTBEAT: wire.Heartbeat,
+}
+EVENT_MESSAGES = {
+    wire.LOGIN_REPLY: wire.LoginReply,
+    wire.PLAY_SEQUENCE_REPLY: wire.PlaySequenceReply,
+    wire.SET_ACTIVE_EFFECT_REPLY: wire.SetActiveEffectReply,
+    wire.UNSET_ACTIVE_EFFECT_REPLY: wire.UnsetActiveEffectReply,
+    wire.UPDATE_BEAT_REPLY: wire.UpdateBeatReply,
+    wire.SET_PARAMETER_REPLY: wire.SetParameterReply,
+    wire.HEARTBEAT: wire.Heartbeat,
+    wire.METRICS: wire.Metrics,
+}
+MESSAGE_TYPE_BY_CLASS = {
+    message: message_type for message_type, message in (COMMAND_MESSAGES | EVENT_MESSAGES).items()
+}
+REPLY_TYPES = {
+    wire.Login: wire.LoginReply,
+    wire.PlaySequence: wire.PlaySequenceReply,
+    wire.SetActiveEffect: wire.SetActiveEffectReply,
+    wire.UnsetActiveEffect: wire.UnsetActiveEffectReply,
+    wire.UpdateBeat: wire.UpdateBeatReply,
+    wire.SetParameter: wire.SetParameterReply,
+    wire.Heartbeat: wire.Heartbeat,
+}
 
 
-def build_command(command: dict | wire.RendererCommand) -> wire.RendererCommand:
+def build_command(command: dict | Message) -> Message:
     """Copy a generated command, or adapt the application's replay command shape."""
-    if isinstance(command, wire.RendererCommand):
-        message = wire.RendererCommand()
+    if isinstance(command, Message):
+        if type(command) not in REPLY_TYPES:
+            raise ValueError('Expected a Starfire client command')
+        message = type(command)()
         message.CopyFrom(command)
         message.command_id = 0
     else:
@@ -24,32 +59,28 @@ def build_command(command: dict | wire.RendererCommand) -> wire.RendererCommand:
             value = dict(command)
             kind = value.pop('kind')
             if kind == 'beat':
-                message = wire.RendererCommand(
-                    update_beat=wire.UpdateBeat(
-                        position_beats=value.pop('position_beats'),
-                        tempo_bpm=value.pop('bpm'),
-                        **value,
-                    )
+                message = wire.UpdateBeat(
+                    position_beats=value.pop('position_beats'),
+                    tempo_bpm=value.pop('bpm'),
+                    **value,
                 )
             elif kind == 'select':
                 transition = value.pop('transition', {'kind': 'cut'})
-                message = wire.RendererCommand(
-                    play_sequence=wire.PlaySequence(
-                        sequence=wire.SequenceReference(
-                            bank_id=value.pop('bank'), sequence_id=value.pop('sequence'), **value
-                        ),
-                        transition=_transition(transition),
-                    )
+                message = wire.PlaySequence(
+                    bank=value.pop('bank'),
+                    sequence=value.pop('sequence'),
+                    transition=_transition(transition),
+                    **value,
                 )
             elif kind in ('set_master', 'set_speed', 'set_blackout', 'set_normalized_rms_level'):
-                parameter, field = {
-                    'set_master': ('output_brightness', 'intensity'),
-                    'set_speed': ('animation_speed', 'multiplier'),
-                    'set_blackout': ('output_blackout', 'enabled'),
-                    'set_normalized_rms_level': ('audio_rms_normalized', 'level'),
+                parameter, field, value_type = {
+                    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
+                    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
+                    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
+                    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
                 }[kind]
-                message = wire.RendererCommand(
-                    set_parameter=wire.SetParameter(**{parameter: value.pop(field)})
+                message = wire.SetParameter(
+                    parameter=wire.Parameter(type=parameter, **{value_type: value.pop(field)})
                 )
                 if value:
                     raise ValueError('Parameter command contains unexpected fields')
@@ -57,23 +88,19 @@ def build_command(command: dict | wire.RendererCommand) -> wire.RendererCommand:
                 override = value.pop('value')
                 if value:
                     raise ValueError('set_override requires exactly one value')
-                message = wire.RendererCommand(set_active_effect=_active_effect(override))
+                message = _active_effect(override)
             elif kind == 'clear_override':
-                message = wire.RendererCommand(
-                    unset_active_effect=wire.UnsetActiveEffect(effect_id=value.pop('id'), **value)
-                )
+                message = wire.UnsetActiveEffect(effect_id=value.pop('id'), **value)
             elif kind == 'stop':
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
-                message = wire.RendererCommand(play_sequence=wire.PlaySequence())
+                message = wire.PlaySequence()
             elif kind == 'heartbeat':
-                message = wire.RendererCommand(heartbeat=wire.Heartbeat(**value))
+                message = wire.Heartbeat(**value)
             else:
                 raise ValueError(f'Unknown Starfire command: {kind}')
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError(f'Invalid Starfire command: {error}') from error
-    if message.WhichOneof('command') is None:
-        raise ValueError('Starfire command is missing')
     return message
 
 
@@ -81,9 +108,11 @@ def _transition(value):
     value = dict(value)
     kind = value.pop('kind')
     if kind == 'cut':
-        return wire.Transition(cut=wire.Empty(**value))
+        if value:
+            raise ValueError('Cut transition contains unexpected fields')
+        return wire.PlaySequence.Transition()
     if kind == 'crossfade':
-        return wire.Transition(crossfade_beats=value.pop('duration_beats'), **value)
+        return wire.PlaySequence.Transition(crossfade_beats=value.pop('duration_beats'), **value)
     raise ValueError('Invalid Starfire transition')
 
 
@@ -91,88 +120,51 @@ def _active_effect(value):
     value = dict(value)
     target = value.pop('target')
     if target == 'all':
-        fixtures = wire.FixtureSelection(all=wire.Empty())
-    elif isinstance(target, dict) and len(target) == 1:
-        kind, identity = next(iter(target.items()))
-        fixtures = wire.FixtureSelection(**{f'{kind}_id': identity})
-    else:
+        target = {}
+    elif not isinstance(target, dict) or set(target) not in ({'group'}, {'fixture'}):
         raise ValueError('Invalid fixture selection')
     lifetime = dict(value.pop('lifetime', {'kind': 'until_cleared'}))
     duration = lifetime.pop('kind')
     if duration == 'until_cleared':
-        lifetime = wire.EffectLifetime(until_removed=wire.Empty(**lifetime))
-    elif duration in ('seconds', 'beats') and set(lifetime) == {f'duration_{duration}'}:
-        lifetime = wire.EffectLifetime(**lifetime)
-    else:
-        raise ValueError('Invalid effect lifetime')
+        if lifetime:
+            raise ValueError('Persistent effect contains unexpected lifetime fields')
+    elif duration != 'seconds' or set(lifetime) != {'duration_seconds'}:
+        raise ValueError('Effects support seconds or an explicitly cleared lifetime')
     properties = dict(value.pop('values', {}))
-    multiplier = value.pop('intensity_multiplier', None)
-    attributes = []
-    if multiplier is not None:
-        if not 0 <= multiplier <= MAX_INTENSITY_MULTIPLIER:
-            raise ValueError('Intensity multiplier is outside the supported range')
-        if properties.get('intensity') is not None:
-            if not 0 <= properties['intensity'] <= 1:
-                raise ValueError('Intensity is outside the supported range')
-            properties['intensity'] = min(1.0, properties['intensity'] * multiplier)
-        else:
-            attributes.append(
-                wire.AttributeAssignment(
-                    attribute=wire.INTENSITY,
-                    value=wire.ParameterValue(number=multiplier),
-                    operation=wire.MULTIPLY,
-                )
-            )
-    for key, item in properties.items():
-        if item is not None:
-            parameter = (
-                wire.ParameterValue(rgb=wire.RgbColor(**item))
-                if key == 'colour'
-                else wire.ParameterValue(number=item)
-            )
-            attribute = {
-                'intensity': wire.INTENSITY,
-                'colour': wire.COLOUR,
-                'pan': wire.PAN,
-                'tilt': wire.TILT,
-                'strobe_hz': wire.STROBE_HZ,
-            }[key]
-            attributes.append(
-                wire.AttributeAssignment(
-                    attribute=attribute, value=parameter, operation=wire.REPLACE
-                )
-            )
+    if not properties.keys() <= {'intensity', 'colour', 'pan', 'tilt', 'strobe_hz'}:
+        raise ValueError('Unknown effect property')
+    if value.pop('intensity_multiplier', None) is not None:
+        raise ValueError('Effects set intensity directly; multipliers are not supported')
     return wire.SetActiveEffect(
         effect_id=value.pop('id'),
-        fixtures=fixtures,
-        attributes=attributes,
-        lifetime=lifetime,
+        **target,
+        **properties,
+        **lifetime,
         **value,
     )
 
 
-def encode_command(message: wire.RendererCommand) -> bytes:
+def encode_command(message: Message) -> bytes:
+    if type(message) not in REPLY_TYPES:
+        raise ValueError('Expected a Starfire client command')
     if not 0 < message.command_id <= MAX_COMMAND_ID:
         raise ValueError('Starfire command ID must be positive')
-    if message.WhichOneof('command') is None:
-        raise ValueError('Starfire command is missing')
     payload = message.SerializeToString()
     if len(payload) > MAX_MESSAGE_BYTES:
         raise ValueError('Starfire command exceeds the message limit')
-    return LENGTH_PREFIX.pack(len(payload)) + payload
+    return FRAME_HEADER.pack(MESSAGE_TYPE_BY_CLASS[type(message)], len(payload)) + payload
 
 
-def read_event(stream) -> wire.RendererEvent | None:
-    prefix = _read_exact(stream, LENGTH_PREFIX.size, allow_eof=True)
+def read_event(stream) -> Message | None:
+    prefix = _read_exact(stream, FRAME_HEADER.size, allow_eof=True)
     if prefix is None:
         return None
-    length = LENGTH_PREFIX.unpack(prefix)[0]
-    if not 0 < length <= MAX_MESSAGE_BYTES:
+    message_type, length = FRAME_HEADER.unpack(prefix)
+    if message_type not in EVENT_MESSAGES:
+        raise ValueError(f'Unexpected Starfire server message type: {message_type}')
+    if length > MAX_MESSAGE_BYTES:
         raise ValueError(f'Invalid Starfire event size: {length}')
-    message = wire.RendererEvent.FromString(_read_exact(stream, length))
-    if message.WhichOneof('event') is None:
-        raise ValueError('Starfire event is missing')
-    return message
+    return EVENT_MESSAGES[message_type].FromString(_read_exact(stream, length))
 
 
 def _finite(value):

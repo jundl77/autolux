@@ -1,22 +1,22 @@
 //! Stateful playback and property composition; no wall clock or hardware I/O.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
 use crate::clock::{ClockSample, MusicalClock, validate_time};
-use crate::effects::{self, MAX_ATTRIBUTES, MAX_MULTIPLIER};
 use crate::fixtures::FixtureRig;
 use crate::model::{
-    Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ, PropertyValues,
-    RenderContext, Rgb, Transition,
+    Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
+    OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
 };
 use crate::protocol::wire;
 use crate::script::{LuaSequence, SequenceCatalog};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
+const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
@@ -62,7 +62,7 @@ impl ActiveSequence {
 }
 
 enum FadeSource {
-    Running(Box<ActiveSequence>),
+    Running(ActiveSequence),
     Frozen(FixtureStates),
 }
 
@@ -73,7 +73,7 @@ struct Crossfade {
 }
 
 struct ActiveOverride {
-    value: wire::SetActiveEffect,
+    value: LightingOverride,
     fixture_ids: Vec<String>,
     order: u64,
     expires_seconds: Option<f64>,
@@ -152,7 +152,7 @@ impl Engine {
                     self.select(at_seconds, time, bank, sequence, transition)?;
                 }
             }
-            Command::SetOverride { value } => self.set_override(at_seconds, value)?,
+            Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
             Command::ClearOverride { id } => {
                 validate_identifier(id)?;
                 self.overrides.remove(id);
@@ -179,6 +179,29 @@ impl Engine {
         Ok(())
     }
 
+    pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
+        use wire::{ParameterType, parameter::Value};
+        let command = match (
+            ParameterType::try_from(parameter.r#type),
+            parameter.value.as_ref(),
+        ) {
+            (Ok(ParameterType::OutputBrightness), Some(Value::Number(value))) => {
+                Command::SetMaster { intensity: *value }
+            }
+            (Ok(ParameterType::AnimationSpeed), Some(Value::Number(value))) => {
+                Command::SetSpeed { multiplier: *value }
+            }
+            (Ok(ParameterType::OutputBlackout), Some(Value::Boolean(value))) => {
+                Command::SetBlackout { enabled: *value }
+            }
+            (Ok(ParameterType::AudioRmsNormalized), Some(Value::Number(value))) => {
+                Command::SetNormalizedRmsLevel { level: *value }
+            }
+            _ => anyhow::bail!("unknown parameter type or incompatible value"),
+        };
+        self.apply(seconds, &command)
+    }
+
     pub fn render_at(&mut self, time_seconds: f64) -> Result<RenderedFrame> {
         self.validate_time(time_seconds)?;
         let time = self.clock.sample_at(time_seconds)?;
@@ -195,7 +218,7 @@ impl Engine {
         };
 
         if self.script_error.is_none() {
-            self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states)?;
+            self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states);
             for state in states.values_mut() {
                 state.intensity = state.intensity.clamp(0.0, 1.0) * self.master_intensity;
             }
@@ -269,7 +292,7 @@ impl Engine {
                 } else if self.script_error.is_some() {
                     FadeSource::Frozen(self.dark_states())
                 } else if let Some(previous) = previous {
-                    FadeSource::Running(Box::new(previous))
+                    FadeSource::Running(previous)
                 } else {
                     FadeSource::Frozen(self.dark_states())
                 };
@@ -321,92 +344,25 @@ impl Engine {
         Ok(blend_states(source, destination, amount))
     }
 
-    pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::SetParameter) -> Result<()> {
-        use wire::set_parameter::Parameter;
-        self.validate_time(seconds)?;
-        match parameter
-            .parameter
-            .as_ref()
-            .context("parameter is required")?
-        {
-            Parameter::OutputBrightness(value) => {
-                validate_unit(*value, "output brightness")?;
-                self.master_intensity = *value;
-            }
-            Parameter::AnimationSpeed(value) => self.clock.set_speed(seconds, *value)?,
-            Parameter::OutputBlackout(value) => self.blackout = *value,
-            Parameter::AudioRmsNormalized(value) => {
-                validate_unit(*value, "normalized RMS level")?;
-                self.normalized_rms_level = Some(*value);
-            }
-            Parameter::SequenceParameter(parameter) => {
-                let identity = parameter
-                    .sequence
-                    .as_ref()
-                    .context("sequence parameter requires its sequence identity")?;
-                let active = self.active.as_mut().context("no sequence is active")?;
-                ensure!(
-                    active.bank == identity.bank_id && active.name == identity.sequence_id,
-                    "parameter target does not match the active sequence"
-                );
-                active.script.set_parameter(
-                    &parameter.name,
-                    parameter
-                        .value
-                        .as_ref()
-                        .context("sequence parameter requires a value")?,
-                )?;
-            }
-        }
-        self.last_time_seconds = seconds;
-        Ok(())
-    }
-    pub fn sequence_reply(&self, error: String) -> wire::PlaySequenceReply {
-        wire::PlaySequenceReply {
-            error,
-            sequence: self.active.as_ref().map(|active| wire::SequenceReference {
-                bank_id: active.bank.clone(),
-                sequence_id: active.name.clone(),
-            }),
-            parameters: self
-                .active
-                .as_ref()
-                .map(|active| active.script.parameter_definitions().to_vec())
-                .unwrap_or_default(),
-        }
-    }
-    fn set_override(&mut self, seconds: f64, value: &LightingOverride) -> Result<()> {
+    fn set_override(
+        &mut self,
+        seconds: f64,
+        time: ClockSample,
+        value: &LightingOverride,
+    ) -> Result<()> {
+        validate_identifier(&value.id)?;
         validate_properties(&value.values)?;
         if let Some(multiplier) = value.intensity_multiplier {
             ensure!(
-                multiplier.is_finite() && (0.0..=MAX_MULTIPLIER).contains(&multiplier),
+                multiplier.is_finite() && (0.0..=MAX_INTENSITY_MULTIPLIER).contains(&multiplier),
                 "intensity multiplier is outside the supported range"
             );
-        }
-        self.set_active_effect(seconds, &effects::from_override(value))
-    }
-
-    pub fn set_active_effect(&mut self, seconds: f64, value: &wire::SetActiveEffect) -> Result<()> {
-        self.validate_time(seconds)?;
-        let time = self.clock.sample_at(seconds)?;
-        validate_identifier(&value.effect_id)?;
-        ensure!(
-            !value.attributes.is_empty() && value.attributes.len() <= MAX_ATTRIBUTES,
-            "effect must contain 1..{MAX_ATTRIBUTES} attributes"
-        );
-        let mut keys = BTreeSet::new();
-        for attribute in &value.attributes {
-            ensure!(
-                keys.insert(attribute.attribute),
-                "duplicate effect attribute"
-            );
-            effects::validate_attribute(attribute)?;
         }
         let other_active_count = self
             .overrides
             .values()
             .filter(|existing| {
-                existing.value.effect_id != value.effect_id
+                existing.value.id != value.id
                     && !existing.expired(seconds, time.elapsed_musical_beats)
             })
             .count();
@@ -414,26 +370,15 @@ impl Engine {
             other_active_count < MAX_ACTIVE_OVERRIDES,
             "too many active lighting overrides"
         );
-        let target = effects::fixture_target(
-            value
-                .fixtures
-                .as_ref()
-                .context("effect fixtures are required")?,
-        )?;
-        let fixture_ids = self.rig.resolve(&target)?;
-        let expiration = value
-            .lifetime
-            .as_ref()
-            .and_then(|lifetime| lifetime.expiration.as_ref())
-            .context("effect lifetime is required")?;
-        let (expires_seconds, expires_beat) = match expiration {
-            wire::effect_lifetime::Expiration::UntilRemoved(_) => (None, None),
-            wire::effect_lifetime::Expiration::DurationBeats(duration_beats) => (
+        let fixture_ids = self.rig.resolve(&value.target)?;
+        let (expires_seconds, expires_beat) = match value.lifetime {
+            OverrideLifetime::UntilCleared => (None, None),
+            OverrideLifetime::Beats { duration_beats } => (
                 None,
-                Some(expiry(time.elapsed_musical_beats, *duration_beats)?),
+                Some(expiry(time.elapsed_musical_beats, duration_beats)?),
             ),
-            wire::effect_lifetime::Expiration::DurationSeconds(duration_seconds) => {
-                (Some(expiry(seconds, *duration_seconds)?), None)
+            OverrideLifetime::Seconds { duration_seconds } => {
+                (Some(expiry(seconds, duration_seconds)?), None)
             }
         };
         let order = self
@@ -443,7 +388,7 @@ impl Engine {
         self.overrides
             .retain(|_, existing| !existing.expired(seconds, time.elapsed_musical_beats));
         self.overrides.insert(
-            value.effect_id.clone(),
+            value.id.clone(),
             ActiveOverride {
                 value: value.clone(),
                 fixture_ids,
@@ -453,30 +398,25 @@ impl Engine {
             },
         );
         self.override_order = order;
-        self.last_time_seconds = seconds;
         Ok(())
     }
 
-    fn compose_overrides(
-        &mut self,
-        seconds: f64,
-        beat: f64,
-        states: &mut FixtureStates,
-    ) -> Result<()> {
+    fn compose_overrides(&mut self, seconds: f64, beat: f64, states: &mut FixtureStates) {
         self.overrides
             .retain(|_, value| !value.expired(seconds, beat));
         let mut ordered: Vec<_> = self.overrides.values().collect();
         ordered.sort_by_key(|value| (value.value.priority, value.order));
-        for value in &ordered {
+        for value in ordered {
             for id in &value.fixture_ids {
                 if let Some(state) = states.get_mut(id) {
-                    for attribute in &value.value.attributes {
-                        effects::apply_attribute(state, attribute)?;
+                    apply_properties(state, &value.value.values);
+                    if let Some(multiplier) = value.value.intensity_multiplier {
+                        state.intensity *= multiplier;
                     }
+                    state.intensity = state.intensity.clamp(0.0, 1.0);
                 }
             }
         }
-        Ok(())
     }
 
     fn dark_states(&self) -> FixtureStates {

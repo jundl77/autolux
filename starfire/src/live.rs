@@ -15,7 +15,8 @@ use crate::engine::Engine;
 use crate::fixtures::FixtureRig;
 use crate::model::{DEFAULT_FRAME_RATE_HZ, FixtureStates};
 use crate::protocol::{
-    MAX_MESSAGE_BYTES, apply_command, error_message, read_control, wire, write_event,
+    ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message, read_control,
+    wire, write_event,
 };
 use crate::script::SequenceCatalog;
 
@@ -92,12 +93,8 @@ impl LiveSession {
             missed_render_deadlines,
             queued_commands: queued_commands as u32,
             last_render_duration_seconds,
-            active_sequence: frame.active_bank.zip(frame.active_sequence).map(
-                |(bank_id, sequence_id)| wire::SequenceReference {
-                    bank_id,
-                    sequence_id,
-                },
-            ),
+            active_bank: frame.active_bank.unwrap_or_default(),
+            active_sequence: frame.active_sequence.unwrap_or_default(),
             script_error: frame.script_error.unwrap_or_default(),
             runtime_error: String::new(),
         })
@@ -140,7 +137,7 @@ fn check_failure(failure: &SharedFailure) -> Result<()> {
 
 fn receive_controls(
     mut input: impl Read,
-    sender: mpsc::SyncSender<wire::RendererCommand>,
+    sender: mpsc::SyncSender<ClientMessage>,
     queued: Arc<AtomicUsize>,
     failure: SharedFailure,
 ) {
@@ -148,14 +145,14 @@ fn receive_controls(
     loop {
         match read_control(&mut input) {
             Ok(Some(control)) => {
-                if control.command_id <= last_command_id {
+                if control.command_id() <= last_command_id {
                     record_failure(
                         &failure,
                         "command IDs must increase within the renderer session".into(),
                     );
                     return;
                 }
-                last_command_id = control.command_id;
+                last_command_id = control.command_id();
                 queued.fetch_add(1, Ordering::Relaxed);
                 if let Err(error) = sender.try_send(control) {
                     queued.fetch_sub(1, Ordering::Relaxed);
@@ -174,49 +171,38 @@ fn receive_controls(
     }
 }
 
-fn send_event(
-    events: &mpsc::SyncSender<wire::RendererEvent>,
-    command_id: u64,
-    event: wire::renderer_event::Event,
-) -> Result<()> {
+fn send_event(events: &mpsc::SyncSender<ServerMessage>, event: ServerMessage) -> Result<()> {
     events
-        .try_send(wire::RendererEvent {
-            command_id,
-            event: Some(event),
-        })
+        .try_send(event)
         .context("renderer event queue overflow or reader closed")
 }
 
-fn operation_reply(
-    command: &wire::renderer_command::Command,
-    engine: Option<&Engine>,
-    error: String,
-) -> wire::renderer_event::Event {
-    use wire::renderer_command::Command;
-    use wire::renderer_event::Event;
+fn operation_reply(command: &ClientMessage, error: String) -> ServerMessage {
+    let command_id = command.command_id();
     match command {
-        Command::PlaySequence(_) => Event::PlaySequenceReply(
-            engine
-                .map(|engine| engine.sequence_reply(error.clone()))
-                .unwrap_or(wire::PlaySequenceReply {
-                    error,
-                    ..Default::default()
-                }),
-        ),
-        Command::SetActiveEffect(_) => {
-            Event::SetActiveEffectReply(wire::SetActiveEffectReply { error })
+        ClientMessage::PlaySequence(_) => {
+            ServerMessage::PlaySequenceReply(wire::PlaySequenceReply { command_id, error })
         }
-        Command::UnsetActiveEffect(_) => {
-            Event::UnsetActiveEffectReply(wire::UnsetActiveEffectReply { error })
+        ClientMessage::SetActiveEffect(_) => {
+            ServerMessage::SetActiveEffectReply(wire::SetActiveEffectReply { command_id, error })
         }
-        Command::UpdateBeat(_) => Event::UpdateBeatReply(wire::UpdateBeatReply { error }),
-        Command::SetParameter(_) => Event::SetParameterReply(wire::SetParameterReply { error }),
-        Command::Login(_) | Command::Heartbeat(_) => {
+        ClientMessage::UnsetActiveEffect(_) => {
+            ServerMessage::UnsetActiveEffectReply(wire::UnsetActiveEffectReply {
+                command_id,
+                error,
+            })
+        }
+        ClientMessage::UpdateBeat(_) => {
+            ServerMessage::UpdateBeatReply(wire::UpdateBeatReply { command_id, error })
+        }
+        ClientMessage::SetParameter(_) => {
+            ServerMessage::SetParameterReply(wire::SetParameterReply { command_id, error })
+        }
+        ClientMessage::Login(_) | ClientMessage::Heartbeat(_) => {
             unreachable!("session operations have their own replies")
         }
     }
 }
-
 /// Readers and writers cannot block the renderer or its final blackout. The owned
 /// process exits without joining a pipe reader still waiting on its parent.
 pub fn run_live(
@@ -287,9 +273,9 @@ pub fn run_live(
                     }
                 };
                 queued.fetch_sub(1, Ordering::Relaxed);
-                let command = control.command.context("control requires an operation")?;
+                let command = control;
                 match &command {
-                    wire::renderer_command::Command::Login(login) => {
+                    ClientMessage::Login(login) => {
                         let result = if session.is_some() {
                             Err(anyhow::anyhow!("renderer session is already logged in"))
                         } else {
@@ -307,8 +293,8 @@ pub fn run_live(
                         let success = error.is_empty();
                         send_event(
                             &events,
-                            control.command_id,
-                            wire::renderer_event::Event::LoginReply(wire::LoginReply {
+                            ServerMessage::LoginReply(wire::LoginReply {
+                                command_id: command.command_id(),
                                 error,
                                 frame_rate_hz: if success { DEFAULT_FRAME_RATE_HZ } else { 0 },
                                 max_message_bytes: if success {
@@ -319,14 +305,15 @@ pub fn run_live(
                             }),
                         )?;
                     }
-                    wire::renderer_command::Command::Heartbeat(_) => {
+                    ClientMessage::Heartbeat(_) => {
                         ensure!(session.is_some(), "login is required before heartbeat");
                         last_client_heartbeat = Instant::now();
                         report_metrics = true;
                         send_event(
                             &events,
-                            control.command_id,
-                            wire::renderer_event::Event::Heartbeat(wire::Heartbeat {}),
+                            ServerMessage::Heartbeat(wire::Heartbeat {
+                                command_id: command.command_id(),
+                            }),
                         )?;
                     }
                     _ => {
@@ -342,15 +329,7 @@ pub fn run_live(
                             .err()
                             .map(|error| error_message(&error))
                             .unwrap_or_default();
-                        send_event(
-                            &events,
-                            control.command_id,
-                            operation_reply(
-                                &command,
-                                session.as_ref().map(|session| &session.engine),
-                                error,
-                            ),
-                        )?;
+                        send_event(&events, operation_reply(&command, error))?;
                     }
                 }
             }
@@ -373,18 +352,13 @@ pub fn run_live(
             if last_server_heartbeat.elapsed() >= HEARTBEAT_INTERVAL {
                 send_event(
                     &events,
-                    0,
-                    wire::renderer_event::Event::Heartbeat(wire::Heartbeat {}),
+                    ServerMessage::Heartbeat(wire::Heartbeat { command_id: 0 }),
                 )?;
                 last_server_heartbeat = Instant::now();
                 report_metrics = true;
             }
             if report_metrics || metrics.script_error != previous_script_error {
-                send_event(
-                    &events,
-                    0,
-                    wire::renderer_event::Event::Metrics(metrics.clone()),
-                )?;
+                send_event(&events, ServerMessage::Metrics(metrics.clone()))?;
             }
             next_frame = due_frame + 1;
         }
@@ -401,7 +375,7 @@ pub fn run_live(
     };
     if let Err(error) = &result {
         metrics.runtime_error = error_message(error);
-        let _ = send_event(&events, 0, wire::renderer_event::Event::Metrics(metrics));
+        let _ = send_event(&events, ServerMessage::Metrics(metrics));
     }
     result
 }

@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import queue
 import socket
-import struct
 import sys
 import threading
 import time
@@ -30,16 +29,17 @@ def test_control_adapter_preserves_zero_values_and_named_targets():
     )
     command.command_id = 1
     encoded = protocol.encode_command(command)
-    value = wire.RendererCommand.FromString(encoded[protocol.LENGTH_PREFIX.size :])
-    assert protocol.LENGTH_PREFIX.unpack(encoded[:4])[0] == len(encoded) - 4
+    message_type, length = protocol.FRAME_HEADER.unpack(encoded[: protocol.FRAME_HEADER.size])
+    value = wire.SetActiveEffect.FromString(encoded[protocol.FRAME_HEADER.size :])
+    assert message_type == wire.SET_ACTIVE_EFFECT
+    assert length == len(encoded) - protocol.FRAME_HEADER.size
     assert value.command_id == 1
-    effect = value.set_active_effect
-    assert effect.fixtures.group_id == 'wash'
-    attributes = {item.attribute: item for item in effect.attributes}
-    assert attributes[wire.INTENSITY].value.WhichOneof('value') == 'number'
-    assert attributes[wire.INTENSITY].value.number == 0.0
-    assert wire.PAN not in attributes
-    assert effect.lifetime.duration_seconds == 1.0
+    effect = value
+    assert effect.group == 'wash'
+    assert effect.HasField('intensity')
+    assert effect.intensity == 0.0
+    assert not effect.HasField('pan')
+    assert effect.duration_seconds == 1.0
 
 
 @pytest.mark.parametrize(
@@ -65,7 +65,11 @@ def test_invalid_control_cannot_enter_the_pipe(command):
 
 @pytest.mark.parametrize(
     'payload',
-    [b'\x00', struct.pack('!I', protocol.MAX_MESSAGE_BYTES + 1), struct.pack('!I', 2) + b'\x08'],
+    [
+        b'\x00',
+        protocol.FRAME_HEADER.pack(wire.METRICS, protocol.MAX_MESSAGE_BYTES + 1),
+        protocol.FRAME_HEADER.pack(wire.METRICS, 2) + b'\x08',
+    ],
 )
 def test_incomplete_and_oversized_events_are_rejected(payload):
     with pytest.raises(ValueError):
@@ -74,109 +78,129 @@ def test_incomplete_and_oversized_events_are_rejected(payload):
 
 
 @pytest.mark.parametrize(
-    'kind,field,parameter,value',
+    'kind,field,parameter,value_type,value',
     [
-        ('set_master', 'intensity', 'output_brightness', 0.0),
-        ('set_speed', 'multiplier', 'animation_speed', 0.0),
-        ('set_blackout', 'enabled', 'output_blackout', False),
-        ('set_normalized_rms_level', 'level', 'audio_rms_normalized', 0.0),
+        ('set_master', 'intensity', wire.OUTPUT_BRIGHTNESS, 'number', 0.0),
+        ('set_speed', 'multiplier', wire.ANIMATION_SPEED, 'number', 0.0),
+        ('set_blackout', 'enabled', wire.OUTPUT_BLACKOUT, 'boolean', False),
+        ('set_normalized_rms_level', 'level', wire.AUDIO_RMS_NORMALIZED, 'number', 0.0),
     ],
 )
-def test_controls_use_typed_parameter_variants(kind, field, parameter, value):
+def test_controls_use_typed_parameters(kind, field, parameter, value_type, value):
     command = protocol.build_command({'kind': kind, field: value})
-    assert command.WhichOneof('command') == 'set_parameter'
-    setting = command.set_parameter
-    assert setting.WhichOneof('parameter') == parameter
-    assert getattr(setting, parameter) == value
+    assert isinstance(command, wire.SetParameter)
+    setting = command.parameter
+    assert setting.type == parameter
+    assert setting.WhichOneof('value') == value_type
+    assert getattr(setting, value_type) == value
 
 
 def test_typed_commands_are_copied_before_queueing():
-    command = wire.RendererCommand(
+    command = wire.SetParameter(
         command_id=93,
-        set_parameter=wire.SetParameter(
-            sequence_parameter=wire.SequenceParameter(
-                sequence=wire.SequenceReference(bank_id='drop', sequence_id='blue_impact'),
-                name='pulse_decay_beats',
-                value=wire.ParameterValue(number=0.4),
-            )
-        ),
+        parameter=wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0.4),
     )
     copied = protocol.build_command(command)
-    command.set_parameter.sequence_parameter.value.number = 0.9
+    command.parameter.number = 0.9
     assert copied.command_id == 0
-    assert copied.set_parameter.sequence_parameter.value.number == 0.4
+    assert copied.parameter.number == 0.4
 
 
-def test_effect_multiplier_keeps_one_assignment_per_attribute():
-    effect = protocol.build_command(
-        {
-            'kind': 'set_override',
-            'value': {
-                'id': 'held',
-                'target': 'all',
-                'values': {'intensity': 0.8},
-                'intensity_multiplier': 2.0,
-            },
-        }
-    ).set_active_effect
-    assert len(effect.attributes) == 1
-    assert effect.attributes[0].operation == wire.REPLACE
-    assert effect.attributes[0].value.number == 1.0
+@pytest.mark.parametrize(
+    'unsupported',
+    [
+        {'intensity_multiplier': 2.0},
+        {'lifetime': {'kind': 'beats', 'duration_beats': 4.0}},
+    ],
+)
+def test_unsupported_effect_controls_are_not_silently_changed(unsupported):
+    with pytest.raises(ValueError):
+        protocol.build_command(
+            {
+                'kind': 'set_override',
+                'value': {
+                    'id': 'held',
+                    'target': 'all',
+                    'values': {'intensity': 0.8},
+                    **unsupported,
+                },
+            }
+        )
 
 
 def test_events_read_partial_pipe_chunks_without_losing_uint64_precision():
-    message = wire.RendererEvent(metrics=wire.Metrics(rendered_frames=(1 << 60) + 7))
+    message = wire.Metrics(rendered_frames=(1 << 60) + 7)
     payload = message.SerializeToString()
 
     class ShortReader(io.BytesIO):
         def read(self, size):
             return super().read(min(size, 1))
 
-    decoded = protocol.read_event(ShortReader(protocol.LENGTH_PREFIX.pack(len(payload)) + payload))
-    assert decoded.metrics.rendered_frames == (1 << 60) + 7
+    decoded = protocol.read_event(
+        ShortReader(protocol.FRAME_HEADER.pack(wire.METRICS, len(payload)) + payload)
+    )
+    assert decoded.rendered_frames == (1 << 60) + 7
+
+
+@pytest.mark.parametrize('message_type', [wire.LOGIN, wire.MESSAGE_TYPE_UNSPECIFIED, 255])
+def test_unknown_and_wrong_direction_message_types_are_rejected(message_type):
+    with pytest.raises(ValueError, match='server message type'):
+        protocol.read_event(io.BytesIO(protocol.FRAME_HEADER.pack(message_type, 0)))
+
+
+@pytest.mark.parametrize(
+    'message_type,message_class', [(wire.HEARTBEAT, wire.Heartbeat), (wire.METRICS, wire.Metrics)]
+)
+def test_empty_standalone_server_messages_are_valid(message_type, message_class):
+    assert (
+        protocol.read_event(io.BytesIO(protocol.FRAME_HEADER.pack(message_type, 0)))
+        == message_class()
+    )
 
 
 _CHILD = r'''
-import json, struct, sys, time
+import json, sys, time
 from proto.starfire import starfire_pb2 as wire
-from cli.starfire_protocol import LENGTH_PREFIX, MAX_MESSAGE_BYTES
+from cli.starfire_protocol import (
+    FRAME_HEADER, MAX_MESSAGE_BYTES, COMMAND_MESSAGES, MESSAGE_TYPE_BY_CLASS, REPLY_TYPES,
+)
 mode, recording = sys.argv[1:]
-def event(**value):
-    payload = wire.RendererEvent(**value).SerializeToString()
-    sys.stdout.buffer.write(LENGTH_PREFIX.pack(len(payload)) + payload)
+def event(value):
+    payload = value.SerializeToString()
+    sys.stdout.buffer.write(FRAME_HEADER.pack(MESSAGE_TYPE_BY_CLASS[type(value)], len(payload)) + payload)
     sys.stdout.buffer.flush()
 if mode == 'stall':
     time.sleep(30)
 if mode == 'malformed':
-    sys.stdout.buffer.write(struct.pack('!I', 65537))
+    sys.stdout.buffer.write(FRAME_HEADER.pack(wire.METRICS, MAX_MESSAGE_BYTES + 1))
     sys.stdout.buffer.flush()
 commands = []
-while prefix := sys.stdin.buffer.read(4):
-    value = wire.RendererCommand.FromString(sys.stdin.buffer.read(LENGTH_PREFIX.unpack(prefix)[0]))
-    kind = value.WhichOneof('command')
-    record = {'id': value.command_id, 'kind': kind}
-    if kind == 'play_sequence' and value.play_sequence.HasField('sequence'):
-        record['sequence'] = value.play_sequence.sequence.sequence_id
+while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
+    message_type, length = FRAME_HEADER.unpack(prefix)
+    value = COMMAND_MESSAGES[message_type].FromString(sys.stdin.buffer.read(length))
+    record = {'id': value.command_id, 'kind': type(value).__name__}
+    if isinstance(value, wire.PlaySequence) and value.sequence:
+        record['sequence'] = value.sequence
     commands.append(record)
-    if kind == 'login' and mode != 'no_login_reply':
+    if isinstance(value, wire.Login) and mode != 'no_login_reply':
         assert value.command_id == 1
-        assert value.login.rig_path and value.login.sequences_path
-        assert value.login.artnet_destination
+        assert value.rig_path and value.sequences_path
+        assert value.artnet_destination
         if mode == 'login_error':
-            event(command_id=value.command_id, login_reply={'error': 'fixture patch is missing'})
+            event(wire.LoginReply(command_id=value.command_id, error='fixture patch is missing'))
         else:
-            event(command_id=value.command_id, login_reply={
-                'frame_rate_hz': 40, 'max_message_bytes': MAX_MESSAGE_BYTES
-            })
-    elif kind == 'heartbeat':
+            event(wire.LoginReply(command_id=value.command_id,
+                frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES
+            ))
+    elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
-            event(heartbeat={})
+            event(wire.Heartbeat())
             if mode != 'no_replies':
-                event(command_id=value.command_id, heartbeat={})
-        event(metrics={'rendered_frames': len(commands)})
-    elif kind != 'login' and mode != 'no_replies':
+                event(wire.Heartbeat(command_id=value.command_id))
+        event(wire.Metrics(rendered_frames=len(commands)))
+    elif not isinstance(value, wire.Login) and mode != 'no_replies':
         error = 'unknown sequence' if mode == 'reject' and 'sequence' in record else ''
-        event(command_id=value.command_id, **{kind + '_reply': {'error': error}})
+        event(REPLY_TYPES[type(value)](command_id=value.command_id, error=error))
 with open(recording, 'w') as output:
     json.dump(commands, output)
 '''
@@ -206,11 +230,11 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
         assert runtime.snapshot()['rendered_frames'] == 5
     assert child.poll() == 0
     assert json.loads((tmp_path / 'commands.json').read_text()) == [
-        {'id': 1, 'kind': 'login'},
-        {'id': 2, 'kind': 'heartbeat'},
-        {'id': 3, 'kind': 'play_sequence', 'sequence': 'blue_impact'},
-        {'id': 4, 'kind': 'play_sequence'},
-        {'id': 5, 'kind': 'heartbeat'},
+        {'id': 1, 'kind': 'Login'},
+        {'id': 2, 'kind': 'Heartbeat'},
+        {'id': 3, 'kind': 'PlaySequence', 'sequence': 'blue_impact'},
+        {'id': 4, 'kind': 'PlaySequence'},
+        {'id': 5, 'kind': 'Heartbeat'},
     ]
     assert all(not thread.is_alive() for thread in runtime._threads)
 
@@ -263,7 +287,7 @@ def test_startup_waits_for_login_reply_before_sending_any_other_command(tmp_path
     with pytest.raises(RuntimeError, match='startup deadline'):
         with runtime:
             pytest.fail('renderer became ready without a login reply')
-    assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'login'}]
+    assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'Login'}]
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
 
@@ -271,12 +295,12 @@ def test_startup_waits_for_login_reply_before_sending_any_other_command(tmp_path
 def test_rejected_login_reports_initialization_error_and_reaps_owned_process(tmp_path):
     runtime = _fake_runtime(tmp_path, 'login_error')
     with pytest.raises(
-        RuntimeError, match='login_reply rejected command 1: fixture patch is missing'
+        RuntimeError, match='LoginReply rejected command 1: fixture patch is missing'
     ):
         with runtime:
             pytest.fail('failed initialization became ready')
     assert runtime.process is None
-    assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'login'}]
+    assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'Login'}]
     assert all(not thread.is_alive() for thread in runtime._threads)
 
 
@@ -351,13 +375,14 @@ def test_injected_heartbeat_ids_follow_pipe_order_and_fast_responses_are_registe
 
     def write_and_acknowledge(encoded):
         nonlocal now
-        command = wire.RendererCommand.FromString(encoded[protocol.LENGTH_PREFIX.size :])
-        recorded.append((command.command_id, command.WhichOneof('command')))
+        message_type, _ = protocol.FRAME_HEADER.unpack(encoded[: protocol.FRAME_HEADER.size])
+        command = protocol.COMMAND_MESSAGES[message_type].FromString(
+            encoded[protocol.FRAME_HEADER.size :]
+        )
+        recorded.append((command.command_id, type(command).__name__))
         # Simulate a child replying while the write is still in progress.
-        kind = command.WhichOneof('command')
-        reply_kind = kind if kind == 'heartbeat' else f'{kind}_reply'
-        runtime._accept_reply(wire.RendererEvent(command_id=command.command_id, **{reply_kind: {}}))
-        if kind == 'login':
+        runtime._accept_reply(protocol.REPLY_TYPES[type(command)](command_id=command.command_id))
+        if isinstance(command, wire.Login):
             runtime._ready.set()
         if command.command_id == 3:
             now += starfire_runtime.HEARTBEAT_INTERVAL_SECONDS
@@ -365,11 +390,11 @@ def test_injected_heartbeat_ids_follow_pipe_order_and_fast_responses_are_registe
     runtime._write = write_and_acknowledge
     runtime._write_commands()
     assert recorded == [
-        (1, 'login'),
-        (2, 'heartbeat'),
-        (3, 'play_sequence'),
-        (4, 'heartbeat'),
-        (5, 'play_sequence'),
+        (1, 'Login'),
+        (2, 'Heartbeat'),
+        (3, 'PlaySequence'),
+        (4, 'Heartbeat'),
+        (5, 'PlaySequence'),
     ]
     assert runtime._last_reply_id == runtime._last_sent_id == 5
     assert not runtime._pending_replies
@@ -378,21 +403,21 @@ def test_injected_heartbeat_ids_follow_pipe_order_and_fast_responses_are_registe
 
 
 @pytest.mark.parametrize(
-    'command_id,reply_kind',
+    'command_id,reply_type',
     [
-        (0, 'set_parameter_reply'),
-        (2, 'set_parameter_reply'),
-        (1, 'update_beat_reply'),
+        (0, wire.SetParameterReply),
+        (2, wire.SetParameterReply),
+        (1, wire.UpdateBeatReply),
     ],
 )
 def test_unsolicited_out_of_order_and_wrong_operation_replies_are_rejected(
-    tmp_path, command_id, reply_kind
+    tmp_path, command_id, reply_type
 ):
     runtime = _fake_runtime(tmp_path)
     runtime._last_sent_id = 1
-    runtime._pending_replies.append((1, 'set_parameter_reply', time.monotonic() + 1))
+    runtime._pending_replies.append((1, wire.SetParameterReply, time.monotonic() + 1))
     with pytest.raises(ValueError):
-        runtime._accept_reply(wire.RendererEvent(command_id=command_id, **{reply_kind: {}}))
+        runtime._accept_reply(reply_type(command_id=command_id))
     assert runtime._last_reply_id == 0
     assert len(runtime._pending_replies) == 1
 
@@ -438,31 +463,18 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             root / 'starfire/sequences',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
-            initial_parameters=[wire.SetParameter(output_brightness=0.5)],
+            initial_parameters=[wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0.5)],
         )
         with runtime:
             runtime.send_command({'kind': 'beat', 'position_beats': 0.0, 'bpm': 120.0})
             runtime.send_command({'kind': 'select', 'bank': 'drop', 'sequence': 'blue_impact'})
             runtime.send_command({'kind': 'set_normalized_rms_level', 'level': 0.8})
             runtime.send_command(
-                wire.RendererCommand(
-                    set_active_effect=wire.SetActiveEffect(
-                        effect_id='held_red',
-                        fixtures=wire.FixtureSelection(fixture_id='cf805_pixel_1'),
-                        attributes=[
-                            wire.AttributeAssignment(
-                                attribute=wire.INTENSITY,
-                                value=wire.ParameterValue(number=0.75),
-                                operation=wire.REPLACE,
-                            ),
-                            wire.AttributeAssignment(
-                                attribute=wire.COLOUR,
-                                value=wire.ParameterValue(rgb=wire.RgbColor(red=1.0)),
-                                operation=wire.REPLACE,
-                            ),
-                        ],
-                        lifetime=wire.EffectLifetime(until_removed=wire.Empty()),
-                    )
+                wire.SetActiveEffect(
+                    effect_id='held_red',
+                    fixture='cf805_pixel_1',
+                    intensity=0.75,
+                    colour=wire.RgbColor(red=1.0),
                 )
             )
             deadline = time.monotonic() + 2
@@ -481,7 +493,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
                 time.sleep(0.01)
             assert runtime._last_reply_id == 6
             runtime.send_command(
-                wire.RendererCommand(set_parameter=wire.SetParameter(output_brightness=1.0))
+                wire.SetParameter(parameter=wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=1.0))
             )
             while time.monotonic() < deadline:
                 packet = receiver.recv(1024)

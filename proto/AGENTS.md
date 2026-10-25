@@ -7,6 +7,7 @@
   avoid parallel versions and compatibility layers. Keep units explicit and
   validate lengths, ranges, sessions and numeric boundaries.
 - Define endpoint roles and comment every wire message with `[CLIENT -> SERVER]`
-  or `[SERVER -> CLIENT]`; mark shared payloads. Use typed alternatives and enums
-  for closed concepts. Initialization belongs in Login; sessions own resources.
+  or `[SERVER -> CLIENT]`. Do not annotate shared data structures. Keep messages
+  standalone and nest types used by only one message. Use typed alternatives and
+  enums for closed concepts. Initialization belongs in Login; sessions own resources.
 - Follow `../radius/AGENTS.md` for C++ style, ownership, naming and regression tests.

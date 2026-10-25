@@ -1,4 +1,4 @@
-//! Generated message types, bounded framing and command dispatch.
+//! Standalone generated messages with bounded, typed stream framing.
 
 use std::io::{Read, Write};
 
@@ -6,14 +6,110 @@ use anyhow::{Context, Result, bail, ensure};
 use prost::Message;
 
 use crate::engine::Engine;
-use crate::model::{Command, Transition};
+use crate::model::{
+    Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
+};
 
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 pub const MAX_ERROR_BYTES: usize = 1024;
-const LENGTH_BYTES: usize = 4;
+pub const FRAME_HEADER_BYTES: usize = 5;
 
 pub mod wire {
     include!(concat!(env!("OUT_DIR"), "/autolux.starfire.rs"));
+}
+
+// These enums dispatch in-process only. The frame carries the generated message
+// directly, with its generated MessageType; no Protobuf envelope is serialized.
+macro_rules! messages {
+    ($name:ident { $($variant:ident),+ $(,)? }) => {
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum $name { $($variant(wire::$variant)),+ }
+
+        impl $name {
+            fn accepts(kind: wire::MessageType) -> bool {
+                matches!(kind, $(wire::MessageType::$variant)|+)
+            }
+
+            fn decode(kind: wire::MessageType, payload: &[u8]) -> Result<Self> {
+                Ok(match kind {
+                    $(wire::MessageType::$variant => Self::$variant(wire::$variant::decode(payload)?)),+,
+                    _ => bail!("message type is invalid in this direction"),
+                })
+            }
+
+            pub fn write(&self, output: &mut impl Write) -> Result<()> {
+                let (kind, payload) = match self {
+                    $(Self::$variant(value) => (wire::MessageType::$variant, value.encode_to_vec())),+
+                };
+                ensure!(payload.len() <= MAX_MESSAGE_BYTES, "message exceeds byte limit");
+                output.write_all(&[u8::try_from(kind as i32)?])?;
+                output.write_all(&(payload.len() as u32).to_be_bytes())?;
+                output.write_all(&payload)?;
+                output.flush().context("flush protocol message")
+            }
+        }
+    };
+}
+
+messages!(ClientMessage {
+    Login,
+    PlaySequence,
+    SetActiveEffect,
+    UnsetActiveEffect,
+    UpdateBeat,
+    SetParameter,
+    Heartbeat
+});
+messages!(ServerMessage {
+    LoginReply,
+    PlaySequenceReply,
+    SetActiveEffectReply,
+    UnsetActiveEffectReply,
+    UpdateBeatReply,
+    SetParameterReply,
+    Heartbeat,
+    Metrics
+});
+
+impl ClientMessage {
+    pub fn command_id(&self) -> u64 {
+        match self {
+            Self::Login(value) => value.command_id,
+            Self::PlaySequence(value) => value.command_id,
+            Self::SetActiveEffect(value) => value.command_id,
+            Self::UnsetActiveEffect(value) => value.command_id,
+            Self::UpdateBeat(value) => value.command_id,
+            Self::SetParameter(value) => value.command_id,
+            Self::Heartbeat(value) => value.command_id,
+        }
+    }
+
+    pub fn set_command_id(&mut self, command_id: u64) {
+        match self {
+            Self::Login(value) => value.command_id = command_id,
+            Self::PlaySequence(value) => value.command_id = command_id,
+            Self::SetActiveEffect(value) => value.command_id = command_id,
+            Self::UnsetActiveEffect(value) => value.command_id = command_id,
+            Self::UpdateBeat(value) => value.command_id = command_id,
+            Self::SetParameter(value) => value.command_id = command_id,
+            Self::Heartbeat(value) => value.command_id = command_id,
+        }
+    }
+}
+
+impl ServerMessage {
+    pub fn command_id(&self) -> Option<u64> {
+        Some(match self {
+            Self::LoginReply(value) => value.command_id,
+            Self::PlaySequenceReply(value) => value.command_id,
+            Self::SetActiveEffectReply(value) => value.command_id,
+            Self::UnsetActiveEffectReply(value) => value.command_id,
+            Self::UpdateBeatReply(value) => value.command_id,
+            Self::SetParameterReply(value) => value.command_id,
+            Self::Heartbeat(value) => value.command_id,
+            Self::Metrics(_) => return None,
+        })
+    }
 }
 
 pub fn error_message(error: &anyhow::Error) -> String {
@@ -24,107 +120,143 @@ pub fn error_message(error: &anyhow::Error) -> String {
     message
 }
 
-/// A clean EOF is allowed only between complete messages.
-pub fn read_control(input: &mut impl Read) -> Result<Option<wire::RendererCommand>> {
-    let mut length = [0; LENGTH_BYTES];
+/// A clean EOF is allowed only between complete frames. Zero-length Protobuf
+/// payloads are valid for default-valued messages, such as server heartbeats.
+fn read_frame(
+    input: &mut impl Read,
+    accepts: impl FnOnce(wire::MessageType) -> bool,
+) -> Result<Option<(wire::MessageType, Vec<u8>)>> {
+    let mut header = [0; FRAME_HEADER_BYTES];
     loop {
-        match input.read(&mut length[..1]) {
+        match input.read(&mut header[..1]) {
             Ok(0) => return Ok(None),
             Ok(_) => break,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(error).context("read command prefix"),
+            Err(error) => return Err(error).context("read frame type"),
         }
     }
     input
-        .read_exact(&mut length[1..])
-        .context("truncated command prefix")?;
-    let length = u32::from_be_bytes(length) as usize;
-    ensure!(
-        (1..=MAX_MESSAGE_BYTES).contains(&length),
-        "invalid command message length"
-    );
+        .read_exact(&mut header[1..])
+        .context("truncated frame header")?;
+    let kind = wire::MessageType::try_from(i32::from(header[0])).context("unknown message type")?;
+    ensure!(accepts(kind), "message type is invalid in this direction");
+    let length = u32::from_be_bytes(header[1..].try_into()?) as usize;
+    ensure!(length <= MAX_MESSAGE_BYTES, "invalid message length");
     let mut payload = vec![0; length];
     input
         .read_exact(&mut payload)
-        .context("truncated command payload")?;
-    let command =
-        wire::RendererCommand::decode(payload.as_slice()).context("decode command protobuf")?;
-    ensure!(command.command_id > 0, "command ID must be positive");
+        .context("truncated message payload")?;
+    Ok(Some((kind, payload)))
+}
+
+pub fn read_control(input: &mut impl Read) -> Result<Option<ClientMessage>> {
+    let Some((kind, payload)) = read_frame(input, ClientMessage::accepts)? else {
+        return Ok(None);
+    };
+    let command = ClientMessage::decode(kind, &payload)?;
     ensure!(
-        command.command.is_some(),
-        "renderer command requires an operation"
+        command.command_id() > 0,
+        "client command ID must be positive"
     );
     Ok(Some(command))
 }
 
-pub fn write_event(output: &mut impl Write, message: &wire::RendererEvent) -> Result<()> {
-    let payload = message.encode_to_vec();
-    ensure!(
-        payload.len() <= MAX_MESSAGE_BYTES,
-        "renderer event exceeds byte limit"
-    );
-    output.write_all(&(payload.len() as u32).to_be_bytes())?;
-    output.write_all(&payload)?;
-    output.flush().context("flush renderer event")
+pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
+    let Some((kind, payload)) = read_frame(input, ServerMessage::accepts)? else {
+        return Ok(None);
+    };
+    Ok(Some(ServerMessage::decode(kind, &payload)?))
 }
 
-/// Decode and validate against the state left by preceding accepted commands.
-pub fn apply_command(
-    engine: &mut Engine,
-    at_seconds: f64,
-    command: &wire::renderer_command::Command,
-) -> Result<()> {
-    use wire::renderer_command::Command as Wire;
+pub fn write_event(output: &mut impl Write, message: &ServerMessage) -> Result<()> {
+    message.write(output)
+}
+
+/// Validate against the state left by preceding accepted commands.
+pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessage) -> Result<()> {
     match command {
-        Wire::Login(_) => bail!("login is handled by the process host"),
-        Wire::Heartbeat(_) => Ok(()),
-        Wire::UpdateBeat(value) => engine.apply(
+        ClientMessage::Login(_) => bail!("login is handled by the process host"),
+        ClientMessage::Heartbeat(_) => Ok(()),
+        ClientMessage::UpdateBeat(value) => engine.apply(
             at_seconds,
             &Command::Beat {
                 position_beats: value.position_beats,
                 bpm: value.tempo_bpm,
             },
         ),
-        Wire::PlaySequence(value) => {
-            let Some(sequence) = value.sequence.as_ref() else {
+        ClientMessage::PlaySequence(value) => {
+            if value.bank.is_empty() && value.sequence.is_empty() {
                 ensure!(
                     value.transition.is_none(),
                     "idle does not accept a transition"
                 );
                 return engine.apply(at_seconds, &Command::Stop);
-            };
+            }
+            let transition = value
+                .transition
+                .as_ref()
+                .and_then(|value| value.crossfade_beats)
+                .map(|duration_beats| Transition::Crossfade { duration_beats })
+                .unwrap_or(Transition::Cut);
             engine.apply(
                 at_seconds,
                 &Command::Select {
-                    bank: sequence.bank_id.clone(),
-                    sequence: sequence.sequence_id.clone(),
-                    transition: transition(value.transition.as_ref())?,
+                    bank: value.bank.clone(),
+                    sequence: value.sequence.clone(),
+                    transition,
                 },
             )
         }
-        Wire::SetParameter(value) => engine.set_parameter(at_seconds, value),
-        Wire::SetActiveEffect(value) => engine.set_active_effect(at_seconds, value),
-        Wire::UnsetActiveEffect(value) => engine.apply(
+        ClientMessage::SetParameter(value) => engine.set_parameter(
+            at_seconds,
+            value.parameter.as_ref().context("parameter is required")?,
+        ),
+        ClientMessage::SetActiveEffect(value) => {
+            let values = PropertyValues {
+                intensity: value.intensity,
+                colour: value.colour.as_ref().map(|colour| Rgb {
+                    red: colour.red,
+                    green: colour.green,
+                    blue: colour.blue,
+                }),
+                pan: value.pan,
+                tilt: value.tilt,
+                strobe_hz: value.strobe_hz,
+            };
+            ensure!(
+                values != PropertyValues::default(),
+                "effect must set at least one property"
+            );
+            let target = match &value.target {
+                None => Target::All,
+                Some(wire::set_active_effect::Target::Group(group)) => Target::Group(group.clone()),
+                Some(wire::set_active_effect::Target::Fixture(fixture)) => {
+                    Target::Fixture(fixture.clone())
+                }
+            };
+            let lifetime = value
+                .duration_seconds
+                .map(|duration_seconds| OverrideLifetime::Seconds { duration_seconds })
+                .unwrap_or_default();
+            engine.apply(
+                at_seconds,
+                &Command::SetOverride {
+                    value: LightingOverride {
+                        id: value.effect_id.clone(),
+                        target,
+                        values,
+                        intensity_multiplier: None,
+                        lifetime,
+                        priority: value.priority,
+                    },
+                },
+            )
+        }
+        ClientMessage::UnsetActiveEffect(value) => engine.apply(
             at_seconds,
             &Command::ClearOverride {
                 id: value.effect_id.clone(),
             },
         ),
     }
-}
-
-fn transition(value: Option<&wire::Transition>) -> Result<Transition> {
-    Ok(match value {
-        None => Transition::Cut,
-        Some(value) => match value
-            .policy
-            .as_ref()
-            .context("transition requires a policy")?
-        {
-            wire::transition::Policy::Cut(_) => Transition::Cut,
-            wire::transition::Policy::CrossfadeBeats(duration_beats) => Transition::Crossfade {
-                duration_beats: *duration_beats,
-            },
-        },
-    })
 }

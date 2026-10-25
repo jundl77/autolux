@@ -3,7 +3,7 @@
   "implementation": {
     "rates": "autolux/lib/telemetry_history.py derives completed render and skipped deadline counter differences over renderer elapsed time. Repeated fresh reports hold the prior interval rate; restarts/outages clear it.",
     "duration": "starfire/src/live.rs measures engine.render_at duration; autolux/lib/telemetry_history.py exposes the last completed render sample in milliseconds, not a timestamp or average.",
-    "protocol": "proto/starfire/starfire.proto and docs/starfire/protocol-design.md define the sole live contract. Four command families, operation-specific replies, typed parameter alternatives, initialization via Login, Metrics and heartbeats. Same sequence continues; named active effects replace complete runtime state."
+    "protocol": "proto/starfire/starfire.proto is the sole contract: standalone Login/Reply, four command families with named replies, Metrics and Heartbeat. Parameter is a global enum type plus number/boolean value. PlaySequence carries bank/sequence strings directly. SetActiveEffect carries literal fixture properties and optional duration_seconds. User explicitly removed generic catalogs, sequence parameter scopes, blend operations and lifetime structures."
   },
   "readers": {
     "fork_turns": "none",
@@ -176,5 +176,6 @@
       ],
       "disposition": "User-selected vocabulary is a contextual exception. Behaviors and units are explicit in schema and tested; removed misleading generic parameter target/key structures."
     }
-  ]
+  ],
+  "user_design_decisions": "Final names and protocol simplifications are explicitly user-selected, not a claimed blind-naming pass. Prior predictions are retained as review evidence; rejected abstractions are not part of the current schema."
 }

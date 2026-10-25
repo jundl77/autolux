@@ -3,129 +3,136 @@ syntax = "proto3";
 package autolux.starfire;
 
 // CLIENT = Autolux coordinator; SERVER = its owned Starfire process.
-// Framing: four-byte big-endian length, then Protobuf; at most 64 KiB.
-// Login is first. Commands apply in order at a render boundary after login.
-// Both endpoints exchange heartbeats every 10 seconds; timeout is 30 seconds.
+// Frame: one byte MessageType, four-byte big-endian payload length, then the
+// standalone Protobuf message (at most 64 KiB). No message envelope.
+// Login comes first. Commands apply in order at render boundaries after login.
+// Command IDs increase within the session; replies echo the ID. Empty error = success.
+// Both endpoints send heartbeats every 10 seconds; timeout is 30 seconds.
 
-// [CLIENT -> SERVER]
-message RendererCommand {
-  uint64 command_id = 1;  // Positive, increasing within this process session.
-  oneof command {
-    Login login = 10;
-    PlaySequence play_sequence = 11;
-    SetActiveEffect set_active_effect = 12;
-    UnsetActiveEffect unset_active_effect = 13;
-    UpdateBeat update_beat = 14;
-    SetParameter set_parameter = 15;
-    Heartbeat heartbeat = 16;
-  }
-}
-
-// [SERVER -> CLIENT]
-message RendererEvent {
-  uint64 command_id = 1;  // Reply correlation; zero for unsolicited metrics/heartbeats.
-  oneof event {
-    LoginReply login_reply = 10;
-    PlaySequenceReply play_sequence_reply = 11;
-    SetActiveEffectReply set_active_effect_reply = 12;
-    UnsetActiveEffectReply unset_active_effect_reply = 13;
-    UpdateBeatReply update_beat_reply = 14;
-    SetParameterReply set_parameter_reply = 15;
-    Heartbeat heartbeat = 16;
-    Metrics metrics = 17;
-  }
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  LOGIN = 1;
+  LOGIN_REPLY = 2;
+  PLAY_SEQUENCE = 3;
+  PLAY_SEQUENCE_REPLY = 4;
+  SET_ACTIVE_EFFECT = 5;
+  SET_ACTIVE_EFFECT_REPLY = 6;
+  UNSET_ACTIVE_EFFECT = 7;
+  UNSET_ACTIVE_EFFECT_REPLY = 8;
+  UPDATE_BEAT = 9;
+  UPDATE_BEAT_REPLY = 10;
+  SET_PARAMETER = 11;
+  SET_PARAMETER_REPLY = 12;
+  HEARTBEAT = 13;
+  METRICS = 14;
 }
 
 // [CLIENT -> SERVER]
-// Initialize one owned rendering session. Failure releases acquired resources.
+// Initialize one owned session. Failure releases partially acquired resources.
 message Login {
-  string rig_path = 1;
-  string sequences_path = 2;
-  string artnet_destination = 3;  // IPv4:port.
-  bool broadcast = 4;
-  repeated SetParameter parameters = 5;
+  uint64 command_id = 1;
+  string rig_path = 2;
+  string sequences_path = 3;
+  string artnet_destination = 4;  // IPv4:port.
+  bool broadcast = 5;
+  repeated Parameter parameters = 6;
 }
 
 // [SERVER -> CLIENT]
-// Empty error means initialization succeeded. Only then may playback begin.
 message LoginReply {
-  string error = 1;
-  uint32 frame_rate_hz = 2;
-  uint32 max_message_bytes = 3;
+  uint64 command_id = 1;
+  string error = 2;
+  uint32 frame_rate_hz = 3;
+  uint32 max_message_bytes = 4;
 }
 
 // [CLIENT -> SERVER]
-// Same identity continues without restart. An absent sequence enters idle:
-// clear the baseline and active effects, release strobe and output darkness.
+// One sequence plays at a time; repeating its identity never restarts it.
+// Both names empty enters idle, clears effects and outputs darkness.
 message PlaySequence {
-  SequenceReference sequence = 1;
-  Transition transition = 2;  // Omitted means cut; idle requires no transition.
+  uint64 command_id = 1;
+  string bank = 2;
+  string sequence = 3;
+  Transition transition = 4;  // Omitted means cut; idle accepts no transition.
+
+  message Transition {
+    optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
+  }
 }
 
 // [SERVER -> CLIENT]
-// Empty error means applied; rejection preserves the previous scene.
 message PlaySequenceReply {
-  string error = 1;
-  SequenceReference sequence = 2;               // Current sequence, absent while idle.
-  repeated ParameterDefinition parameters = 3;  // Active Lua program's controls.
+  uint64 command_id = 1;
+  string error = 2;
 }
 
 // [CLIENT -> SERVER]
-// Replace this entire identified effect, including its lifetime; baseline continues.
+// Replace this identified effect. Only specified properties override the baseline.
+// Higher priority wins; ties use command order. Brightness/blackout parameters apply last.
 message SetActiveEffect {
-  string effect_id = 1;
-  FixtureSelection fixtures = 2;
-  repeated AttributeAssignment attributes = 3;
-  sint32 priority = 4;  // Higher wins; ties use command order.
-  EffectLifetime lifetime = 5;
+  uint64 command_id = 1;
+  string effect_id = 2;
+  oneof target {  // Omitted targets all fixtures.
+    string group = 3;
+    string fixture = 4;
+  }
+  optional double intensity = 5;  // 0..1.
+  RgbColor colour = 6;
+  optional double pan = 7;        // 0..1.
+  optional double tilt = 8;       // 0..1.
+  optional double strobe_hz = 9;  // 0..10.
+  sint32 priority = 10;
+  optional double duration_seconds = 11;  // Positive; absent lasts until unset.
 }
 
 // [SERVER -> CLIENT]
 message SetActiveEffectReply {
-  string error = 1;  // Empty means applied; rejection preserves the prior effect.
+  uint64 command_id = 1;
+  string error = 2;
 }
 
 // [CLIENT -> SERVER]
 message UnsetActiveEffect {
-  string effect_id = 1;  // Removing an absent ID is a no-op.
+  uint64 command_id = 1;
+  string effect_id = 2;  // Removing an absent ID does nothing.
 }
 
 // [SERVER -> CLIENT]
 message UnsetActiveEffectReply {
-  string error = 1;
+  uint64 command_id = 1;
+  string error = 2;
 }
 
 // [CLIENT -> SERVER]
-// Musical position is interpolated between updates, independently of animation speed.
+// Starfire interpolates musical position between updates, independently of animation speed.
 message UpdateBeat {
-  double position_beats = 1;
-  double tempo_bpm = 2;
+  uint64 command_id = 1;
+  double position_beats = 2;
+  double tempo_bpm = 3;
 }
 
 // [SERVER -> CLIENT]
 message UpdateBeatReply {
-  string error = 1;
+  uint64 command_id = 1;
+  string error = 2;
 }
 
 // [CLIENT -> SERVER]
-// One typed parameter change; all other settings remain unchanged.
 message SetParameter {
-  oneof parameter {
-    double output_brightness = 1;     // 0..1, final output multiplier.
-    double animation_speed = 2;       // 0..8, independent of beat phase.
-    bool output_blackout = 3;         // Final gate, after all effects.
-    double audio_rms_normalized = 4;  // Measured input, 0..1; absent stays unknown.
-    SequenceParameter sequence_parameter = 5;
-  }
+  uint64 command_id = 1;
+  Parameter parameter = 2;  // One global setting; other values remain unchanged.
 }
 
 // [SERVER -> CLIENT]
 message SetParameterReply {
-  string error = 1;
+  uint64 command_id = 1;
+  string error = 2;
 }
 
 // [CLIENT -> SERVER] [SERVER -> CLIENT]
-message Heartbeat {}
+message Heartbeat {
+  uint64 command_id = 1;  // Zero for unsolicited server heartbeats; otherwise echo client ID.
+}
 
 // [SERVER -> CLIENT]
 message Metrics {
@@ -134,109 +141,31 @@ message Metrics {
   uint64 missed_render_deadlines = 3;
   uint32 queued_commands = 4;
   double last_render_duration_seconds = 5;
-  SequenceReference active_sequence = 6;
-  string script_error = 7;
-  string runtime_error = 8;
+  string active_bank = 6;
+  string active_sequence = 7;
+  string script_error = 8;
+  string runtime_error = 9;
 }
 
-// [CLIENT -> SERVER] Presence marker within typed alternatives.
-message Empty {}
-
-// [CLIENT -> SERVER] [SERVER -> CLIENT] Shared identity payload.
-message SequenceReference {
-  string bank_id = 1;
-  string sequence_id = 2;  // Unique within its bank.
-}
-
-// [CLIENT -> SERVER] Payload within PlaySequence.
-message Transition {
-  oneof policy {
-    Empty cut = 1;
-    double crossfade_beats = 2;
-  }
-}
-
-// [CLIENT -> SERVER] Scripts declare names/types; only the active sequence can change.
-message SequenceParameter {
-  SequenceReference sequence = 1;
-  string name = 2;
-  ParameterValue value = 3;
-}
-
-// [CLIENT -> SERVER] [SERVER -> CLIENT] Lua controls and fixture attribute values.
-message ParameterValue {
+// Shared by initialization and runtime updates. Independent of the active sequence.
+message Parameter {
+  ParameterType type = 1;
   oneof value {
-    double number = 1;
-    sint64 integer = 2;
+    double number = 2;
     bool boolean = 3;
-    string text = 4;
-    RgbColor rgb = 5;
   }
 }
 
-// [CLIENT -> SERVER] [SERVER -> CLIENT] Each channel is normalized to 0..1.
+enum ParameterType {
+  PARAMETER_TYPE_UNSPECIFIED = 0;
+  OUTPUT_BRIGHTNESS = 1;     // Number, 0..1; final output multiplier.
+  ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
+  OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
+  AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
+}
+
 message RgbColor {
-  double red = 1;
+  double red = 1;  // Each channel is normalized to 0..1.
   double green = 2;
   double blue = 3;
-}
-
-// [CLIENT -> SERVER] Payload within SetActiveEffect.
-message FixtureSelection {
-  oneof selection {
-    Empty all = 1;
-    string group_id = 2;
-    string fixture_id = 3;
-  }
-}
-
-// [CLIENT -> SERVER] Payload within SetActiveEffect.
-message AttributeAssignment {
-  FixtureAttribute attribute = 1;
-  ParameterValue value = 2;
-  BlendOperation operation = 3;
-}
-
-enum FixtureAttribute {
-  FIXTURE_ATTRIBUTE_UNSPECIFIED = 0;
-  INTENSITY = 1;
-  COLOUR = 2;
-  PAN = 3;
-  TILT = 4;
-  STROBE_HZ = 5;
-}
-
-enum BlendOperation {
-  BLEND_OPERATION_UNSPECIFIED = 0;
-  REPLACE = 1;
-  MULTIPLY = 2;  // Continuous numeric attributes only; multiplier 0..8.
-}
-
-// [CLIENT -> SERVER] Beats accumulate continuously, unaffected by phase corrections.
-message EffectLifetime {
-  oneof expiration {
-    Empty until_removed = 1;
-    double duration_beats = 2;
-    double duration_seconds = 3;
-  }
-}
-
-// [SERVER -> CLIENT] Lua parameter metadata within PlaySequenceReply.
-message ParameterDefinition {
-  string name = 1;
-  ValueType value_type = 2;
-  ParameterValue default_value = 3;
-  string unit = 4;
-  ParameterValue minimum = 5;  // Numeric bounds retain the declared type.
-  ParameterValue maximum = 6;
-  repeated ParameterValue allowed_values = 7;
-}
-
-enum ValueType {
-  VALUE_TYPE_UNSPECIFIED = 0;
-  NUMBER = 1;
-  INTEGER = 2;
-  BOOLEAN = 3;
-  TEXT = 4;
-  RGB = 5;
 }

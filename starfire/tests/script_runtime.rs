@@ -38,58 +38,6 @@ fn snapshot(beats: f64) -> RenderContext {
 }
 
 #[test]
-fn lua_parameters_enforce_declared_types_bounds_and_dense_choices() {
-    for definition in [
-        "{value_type='integer', default_value=1.5}",
-        "{value_type='number', default_value=2, minimum=0, maximum=1}",
-        "{value_type='number', default_value=0, minimum=1, maximum=0}",
-        "{value_type='text', default_value='red', allowed_values={[2]='red'}}",
-        "{value_type='text', default_value='red', allowed_values={'red', extra='blue'}}",
-    ] {
-        let source = format!(
-            "return {{parameters={{level={definition}}}, render=function(ctx) return sf.scene {{sf.dimmer(sf.all(), 0.5)}} end}}"
-        );
-        assert!(
-            catalog(&source)
-                .instantiate("test", "sequence", &rig())
-                .is_err(),
-            "invalid definition accepted: {definition}"
-        );
-    }
-}
-
-#[test]
-fn lua_parameter_snapshot_and_nested_colours_are_read_only() {
-    for mutation in [
-        "ctx.parameters.level = 0.7",
-        "ctx.parameters.tint.red = 0.7",
-    ] {
-        let source = format!(
-            "return {{parameters={{level={{value_type='number',default_value=0.5}}, tint={{value_type='rgb',default_value={{red=1,green=0,blue=0}}}}}}, render=function(ctx) {mutation}; return sf.scene {{sf.dimmer(sf.all(), 0.5)}} end}}"
-        );
-        let error = sequence(&source).render(&snapshot(0.0)).unwrap_err();
-        assert!(format!("{error:#}").contains("read-only"));
-    }
-}
-
-#[test]
-fn oversized_generated_parameter_metadata_is_rejected_before_activation() {
-    let source = r#"local controls = {}
-        local text = string.rep('a', 256)
-        for index=1,64 do
-            local allowed = {}
-            for choice=1,32 do allowed[choice] = text end
-            controls['parameter_' .. index] = {value_type='text', default_value=text, allowed_values=allowed}
-        end
-        return {parameters=controls, render=function(ctx) return {} end}"#;
-    let error = catalog(source)
-        .instantiate("test", "sequence", &rig())
-        .err()
-        .expect("catalog must exceed bounded reply size");
-    assert!(format!("{error:#}").contains("catalog exceeds message limit"));
-}
-
-#[test]
 fn composed_effects_resolve_named_groups_in_the_authored_order() {
     let mut sequence = sequence(
         r#"return {render = function(ctx)

@@ -71,8 +71,9 @@ flowchart TB
 - **Enttec adapter and lighting fixtures:** convert USB output into physical DMX.
 
 The CLI launches local processes and deploys/starts RX using **SCP over SSH**.
-[Starfire's contract](../proto/starfire/starfire.proto) uses four-byte big-endian
-length framing around Protobuf messages on owned stdin/stdout pipes.
+[Starfire's contract](../proto/starfire/starfire.proto) uses a one-byte message type
+and four-byte big-endian payload length before each standalone Protobuf message
+on owned stdin/stdout pipes.
 Login carries initialization settings; its reply confirms the owned session.
 The four control families are PlaySequence, active effects, UpdateBeat and
 SetParameter; each has a typed reply. See the [protocol](starfire/protocol-design.md).
