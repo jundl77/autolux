@@ -1,17 +1,45 @@
 """Time-series panels for the existing Autolux dashboard."""
 
-from datetime import datetime, timezone
 import math
 import time
+from datetime import UTC, datetime
 
-from dash import dcc, html
 import plotly.graph_objects as go
+from dash import dcc, html
 
-from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, HISTORY_WINDOW_SECONDS, finite
-from autolux.lib.system_health import AUDIO_INPUT_STALE_SECONDS, DMX_INPUT_STALE_SECONDS
+from autolux.lib.system_health import (
+    AUDIO_INPUT_STALE_SECONDS,
+    DMX_INPUT_STALE_SECONDS,
+    renderer_is_fresh,
+)
+from autolux.lib.telemetry_history import HISTORY_WINDOW_SECONDS, TELEMETRY_STALE_SECONDS, finite
 
 BLUE, TEAL, AMBER, RED = '#73b6ff', '#59d5be', '#f6c177', '#ef818c'
 PANELS = (
+    (
+        'renderer-rate',
+        'Starfire rendering',
+        'Measured frames per second between renderer reports, about 10 s apart. The latest measured interval is held between reports.',
+        'frames/s',
+        (
+            ('starfire_measured_render_frames_per_second', 'Rendered', TEAL, False),
+            ('starfire_missed_render_deadlines_per_second', 'Skipped deadlines', RED, False),
+        ),
+    ),
+    (
+        'renderer-duration',
+        'Starfire render duration',
+        'Duration of the last completed render in each report. This is one frame sample, not an average or percentile.',
+        'ms',
+        (('starfire_last_render_duration_ms', 'Last render', BLUE, False),),
+    ),
+    (
+        'renderer-queue',
+        'Starfire command queue',
+        'Commands waiting for the next render frame when the renderer reports its health.',
+        'commands',
+        (('starfire_queued_commands', 'Queued at report', AMBER, False),),
+    ),
     (
         'buffer',
         'Receiver audio buffer',
@@ -55,7 +83,7 @@ PANELS = (
     (
         'timing',
         'Lighting & command timing',
-        'DMX lateness against audible audio; controller mean scheduling error for its retained commands. Software timing only.',
+        'DMX scheduling lateness before USB output; controller mean scheduling error. These do not measure physical flash-to-audio synchronization.',
         'ms',
         (
             ('dmx_lateness_ms', 'DMX lateness', TEAL, False),
@@ -64,10 +92,10 @@ PANELS = (
     ),
     (
         'lighting',
-        'Lighting delivery',
-        'Frames written to the Enttec output per second. Drops are rejected or out-of-order lighting frames.',
+        'USB frame updates',
+        'Successful host writes to Enttec per second. Newer queued frames can replace older ones; the device refreshes the DMX wire independently.',
         'frames/s',
-        (('dmx_frames', 'DMX output', TEAL, True), ('dmx_dropped', 'Dropped', RED, True)),
+        (('dmx_frames', 'USB updates', TEAL, True), ('dmx_dropped', 'Rejected packets', RED, True)),
     ),
 )
 
@@ -80,7 +108,7 @@ def build_metric_series(history, key, *, rate=False):
         stamp, value = sample['at'], sample.get(key)
         gap = stamp - previous['at'] if previous else None
         if gap is not None and gap > TELEMETRY_STALE_SECONDS:
-            x.append(datetime.fromtimestamp(previous['at'] + 0.001, timezone.utc))
+            x.append(datetime.fromtimestamp(previous['at'] + 0.001, UTC))
             y.append(None)
         if rate:
             before = previous.get(key) if previous else None
@@ -98,7 +126,7 @@ def build_metric_series(history, key, *, rate=False):
                 if finite(value) and value > 0
                 else (-90 if value == 0 else None)
             )
-        x.append(datetime.fromtimestamp(stamp, timezone.utc))
+        x.append(datetime.fromtimestamp(stamp, UTC))
         y.append(value if finite(value) else None)
         previous = sample
     return x, y
@@ -129,35 +157,35 @@ def build_system_health_charts(snapshot, *, now=None):
                         'color': color,
                         'width': 1.8,
                         'dash': 'dot' if key == 'target_ms' else 'solid',
-                        'shape': 'hv' if rate else 'linear',
+                        'shape': 'hv' if rate or key.startswith('starfire_') else 'linear',
                     },
                     hovertemplate=f'%{{y:.1f}} {unit}<extra>{name}</extra>',
                 )
             )
         fig.update_layout(
             height=218,
-            margin=dict(l=48, r=12, t=36, b=32),
+            margin={'l': 48, 'r': 12, 't': 36, 'b': 32},
             paper_bgcolor='#111923',
             plot_bgcolor='#111923',
-            font=dict(family='Segoe UI, sans-serif', size=11, color='#9baabb'),
-            legend=dict(orientation='h', x=0, y=1.22, font=dict(size=10)),
-            xaxis=dict(
-                type='date',
-                range=[
-                    datetime.fromtimestamp(now - HISTORY_WINDOW_SECONDS, timezone.utc),
-                    datetime.fromtimestamp(now, timezone.utc),
+            font={'family': 'Segoe UI, sans-serif', 'size': 11, 'color': '#9baabb'},
+            legend={'orientation': 'h', 'x': 0, 'y': 1.22, 'font': {'size': 10}},
+            xaxis={
+                'type': 'date',
+                'range': [
+                    datetime.fromtimestamp(now - HISTORY_WINDOW_SECONDS, UTC),
+                    datetime.fromtimestamp(now, UTC),
                 ],
-                tickformat='%H:%M:%S',
-                nticks=4,
-                showgrid=False,
-                zeroline=False,
-            ),
-            yaxis=dict(
-                title=dict(text=unit, font=dict(size=10)),
-                gridcolor='#223040',
-                zerolinecolor='#334456',
-                rangemode='tozero',
-            ),
+                'tickformat': '%H:%M:%S',
+                'nticks': 4,
+                'showgrid': False,
+                'zeroline': False,
+            },
+            yaxis={
+                'title': {'text': unit, 'font': {'size': 10}},
+                'gridcolor': '#223040',
+                'zerolinecolor': '#334456',
+                'rangemode': 'tozero',
+            },
             hovermode='x unified',
             uirevision=f'{panel}-{(snapshot.get("system") or {}).get("session")}',
         )
@@ -171,7 +199,7 @@ def build_system_health_charts(snapshot, *, now=None):
                 xref='paper',
                 yref='paper',
                 showarrow=False,
-                font=dict(color='#9baabb'),
+                font={'color': '#9baabb'},
             )
         results.append(fig)
     return results
@@ -202,14 +230,21 @@ def build_telemetry_notices(snapshot, *, now=None):
     messages = []
     age = max(0, now - system.get('updated_at', now))
     if not system:
-        messages.append(
-            'No Radius telemetry yet. Transport graphs will populate when measurements arrive.'
-        )
+        messages.append('No system telemetry yet. Graphs will populate when measurements arrive.')
     elif age >= TELEMETRY_STALE_SECONDS:
         messages.append(
             f'Controller telemetry is {age:.0f} s old. Showing the last received show frame.'
         )
     else:
+        renderer = system.get('starfire') or {}
+        if not renderer_is_fresh(system, age):
+            messages.append('Starfire telemetry unavailable; gaps are not zero measurements.')
+        elif renderer.get('script_error'):
+            messages.append(f'Starfire stopped its sequence: {renderer["script_error"]}')
+        else:
+            history = snapshot.get('system_history') or []
+            if not history or history[-1].get('starfire_measured_render_frames_per_second') is None:
+                messages.append('Waiting for two renderer reports to measure Starfire FPS.')
         for node, name in [('tx', 'Transmitter'), ('rx', 'Receiver')]:
             measured_age = system.get(f'{node}_age_seconds')
             info = system.get(node) or {}

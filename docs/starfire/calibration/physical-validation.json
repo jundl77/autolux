@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-25",
+  "full_pipeline": {
+    "duration_seconds": 90.4420192000689,
+    "user_confirmation": "Audio and lights both work",
+    "mean_command_scheduling_error_ms": 8.209277216519695,
+    "classified_categories": 4,
+    "audio_lost_frames": 0,
+    "audio_overflow_frames": 0,
+    "audio_queue_underruns": 0,
+    "audio_device_underruns": 1,
+    "dmx_queue_drops": 0,
+    "maximum_observed_packet_gap_ms": 88.0
+  },
+  "pulse_audition": {
+    "user_confirmation": "On the beat; delayed start identified separately. After startup fix: lights and music were synced well.",
+    "rendered_script": "White wash/strip, 65 percent peak, cubic fade from absolute beat phase; no movement/accents",
+    "replay_tempos_bpm": [
+      120,
+      150,
+      180
+    ],
+    "replay_repeat_deterministic": true
+  },
+  "corrected_startup": {
+    "duration_seconds": 45.49040440004319,
+    "models_ready_local": "14:11:17",
+    "tx_ready_local": "14:11:25",
+    "controller_ready_local": "14:11:25",
+    "first_sequence_local": "14:11:39",
+    "measured_renderer_fps_min": 40.0,
+    "measured_renderer_fps_max": 40.00000000000001,
+    "clean_controller_renderer_tx_remote_rx_shutdown": true
+  },
+  "limits": [
+    "Command queue and DMX queue timing are software measurements, not physical flash latency.",
+    "Successful USB frame writes are not the physical DMX refresh rate.",
+    "One intermediate restart failed with SoundIoErrorStreaming (8); clean retry succeeded.",
+    "Single-pulse diagnostic intentionally fails the general evaluator requirement for at least two distinct effects."
+  ]
+}

@@ -5,6 +5,7 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 | Check | Result |
 | --- | --- |
 | Python | Full run: 2,331 passed, two failures subsequently fixed and retested. Another 260 focused API checks passed; final CLI validation passed 57 cases and DMX comparison passed 15 cases. Actual dashboard HTTP/mDNS startup and bounded Ctrl-C shutdown are covered. |
+| Startup/dashboard follow-up | 226 tests passed: CLI lifecycle, delayed capture/song clocks, telemetry freshness/rates, controller/client/replay, simulation and committed analysis digest comparisons. Desktop browser review covered Control, Telemetry and Config without browser errors or horizontal overflow. |
 | Rust | 97 tests passed, including all Lua sequences, 80 independent captured-value anchors, protocol/lifecycle handling and performance gates. Strict Clippy and rustfmt passed. |
 | Radius | Both executables built; all four native test groups passed. |
 | Distribution | Product build, wheel/source package and formatting passed. Generated Protobuf descriptors are packaged; isolated codec import passed. |
@@ -13,7 +14,7 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 | Recorded command replay | All ten actual command streams rendered twice on the calibrated 14-fixture patch: 168,114 DMX frames per pass, identical repeated digests, zero script errors. Final release also matches the prior build exactly; slowest run: 473.1x real time. |
 | Live loopback | Python ownership to Protobuf IPC to native Art-Net: all four banks observed over 90 seconds; 3,602 packets, no sequence gaps, final blackout preserving movement. |
 | SoundSwitch calibration | All four loops pass independent DMX comparisons at 120, 140 and 156 BPM; complete channel coverage and exact safe controls. See [reference calibration](calibration/README.md) for timing and quantization limits. |
-| Physical pipeline | A 90-second Spotify run drove Starfire, Radius TX, the remote RX and Enttec; the user confirmed working lights. Audio transport was active, but the speaker was off, so hearing remains unconfirmed. The dashboard startup defect exposed by this run is fixed and regression-tested. |
+| Physical pipeline | A 90-second Spotify run exercised all four categories through Starfire, Radius, Focusrite and Enttec; the user confirmed audio and lights. A simple white beat pulse was judged on-beat. After moving model preparation ahead of capture, the user confirmed the repeat remained synchronized. See [physical validation](calibration/physical-validation.json). |
 | Failure handling | Real heartbeat expiry exited at 30.000 seconds with blackout. Malformed/oversized messages, script failures, full-queue shutdown and mismatched production universes are covered. |
 | Diagram | Mermaid rendered; all 12 nodes have explanations and all three application boundaries are dotted rectangles. |
 
@@ -40,12 +41,14 @@ errors; sparse samples are not worst-case latency measurements.
 
 ## Scope and reproduction
 
-The physical run reported no lost or late audio packets, buffer overflows, buffer
-underruns or dropped DMX frames. One device underrun occurred during startup;
-the counter stayed at one. Maximum audio packet gap was 28 ms. These are observed
-session measurements, not guarantees for every Wi-Fi condition. SoundSwitch
-reference calibration passed with local capture and physical output off.
-Audible output and the calibrated looks still need a joint audition.
+The full physical run reported no lost or late audio packets, buffer overflows,
+queue underruns or dropped DMX packets. One device underrun occurred at startup;
+the counter stayed at one. Maximum observed packet gap was 88 ms. A separate
+restart encountered an audio stream error and recovered on a clean retry.
+These are session measurements, not guarantees for every Wi-Fi condition.
+The corrected-startup audition measured 40 renderer frames/s in the dashboard.
+USB writes and pre-USB scheduling lateness do not measure physical DMX refresh
+or fixture response latency. SoundSwitch calibration used isolated local capture.
 Radius currently stamps Art-Net ingress at receipt; exact future render targets
 need a further timing handoff. The RMS input updates on detected beats.
 

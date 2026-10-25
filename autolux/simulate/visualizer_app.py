@@ -3,6 +3,7 @@ import http.client
 import json
 import logging
 import threading
+import time
 from statistics import median
 
 import dash
@@ -11,6 +12,7 @@ from dash import Input, Output, State, dash_table, dcc, html
 
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.system_health import health_summary
+from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
     DASHBOARD_BIND_ADDRESS,
     DASHBOARD_MDNS_HOSTNAME,
@@ -25,7 +27,6 @@ from autolux.simulate import system_metrics
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
 
 TITLE = 'Autolux'
-SLOT_LABELS = list('ABCDEFGH')
 TIMELINE_WINDOW_SEC = 30.0
 TIMELINE_LEAD_SEC = 0.5
 # Drawn past the lead so the strip the browser translates in from the right is
@@ -43,7 +44,6 @@ NOW_CURSOR_LEFT = (
     f'calc({TIMELINE_MARGIN_L_PX}px + {NOW_CURSOR_X * 100:.4f}% - '
     f'{NOW_CURSOR_X:.6f} * {TIMELINE_MARGIN_L_PX + TIMELINE_MARGIN_R_PX}px)'
 )
-GLOW_BASE_PX = 16
 DARK_BG = '#0d1117'
 CARD_BG = '#111827'
 BORDER = '#1e2937'
@@ -60,6 +60,7 @@ DOWNBEAT_COLOR = 'rgba(88,166,255,0.55)'
 BEAT_TICK_COLOR = 'rgba(88,166,255,0.22)'
 
 REFRESH_MS = 250
+TELEMETRY_REFRESH_SECONDS = 1
 VIEW_EVERY_TICKS = 2
 STALL_RELEASE_MS = 4000
 STALE_REFRESHES = 12
@@ -67,44 +68,24 @@ STALE_REFRESHES = 12
 INTENT_CONFIG = {
     'atmospheric': {
         'primary': '#1565c0',
-        'accent': '#6a1b9a',
-        'slots': [3, 4],
-        'decay': 0.80,
-        'glow_mult': 1.4,
         'label': 'ATMOSPHERIC',
     },
     'breakdown': {
         'primary': '#7b1fa2',
-        'accent': '#880e4f',
-        'slots': [2, 3, 4],
-        'decay': 0.55,
-        'glow_mult': 1.6,
         'label': 'BREAKDOWN',
     },
     'buildup': {
         'primary': '#e65100',
-        'accent': '#f9a825',
-        'slots': [0, 1, 2, 3, 4, 5],
-        'decay': 0.25,
-        'glow_mult': 2.2,
         'label': 'BUILDUP',
     },
     'drop': {
         'primary': '#b71c1c',
-        'accent': '#ad1457',
-        'slots': [0, 1, 2, 3, 4, 5, 6, 7],
-        'decay': 0.12,
-        'glow_mult': 3.0,
         'label': 'DROP',
     },
 }
 
 _DEFAULT_CONFIG = {
     'primary': '#2d3f52',
-    'accent': '#2d3f52',
-    'slots': [],
-    'decay': 0.5,
-    'glow_mult': 1.0,
     'label': '—',
 }
 
@@ -425,60 +406,6 @@ def _build_timeline(snapshot: dict) -> go.Figure:
     return fig
 
 
-def _build_stage(snapshot: dict) -> list:
-    cfg = _intent_config(snapshot.get('intent'))
-    active = sorted(cfg['slots'])
-    peak_px = int(GLOW_BASE_PX * (1 + cfg['glow_mult']))
-
-    slots = []
-    for i, label in enumerate(SLOT_LABELS):
-        on = i in active
-        color = (cfg['accent'] if active.index(i) % 2 else cfg['primary']) if on else None
-
-        lamp = {
-            'width': '38px',
-            'height': '38px',
-            'borderRadius': '50%',
-            'background': color or '#161d27',
-            'margin': '0 auto 8px',
-        }
-        if on:
-            lamp.update(
-                {
-                    '--ss-lamp': color,
-                    '--ss-base': f'{GLOW_BASE_PX}px',
-                    '--ss-peak': f'{peak_px}px',
-                    '--ss-decay': f'{cfg["decay"]}s',
-                }
-            )
-
-        slots.append(
-            html.Div(
-                [
-                    html.Div(className='ss-lamp ss-on' if on else 'ss-lamp', style=lamp),
-                    html.Div(
-                        label,
-                        style={
-                            'color': '#ffffff' if on else '#2d3f52',
-                            'fontSize': '12px',
-                            'textAlign': 'center',
-                            'fontFamily': 'monospace',
-                            'letterSpacing': '1px',
-                        },
-                    ),
-                ],
-                style={
-                    'padding': '16px 8px',
-                    'background': CARD_BG,
-                    'borderRadius': '8px',
-                    'border': f'1px solid {color}' if on else f'1px solid {BORDER}',
-                    'transition': 'border-color 0.08s ease',
-                },
-            )
-        )
-    return slots
-
-
 def _build_decoder(snapshot: dict) -> list:
     state = snapshot.get('decoder') or {}
     classes = state.get('classes') or []
@@ -572,6 +499,7 @@ def _build_show_overview(snapshot: dict) -> list:
     health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
     effect = snapshot.get('current_effect') or {}
     effect_name = effect.get('name', '—')
+    sequence_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
     return [
         _build_stat_card(
             'Health',
@@ -584,11 +512,124 @@ def _build_show_overview(snapshot: dict) -> list:
             'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
         ),
         _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
-        _build_stat_card('Sequence', html.Span(effect_name)),
+        _build_stat_card('Sequence', html.Span(sequence_name, title=effect_name)),
         _build_stat_card('Room position', html.Span(room_text, id='room-clock')),
         _build_stat_card('Source position', html.Span(song_text, id='song-clock')),
         _build_stat_card('Show delay', html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s')),
     ]
+
+
+def _metric_card(label, value, detail):
+    return html.Div(
+        [
+            html.Div(label, className='stat-label'),
+            html.Div(value, className='stat-value'),
+            html.Div(detail, className='metric-detail'),
+        ],
+        className='performance-stat',
+    )
+
+
+def _latest_telemetry(snapshot, now):
+    history = snapshot.get('system_history') or []
+    if not history or not 0 <= now - history[-1]['at'] < TELEMETRY_STALE_SECONDS:
+        return {}
+    return history[-1]
+
+
+def _metric_text(value, unit='', precision=0):
+    return f'{value:.{precision}f}{unit}' if finite(value) else '—'
+
+
+def _build_performance_overview(snapshot, now):
+    sample = _latest_telemetry(snapshot, now)
+    recent = (snapshot.get('system') or {}).get('recent') or {}
+    interruptions = (
+        recent['underruns'] + recent['overruns']
+        if sample and all(finite(recent.get(key)) for key in ('underruns', 'overruns'))
+        else None
+    )
+    target = _metric_text(sample.get('target_ms'), ' ms')
+    return [
+        _metric_card(
+            'Receiver buffer',
+            _metric_text(sample.get('buffer_ms'), ' ms'),
+            f'Target {target} · network jitter reserve',
+        ),
+        _metric_card(
+            'Audio interruptions', _metric_text(interruptions), 'Underruns + overruns · last 10 s'
+        ),
+        _metric_card(
+            'DMX queue lateness',
+            _metric_text(sample.get('dmx_lateness_ms'), ' ms', 1),
+            'Scheduled frame lateness before USB output',
+        ),
+        _metric_card(
+            'Renderer FPS',
+            _metric_text(sample.get('starfire_measured_render_frames_per_second'), precision=1),
+            'Measured Starfire render rate',
+        ),
+    ]
+
+
+def _build_renderer_overview(snapshot, now):
+    sample = _latest_telemetry(snapshot, now)
+    return [
+        _metric_card(
+            'Renderer FPS',
+            _metric_text(sample.get('starfire_measured_render_frames_per_second'), precision=1),
+            'Between renderer health reports',
+        ),
+        _metric_card(
+            'Last render',
+            _metric_text(sample.get('starfire_last_render_duration_ms'), ' ms', 2),
+            'Most recently reported frame',
+        ),
+        _metric_card(
+            'Queued commands',
+            _metric_text(sample.get('starfire_queued_commands')),
+            'Awaiting the next render frame',
+        ),
+        _metric_card(
+            'Skipped frames',
+            _metric_text(sample.get('starfire_skipped_frames')),
+            'Missed render deadlines · this session',
+        ),
+    ]
+
+
+def _build_command_diagnostics(snapshot):
+    streams = (snapshot.get('timing_stats') or {}).get('by_label') or {}
+    if not streams:
+        return html.Div('No scheduled commands yet.', className='diagnostic-empty')
+    return html.Table(
+        [
+            html.Thead(
+                html.Tr(
+                    [
+                        html.Th('Stream'),
+                        html.Th('Commands'),
+                        html.Th('Mean error'),
+                        html.Th('Max error'),
+                    ]
+                )
+            ),
+            html.Tbody(
+                [
+                    html.Tr(
+                        [
+                            html.Td(label.replace('_', ' ').title()),
+                            html.Td(stream['samples']),
+                            html.Td(_metric_text(stream.get('mean_error_ms'), ' ms', 1)),
+                            html.Td(_metric_text(stream.get('max_error_ms'), ' ms', 1)),
+                        ]
+                    )
+                    for label, stream in streams.items()
+                ]
+            ),
+        ],
+        className='command-diagnostics',
+    )
 
 
 STYLESHEET = (
@@ -596,10 +637,13 @@ STYLESHEET = (
 * { box-sizing: border-box; }
 body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', sans-serif; }
 .dashboard { max-width: 1680px; margin: auto; padding: 26px 32px 32px; }
-.masthead, .section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
-.masthead { margin-bottom: 22px; }
-.masthead h1 { font-size: 25px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.7px; }
-.eyebrow { color: #71b7ee; font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; margin-bottom: 6px; }
+.section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.masthead { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+            margin-bottom: 22px; padding-bottom: 16px; border-bottom: 1px solid #1b2735; }
+.masthead h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -.6px; }
+.dashboard-nav { justify-self: center; }
+.dashboard-tabs { gap: 6px; }
+.dashboard-tab:hover { color: #e6edf3 !important; background: #131c27 !important; }
 .subtitle, .section-heading p { color: #9baabb; font-size: 12px; margin: 0; }
 .window-label { font-size: 11px; color: #9baabb; text-align: right; }
 .section-heading { margin: 22px 0 12px; }
@@ -611,6 +655,12 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .show-stat:last-child { border-right: 0; }
 .stat-label { font-size: 10px; color: #9baabb; margin-bottom: 8px; }
 .stat-value { display: flex; gap: 14px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.performance-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+                        gap: 20px; padding: 16px 4px 2px; }
+.performance-stat { min-width: 0; font-variant-numeric: tabular-nums; }
+.performance-stat .stat-label { margin-bottom: 5px; }
+.performance-stat .stat-value { font-size: 20px; }
+.metric-detail { margin-top: 5px; color: #8293a6; font-size: 11px; }
 .show-stat:nth-child(4) .stat-value { font-size: 15px; }
 .show-stat:nth-child(4) .stat-value span { filter: brightness(1.7); }
 .show-stat:nth-child(5) .stat-value { font-size: 15px; }
@@ -618,33 +668,39 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .show-panel .section-heading { margin: 0; padding: 14px 18px 6px; }
 .legend { padding: 12px 18px 0; }
 .legend > span { display: inline-block; white-space: nowrap; filter: brightness(1.7); }
-.stage-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; padding: 14px 18px 18px; }
-.stage-grid > div { padding: 8px !important; }
-.stage-grid .ss-lamp { width: 24px !important; height: 24px !important; margin-bottom: 5px !important; }
 .charts-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .chart-panel { min-width: 0; background: #111923; border: 1px solid #273344; border-radius: 8px; overflow: hidden; }
 .chart-panel h3 { margin: 16px 16px 7px; font-size: 13px; font-weight: 600; }
 .panel-description { margin: 0 16px 4px; color: #9baabb; font-size: 11px; line-height: 1.5; min-height: 50px; }
 .telemetry-notice { padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
                     color: #f6c177; margin-bottom: 12px; font-size: 12px; }
-.diagnostics { border-bottom: 1px solid #273344; padding: 16px 18px; }
+.diagnostics-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
+                    border-bottom: 1px solid #273344; }
+.diagnostics { padding: 16px 18px; min-width: 0; }
+.diagnostics + .diagnostics { border-left: 1px solid #273344; }
 .diagnostics h2 { margin: 0; font-size: 14px; color: #e6edf3; }
 .diagnostics-content { padding-top: 16px; font-size: 12px; }
+.diagnostic-empty { color: #8293a6; }
+.command-diagnostics { width: 100%; border-collapse: collapse; font-size: 11px;
+                       font-variant-numeric: tabular-nums; }
+.command-diagnostics th { color: #8293a6; font-weight: 500; padding-bottom: 7px; }
+.command-diagnostics td { padding: 4px 0; }
+.command-diagnostics th, .command-diagnostics td { text-align: right; }
+.command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
+.fixture-actions { display: flex; gap: 10px; margin-top: 16px; }
+.fixture-actions button { border: 1px solid #334456; background: #162332; color: #dbe7f3;
+                          padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+.fixture-actions button:hover { background: #223449; }
+#fixture-status { color: #9baabb; font-size: 12px; }
+#config-panel details { margin-top: 22px; color: #9baabb; font-size: 12px; line-height: 1.8; }
 .footer { display: flex; justify-content: space-between; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
-.ss-lamp { transition: background 0.08s ease; }
-.ss-lamp.ss-on { box-shadow: 0 0 var(--ss-base) var(--ss-lamp); }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
            height: '''
     + str(BEAT_MARKER_SIZE)
     + '''px;
            left: -9999px;  /* off-screen until seated against the live range */
            background: rgba(168,218,220,0.65); }
-@keyframes ss-pulse {
-    from { box-shadow: 0 0 var(--ss-peak) var(--ss-lamp); }
-    to   { box-shadow: 0 0 var(--ss-base) var(--ss-lamp); }
-}
-.ss-lamp.ss-on.ss-pulse { animation: ss-pulse var(--ss-decay) linear both; }
 '''
 )
 
@@ -790,37 +846,6 @@ function(sync) {
         el.style.transform = 'translate3d(' + (-dx).toFixed(2) + 'px,0,0)';
     };
 
-    // The glow fires when the room clock crosses the beat, not when an anchor
-    // happens to land -- the anchor cadence cost a median 154 ms of lag here.
-    const pulse = (now) => {
-        const beats = a.markerList || [];
-        let latest = null;
-        for (let i = beats.length - 1; i >= 0; i--) {
-            if (beats[i] <= now) { latest = beats[i]; break; }
-        }
-        if (latest == null) { a.pulsed = null; return; }
-        if (latest === a.pulsed) return;
-        a.pulsed = latest;
-        document.querySelectorAll('.ss-lamp.ss-on').forEach((el) => {
-            el.classList.remove('ss-pulse');
-            void el.offsetWidth;
-            el.style.animationDelay = Math.min(0, latest - now) + 's';
-            el.classList.add('ss-pulse');
-        });
-    };
-
-    const meter = () => {
-        a.ticks = (a.ticks || 0) + 1;
-        const at = performance.now();
-        if (a.meteredAt == null) { a.meteredAt = at; return; }
-        const span = at - a.meteredAt;
-        if (span < 1000) return;
-        const el = document.getElementById('fps');
-        if (el) el.textContent = Math.round(a.ticks * 1000 / span) + ' fps';
-        a.ticks = 0;
-        a.meteredAt = at;
-    };
-
     const frame = () => {
         const drift = a.frozen ? 0 : Math.min(1.5, (performance.now() - a.at) / 1000);
         const now = a.now + drift;
@@ -829,8 +854,6 @@ function(sync) {
         seatBeats(document.querySelector('#timeline .js-plotly-plot'));
         tick('room-clock', '', a.room, drift);
         tick('song-clock', '', a.song, drift);
-        pulse(now);
-        meter();
         requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);
@@ -1056,7 +1079,7 @@ def _fixture_patch(rows, previous):
     return {'schema_version': previous['schema_version'], 'fixtures': fixtures, 'groups': groups}
 
 
-def _add_fixture_setup(app, store):
+def _build_fixture_setup(app, store):
     patch, revision = store.load()
     profiles = store.profiles()
     columns = [
@@ -1083,9 +1106,6 @@ def _add_fixture_setup(app, store):
             for axis in ('pan', 'tilt')
         },
     }
-    tab_style = {'backgroundColor': CARD_BG, 'color': '#9baabb', 'borderColor': BORDER}
-    selected_style = {**tab_style, 'color': '#e6edf3', 'borderTopColor': POSTERIOR_FILL}
-    monitor = html.Div(app.layout.children[1:], id='monitor-panel')
     fixtures = html.Section(
         [
             html.Div(
@@ -1146,7 +1166,7 @@ def _add_fixture_setup(app, store):
                     html.Button('Reload saved patch', id='fixture-reload'),
                     html.Button('Save patch', id='fixture-save'),
                 ],
-                style={'display': 'flex', 'gap': '12px', 'marginTop': '16px'},
+                className='fixture-actions',
             ),
             html.P('Changes are validated before saving.', id='fixture-status', role='status'),
             html.Details(
@@ -1163,40 +1183,9 @@ def _add_fixture_setup(app, store):
             dcc.Store(id='fixture-patch', data=patch),
             dcc.Store(id='fixture-revision', data=revision),
         ],
-        id='fixtures-panel',
+        id='config-panel',
         style={'display': 'none'},
     )
-    app.layout.children = [
-        app.layout.children[0],
-        dcc.Tabs(
-            id='dashboard-tab',
-            value='monitor',
-            children=[
-                dcc.Tab(
-                    label='Monitor', value='monitor', style=tab_style, selected_style=selected_style
-                ),
-                dcc.Tab(
-                    label='Fixtures',
-                    value='fixtures',
-                    style=tab_style,
-                    selected_style=selected_style,
-                ),
-            ],
-        ),
-        monitor,
-        fixtures,
-    ]
-
-    @app.callback(
-        Output('monitor-panel', 'style'),
-        Output('fixtures-panel', 'style'),
-        Input('dashboard-tab', 'value'),
-    )
-    def show_tab(selected):
-        return (
-            {'display': 'block' if selected == 'monitor' else 'none'},
-            {'display': 'block' if selected == 'fixtures' else 'none'},
-        )
 
     @app.callback(
         Output('fixture-table', 'data'),
@@ -1241,6 +1230,8 @@ def _add_fixture_setup(app, store):
         except (TypeError, ValueError, OSError, RuntimeError) as error:
             return *unchanged, f'Patch not saved: {error}'
 
+    return fixtures
+
 
 def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
     app = dash.Dash(
@@ -1270,115 +1261,163 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             '/metrics': make_wsgi_app(registry_for(snapshot_source)),
         },
     )
+    tab_style = {
+        'backgroundColor': 'transparent',
+        'color': '#8293a6',
+        'border': '0',
+        'borderBottom': '2px solid transparent',
+        'padding': '10px 20px',
+        'fontSize': '13px',
+        'fontWeight': '500',
+        'flex': 'none',
+    }
+    selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
+    config_panel = (
+        _build_fixture_setup(app, fixture_store)
+        if fixture_store is not None
+        else html.Section(
+            [
+                html.Div(html.H2('Fixture setup'), className='section-heading'),
+                html.P('Fixture setup is unavailable in this session.', className='subtitle'),
+            ],
+            id='config-panel',
+            style={'display': 'none'},
+        )
+    )
     app.layout = html.Div(
         [
             html.Header(
                 [
-                    html.Div(
-                        [
-                            html.Div('Audio · Light · Control', className='eyebrow'),
-                            html.H1('Autolux'),
-                            html.P('Show & system monitor', className='subtitle'),
-                        ]
+                    html.H1('Autolux'),
+                    dcc.Tabs(
+                        id='dashboard-tab',
+                        value='control',
+                        className='dashboard-tabs',
+                        parent_className='dashboard-nav',
+                        children=[
+                            dcc.Tab(
+                                label=label,
+                                value=label.lower(),
+                                className='dashboard-tab',
+                                style=tab_style,
+                                selected_style=selected_tab_style,
+                            )
+                            for label in ('Control', 'Telemetry', 'Config')
+                        ],
                     ),
-                    html.Div(
-                        ['LOCAL SESSION', html.Br(), 'Radius telemetry · 1 s'],
-                        className='window-label',
-                    ),
+                    html.Div('Audio · light · control', className='window-label'),
                 ],
                 className='masthead',
             ),
             html.Div(id='telemetry-alerts'),
             html.Section(
                 [
-                    html.Div(id='metrics', className='show-overview'),
-                ],
-                className='overview-panel',
-            ),
-            html.Div(
-                [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
-                className='section-heading',
-            ),
-            html.Section(
-                [
-                    html.Div(_build_legend(), className='legend'),
+                    html.Section(
+                        html.Div(id='metrics', className='show-overview'),
+                        className='overview-panel',
+                    ),
+                    html.Div(id='performance-metrics', className='performance-overview'),
                     html.Div(
+                        [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
+                        className='section-heading',
+                    ),
+                    html.Section(
                         [
+                            html.Div(_build_legend(), className='legend'),
                             html.Div(
                                 [
-                                    dcc.Graph(id='timeline', config={'displayModeBar': False}),
                                     html.Div(
-                                        id='beat-layer',
+                                        [
+                                            dcc.Graph(
+                                                id='timeline', config={'displayModeBar': False}
+                                            ),
+                                            html.Div(
+                                                id='beat-layer',
+                                                style={
+                                                    'position': 'absolute',
+                                                    'top': '0',
+                                                    'left': '0',
+                                                    'right': '0',
+                                                    'bottom': '0',
+                                                    'pointerEvents': 'none',
+                                                },
+                                            ),
+                                        ],
+                                        id='timeline-scroll',
+                                        style={'willChange': 'transform', 'position': 'relative'},
+                                    ),
+                                    html.Div(
+                                        id='now-cursor',
                                         style={
                                             'position': 'absolute',
                                             'top': '0',
-                                            'left': '0',
-                                            'right': '0',
                                             'bottom': '0',
+                                            'left': NOW_CURSOR_LEFT,
+                                            'width': '1px',
+                                            'background': 'rgba(255,255,255,0.25)',
                                             'pointerEvents': 'none',
                                         },
                                     ),
                                 ],
-                                id='timeline-scroll',
-                                style={'willChange': 'transform', 'position': 'relative'},
-                            ),
-                            html.Div(
-                                id='now-cursor',
                                 style={
-                                    'position': 'absolute',
-                                    'top': '0',
-                                    'bottom': '0',
-                                    'left': NOW_CURSOR_LEFT,
-                                    'width': '1px',
-                                    'background': 'rgba(255,255,255,0.25)',
-                                    'pointerEvents': 'none',
+                                    'position': 'relative',
+                                    'overflow': 'hidden',
+                                    'background': DARK_BG,
+                                    'borderBottom': f'1px solid {BORDER}',
                                 },
                             ),
-                        ],
-                        style={
-                            'position': 'relative',
-                            'overflow': 'hidden',
-                            'background': DARK_BG,
-                            'borderBottom': f'1px solid {BORDER}',
-                        },
-                    ),
-                    html.Section(
-                        [
-                            html.H2('Analysis diagnostics'),
                             html.Div(
                                 [
-                                    html.Div(id='decoder'),
+                                    html.Section(
+                                        [
+                                            html.H2('Analysis diagnostics'),
+                                            html.Div(id='decoder', className='diagnostics-content'),
+                                        ],
+                                        className='diagnostics',
+                                    ),
+                                    html.Section(
+                                        [
+                                            html.H2('Command diagnostics'),
+                                            html.Div(
+                                                id='command-diagnostics',
+                                                className='diagnostics-content',
+                                            ),
+                                        ],
+                                        className='diagnostics',
+                                    ),
                                 ],
-                                className='diagnostics-content',
+                                className='diagnostics-grid',
                             ),
                         ],
-                        className='diagnostics',
+                        className='show-panel',
                     ),
+                ],
+                id='control-panel',
+            ),
+            html.Section(
+                [
+                    html.Div(
+                        [html.H2('Starfire'), html.P('Measured rendering performance')],
+                        className='section-heading',
+                    ),
+                    html.Div(id='renderer-metrics', className='performance-overview'),
                     html.Div(
                         [
-                            html.H2('Intent preview'),
-                            html.P('Illustration of the selected effect · not fixture feedback'),
+                            html.H2('System history'),
+                            html.P('Last 5 minutes · UTC · gaps indicate unavailable data'),
                         ],
                         className='section-heading',
                     ),
-                    html.Div(id='stage', className='stage-grid'),
+                    html.Div(system_metrics.build_system_health_panels(), className='charts-grid'),
                 ],
-                className='show-panel',
+                id='telemetry-panel',
+                style={'display': 'none'},
             ),
-            html.Div(
-                [
-                    html.H2('Transport & output'),
-                    html.P('Last 5 minutes · UTC · gaps indicate unavailable data'),
-                ],
-                className='section-heading',
-            ),
-            html.Div(system_metrics.build_system_health_panels(), className='charts-grid'),
+            config_panel,
             html.Footer(
                 [
-                    html.Span(
-                        ['Autolux / Radius', ' · ', html.A('Prometheus metrics', href='/metrics')]
-                    ),
-                    html.Span('— fps', id='fps'),
+                    html.Span('Autolux · Starfire · Radius'),
+                    html.A('Prometheus metrics', href='/metrics'),
                 ],
                 className='footer',
             ),
@@ -1393,6 +1432,18 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         className='dashboard',
     )
 
+    @app.callback(
+        Output('control-panel', 'style'),
+        Output('telemetry-panel', 'style'),
+        Output('config-panel', 'style'),
+        Input('dashboard-tab', 'value'),
+    )
+    def show_tab(selected):
+        return tuple(
+            {'display': 'block' if selected == tab else 'none'}
+            for tab in ('control', 'telemetry', 'config')
+        )
+
     app.clientside_callback(
         GATE_JS, [Output('gate', 'data'), Output('view-gate', 'data')], Input('tick', 'n_intervals')
     )
@@ -1403,8 +1454,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         [
             Output('sync', 'data'),
             Output('metrics', 'children'),
-            Output('stage', 'children'),
             Output('decoder', 'children'),
+            Output('command-diagnostics', 'children'),
         ],
         Input('gate', 'data'),
         prevent_initial_call=True,
@@ -1414,8 +1465,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         return (
             _anchor(snap),
             _build_show_overview(snap),
-            _build_stage(snap),
             _build_decoder(snap),
+            _build_command_diagnostics(snap),
         )
 
     @app.callback(
@@ -1432,27 +1483,29 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     @app.callback(
         [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS]
-        + [Output('telemetry-alerts', 'children')],
+        + [
+            Output('telemetry-alerts', 'children'),
+            Output('performance-metrics', 'children'),
+            Output('renderer-metrics', 'children'),
+        ],
         Input('sync', 'data'),
         prevent_initial_call=True,
     )
     def refresh_telemetry(_):
         # Reuse the one show snapshot and limit chart rendering to once per second.
-        import time
-
         now = time.time()
-        if now - latest.get('charts_at', 0) < 1:
-            return [dash.no_update] * (len(system_metrics.PANELS) + 1)
+        if now - latest.get('charts_at', 0) < TELEMETRY_REFRESH_SECONDS:
+            return [dash.no_update] * (len(system_metrics.PANELS) + 3)
         latest['charts_at'] = now
         snap = latest.get('snapshot') or {}
         return system_metrics.build_system_health_charts(snap, now=now) + [
-            system_metrics.build_telemetry_notices(snap, now=now)
+            system_metrics.build_telemetry_notices(snap, now=now),
+            _build_performance_overview(snap, now),
+            _build_renderer_overview(snap, now),
         ]
 
     app.clientside_callback(ANIMATION_JS, Output('anim', 'data'), Input('sync', 'data'))
     app.clientside_callback(VIEW_LANDED_JS, Output('taken', 'data'), Input('drawn', 'data'))
-    if fixture_store is not None:
-        _add_fixture_setup(app, fixture_store)
     return app
 
 

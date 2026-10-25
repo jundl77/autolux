@@ -5,7 +5,8 @@ import time
 
 from prometheus_client import CollectorRegistry, generate_latest
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
-from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
+
+from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite, renderer_is_fresh
 
 MIN_BUFFER_TARGET_RATIO = 0.25
 MAX_BUFFER_TARGET_RATIO = 3
@@ -13,17 +14,6 @@ MAX_DMX_LATENESS_SECONDS = 0.05
 AUDIO_INPUT_STALE_SECONDS = 1
 DMX_INPUT_STALE_SECONDS = 3
 MILLISECONDS_PER_SECOND = 1000
-RENDERER_TELEMETRY_STALE_SECONDS = 30
-
-
-def renderer_is_fresh(system, age):
-    renderer = system.get('starfire') or {}
-    measured_age = renderer.get('age_seconds')
-    return (
-        age < TELEMETRY_STALE_SECONDS
-        and finite(measured_age)
-        and measured_age + age < RENDERER_TELEMETRY_STALE_SECONDS
-    )
 
 
 def health_summary(snapshot, *, now=None):
@@ -224,8 +214,25 @@ class HealthCollector:
                 ),
             ):
                 value = renderer.get(key)
-                if finite(value):
+                if finite(value) and value >= 0:
                     yield factory(name, description, value=value * scale)
+            history = snapshot.get('system_history') or []
+            latest = history[-1] if history else {}
+            for key, name, description in (
+                (
+                    'starfire_measured_render_frames_per_second',
+                    'starfire_measured_render_frames_per_second',
+                    'Rendered frame count divided by elapsed renderer time between reports.',
+                ),
+                (
+                    'starfire_missed_render_deadlines_per_second',
+                    'starfire_missed_render_deadlines_per_second',
+                    'Skipped render deadlines per second between renderer reports.',
+                ),
+            ):
+                value = latest.get(key)
+                if finite(value) and latest.get('at') == system.get('sample_timestamp'):
+                    yield GaugeMetricFamily(name, description, value=value)
         timing = (snapshot.get('timing_stats') or {}).get('mean_error_ms')
         if timing is not None:
             yield GaugeMetricFamily(
