@@ -149,8 +149,8 @@ COUNTERS = {
     'overflow_frames_total': 'Audio frames rejected by a full receiver queue.',
     'late_packets_total': 'Audio packets arriving after their accepted media position.',
     'latency_trims_total': 'Audio packets discarded to recover excessive latency.',
-    'send_failures_total': 'Failed UDP sends.',
-    'invalid_packets_total': 'Rejected bus datagrams.',
+    'send_failures_total': 'Failed transport writes.',
+    'invalid_packets_total': 'Rejected transport messages.',
     'dmx_dropped_total': 'Dropped or out-of-order lighting packets.',
     'dmx_frames_total': 'Lighting frames written to the Enttec output.',
 }

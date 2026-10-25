@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from cli import production
-from cli.native_runtime import NativeSpec
+from cli.remote_runtime import ReceiverSpec
 
 
 def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path, monkeypatch):
@@ -19,39 +19,35 @@ def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path, monk
 
     monkeypatch.setattr(secrets, 'randbits', random_run_id)
 
-    for role in ('tx', 'rx'):
+    for name in ('transmitter', 'receiver'):
         config = {
             'peer_address': '127.0.0.1',
             'bus_port': 19002,
             'sample_rate': 44100,
-            'jitter_buffer_ms': 75,
-            'audio_enabled': False,
-            'dmx_enabled': False,
-            'artnet_address': '0.0.0.0',
-            'artnet_port': 6454,
+            'jitter_buffer_ms': 500,
+            'audio_enabled': True,
+            'dmx_enabled': True,
+            'audio_device_id': 'capture',
+            'dmx_universe': 0,
         }
-        directory = tmp_path / f'radius_{role}'
-        directory.mkdir()
-        (directory / f'radius_{role}.json').write_text(json.dumps(config))
-        binary = tmp_path / f'cmake-build-release/radius_{role}/radius_{role}.exe'
-        binary.parent.mkdir(parents=True)
-        binary.touch()
+        (tmp_path / f'{name}.json').write_text(json.dumps(config))
+    binary = tmp_path / 'radius_rx.exe'
+    binary.touch()
     args = argparse.Namespace(
-        radius_dir=tmp_path, tx_config=None, rx_config=None, receiver_host=None
+        tx_config=tmp_path / 'transmitter.json',
+        rx_config=tmp_path / 'receiver.json',
+        receiver_binary=binary,
+        receiver_host=None,
     )
-    transmitter, receiver = production.native_specs(args, 14)
-    assert transmitter.config['run_id'] == receiver.config['run_id']
-    assert transmitter.config['run_id'] == 1
-    assert transmitter.config['artnet_address'] == '127.0.0.1'
-    assert 0 < transmitter.config['artnet_port'] <= 65535
-    assert transmitter.config['artnet_port'] != 6454
-    assert transmitter.config['receiver'] == {
-        'audio_enabled': False,
-        'lighting_enabled': False,
-        'jitter_buffer_ms': 75,
-    }
-    restarted_tx, restarted_rx = production.native_specs(args, 14)
-    assert restarted_tx.config['run_id'] == restarted_rx.config['run_id'] == 2**64 - 1
+    transmitter, receiver = production.transport_settings(args, 14)
+    assert transmitter['run_id'] == receiver.config['run_id'] == 1
+    output = production.radius_output(transmitter)
+    assert output.receiver_address == '127.0.0.1:19002'
+    assert output.playback_delay_seconds == 14
+    assert output.receiver_buffer_ms == 500
+    assert output.receiver_audio_enabled and output.receiver_lighting_enabled
+    restarted_tx, restarted_rx = production.transport_settings(args, 14)
+    assert restarted_tx['run_id'] == restarted_rx.config['run_id'] == 2**64 - 1
     assert requested_bits == [64, 64]
 
 
@@ -154,7 +150,6 @@ def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypa
         ('missing_autoloop', False),
         ('controller_init', False),
         ('receiver_start', False),
-        ('transmitter_start', False),
         ('renderer_start', False),
         ('monitor_setup', False),
         ('controller_run', False),
@@ -178,21 +173,19 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     args = parser.parse_args([])
     args.starfire_binary = tmp_path / 'starfire.exe'
     args.starfire_binary.touch()
-    tx = NativeSpec(
-        'radius_tx',
-        Path('tx.exe'),
-        {
-            'peer_address': '127.0.0.1',
-            'run_id': 17,
-            'artnet_address': '127.0.0.1',
-            'dmx_universe': 0,
-        },
-    )
-    rx = NativeSpec('radius_rx', Path('rx.exe'), {})
+    tx = {
+        'peer_address': '127.0.0.1',
+        'bus_port': 19002,
+        'run_id': 17,
+        'dmx_universe': 0,
+        'audio_device_id': 'capture',
+        'playback_delay_seconds': 14,
+        'receiver': {'audio_enabled': True, 'lighting_enabled': True, 'jitter_buffer_ms': 500},
+    }
+    rx = ReceiverSpec(Path('rx.exe'), {'run_id': 17})
     monkeypatch.setattr(production, 'ROOT', tmp_path)
     (tmp_path / '.live').mkdir()
-    monkeypatch.setattr(production, 'native_specs', lambda *_: [tx, rx])
-    monkeypatch.setattr(production, 'validate_native', lambda *_: None)
+    monkeypatch.setattr(production, 'transport_settings', lambda *_: [tx, rx])
     monkeypatch.setattr(production, 'running_processes', lambda: [])
     monkeypatch.setattr(production, 'resolve_devices', lambda *_: 1)
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda: True)
@@ -234,6 +227,9 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         def check_connection(self):
             events.append('ssh_check')
 
+        def prepare(self):
+            events.append('receiver_check')
+
         def __enter__(self):
             assert 'app_initialized' in events
             if failure == 'receiver_start':
@@ -247,27 +243,11 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         def check_health(self):
             pass
 
-    class Native:
-        def __init__(self, specs, path):
-            Path(path).mkdir(parents=True)
-
-        def __enter__(self):
-            assert 'app_initialized' in events
-            if failure == 'transmitter_start':
-                raise RuntimeError('transmitter start failed')
-            events.append('tx_start')
-            return self
-
-        def __exit__(self, *_):
-            events.append('tx_stop')
-
-        def check_health(self):
-            pass
-
     class Renderer:
         def __init__(self, binary, rig, autoloops, artnet, directory, **kwargs):
-            assert artnet == '127.0.0.1:6454'
-            assert kwargs['run_id'] == tx.config['run_id']
+            assert artnet is None
+            assert kwargs['run_id'] == rx.config['run_id'] == 17
+            assert kwargs['radius'].receiver_buffer_ms == 500
             self.process = None
 
         def __enter__(self):
@@ -294,7 +274,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
 
     class App:
         def __init__(self, *_, **kwargs):
-            assert not any(name in events for name in ('rx_start', 'tx_start', 'starfire_start'))
+            assert not any(name in events for name in ('rx_start', 'starfire_start'))
             if failure == 'controller_init':
                 raise RuntimeError('model initialization failed')
             self.lighting_client = kwargs['lighting_client']
@@ -306,7 +286,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             self.lighting_client.stop()
 
         async def run(self):
-            assert all(name in events for name in ('rx_start', 'tx_start', 'starfire_start'))
+            assert all(name in events for name in ('rx_start', 'starfire_start'))
             events.append('app_run')
             try:
                 self.health_check()
@@ -317,7 +297,6 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
 
     monkeypatch.setattr(windows_runtime, 'RoleLock', Lock)
     monkeypatch.setattr(remote_runtime, 'RemoteRuntime', Remote)
-    monkeypatch.setattr(production, 'NativeRuntime', Native)
     monkeypatch.setattr(main, 'AutoluxController', App)
     monkeypatch.setattr(production, 'StarfireRuntime', Renderer)
     if failure == 'monitor_setup':
@@ -341,12 +320,12 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     assert events[-1] == 'unlock'
     if failure in preflight_failures:
         assert events == ['unlock']
-    elif checking or failure == 'controller_init':
+    elif checking:
+        assert events == ['ssh_check', 'receiver_check', 'unlock']
+    elif failure == 'controller_init':
         assert events == ['ssh_check', 'unlock']
-    if 'tx_stop' in events:
-        assert events.index('tx_stop') < events.index('rx_stop')
     if 'starfire_stop' in events:
-        assert events.index('starfire_stop') < events.index('tx_stop')
+        assert events.index('starfire_stop') < events.index('rx_stop')
     if 'app_run' in events:
         assert events.index('app_stop') < events.index('starfire_stop')
         assert events.count('stop') == 1

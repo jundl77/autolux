@@ -15,9 +15,7 @@ from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BINARY = (
-    ROOT / 'starfire' / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
-)
+DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
 DEFAULT_RIG = ROOT / 'rigs' / 'room.json'
 DEFAULT_AUTOLOOPS = ROOT / 'autoloops'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'

@@ -1,6 +1,7 @@
 """Deploy an immutable Radius bundle and supervise one SSH-owned receiver session."""
 
 import base64
+from dataclasses import dataclass
 import hashlib
 import ipaddress
 import json
@@ -11,6 +12,12 @@ import re
 import subprocess
 import time
 import uuid
+
+
+@dataclass(frozen=True)
+class ReceiverSpec:
+    executable: Path
+    config: dict
 
 
 def encoded_command(script):
@@ -89,47 +96,52 @@ class RemoteRuntime:
     def check_connection(self):
         self.ssh('Write-Output radius-ssh-ready')
 
+    def prepare(self):
+        """Deploy and check receiver devices without opening playback or DMX."""
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        files = [
+            self.spec.executable,
+            Path(__file__).parent / 'deployment' / 'run-radius.ps1',
+        ]
+        digest = hashlib.sha256()
+        for file in files:
+            digest.update(file.name.encode())
+            digest.update(file.read_bytes())
+        version = digest.hexdigest()[:20]
+        script = (
+            "$base=Join-Path $env:LOCALAPPDATA 'Autolux'; "
+            f"$bundle=Join-Path $base 'radius/{version}'; "
+            f"$run=Join-Path $base 'runs/{self.session_id}'; "
+            "New-Item -ItemType Directory -Force -Path $bundle,$run | Out-Null; "
+            "@{bundle=$bundle;run=$run}|ConvertTo-Json -Compress"
+        )
+        self.remote = json.loads(self.ssh(script))
+        config = self.run_dir / 'receiver.json'
+        config.write_text(json.dumps(self.spec.config), encoding='utf-8')
+        for sources, destination in (
+            (files, self.remote['bundle']),
+            ([config], self.remote['run']),
+        ):
+            # scp's SFTP transport accepts a single destination argument, including spaces.
+            target = f'{self.user}@{self.host}:' + destination.replace('\\', '/') + '/'
+            subprocess.run(
+                ['scp', *self.options(), *map(str, sources), target],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+            )
+        bundle, run = map(ps_literal, (self.remote['bundle'], self.remote['run']))
+        self.ssh(
+            f'& (Join-Path {bundle} radius_rx.exe) --check-config (Join-Path {run} receiver.json); exit $LASTEXITCODE'
+        )
+
     def __enter__(self):
         try:
-            self.run_dir.mkdir(parents=True, exist_ok=True)
-            files = [
-                self.spec.executable,
-                *[self.spec.executable.parent / name for name in ('soundio.dll', 'ftd2xx.dll')],
-                Path(__file__).parent / 'deployment' / 'run-radius.ps1',
-            ]
-            digest = hashlib.sha256()
-            for file in files:
-                digest.update(file.name.encode())
-                digest.update(file.read_bytes())
-            version = digest.hexdigest()[:20]
-            script = (
-                "$base=Join-Path $env:LOCALAPPDATA 'Autolux'; "
-                f"$bundle=Join-Path $base 'radius/{version}'; "
-                f"$run=Join-Path $base 'runs/{self.session_id}'; "
-                "New-Item -ItemType Directory -Force -Path $bundle,$run | Out-Null; "
-                "@{bundle=$bundle;run=$run}|ConvertTo-Json -Compress"
-            )
-            self.remote = json.loads(self.ssh(script))
-            config = self.run_dir / 'receiver.json'
-            config.write_text(json.dumps(self.spec.config), encoding='utf-8')
-            for sources, destination in (
-                (files, self.remote['bundle']),
-                ([config], self.remote['run']),
-            ):
-                # scp's SFTP transport accepts a single destination argument, including spaces.
-                target = f'{self.user}@{self.host}:' + destination.replace('\\', '/') + '/'
-                subprocess.run(
-                    ['scp', *self.options(), *map(str, sources), target],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-                )
+            if self.remote is None:
+                self.prepare()
             bundle, run = map(ps_literal, (self.remote['bundle'], self.remote['run']))
-            self.ssh(
-                f'& (Join-Path {bundle} radius_rx.exe) --check-config (Join-Path {run} receiver.json); exit $LASTEXITCODE'
-            )
             self._log = (self.run_dir / 'receiver-ssh.log').open('wb')
             script = f'& (Join-Path {bundle} run-radius.ps1) -Bundle {bundle} -RunDirectory {run}; exit $LASTEXITCODE'
             self.process = subprocess.Popen(
@@ -145,7 +157,7 @@ class RemoteRuntime:
                 ready = self.ssh(
                     f'$p=Join-Path {run} ready; if(Test-Path -LiteralPath $p){{Get-Content -LiteralPath $p}}'
                 )
-                if ready == 'autolux-native-v1':
+                if ready == 'ready':
                     logging.info('[prod] receiver ready on %s', self.host)
                     return self
                 time.sleep(0.2)

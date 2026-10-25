@@ -126,6 +126,8 @@ class StarfireRuntime:
         stop_timeout=STOP_TIMEOUT_SECONDS,
         initial_parameters=(),
         profiles=PROFILE_CATALOGUE,
+        radius=None,
+        render_core=None,
     ):
         self.run_id = run_id
         self.command = [str(Path(binary).resolve()), 'live']
@@ -134,6 +136,8 @@ class StarfireRuntime:
         self._autoloop_directory = Path(autoloops).resolve()
         self._artnet_destination = artnet
         self._initial_parameters = initial_parameters
+        self._radius = radius
+        self._render_core = render_core
         self._login = None
         self._autoloop_ids = frozenset()
         self.run_dir = Path(run_dir)
@@ -165,6 +169,8 @@ class StarfireRuntime:
                 parameters=self._initial_parameters,
                 profiles=self._profiles_path,
                 run_id=self.run_id,
+                radius=self._radius,
+                render_core=self._render_core,
             )
             self._autoloop_ids = frozenset(script.autoloop_id for script in self._login.autoloops)
             self.run_dir.mkdir(parents=True, exist_ok=False)
@@ -172,6 +178,7 @@ class StarfireRuntime:
                 self.process = subprocess.Popen(
                     self.command,
                     cwd=ROOT,
+                    env={**os.environ, 'AUTOLUX_RUNTIME_DIR': str(self.run_dir)},
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=log,

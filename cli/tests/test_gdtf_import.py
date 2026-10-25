@@ -15,7 +15,7 @@ from cli.starfire_assets import load_login
 from cli.starfire_runtime import StarfireRuntime
 
 ROOT = Path(__file__).parents[2]
-BINARY = ROOT / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+BINARY = ROOT / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
 DESCRIPTION = ROOT / 'autolux/tests/data/gdtf/dimmer.xml'
 ARTNET_HEADER_BYTES = 18
 TEST_TIMEOUT_SECONDS = 5.0

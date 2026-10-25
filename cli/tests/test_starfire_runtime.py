@@ -549,7 +549,7 @@ def test_full_command_queue_fails_instead_of_blocking_audio_thread(tmp_path):
 
 def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    binary = root / 'starfire/target/debug/starfire.exe'
+    binary = root / 'target/debug/starfire.exe'
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise the native protocol boundary')
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
@@ -612,7 +612,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
 
 def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    binary = root / 'starfire/target/debug/starfire.exe'
+    binary = root / 'target/debug/starfire.exe'
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native fixture validation')
     patch = json.loads((root / 'rigs/room.json').read_text())
@@ -630,7 +630,7 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
 
 def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
     root = Path(__file__).resolve().parents[2]
-    binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+    binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
     patch = json.loads((root / 'rigs/room.json').read_text())
@@ -646,7 +646,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
     from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 
     root = Path(__file__).resolve().parents[2]
-    binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+    binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
     for intent, (bank, autoloop) in AUTOLOOP_BY_LIGHT_INTENT.items():

@@ -134,16 +134,20 @@ def _autoloop_definitions(directory):
 def load_login(
     rig: Path,
     autoloops: Path,
-    artnet: str,
+    artnet: str | None,
     parameters=(),
     *,
     run_id: int,
     profiles: Path | None = None,
+    radius: wire.Login.RadiusOutput | None = None,
+    render_core: int | None = None,
 ) -> wire.Login:
     """Load one immutable asset snapshot before starting the owned renderer."""
     try:
         if type(run_id) is not int or not 0 < run_id < 1 << 64:
             raise ValueError('run_id must be a nonzero uint64')
+        if (radius is None) == (not artnet):
+            raise ValueError('Select exactly one output: Art-Net or Radius')
         patch = _document(rig)
         fixtures = [_fixture(value) for value in patch.pop('fixtures')]
         groups = []
@@ -169,9 +173,11 @@ def load_login(
                 **patch,
             ),
             autoloops=_autoloop_definitions(autoloops),
-            artnet_destination=artnet,
             parameters=parameters,
+            **({'artnet_destination': artnet} if radius is None else {'radius': radius}),
         )
+        if render_core is not None:
+            login.render_core = render_core
         if login.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES > MAX_MESSAGE_BYTES:
             raise ValueError('Login assets exceed the renderer message limit')
         return login

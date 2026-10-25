@@ -18,11 +18,11 @@ def generate(output: Path) -> None:
             f'--proto_path={ROOT}',
             f'--python_out={output}',
             f'--pyi_out={output}',
-            *(str(path) for path in sorted((ROOT / 'proto/starfire').glob('*.proto'))),
+            *(str(path) for path in sorted((ROOT / 'proto').glob('*/*.proto'))),
         ]
     )
     if result:
-        raise RuntimeError(f'Starfire Protobuf generation failed (exit {result})')
+        raise RuntimeError(f'Protobuf generation failed (exit {result})')
 
 
 class BuildPy(build_py):

@@ -1,2 +1,2 @@
-recursive-include proto/starfire *.proto
+recursive-include proto *.proto
 include tools/build_proto.py

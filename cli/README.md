@@ -13,7 +13,7 @@ after 45 seconds. `--check-full` also runs builds, tests, backtest and simulatio
 Install Windows OpenSSH Server once on the receiver. From an elevated PowerShell,
 run `deployment/enable-ssh.ps1` with the controller's Ed25519 **public** key and
 controller IPv4 address. The script enables key access and restricts SSH to that
-address. Permit UDP 19002 from the controller for the Radius bus.
+address. The launcher permits TCP 19002 from that controller for the Radius bus.
 
 Keep the private key on the controller at `~/.ssh/autolux_radius_ed25519`.
 Verify the receiver's public SSH host key through a trusted connection and store
@@ -21,7 +21,7 @@ it in `~/.ssh/known_hosts_autolux`. Production requires strict host-key checking
 `--receiver-user`, `--ssh-key` and `--known-hosts` select other settings.
 
 The receiver config selects its physical speaker endpoint. SCP uploads versioned
-binary/DLL bundles under the receiver user's local application-data directory.
+Rust receiver bundles under the receiver user's local application-data directory.
 SSH runs one supervised receiver session; no Python installation is required on
 the receiver. Concurrent receiver sessions are refused. Session logs are retained.
 
@@ -33,8 +33,10 @@ loads the fixture patch, required profiles and Lua sources into Login; LoginRepl
 confirms readiness. Model preparation precedes audio capture. Independent heartbeats
 run every ten seconds with a thirty-second deadline. `--rig`, `--profiles`,
 `--autoloops` and `--starfire-binary` select the fixture patch, GDTF catalogue,
-Lua catalogue and executable. Art-Net goes to the
-configured Radius TX ingress; the receiver alone drives the physical fixtures.
+Lua catalogue and executable. Starfire passes complete DMX frames directly to
+its Radius TX worker. One TCP connection carries audio, lights and telemetry;
+RX uses a 500 ms buffer and schedules lighting against audible audio.
+Standalone Starfire can also output Art-Net.
 
 `autolux starfire import-fixture fixture.gdtf --profile-id my_fixture --mode "Standard"`
 validates and stores a GDTF mode in `rigs/profiles.json`. Config lists imported
