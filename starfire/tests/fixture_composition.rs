@@ -73,7 +73,7 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
     for start in [0, 12] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 12],
-            &[64, 0, 191, 255, 0, 96, 0, 102, 0, 0, 0, 0]
+            &[64, 0, 191, 255, 0, 111, 7, 102, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -113,7 +113,7 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
                 frame.dmx_frames_by_universe[&0][start + 7],
                 expected_intensity
             );
-            assert_eq!(frame.dmx_frames_by_universe[&0][start + 6], 0);
+            assert_eq!(frame.dmx_frames_by_universe[&0][start + 6], 7);
             assert_eq!(
                 &frame.dmx_frames_by_universe[&0][start + 8..start + 12],
                 &[0, 0, 0, 0]
@@ -146,7 +146,7 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][6..12],
-        &[0, 0, 0, 0, 0, 0]
+        &[7, 0, 0, 0, 0, 0]
     );
     engine.apply(0.7, &Command::Stop).unwrap();
     let stopped = engine.render_at(0.7).unwrap();

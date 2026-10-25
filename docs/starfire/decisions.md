@@ -100,6 +100,19 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P59: Run the standalone dashboard synchronously from the CLI main thread.
   Its blocking server and mDNS registration must not occupy an asyncio event
   loop or an executor worker that prevents bounded Ctrl-C shutdown.
+- P60: Calibrate against the saved Home patch using eight generic RGB pixels at
+  addresses 97, 100, ... 118 for the CF805's verified 24-channel mode. Keep this
+  reference patch separate until its scripts are ready. Mini Kinta channels
+  40..43 remain dark; compare them explicitly rather than inventing a profile.
+  Use Spot shutter value 7 and blue-wheel value 111, both inside the documented
+  open/blue ranges. Prove existing replay changes contain only these equivalent
+  channel encodings before updating their digests.
+- P61: Record two complete 64-beat SoundSwitch cycles per look at 120 BPM and
+  an independent 140 BPM run, with full master, normalized RMS 1 and no entry
+  accent. Use one common temporal alignment per look; report active properties
+  separately so inactive channels cannot dilute errors. Compare SoundSwitch's
+  own repeat variability before choosing comparison tolerances. Reconstruct
+  semantic authored curves; do not substitute raw DMX frame playback for Lua.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |

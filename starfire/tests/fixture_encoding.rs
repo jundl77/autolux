@@ -61,7 +61,7 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
-            &[64, 0, 191, 255, 0, 160, 0, 191, 0, 0, 0, 0]
+            &[64, 0, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -88,7 +88,7 @@ fn blackout_preserves_movement_and_disables_all_device_programs() {
     let dark_frame = rig.encode(&states).unwrap();
     assert_eq!(&dark_frame[&0][..4], &lit_frame[&0][..4]);
     assert_eq!(&dark_frame[&0][..4], &[32, 0, 223, 255]);
-    assert_eq!(&dark_frame[&0][6..12], &[0, 0, 0, 0, 0, 0]);
+    assert_eq!(&dark_frame[&0][6..12], &[7, 0, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn colour_wheel_maps_shades_to_same_hue_and_black_to_zero_intensity() {
                 green: 0.0,
                 blue: 0.5,
             },
-            96,
+            111,
             128,
         ),
         (
@@ -157,6 +157,49 @@ fn movement_calibration_maps_inverted_endpoints_without_touching_macros() {
     assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[191, 255, 128, 0]);
     states.get_mut("test").unwrap().pan = 1.0;
     assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[64, 0, 128, 0]);
+}
+
+#[test]
+fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() {
+    const STRIP_START: usize = 96;
+    const RGB_CHANNELS: usize = 3;
+    const PIXEL_COUNT: usize = 8;
+    const MINI_KINTA_START: usize = 39;
+    const MINI_KINTA_CHANNELS: usize = 4;
+    let rig = FixtureRig::from_json(include_str!("../rigs/soundswitch-reference.json")).unwrap();
+    let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
+    assert_eq!(strip.len(), PIXEL_COUNT);
+    for (selected, id) in strip.iter().enumerate() {
+        let mut states = rig.empty_states();
+        states.get_mut(id).unwrap().intensity = 0.5;
+        states.get_mut(id).unwrap().colour = Rgb {
+            red: 0.2,
+            green: 0.3,
+            blue: 0.8,
+        };
+        let frames = rig.encode(&states).unwrap();
+        let frame = &frames[&0];
+        for pixel in 0..PIXEL_COUNT {
+            let start = STRIP_START + pixel * RGB_CHANNELS;
+            assert_eq!(
+                &frame[start..start + RGB_CHANNELS],
+                if pixel == selected {
+                    &[26, 38, 102]
+                } else {
+                    &[0, 0, 0]
+                }
+            );
+        }
+        assert_eq!(
+            &frame[MINI_KINTA_START..MINI_KINTA_START + MINI_KINTA_CHANNELS],
+            &[0, 0, 0, 0]
+        );
+        assert!(
+            frame[STRIP_START + PIXEL_COUNT * RGB_CHANNELS..]
+                .iter()
+                .all(|value| *value == 0)
+        );
+    }
 }
 
 #[test]
