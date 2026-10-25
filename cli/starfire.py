@@ -1,0 +1,196 @@
+"""Coordinate the prebuilt Starfire renderer and the existing fixture dashboard."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
+from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_BINARY = (
+    ROOT / 'starfire' / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+)
+DEFAULT_RIG = ROOT / 'starfire' / 'rigs' / 'room.json'
+DEFAULT_SEQUENCES = ROOT / 'starfire' / 'sequences'
+DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
+PROFILE_CATALOGUE = ROOT / 'starfire' / 'rigs' / 'profiles.json'
+CHILD_STOP_TIMEOUT_SEC = 5.0
+PATCH_VALIDATION_TIMEOUT_SEC = 10.0
+MAX_REPORT_BYTES = 32 * 1024 * 1024
+MAX_TCP_PORT = 65535
+LOGGER = logging.getLogger(__name__)
+
+
+def add_subparser(subparsers) -> None:
+    parser = subparsers.add_parser('starfire', help='Replay lighting or edit the fixture patch')
+    parser.add_argument(
+        '--binary', type=Path, default=DEFAULT_BINARY, help='Prebuilt renderer path'
+    )
+    actions = parser.add_subparsers(dest='starfire_action', required=True)
+
+    replay = actions.add_parser('replay', help='Render native replay input; network output is off')
+    replay.add_argument('input', type=Path)
+    replay.add_argument(
+        '--rig', type=Path, help='Fixture patch; defaults to the saved setup or room rig'
+    )
+    replay.add_argument('--sequences', type=Path, default=DEFAULT_SEQUENCES)
+    replay.add_argument('--output', type=Path, help='Write a binary DMX capture')
+    replay.add_argument('--summary', type=Path, help='Write render metrics and DMX digest')
+    replay.add_argument('--artnet', help='Explicit destination IPv4:port; requires --realtime')
+    replay.add_argument('--realtime', action='store_true')
+    replay.add_argument('--broadcast', action='store_true')
+    replay.set_defaults(func=run_native)
+
+    listing = actions.add_parser('list', help='List sequence banks and names')
+    listing.add_argument('--sequences', type=Path, default=DEFAULT_SEQUENCES)
+    listing.set_defaults(func=run_native)
+    rig = actions.add_parser('rig', help='Validate a fixture patch without output')
+    rig.add_argument('input', type=Path)
+    rig.set_defaults(func=run_native)
+
+    convert = actions.add_parser(
+        'convert-report',
+        help='Convert report beats/intents to source-time replay; excludes unrecorded accents',
+    )
+    convert.add_argument('input', type=Path)
+    convert.add_argument('output', type=Path)
+    convert.add_argument('--frame-rate-hz', type=int, default=DEFAULT_FRAME_RATE_HZ)
+    convert.set_defaults(func=convert_report)
+
+    ui = actions.add_parser('ui', help='Open the existing dashboard with fixture setup')
+    ui.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT)
+    ui.add_argument('--rig-store', type=Path, default=DEFAULT_FIXTURE_STORE)
+    ui.set_defaults(func=run_ui)
+
+
+def _binary(path: Path) -> Path:
+    path = path.resolve()
+    if not path.is_file():
+        raise RuntimeError(f'Starfire binary is missing: {path}. Build it with build-starfire.ps1.')
+    return path
+
+
+async def _run_child(command: list[str], *, stop_file: Path | None = None) -> None:
+    child = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=ROOT,
+        stdin=subprocess.DEVNULL,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+    )
+    try:
+        code = await child.wait()
+        if code != 0:
+            raise RuntimeError(f'Starfire exited with code {code}')
+    finally:
+        if child.returncode is None:
+            try:
+                if stop_file is not None:
+                    stop_file.touch()
+                else:
+                    child.terminate()
+            except ProcessLookupError:
+                pass
+            except OSError as error:
+                LOGGER.warning('[starfire] graceful shutdown request failed: %s', error)
+            try:
+                await asyncio.wait_for(child.wait(), CHILD_STOP_TIMEOUT_SEC)
+            except TimeoutError:
+                LOGGER.warning('[starfire] shutdown timed out; terminating owned renderer')
+                child.kill()
+                await child.wait()
+
+
+async def run_native(args: argparse.Namespace) -> None:
+    command = [str(_binary(args.binary)), args.starfire_action]
+    if hasattr(args, 'input'):
+        command.append(str(args.input.resolve()))
+    for name in ('rig', 'sequences', 'output', 'summary'):
+        path = getattr(args, name, None)
+        if name == 'rig' and args.starfire_action == 'replay' and path is None:
+            path = DEFAULT_FIXTURE_STORE if DEFAULT_FIXTURE_STORE.is_file() else DEFAULT_RIG
+        if path is not None:
+            command.extend([f'--{name}', str(path.resolve())])
+    if getattr(args, 'artnet', None):
+        if not args.realtime:
+            raise ValueError('Art-Net output requires --realtime')
+        command.extend(['--artnet', args.artnet])
+    if getattr(args, 'broadcast', False) and not getattr(args, 'artnet', None):
+        raise ValueError('--broadcast requires --artnet')
+    for name in ('realtime', 'broadcast'):
+        if getattr(args, name, False):
+            command.append(f'--{name}')
+    if getattr(args, 'artnet', None):
+        runtime = ROOT / '.live' / 'starfire'
+        runtime.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='replay-', dir=runtime) as owned:
+            stop_file = Path(owned) / 'stop'
+            command.extend(['--stop-file', str(stop_file)])
+            await _run_child(command, stop_file=stop_file)
+    else:
+        await _run_child(command)
+
+
+async def convert_report(args: argparse.Namespace) -> None:
+    if args.input.resolve() == args.output.resolve():
+        raise ValueError('Replay output must differ from the input report')
+    with args.input.open('rb') as source:
+        raw = source.read(MAX_REPORT_BYTES + 1)
+    if len(raw) > MAX_REPORT_BYTES:
+        raise ValueError('Session report exceeds the input size limit')
+    try:
+        replay = report_to_replay(json.loads(raw), frame_rate_hz=args.frame_rate_hz)
+    except TypeError as error:
+        raise ValueError(f'Invalid session report: {error}') from error
+    args.output.write_text(json.dumps(replay, indent=2, allow_nan=False) + '\n', encoding='utf-8')
+    print(f'Source-time replay: {args.output} ({len(replay["events"])} commands; accents omitted)')
+
+
+def _validate_patch(binary: Path, patch: Path) -> None:
+    try:
+        completed = subprocess.run(
+            [str(binary), 'rig', str(patch.resolve())],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=PATCH_VALIDATION_TIMEOUT_SEC,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError('Starfire fixture validation timed out') from error
+    if completed.returncode != 0:
+        raise ValueError(completed.stderr.strip() or 'Starfire rejected the fixture patch')
+
+
+async def run_ui(args: argparse.Namespace) -> None:
+    from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.lighting.fixture_setup import FixtureStore
+    from autolux.simulate.visualizer_app import run_app
+
+    if not 1 <= args.port <= MAX_TCP_PORT:
+        raise ValueError(f'Dashboard port must be in 1..{MAX_TCP_PORT}')
+    binary = _binary(args.binary)
+    patch = args.rig_store.resolve()
+    if not patch.exists():
+        _validate_patch(binary, DEFAULT_RIG)
+        patch.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with patch.open('xb') as target:
+                target.write(DEFAULT_RIG.read_bytes())
+        except FileExistsError:
+            pass
+    _validate_patch(binary, patch)
+    store = FixtureStore(
+        patch, PROFILE_CATALOGUE, lambda candidate: _validate_patch(binary, candidate)
+    )
+    run_app(EventBuffer(), port=args.port, fixture_store=store)

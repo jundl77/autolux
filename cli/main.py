@@ -199,8 +199,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparser.set_defaults(func=label_cmd)
 
     from autolux.simulate.cli import add_simulate_subparser
+    from cli.starfire import add_subparser as add_starfire_subparser
 
     add_simulate_subparser(subparsers)
+    add_starfire_subparser(subparsers)
     return parser
 
 
