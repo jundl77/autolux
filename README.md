@@ -40,6 +40,11 @@ See [receiver setup](cli/README.md). Fixture patches and profiles live in `rigs/
 named Lua autoloops live in `autoloops/`. Saved fixture edits apply on
 the next session.
 
+The dashboard's **Config** tab provides a manufacturer/mode library, fixture patch
+list and 512-channel DMX map. Add fixtures at the first free address or choose an
+address, then assign groups and movement limits in the selected-fixture editor.
+Universes are displayed from 1. Save validates the complete patch before replacing it.
+
 ## Run
 
 ```powershell

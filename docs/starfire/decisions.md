@@ -393,3 +393,23 @@ independent control-policy question.
 Optional experiment drivers require explicitly selected source/interpreter paths,
 with provenance guards. Removing obsolete report metadata preserves all eight
 gated analysis invariants for each of the three recorded digest tracks.
+
+2026-10-25 review hardening: remove native Lua pattern matching because instruction
+hooks cannot bound its backtracking. Treat fixture encoding failures like other
+script faults: publish safe darkness and a bounded diagnostic. Accepted GDTF
+emitters must obey blackout and brightness, including white-only fixtures and
+nonzero profile defaults. Additional emitters default dark until explicitly
+controlled; white-only fixtures use colour brightness without requiring RGB.
+Radius health-file failures are diagnostic failures,
+not a reason to stop audio or DMX; retry with throttled logging.
+
+2026-10-25: Confirmed source silence follows the delayed audio boundary; pending
+beats and section decisions remain queued. Detector beat positions carry detector
+tempo, while the analysis/display tempo may be octave-folded.
+
+2026-10-25 user decision: manual annotations override published labels for tracks
+already admitted to training. Preserve split membership and evaluation exclusions.
+Simulation and report fingerprints use the same explicitly selected corpus/model root.
+
+Fixture configuration uses a library, patch list and 512-channel map. Display
+universes from 1, retain native addressing internally, and validate saves atomically.

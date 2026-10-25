@@ -27,27 +27,33 @@ Starfire and Radius have independent protobuf contracts and telemetry.
 See [production evidence](calibration/rust-production-validation.json) and the
 [earlier Rust hardware proof](calibration/rust-device-proof.json). Physical timing
 was judged by the user, not measured with an audio loopback or photodiode.
+These physical runs precede the review hardening below; the review used offline
+replay, loopback transport and browser checks.
 
 ## Automated coverage
 
 - Radius: 38 Rust tests covering framed TCP, ordering, run identity, backpressure,
   audio/light association, 500 ms buffering, clock drift, starvation tails,
   exact ENTTEC packets, bounded shutdown and bidirectional ten-second heartbeats.
-- Starfire: 133 Rust tests covering deterministic Lua-to-DMX replay, fixture
-  encoding, protocol validation, composition, process ownership and embedded TX.
+- Starfire: 137 Rust tests covering deterministic Lua-to-DMX replay, fixture
+  encoding, sandbox bounds, safe darkness, protocol validation and embedded TX.
 - Strict Clippy and Rust formatting pass. Workspace builds run these checks and
   generate language bindings from the root schemas.
-- The broad Python run passed 2,452 tests and exposed one startup-report baseline
-  mismatch. The reviewed correction changes initial lighting coverage only;
-  [the ten-track audit](startup-report-parity.json) records exact hashes and score
-  deltas. The failed benchmark then passed in 124.31 seconds; all three fresh
-  reports exactly matched the audited expectations. Later decisions, beats,
-  timing, labels and gate tolerances are unchanged.
-- CLI/tooling checks passed 142 tests, including a wheel built from its source
-  distribution and isolated imports of both generated protocols. Focused startup
-  and evaluation checks passed 204 tests. These runs overlap.
-- Production readiness completed in 4.8 seconds. `--prod --check` has a 45-second
+- The broad Python suite passed 2,504 tests in 484.74 seconds and exposed one
+  expected checksum change from retaining the audible tail. A fresh ten-track
+  backtest and [exact report audit](silence-tail-parity.json) verified seven
+  unchanged reports and three containing only the intended tail correction.
+  Every score, beat, section decision and tolerance is unchanged. The full-set
+  gate passes against the audited expectations; the full suite was not repeated.
+- Manual training corrections pass five new regressions and 138 existing dataset,
+  downbeat and exclusion checks. No models were retrained.
+- Browser checks on a copied rig cover map selection, automatic addressing,
+  conflicts, save/remove and group preservation. No JavaScript exceptions occurred.
+- Workspace/release builds, Python packaging and formatting pass.
+- Production readiness completed in 4.71 seconds. `--prod --check` has a 45-second
   deadline; full builds, suites, backtests and simulations use `--check-full`.
+
+See the [code review](code-review.json) for findings, fixes and review scope.
 
 ## Rendering performance
 

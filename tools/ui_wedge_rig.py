@@ -94,7 +94,7 @@ def profile(show: RiggedShow, ticks: int) -> None:
 
     for fn in (
         V._build_timeline,
-        V._build_stage,
+        V._build_command_diagnostics,
         V._build_decoder,
         V._build_show_overview,
         V._anchor,

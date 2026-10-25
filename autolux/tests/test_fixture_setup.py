@@ -6,7 +6,73 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from autolux.lighting.fixture_setup import FixtureStore
+from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy, next_free_address
+
+PROFILES = {'rgb': {'channels': 3}, 'moving_head': {'channels': 12}}
+
+
+def fixture_row(name='left', address=1, universe=0, profile='rgb'):
+    return {'id': name, 'profile': profile, 'universe': universe, 'address': address}
+
+
+def test_patch_occupancy_retains_both_owners_of_conflicting_channels():
+    rows = [fixture_row(address=1), fixture_row('right', address=3)]
+    occupied, errors = channel_occupancy(rows, PROFILES, 0)
+    assert len(occupied) == 512
+    assert occupied[:5] == [[0], [0], [0, 1], [1], [1]]
+    assert errors == ['right overlaps left in universe 1.']
+    with pytest.raises(ValueError, match='overlaps'):
+        next_free_address(rows, PROFILES, 0, 3)
+
+
+def test_address_search_respects_gaps_footprints_and_universe_boundaries():
+    rows = [fixture_row(address=1), fixture_row('right', address=6), fixture_row('other', 4, 1)]
+    assert next_free_address(rows, PROFILES, 0, 2) == 4
+    assert next_free_address(rows, PROFILES, 0, 3) == 9
+    assert next_free_address(rows, PROFILES, 1, 3) == 1
+    assert channel_occupancy(rows, PROFILES, 1)[0][3:6] == [[2], [2], [2]]
+
+
+def test_last_channel_can_be_allocated_without_clipping_or_wrapping():
+    profiles = {'large': {'channels': 509}, **PROFILES}
+    rows = [fixture_row(profile='large')]
+    assert next_free_address(rows, profiles, 0, 3) == 510
+    rows.append(fixture_row('last', 510))
+    assert channel_occupancy(rows, profiles, 0)[0][-1] == [1]
+    with pytest.raises(ValueError, match='No room'):
+        next_free_address(rows, profiles, 0, 1)
+    rows[-1]['address'] = 511
+    occupied, errors = channel_occupancy(rows, profiles, 0)
+    assert 'do not fit' in errors[0]
+    assert occupied[509:] == [[], [], []]
+
+
+@pytest.mark.parametrize(
+    'field,value',
+    [
+        ('address', 0),
+        ('address', 513),
+        ('address', True),
+        ('address', 1.5),
+        ('universe', -1),
+        ('universe', 32768),
+        ('universe', False),
+        ('profile', 'missing'),
+        ('id', ''),
+    ],
+)
+def test_invalid_patch_cannot_be_used_for_automatic_address_allocation(field, value):
+    row = fixture_row()
+    row[field] = value
+    assert channel_occupancy([row], PROFILES, 0)[1]
+    with pytest.raises(ValueError):
+        next_free_address([row], PROFILES, 0, 3)
+
+
+def test_identical_addresses_in_distinct_universes_are_independent():
+    rows = [fixture_row(), fixture_row('other', universe=1)]
+    assert not channel_occupancy(rows, PROFILES, 0)[1]
+    assert next_free_address(rows, PROFILES, 0, 3) == 4
 
 
 @pytest.fixture
@@ -150,13 +216,13 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(patch_file):
 
 
 def test_renaming_fixture_preserves_group_order_used_by_autoloop_spread(patch_file):
-    from autolux.simulate.visualizer_app import _fixture_patch, _fixture_rows
+    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
 
     store = store_for(patch_file, lambda _staged: None)
     original, revision = store.load()
-    rows = _fixture_rows(original)
+    rows = fixture_rows(original)
     rows[1]['id'] = 'rear'
-    renamed = _fixture_patch(rows, original)
+    renamed = fixture_patch(rows, original)
     store.save(renamed, revision)
     assert store.load()[0]['groups']['wash'] == ['rear', 'left']
     assert [fixture['id'] for fixture in renamed['fixtures']] == ['left', 'rear']
@@ -164,20 +230,31 @@ def test_renaming_fixture_preserves_group_order_used_by_autoloop_spread(patch_fi
 
 
 def test_swapping_fixture_names_preserves_physical_group_order(patch_file):
-    from autolux.simulate.visualizer_app import _fixture_patch, _fixture_rows
+    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
 
     store = store_for(patch_file, lambda _staged: None)
     original, _revision = store.load()
-    rows = _fixture_rows(original)
+    rows = fixture_rows(original)
     rows[0]['id'], rows[1]['id'] = rows[1]['id'], rows[0]['id']
-    assert _fixture_patch(rows, original)['groups']['wash'] == ['left', 'right']
+    assert fixture_patch(rows, original)['groups']['wash'] == ['left', 'right']
 
 
 def test_copied_row_identity_cannot_silently_reorder_a_group(patch_file):
-    from autolux.simulate.visualizer_app import _fixture_patch, _fixture_rows
+    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
 
     original, _revision = store_for(patch_file, lambda _staged: None).load()
-    rows = _fixture_rows(original)
+    rows = fixture_rows(original)
     rows.append({**rows[1], 'id': 'clone'})
     with pytest.raises(ValueError, match='duplicated'):
-        _fixture_patch(rows, original)
+        fixture_patch(rows, original)
+
+
+def test_reusing_removed_fixture_name_does_not_duplicate_group_members(patch_file):
+    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
+
+    original, _revision = store_for(patch_file, lambda _staged: None).load()
+    rows = fixture_rows(original)[:1]
+    rows[0]['id'] = 'right'
+    saved = fixture_patch(rows, original)
+    assert saved['groups']['wash'] == ['right']
+    assert len(saved['fixtures']) == 1

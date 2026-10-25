@@ -8,7 +8,7 @@ from statistics import median
 
 import dash
 import plotly.graph_objects as go
-from dash import Input, Output, State, dash_table, dcc, html
+from dash import Input, Output, dcc, html
 
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.system_health import health_summary
@@ -24,6 +24,7 @@ from autolux.lib.ui_bridge import (
 )
 from autolux.lighting.fixture_setup import FixtureStore
 from autolux.simulate import system_metrics
+from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
 
 TITLE = 'Autolux'
@@ -681,12 +682,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .command-diagnostics td { padding: 4px 0; }
 .command-diagnostics th, .command-diagnostics td { text-align: right; }
 .command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
-.fixture-actions { display: flex; gap: 10px; margin-top: 16px; }
-.fixture-actions button { border: 1px solid #334456; background: #162332; color: #dbe7f3;
-                          padding: 8px 12px; border-radius: 5px; cursor: pointer; }
-.fixture-actions button:hover { background: #223449; }
-#fixture-status { color: #9baabb; font-size: 12px; }
-#config-panel details { margin-top: 22px; color: #9baabb; font-size: 12px; line-height: 1.8; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -1016,217 +1011,6 @@ class SnapshotPoller:
             self._lock.release()
 
 
-def _fixture_rows(patch):
-    groups = patch.get('groups', {})
-    rows = []
-    for fixture in patch['fixtures']:
-        row = {key: fixture[key] for key in ('id', 'profile', 'universe', 'address')}
-        row['_original_id'] = fixture['id']
-        row['groups'] = ', '.join(
-            name for name, members in groups.items() if fixture['id'] in members
-        )
-        for axis in ('pan', 'tilt'):
-            limits = fixture.get(axis, {})
-            row.update(
-                {
-                    f'{axis}_min': limits.get('min', 0.0),
-                    f'{axis}_max': limits.get('max', 1.0),
-                    f'{axis}_inverted': limits.get('inverted', False),
-                }
-            )
-        rows.append(row)
-    return rows
-
-
-def _fixture_patch(rows, previous):
-    fixtures, groups = [], {}
-    renamed = {}
-    for row in rows:
-        fixture = {key: row.get(key) for key in ('id', 'profile', 'universe', 'address')}
-        original = row.get('_original_id')
-        if original:
-            if original in renamed:
-                raise ValueError('A fixture row was duplicated. Add a new fixture instead.')
-            renamed[original] = fixture['id']
-        for key in ('universe', 'address'):
-            value = fixture[key]
-            if isinstance(value, float) and value.is_integer():
-                fixture[key] = int(value)
-        for axis in ('pan', 'tilt'):
-            fixture[axis] = {
-                'min': row.get(f'{axis}_min'),
-                'max': row.get(f'{axis}_max'),
-                'inverted': row.get(f'{axis}_inverted'),
-            }
-        fixtures.append(fixture)
-        membership = row.get('groups') or ''
-        if not isinstance(membership, str):
-            raise TypeError('Group membership must be comma-separated names.')
-        for name in membership.split(','):
-            if name := name.strip():
-                groups.setdefault(name, []).append(fixture['id'])
-    for name, members in groups.items():
-        prior = [renamed.get(member, member) for member in previous.get('groups', {}).get(name, [])]
-        groups[name] = [member for member in prior if member in members] + [
-            member for member in members if member not in prior
-        ]
-    return {'schema_version': previous['schema_version'], 'fixtures': fixtures, 'groups': groups}
-
-
-def _build_fixture_setup(app, store):
-    patch, revision = store.load()
-    profiles = store.profiles()
-    columns = [
-        {'name': 'Fixture', 'id': 'id'},
-        {'name': 'Profile', 'id': 'profile', 'presentation': 'dropdown'},
-        {'name': 'Universe', 'id': 'universe', 'type': 'numeric'},
-        {'name': 'Address', 'id': 'address', 'type': 'numeric'},
-        {'name': 'Groups', 'id': 'groups'},
-    ]
-    for axis in ('pan', 'tilt'):
-        columns.extend(
-            [
-                {'name': f'{axis.title()} min', 'id': f'{axis}_min', 'type': 'numeric'},
-                {'name': f'{axis.title()} max', 'id': f'{axis}_max', 'type': 'numeric'},
-                {'name': f'Invert {axis}', 'id': f'{axis}_inverted', 'presentation': 'dropdown'},
-            ]
-        )
-    dropdown = {
-        'profile': {'options': [{'label': name, 'value': name} for name in profiles]},
-        **{
-            f'{axis}_inverted': {
-                'options': [{'label': 'No', 'value': False}, {'label': 'Yes', 'value': True}]
-            }
-            for axis in ('pan', 'tilt')
-        },
-    }
-    fixtures = html.Section(
-        [
-            html.Div(
-                [
-                    html.H2('Fixture patch'),
-                    html.P(
-                        'Save for the next Starfire session. This page does not send light commands.'
-                    ),
-                ],
-                className='section-heading',
-            ),
-            html.P(
-                'Addresses start at 1; universes start at 0. Groups use comma-separated names. '
-                'Movement limits are normalized from 0 to 1.',
-                className='subtitle',
-            ),
-            dash_table.DataTable(
-                id='fixture-table',
-                columns=columns,
-                data=_fixture_rows(patch),
-                dropdown=dropdown,
-                editable=True,
-                row_deletable=True,
-                style_table={'overflowX': 'auto', 'marginTop': '16px'},
-                style_cell={
-                    'backgroundColor': CARD_BG,
-                    'color': '#e6edf3',
-                    'borderColor': BORDER,
-                    'fontFamily': 'Segoe UI',
-                    'fontSize': '12px',
-                    'padding': '10px',
-                    'textAlign': 'left',
-                },
-                style_header={'fontWeight': '600', 'backgroundColor': DARK_BG},
-                style_cell_conditional=[{'if': {'column_id': 'profile'}, 'minWidth': '280px'}],
-                css=[
-                    {
-                        'selector': '.Select-value-label, .Select-input input',
-                        'rule': 'color: #e6edf3 !important;',
-                    },
-                    {
-                        'selector': '.Select-menu-outer',
-                        'rule': f'background-color: {CARD_BG}; color: #e6edf3;',
-                    },
-                    {
-                        'selector': '.Select-option',
-                        'rule': f'background-color: {CARD_BG}; color: #e6edf3;',
-                    },
-                    {
-                        'selector': '.Select-option.is-focused, .Select-option.is-selected',
-                        'rule': f'background-color: {BORDER}; color: #e6edf3;',
-                    },
-                ],
-            ),
-            html.Div(
-                [
-                    html.Button('Add fixture', id='fixture-add'),
-                    html.Button('Reload saved patch', id='fixture-reload'),
-                    html.Button('Save patch', id='fixture-save'),
-                ],
-                className='fixture-actions',
-            ),
-            html.P('Changes are validated before saving.', id='fixture-status', role='status'),
-            html.Details(
-                [
-                    html.Summary('Available fixture profiles'),
-                    html.Ul(
-                        [
-                            html.Li([html.Strong(name), ': ', profile['notes']])
-                            for name, profile in profiles.items()
-                        ]
-                    ),
-                ]
-            ),
-            dcc.Store(id='fixture-patch', data=patch),
-            dcc.Store(id='fixture-revision', data=revision),
-        ],
-        id='config-panel',
-        style={'display': 'none'},
-    )
-
-    @app.callback(
-        Output('fixture-table', 'data'),
-        Output('fixture-patch', 'data'),
-        Output('fixture-revision', 'data'),
-        Output('fixture-status', 'children'),
-        Input('fixture-add', 'n_clicks'),
-        Input('fixture-reload', 'n_clicks'),
-        Input('fixture-save', 'n_clicks'),
-        State('fixture-table', 'data'),
-        State('fixture-patch', 'data'),
-        State('fixture-revision', 'data'),
-        prevent_initial_call=True,
-    )
-    def edit_patch(_add, _reload, _save, rows, previous, expected_revision):
-        unchanged = (dash.no_update, dash.no_update, dash.no_update)
-        try:
-            if dash.ctx.triggered_id == 'fixture-add':
-                profile = 'generic_rgb' if 'generic_rgb' in profiles else next(iter(profiles))
-                added = _fixture_rows(
-                    {'fixtures': [{'id': '', 'profile': profile, 'universe': 0, 'address': 1}]}
-                )
-                return (
-                    rows + added,
-                    dash.no_update,
-                    dash.no_update,
-                    'New fixture added. Set its name and address before saving.',
-                )
-            if dash.ctx.triggered_id == 'fixture-reload':
-                saved, version = store.load()
-                return _fixture_rows(saved), saved, version, 'Saved patch loaded.'
-            saved = _fixture_patch(rows, previous)
-            version = store.save(saved, expected_revision)
-            return (
-                _fixture_rows(saved),
-                saved,
-                version,
-                'Patch saved. It will be used by the next Starfire session.',
-            )
-        except (KeyError, AttributeError) as error:
-            return *unchanged, f'Patch unchanged: saved fixture data is malformed ({error}).'
-        except (TypeError, ValueError, OSError, RuntimeError) as error:
-            return *unchanged, f'Patch not saved: {error}'
-
-    return fixtures
-
-
 def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
     app = dash.Dash(
         __name__,
@@ -1234,7 +1018,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    app.index_string = INDEX_TEMPLATE
+    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>')
     from flask import request
     from prometheus_client import make_wsgi_app
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
@@ -1267,7 +1051,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     }
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
-        _build_fixture_setup(app, fixture_store)
+        build_fixture_panel(app, fixture_store)
         if fixture_store is not None
         else html.Section(
             [
@@ -1428,13 +1212,15 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('control-panel', 'style'),
         Output('telemetry-panel', 'style'),
         Output('config-panel', 'style'),
+        Output('telemetry-alerts', 'style'),
         Input('dashboard-tab', 'value'),
     )
     def show_tab(selected):
-        return tuple(
+        panels = tuple(
             {'display': 'block' if selected == tab else 'none'}
             for tab in ('control', 'telemetry', 'config')
         )
+        return *panels, {'display': 'none' if selected == 'config' else 'block'}
 
     app.clientside_callback(
         GATE_JS, [Output('gate', 'data'), Output('view-gate', 'data')], Input('tick', 'n_intervals')
