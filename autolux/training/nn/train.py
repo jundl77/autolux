@@ -82,7 +82,7 @@ from .model import PARAM_BUDGET, SectionCRNN, count_parameters
 
 from build_training_table import default_data_dir  # noqa: E402
 from autolux.lib.label_space import NUM_SECTION_CLASSES, SECTION_LABELS  # noqa: E402
-from raveform_fetch_annotations import load_tracks, parse_sections  # noqa: E402
+from raveform_fetch_annotations import load_all_tracks, parse_sections  # noqa: E402
 
 MODELS_DIR = "models"
 MODEL_VERSION = "v1"
@@ -264,7 +264,7 @@ def load_target_stats(data_dir, youtube_ids, sections_by_youtube_id=None) -> Tar
     data_dir = Path(data_dir)
     if sections_by_youtube_id is None:
         sections_by_youtube_id = {
-            str(track.get("id")): parse_sections(track) for track in load_tracks(data_dir)
+            str(track.get("id")): parse_sections(track) for track in load_all_tracks(data_dir)
         }
 
     def targets():
@@ -638,7 +638,7 @@ def train(config: dict) -> dict:
 
     splits = make_splits(data_dir, write=False)
     track_ids = {ref.youtube_id: ref.track_id for ref in candidate_tracks(data_dir)[0]}
-    sections = {str(track.get("id")): parse_sections(track) for track in load_tracks(data_dir)}
+    sections = {str(track.get("id")): parse_sections(track) for track in load_all_tracks(data_dir)}
     chosen = {
         name: select_smoke_subset(splits[name], track_ids, config["smoke_tracks"])
         for name in ("train", "val")
