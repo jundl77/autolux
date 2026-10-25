@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "comparison_count": 12,
+  "failed_metrics": 0,
+  "native_rendered_frames": 26912,
+  "strict_value_anchors": 80,
+  "constant_control_channels_per_universe": 30,
+  "unassigned_dark_channels_per_universe": 432,
+  "phase_policy": "Fit one offset per bank on 120 BPM beats 4..60; freeze unchanged for 140 and previously unseen 156 BPM. Evaluate second cycles 68..124 at every tempo.",
+  "metric_policy": "Reference-only cadence budgets gate MAE/p95/p99; safe controls and active-channel coverage are exact. Continuous-property maxima are retained diagnostics. Direct native value-anchor tests separately enforce 5 ms clock uncertainty plus quantization.",
+  "program_sha256": {
+    "atmospheric": "89e3e5810a1b07640411724ef179a3e893eecea1d48c9f071a3e083e20c05d1c",
+    "breakdown": "91fca9018706919b44d22e0700260b5d94c5c89236bcee3a5d9a0702acc6aa71",
+    "buildup": "d973691426d56c9335d05530997bed2509b284bf07b40da01ec8a6f50b7d99be",
+    "drop": "b0652997dc7e184e1c7232558676a9a381e8d5b709abc03ad1498dc6091c0d65"
+  },
+  "rig_sha256": "65ddab03d33e0ad80f26fe990b70d0d9cdcb164fc7b3cda35be13f95eb6a9e7a",
+  "profiles_sha256": "49e7e1efad2d5409a48d7772375d4fca5564c4c624a3dac37148150436032ae3",
+  "banks": {
+    "atmospheric": {
+      "fixed_offset_beats": -0.03499999999999999,
+      "maximum_mae": {
+        "movement": 32.86098214285714,
+        "dimmer": 0.34116071428571426,
+        "wash_rgb": 0.6617857142857143,
+        "pixel_rgb": 0.4023809523809524
+      },
+      "maximum_error_diagnostics": []
+    },
+    "breakdown": {
+      "fixed_offset_beats": -0.024999999999999994,
+      "maximum_mae": {
+        "movement": 0.0,
+        "dimmer": 0.0,
+        "wash_rgb": 0.16714285714285715,
+        "pixel_rgb": 0.6136904761904762
+      },
+      "maximum_error_diagnostics": []
+    },
+    "buildup": {
+      "fixed_offset_beats": -0.022499999999999992,
+      "maximum_mae": {
+        "movement": 182.28098214285714,
+        "dimmer": 6.834821428571429,
+        "wash_rgb": 0.14142857142857143,
+        "pixel_rgb": 2.9973809523809525
+      },
+      "maximum_error_diagnostics": []
+    },
+    "drop": {
+      "fixed_offset_beats": -0.009999999999999981,
+      "maximum_mae": {
+        "movement": 25.39982142857143,
+        "dimmer": 1.6896428571428572,
+        "wash_rgb": 0.2961011904761905,
+        "pixel_rgb": 0.4280952380952381
+      },
+      "maximum_error_diagnostics": [
+        "120 BPM: spot_left.pan maximum_error_units: 3604.000000 exceeds 3603.000000",
+        "120 BPM: spot_right.pan maximum_error_units: 3604.000000 exceeds 3603.000000",
+        "120 BPM: spot_right.dimmer maximum_error_units: 198.000000 exceeds 194.000000",
+        "156 BPM: spot_right.dimmer maximum_error_units: 196.000000 exceeds 190.000000"
+      ]
+    }
+  }
+}

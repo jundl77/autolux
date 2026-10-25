@@ -73,7 +73,8 @@
       124
     ],
     "maximum_shared_offset_beats": 0.15,
-    "rule": "One offset per sequence, fitted only at 120 BPM; unchanged at 140 BPM. No per-channel shifts or time warps."
+    "rule": "One offset per sequence, fitted only at 120 BPM; unchanged at 140 BPM. No per-channel shifts or time warps.",
+    "final_holdout_bpm": 156
   },
   "limitations": [
     "Receive timestamps include polling jitter; zero-order hold preserves observed output.",
@@ -184,6 +185,60 @@
           "median_frame_interval_seconds": 0.02649079996626824,
           "p95_frame_interval_seconds": 0.027381050027906893,
           "maximum_frame_interval_seconds": 0.036009700037539005
+        }
+      }
+    },
+    {
+      "bpm": 156,
+      "files": {
+        "frames": {
+          "path": "156-frames.json.gz",
+          "sha256": "bbeb9058db02bd2be7b2fc7591910699f83698d23bbd031cb6611c91259e03dc",
+          "uncompressed_sha256": "6f15dc520b5465a2f72335a49fed7fc5d3eb6fee4ec6a2ae13beafcbfb994185"
+        },
+        "controls": {
+          "path": "156-controls.json.gz",
+          "sha256": "a53304e8b71de6de31bd48780837f31a0eda77e9be61e558bf78b6b685f6d6a8",
+          "uncompressed_sha256": "dfe63b19f9cf0f66918f8bd814e548753e2412d8c1cfadb210b63f02292ad191"
+        },
+        "conditions": {
+          "path": "156-conditions.json.gz",
+          "sha256": "d25f7cd62a70f3ae95cdd7f80591c72b9f3c0060cd4ef660fb6b703a13e73330",
+          "uncompressed_sha256": "ad4523a6c0a70f2fe2bccaf7c9b26adf1fb24c793df6d5055321ab126911933e"
+        }
+      },
+      "cadence_budget_file": "156-cadence-budgets.json.gz",
+      "selected_at_seconds": {
+        "atmospheric": 0.016794699942693114,
+        "breakdown": 49.24884229991585,
+        "buildup": 98.48146239994094,
+        "drop": 147.7146183999721
+      },
+      "capture_mtime_utc": "2026-10-25T09:32:28.451684+00:00",
+      "observed_output": {
+        "atmospheric": {
+          "frame_count": 1858,
+          "median_frame_interval_seconds": 0.026482900022529066,
+          "p95_frame_interval_seconds": 0.027229580003768204,
+          "maximum_frame_interval_seconds": 0.028395700035616755
+        },
+        "breakdown": {
+          "frame_count": 1858,
+          "median_frame_interval_seconds": 0.02647330006584525,
+          "p95_frame_interval_seconds": 0.027326560043729842,
+          "maximum_frame_interval_seconds": 0.02876949997153133
+        },
+        "buildup": {
+          "frame_count": 1857,
+          "median_frame_interval_seconds": 0.02648390003014356,
+          "p95_frame_interval_seconds": 0.027225850062677637,
+          "maximum_frame_interval_seconds": 0.028408000012859702
+        },
+        "drop": {
+          "frame_count": 1856,
+          "median_frame_interval_seconds": 0.026488799951039255,
+          "p95_frame_interval_seconds": 0.027320980082731695,
+          "maximum_frame_interval_seconds": 0.028605800005607307
         }
       }
     }

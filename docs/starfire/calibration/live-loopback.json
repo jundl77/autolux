@@ -1,0 +1,124 @@
+{
+  "loopback_only": true,
+  "hardware_output": false,
+  "recorded_beat_anchors": 187,
+  "authored_controls": 15,
+  "duration_seconds": 90.00380199996289,
+  "packets": 3602,
+  "udp_sequence_gaps": 0,
+  "observed_banks": [
+    "atmospheric",
+    "breakdown",
+    "buildup",
+    "drop"
+  ],
+  "renderer_health": [
+    {
+      "elapsed_seconds": 0.025,
+      "rendered_frames": 2,
+      "last_render_ms": 0.10890000000000001,
+      "active_bank": "atmospheric",
+      "active_sequence": "blue_tide",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 10.025,
+      "rendered_frames": 402,
+      "last_render_ms": 0.1725,
+      "active_bank": "atmospheric",
+      "active_sequence": "blue_tide",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 20.025,
+      "rendered_frames": 802,
+      "last_render_ms": 0.1969,
+      "active_bank": "breakdown",
+      "active_sequence": "violet_space",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 30.025,
+      "rendered_frames": 1202,
+      "last_render_ms": 0.1603,
+      "active_bank": "breakdown",
+      "active_sequence": "violet_space",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 40.025,
+      "rendered_frames": 1602,
+      "last_render_ms": 0.22540000000000002,
+      "active_bank": "buildup",
+      "active_sequence": "current",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 50.025,
+      "rendered_frames": 2002,
+      "last_render_ms": 0.2068,
+      "active_bank": "buildup",
+      "active_sequence": "current",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 60.025,
+      "rendered_frames": 2402,
+      "last_render_ms": 0.1417,
+      "active_bank": "drop",
+      "active_sequence": "blue_impact",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 70.025,
+      "rendered_frames": 2802,
+      "last_render_ms": 0.1137,
+      "active_bank": "drop",
+      "active_sequence": "blue_impact",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    },
+    {
+      "elapsed_seconds": 80.025,
+      "rendered_frames": 3202,
+      "last_render_ms": 0.1078,
+      "active_bank": "drop",
+      "active_sequence": "blue_impact",
+      "skipped_frames": 0,
+      "queued_commands": 0,
+      "script_error": "",
+      "age_seconds": 0.0
+    }
+  ],
+  "final_blackout": true,
+  "movement_preserved_on_shutdown": true,
+  "exit_code": 0,
+  "packet_interval_ms": {
+    "median": 25.017500040121377,
+    "p99": 25.58259991928935,
+    "maximum": 26.859099976718426
+  }
+}

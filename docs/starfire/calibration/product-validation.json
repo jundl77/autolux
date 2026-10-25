@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "source_hashes": {
+    "starfire\\target\\release\\starfire.exe": "60b1735a98adaf36f4981362c5995e84db959038ddacb85e8ed24a9b6edee49c",
+    "starfire\\rigs\\room.json": "65ddab03d33e0ad80f26fe990b70d0d9cdcb164fc7b3cda35be13f95eb6a9e7a",
+    "starfire\\sequences\\atmospheric\\blue_tide.lua": "89e3e5810a1b07640411724ef179a3e893eecea1d48c9f071a3e083e20c05d1c",
+    "starfire\\sequences\\breakdown\\violet_space.lua": "91fca9018706919b44d22e0700260b5d94c5c89236bcee3a5d9a0702acc6aa71",
+    "starfire\\sequences\\buildup\\current.lua": "d973691426d56c9335d05530997bed2509b284bf07b40da01ec8a6f50b7d99be",
+    "starfire\\sequences\\drop\\blue_impact.lua": "b0652997dc7e184e1c7232558676a9a381e8d5b709abc03ad1498dc6091c0d65"
+  },
+  "fixture_count": 14,
+  "runs_per_track": 2,
+  "network_output": false,
+  "gpu_analysis_rerun": false,
+  "tracks": {
+    "0064.hzIFjGcOKbg": {
+      "input_sha256": "e1fa88151d87fc42f2c2bd80d539cecf9e2e218783c8da2213a94ed11fe306ee",
+      "command_count": 2632,
+      "frames": 19484,
+      "duration_seconds": 487.0559637190723,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "306bc6c1bc68ee19ef886ff513e850e3d3649328138b5643d2320f882c7e4e1f",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.7598879,
+        0.7651087
+      ],
+      "render_realtime_factor": [
+        640.9576514102571,
+        636.5840091990489
+      ]
+    },
+    "0096.PNpXKsge4xM": {
+      "input_sha256": "91e7211d74f196adcca3c073380a1691eae27811ba7e6b2b15d85850810db8f6",
+      "command_count": 1466,
+      "frames": 10867,
+      "duration_seconds": 271.6444444445761,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "b8ca18db88dcb3eee7aafd91beef9bfa1df8b7a6464ca5c9774d45b3506cd09d",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.5116107,
+        0.5101873
+      ],
+      "render_realtime_factor": [
+        530.9592712673447,
+        532.4406241483787
+      ]
+    },
+    "0136.FO566BKY2Jc": {
+      "input_sha256": "35b09aa735701d9690a485f127d9f521731568b4df4c814484a5a99c6b3dd10b",
+      "command_count": 1872,
+      "frames": 17809,
+      "duration_seconds": 445.1787755104322,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "4b6c383b0629ab4f7bb7066d23d44d6cc630e51aa4b291c4c14d453dc8138cb7",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.8276491,
+        0.8259567
+      ],
+      "render_realtime_factor": [
+        537.8834768387137,
+        538.9856096698921
+      ]
+    },
+    "0434.SBnxzXkc_qw": {
+      "input_sha256": "a2deef71aa78ad687d773e5c2361cc13f7b8122c1f09ffae6cee2d5aada2bad6",
+      "command_count": 2113,
+      "frames": 16957,
+      "duration_seconds": 423.89768707504624,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "c36fde5ef5adc1ecf22604d2721583a02df5bd1fc6c926473c9609d9d09791f8",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.6628143,
+        0.6582717
+      ],
+      "render_realtime_factor": [
+        639.5421569435757,
+        643.9555081511878
+      ]
+    },
+    "0485.MRRgXXq-0rc": {
+      "input_sha256": "80349654868b6254a735554ca52bdbf86b7ae2214883165f00e19bf170df1194",
+      "command_count": 1705,
+      "frames": 17068,
+      "duration_seconds": 426.67247165554664,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "894d78cbfe401c95220a362b14298a024d0a4b7cf9f5eb9091bc86443443f8f1",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.7537389,
+        0.7595077
+      ],
+      "render_realtime_factor": [
+        566.0746336105867,
+        561.7750440917803
+      ]
+    },
+    "0501.hwdjIgtMFq8": {
+      "input_sha256": "324132aaa536f803c1074e564e36d997efe99638fda28f60b87c9dfa04346339",
+      "command_count": 1838,
+      "frames": 17362,
+      "duration_seconds": 434.00997732448496,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "fe8548eaa3b5066eea7720661a870351c958ab4d6d221cae6a182e3031a112f8",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.7981887,
+        0.8140189
+      ],
+      "render_realtime_factor": [
+        543.7435750775286,
+        533.1694108385997
+      ]
+    },
+    "0640.4o4joooH5tg": {
+      "input_sha256": "3e4a72e31583408188e94e273d73a3e4a7dea1b9a59e1f0ca6f02c03c03bbbef",
+      "command_count": 1934,
+      "frames": 17925,
+      "duration_seconds": 448.09287981882386,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "c4c2cff13a948ad31c797daa6a21711523831f39ca21dc3114154f46a670cddf",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.8139178,
+        0.8142916
+      ],
+      "render_realtime_factor": [
+        550.5382482344334,
+        550.2855240295047
+      ]
+    },
+    "0834.NyEKXA7_6z0": {
+      "input_sha256": "aa5fdb10716847db28061c9f85852048175764910414176a88a55220ccf9317b",
+      "command_count": 1370,
+      "frames": 15165,
+      "duration_seconds": 379.09478458069026,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "25b4e5664a6d73cd03ef375bf6d369c9ad8d1081a10ee5fddf471a12b26a0dca",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.6271612,
+        0.6282109
+      ],
+      "render_realtime_factor": [
+        604.4614759023522,
+        603.4514596621775
+      ]
+    },
+    "0911.hSCcLy_OBLM": {
+      "input_sha256": "664916bed64ecbf044b1100bbf92a3067b20ce78c65ccadaba81592ca8ae1c1e",
+      "command_count": 1684,
+      "frames": 17034,
+      "duration_seconds": 425.80172335622643,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "adfe33c3e42efab451114f925dc236008b5fda42c8561375ea964e78b896824a",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.8599876,
+        0.8624365
+      ],
+      "render_realtime_factor": [
+        495.1254219900687,
+        493.7195067187281
+      ]
+    },
+    "1110.DnhxAxnCbrY": {
+      "input_sha256": "5fbc9651ceac349b6d5051393518f522658cfd27706e5530f3f684d2b9ebcb44",
+      "command_count": 2005,
+      "frames": 18443,
+      "duration_seconds": 461.0263945580601,
+      "frame_rate_hz": 40,
+      "dmx_sha256": "7ac516816a691e012d7421238782566353d7b639a60635046428099af4c5896f",
+      "repeat_dmx_identical": true,
+      "script_errors": [],
+      "render_elapsed_seconds": [
+        0.9737379,
+        0.9745264
+      ],
+      "render_realtime_factor": [
+        473.460460518236,
+        473.07737846615555
+      ]
+    }
+  },
+  "wall_elapsed_seconds": 16.140999999945052,
+  "frames_per_pass": 168114,
+  "rendered_timeline_seconds_per_pass": 4202.475102042959,
+  "slowest_track_realtime_factor": 473.07737846615555,
+  "all_passed": true,
+  "cli_tests": {
+    "passed": 57,
+    "duration_seconds": 14.76,
+    "log": "cli-tests.log"
+  },
+  "production_readiness": {
+    "command": "uv run --no-sync autolux --prod --check",
+    "worktree": "starfire-prototype",
+    "elapsed_seconds": 1.9975924999999999,
+    "exit_code": 0,
+    "log": "production-readiness.log"
+  },
+  "parallel_validation_conflicts_preserved": [
+    "production-readiness-conflict.log",
+    "production-readiness-second-conflict.log"
+  ],
+  "product_build": {
+    "passed": true,
+    "log": "product-build.log",
+    "post_build_hash_mismatches": [
+      {
+        "path": "starfire\\target\\release\\starfire.exe",
+        "expected": "54685dae8d77802b61eed7a97dae9a55ff6b24b53cd39304d2c7d0638c872d0b",
+        "actual": "60b1735a98adaf36f4981362c5995e84db959038ddacb85e8ed24a9b6edee49c"
+      }
+    ]
+  },
+  "final_build_relink": {
+    "prior_summary": "summary-before-final-build.json",
+    "prior_binary_sha256": "54685dae8d77802b61eed7a97dae9a55ff6b24b53cd39304d2c7d0638c872d0b",
+    "current_binary_sha256": "60b1735a98adaf36f4981362c5995e84db959038ddacb85e8ed24a9b6edee49c",
+    "all_ten_dmx_digests_match_prior_build": true,
+    "rig_and_lua_sources_unchanged": true
+  }
+}
