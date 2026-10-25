@@ -113,6 +113,15 @@ approved removing SoundSwitch connectivity and requested the live contract in
   separately so inactive channels cannot dilute errors. Compare SoundSwitch's
   own repeat variability before choosing comparison tolerances. Reconstruct
   semantic authored curves; do not substitute raw DMX frame playback for Lua.
+- P62: Preserve the renderer's rounded fixture encoding. SoundSwitch truncates
+  some colour/intensity products; report the resulting one-byte quantization
+  residual instead of adding a second encoding policy solely for comparison.
+  Calibrated dimmer levels and movement coordinates remain semantic script values.
+  Promote the verified strip patch with the reconstructed scripts, and retain
+  named groups so programs remain independent of DMX addresses.
+- P63: After reconstructing the programs, record a fresh 156 BPM reference run
+  before evaluating it. Keep the formulas and alignment policy fixed for that
+  final check; 120/140 BPM captures remain available for detailed diagnostics.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -233,6 +242,12 @@ Hardware audition is explicitly separate from deterministic offline validation.
   mDNS/dashboard lifecycle defect, now under regression review. Reference-loop
   calibration takes priority while the user is away; local and remote Radius
   processes are absent, and SoundSwitch output is captured on localhost only.
+- 2026-10-25 10:12 local: all three agents reviewed. Dashboard lifecycle fix is
+  published with 53 passing CLI checks. Fixture encoding is published with 92
+  passing Rust checks and proof that only equivalent blue/shutter bytes changed.
+  Both 120 and 140 BPM reference captures completed, covering two full cycles of
+  every look. Native palette/keyframe extraction and independent curve comparison
+  continue. No Radius, renderer or physical-output process is running.
 
 - 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
   engine suites pass independently. Lead reviewed public boundaries and found
