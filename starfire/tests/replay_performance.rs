@@ -185,7 +185,7 @@ fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig: Value = serde_json::from_str(include_str!("../rigs/room.json")).unwrap();
+    let rig: Value = serde_json::from_str(include_str!("../../rigs/room.json")).unwrap();
     assert_render_budget("room / 14 fixtures", &rig, MIN_ROOM_REALTIME_FACTOR);
 }
 

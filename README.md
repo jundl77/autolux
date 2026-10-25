@@ -12,6 +12,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
 | `starfire/` | Rust/Lua lighting renderer, fixture setup and deterministic replay |
+| `rigs/` | Shared fixture patches and DMX profiles |
 | `proto/` | Starfire control and Radius transport protobuf contracts |
 | `tools/` | Development checks and diagnostics |
 | `docs/` | Architecture, decisions and operations |
@@ -35,8 +36,9 @@ Keep models and music under `autolux/training/data/raveform/`, or set
 
 Route music to **CABLE Input**; analysis and Radius both capture **CABLE Output**.
 The receiver needs speakers, the Enttec USB device and key-based Windows SSH.
-See [receiver setup](cli/README.md). The room fixture patch and named Lua sequences
-live in `starfire/`; saved fixture edits apply on the next session.
+See [receiver setup](cli/README.md). Fixture patches and profiles live in `rigs/`;
+named Lua sequences live in `starfire/sequences/`. Saved fixture edits apply on
+the next session.
 
 ## Run
 

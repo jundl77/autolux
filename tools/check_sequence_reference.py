@@ -94,7 +94,7 @@ def check_sequence(bank, binary, output_dir):
                 'replay',
                 str(stem.with_suffix('.replay.json')),
                 '--rig',
-                str(ROOT / 'starfire/rigs/room.json'),
+                str(ROOT / 'rigs/room.json'),
                 '--sequences',
                 str(ROOT / 'starfire/sequences'),
                 '--output',

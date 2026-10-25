@@ -105,7 +105,7 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
 fn check_replay(look: Look) {
     let replay = Replay::load(&root().join(format!("tests/replays/{}.json", look.bank))).unwrap();
     let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
-    let rig = FixtureRig::load(&root().join("rigs/room.json")).unwrap();
+    let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     let first = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     assert_eq!(first.frames.len(), 3601);
     assert_semantics(&first.frames, &look);
@@ -163,7 +163,7 @@ fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe
         ("buildup", "current"),
         ("drop", "blue_impact"),
     ] {
-        let rig = FixtureRig::load(&root().join("rigs/room.json")).unwrap();
+        let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
         let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
         let mut engine = Engine::new(rig, catalog).unwrap();
         engine
@@ -258,7 +258,7 @@ fn every_registered_sequence_has_an_executable_replay_and_expected_dmx() {
         );
         let result = render_replay(
             &replay,
-            FixtureRig::load(&root().join("rigs/room.json")).unwrap(),
+            FixtureRig::load(&root().join("../rigs/room.json")).unwrap(),
             catalog.clone(),
         )
         .unwrap();
@@ -278,7 +278,7 @@ fn every_registered_sequence_has_an_executable_replay_and_expected_dmx() {
 #[test]
 fn the_same_sequences_work_on_a_different_rig_through_named_groups() {
     let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
-    let rig = FixtureRig::load(&root().join("rigs/generic.json")).unwrap();
+    let rig = FixtureRig::load(&root().join("../rigs/generic.json")).unwrap();
     for entry in catalog.list() {
         let mut replay =
             Replay::load(&root().join(format!("tests/replays/{}.json", entry.bank))).unwrap();
@@ -303,7 +303,7 @@ fn the_same_sequences_work_on_a_different_rig_through_named_groups() {
 #[test]
 fn beat_corrections_change_pulses_without_restarting_choreography() {
     let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
-    let rig = FixtureRig::load(&root().join("rigs/room.json")).unwrap();
+    let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     for (bank, sequence, initial_level, corrected_level) in [
         ("buildup", "current", 144.0 / 255.0, 72.0_f64 / 255.0),
         ("drop", "blue_impact", 198.0 / 255.0, 124.0 / 255.0),
@@ -377,7 +377,7 @@ fn beat_corrections_change_pulses_without_restarting_choreography() {
 #[test]
 fn drop_pulses_survive_animation_freeze_and_selection_across_global_phrase_boundaries() {
     let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
-    let rig = FixtureRig::load(&root().join("rigs/room.json")).unwrap();
+    let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     let mut pulse_traces = Vec::new();
     for selection_beat in [2.0, 2.25, 62.0, 62.25] {
         let make_engine = |speed| {

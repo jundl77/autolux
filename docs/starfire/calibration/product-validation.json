@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_hashes": {
     "starfire\\target\\release\\starfire.exe": "60b1735a98adaf36f4981362c5995e84db959038ddacb85e8ed24a9b6edee49c",
-    "starfire\\rigs\\room.json": "65ddab03d33e0ad80f26fe990b70d0d9cdcb164fc7b3cda35be13f95eb6a9e7a",
+    "rigs\\room.json": "65ddab03d33e0ad80f26fe990b70d0d9cdcb164fc7b3cda35be13f95eb6a9e7a",
     "starfire\\sequences\\atmospheric\\blue_tide.lua": "89e3e5810a1b07640411724ef179a3e893eecea1d48c9f071a3e083e20c05d1c",
     "starfire\\sequences\\breakdown\\violet_space.lua": "91fca9018706919b44d22e0700260b5d94c5c89236bcee3a5d9a0702acc6aa71",
     "starfire\\sequences\\buildup\\current.lua": "d973691426d56c9335d05530997bed2509b284bf07b40da01ec8a6f50b7d99be",

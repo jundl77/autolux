@@ -46,7 +46,8 @@ last processed command ID. Standalone messages are generated from [starfire.prot
 Each frame carries a message type, bounded length and generated Protobuf payload.
 An empty `PlaySequence` enters idle; no sequence restarts on repeated selection.
 
-The room rig has two Spot 110 movers, four SePar washes and eight RGB cells of
+Shared patches and profiles live in root `rigs/`. The room rig has two Spot 110
+movers, four SePar washes and eight RGB cells of
 the CF805 in 24-channel mode. These are 14 independently controlled fixtures.
 Mini Kinta remains dark until its control profile is verified. Production
 readiness probes every sequence against the selected patch before deployment.

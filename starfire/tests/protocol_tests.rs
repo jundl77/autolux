@@ -52,7 +52,7 @@ fn parameter(kind: wire::ParameterType, value: wire::parameter::Value) -> Operat
 
 fn engine() -> Engine {
     Engine::new(
-        FixtureRig::from_json(include_str!("../rigs/room.json")).unwrap(),
+        FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
         SequenceCatalog::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences"))
             .unwrap(),
     )
@@ -356,7 +356,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = FixtureRig::from_json(include_str!("../rigs/room.json")).unwrap();
+    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let catalog =
         SequenceCatalog::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences"))
             .unwrap();

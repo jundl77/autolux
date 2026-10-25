@@ -53,7 +53,7 @@ fn all_four_sequences_match_independent_sound_switch_value_anchors() {
         serde_json::from_str(include_str!("reference/soundswitch/channel-groups.json")).unwrap();
     assert_eq!(reference.schema_version, REFERENCE_SCHEMA_VERSION);
     assert!(!reference.samples.is_empty());
-    let rig = FixtureRig::from_json(include_str!("../rigs/room.json")).unwrap();
+    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let catalog =
         SequenceCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences")).unwrap();
     let mut engines = BTreeMap::new();

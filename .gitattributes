@@ -9,4 +9,4 @@ starfire/tests/reference/soundswitch/*.gz binary
 
 # Keep calibrated program and rig hashes stable across checkouts.
 starfire/sequences/**/*.lua text eol=lf
-starfire/rigs/*.json text eol=lf
+rigs/*.json text eol=lf

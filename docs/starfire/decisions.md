@@ -37,6 +37,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | U27 | Successful commands need no reply except Login. | ErrorReply identifies rejections; independent heartbeats show liveness and Metrics reports command progress. |
 | U28 | Sequence IDs identify playback independently of banks. | Banks group supplied scripts; PlaySequence uses a globally unique ID only. |
 | U29 | Name the complete fixture setup RigDefinition and define it in rig.proto. | Login.rig contains fixtures, groups and their reusable DMX profiles. The name describes configuration rather than a running rig. starfire.proto imports the definition; both files share one generated contract. |
+| U30 | Store shared rig files and fixture profiles in root rigs/. | Autolux loads these assets into Login; native replay and validation use the same files. |
 
 ## Prototype decisions
 

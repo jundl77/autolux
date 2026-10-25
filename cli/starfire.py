@@ -18,10 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = (
     ROOT / 'starfire' / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
 )
-DEFAULT_RIG = ROOT / 'starfire' / 'rigs' / 'room.json'
+DEFAULT_RIG = ROOT / 'rigs' / 'room.json'
 DEFAULT_SEQUENCES = ROOT / 'starfire' / 'sequences'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
-PROFILE_CATALOGUE = ROOT / 'starfire' / 'rigs' / 'profiles.json'
+PROFILE_CATALOGUE = ROOT / 'rigs' / 'profiles.json'
 CHILD_STOP_TIMEOUT_SEC = 5.0
 PATCH_VALIDATION_TIMEOUT_SEC = 10.0
 MAX_REPORT_BYTES = 32 * 1024 * 1024

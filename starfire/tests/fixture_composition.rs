@@ -24,7 +24,7 @@ fn steady_room() -> Engine {
     )
     .unwrap();
     let catalogue = SequenceCatalog::load(directory.path()).unwrap();
-    let rig = FixtureRig::from_json(include_str!("../rigs/room.json")).unwrap();
+    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let mut engine = Engine::new(rig, catalogue).unwrap();
     engine
         .apply(

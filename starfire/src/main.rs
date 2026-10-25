@@ -17,7 +17,7 @@ use starfire::model::{Command, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::SequenceCatalog;
 
-const DEFAULT_RIG: &str = "starfire/rigs/room.json";
+const DEFAULT_RIG: &str = "rigs/room.json";
 const DEFAULT_SEQUENCES: &str = "starfire/sequences";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
@@ -347,7 +347,7 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig = FixtureRig::from_json(include_str!("../rigs/room.json")).unwrap();
+        let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();

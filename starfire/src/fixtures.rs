@@ -14,7 +14,7 @@ use crate::protocol::wire;
 
 const RIG_SCHEMA_VERSION: u32 = 1;
 const PROFILE_SCHEMA_VERSION: u32 = 1;
-const PROFILE_CATALOGUE: &str = include_str!("../rigs/profiles.json");
+const PROFILE_CATALOGUE: &str = include_str!("../../rigs/profiles.json");
 const DMX_MAX: f64 = u8::MAX as f64;
 const FINE_POSITION_MAX: f64 = u16::MAX as f64;
 pub const MAX_RIG_INPUT_BYTES: usize = 1024 * 1024;
