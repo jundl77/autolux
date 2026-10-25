@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package autolux.starfire.v2;
+
+// Proposed contract; the live product still uses v1. Generate bindings with
+// standard Protobuf tools. Commands apply in order at a render boundary.
+message RendererCommand {
+  uint32 protocol_version = 1;
+  uint64 command_id = 2;
+  oneof command {
+    UpdateBeatClock update_beat_clock = 10;
+    EnsureSequencePlaying ensure_sequence_playing = 11;
+    PatchParameterValues patch_parameters = 12;
+    PutActiveEffectLayer put_layer = 13;
+    RemoveActiveEffectLayer remove_layer = 14;
+    Empty stop_playback = 15;
+    Empty heartbeat = 16;
+  }
+}
+
+message Empty {}
+
+message UpdateBeatClock {
+  double position_beats = 1;
+  double tempo_bpm = 2;
+}
+
+message SequenceReference {
+  string bank_id = 1;
+  string sequence_id = 2;  // Unique within its bank; not a display label.
+}
+
+message EnsureSequencePlaying {
+  SequenceReference sequence = 1;
+  Transition transition = 2;  // Omitted means cut; an unset present policy is invalid.
+}
+
+message Transition {
+  oneof policy {
+    Empty cut = 1;
+    double crossfade_beats = 2;
+  }
+}
+
+message ParameterTarget {
+  oneof owner {
+    Empty engine = 1;
+    Empty analysis_inputs = 2;
+    SequenceReference sequence = 3;
+  }
+}
+
+// Merge supplied assignments atomically; unspecified values stay unchanged.
+message PatchParameterValues {
+  ParameterTarget target = 1;
+  repeated ParameterAssignment assignments = 2;
+}
+
+message ParameterAssignment {
+  string parameter_key = 1;
+  ParameterValue value = 2;
+}
+
+message ParameterValue {
+  oneof value {
+    double number = 1;
+    sint64 integer = 2;
+    bool boolean = 3;
+    string text = 4;
+    RgbColor rgb = 5;
+  }
+}
+
+message RgbColor {
+  double red = 1;
+  double green = 2;
+  double blue = 3;
+}
+
+message FixtureSelection {
+  oneof selection {
+    Empty all = 1;
+    string group_id = 2;
+    string fixture_id = 3;
+  }
+}
+
+// Create or replace this entire runtime layer, including its lifetime.
+// Stored sequence definitions and the continuing baseline are unaffected.
+message PutActiveEffectLayer {
+  string layer_id = 1;
+  FixtureSelection fixtures = 2;
+  repeated AttributeAssignment attributes = 3;
+  sint32 priority = 4;
+  LayerLifetime lifetime = 5;
+}
+
+message AttributeAssignment {
+  string attribute_key = 1;
+  ParameterValue value = 2;
+  BlendOperation operation = 3;
+}
+
+enum BlendOperation {
+  BLEND_OPERATION_UNSPECIFIED = 0;
+  REPLACE = 1;
+  MULTIPLY = 2;
+}
+
+message LayerLifetime {
+  oneof expiration {
+    Empty until_removed = 1;
+    double duration_beats = 2;
+    double duration_seconds = 3;
+  }
+}
+
+message RemoveActiveEffectLayer {
+  string layer_id = 1;
+}
+
+message RendererEvent {
+  uint32 protocol_version = 1;
+  oneof event {
+    Ready ready = 10;
+    CommandResult command_result = 11;
+    Health health = 12;
+    ParameterCatalog parameter_catalog = 13;
+    RuntimeError runtime_error = 14;
+  }
+}
+
+message Ready {
+  uint32 frame_rate_hz = 1;
+  uint32 max_message_bytes = 2;
+}
+
+message CommandResult {
+  uint64 command_id = 1;
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    APPLIED = 1;
+    REJECTED = 2;
+  }
+  Status status = 2;
+  string reason = 3;
+}
+
+// Published for engine/input targets at readiness and for a sequence when it
+// becomes active. The scope prevents a stale UI changing another sequence.
+message ParameterCatalog {
+  ParameterTarget target = 1;
+  repeated ParameterDefinition parameters = 2;
+}
+
+message ParameterDefinition {
+  string parameter_key = 1;
+  ValueType value_type = 2;
+  ParameterValue default_value = 3;  // Absent measured input remains unknown.
+  string unit = 4;
+  ParameterValue minimum = 5;  // Numeric bounds use the declared value type.
+  ParameterValue maximum = 6;
+  repeated ParameterValue allowed_values = 7;
+}
+
+enum ValueType {
+  VALUE_TYPE_UNSPECIFIED = 0;
+  NUMBER = 1;
+  INTEGER = 2;
+  BOOLEAN = 3;
+  TEXT = 4;
+  RGB = 5;
+}
+
+message Health {
+  double elapsed_seconds = 1;
+  uint64 rendered_frames = 2;
+  uint64 missed_render_deadlines = 3;
+  uint32 queued_commands = 4;
+  double last_render_duration_seconds = 5;
+  SequenceReference active_sequence = 6;
+  string script_error = 7;
+}
+
+message RuntimeError {
+  string reason = 1;
+}

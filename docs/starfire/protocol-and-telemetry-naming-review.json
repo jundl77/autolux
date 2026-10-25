@@ -1,0 +1,133 @@
+{
+  "scope": "Bounded names-only review of renderer telemetry and proposed protocol primitives; not exhaustive and not a protocol correctness proof.",
+  "implementation": {
+    "rates": "autolux/lib/telemetry_history.py derives completed render and skipped deadline counter differences over renderer elapsed time. Repeated fresh reports hold the prior interval rate; restarts/outages clear it.",
+    "duration": "starfire/src/live.rs measures engine.render_at duration; autolux/lib/telemetry_history.py exposes the last completed render sample in milliseconds, not a timestamp or average.",
+    "protocol": "proto/starfire/v2/starfire.proto and docs/starfire/protocol-design.md define a proposal. Existing v1 remains live. Parameter patches preserve omitted values; named layers replace their entire runtime state; active sequence identity never restarts."
+  },
+  "readers": {
+    "fork_turns": "none",
+    "reasoning_effort": "low",
+    "tools": "Forbidden; names only, no repository or conversation context"
+  },
+  "concepts": [
+    {
+      "concept": "Renderer frame rates",
+      "attempts": [
+        {
+          "names": [
+            "starfire_rendered_frames_per_second",
+            "starfire_skipped_frames_per_second"
+          ],
+          "reader": "/root/blind_renderer_frame_rates",
+          "prediction": "- `starfire_rendered_frames_per_second`: Number of frames rendered each second by something called Starfire. Unclear whether “rendered” means generated, submitted, or actually displayed, and whether this is a measured rate or target setting.\n- `starfire_skipped_frames_per_second`: Number of frames intentionally skipped or otherwise omitted each second by Starfire. Unclear what causes skipping, whether dropped frames count, or which stage skips them.\n\nBoth suggest related frame-rate measurements. `starfire` is an unexplained component or product name; neither identifier contains unclear abbreviations.",
+          "comparison": "Ambiguous measured-versus-target rate and render deadline versus transport loss. Renamed both new fields."
+        },
+        {
+          "names": [
+            "starfire_measured_render_frames_per_second",
+            "starfire_missed_render_deadlines_per_second"
+          ],
+          "reader": "/root/blind_renderer_rates_retry",
+          "prediction": "- `starfire_measured_render_frames_per_second`: An observed rendering throughput in frames per second for something called “Starfire.” Unclear whether frames are started, completed, or displayed, and over what measurement window.\n- `starfire_missed_render_deadlines_per_second`: The rate of rendering deadlines missed by “Starfire,” measured as misses per second. Unclear what sets a deadline or whether one frame can produce multiple misses.\n\nBoth names clearly indicate rates. `starfire` is an unexplained scope or component name; neither identifier has unclear abbreviations.",
+          "comparison": "Aligned on observed throughput and missed renderer deadlines. Stage boundary and report interval remain explicit in metric descriptions; these are not physical fixture FPS."
+        }
+      ],
+      "disposition": "Aligned with explicit stage/window documentation; existing native counter names preserved."
+    },
+    {
+      "concept": "Last render duration",
+      "attempts": [
+        {
+          "names": [
+            "starfire_last_render_duration_ms"
+          ],
+          "reader": "/root/blind_renderer_duration",
+          "prediction": "`starfire_last_render_duration_ms` likely stores the elapsed time, in milliseconds, of Starfire’s most recent render.\n\nAmbiguities:\n- `starfire` is an unexplained component or system name.\n- “Render” could mean generating a frame, updating a view, or producing an entire output.\n- “Last” could mean the latest completed render or the latest attempted render, including failures.\n- The name does not clarify whether duration includes waiting or only active rendering.",
+          "comparison": "Aligned on elapsed milliseconds of the most recent render. Help text and implementation delimit engine rendering, excluding wait/network/USB."
+        }
+      ],
+      "disposition": "Aligned; duration boundary is documented, not encoded into an unwieldy identifier."
+    },
+    {
+      "concept": "Protocol command families",
+      "attempts": [
+        {
+          "names": [
+            "Control",
+            "TimelineAnchor",
+            "position_beats",
+            "tempo_bpm",
+            "SelectSequence",
+            "bank_id",
+            "sequence_id",
+            "UpdateParameters",
+            "UpsertLayer",
+            "RemoveLayer",
+            "StopPlayback",
+            "Heartbeat"
+          ],
+          "reader": "/root/blind_protocol_primitives",
+          "prediction_excerpt": "`Control`: A control element, command, or governing interface. Very broad: UI widget, command envelope, controller, or control data.\n`SelectSequence`: Choose a sequence as the current selection. Whether selection also activates or starts it is unclear.\n`UpdateParameters`: Change parameter values on an existing target. Target, merge versus replacement, and supported parameters unspecified.\n`UpsertLayer`: Insert a layer if absent or update it if present. Identity matching and partial versus full replacement unspecified.",
+          "comparison": "Unclear envelope ownership, playback activation and update semantics. Replaced Control, SelectSequence, UpdateParameters and generic layer names. Excerpts retain the failed distinctions; the full response also identified required contract details for time, IDs and heartbeat."
+        },
+        {
+          "names": [
+            "RendererCommand",
+            "UpdateBeatClock",
+            "position_beats",
+            "tempo_bpm",
+            "SetActiveSequence",
+            "bank_id",
+            "sequence_name",
+            "PatchParameterValues",
+            "PutEffectLayer",
+            "layer_id",
+            "RemoveEffectLayer",
+            "StopPlayback",
+            "Heartbeat"
+          ],
+          "reader": "/root/blind_protocol_primitives_retry",
+          "prediction_excerpt": "`RendererCommand`: A command sent to a rendering component.\n`PatchParameterValues`: Partially updates parameter values, leaving unspecified ones unchanged.\n`PutEffectLayer`: Adds or replaces an effect layer.\n`SetActiveSequence`: Selects the sequence currently active. Unclear whether selection starts playback or only prepares the sequence.\n`sequence_name`: Human-readable name of a sequence. Could also be a unique lookup key; uniqueness is unclear.",
+          "comparison": "Envelope, patch and layer families understood. Changed activation name again and retained sequence_id rather than misleading display-name terminology."
+        },
+        {
+          "names": [
+            "EnsureSequencePlaying",
+            "SequenceReference",
+            "bank_id",
+            "sequence_id"
+          ],
+          "reader": "/root/blind_sequence_playing",
+          "prediction": "- `EnsureSequencePlaying`: Makes sure a sequence is currently playing, likely starting or resuming it if needed. Unclear whether it also selects a sequence, restarts playback, waits for playback confirmation, or returns success.\n- `SequenceReference`: Identifies or points to a sequence without containing the full sequence. Could be an object reference, lookup key, or compound identifier.\n- `bank_id`: Identifier for a bank, presumably a grouping or container. “Bank” does not reveal what it contains.\n- `sequence_id`: Identifier for a sequence. Unclear whether globally unique or unique only within a bank.\n\nTogether, `bank_id` and `sequence_id` suggest a compound `SequenceReference` locating a sequence within a bank. No unclear abbreviations beyond conventional `id` meaning identifier.",
+          "comparison": "Understood ensuring playback and the compound bank-scoped reference. No-restart semantics are explicitly contractual; names cannot prove that invariant."
+        }
+      ],
+      "disposition": "Revised names retained; priority, ordering, idempotency and clock semantics require explicit contract and behavioral tests."
+    },
+    {
+      "concept": "Parameter patches and active layers",
+      "attempts": [
+        {
+          "names": [
+            "PatchParameterValues",
+            "ParameterAssignment",
+            "parameter_key",
+            "ParameterValue",
+            "ParameterDefinition",
+            "PutActiveEffectLayer",
+            "layer_id",
+            "target",
+            "priority",
+            "lifetime",
+            "RemoveActiveEffectLayer"
+          ],
+          "reader": "/root/blind_parameter_layers",
+          "prediction_excerpt": "`PatchParameterValues`: Partially update a collection of parameter values.\n`ParameterDefinition`: Metadata defining a parameter, such as its type, default, and constraints.\n`PutActiveEffectLayer`: Add or replace an effect layer in the active collection.\n`RemoveActiveEffectLayer`: Remove a layer from the active collection.\nThe largest prediction risks are `target`, `lifetime`, and the create/replace/activate semantics of `PutActiveEffectLayer`.",
+          "comparison": "Core separation understood. Replaced broad layer target with FixtureSelection; explicit oneofs describe all/group/fixture and lifetime. Complete replacement, numeric priority order and removal semantics are written in the contract."
+        }
+      ],
+      "disposition": "Core concepts aligned; FixtureSelection is a source-grounded clarification, not separately blind-tested. No claim that names alone specify all contracts."
+    }
+  ]
+}

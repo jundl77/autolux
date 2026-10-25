@@ -25,6 +25,8 @@ prototype assumptions can change after an offline review and hardware audition.
 | U15 | Delegate work, review it centrally and check progress every 15 minutes. | Three implementation workstreams; integration, decisions and final validation stay with the lead. |
 | U16 | Calibrate the four Lua loops against captured output from the authored SoundSwitch loops. | Compare controlled beatgrids, levels, fixture encoding and timing; thematic similarity alone is insufficient. |
 | U17 | Continue calibration while the user is away; speakers cannot be tested now. | Capture local Art-Net only; leave Radius and physical outputs stopped. Audible validation remains pending. |
+| U18 | Bounded hardware auditions are authorized when the user is present. | Audio and lights were confirmed working; the isolated beat pulse was judged on-beat. Startup alignment is a separate requirement. |
+| U19 | Use centered Control, Telemetry and Config tabs in the existing dashboard. | Control keeps essential performance, the timeline and horizontal diagnostics; detailed graphs live in Telemetry; Config owns fixture setup. |
 
 ## Prototype decisions
 
@@ -145,6 +147,26 @@ approved removing SoundSwitch connectivity and requested the live contract in
   Test nonzero selection positions, beat corrections and animation freeze at
   entry and loop boundaries. A global 64-beat envelope plus a relative hold can
   otherwise add an unintended second hold near a global phrase boundary.
+- P67: Initialize analysis models before starting Radius capture. Model loading
+  must not give room audio a head start over lighting. Preserve bounded startup,
+  partial-start cleanup and receiver ownership; readiness checks remain output-free.
+- P68: Show measured Starfire frame rate from render-counter and renderer-time
+  deltas. Missing, stale and restarted measurements must not appear as healthy
+  zeros. Distinguish renderer FPS, host USB writes and physical DMX refresh.
+- P69: Diagnose musical alignment with a single white pulse on the wash and
+  strip, using absolute beat phase, a cubic fade and a 65% peak. Disable movement,
+  section-dependent looks and accents in the temporary audition. Verify the
+  envelope and deterministic DMX replay before physical output. Do not apply a
+  guessed phase offset after the user confirms the pulse is on-beat.
+- P70: Propose v2 as stable renderer operations plus typed, registered parameters
+  and named active layers. Keep v1 live during discussion. Generate language
+  bindings from canonical paths beneath root `proto/`; do not duplicate message
+  models or hand-write serialization. See [protocol](protocol-design.md).
+- P71: Layer expiry and crossfade duration in proposed v2 use continuous musical
+  elapsed time, independent of beat-phase corrections and animation speed. Apply
+  queued commands in order against the result of preceding accepted commands;
+  reject each invalid patch atomically. The contract review resolved five edge
+  cases before presenting the proposal.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -203,6 +225,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 | Q05 | Which manual controls belong in the first webapp tab? | Patch/groups now; live audition, master and blackout follow the live-session integration. No browser code editor. |
 | Q06 | Where does Art-Net sit when Radius preserves exact render targets? | Preserve existing local Art-Net ingress in the prototype; document measured scheduling limits. Clock mapping remains Radius implementation work. |
 | Q07 | Are multiple universes needed immediately? | Encoder/output support universe identity; current Radius deployment remains its existing configured universe. |
+| Q08 | How should exact beat source times and physical-output latency be measured? | Preserve the successful pulse audition as evidence, not a sample-exact guarantee. Beat timestamps currently lose batching age; USB cadence and fixture response remain outside command-delay metrics. Measure these before adding compensation. |
 
 ## References and what to borrow
 
