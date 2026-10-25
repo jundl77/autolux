@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-25",
+  "duration_seconds": 60,
+  "scope": "Rust hardware path proof; Spotify capture, Focusrite playback, ENTTEC DMX; fixed120BPM atmospheric control, zero analysis delay",
+  "user_observation": "Audio and lights both work",
+  "exit_code": 0,
+  "final_transport_snapshot": {
+    "run_id": 8637486017896274087,
+    "timestamp": 1792950557.1440833,
+    "tx": {
+      "up": true,
+      "link_up": true,
+      "heartbeat_age_seconds": 9.0958066,
+      "heartbeats_sent": 5,
+      "heartbeats_received": 5,
+      "audio_buffer_seconds": 0.0,
+      "capture_overruns_total": 0,
+      "queue_dropped_frames_total": 0,
+      "send_failures_total": 0,
+      "invalid_packets_total": 0,
+      "playback_delay_seconds": 0.0,
+      "dmx_input_age_seconds": 0.0110637,
+      "network_queued_bytes": 0
+    },
+    "rx": {
+      "run_id": 8637486017896274087,
+      "last_processed_command_id": 1,
+      "up": true,
+      "link_up": true,
+      "heartbeat_age_seconds": 8.2551678,
+      "heartbeats_sent": 5,
+      "heartbeats_received": 5,
+      "audio_buffer_seconds": 0.4978004535147392,
+      "buffer_target_seconds": 0.5,
+      "underruns_total": 0,
+      "device_underruns_total": 0,
+      "concealed_frames_total": 0,
+      "lost_frames_total": 0,
+      "overflow_frames_total": 0,
+      "late_packets_total": 0,
+      "latency_trims_total": 0,
+      "clock_correction_ppm": -10,
+      "dmx_connected": true,
+      "dmx_frames_total": 1150,
+      "dmx_dropped_total": 0,
+      "dmx_lateness_seconds": 0.01614512471655329,
+      "audio_input_age_seconds": 0.001954,
+      "audio_max_gap_seconds": 0.0316555,
+      "audio_signal_peak": 0.4415168762207031,
+      "invalid_packets_total": 0,
+      "send_failures_total": 0,
+      "playing": true,
+      "rebuffer_count": 0
+    },
+    "rx_age_seconds": 0.9515923
+  },
+  "limits": [
+    "Not a full analysis pipeline run",
+    "No quantitative physical beat latency measurement"
+  ]
+}

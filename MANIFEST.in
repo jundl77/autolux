@@ -1,0 +1,2 @@
+recursive-include proto *.proto
+include tools/build_proto.py

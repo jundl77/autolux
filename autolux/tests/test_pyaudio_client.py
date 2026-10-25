@@ -1,8 +1,27 @@
 from unittest.mock import Mock
 
 import pytest
+import pyaudio
 
 from autolux.lib.clients.pyaudio_client import PyAudioClient
+
+
+@pytest.mark.parametrize('code', [pyaudio.paUnanticipatedHostError, pyaudio.paInputOverflowed])
+def test_capture_failure_explains_host_errors_and_preserves_unrelated_errors(monkeypatch, code):
+    monkeypatch.setattr('autolux.lib.clients.pyaudio_client.pyaudio.PyAudio', Mock)
+    client = PyAudioClient(sample_rate=44100, buffer_size=256)
+    error = OSError(code, 'capture failed')
+    client.stream_in = Mock()
+    client.stream_in.read.side_effect = error
+
+    if code == pyaudio.paUnanticipatedHostError:
+        with pytest.raises(RuntimeError, match='RDP session change') as failure:
+            client.read()
+        assert failure.value.__cause__ is error
+    else:
+        with pytest.raises(OSError) as failure:
+            client.read()
+        assert failure.value is error
 
 
 @pytest.mark.parametrize('close_fails', [False, True])

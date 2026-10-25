@@ -1,44 +1,36 @@
-# Radius
+﻿# Radius
 
-Radius is Autolux's audiovisual bus, with two C++ applications:
+Radius transports synchronized stereo audio and lighting. Starfire owns the Rust
+TX worker; `radius_rx` drives the remote audio endpoint and ENTTEC USB Pro.
+Run the complete system through `uv run autolux --prod`.
 
-- `radius_tx`: captures stereo audio, applies the show delay, combines local
-  SoundSwitch ArtDmx with Autolux overlays, and sends the stream.
-- `radius_rx`: buffers audio, follows its media clock for DMX playback, and drives
-  the speakers and Enttec USB device on separate threads.
+One TCP connection carries the standalone messages in
+[`radius.proto`](../proto/radius/radius.proto): a one-byte message type, four-byte
+big-endian payload length, and generated Protobuf payload. Login validates the
+shared random `run_id`, negotiates protocol major/minor, and opens outputs before
+LoginReply. Every message is bounded to 1200 bytes. Both endpoints heartbeat
+every 10 seconds and fail after 30 seconds without the peer heartbeat.
 
-Build and test from the root with `.\build-radius.ps1`. Start the complete system
-with `uv run autolux --prod`. The CLI supplies a unique session and deploys RX over
-SSH. Each binary also accepts a config path, or `--check-config <path>`.
+Audio is 44.1 kHz stereo Float32. TX applies the analysis delay once. Each audio
+block references the preceding lighting state; RX admits them together. A light
+message alone never changes the fixtures. DMX follows the audible sample position,
+including the audio device's reported latency, with at most 40 updates per second.
 
-## Timing and transport
+RX fills 500 ms before playback. Starvation produces silence and darkness, then
+requires another 500 ms before resuming. Valid buffered audio continues during
+network interruptions. Queues are bounded; capture or playback faults stop the
+run instead of silently losing synchronization. Audio callbacks allocate nothing
+and perform no network, logging or USB work.
 
-The bus uses Google Protocol Buffers in UDP datagrams no larger than 1200 bytes.
-[`proto/radius/radius.proto`](../proto/radius/radius.proto) defines the versioned envelope,
-audio, lighting, heartbeats and typed receiver telemetry. Session IDs and audio
-watermarks use `fixed64`; samples use packed protobuf floats at 44.1 kHz stereo.
-TX holds the show delay; RX starts with a 150 ms jitter target and uses
-bounded clock correction. Network and audio-device latency are additional.
+`radius_rx CONFIG.json` uses `AUTOLUX_RUNTIME_DIR` for `ready`, `stop` and
+`health.json`. The ready file means the TCP listener exists; LoginReply means
+hardware is ready. `--check-config` verifies the configured audio endpoint without
+starting playback; `--list-devices` reports exact endpoint IDs. Device fallback is
+never implicit. `network_core` and `dmx_core` optionally pin their workers.
+TX publishes `transport-health.json` once per second; Radius telemetry stays
+independent of the Starfire protocol. Report-write failures do not stop playback.
 
-Audio callbacks use fixed queues and perform no network or USB I/O. Full queues
-drop incoming data and count the loss. RX conceals missing audio with silence and
-recovers excessive backlog instead of retaining unbounded latency.
-
-RX schedules lighting against the audio position corrected for reported device
-latency. USB refresh and device latency limit physical alignment; this is not a
-sample-accurate lighting output guarantee. Loss of media blanks DMX after one
-second. Both endpoints heartbeat every 10 seconds and exit after 30 seconds
-without the peer heartbeat. RX sends health once per second.
-
-CMake downloads SHA256-pinned Protobuf v33.5 and Abseil 20250512.1, builds matching
-`protoc`, and generates C++ under the build directory. Endpoints link the static
-lite runtime without reflection; generated code is neither checked in nor formatted.
-The first build needs internet access. Protocol v2 requires upgrading TX and RX
-together; v1 packets, wrong sessions, invalid message kinds, malformed/oversize
-packets and invalid media values are rejected and counted. Dashboard `health.json`
-retains its existing keys, units, integer counters and null ages for missing input.
-
-`audio_core`, `network_core` and `dmx_core` optionally pin separate threads;
-`-1` leaves scheduling to Windows. SoundSwitch's local Art-Net output feeds
-`127.0.0.1:6454`; Autolux overlays feed port 19001. Only the Radius bus crosses
-the network, on UDP 19002 by default.
+Build with `cargo build --release -p radius`; validate with `cargo test -p radius`
+and `cargo clippy -p radius --all-targets -- -D warnings`. Tests cover framing,
+backpressure, run ownership, heartbeats, audio/light admission, buffering, clock
+drift and bounded USB I/O without operating physical outputs.

@@ -276,7 +276,7 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, m
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lib.engine.light_engine import LightEngine
     from autolux.lib.engine.section_decoder import DecodeParams, SectionDecoder
-    from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
     from autolux.tests.test_light_engine import FakeAnalyser
     from autolux.tests.test_nn_decoder import toy_priors
 
@@ -284,15 +284,13 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, m
     worker, watchdog, _encoder, _built = faulty(
         tiny, mean, CUDA_ERROR, clock=FakeClock(), repairable=False
     )
-    midi = StubMidiClient(clock=clock)
+    lighting = RecordingStarfireClient(clock=clock)
     events = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     events.start()
     queue = DelayedCommandQueue(14.0, clock=clock)
     engine = LightEngine(
-        midi,
-        StubOs2lClient(clock=clock),
-        StubOverlayClient(clock=clock),
-        EffectController(midi, event_buffer=events),
+        lighting,
+        EffectController(lighting, event_buffer=events),
         queue,
         event_buffer=events,
         playback_delay_sec=14.0,
@@ -303,6 +301,7 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, m
         clock=clock,
     )
     engine.set_analyser(FakeAnalyser())
+    engine.on_sound_start()
 
     try:
         block = np.zeros(256, dtype=np.float32)

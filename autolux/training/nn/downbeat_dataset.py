@@ -12,7 +12,7 @@ from . import _TRAINING_DIR  # noqa: F401
 
 from raveform_fetch_annotations import (  # noqa: E402
     beat_csv_path,
-    load_tracks,
+    load_all_tracks,
     parse_beat_csv,
     parse_sections,
 )
@@ -138,7 +138,7 @@ def load_beat_grid(path) -> BeatGrid:
 def load_beat_grids(data_dir, youtube_ids) -> tuple:
     data_dir = Path(data_dir)
     wanted = [str(i) for i in youtube_ids]
-    records = {str(track.get("id")): track for track in load_tracks(data_dir)}
+    records = {str(track.get("id")): track for track in load_all_tracks(data_dir)}
 
     grids: dict = {}
     missing: list = []
@@ -221,7 +221,7 @@ class DownbeatWindowDataset(WindowDataset):
         data_dir = Path(data_dir)
         records: dict = {}
         if sections_by_youtube_id is None or grids_by_youtube_id is None:
-            records = {str(track.get("id")): track for track in load_tracks(data_dir)}
+            records = {str(track.get("id")): track for track in load_all_tracks(data_dir)}
         if sections_by_youtube_id is None:
             sections_by_youtube_id = {
                 youtube_id: parse_sections(track) for youtube_id, track in records.items()

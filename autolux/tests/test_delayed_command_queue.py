@@ -306,14 +306,14 @@ async def test_one_failing_command_does_not_take_the_batch_or_the_show_with_it()
     fired: list = []
 
     async def boom():
-        raise RuntimeError('the midi port went away')
+        raise RuntimeError('the renderer disconnected')
 
     async def note(which):
         fired.append(which)
 
     queue.schedule('intent', lambda: note('before'))
     queue.schedule('intent', boom)
-    queue.schedule('overlay', lambda: note('after'))
+    queue.schedule('accent', lambda: note('after'))
     clock.advance(1.0)
 
     await queue.drain()

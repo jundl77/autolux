@@ -1,0 +1,247 @@
+{
+  "date": "2026-10-25",
+  "branch": "starfire-prototype",
+  "scope": [
+    "Radius and Starfire hand-written source, protocols, autoloops and relevant tests",
+    "Python live analysis/controller, CLI lifecycle/deployment, simulation, shared training/cache paths",
+    "Fixture storage and existing Dash Config tab",
+    "Bounded survey of offline training/export/split/provenance and development tools"
+  ],
+  "excluded": [
+    "generated bindings, dependencies and corpora",
+    "historical experiment campaigns were not exhaustively validated",
+    "pre-existing untracked starfire/src/gdtf/mapping.rs"
+  ],
+  "internal_review": {
+    "tool": "Codex CLI review",
+    "initial_attempt": "Repository commands rejected by execution policy; no inspection in that attempt.",
+    "fallback": "Same read-only policy; supplied source and diff as text. Review completed without tools.",
+    "files": [
+      "autolux/lighting/fixture_setup.py",
+      "autolux/simulate/fixture_panel.py",
+      "starfire/src/engine.rs",
+      "starfire/src/gdtf.rs",
+      "starfire/src/script.rs",
+      "radius/src/rx.rs"
+    ],
+    "finding": "Deleted fixture name reuse duplicates group membership; fixed with regression."
+  },
+  "fixed_findings": [
+    {
+      "id": "R1",
+      "severity": "P1",
+      "area": "Lua sandbox",
+      "issue": "Native pattern backtracking bypassed instruction budget.",
+      "resolution": "Remove native pattern functions; subprocess watchdog regressions."
+    },
+    {
+      "id": "R2",
+      "severity": "P1",
+      "area": "GDTF output",
+      "issue": "Additional emitter defaults could light fixtures during blackout.",
+      "resolution": "Explicit dark semantics for additive/subtractive emitters, including idle and script faults."
+    },
+    {
+      "id": "R3",
+      "severity": "P1",
+      "area": "Playback scheduling",
+      "issue": "Source silence cut lighting before buffered audio ended and discarded queued intents.",
+      "resolution": "Retain audible-tail commands; schedule confirmed stop at delayed source boundary."
+    },
+    {
+      "id": "R4",
+      "severity": "P2",
+      "area": "Radius RX telemetry",
+      "issue": "Unwritable health file stopped media playback.",
+      "resolution": "Nonfatal writes with throttled logging and bidirectional-heartbeat regression."
+    },
+    {
+      "id": "R5",
+      "severity": "P2",
+      "area": "Renderer fault containment",
+      "issue": "Final fixture encoding errors terminated rendering.",
+      "resolution": "Publish safe darkness, retain diagnostics and allow recovery."
+    },
+    {
+      "id": "R6",
+      "severity": "P2",
+      "area": "White-only fixtures",
+      "issue": "Accepted white-only GDTF fixture rendered dark.",
+      "resolution": "Independent white-emitter mapping with intensity regressions."
+    },
+    {
+      "id": "R7",
+      "severity": "P2",
+      "area": "Beat anchors",
+      "issue": "Folded BPM and raw detector beat positions used inconsistent units.",
+      "resolution": "Transmit detector tempo alongside detector beat positions; retain folded analysis/display BPM."
+    },
+    {
+      "id": "R8",
+      "severity": "P2",
+      "area": "Training report provenance",
+      "issue": "Cache identity omitted decoder and model changes and untracked source contents.",
+      "resolution": "Hash runtime dependency and active artifact contents."
+    },
+    {
+      "id": "R9",
+      "severity": "P2",
+      "area": "Fixture groups",
+      "issue": "Deleting a fixture and reusing its name duplicated group membership.",
+      "resolution": "Restore prior order only for surviving original rows; regression added."
+    },
+    {
+      "id": "R10",
+      "severity": "P2",
+      "area": "Corpus paths",
+      "issue": "Shared training CLI default ignored RAVEFORM_DATA_DIR.",
+      "resolution": "Use corpus_dir resolver; environment override regression."
+    },
+    {
+      "id": "R11",
+      "severity": "P3",
+      "area": "Profiling tool",
+      "issue": "Dashboard profiler referenced a removed helper.",
+      "resolution": "Profile current command diagnostics; CPU-only smoke passed."
+    },
+    {
+      "id": "R12",
+      "severity": "P2",
+      "area": "Custom simulation corpus",
+      "issue": "Custom corpus readiness and report identity could describe different model artifacts than the actual simulation.",
+      "resolution": "Thread the selected corpus through inference, extractor/tracker cache planning, model reuse and report fingerprints."
+    },
+    {
+      "id": "R13",
+      "severity": "P2",
+      "area": "Training annotations",
+      "issue": "Trainer target, class-weight and downbeat-grid paths used published-only labels despite merged-label dataset admission.",
+      "resolution": "Apply user-approved manual corrections to admitted tracks through the shared merged loader, retaining split and evaluation exclusions."
+    }
+  ],
+  "open_questions": [],
+  "fixture_reference": [
+    "https://support.soundswitch.com/en/support/solutions/articles/69000847589/",
+    "https://support.soundswitch.com/en/support/solutions/articles/69000847600-multiple-universe-support-in-soundswitch"
+  ],
+  "fixture_browser_check": {
+    "copied_patch_only": true,
+    "channel_cells": 512,
+    "map_selects_fixture": true,
+    "automatic_address": 25,
+    "overlap_rejected": true,
+    "save_add_remove": true,
+    "group_order_preserved": true,
+    "javascript_exceptions": 0
+  },
+  "naming_review": {
+    "concepts": [
+      "channel_occupancy",
+      "next_free_address",
+      "get_detector_bpm"
+    ],
+    "status": "pending",
+    "reason": "Fresh isolated reader spawn was rejected by the session agent-thread limit. Independent implementation review completed; not claimed as a blind naming pass."
+  },
+  "validation": {
+    "native_tests_passed": 175,
+    "full_build": "passed",
+    "fixture_and_gdtf_tests_before_last_group_regression": 48,
+    "python_full_suite": {
+      "passed": 2504,
+      "failed": 1,
+      "seconds": 484.74,
+      "failure": "Three-track benchmark checksum:0834 changed because the corrected lighting tail retains its pending beat commands.",
+      "resolution": "Failure audited against fresh full ten-track reports; all gates pass after the three expected retained-tail checksum updates. Full suite was not redundantly repeated."
+    },
+    "backtest": {
+      "tracks": 10,
+      "result": "passed",
+      "baseline_update": "Three checksum expectations and pipeline identity updated after exact retained-tail parity audit. Scores, counts and tolerances unchanged.",
+      "audit": "silence-tail-parity.json"
+    },
+    "physical_output": "Not exercised in this review; last live startup audition was confirmed by user before this task.",
+    "readiness": {
+      "result": "passed",
+      "seconds": 4.71
+    },
+    "annotation_regressions": {
+      "new": 5,
+      "existing": 138
+    },
+    "fixture_and_gdtf_tests": "Passed in broad suite, including group-name reuse regression"
+  },
+  "user_decisions": [
+    "Manual corrections override published annotations for already admitted training tracks; evaluation holdouts remain excluded."
+  ],
+  "fixture_drag_followup": {
+    "behavior": [
+      "Grid is the primary patch editor; click opens fixture details.",
+      "Drag preserves the grabbed channel offset and validates the complete fixture footprint.",
+      "Overlaps, invalid addresses and stale moves leave the draft unchanged.",
+      "Universe selector sits beside the grid heading; manufacturer controls and patch table are removed."
+    ],
+    "validation": {
+      "fixture_and_gdtf_tests": 58,
+      "browser": "Real Edge pointer events on a copied rig: row wrapping, offset, collision, bounds, Escape/outside cancellation, details, save/reload and group order.",
+      "asset_packaging": "JavaScript verified byte-for-byte in wheel and source distribution.",
+      "independent_review": "Pointer/callback/persistence review complete; click suppression now expires after the pointer release."
+    },
+    "naming": {
+      "implementation": "autolux/lighting/fixture_setup.py:repatch_dmx_fixture returns a validated draft after changing one identified fixture\u2019s Art-Net universe and DMX start address; no persistence or hardware output.",
+      "attempts": [
+        {
+          "names": [
+            "repatch_fixture",
+            "fixture_id",
+            "universe",
+            "start_address"
+          ],
+          "reader": "/root/blind_repatch_fixture; fresh names-only context, low effort, no tools",
+          "prediction": "Together, these suggest reassigning a fixture identified by fixture_id to an address range beginning at start_address within universe. They do not reveal whether the operation also changes physical connections, reserves a range, or checks collisions.",
+          "comparison": "Core address reassignment aligned; domain was ambiguous. Renamed function and address inputs to name DMX/Art-Net explicitly."
+        },
+        {
+          "names": [
+            "repatch_dmx_fixture",
+            "fixture_id",
+            "artnet_universe",
+            "dmx_start_address"
+          ],
+          "reader": "/root/blind_repatch_dmx_fixture; fresh names-only context, low effort, no tools",
+          "prediction": "Together, these suggest changing a fixture\u2019s destination group and starting address, but the names alone do not establish validation rules, side effects, or whether the operation persists changes.",
+          "comparison": "Address reassignment aligned. Protocol terms retained; indexing, validation and absence of persistence are explicit in the boundary docstring/tests, not inferred from names."
+        }
+      ],
+      "disposition": "Address-move meaning aligned; names-only inference of validation/side effects remains limited. DMX and Art-Net numbering follow documented protocol conventions."
+    }
+  },
+  "fixture_responsiveness_followup": {
+    "implementation": [
+      "Fixture selection, drag, add and edit run in clientside callbacks; Save/Reload retain server validation and revision checks.",
+      "512 channel cells retain their identity during edits; drag geometry is sampled once and previews are animation-frame limited.",
+      "Only the visible dashboard tab requests and renders telemetry; Config pauses polling and timeline animation."
+    ],
+    "validation": {
+      "python_tests": 68,
+      "node_draft_integrity_cases": 10,
+      "browser": "Real Edge pointer events on a copied rig: repeated moves with 500 ms simulated network latency; no edit requests; all 512 channel nodes retained; offline save unlock/retry; stale revision protection; Control/Telemetry resume.",
+      "latency_ms": {
+        "conditions": "Single headless Edge samples; 200 ms simulated network latency. Drop timing includes driver polling overhead.",
+        "before": {
+          "details": 467,
+          "drop": 500
+        },
+        "after": {
+          "details": 117,
+          "drop": 62
+        }
+      },
+      "independent_review": "Confirmed Dash failed-fetch path omits runningOff; error hook now unlocks editing and reports unconfirmed persistence.",
+      "regressions": "Draft integrity runs in Node without a browser or DOM; queued edit plus save response cannot discard the new revision.",
+      "limits": "Scoped Python, browser and packaging validation; no audio/DMX hardware or model paths changed."
+    },
+    "cleanup": "Removed unused Python movement/allocation implementations; their invariants now exercise the clientside draft reducer. Server validation and atomic storage tests remain.",
+    "naming": "Existing fixture, address, universe and revision concepts retained. Dash callback names and routine local helpers are outside the bounded blind domain-name review."
+  }
+}

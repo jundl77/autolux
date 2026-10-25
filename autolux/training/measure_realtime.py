@@ -93,7 +93,7 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
     from autolux.lib.engine.effect_controller import EffectController
     from autolux.lib.engine.light_engine import LightEngine
     from autolux.lib.main import PLAYBACK_DELAY_SEC
-    from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
     from autolux.lib import section_chain
 
     watchdog = DriftWatchdog(BUFFER / SR)
@@ -113,13 +113,11 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
     stage.posteriors.posteriors.run_pass = timed_pass
     tracker = stage.posteriors.tracker
 
-    midi, os2l, overlay = StubMidiClient(), StubOs2lClient(), StubOverlayClient()
+    lighting = RecordingStarfireClient()
     queue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
     engine = LightEngine(
-        midi,
-        os2l,
-        overlay,
-        EffectController(midi),
+        lighting,
+        EffectController(lighting),
         queue,
         playback_delay_sec=PLAYBACK_DELAY_SEC,
         section_chain=chain.stream,
@@ -128,7 +126,6 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
     )
     analyser = MusicAnalyser(SR, BUFFER, engine, watchdog=watchdog)
     engine.set_analyser(analyser)
-    os2l.set_analyser(analyser)
 
     on_audio_ms, analyse_ms, drain_ms, loop_ms = [], [], [], []
     depths, reserved, pacing_ms = [], [], []

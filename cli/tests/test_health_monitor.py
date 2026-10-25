@@ -68,17 +68,17 @@ def test_individual_latency_samples_do_not_flood_the_log(caplog):
     assert len(caplog.records) == 1
 
 
-def test_stale_file_ages_and_wrong_session_is_rejected(tmp_path, monkeypatch):
+def test_stale_file_ages_and_wrong_run_id_is_rejected(tmp_path, monkeypatch):
     path = tmp_path / 'health.json'
-    path.write_text(json.dumps({'session': 5, 'timestamp': 100, 'rx_age_seconds': 0.2}))
+    path.write_text(json.dumps({'run_id': 5, 'timestamp': 100, 'rx_age_seconds': 0.2}))
     monkeypatch.setattr('cli.health_monitor.time.time', lambda: 102)
     monitor = HealthMonitor(path, 5)
     assert monitor.snapshot()['sample_timestamp'] == 100
-    assert monitor.snapshot()['session'] == 5
+    assert monitor.snapshot()['run_id'] == 5
     assert monitor.snapshot()['rx_age_seconds'] == 2.2
     monkeypatch.setattr('cli.health_monitor.time.time', lambda: 110)
     assert monitor.snapshot()['rx_age_seconds'] == 10.2
-    with pytest.raises(ValueError, match='different session'):
+    with pytest.raises(ValueError, match='different run'):
         HealthMonitor(path, 6).snapshot()
 
 
@@ -89,7 +89,7 @@ def test_recent_glitches_clear_after_ten_seconds(tmp_path, monkeypatch):
         monkeypatch.setattr('cli.health_monitor.time.time', lambda: second)
         path.write_text(
             json.dumps(
-                {'session': 1, 'timestamp': second, 'rx': {'underruns_total': int(second > 100)}}
+                {'run_id': 1, 'timestamp': second, 'rx': {'underruns_total': int(second > 100)}}
             )
         )
         snapshot = monitor.snapshot()

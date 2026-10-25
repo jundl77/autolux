@@ -1,0 +1,34 @@
+[package]
+name = "starfire"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Beat-driven Lua lighting renderer for Autolux"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+ctrlc = { version = "3.5", features = ["termination"] }
+gdtf = "=0.3.0"
+mlua = { version = "0.12.2", features = ["lua54", "vendored", "serde", "error-send"] }
+prost = "0.14"
+quick-xml = "=0.41.0"
+radius = { path = "../radius" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[build-dependencies]
+prost-build = "0.14"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+

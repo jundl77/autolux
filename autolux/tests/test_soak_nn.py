@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -65,3 +66,41 @@ def test_the_per_minute_tail_splits_where_the_minutes_do():
 def test_an_empty_capture_summarises_to_nothing_rather_than_raising():
     assert spread([]) == {}
     assert buckets([], []) == []
+
+
+def test_soak_run_reaches_renderer_with_selected_autoloops_and_profiles(tmp_path, monkeypatch):
+    import soak_nn
+
+    from cli import starfire_runtime
+
+    autoloops = tmp_path / 'custom-autoloops'
+    profiles = tmp_path / 'custom-profiles.json'
+    captured = {}
+
+    def renderer_boundary(binary, rig, selected_autoloops, artnet, run_dir, **kwargs):
+        captured.update(autoloops=selected_autoloops, **kwargs)
+        raise RuntimeError('renderer boundary reached')
+
+    # Stop before acquiring audio, GPU, subprocess or lighting resources.
+    monkeypatch.setitem(
+        sys.modules,
+        'autolux.lib.main',
+        SimpleNamespace(PLAYBACK_DELAY_SEC=14.0, AutoluxController=None),
+    )
+    monkeypatch.setattr(starfire_runtime, 'StarfireRuntime', renderer_boundary)
+    with pytest.raises(RuntimeError, match='renderer boundary reached'):
+        soak_nn.main(
+            [
+                'run',
+                '--input-device',
+                '0',
+                '--autoloops',
+                str(autoloops),
+                '--profiles',
+                str(profiles),
+            ]
+        )
+
+    assert captured['autoloops'] == autoloops
+    assert captured['profiles'] == profiles
+    assert 0 < captured['run_id'] < 1 << 64

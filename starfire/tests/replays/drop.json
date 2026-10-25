@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "duration_seconds": 90,
+  "frame_rate_hz": 40,
+  "events": [
+    {
+      "at_seconds": 0,
+      "command": {
+        "kind": "beat",
+        "position_beats": 0,
+        "bpm": 120
+      }
+    },
+    {
+      "at_seconds": 0,
+      "command": {
+        "kind": "select",
+        "bank": "drop",
+        "autoloop": "blue_impact",
+        "transition": {
+          "kind": "cut"
+        }
+      }
+    },
+    {
+      "at_seconds": 10,
+      "command": {
+        "kind": "select",
+        "bank": "drop",
+        "autoloop": "blue_impact",
+        "transition": {
+          "kind": "cut"
+        }
+      }
+    },
+    {
+      "at_seconds": 16,
+      "command": {
+        "kind": "beat",
+        "position_beats": 32,
+        "bpm": 120
+      }
+    },
+    {
+      "at_seconds": 32,
+      "command": {
+        "kind": "beat",
+        "position_beats": 64,
+        "bpm": 120
+      }
+    },
+    {
+      "at_seconds": 48,
+      "command": {
+        "kind": "beat",
+        "position_beats": 96,
+        "bpm": 120
+      }
+    },
+    {
+      "at_seconds": 64,
+      "command": {
+        "kind": "beat",
+        "position_beats": 128,
+        "bpm": 150
+      }
+    },
+    {
+      "at_seconds": 80,
+      "command": {
+        "kind": "beat",
+        "position_beats": 168,
+        "bpm": 150
+      }
+    }
+  ]
+}

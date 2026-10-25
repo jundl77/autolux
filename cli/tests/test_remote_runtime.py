@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess
 
 import pytest
-from cli.native_runtime import NativeSpec
+from cli.remote_runtime import ReceiverSpec
 from cli.remote_runtime import RemoteRuntime, encoded_command, ps_literal
 
 
@@ -18,7 +18,7 @@ def test_remote_paths_cannot_inject_powershell():
 def test_remote_target_rejects_shell_syntax(tmp_path, host, user):
     with pytest.raises(ValueError):
         RemoteRuntime(
-            NativeSpec('radius_rx', Path('rx.exe'), {}),
+            ReceiverSpec(Path('rx.exe'), {}),
             host,
             user,
             tmp_path / 'key',
@@ -32,7 +32,7 @@ def test_ssh_uses_pinned_host_key_and_noninteractive_auth(tmp_path, monkeypatch)
     key.touch()
     known.touch()
     runtime = RemoteRuntime(
-        NativeSpec('radius_rx', Path('rx.exe'), {}),
+        ReceiverSpec(Path('rx.exe'), {}),
         '127.0.0.1',
         'User',
         key,
@@ -56,7 +56,7 @@ def test_missing_host_key_store_fails_before_network_access(tmp_path):
     key = tmp_path / 'key'
     key.touch()
     runtime = RemoteRuntime(
-        NativeSpec('radius_rx', Path('rx.exe'), {}),
+        ReceiverSpec(Path('rx.exe'), {}),
         '127.0.0.1',
         'User',
         key,
@@ -65,3 +65,31 @@ def test_missing_host_key_store_fails_before_network_access(tmp_path):
     )
     with pytest.raises(RuntimeError, match='Missing SSH setup'):
         runtime.options()
+
+
+def test_prepared_receiver_uses_rust_readiness_and_stops_owned_session(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    key, known = tmp_path / 'key', tmp_path / 'known'
+    key.touch()
+    known.touch()
+    runtime = RemoteRuntime(
+        ReceiverSpec(Path('radius_rx.exe'), {}),
+        '127.0.0.1',
+        'User',
+        key,
+        known,
+        tmp_path / 'run',
+    )
+    runtime.run_dir.mkdir()
+    runtime.remote = {'bundle': 'C:/Autolux/radius/test', 'run': 'C:/Autolux/runs/test'}
+    ssh = Mock(return_value='ready')
+    runtime.ssh = ssh
+    process = Mock(poll=lambda: None, wait=lambda **_: 0)
+    monkeypatch.setattr(subprocess, 'Popen', Mock(return_value=process))
+    with runtime:
+        assert runtime.process is process
+        assert ssh.call_count == 1
+    assert 'stop' in ssh.call_args.args[0]
+    process.kill.assert_not_called()
+    assert runtime.process is None

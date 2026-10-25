@@ -16,17 +16,15 @@ def _app(enable_ui: bool, event_buffer):
 
     app = object.__new__(AutoluxController)
     app._monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, lambda audio: None)
-    app.disable_os2l = True
     app.enable_ui = enable_ui
     app._ui_port = 8050
     app._ui = None
+    app._fixture_setup = None
     app._enable_playback = False
     app.event_buffer = event_buffer
     app.audio_client = MagicMock()
     app.audio_client.read.side_effect = _StopRun
-    app.midi_client = MagicMock()
-    app.os2l_client = MagicMock()
-    app.overlay_client = MagicMock()
+    app.lighting_client = MagicMock()
     app.section = None
     app.is_running = False
     app._stop_requested = False
@@ -109,30 +107,18 @@ def test_a_raise_in_the_loop_still_blanks_the_rig_and_stops_every_thread(monkeyp
 
     app.audio_client.close.assert_called_once()
     app.section.stop.assert_called_once()
-    app.os2l_client.stop.assert_called_once()
-    app.midi_client.stop.assert_called_once()
-    app.overlay_client.stop.assert_called_once()
+    app.lighting_client.stop.assert_called_once()
     assert app.is_running is False
 
 
 def test_one_client_failing_to_close_does_not_strand_the_rest(monkeypatch):
     _threads_started(monkeypatch)
     app = _app(enable_ui=False, event_buffer=None)
-    app.os2l_client.stop.side_effect = OSError('socket already gone')
+    app.audio_client.close.side_effect = OSError('device already gone')
 
     _run(app)
 
-    app.midi_client.stop.assert_called_once()
-    app.overlay_client.stop.assert_called_once()
-
-
-def test_the_overlay_clear_is_transmitted_rather_than_queued(monkeypatch):
-    _threads_started(monkeypatch)
-    app = _app(enable_ui=False, event_buffer=None)
-
-    _run(app)
-
-    app.overlay_client.flush_messages.assert_called()
+    app.lighting_client.stop.assert_called_once()
 
 
 def _built_buffer(monkeypatch, *, enable_ui, report_path):
@@ -140,9 +126,6 @@ def _built_buffer(monkeypatch, *, enable_ui, report_path):
 
     for module, name in (
         ('autolux.lib.clients.pyaudio_client', 'PyAudioClient'),
-        ('autolux.lib.clients.midi_client', 'MidiClient'),
-        ('autolux.lib.clients.os2l_client', 'Os2lClient'),
-        ('autolux.lib.clients.overlay_client', 'OverlayClient'),
         ('autolux.lib.analyser.music_analyser', 'MusicAnalyser'),
         ('autolux.lib.engine.light_engine', 'LightEngine'),
         ('autolux.lib.engine.effect_controller', 'EffectController'),
@@ -151,7 +134,9 @@ def _built_buffer(monkeypatch, *, enable_ui, report_path):
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda *a, **k: False)
     monkeypatch.setattr(asyncio, 'get_event_loop', MagicMock())
 
-    app = AutoluxController(midi_port_index=0, enable_ui=enable_ui, report_path=report_path)
+    app = AutoluxController(
+        lighting_client=MagicMock(), enable_ui=enable_ui, report_path=report_path
+    )
     return app.event_buffer
 
 
@@ -181,27 +166,22 @@ def test_the_live_view_keeps_its_rolling_window(monkeypatch):
     assert buffer._window_sec == 60.0
 
 
-def test_the_monitor_delay_is_rearmed_after_a_stop():
-    from autolux.lib.clock import VirtualClock
+async def test_source_silence_keeps_the_monitor_audio_tail():
     from autolux.lib.delayed_monitor import DelayedMonitor
     from autolux.lib.main import PLAYBACK_DELAY_SEC
+    from autolux.tests.test_light_engine import engine, hold_silence
 
-    clock = VirtualClock()
+    light, queue, clock, _ = engine()
     played = []
-    app = _app(enable_ui=False, event_buffer=None)
-    app._monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, played.append, clock=clock)
+    monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, played.append, clock=clock)
     for _ in range(20):
         clock.advance(1.0)
-        app._monitor.feed(b'old song')
-    assert app._monitor.started and played
-
-    app._silence_monitor()
-
-    assert app._monitor.buffered == 0, 'the tail was left to play out'
-    assert not app._monitor.started
-
-    heard = len(played)
-    for _ in range(int(PLAYBACK_DELAY_SEC) - 1):
-        clock.advance(1.0)
-        app._monitor.feed(b'next song')
-    assert len(played) == heard, 'the delay collapsed after the stop'
+        monitor.feed(b'music')
+    assert monitor.started and played
+    buffered = monitor.buffered
+    light.on_sound_stop()
+    await hold_silence(light, clock)
+    await queue.drain()
+    assert monitor.buffered == buffered
+    monitor.feed(b'silence')
+    assert played[-1] == b'music'

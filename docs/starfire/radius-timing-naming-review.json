@@ -1,0 +1,77 @@
+{
+  "scope": "Two timing contracts in Rust Radius; routine locals and established protocol message names excluded.",
+  "method": "Fresh readers with fork_turns=none, reasoning_effort=low, exact names only, explicit no-tools instruction; no repository access used.",
+  "concepts": [
+    {
+      "concept": "Completion time of an assembled delayed audio block",
+      "implementation": "radius/src/audio.rs:25,286 records monotonic Instant immediately before admitting a complete delayed block to the capture queue. radius/src/tx.rs:276 selects the lighting state that existed at this time, preserving association when TCP is backpressured.",
+      "attempts": [
+        {
+          "names": [
+            "AudioBlock",
+            "captured_at"
+          ],
+          "reader": "/root/radius_protocol_patterns/capture_time_blind",
+          "prediction": "- `AudioBlock`: A chunk of audio data, likely containing consecutive samples and possibly format metadata. “Block” does not specify duration, sample layout, or whether the data is encoded.\n- `captured_at`: The timestamp when something was captured. Unclear whether it marks capture start, capture completion, or receipt by software; also unclear whether it uses wall-clock or monotonic time and what units apply.",
+          "comparison": "Unclear: capture time can be mistaken for the original hardware sample time, preceding the analysis delay. The implementation records completed assembly.",
+          "rename": "assembled_at"
+        },
+        {
+          "names": [
+            "AudioBlock",
+            "assembled_at"
+          ],
+          "reader": "/root/radius_protocol_patterns/assembled_time_blind",
+          "prediction": "- `AudioBlock`: A bounded chunk of audio data, possibly samples plus metadata such as format or timing. “Block” could also mean a processing component rather than data; the name does not establish duration or representation.\n- `assembled_at`: A timestamp recording when something was assembled from constituent parts. It is unclear what was assembled, whether this marks assembly start or completion, and which clock, timezone, or units apply.",
+          "comparison": "Improved event identity, but completion remained ambiguous.",
+          "rename": "assembly_completed_at"
+        },
+        {
+          "names": [
+            "AudioBlock",
+            "assembly_completed_at"
+          ],
+          "reader": "/root/radius_protocol_patterns/assembly_completion_blind",
+          "prediction": "- `AudioBlock`: A discrete chunk of audio data, likely samples plus metadata such as sample rate or channel count. “Block” could also mean a processing component or UI element; the name alone does not distinguish these.\n- `assembly_completed_at`: A timestamp recording when an assembly process finished. It is unclear what was assembled and whether completion means successful assembly or merely termination. The time representation and clock are unspecified.",
+          "comparison": "Aligned on the distinguishing event: assembly has finished. AudioBlock supplies the containing object; Rust Instant supplies monotonic time rather than a wall-clock/timezone value.",
+          "rename": null
+        }
+      ],
+      "disposition": "aligned; Instant representation is a conventional type-context exception"
+    },
+    {
+      "concept": "Snapshot of the audible source position",
+      "implementation": "radius/src/audio.rs:367,395 publishes the source stereo-frame index at the output-device audible position, accounting for device latency. position_valid distinguishes known source position (including zero) from startup/rebuffer silence or an unavailable atomic snapshot. callback_age is Option<Duration> since callback invocation; device_latency_frames is output-device delay.",
+      "attempts": [
+        {
+          "names": [
+            "AudibleSnapshot",
+            "sample_position",
+            "position_valid",
+            "callback_age",
+            "device_latency_frames"
+          ],
+          "reader": "/root/radius_protocol_patterns/audible_position_blind",
+          "prediction": "- `AudibleSnapshot`: A captured state of something currently audible. Unclear whether it represents measured output, predicted playback, or merely sound-producing state.\n- `sample_position`: A position expressed in audio samples, or the position of a sampled item. Origin and whether it counts individual channel samples or frames are unclear.\n- `position_valid`: Whether the associated position is usable. Could mean present, within bounds, fresh, or accurately determined.\n- `callback_age`: Time elapsed since a callback last occurred. Units and whether measured from invocation or completion are unclear.\n- `device_latency_frames`: Device latency expressed in frames. Likely a delay between submission and output, but “device” and “frames” could refer to audio or video; whether it includes buffering is unspecified.\n\nTogether, these names suggest a snapshot estimating an audible playback position using callback timing and device delay. They do not establish the position’s reference point or validity criteria.",
+          "comparison": "The overall clock relationship is understood; samples versus stereo frames is a material ambiguity.",
+          "rename": "sample_position -> audio_frame_position across AudioBlock, LightingUpdate and AudibleSnapshot"
+        },
+        {
+          "names": [
+            "AudibleSnapshot",
+            "audio_frame_position",
+            "position_valid",
+            "callback_age",
+            "device_latency_frames"
+          ],
+          "reader": "/root/radius_protocol_patterns/audible_frame_blind",
+          "prediction": "- `AudibleSnapshot`: A captured state of something currently audible. Unclear whether it contains sound samples, playback state, or measurements, and whether “audible” means physically heard or merely eligible for playback.\n- `audio_frame_position`: A position measured in audio frames. The origin and reference point are unclear: recording start, stream start, playback cursor, or output device position.\n- `position_valid`: Whether an associated position can be trusted or used. It does not say which position or what makes it valid.\n- `callback_age`: Time elapsed since a callback, probably its most recent invocation. Units and whether timing starts at invocation or completion are unclear.\n- `device_latency_frames`: Device delay expressed in frames. Likely audio frames, but input versus output latency and which buffering stages are included remain unclear.",
+          "comparison": "Frame units are now explicit and match the existing wire field. The reader still needs type/contract context for run origin and validity criteria; this is not recorded as a full blind pass.",
+          "rename": null
+        }
+      ],
+      "disposition": "contextual exception after unit clarification: audio_frame_position follows the established run-relative protocol contract; Rust Duration defines age units and field documentation defines validity. Remaining context dependence retained explicitly; review capped rather than expanding names indefinitely."
+    }
+  ],
+  "checks": "Starfire 133 tests and Radius 37 tests pass; strict Clippy passes for both crates. Shared release build passes."
+}

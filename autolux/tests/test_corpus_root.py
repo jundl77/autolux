@@ -59,6 +59,16 @@ def test_the_environment_override_outranks_both(linked, monkeypatch, tmp_path):
     assert corpus_root.corpus_dir() == elsewhere
 
 
+def test_training_entrypoints_use_the_configured_corpus(linked, monkeypatch, tmp_path):
+    from build_training_table import default_data_dir
+
+    _main, shared_corpus, _linked_root = linked
+    assert default_data_dir() == shared_corpus
+    elsewhere = tmp_path / "training-assets"
+    monkeypatch.setenv(corpus_root.DATA_DIR_ENV, str(elsewhere))
+    assert default_data_dir() == elsewhere
+
+
 def test_no_corpus_anywhere_still_names_this_checkout(tmp_path, monkeypatch):
     linked_root = _worktree(tmp_path, "linked")
     monkeypatch.delenv(corpus_root.DATA_DIR_ENV, raising=False)

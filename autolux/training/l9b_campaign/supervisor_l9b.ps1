@@ -7,8 +7,14 @@ $Repo     = (Resolve-Path (Join-Path $PSScriptRoot "../../..")).Path
 $Data     = "$Repo\autolux\training\data\raveform"
 $Camp     = "$Data\models\l9b_campaign"
 $Scripts  = "$Repo\autolux\training\l9b_campaign"
-$TreePB   = "C:\Users\Julian\Projects\soundswitch-phase-b-worktree"
-$PyExp    = "C:\Users\Julian\Projects\soundswitch-exp-ceiling-worktree\.venv\Scripts\python.exe"
+$TreePB   = $env:AUTOLUX_PHASE_B_CHECKOUT
+$PyExp    = $env:AUTOLUX_EXPERIMENT_PYTHON
+if (-not $TreePB -or -not (Test-Path -LiteralPath (Join-Path $TreePB "training/nn") -PathType Container)) {
+    throw "Set AUTOLUX_PHASE_B_CHECKOUT to the required experiment checkout containing training/nn."
+}
+if (-not $PyExp -or -not (Test-Path -LiteralPath $PyExp -PathType Leaf)) {
+    throw "Set AUTOLUX_EXPERIMENT_PYTHON to the experiment Python executable."
+}
 $PyMain   = "$Repo\.venv\Scripts\python.exe"
 $FeatDir  = "$Data\features_stream\MERT-v1-330M_L6-22_F3_hop1"
 $Stamp    = Get-Date -Format "yyyyMMdd-HHmmss"

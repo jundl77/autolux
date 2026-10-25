@@ -1,0 +1,17 @@
+{
+  "peer_address": "192.168.178.245",
+  "bus_port": 19002,
+  "sample_rate": 44100,
+  "run_id": 1,
+  "network_core": 0,
+  "render_core": 2,
+  "dmx_universe": 0,
+  "audio_device_id": "{0.0.1.00000000}.{d81e9c3d-c36d-4eef-ae2b-4f1ab90a5749}",
+  "playback_delay_seconds": 14.0,
+  "audio_enabled": true,
+  "receiver": {
+    "audio_enabled": true,
+    "lighting_enabled": true,
+    "jitter_buffer_ms": 500
+  }
+}

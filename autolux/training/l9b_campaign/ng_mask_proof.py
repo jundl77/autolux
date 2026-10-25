@@ -35,14 +35,15 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-PHASE_B = Path(r"C:\Users\Julian\Projects\soundswitch-phase-b-worktree")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import module_source
+
+PHASE_B = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
 DATA = Path(__file__).resolve().parents[1] / "data" / "raveform"
 CAMP = DATA / "models" / "l9b_campaign"
 
 sys.path.insert(0, str(PHASE_B))
 sys.path.append(str(Path(__file__).resolve().parents[1]))
-
-import module_source  # noqa: E402
 
 # ``ceiling`` exists only in the phase-B checkout, so the rest of training.nn
 # must come from beside it rather than from whichever copy an import reached

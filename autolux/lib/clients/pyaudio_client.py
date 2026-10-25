@@ -95,7 +95,16 @@ class PyAudioClient:
 
     def read(self) -> np.ndarray:
         assert self.stream_in is not None, "stream_in was None"
-        audio_buffer = self.stream_in.read(self.buffer_size, exception_on_overflow=False)
+        try:
+            audio_buffer = self.stream_in.read(self.buffer_size, exception_on_overflow=False)
+        except OSError as error:
+            if error.errno != pyaudio.paUnanticipatedHostError:
+                raise
+            raise RuntimeError(
+                'Audio capture failed: the Windows input stream became unavailable. '
+                'An RDP session change or device reconfiguration can cause this; '
+                'restart Autolux after the session and audio device are stable.'
+            ) from error
         return np.fromstring(audio_buffer, dtype=np.float32)
 
     def play(self, audio_buffer: np.ndarray) -> None:

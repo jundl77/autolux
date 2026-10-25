@@ -1,0 +1,49 @@
+{
+  "concept": "Normalized measured RMS input, independent of final master brightness",
+  "implementation": "autolux/lib/clients/starfire_client.py:8-26 maps smoothed RMS amplitude via20*log10 into -48..-12dBFS, clamped0..1; Starfire Engine receives this value without multiplying master, exposes it to RenderContext, bundledLua uses0.65+0.35*value as baseline modulation. Command field18 preserves exact protobuf wire identity.",
+  "attempts": [
+    {
+      "reader": "/root/blind_starfire_energy",
+      "isolation": "fork_turns=none, low reasoning, names only, no tools",
+      "names": [
+        "SetMusicEnergy",
+        "music_energy",
+        "music_energy_from_rms",
+        "MUSIC_ENERGY_FLOOR_DBFS",
+        "MUSIC_ENERGY_CEILING_DBFS"
+      ],
+      "prediction": "- `SetMusicEnergy`: Sets a quantity representing music intensity or energy. Unclear whether it accepts a normalized score, raw measurement, or decibel value.\n- `music_energy`: A music intensity measurement or score. Its units, range, and definition are unspecified; “energy” could mean physical signal energy or perceived intensity.\n- `music_energy_from_rms`: Converts a root mean square (RMS) measurement into the music energy quantity. Likely a computed score, but the name leaves input units, normalization, and mapping unspecified.\n- `MUSIC_ENERGY_FLOOR_DBFS`: Lower threshold for music energy expressed in decibels relative to full scale (dBFS). Could be a noise cutoff, normalization endpoint, or minimum allowed value.\n- `MUSIC_ENERGY_CEILING_DBFS`: Upper threshold in dBFS. Could be a normalization endpoint, clipping threshold, or maximum allowed value.\n\nTogether, these names suggest an RMS-derived intensity score mapped between lower and upper dBFS thresholds. The main ambiguity is whether `music_energy` denotes that normalized score or the underlying signal measurement.",
+      "comparison": "Unclear: measurement/normalization can be mistaken for perceptual intensity.",
+      "rename": "SetNormalizedAudioLevel / normalized_audio_level / normalized_audio_level_from_rms / AUDIO_LEVEL_FLOOR_DBFS / AUDIO_LEVEL_CEILING_DBFS"
+    },
+    {
+      "reader": "/root/blind_starfire_audio_level",
+      "isolation": "fork_turns=none, low reasoning, names only, no tools",
+      "names": [
+        "SetNormalizedAudioLevel",
+        "normalized_audio_level",
+        "normalized_audio_level_from_rms",
+        "AUDIO_LEVEL_FLOOR_DBFS",
+        "AUDIO_LEVEL_CEILING_DBFS"
+      ],
+      "prediction": "- `SetNormalizedAudioLevel`: Sets an audio level represented on a normalized scale, probably 0–1. Unclear whether it sets playback volume, a measured signal level, or a displayed value.\n- `normalized_audio_level`: An audio level mapped to a standard range, probably 0–1. The range, mapping curve, and reference level are unspecified.\n- `normalized_audio_level_from_rms`: Converts root mean square (RMS) signal amplitude into a normalized audio level. Likely applies scaling or a logarithmic conversion; names alone do not establish which.\n- `AUDIO_LEVEL_FLOOR_DBFS`: Lower bound for audio level, measured in decibels relative to full scale (dBFS). Could be a clipping threshold, noise floor, or lower endpoint of normalization.\n- `AUDIO_LEVEL_CEILING_DBFS`: Upper bound in dBFS. Could be a limiter threshold or upper endpoint of normalization.\n\nTogether, these suggest mapping RMS amplitude through a dBFS interval into a normalized level. The main remaining ambiguity is whether values outside that interval are clamped and whether the resulting scale represents measurement or volume control.",
+      "comparison": "Unclear: normalized signal measurement still confused with playback volume.",
+      "rename": "SetNormalizedRmsLevel / normalized_rms_level / rms_to_normalized_level / RMS_LEVEL_FLOOR_DBFS / RMS_LEVEL_CEILING_DBFS"
+    },
+    {
+      "reader": "/root/blind_starfire_rms_level",
+      "isolation": "fork_turns=none, low reasoning, names only, no tools",
+      "names": [
+        "SetNormalizedRmsLevel",
+        "normalized_rms_level",
+        "rms_to_normalized_level",
+        "RMS_LEVEL_FLOOR_DBFS",
+        "RMS_LEVEL_CEILING_DBFS"
+      ],
+      "prediction": "- `SetNormalizedRmsLevel`: Sets an RMS measurement expressed on a normalized scale, probably 0–1. Unclear whether it accepts an already normalized value or performs normalization itself.\n- `normalized_rms_level`: An RMS measurement mapped to a normalized scale. The range and mapping—linear, logarithmic, or otherwise—are unspecified.\n- `rms_to_normalized_level`: Converts an RMS measurement to a normalized level. Input units and reference, output range, and handling of out-of-range values are unclear.\n- `RMS_LEVEL_FLOOR_DBFS`: Lower reference or cutoff for RMS level, in decibels relative to full scale. “Floor” could mean a normalization endpoint, a clamp, or a noise threshold.\n- `RMS_LEVEL_CEILING_DBFS`: Upper reference or limit for RMS level in the same units. Could be a normalization endpoint or a hard cap.\n\n`RMS` conventionally means root mean square; `DBFS` means decibels relative to full scale. Together, the names suggest mapping an RMS measurement through a decibel interval to a normalized level, but do not establish the exact conversion or clamping behavior.",
+      "comparison": "Aligned on distinguishing concept: normalized RMS measurement and conversion, not perceived intensity or volume. Exact range/clamping/formula remain documented constraints; those numerical details are not expected to be encoded in identifiers.",
+      "rename": null
+    }
+  ],
+  "disposition": "Aligned for the selected domain concept. RMS/dBFS are conventional measurement abbreviations. Bounded review closed after three attempts."
+}

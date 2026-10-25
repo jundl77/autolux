@@ -79,7 +79,7 @@ def test_a_song_outlasting_the_storage_window_still_knows_where_it_started():
 
 
 def test_the_sound_events_are_never_windowed():
-    buffer, clock = _ui_session(minutes=20.0)
+    buffer, _clock = _ui_session(minutes=20.0)
     assert buffer.snapshot()['sound_events'][0]['t'] == 0.0
 
 
@@ -164,7 +164,7 @@ def test_infinite_window_keeps_old_events():
     report = buf.to_report()
     assert [e['intent'] for e in report['intents']] == ['GROOVE', 'DROP']
     assert report['intents'][0]['t'] == 0.0
-    assert [e['channel'] for e in report['effects']] == ['CH_A', 'CH_B']
+    assert [e['name'] for e in report['effects']] == ['CH_A', 'CH_B']
 
 
 def test_mark_end_freezes_timeline():
@@ -199,9 +199,9 @@ def test_default_window_prunes_old_effects():
     clock.advance(500.0)
     buf.add_effect('CH_C', 'AUTOLOOP')
     report = buf.to_report()
-    channels = [e['channel'] for e in report['effects']]
-    assert 'CH_A' not in channels
-    assert 'CH_B' in channels and 'CH_C' in channels
+    names = [e['name'] for e in report['effects']]
+    assert 'CH_A' not in names
+    assert 'CH_B' in names and 'CH_C' in names
 
 
 def test_a_beat_row_carries_only_what_the_pipeline_still_measures():
@@ -210,7 +210,7 @@ def test_a_beat_row_carries_only_what_the_pipeline_still_measures():
     buf.start()
     buf.add_beat(128.0, False, rms=0.42)
     beat = buf.to_report()['beats'][0]
-    assert set(beat) == {'t', 'bpm', 'strength', 'change', 'rms'}
+    assert set(beat) == {'t', 'bpm', 'change', 'rms'}
     assert beat['rms'] == pytest.approx(0.42)
 
 
@@ -221,7 +221,6 @@ def test_add_beat_defaults_are_neutral():
     buf.add_beat(128.0, False)
     beat = buf.to_report()['beats'][0]
     assert beat['rms'] == 0.0
-    assert beat['strength'] == 0.0
 
 
 def test_report_records_look_ahead_offset():
@@ -230,6 +229,25 @@ def test_report_records_look_ahead_offset():
     buf.start()
     buf.add_beat(128.0, False)
     assert buf.to_report()['metrics']['look_ahead_sec'] == pytest.approx(2.5)
+
+
+def test_brief_accent_preserves_the_active_autoloop_and_reports_its_lifetime():
+    clock = VirtualClock()
+    buffer = EventBuffer(clock=clock)
+    buffer.start()
+    buffer.add_effect('drop/blue_impact', 'AUTOLOOP')
+    buffer.add_effect('drop_arrival', 'ACCENT', duration_seconds=1.0)
+    clock.advance(10.0)
+    assert buffer.snapshot()['current_effect']['name'] == 'drop/blue_impact'
+    effects = buffer.to_report()['effects']
+    assert [(effect['name'], effect['end']) for effect in effects] == [
+        ('drop/blue_impact', 10.0),
+        ('drop_arrival', 1.0),
+    ]
+    buffer.stop_effects()
+    clock.advance(1.0)
+    assert buffer.snapshot()['current_effect'] is None
+    assert buffer.to_report()['effects'][0]['end'] == 10.0
 
 
 def test_report_look_ahead_defaults_to_zero():
@@ -300,7 +318,7 @@ def test_a_repeat_of_the_same_intent_and_trigger_is_still_one_block():
     assert len(buf.to_report()['intents']) == 1
 
 
-def test_a_stop_banks_the_beats_that_never_reached_the_room():
+def test_source_stop_preserves_beats_waiting_for_room_playback():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     buf.start()
@@ -309,10 +327,11 @@ def test_a_stop_banks_the_beats_that_never_reached_the_room():
         buf.add_beat(bpm=128.0, change=False)
     clock.advance(5.0)
     buf.set_playing(False)
-    assert buf.snapshot()['beats_cut'] == 2
+    assert [beat['t'] for beat in buf.snapshot()['beats']] == [50.0, 55.0]
+    assert [beat['t'] for beat in buf.to_report()['beats']] == [10.0, 50.0, 55.0]
 
 
-def test_the_banked_beats_survive_the_window_they_were_counted_in():
+def test_buffered_beats_remain_in_the_report_after_leaving_the_display_window():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=float('inf'), clock=clock, look_ahead_sec=14.0)
     buf.start()
@@ -321,7 +340,8 @@ def test_the_banked_beats_survive_the_window_they_were_counted_in():
     clock.advance(10.0)
     buf.set_playing(False)
     clock.advance(300.0)
-    assert buf.snapshot()['beats_cut'] == 1
+    assert buf.snapshot()['beats'] == []
+    assert [beat['t'] for beat in buf.to_report()['beats']] == [50.0]
 
 
 def test_the_shed_state_reaches_the_payload_and_stays_out_of_the_report():

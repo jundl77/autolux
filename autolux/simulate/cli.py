@@ -138,7 +138,6 @@ async def _run_file_paced(args):
         audio_client,
         event_buffer,
         threaded=True,
-        silence_monitor=None if monitor is None else monitor.silence,
     )
 
     try:

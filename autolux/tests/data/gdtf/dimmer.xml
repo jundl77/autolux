@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GDTF DataVersion="1.2">
+  <FixtureType Name="Test Dimmer" ShortName="Dimmer" LongName="Test Dimmer" Manufacturer="Autolux" Description="Import test · exact source" FixtureTypeID="85176e68-73d4-4217-9bfd-7791b08b01ef" CanHaveChildren="No">
+    <AttributeDefinitions>
+      <ActivationGroups/>
+      <FeatureGroups><FeatureGroup Name="Dimmer" Pretty="Dimmer"><Feature Name="Dimmer"/></FeatureGroup></FeatureGroups>
+      <Attributes><Attribute Name="Dimmer" Pretty="Dimmer" Feature="Dimmer.Dimmer" PhysicalUnit="Percent"/></Attributes>
+    </AttributeDefinitions>
+    <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
+    <DMXModes>
+      <DMXMode Name="8 bit" Description="One channel" Geometry="Base">
+        <DMXChannels>
+          <DMXChannel DMXBreak="1" Offset="1" InitialFunction="Base_Dimmer.Dimmer.Dimmer" Highlight="None" Geometry="Base">
+            <LogicalChannel Attribute="Dimmer" Snap="No" Master="Grand" MibFade="0" DMXChangeTimeLimit="0">
+              <ChannelFunction Name="Dimmer" Attribute="Dimmer" OriginalAttribute="Dimmer" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100" RealFade="0" RealAcceleration="0"/>
+            </LogicalChannel>
+          </DMXChannel>
+        </DMXChannels>
+      </DMXMode>
+      <DMXMode Name="16 bit" Description="Coarse and fine" Geometry="Base">
+        <DMXChannels>
+          <DMXChannel DMXBreak="1" Offset="1,2" InitialFunction="Base_Dimmer.Dimmer.Dimmer" Highlight="None" Geometry="Base">
+            <LogicalChannel Attribute="Dimmer" Snap="No" Master="Grand" MibFade="0" DMXChangeTimeLimit="0">
+              <ChannelFunction Name="Dimmer" Attribute="Dimmer" OriginalAttribute="Dimmer" DMXFrom="0/2" Default="0/2" PhysicalFrom="0" PhysicalTo="100" RealFade="0" RealAcceleration="0"/>
+            </LogicalChannel>
+          </DMXChannel>
+        </DMXChannels>
+      </DMXMode>
+    </DMXModes>
+  </FixtureType>
+</GDTF>

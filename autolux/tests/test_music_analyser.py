@@ -142,6 +142,31 @@ def test_bpm_is_octave_folded_from_the_beat_stream(analyser):
     assert analyser.get_bpm() == pytest.approx(150.0)
 
 
+@pytest.mark.parametrize('detector_bpm', [64.0, 128.0, 180.0, 256.0])
+async def test_renderer_beat_anchors_and_tempo_have_the_same_units(detector_bpm):
+    from autolux.tests.test_light_engine import engine
+
+    light, _, clock, lighting = engine(queue=False)
+    analyser = _make_analyser(clock, light)
+    analyser.is_playing = True
+    light.set_analyser(analyser)
+    interval = 60.0 / detector_bpm
+    for beat in range(6):
+        clock.advance(interval)
+        await analyser._track_beat([beat * interval], clock.now())
+
+    anchors = [event for event in lighting.events if event['command']['kind'] == 'beat']
+    assert len(anchors) == 4
+    assert analyser.get_bpm() == pytest.approx(MusicAnalyser._fold_bpm(detector_bpm))
+    for previous, current in zip(anchors, anchors[1:]):
+        anchor = previous['command']
+        extrapolated = (
+            anchor['position_beats']
+            + (current['at_seconds'] - previous['at_seconds']) * anchor['bpm'] / 60.0
+        )
+        assert extrapolated == pytest.approx(current['command']['position_beats'])
+
+
 def test_an_unmeasured_bpm_is_not_a_bpm_change(analyser):
     analyser.is_playing = True
     analyser.last_bpm = 128.0
@@ -160,7 +185,7 @@ async def test_no_beat_means_no_note_event(analyser):
     assert await analyser._track_note([], now) is False
 
 
-async def test_a_burst_of_beats_in_one_buffer_cannot_strobe_the_overlay_bar(analyser):
+async def test_a_burst_of_beats_in_one_buffer_emits_one_note_callback(analyser):
     now = analyser._clock.now()
     analyser.last_note_detected = now - datetime.timedelta(seconds=1)
     assert await analyser._track_note([1.0], now) is True
@@ -186,7 +211,48 @@ class _FakeRhythm:
         return self._events(beats=[index / 100.0] if index in self.fire_on else [])
 
 
-async def test_the_overlay_note_event_follows_the_beat_stream():
+@pytest.mark.parametrize('leading_silent_buffers', [0, 90])
+async def test_startup_wait_is_excluded_from_song_time_without_changing_song_boundaries(
+    monkeypatch, leading_silent_buffers
+):
+    monkeypatch.setattr(
+        'autolux.lib.analyser.music_analyser.MadmomRhythm', lambda *_: _FakeRhythm()
+    )
+
+    class _Recorder(_StubHandler):
+        def __init__(self):
+            self.events = []
+            self.index = 0
+
+        def on_sound_start(self):
+            self.events.append((self.index, 'start'))
+
+        def on_sound_stop(self):
+            self.events.append((self.index, 'stop'))
+
+    async def capture(startup_wait):
+        clock = VirtualClock()
+        handler = _Recorder()
+        analyser = _make_analyser(clock, handler)
+        clock.advance(startup_wait)
+        durations = []
+        levels = [0.0] * leading_silent_buffers + [0.2] * 180 + [0.0] * 90 + [0.2] * 180
+        for index, level in enumerate(levels):
+            handler.index = index
+            clock.advance(analyser.buffer_size / analyser.sample_rate)
+            await analyser.analyse(np.full(256, level, dtype=np.float32))
+            durations.append(analyser.get_song_current_duration())
+        return handler.events, durations, analyser._rhythm.resets
+
+    immediate = await capture(0.0)
+    delayed = await capture(8.0)
+    assert delayed == immediate
+    events, durations, _ = delayed
+    assert [kind for _, kind in events] == ['start', 'stop', 'start']
+    assert max(durations) < datetime.timedelta(seconds=2)
+
+
+async def test_the_note_event_follows_the_beat_stream():
     class _Recorder(_StubHandler):
         def __init__(self):
             self.beats: list[int] = []
@@ -274,7 +340,7 @@ async def test_the_fifteen_minute_roll_keeps_the_beat_lock():
     assert analyser._rhythm.resets == 0, (
         'the roll re-locked madmom mid-audio; a gained or lost beat rotates the bar grid'
     )
-    assert analyser.beat_count == 2, 'the OS2L beat position re-based mid-song'
+    assert analyser.beat_count == 2, 'the musical beat position re-based mid-song'
     assert list(analyser._beat_stream_times) == bpm_window, 'the BPM window was torn down mid-lock'
 
 
@@ -410,7 +476,7 @@ async def test_debug_clicks_are_mixed_into_the_returned_audio():
     assert on.beat_buffers, 'no beats on 20 s of the anchor track'
     assert clicked_on == on.beat_buffers, 'clicks did not land exactly on the beats'
     assert on.note_buffers == on.beat_buffers, (
-        'the overlay light bar is no longer following the beat stream'
+        'the note callback is no longer following the beat stream'
     )
     assert not clicked_off, 'audio was modified with -d off'
 

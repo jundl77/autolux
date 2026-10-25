@@ -14,16 +14,16 @@ delivery. Counters appear as rates; missing reports and counter resets leave gap
 Analysis and per-command details are under **Analysis & command diagnostics**.
 Link, telemetry and hardware faults appear only when they need attention.
 
-- **No link:** check receiver power, SSH access and UDP 19002. Heartbeats run every
+- **No link:** check receiver power, SSH access and TCP 19002. Heartbeats run every
   ten seconds; missing heartbeats end the session after thirty seconds.
 - **Audio glitches:** capture overruns identify input-device pressure; RX underruns
   identify missing playback data. Lost frames and queue drops distinguish transport
-  trouble from device failures. One startup device underrun is visible separately.
-- **Buffer drift:** the default target is 150 ms to absorb Wi-Fi delivery bursts. Clock correction handles slow
-  device-clock differences; repeated latency recovery indicates sustained stalls.
+  trouble from device failures. Device errors stop the session with an actionable log.
+- **Buffer drift:** the target is 500 ms to absorb Wi-Fi delivery bursts. Clock correction handles slow
+  device-clock differences; repeated rebuffering indicates sustained stalls.
   Audio delivery-gap and signal-peak metrics distinguish delayed packets from silence.
-- **Lighting unavailable:** confirm SoundSwitch Performance Mode, Art-Net output to
-  localhost, the configured universe, and the receiver's Enttec connection.
+- **Lighting unavailable:** inspect the Starfire process log, fixture patch and Lua
+  autoloop, the selected DMX universe, and the receiver's Enttec connection.
 - **Analysis degraded:** inspect the GPU fault and timing panels. Rhythm continues
   while the analysis worker recovers.
 
@@ -45,5 +45,5 @@ Prometheus server if longer-term history is needed. Metrics use seconds, cumulat
 counters and fixed endpoint labels. Stale endpoint data is unavailable, never zero.
 
 `.live/current.json` identifies the latest session. Each session retains generated
-configs, TX output and receiver SSH output. The receiver keeps its own session
+configs, Starfire output (including embedded TX) and receiver SSH output. The receiver keeps its own session
 logs under `%LOCALAPPDATA%\Autolux\runs`. No credentials are stored in the repo.

@@ -10,7 +10,6 @@
 
 ## Global Constraints
 
-- Branch `downbeat_tracking` (create off `eval_pipeline` at its current head) in a NEW worktree `C:\Users\Julian\Projects\soundswitch-downbeat-worktree`. Never commit to master/eval_pipeline; no push until the coordinator says so. Data at the main-repo path as usual.
 - The v2 retrain chain runs concurrently in the eval worktree and OWNS the GPU during its training window — coordinate: your training runs are short (≤10 min); if `nvidia-smi` shows the GPU busy with a training process, wait for it rather than contending.
 - Splits: reuse `splits.json` exactly (train for fitting, val for any tuning, test read ONCE at the end). Eval-set ids/artists excluded already by construction.
 - Determinism, TDD, per-task commits, AGENT.md policy — all as established.

@@ -23,8 +23,12 @@ import json
 import sys
 from pathlib import Path
 
-W = r"C:\Users\Julian\Projects\soundswitch-label9-worktree"
-sys.path[:0] = [W, W + r"\training"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import module_source
+
+W = str(module_source.experiment_checkout("AUTOLUX_LABEL9_CHECKOUT"))
+sys.path[:0] = [W, str(Path(W) / "training")]
+module_source.require_imported_package_under_root("nn", Path(W))
 
 try:
     _kernel32 = ctypes.windll.kernel32

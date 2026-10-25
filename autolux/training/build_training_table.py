@@ -49,7 +49,7 @@ from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE  # noqa: E402
 from autolux.lib.label_space import DROPPED_LABELS, SECTION_LABELS  # noqa: E402
 from autolux.lib.engine.event_buffer import CLASSIFIER_TRIGGER, SILENCE_TRIGGER  # noqa: E402
 
-from corpus_root import default_data_dir  # noqa: E402,F401
+from corpus_root import corpus_dir as default_data_dir  # noqa: E402,F401
 
 TABLE_FILE = "training_table.csv.gz"
 META_FILE = "training_table.meta.json"
@@ -417,6 +417,7 @@ class SimJob(NamedTuple):
     mp3_size: int
     mp3_mtime: float
     keep_cells: bool = False
+    data_dir: str | None = None
 
 
 class SimResult(NamedTuple):
@@ -514,7 +515,9 @@ def simulate_track(job: SimJob) -> SimResult:
         from autolux.simulate.runner import run_fast_simulation
 
         client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, job.mp3_path)
-        _client, event_buffer, command_queue = asyncio.run(run_fast_simulation(client))
+        _client, event_buffer, command_queue = asyncio.run(
+            run_fast_simulation(client, data_dir=job.data_dir)
+        )
         report = event_buffer.to_report(command_queue.get_timing_log())
         _write_json_gz(Path(job.report_path), report_envelope(job, report))
 
@@ -612,7 +615,7 @@ def select_jobs(
     """``(jobs, counts)`` -- which tracks still need simulating, and why."""
     now = time.time()
     preexisting_caches = preexisting_caches or set()
-    sha = pipeline_sha() if sha is None else sha
+    sha = pipeline_sha(data_dir=data_dir) if sha is None else sha
     jobs: list = []
     counts: collections.Counter = collections.Counter()
 
@@ -651,6 +654,7 @@ def select_jobs(
                 mp3_size=stat.st_size,
                 mp3_mtime=stat.st_mtime,
                 keep_cells=keep_cells,
+                data_dir=str(data_dir),
             )
         )
     jobs.sort(key=lambda job: job.track_id)
@@ -849,20 +853,47 @@ def git_sha(repo_root: Path = AUTOLUX_PACKAGE_ROOT) -> str:
     return _git(repo_root, "rev-parse", "HEAD") or "unknown"
 
 
-# .py only: a document beside the code cannot change what the simulation produces.
-_PIPELINE_PATHSPEC = (":(glob)lib/**/*.py", ":(glob)simulate/**/*.py")
+_PIPELINE_SOURCES = (
+    "lib/**/*.py",
+    "simulate/**/*.py",
+    "training/nn/*.py",
+    "training/nn/decoder_config.json",
+)
+_HASH_BLOCK_BYTES = 1024 * 1024
 
 
-def pipeline_sha(repo_root: Path = AUTOLUX_PACKAGE_ROOT) -> str:
-    sha = _git(repo_root, "log", "-1", "--format=%H", "--", *_PIPELINE_PATHSPEC)
-    if not sha:
-        return "unknown"
-    dirty = _git(repo_root, "status", "--porcelain", "--", *_PIPELINE_PATHSPEC)
-    if not dirty:
-        return sha
-    diff = _git(repo_root, "diff", "HEAD", "--", *_PIPELINE_PATHSPEC) or ""
-    digest = hashlib.sha256(f"{dirty}\n{diff}".encode("utf-8")).hexdigest()
-    return f"{sha}+dirty.{digest[:12]}"
+def pipeline_sha(repo_root: Path = AUTOLUX_PACKAGE_ROOT, *, data_dir=None) -> str:
+    """Fingerprint runtime source and active model bytes once per batch, without loading models."""
+    from autolux.lib import section_chain
+    from autolux.lib.analyser import bar_tracker
+
+    root = Path(repo_root)
+    sources = sorted({path for pattern in _PIPELINE_SOURCES for path in root.glob(pattern)})
+    found = section_chain.artifacts(data_dir)
+    tracker = bar_tracker.artifacts(section_chain.generation_dir(data_dir))
+    inputs = [(f'source/{path.relative_to(root).as_posix()}', path) for path in sources]
+    inputs.extend(
+        (
+            ('model/affine', found.affine),
+            ('model/graph', found.graph),
+            ('model/graph_geometry', Path(str(found.graph) + '.json')),
+            ('model/priors', found.priors),
+            ('model/bar_tracker', tracker.checkpoint),
+            ('model/bar_tracker_record', tracker.record),
+        )
+    )
+    digest = hashlib.sha256()
+    for name, path in inputs:
+        digest.update(name.encode('utf-8') + b'\0')
+        if not path.exists():
+            digest.update(b'missing\0')
+            continue
+        content = hashlib.sha256()
+        with path.open('rb') as handle:
+            for block in iter(lambda: handle.read(_HASH_BLOCK_BYTES), b''):
+                content.update(block)
+        digest.update(content.digest())
+    return digest.hexdigest()
 
 
 def sidecar_stats(data_dir: Path) -> tuple:
@@ -885,7 +916,7 @@ def write_meta(
     meta = {
         "built_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
         "git_sha": git_sha(),
-        "pipeline_sha": pipeline_sha() if sha is None else sha,
+        "pipeline_sha": pipeline_sha(data_dir=data_dir) if sha is None else sha,
         "report_cache": dict(sorted((cache_counts or {}).items())),
         "build_wall_sec": round(elapsed_sec, 1),
         "schema": list(TABLE_HEADER),
@@ -1091,11 +1122,11 @@ def main(argv: list | None = None) -> int:
 
     data_dir = args.data_dir.resolve()
     started = time.time()
-    sha = pipeline_sha()
+    sha = pipeline_sha(data_dir=data_dir)
     print("label-aligned training table")
     print(f"data dir : {data_dir}")
     print(f"repo     : {git_sha()}")
-    print(f"pipeline : {sha}  (lib/ + simulate/ -- the report cache key)")
+    print(f"pipeline : {sha}  (runtime source + model contents -- the report cache key)")
 
     rows = load_ok_rows(data_dir)
     sections_by_track = load_sections_by_track(data_dir)

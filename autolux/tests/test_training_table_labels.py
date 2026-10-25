@@ -804,24 +804,25 @@ def staged_repo(tmp_path: Path) -> str:
     (tmp_path / "lib" / "AGENT.md").write_text("docs\n", encoding="utf-8")
     git("add", "-A")
     git("commit", "-qm", "init")
-    return pipeline_sha(tmp_path)
+    return pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
 
 
 def test_pipeline_sha_ignores_documentation_beside_the_code(tmp_path):
     baseline = staged_repo(tmp_path)
 
     (tmp_path / "lib" / "AGENT.md").write_text("docs, revised\n", encoding="utf-8")
-    assert pipeline_sha(tmp_path) == baseline
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') == baseline
 
     (tmp_path / "lib" / "engine.py").write_text("x = 2\n", encoding="utf-8")
-    assert pipeline_sha(tmp_path).startswith(f"{baseline}+dirty")
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') != baseline
 
 
-def test_a_committed_tree_keys_on_the_bare_commit_sha(tmp_path):
+def test_pipeline_identity_is_a_content_digest(tmp_path):
     baseline = staged_repo(tmp_path)
 
-    assert pipeline_sha(tmp_path) == baseline
-    assert "+" not in baseline
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') == baseline
+    assert len(baseline) == 64
+    assert int(baseline, 16) >= 0
 
 
 def test_two_different_uncommitted_edits_get_two_different_keys(tmp_path):
@@ -829,12 +830,12 @@ def test_two_different_uncommitted_edits_get_two_different_keys(tmp_path):
     source = tmp_path / "lib" / "engine.py"
 
     source.write_text("x = 2\n", encoding="utf-8")
-    first = pipeline_sha(tmp_path)
+    first = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
     source.write_text("x = 3\n", encoding="utf-8")
-    second = pipeline_sha(tmp_path)
+    second = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
 
     assert first != second
-    assert "+dirty" in first and "+dirty" in second
+    assert len(first) == len(second) == 64
 
 
 def test_pipeline_hash_reads_unicode_git_diffs_without_system_locale(tmp_path, monkeypatch):
@@ -846,9 +847,9 @@ def test_pipeline_hash_reads_unicode_git_diffs_without_system_locale(tmp_path, m
     source = tmp_path / "lib" / "engine.py"
     source.write_text('label = "停止 → 音声"\n', encoding="utf-8")
     assert "停止 → 音声" in _git(tmp_path, "diff", "HEAD")
-    first = pipeline_sha(tmp_path)
+    first = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
     source.write_text('label = "停止 → 照明"\n', encoding="utf-8")
-    assert pipeline_sha(tmp_path) != first
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') != first
 
 
 def test_the_dirty_key_returns_when_the_edit_does(tmp_path):
@@ -856,11 +857,11 @@ def test_the_dirty_key_returns_when_the_edit_does(tmp_path):
     source = tmp_path / "lib" / "engine.py"
 
     source.write_text("x = 2\n", encoding="utf-8")
-    edited = pipeline_sha(tmp_path)
+    edited = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
     source.write_text("x = 3\n", encoding="utf-8")
     source.write_text("x = 2\n", encoding="utf-8")
 
-    assert pipeline_sha(tmp_path) == edited
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') == edited
 
 
 def test_an_untracked_pipeline_source_moves_the_key(tmp_path):
@@ -868,8 +869,125 @@ def test_an_untracked_pipeline_source_moves_the_key(tmp_path):
 
     (tmp_path / "lib" / "extra.py").write_text("y = 1\n", encoding="utf-8")
 
-    assert pipeline_sha(tmp_path) not in (baseline, "unknown")
-    assert pipeline_sha(tmp_path).startswith(f"{baseline}+dirty")
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') not in (baseline, "unknown")
+    assert pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus') != baseline
+
+
+def test_edits_to_an_untracked_source_invalidate_cached_reports(tmp_path):
+    staged_repo(tmp_path)
+    source = tmp_path / 'lib/extra.py'
+    source.write_text('value = 1\n', encoding='utf-8')
+    before = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
+    cached = {**FRESH, 'pipeline_sha': before}
+    source.write_text('value = 2\n', encoding='utf-8')
+    after = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
+    assert not cache_is_fresh(cached, after, FRESH['mp3_size'], FRESH['mp3_mtime'])
+
+
+@pytest.mark.parametrize('dependency', ['decoder.py', 'priors.py', 'decoder_config.json'])
+def test_shared_decoder_changes_invalidate_cached_reports(tmp_path, dependency):
+    staged_repo(tmp_path)
+    path = tmp_path / 'training/nn' / dependency
+    path.parent.mkdir(parents=True)
+    path.write_text('1', encoding='utf-8')
+    before = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
+    cached = {**FRESH, 'pipeline_sha': before}
+    path.write_text('2', encoding='utf-8')
+    after = pipeline_sha(tmp_path, data_dir=tmp_path / 'corpus')
+    assert not cache_is_fresh(cached, after, FRESH['mp3_size'], FRESH['mp3_mtime'])
+
+
+@pytest.mark.parametrize(
+    'dependency', ['affine', 'graph', 'graph_geometry', 'priors', 'tracker', 'tracker_record']
+)
+def test_same_path_model_changes_invalidate_cached_reports(tmp_path, dependency):
+    from autolux.lib import section_chain
+    from autolux.lib.analyser import bar_tracker
+
+    corpus = tmp_path / 'corpus'
+    found = section_chain.artifacts(corpus)
+    tracker = bar_tracker.artifacts(section_chain.generation_dir(corpus))
+    paths = {
+        'affine': found.affine,
+        'graph': found.graph,
+        'graph_geometry': Path(str(found.graph) + '.json'),
+        'priors': found.priors,
+        'tracker': tracker.checkpoint,
+        'tracker_record': tracker.record,
+    }
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('1', encoding='utf-8')
+    tracker.record.write_text('{"checkpoint": "checkpoint.ckpt", "sha256": "1"}', encoding='utf-8')
+    before = pipeline_sha(tmp_path, data_dir=corpus)
+    cached = {**FRESH, 'pipeline_sha': before}
+    paths[dependency].write_text(
+        '{"checkpoint": "checkpoint.ckpt", "sha256": "2"}'
+        if dependency == 'tracker_record'
+        else '2',
+        encoding='utf-8',
+    )
+    after = pipeline_sha(tmp_path, data_dir=corpus)
+    assert not cache_is_fresh(cached, after, FRESH['mp3_size'], FRESH['mp3_mtime'])
+
+
+def test_training_job_hash_and_simulation_use_the_selected_model_root(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from autolux.lib import section_chain
+    from autolux.simulate import runner
+    import build_training_table as training
+
+    rows = stage_track(tmp_path, cached=False)
+    for path in section_chain.artifacts(tmp_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'model')
+    jobs, _ = select_jobs(rows, tmp_path, min_age_sec=0)
+    assert jobs[0].pipeline_sha == pipeline_sha(data_dir=tmp_path)
+    loaded = []
+
+    def build(*, data_dir):
+        loaded.append(data_dir)
+        return SimpleNamespace(stream=Mock(), decoder=Mock())
+
+    async def simulate(client, *, data_dir):
+        runner.load_section_chain(data_dir=data_dir)
+        return (
+            client,
+            SimpleNamespace(to_report=lambda _: {}),
+            SimpleNamespace(get_timing_log=lambda: []),
+        )
+
+    monkeypatch.setattr(runner, '_SECTION_CHAIN', runner._UNBUILT)
+    monkeypatch.setattr(runner, '_SECTION_CHAIN_DATA_DIR', None)
+    monkeypatch.setattr(section_chain, 'build_section_chain', build)
+    monkeypatch.setattr(runner, 'run_fast_simulation', simulate)
+    monkeypatch.setattr(training, '_release_track_memory', lambda: None)
+    result = training.simulate_track(jobs[0])
+    assert result.ok, result.detail
+    assert loaded == [tmp_path.resolve()]
+
+
+def test_reused_simulation_model_is_rebuilt_when_the_corpus_changes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from autolux.lib import section_chain
+    from autolux.simulate import runner
+
+    loaded = []
+
+    def build(*, data_dir):
+        loaded.append(data_dir)
+        return SimpleNamespace(stream=Mock(), decoder=Mock())
+
+    monkeypatch.setattr(runner, '_SECTION_CHAIN', runner._UNBUILT)
+    monkeypatch.setattr(runner, '_SECTION_CHAIN_DATA_DIR', None)
+    monkeypatch.setattr(section_chain, 'artifacts_present', lambda _: True)
+    monkeypatch.setattr(section_chain, 'build_section_chain', build)
+    first = runner.load_section_chain(data_dir=tmp_path / 'first')
+    assert runner.load_section_chain(data_dir=tmp_path / 'first') is first
+    assert runner.load_section_chain(data_dir=tmp_path / 'second') is not first
+    assert loaded == [(tmp_path / name).resolve() for name in ('first', 'second')]
 
 
 def test_cached_reports_are_byte_identical_when_rewritten(tmp_path):

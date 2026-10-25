@@ -56,11 +56,6 @@ if _absent:
         f"the shipped generation {SHIPPED} is not on this machine: "
         f"{_absent} -- there is nothing to mirror"
     )
-PHASE_B = Path(r"C:\Users\Julian\Projects\soundswitch-phase-b-worktree")
-CEILING_PY = Path(
-    r"C:\Users\Julian\Projects\soundswitch-exp-ceiling-worktree"
-    r"\.venv\Scripts\python.exe"
-)
 ANCHOR_TRACK = MAIN / "training" / "eval_audio" / "0yMOLeJRKr.mp3"
 
 # annotation id per track key; audio is DATA/audio/<id>.mp3 either way.
@@ -208,6 +203,8 @@ def build_shadow(chain: str) -> Path:
 
 
 def export_arm(chain: str, run: str) -> None:
+    phase_b = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
+    interpreter = module_source.experiment_python()
     root = shadow_root(chain)
     out = root / "models" / GENERATION / MODEL_VERSION / "online_step.onnx"
     checkpoint = CAMP / run / "best.pt"
@@ -217,7 +214,7 @@ def export_arm(chain: str, run: str) -> None:
     env = dict(os.environ, CUDA_VISIBLE_DEVICES="")
     proc = subprocess.run(
         [
-            str(CEILING_PY),
+            str(interpreter),
             "-m",
             "training.nn.ceiling.online_export",
             "export",
@@ -226,7 +223,7 @@ def export_arm(chain: str, run: str) -> None:
             "--out",
             str(out),
         ],
-        cwd=str(PHASE_B),
+        cwd=str(phase_b),
         env=env,
     )
     if proc.returncode != 0:

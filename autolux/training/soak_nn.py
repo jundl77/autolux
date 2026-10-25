@@ -275,25 +275,38 @@ def boundary_verdict(boundaries: list, transitions: list, window_sec: float = 30
 
 async def _soak(args) -> dict:
     from autolux.lib.main import PLAYBACK_DELAY_SEC, AutoluxController
+    from autolux.lib.clients.starfire_client import StarfireClient
+    from cli.starfire import ROOT
+    from cli.starfire_runtime import StarfireRuntime, selected_rig
+    import secrets
+    import uuid
 
-    app = AutoluxController(
-        midi_port_index=args.midi_port,
-        input_device_index=args.input_device,
-        disable_os2l=args.no_os2l,
-        ui_port=args.ui_port,
-        report_path=args.report,
-    )
-    timing = _instrument(app)
-    sampler = Sampler(app, args.minutes)
-    sampler.start()
-    await app.run()
+    with StarfireRuntime(
+        args.starfire_binary,
+        selected_rig(args.rig),
+        args.autoloops,
+        args.artnet,
+        ROOT / '.live' / 'starfire' / f'soak-{uuid.uuid4().hex}',
+        run_id=secrets.randbits(64) or 1,
+        profiles=args.profiles,
+    ) as renderer:
+        app = AutoluxController(
+            lighting_client=StarfireClient(renderer.send_command),
+            input_device_index=args.input_device,
+            ui_port=args.ui_port,
+            report_path=args.report,
+        )
+        app.health_check = renderer.check_health
+        timing = _instrument(app)
+        sampler = Sampler(app, args.minutes)
+        sampler.start()
+        await app.run()
 
     warm = WARMUP_BUFFERS
     stamps, loop = timing["stamps"][warm:], timing["loop"][warm:]
     record = {
         "minutes": args.minutes,
         "input_device": args.input_device,
-        "midi_port": args.midi_port,
         "playback_delay_sec": PLAYBACK_DELAY_SEC,
         "warmup_buffers_dropped": warm,
         "buffers": len(loop),
@@ -370,15 +383,11 @@ def main(argv: list | None = None) -> int:
     )
 
     soak = sub.add_parser("run", help="the pipeline, sampled, for a fixed time")
-    soak.add_argument("--midi-port", type=int, required=True)
+    from cli.starfire_runtime import add_arguments
+
+    add_arguments(soak, include_artnet=True)
     soak.add_argument("--input-device", type=int, required=True)
     soak.add_argument("--minutes", type=float, default=33.0)
-    soak.add_argument(
-        "--no-os2l",
-        action="store_true",
-        help="required off a rig: Os2lClient.start RAISES after "
-        "10 s when no SoundSwitch answers the zeroconf query",
-    )
     soak.add_argument(
         "--ui-port",
         type=int,

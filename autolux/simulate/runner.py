@@ -3,10 +3,13 @@ import datetime
 import logging
 import random
 import time
+from pathlib import Path
 
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
-from autolux.lib.clock import Clock, SYSTEM_CLOCK, VirtualClock
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.clock import SYSTEM_CLOCK, Clock, VirtualClock
 from autolux.simulate import cell_cache
+
+LOGGER = logging.getLogger(__name__)
 
 TIMING_TOLERANCE_SEC = 0.050
 # Must match lib/main.py's PLAYBACK_DELAY_SEC and the native audio sender's delay.
@@ -20,31 +23,29 @@ def build_simulation(
     clock: Clock = SYSTEM_CLOCK,
     section: object | None = None,
     threaded: bool = False,
-    silence_monitor=None,
+    data_dir=None,
 ):
-    from autolux.simulate.stub_clients import StubMidiClient, StubOs2lClient, StubOverlayClient
     from autolux.lib.analyser.drift_watchdog import DriftWatchdog
+    from autolux.lib.analyser.music_analyser import MusicAnalyser
     from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
     from autolux.lib.engine.effect_controller import EffectController
     from autolux.lib.engine.light_engine import LightEngine
-    from autolux.lib.analyser.music_analyser import MusicAnalyser
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
-    midi_client = StubMidiClient(clock=clock)
-    os2l_client = StubOs2lClient(clock=clock)
-    overlay_client = StubOverlayClient(clock=clock)
+    lighting_client = RecordingStarfireClient(clock=clock)
     command_queue = DelayedCommandQueue(PLAYBACK_DELAY_SEC, clock=clock)
 
     watchdog = None
     if threaded:
         watchdog = DriftWatchdog(BUFFER_SIZE / SAMPLE_RATE, clock=clock)
     if section is None:
-        section = load_section_chain(watchdog=watchdog, audio_client=audio_client)
+        section = load_section_chain(
+            watchdog=watchdog, audio_client=audio_client, data_dir=data_dir
+        )
 
-    effect_controller = EffectController(midi_client, event_buffer=event_buffer)
+    effect_controller = EffectController(lighting_client, event_buffer=event_buffer)
     light_engine = LightEngine(
-        midi_client,
-        os2l_client,
-        overlay_client,
+        lighting_client,
         effect_controller,
         command_queue,
         event_buffer=event_buffer,
@@ -52,7 +53,6 @@ def build_simulation(
         section_chain=None if section is None else section.stream,
         section_decoder=None if section is None else section.decoder,
         watchdog=watchdog,
-        silence_monitor=silence_monitor,
         clock=clock,
     )
 
@@ -63,9 +63,7 @@ def build_simulation(
 
     return {
         'audio_client': audio_client,
-        'midi_client': midi_client,
-        'os2l_client': os2l_client,
-        'overlay_client': overlay_client,
+        'lighting_client': lighting_client,
         'command_queue': command_queue,
         'music_analyser': music_analyser,
         'light_engine': light_engine,
@@ -74,17 +72,18 @@ def build_simulation(
     }, command_queue
 
 
-def load_section_chain(watchdog=None, audio_client=None):
-    global _SECTION_CHAIN
+def load_section_chain(watchdog=None, audio_client=None, data_dir=None):
+    global _SECTION_CHAIN, _SECTION_CHAIN_DATA_DIR
     from autolux.lib import section_chain
 
+    data_dir = Path(data_dir if data_dir is not None else section_chain.corpus_dir()).resolve()
     if watchdog is not None:
-        if not _artifacts_or_degrade():
+        if not _artifacts_or_degrade(data_dir):
             return None
-        return section_chain.build_section_chain(watchdog=watchdog)
+        return section_chain.build_section_chain(data_dir=data_dir, watchdog=watchdog)
 
-    plan = _cell_cache_plan(audio_client)
-    tracker_plan = _tracker_cache_plan(audio_client)
+    plan = _cell_cache_plan(audio_client, data_dir)
+    tracker_plan = _tracker_cache_plan(audio_client, data_dir)
     if plan is not None:
         expected = _expected_samples(audio_client)
         replay, reason = cell_cache.open_replay(*plan, expected_samples=expected)
@@ -100,7 +99,7 @@ def load_section_chain(watchdog=None, audio_client=None):
         # One decision for both caches: a run is warm only when every stage
         # this machine would run can be replayed.
         if replay is not None and (tracker_plan is None or tracker_replay is not None):
-            logging.info(
+            LOGGER.info(
                 f'[sim] replaying cached extractor cells '
                 f'← {plan[0].name}'
                 + (
@@ -110,15 +109,20 @@ def load_section_chain(watchdog=None, audio_client=None):
                 )
             )
             return section_chain.build_section_chain(
-                extractor=lambda _: replay, tracker=tracker_replay
+                data_dir=data_dir, extractor=lambda _: replay, tracker=tracker_replay
             )
-        logging.info(
+        LOGGER.info(
             f'[sim] extractor cells: {reason} / tracker chunks: '
             f'{tracker_reason} — this run needs the GPU'
         )
 
-    if _SECTION_CHAIN is _UNBUILT:
-        _SECTION_CHAIN = section_chain.build_section_chain() if _artifacts_or_degrade() else None
+    if _SECTION_CHAIN is _UNBUILT or _SECTION_CHAIN_DATA_DIR != data_dir:
+        _SECTION_CHAIN = (
+            section_chain.build_section_chain(data_dir=data_dir)
+            if _artifacts_or_degrade(data_dir)
+            else None
+        )
+        _SECTION_CHAIN_DATA_DIR = data_dir
     if _SECTION_CHAIN is None:
         return None
     _SECTION_CHAIN.stream.reset()
@@ -128,12 +132,12 @@ def load_section_chain(watchdog=None, audio_client=None):
     return cell_cache.recording_chain(_SECTION_CHAIN, *plan, tracker_plan=tracker_plan)
 
 
-def _artifacts_or_degrade() -> bool:
+def _artifacts_or_degrade(data_dir=None) -> bool:
     from autolux.lib import section_chain
 
-    if section_chain.artifacts_present():
+    if section_chain.artifacts_present(data_dir):
         return True
-    logging.warning(
+    LOGGER.warning(
         '[sim] no NN artifacts on this machine — running '
         'the degradation state (beats, silence, held intent)'
     )
@@ -147,14 +151,14 @@ def _expected_samples(audio_client):
     return audio_client.total_samples
 
 
-def _cell_cache_plan(audio_client):
+def _cell_cache_plan(audio_client, data_dir=None):
     from autolux.lib import section_chain
 
     path = getattr(audio_client, 'path', None)
     decode = getattr(audio_client, 'decode_path', None)
-    if path is None or decode is None or not section_chain.artifacts_present():
+    if path is None or decode is None or not section_chain.artifacts_present(data_dir):
         return None
-    geometry = section_chain.read_geometry().stream
+    geometry = section_chain.read_geometry(data_dir).stream
     return (
         cell_cache.sidecar_path(path, decode),
         cell_cache.cache_key(
@@ -163,16 +167,16 @@ def _cell_cache_plan(audio_client):
     )
 
 
-def _tracker_cache_plan(audio_client):
+def _tracker_cache_plan(audio_client, data_dir=None):
     from autolux.lib import section_chain
     from autolux.lib.analyser import bar_tracker
     from autolux.simulate import tracker_cache
 
     path = getattr(audio_client, 'path', None)
     decode = getattr(audio_client, 'decode_path', None)
-    if path is None or decode is None or not section_chain.bar_tracker_present():
+    if path is None or decode is None or not section_chain.bar_tracker_present(data_dir):
         return None
-    record = bar_tracker.load_record(section_chain.generation_dir())
+    record = bar_tracker.load_record(section_chain.generation_dir(data_dir))
     return (
         tracker_cache.sidecar_path(path, decode),
         tracker_cache.cache_key(
@@ -183,10 +187,15 @@ def _tracker_cache_plan(audio_client):
 
 _UNBUILT = object()
 _SECTION_CHAIN = _UNBUILT
+_SECTION_CHAIN_DATA_DIR = None
 
 
 async def run_fast_simulation_components(
-    audio_client, duration_sec: float = float('inf'), seed: int = FAST_SIM_RANDOM_SEED
+    audio_client,
+    duration_sec: float = float('inf'),
+    seed: int = FAST_SIM_RANDOM_SEED,
+    *,
+    data_dir=None,
 ):
     from autolux.lib.engine.event_buffer import EventBuffer
 
@@ -195,17 +204,23 @@ async def run_fast_simulation_components(
     event_buffer = EventBuffer(
         window_sec=float('inf'), clock=clock, look_ahead_sec=PLAYBACK_DELAY_SEC
     )
-    components, command_queue = build_simulation(audio_client, event_buffer, clock=clock)
+    components, command_queue = build_simulation(
+        audio_client, event_buffer, clock=clock, data_dir=data_dir
+    )
     event_buffer.start()
     await run_simulation(components, duration_sec, clock=clock)
     return components, command_queue
 
 
 async def run_fast_simulation(
-    audio_client, duration_sec: float = float('inf'), seed: int = FAST_SIM_RANDOM_SEED
+    audio_client,
+    duration_sec: float = float('inf'),
+    seed: int = FAST_SIM_RANDOM_SEED,
+    *,
+    data_dir=None,
 ):
     components, command_queue = await run_fast_simulation_components(
-        audio_client, duration_sec, seed
+        audio_client, duration_sec, seed, data_dir=data_dir
     )
     return components['audio_client'], components['event_buffer'], command_queue
 
@@ -233,7 +248,7 @@ async def run_simulation(
     last_1s = clock.now()
     last_10s = clock.now()
 
-    logging.info(
+    LOGGER.info(
         f'[sim] starting simulation loop for {duration_sec:.1f}s '
         f'({"virtual" if is_virtual else "wall"} time)'
     )
@@ -260,7 +275,6 @@ async def run_simulation(
         if now - last_100ms > datetime.timedelta(milliseconds=100):
             last_100ms = now
             await components['light_engine'].on_100ms_callback()
-            await components['midi_client'].on_100ms_callback()
 
         if now - last_1s > datetime.timedelta(seconds=1):
             last_1s = now
@@ -286,11 +300,16 @@ async def run_simulation(
             if monitor is not None:
                 monitor.drain()
 
+    lighting_client = components.get('lighting_client')
+    if lighting_client is not None:
+        lighting_client.stop()
+    if event_buffer is not None:
+        event_buffer.stop_effects()
     audio_client.close()
     section = components.get('section')
     if section is not None:
         section.stop()
-    logging.info('[sim] simulation complete')
+    LOGGER.info('[sim] simulation complete')
 
 
 def print_timing_report(command_queue, tolerance_sec: float = TIMING_TOLERANCE_SEC):

@@ -22,7 +22,7 @@ DEFAULT_CRITERIA: dict = {
     'unique_effects_count': {
         'min': 2,
         'weight': 0.10,
-        'description': 'Distinct MIDI channels used',
+        'description': 'Distinct lighting autoloops and accents used',
     },
     'effect_changes_count': {
         'min': 1,

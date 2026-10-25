@@ -1,4 +1,3 @@
-import json
 import time
 
 from autolux.lib.engine.event_buffer import EventBuffer
@@ -23,6 +22,7 @@ def healthy():
             'underruns_total': 2,
         },
         'recent': {},
+        'starfire': {'age_seconds': 0.2, 'script_error': ''},
     }
 
 
@@ -31,6 +31,67 @@ def test_old_counters_do_not_make_a_recovered_show_permanently_unhealthy():
     assert health_summary(snapshot)['state'] == 'healthy'
     snapshot['system']['recent'] = {'underruns': 1}
     assert health_summary(snapshot)['state'] == 'degraded'
+
+
+def test_renderer_metrics_use_measured_counts_and_seconds_and_expire():
+    buffer = EventBuffer()
+    state = healthy()
+    state['starfire'].update(
+        rendered_frames=80, skipped_frames=2, queued_commands=1, last_render_ms=2.5
+    )
+    buffer.set_system_health(state)
+    text = metrics(buffer).decode()
+    assert 'starfire_rendered_frames_total 80.0' in text
+    assert 'starfire_skipped_frames_total 2.0' in text
+    assert 'starfire_last_render_duration_seconds 0.0025' in text
+    state['starfire']['age_seconds'] = 31
+    buffer.set_system_health(state)
+    assert health_summary(buffer.snapshot())['state'] == 'degraded'
+    text = metrics(buffer).decode()
+    assert 'starfire_up 0.0' in text
+    assert 'starfire_last_render_duration_seconds' not in text
+
+
+def test_prometheus_renderer_rates_share_dashboard_measurements_and_expire():
+    buffer = EventBuffer()
+    now = time.time()
+    state = healthy()
+    state['sample_timestamp'] = now - 10
+    state['starfire'].update(elapsed_seconds=10, rendered_frames=400, skipped_frames=0)
+    buffer.set_system_health(state)
+    assert 'starfire_measured_render_frames_per_second' not in metrics(buffer).decode()
+    state['sample_timestamp'] = now
+    state['starfire'].update(elapsed_seconds=20, rendered_frames=795, skipped_frames=5)
+    buffer.set_system_health(state)
+    latest = buffer.snapshot()['system_history'][-1]
+    assert latest['starfire_measured_render_frames_per_second'] == 39.5
+    assert latest['starfire_missed_render_deadlines_per_second'] == 0.5
+    text = metrics(buffer).decode()
+    assert 'starfire_measured_render_frames_per_second 39.5' in text
+    assert 'starfire_missed_render_deadlines_per_second 0.5' in text
+    state['starfire']['age_seconds'] = 30
+    buffer.set_system_health(state)
+    assert 'starfire_measured_render_frames_per_second' not in metrics(buffer).decode()
+    assert 'starfire_missed_render_deadlines_per_second' not in metrics(buffer).decode()
+
+
+def test_negative_renderer_age_cannot_be_treated_as_fresh():
+    state = healthy()
+    state['starfire']['age_seconds'] = -1
+    state['starfire']['rendered_frames'] = 800
+    buffer = EventBuffer()
+    buffer.set_system_health(state)
+    assert health_summary(buffer.snapshot())['state'] == 'degraded'
+    assert 'starfire_rendered_frames_total' not in metrics(buffer).decode()
+
+
+def test_script_fault_or_missing_renderer_cannot_look_like_healthy_lighting():
+    for renderer in (None, {'age_seconds': 0.1, 'script_error': 'Lua budget exceeded'}):
+        state = healthy()
+        state['starfire'] = renderer
+        summary = health_summary({'system': state})
+        assert summary['state'] == 'degraded'
+        assert not summary['cards'][4][3]
 
 
 def test_missing_buffer_measurements_do_not_invent_a_zero_or_default_target():

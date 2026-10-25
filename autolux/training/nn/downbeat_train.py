@@ -57,7 +57,7 @@ from .train import (
 )
 
 from build_training_table import default_data_dir  # noqa: E402
-from raveform_fetch_annotations import load_tracks, parse_sections  # noqa: E402
+from raveform_fetch_annotations import load_all_tracks, parse_sections  # noqa: E402
 
 MODEL_VERSION = "downbeat_v1"
 
@@ -340,7 +340,7 @@ def train(config: dict) -> dict:
 
     splits = make_splits(data_dir, write=False)
     track_ids = {ref.youtube_id: ref.track_id for ref in candidate_tracks(data_dir)[0]}
-    sections = {str(track.get("id")): parse_sections(track) for track in load_tracks(data_dir)}
+    sections = {str(track.get("id")): parse_sections(track) for track in load_all_tracks(data_dir)}
     chosen = {
         name: select_smoke_subset(splits[name], track_ids, config["smoke_tracks"])
         for name in ("train", "val")

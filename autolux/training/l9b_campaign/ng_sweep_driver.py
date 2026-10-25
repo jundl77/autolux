@@ -23,8 +23,12 @@ from pathlib import Path
 
 import psutil
 
-W = r"C:\Users\Julian\Projects\soundswitch-label9-worktree"
-sys.path[:0] = [W, W + r"\training"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import module_source
+
+W = str(module_source.experiment_checkout("AUTOLUX_LABEL9_CHECKOUT"))
+sys.path[:0] = [W, str(Path(W) / "training")]
+module_source.require_imported_package_under_root("nn", Path(W))
 
 import nn.sweep as nn_sweep  # noqa: E402
 from nn.decoder import DecodeParams  # noqa: E402

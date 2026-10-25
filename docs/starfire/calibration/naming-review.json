@@ -1,0 +1,28 @@
+{
+  "concept": "One musical-time alignment parameter shared across fixture channels",
+  "implementation": "tools/compare_dmx.py: fit_shared_channel_offset_beats searches bounded beat offsets using all semantic channel groups; it returns one offset without changing captures. compare samples candidate time plus that offset. Fit and evaluation windows are supplied separately.",
+  "attempts": [
+    {
+      "names": [
+        "fit_shared_offset",
+        "candidate_offset_beats"
+      ],
+      "reader": "/root/blind_shared_phase",
+      "isolation": "fresh, no inherited context, low reasoning, no tools",
+      "prediction": "- `fit_shared_offset`: Likely estimates an offset applied to multiple items or datasets. \u201cFit\u201d suggests optimization against observations, but could also mean adjusting values to fit a constraint. \u201cShared\u201d leaves unclear which items share the offset. Units and return value are unspecified.\n- `candidate_offset_beats`: Likely a proposed offset measured in beats. \u201cBeats\u201d could denote musical timing or another counted cycle. It is unclear whether this is one candidate offset or a collection; \u201ccandidate\u201d suggests one, but the plural unit may visually suggest multiple values.",
+      "comparison": "The fit name omitted both channel scope and beat units.",
+      "rename": "fit_shared_channel_offset_beats"
+    },
+    {
+      "names": [
+        "fit_shared_channel_offset_beats",
+        "candidate_offset_beats"
+      ],
+      "reader": "/root/blind_channel_phase",
+      "isolation": "fresh, no inherited context, low reasoning, no tools",
+      "prediction": "- `fit_shared_channel_offset_beats`: Likely estimates or optimizes a common offset, measured in beats, shared across multiple channels. Ambiguities: \u201cfit\u201d could mean estimating a parameter or adjusting data; \u201cshared channel\u201d could mean one shared channel rather than an offset shared by channels. The name does not reveal what reference the offset uses or whether it modifies inputs.\n- `candidate_offset_beats`: A proposed offset measured in beats, presumably awaiting evaluation or selection. Its reference point, sign convention, and scope are unspecified.\n\nNeither name contains unclear abbreviations.",
+      "comparison": "Aligned on the important invariant: one fitted offset across channels, measured in beats. The function documents immutable inputs, the reference/candidate roles and positive-offset sampling. These mathematical conventions require context; the report field is not treated as a separate blind pass."
+    }
+  ],
+  "disposition": "Aligned fit-function name; sign and reference convention documented in its comparison API. Review capped at the calibration alignment concept."
+}

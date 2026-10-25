@@ -371,14 +371,16 @@ class TrackRun(NamedTuple):
     wall_sec: float
 
 
-def simulate_report(mp3_path: str) -> tuple:
+def simulate_report(mp3_path: str, *, data_dir=None) -> tuple:
     from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
     from autolux.simulate.fake_audio_client import FileAudioClient
     from autolux.simulate.runner import run_fast_simulation
 
     started = time.monotonic()
     client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, str(mp3_path))
-    _client, event_buffer, command_queue = asyncio.run(run_fast_simulation(client))
+    _client, event_buffer, command_queue = asyncio.run(
+        run_fast_simulation(client, data_dir=data_dir)
+    )
     report = event_buffer.to_report(command_queue.get_timing_log())
     return report, client.duration_sec, time.monotonic() - started
 
@@ -477,7 +479,9 @@ class Job(NamedTuple):
 
 def run_job(job: Job) -> TrackRun:
     track_id, youtube_id = job.track["track_id"], job.track["youtube_id"]
-    report, song_sec, wall_sec = simulate_report(audio_path(Path(job.data_dir), youtube_id))
+    report, song_sec, wall_sec = simulate_report(
+        audio_path(Path(job.data_dir), youtube_id), data_dir=job.data_dir
+    )
     reads = {
         truth: score_report(track_id, youtube_id, report, job.sections[truth])
         for truth in ANNOTATION_SOURCES
@@ -931,7 +935,7 @@ def run(
     gated = corpus[GATED_TRUTH]
     document = build_document(
         eval_set=eval_set_identity(eval_set_path, eval_document),
-        pipeline_sha_=pipeline_sha(AUTOLUX_PACKAGE_ROOT),
+        pipeline_sha_=pipeline_sha(AUTOLUX_PACKAGE_ROOT, data_dir=data_dir),
         entries={result.track_id: result.entry for result in runs},
         aggregate_metrics=track_metrics(gated[GATED_SPACE]),
         aggregate_spaces={space: space_block(gated[space]) for space in REPORTED_SPACES},

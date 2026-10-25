@@ -49,6 +49,7 @@ class MusicAnalyser:
         self._rhythm_log_at: datetime.datetime = self._clock.now() + _RHYTHM_LOG_INTERVAL
         self._beats_since_log: int = 0
         self._last_beat_activation: float = 0.0
+        self._audio_started = False
         self._reset_state()
 
     def _roll_song_clock(self) -> None:
@@ -91,9 +92,13 @@ class MusicAnalyser:
             return 0
 
     def get_bpm(self) -> float:
+        return self._fold_bpm(self.get_detector_bpm())
+
+    def get_detector_bpm(self) -> float:
+        """Tempo in the same beat units as the emitted detector events."""
         if not self.is_playing:
             return 0
-        return self._fold_bpm(self._measured_bpm())
+        return self._measured_bpm()
 
     def _measured_bpm(self) -> float:
         if len(self._beat_stream_times) < 3:
@@ -124,6 +129,13 @@ class MusicAnalyser:
 
     async def analyse(self, audio_signal: np.ndarray) -> np.ndarray:
         now = self._clock.now()
+        if not self._audio_started:
+            # The first buffer covers audio captured before this callback.
+            started = now - datetime.timedelta(seconds=self.buffer_size / self.sample_rate)
+            self.song_start_time = self.silence_period_start = started
+            self.last_beat_detected = self.last_note_detected = started
+            self._rhythm_log_at = now + _RHYTHM_LOG_INTERVAL
+            self._audio_started = True
 
         self._drift.observe()
 

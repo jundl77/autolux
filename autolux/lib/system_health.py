@@ -5,7 +5,8 @@ import time
 
 from prometheus_client import CollectorRegistry, generate_latest
 from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
-from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
+
+from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite, renderer_is_fresh
 
 MIN_BUFFER_TARGET_RATIO = 0.25
 MAX_BUFFER_TARGET_RATIO = 3
@@ -60,8 +61,11 @@ def health_summary(snapshot, *, now=None):
     input_age = rx.get('audio_input_age_seconds')
     audio_fresh = rx_fresh and input_age is not None and input_age + age < AUDIO_INPUT_STALE_SECONDS
     dmx_age = tx.get('dmx_input_age_seconds')
+    renderer = system.get('starfire') or {}
+    renderer_ready = renderer_is_fresh(system, age) and not renderer.get('script_error')
     lights = (
         link
+        and renderer_ready
         and rx.get('dmx_connected')
         and dmx_age is not None
         and dmx_age + age < DMX_INPUT_STALE_SECONDS
@@ -97,7 +101,14 @@ def health_summary(snapshot, *, now=None):
         (
             'Lighting',
             'Ready' if lights else 'Waiting / offline',
-            'Enttec output and SoundSwitch input',
+            str(
+                renderer.get('script_error')
+                or (
+                    'Enttec output and Starfire renderer'
+                    if renderer_ready
+                    else 'Starfire telemetry unavailable'
+                )
+            ),
             bool(lights),
         ),
         (
@@ -138,8 +149,8 @@ COUNTERS = {
     'overflow_frames_total': 'Audio frames rejected by a full receiver queue.',
     'late_packets_total': 'Audio packets arriving after their accepted media position.',
     'latency_trims_total': 'Audio packets discarded to recover excessive latency.',
-    'send_failures_total': 'Failed UDP sends.',
-    'invalid_packets_total': 'Rejected bus datagrams.',
+    'send_failures_total': 'Failed transport writes.',
+    'invalid_packets_total': 'Rejected transport messages.',
     'dmx_dropped_total': 'Dropped or out-of-order lighting packets.',
     'dmx_frames_total': 'Lighting frames written to the Enttec output.',
 }
@@ -164,6 +175,64 @@ class HealthCollector:
             'Analysis is recovering from a fault.',
             value=int(bool(shed.get('fault'))),
         )
+        renderer = system.get('starfire') or {}
+        renderer_fresh = renderer_is_fresh(system, age)
+        yield GaugeMetricFamily(
+            'starfire_up',
+            'Renderer heartbeat is fresh and its script is healthy.',
+            value=int(renderer_fresh and not renderer.get('script_error')),
+        )
+        if renderer_fresh:
+            for key, name, description, factory, scale in (
+                (
+                    'rendered_frames',
+                    'starfire_rendered_frames_total',
+                    'Frames rendered.',
+                    CounterMetricFamily,
+                    1,
+                ),
+                (
+                    'skipped_frames',
+                    'starfire_skipped_frames_total',
+                    'Render deadlines skipped after a scheduling stall.',
+                    CounterMetricFamily,
+                    1,
+                ),
+                (
+                    'queued_commands',
+                    'starfire_queued_commands',
+                    'Commands awaiting the next render frame.',
+                    GaugeMetricFamily,
+                    1,
+                ),
+                (
+                    'last_render_ms',
+                    'starfire_last_render_duration_seconds',
+                    'Duration of the last completed render.',
+                    GaugeMetricFamily,
+                    1 / MILLISECONDS_PER_SECOND,
+                ),
+            ):
+                value = renderer.get(key)
+                if finite(value) and value >= 0:
+                    yield factory(name, description, value=value * scale)
+            history = snapshot.get('system_history') or []
+            latest = history[-1] if history else {}
+            for key, name, description in (
+                (
+                    'starfire_measured_render_frames_per_second',
+                    'starfire_measured_render_frames_per_second',
+                    'Rendered frame count divided by elapsed renderer time between reports.',
+                ),
+                (
+                    'starfire_missed_render_deadlines_per_second',
+                    'starfire_missed_render_deadlines_per_second',
+                    'Skipped render deadlines per second between renderer reports.',
+                ),
+            ):
+                value = latest.get(key)
+                if finite(value) and latest.get('at') == system.get('sample_timestamp'):
+                    yield GaugeMetricFamily(name, description, value=value)
         timing = (snapshot.get('timing_stats') or {}).get('mean_error_ms')
         if timing is not None:
             yield GaugeMetricFamily(

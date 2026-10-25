@@ -126,13 +126,12 @@ dependencies = [
     { name = "cython", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "librosa", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "madmom", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "netifaces", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "numpy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "onnxruntime", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "prometheus-client", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "protobuf", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "pyaudio", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "python-osc", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
-    { name = "python-rtmidi", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "pygdtf", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "scikit-learn", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "scipy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "setuptools", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
@@ -170,7 +169,6 @@ requires-dist = [
     { name = "jupyterlab", marker = "extra == 'dev'" },
     { name = "librosa" },
     { name = "madmom", git = "https://github.com/CPJKU/madmom.git?rev=27f032e8947204902c675e5e341a3faf5dc86dae" },
-    { name = "netifaces" },
     { name = "numpy", specifier = ">=1.26,<2" },
     { name = "onnx", marker = "extra == 'dev'", specifier = ">=1.22,<2" },
     { name = "onnx", marker = "extra == 'training'", specifier = ">=1.22,<2" },
@@ -178,11 +176,11 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'training'", specifier = ">=10" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.7.0" },
     { name = "prometheus-client", specifier = ">=0.21,<1" },
+    { name = "protobuf", specifier = ">=4.25,<5" },
     { name = "pyaudio" },
+    { name = "pygdtf", specifier = "==1.4.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "python-osc" },
-    { name = "python-rtmidi", specifier = ">=1.5,<2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.17.2" },
     { name = "scikit-learn" },
     { name = "scipy" },
@@ -1223,12 +1221,6 @@ wheels = [
 ]
 
 [[package]]
-name = "netifaces"
-version = "0.11.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a6/91/86a6eac449ddfae239e93ffc1918cf33fd9bab35c04d1e963b311e347a73/netifaces-0.11.0.tar.gz", hash = "sha256:043a79146eb2907edf439899f262b3dfe41717d34124298ed281139a8b93ca32", size = 30106, upload-time = "2021-05-31T08:33:02.506Z" }
-
-[[package]]
 name = "networkx"
 version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1555,6 +1547,14 @@ wheels = [
 ]
 
 [[package]]
+name = "pygdtf"
+version = "1.4.5"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/b4/ba4c8b3bcfb4c50b6edf4cbf0207dc26d9faa062077e68b5afe60cb58ef0/pygdtf-1.4.5-py3-none-any.whl", hash = "sha256:852c206a04e978b142be259967676f9acf450328aa43c94b69f8a343369fa447", size = 54367, upload-time = "2026-03-31T18:09:06.196Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1623,25 +1623,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f7/ff/3cc9165fd44106973cd7ac9facb674a65ed853494592541d339bdc9a30eb/python_json_logger-4.1.0.tar.gz", hash = "sha256:b396b9e3ed782b09ff9d6e4f1683d46c83ad0d35d2e407c09a9ebbf038f88195", size = 17573, upload-time = "2026-03-29T04:39:56.805Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/be/0631a861af4d1c875f096c07d34e9a63639560a717130e7a87cbc82b7e3f/python_json_logger-4.1.0-py3-none-any.whl", hash = "sha256:132994765cf75bf44554be9aa49b06ef2345d23661a96720262716438141b6b2", size = 15021, upload-time = "2026-03-29T04:39:55.266Z" },
-]
-
-[[package]]
-name = "python-osc"
-version = "1.10.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a1/79/094503dc039c8ba9cead01f4b5e163d795a6a502563d3a31f35d20a1ecf8/python_osc-1.10.2.tar.gz", hash = "sha256:732548f4f467dda9f890a6b0b3bfb085ab117f4bd38a45a58d2ca0f3bd6a546d", size = 33716, upload-time = "2026-04-02T20:46:04.692Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/a2/ce26e437e36707f0da839dd88b072413825ea8986b73ce7b5c4f3cd1b7f4/python_osc-1.10.2-py3-none-any.whl", hash = "sha256:018b28e1cc06427c2c3d695f4e8d87d0caecfe604ff889acc45235cfd94183a2", size = 45467, upload-time = "2026-04-02T20:46:03.718Z" },
-]
-
-[[package]]
-name = "python-rtmidi"
-version = "1.5.8"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/dd/ee/0f91965dcc471714c69df21e5ca3d94dc81411b7dee2d31ff1184bea07c9/python_rtmidi-1.5.8.tar.gz", hash = "sha256:7f9ade68b068ae09000ecb562ae9521da3a234361ad5449e83fc734544d004fa", size = 368130, upload-time = "2023-11-20T21:55:02.192Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/ff/2c55797dbf020d462132d1bc5b34d596b400fa197e2a259b8dd2ea2e5954/python_rtmidi-1.5.8-cp311-cp311-win_amd64.whl", hash = "sha256:cfea32c91752fa7aecfe3d6827535c190ba0e646a9accd6604f4fc70cf4b780f", size = 132937, upload-time = "2023-11-20T21:54:38.3Z" },
-    { url = "https://files.pythonhosted.org/packages/93/46/6af077d262f521ea2bf1ab60b8aad72f34fe6dd55af739176605369d449c/python_rtmidi-1.5.8-cp312-cp312-win_amd64.whl", hash = "sha256:052c89933cae4fca354012d8ca7248f4f9e1e3f062471409d48415a7f7d7e59e", size = 129755, upload-time = "2023-11-20T21:54:44.935Z" },
 ]
 
 [[package]]

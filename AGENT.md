@@ -1,14 +1,14 @@
 # Autolux development
 
 - `cli/` owns lifecycle and deployment; `autolux/` owns analysis, control and data;
-  `radius/` owns transport and hardware output; `proto/` owns shared protocol
-  contracts. Keep tests with each component.
+  `radius/` owns transport and hardware output; `starfire/` owns Rust/Lua lighting
+  rendering; `proto/` owns shared protocol contracts. Keep tests with each component.
 - Keep READMEs and AGENT files brief, describing current intent and contracts.
 - Fix discovered bugs and add meaningful regression tests.
 - Focus tests on transport, synchronization, lifecycle, model output and data
   integrity. Do not add UI, configuration snapshot or static source-shape tests.
-- Build scripts and pre-commit hooks run Ruff and clang-format directly using
-  the saved Python and C++ policy. Development helpers belong in root `tools/`,
+- Build scripts and pre-commit hooks run Ruff, clang-format and rustfmt directly
+  using saved policy; Rust builds also run Clippy. Development helpers belong in root `tools/`,
   never business packages; do not add unused scaffolding or boilerplate.
 - Review new or changed naming concepts with the personal `blind-naming-test`
   skill: fresh low-effort reviewers see names only; compare their explanations
@@ -22,8 +22,10 @@ bar timing; MERT and the section model produce immutable bar decisions. Only
 committed decisions select lighting intents. Startup and silence are explicit.
 
 Apply the show delay once, in TX audio and scheduled controller commands.
-Radius carries a session ID and 64-bit audio-frame watermark. RX schedules DMX
-against audible audio; jitter buffering is separate from the show delay.
+Autolux supplies one random run_id to Starfire and Radius at startup. Radius
+carries it with every audio/light frame over TCP. Audio references the preceding
+lighting sequence; RX schedules DMX against audible audio with a 500 ms buffer.
+TX runs inside Starfire; only RX is deployed remotely.
 
 Audio callbacks must not allocate, log, block or perform network/USB I/O.
 Use bounded queues with clear ownership. Keep audio and DMX output on separate

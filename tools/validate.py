@@ -1,12 +1,12 @@
 """Run the complete repository validation serially, without starting a show."""
 
-from datetime import datetime
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECK_TIMEOUT_SECONDS = 3600
@@ -23,9 +23,10 @@ def validation_steps(output_dir):
     return [
         (
             'python-format',
-            python + ['-m', 'ruff', 'format', '--check', 'autolux', 'cli', 'radius', 'tools'],
+            python + ['-m', 'ruff', 'format', '--check', 'autolux', 'cli', 'proto', 'tools'],
         ),
-        ('cpp-format', python + ['-m', 'pre_commit', 'run', 'cpp-format', '--all-files']),
+        ('proto-format', python + ['-m', 'pre_commit', 'run', 'proto-format', '--all-files']),
+        ('rust-format', ['cargo', 'fmt', '--all', '--check']),
         (
             'build',
             ['powershell.exe', '-NoProfile', '-NonInteractive', '-File', str(ROOT / 'build.ps1')],
@@ -60,6 +61,7 @@ def run_checks(steps, output_dir):
             try:
                 result = subprocess.run(
                     command,
+                    check=False,
                     cwd=ROOT,
                     env=environment,
                     stdout=log,

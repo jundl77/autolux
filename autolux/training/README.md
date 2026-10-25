@@ -11,3 +11,7 @@ directories contain experiment drivers with explicit artifact and import checks.
 
 Keep train/validation/test separation and benchmark exclusions intact. Generated
 artifacts stay out of Git. Run GPU jobs serially. Tests live in autolux/tests.
+
+Optional experiment drivers require explicit `AUTOLUX_PHASE_B_CHECKOUT` or
+`AUTOLUX_LABEL9_CHECKOUT` source trees and `AUTOLUX_EXPERIMENT_PYTHON` for external
+exports. Paths are validated; the current decoder is never substituted.

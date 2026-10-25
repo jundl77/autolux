@@ -37,13 +37,14 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-PHASE_B = Path(r"C:\Users\Julian\Projects\soundswitch-phase-b-worktree")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import module_source
+
+PHASE_B = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
 for entry in (str(HERE), str(ROOT / "training" / "raveform"), str(PHASE_B)):
     if entry not in sys.path:
         sys.path.insert(0, entry)
 sys.path.append(str(ROOT / "training"))
-
-import module_source  # noqa: E402
 
 # The whole gate is phase-B's generation: ``ceiling`` and ``paired`` exist
 # nowhere else, so every training.nn it reads must come from there too.

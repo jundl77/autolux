@@ -1,10 +1,16 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "grpcio-tools==1.62.3"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "autolux*"]
+include = ["cli*", "autolux*", "proto", "proto.starfire", "proto.radius"]
 exclude = ["*.tests*", "autolux.training.data*"]
+
+[tool.setuptools.cmdclass]
+build_py = "tools.build_proto.BuildPy"
+
+[tool.setuptools.package-data]
+"autolux.simulate" = ["assets/*.js"]
 
 [project.scripts]
 autolux = "cli.main:run_sync"
@@ -14,18 +20,17 @@ name = "autolux"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "python-rtmidi>=1.5,<2",
+    "protobuf>=4.25,<5",
+    "pygdtf==1.4.5",
     "cython",
     "madmom",
     "numpy>=1.26,<2",
     "pyaudio",
     "scipy",
-    "python-osc",
     "scikit-learn",
     "librosa",
     "argcomplete",
     "zeroconf",
-    "netifaces",
     "prometheus-client>=0.21,<1",
     "setuptools<71",
     # torch stays at 2.11: only the legacy TorchScript ONNX exporter keeps a GRU's
@@ -83,7 +88,7 @@ madmom = { git = "https://github.com/CPJKU/madmom.git", rev = "27f032e8947204902
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["autolux/tests", "cli/tests", "radius/tests", "tools/tests"]
+testpaths = ["autolux/tests", "cli/tests", "tools/tests"]
 pythonpath = ["."]
 markers = [
     "integration: full-pipeline simulation tests (slow, requires madmom)",
@@ -93,7 +98,7 @@ markers = [
 required-version = "==0.17.2"
 target-version = "py311"
 line-length = 100
-extend-exclude = ["autolux/training/data", "radius/x_*", "radius/cmake-build-*"]
+extend-exclude = ["autolux/training/data"]
 
 [tool.ruff.format]
 quote-style = "preserve"

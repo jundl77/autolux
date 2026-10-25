@@ -4,6 +4,7 @@ import argparse
 import argcomplete
 import asyncio
 import logging
+import secrets
 import signal
 import sys
 from pathlib import Path
@@ -23,25 +24,38 @@ async def run_cmd(args: argparse.Namespace):
     else:
         debug_mode = False
 
-    midi_port_index: int = int(args.midi_port_index)
+    from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
+    from cli.starfire import PROFILE_CATALOGUE, ROOT
+    from autolux.lib.clients.starfire_client import StarfireClient
+    import uuid
+
     input_device_index = int(args.input_device) if args.input_device is not None else None
     output_device_index = int(args.output_device) if args.output_device is not None else None
-    global_app = AutoluxController(
-        midi_port_index=midi_port_index,
-        input_device_index=input_device_index,
-        output_device_index=output_device_index,
-        debug_mode=debug_mode,
-        disable_os2l=args.no_os2l,
-        enable_ui=args.ui,
-        ui_port=args.ui_port,
-        report_path=args.report,
-    )
-
-    try:
-        await global_app.run()
-        write_report(global_app, args.report)
-    finally:
-        global_app = None
+    with StarfireRuntime(
+        args.starfire_binary,
+        selected_rig(args.rig),
+        args.autoloops,
+        args.artnet,
+        ROOT / '.live' / 'starfire' / f'live-{uuid.uuid4().hex}',
+        run_id=secrets.randbits(64) or 1,
+        profiles=getattr(args, 'profiles', PROFILE_CATALOGUE),
+    ) as renderer:
+        global_app = AutoluxController(
+            lighting_client=StarfireClient(renderer.send_command),
+            input_device_index=input_device_index,
+            output_device_index=output_device_index,
+            debug_mode=debug_mode,
+            enable_ui=args.ui,
+            ui_port=args.ui_port,
+            report_path=args.report,
+            fixture_setup=fixture_setup(args),
+        )
+        global_app.health_check = renderer.check_health
+        try:
+            await global_app.run()
+            write_report(global_app, args.report)
+        finally:
+            global_app = None
 
 
 def write_report(app, path):
@@ -58,10 +72,8 @@ def write_report(app, path):
 
 async def list_cmd(args: argparse.Namespace):
     from autolux.lib.clients.pyaudio_client import PyAudioClient
-    from autolux.lib.clients.midi_client import MidiClient
 
     PyAudioClient(SAMPLE_RATE, BUFFER_SIZE, None, None).list_devices()
-    MidiClient(0).list_devices()
 
 
 async def label_cmd(args: argparse.Namespace):
@@ -98,7 +110,12 @@ def run_sync():
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     try:
-        asyncio.run(main())
+        args = _parse_command()
+        if args is not None:
+            if asyncio.iscoroutinefunction(args.func):
+                asyncio.run(args.func(args))
+            else:
+                args.func(args)
     except KeyboardInterrupt:
         pass
     except (RuntimeError, OSError, ValueError) as error:
@@ -124,17 +141,16 @@ def build_parser() -> argparse.ArgumentParser:
         'stop', help='Stop the owned controller and receiver session'
     ).set_defaults(func=production.stop)
 
-    subparser = subparsers.add_parser('list', help='List all available sound and midi devices')
+    subparser = subparsers.add_parser('list', help='List available audio devices')
     subparser.set_defaults(func=list_cmd)
 
     subparser = subparsers.add_parser('run', help='Create the specified instance')
     subparser.add_argument(
         '--verbose', action='store_true', help='Include beat, note and protocol diagnostics'
     )
-    subparser.add_argument(
-        'midi_port_index',
-        help='The midi port index of the midi device to use. Available devices are shown by running \'list\'',
-    )
+    from cli.starfire_runtime import add_arguments as add_starfire_arguments
+
+    add_starfire_arguments(subparser, include_artnet=True)
     subparser.add_argument(
         '-i',
         '--input_device',
@@ -153,12 +169,6 @@ def build_parser() -> argparse.ArgumentParser:
         '-d',
         '--debug',
         help='Run in debug mode, this will playback audio on the output device with additional auditory information',
-        required=False,
-        action='store_true',
-    )
-    subparser.add_argument(
-        '--no-os2l',
-        help='Disable OS2L (connection to SoundSwitch). This can be useful for debugging.',
         required=False,
         action='store_true',
     )
@@ -199,12 +209,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparser.set_defaults(func=label_cmd)
 
     from autolux.simulate.cli import add_simulate_subparser
+    from cli.starfire import add_subparser as add_starfire_subparser
 
     add_simulate_subparser(subparsers)
+    add_starfire_subparser(subparsers)
     return parser
 
 
-async def main():
+def _parse_command():
     parser = build_parser()
     argcomplete.autocomplete(parser)
     arguments = sys.argv[1:]
@@ -219,4 +231,14 @@ async def main():
         parser.print_help()
         return
 
+    return args
+
+
+async def main():
+    """Async entry for analysis and simulation callers."""
+    args = _parse_command()
+    if args is None:
+        return
+    if not asyncio.iscoroutinefunction(args.func):
+        raise RuntimeError('This command owns a blocking server; launch it through autolux.')
     await args.func(args)
