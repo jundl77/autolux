@@ -123,7 +123,7 @@ handoff change, tracked in the [decision log](starfire/decisions.md).
 
 Each 40 Hz frame has a 25 ms budget. Replay reports `render_realtime_factor`:
 show duration divided by rendering time, including commands, Lua and fixture encoding.
-The test suite requires at least 10x real-time speed for the six-fixture room and
+The test suite requires at least 10x real-time speed for the 14-fixture room and
 2x for a 64-fixture patch, using a 90-second show with transitions and accents.
 These measure rendering headroom, not hardware latency or a worst-case deadline.
 

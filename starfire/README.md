@@ -20,7 +20,7 @@ Sequences return semantic effects from `render(ctx)`. Use supplied musical time,
 named groups and helpers in `src/lua/lighting.lua`; never depend on render count.
 `ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, separate from master
 brightness; bundled sequences use it for restrained brightness variation.
-The supplied sequences expect `wash` and `movers` groups in the rig.
+The supplied sequences expect `wash`, `movers` and `strip` groups in the rig.
 Selecting the current bank/name keeps it running. Overrides affect only their
 properties; clearing reveals the continuing baseline.
 
@@ -38,8 +38,11 @@ Live mode receives framed Protobuf commands through owned process pipes and
 renders Art-Net at 40 Hz. Heartbeats expire after 30 seconds; EOF and failures
 black out output. The contract is in `../proto/starfire/starfire.proto`.
 
-The room rig includes verified Spot 110 and SePar profiles. Other hardware,
-physical calibration and exact Radius clock handoff require review.
+The room rig has two Spot 110 movers, four SePar washes and eight RGB cells of
+the CF805 in 24-channel mode. These are 14 independently controlled fixtures.
+Mini Kinta remains dark until its control profile is verified. Production
+readiness probes every sequence against the selected patch before deployment.
+Physical calibration and exact Radius clock handoff still require review.
 See the [design and diagrams](../docs/starfire-design.md) and
 [decision log](../docs/starfire/decisions.md).
 See [validation](../docs/starfire/validation.md) for tested behavior and hardware limits.

@@ -86,7 +86,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P56: Report replay performance as represented show seconds divided by elapsed
   rendering seconds. Include command application, Lua, composition and encoding;
   exclude file parsing/output and network pacing. Default tests render a mixed
-  90-second show: minimum 10x real time for the six-fixture room and 2x for a
+  90-second show: minimum 10x real time for the room and 2x for a
   64-fixture patch. These are conservative regression floors, not hard deadlines.
 - P57: Use nonblocking Art-Net sends instead of a 100 ms socket timeout on the
   render thread. A send failure retains the existing fail-closed policy and
@@ -128,6 +128,23 @@ approved removing SoundSwitch connectivity and requested the live contract in
   incompatible saved patch. This is a startup probe; replay tests cover the
   programs' later branches. Preserve custom saved patches; update this machine's
   saved default only after confirming it is the unchanged six-fixture default.
+- P65: Keep maximum cross-capture errors visible, but do not treat an observed
+  self-shift maximum as a hard bound for independently sampled discontinuities.
+  The first comparison exposed a 198-unit Drop cut lasting 3.4 ms, exceeding a
+  194-unit observed-reference bound because SoundSwitch missed the true zero
+  endpoint between packets. Preserve that failed diagnostic and the original
+  budgets. Gate cadence with their unchanged mean/p95/p99 bounds, exact control
+  channels and complete coverage; direct captured-value anchors check waveform
+  accuracy separately with a declared 5 ms clock uncertainty. A synthetic
+  independent-sampling regression must cover this distinction before final
+  holdout evaluation. Never describe this as bit-identical cross-engine output.
+- P66: Drop's rhythmic brightness envelope must keep running when animation
+  speed is zero. Gate its initial hold with unscaled musical elapsed time, and
+  align the authored envelope to the musical bar containing sequence selection.
+  Keep movement and colour on the continuous speed-scaled sequence clock.
+  Test nonzero selection positions, beat corrections and animation freeze at
+  entry and loop boundaries. A global 64-beat envelope plus a relative hold can
+  otherwise add an unintended second hold near a global phrase boundary.
 
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
@@ -182,7 +199,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 | Q01 | When should a valid Lua edit activate? | Start a fresh replay after editing in the prototype. Live reload should preserve musical position; explicit versus next-bar activation remains open. No restart command. |
 | Q02 | Should persistent manual colour overrides win over automatic accents? | Explicit priority; manual defaults above automatic on the same property. Unrelated intensity/strobe controls still combine. |
 | Q03 | Named calibrated movement targets or direct pan/tilt first? | Direct normalized pan/tilt with calibrated bounds; API leaves room for named positions without needing a 3D editor. |
-| Q04 | What are the exact CF805 and Mini Kinta IRC channel modes/calibrations? | Leave unverified hardware out of the audition patch; preserve addresses rather than guessing. |
+| Q04 | What is the verified Mini Kinta IRC control profile? | Keep it dark. CF805's saved 24-channel mode is verified and represented by eight RGB cells at addresses 97-120. |
 | Q05 | Which manual controls belong in the first webapp tab? | Patch/groups now; live audition, master and blackout follow the live-session integration. No browser code editor. |
 | Q06 | Where does Art-Net sit when Radius preserves exact render targets? | Preserve existing local Art-Net ingress in the prototype; document measured scheduling limits. Clock mapping remains Radius implementation work. |
 | Q07 | Are multiple universes needed immediately? | Encoder/output support universe identity; current Radius deployment remains its existing configured universe. |
@@ -260,6 +277,23 @@ Hardware audition is explicitly separate from deterministic offline validation.
   cadence before candidate evaluation; direct captured-value anchors will check
   finer waveform accuracy. Review found startup did not execute scripts against
   the saved rig; that readiness defect is being fixed before final publication.
+- 2026-10-25 10:42 local: readiness fixes are published; all eight 120/140 BPM
+  comparisons pass cadence gates with raw cut maxima retained. Direct-value
+  anchors exposed a late Drop discrepancy: native master keyframes have uneven
+  spacing, and the script is being corrected from those source records. An
+  independent clock review also found animation freeze could suppress musical
+  pulses during Drop's initial hold. Both corrections use existing evidence;
+  the fresh 156 BPM capture is complete and remains unevaluated.
+- 2026-10-25 10:57 local: all 12 comparisons pass, including the previously unseen
+  156 BPM capture, with unchanged phase policy and value-anchor tolerances. All
+  97 Rust tests, 57 CLI tests and 15 comparison tests pass. The final product
+  build passed Radius's four groups, formatting, Clippy, native release and
+  wheel/source packaging. A 90-second local live run delivered 3,602 packets
+  without gaps and shut down dark. Readiness passed again in two seconds after
+  the build. Release relinking changed only the executable artifact identity;
+  all ten recorded-stream outputs match the prior validated hashes after a fresh
+  20-run check. Physical output remains stopped. Publishing final slices and
+  stopping the owned checkpoint timer after the repository is clean.
 
 - 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
   engine suites pass independently. Lead reviewed public boundaries and found

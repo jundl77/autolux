@@ -15,6 +15,7 @@ const MIN_ROOM_REALTIME_FACTOR: f64 = 10.0;
 const MIN_SCALED_REALTIME_FACTOR: f64 = 2.0;
 const SCALED_FIXTURE_COUNT: usize = 64;
 const SCALED_MOVER_COUNT: usize = 16;
+const SCALED_STRIP_COUNT: usize = 8;
 const FIXTURES_PER_UNIVERSE: usize = 32;
 const FIXTURE_ADDRESS_STRIDE: usize = 16;
 const BEAT_ANCHOR_INTERVAL_SECONDS: f64 = 0.5;
@@ -115,13 +116,17 @@ fn scaled_rig() -> Value {
     let mut fixtures = Vec::new();
     let mut movers = Vec::new();
     let mut wash = Vec::new();
+    let mut strip = Vec::new();
     for index in 0..SCALED_FIXTURE_COUNT {
         let id = format!("fixture_{index}");
         let mover = index < SCALED_MOVER_COUNT;
+        let pixel = index >= SCALED_FIXTURE_COUNT - SCALED_STRIP_COUNT;
         fixtures.push(json!({
             "id": id,
             "profile": if mover {
                 "chauvet_intimidator_spot_110_12ch"
+            } else if pixel {
+                "generic_rgb"
             } else {
                 "fun_generation_separ_quad_uv_8ch"
             },
@@ -130,11 +135,13 @@ fn scaled_rig() -> Value {
         }));
         if mover {
             movers.push(id);
+        } else if pixel {
+            strip.push(id);
         } else {
             wash.push(id);
         }
     }
-    json!({"schema_version": 1, "fixtures": fixtures, "groups": {"movers": movers, "wash": wash}})
+    json!({"schema_version": 1, "fixtures": fixtures, "groups": {"movers": movers, "wash": wash, "strip": strip}})
 }
 
 fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
@@ -179,7 +186,7 @@ fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
     let rig: Value = serde_json::from_str(include_str!("../rigs/room.json")).unwrap();
-    assert_render_budget("room / 6 fixtures", &rig, MIN_ROOM_REALTIME_FACTOR);
+    assert_render_budget("room / 14 fixtures", &rig, MIN_ROOM_REALTIME_FACTOR);
 }
 
 #[test]

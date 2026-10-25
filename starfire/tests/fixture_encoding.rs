@@ -70,7 +70,7 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
     assert!(
         frame[24..64]
             .iter()
-            .chain(frame[96..].iter())
+            .chain(frame[120..].iter())
             .all(|byte| *byte == 0)
     );
 }
@@ -166,7 +166,7 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() 
     const PIXEL_COUNT: usize = 8;
     const MINI_KINTA_START: usize = 39;
     const MINI_KINTA_CHANNELS: usize = 4;
-    let rig = FixtureRig::from_json(include_str!("../rigs/soundswitch-reference.json")).unwrap();
+    let rig = FixtureRig::from_json(include_str!("../rigs/room.json")).unwrap();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
     for (selected, id) in strip.iter().enumerate() {
