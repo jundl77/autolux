@@ -20,6 +20,7 @@ struct Renderer {
     socket: UdpSocket,
     login: wire::Login,
     command_id: u64,
+    runtime: tempfile::TempDir,
 }
 
 fn play(name: &str) -> Operation {
@@ -46,10 +47,12 @@ fn setting(kind: wire::ParameterType, value: wire::parameter::Value) -> wire::Pa
 
 impl Renderer {
     fn start() -> Self {
+        let runtime = tempfile::tempdir().unwrap();
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_starfire"))
             .arg("live")
+            .env("AUTOLUX_RUNTIME_DIR", runtime.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -89,8 +92,9 @@ impl Renderer {
                 wire::AutoloopDefinition { autoloop_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into() },
                 wire::AutoloopDefinition { autoloop_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into() },
             ],
-            artnet_destination: socket.local_addr().unwrap().to_string(),
+            output: Some(wire::login::Output::ArtnetDestination(socket.local_addr().unwrap().to_string())),
             parameters: vec![],
+            render_core: None,
         };
         Self {
             child,
@@ -99,6 +103,7 @@ impl Renderer {
             socket,
             login,
             command_id: 0,
+            runtime,
         }
     }
 
@@ -221,6 +226,81 @@ impl Drop for Renderer {
 }
 
 #[test]
+fn radius_login_owns_receiver_connection_and_writes_separate_transport_health() {
+    let mut renderer = Renderer::start();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let receiver_stop = stop.clone();
+    let config = radius::RxConfig {
+        peer_address: "127.0.0.1".into(),
+        bind_address: "127.0.0.1".into(),
+        bus_port: port,
+        run_id: renderer.login.run_id,
+        audio_device_id: String::new(),
+        dmx_serial: None,
+        audio_enabled: false,
+        dmx_enabled: false,
+        jitter_buffer_ms: 500,
+        sample_rate: 44_100,
+        network_core: -1,
+        dmx_core: -1,
+    };
+    let (completed_tx, completed_rx) = mpsc::channel();
+    let receiver = thread::spawn(move || {
+        let result = radius::rx::run_receiver(config, receiver_stop, None, None);
+        let _ = completed_tx.send(result);
+    });
+    renderer.login.output = Some(wire::login::Output::Radius(wire::login::RadiusOutput {
+        receiver_address: format!("127.0.0.1:{port}"),
+        capture_device_id: String::new(),
+        playback_delay_seconds: 0.0,
+        receiver_buffer_ms: 500,
+        receiver_audio_enabled: false,
+        receiver_lighting_enabled: false,
+        universe: 0,
+        network_core: None,
+    }));
+    assert!(matches!(
+        renderer.reply(Operation::Login(renderer.login.clone())),
+        Event::LoginReply(_)
+    ));
+    renderer.send(play("energy"));
+    let deadline = Instant::now() + TEST_TIMEOUT;
+    let health_file = renderer.runtime.path().join("transport-health.json");
+    loop {
+        if let Ok(bytes) = std::fs::read(&health_file)
+            && let Ok(report) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            && report["rx"].is_object()
+        {
+            assert_eq!(report["run_id"].as_u64(), Some(renderer.login.run_id));
+            assert_eq!(report["rx"]["run_id"].as_u64(), Some(renderer.login.run_id));
+            assert_eq!(report["rx"]["up"].as_bool(), Some(true));
+            assert_eq!(report["tx"]["up"].as_bool(), Some(true));
+            assert_eq!(report["rx"]["buffer_target_seconds"].as_f64(), Some(0.5));
+            assert!(renderer.metrics().rendered_frames > 0);
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Radius health report was not published"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    renderer.assert_no_output();
+    renderer.input.take();
+    assert!(renderer.wait_exit().success());
+    let result = completed_rx.recv_timeout(TEST_TIMEOUT);
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    receiver.join().unwrap();
+    assert!(
+        result.is_ok(),
+        "receiver did not exit when owned TX stopped"
+    );
+}
+
+#[test]
 fn login_rejects_incompatible_major_and_negotiates_compatible_minor_before_output() {
     let mut renderer = Renderer::start();
     let mut login = renderer.login.clone();
@@ -293,7 +373,7 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
     let mut missing_autoloops = renderer.login.clone();
     missing_autoloops.autoloops.clear();
     let mut invalid_output = renderer.login.clone();
-    invalid_output.artnet_destination = "0.0.0.0:0".into();
+    invalid_output.output = Some(wire::login::Output::ArtnetDestination("0.0.0.0:0".into()));
     let mut invalid_parameter = renderer.login.clone();
     invalid_parameter.parameters = vec![
         setting(
@@ -466,12 +546,18 @@ fn script_fault_and_recovery_publish_metrics_without_waiting_for_heartbeat() {
 fn server_sends_ten_second_heartbeats_without_waiting_for_requests() {
     let mut renderer = Renderer::logged_in();
     let started = Instant::now();
-    let event = renderer
-        .events
-        .recv_timeout(Duration::from_secs(12))
-        .unwrap();
-    assert_eq!(event.command_id(), None);
-    assert!(matches!(event, Event::Heartbeat(_)));
+    let deadline = started + Duration::from_secs(12);
+    loop {
+        let event = renderer
+            .events
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        match event {
+            Event::Heartbeat(_) => break,
+            Event::Metrics(_) => {}
+            other => panic!("unexpected unsolicited event: {other:?}"),
+        }
+    }
     assert!(started.elapsed() >= Duration::from_secs(9));
     assert!(renderer.next_metrics().rendered_frames >= 360);
     assert!(renderer.child.try_wait().unwrap().is_none());

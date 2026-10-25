@@ -1,13 +1,12 @@
 syntax = "proto3";
 
-package Radius.Bus;
-option optimize_for = LITE_RUNTIME;
+package autolux.radius;
 
-// CLIENT = radius_tx; SERVER = radius_rx.
-// Datagram: one-byte MessageType, four-byte big-endian payload length, then one
+// CLIENT = Starfire's Radius TX worker; SERVER = radius_rx.
+// TCP stream: one-byte MessageType, four-byte big-endian payload length, then one
 // standalone Protobuf message. Total size is at most 1200 bytes; no envelope.
 // Login comes first. Major versions must match; minor = min(client, server).
-// Only Login has a success reply. Media is best effort and never acknowledged.
+// Only Login has a success reply. TCP owns ordering and retransmission.
 // Both endpoints send independent heartbeats every 10 seconds; timeout is 30 seconds.
 
 // Build constants, not a wire field.
@@ -29,8 +28,7 @@ enum MessageType {
 }
 
 // [CLIENT -> SERVER]
-// Own one output run; every packet must carry its configured run_id. Repeating the identical Login
-// retries its reply without restarting output. A changed Login cannot replace an initialized run.
+// Own one output run; every message carries its configured run_id.
 // Device selection and worker affinity remain receiver-local deployment policy.
 message Login {
   uint64 command_id = 1;
@@ -41,7 +39,7 @@ message Login {
   uint32 channel_count = 6;   // Supported: 2, left then right.
   bool audio_enabled = 7;
   bool lighting_enabled = 8;
-  uint32 jitter_buffer_ms = 9;  // Supported: 20..150.
+  uint32 jitter_buffer_ms = 9;  // 500 ms; initial fill and refill after starvation.
 }
 
 // [SERVER -> CLIENT]
@@ -67,12 +65,12 @@ message AudioFrame {
   fixed64 audio_frame_position = 2;  // Run stereo frame index of the first sample.
   fixed32 sequence_number = 3;       // Per media kind; wraps modulo 2^32.
   repeated float interleaved_samples = 4 [packed = true];  // 1..128 finite stereo frames.
+  fixed32 light_sequence_number = 5;  // Most recent preceding LightFrame, played with this audio.
 }
 
 // [CLIENT -> SERVER]
 message LightFrame {
   fixed64 run_id = 1;
-  fixed64 audio_frame_position = 2;  // Target audible audio-frame watermark.
   fixed32 sequence_number = 3;
   bytes channels = 4;  // Exactly 512 DMX channel values.
 }
@@ -111,4 +109,23 @@ message Metrics {
   float audio_signal_peak = 22;
   uint64 invalid_packets_total = 23;
   uint64 send_failures_total = 24;
+  bool playing = 27;  // False while filling the 500 ms buffer or after starvation.
+  uint64 rebuffer_count = 28;
+}
+
+// Local TX measurements for the transport health report.
+message TxMetrics {
+  bool up = 1;
+  bool link_up = 2;
+  double heartbeat_age_seconds = 3;
+  uint64 heartbeats_sent = 4;
+  uint64 heartbeats_received = 5;
+  double audio_buffer_seconds = 6;
+  uint64 capture_overruns_total = 7;
+  uint64 queue_dropped_frames_total = 8;
+  uint64 send_failures_total = 9;
+  uint64 invalid_packets_total = 10;
+  double playback_delay_seconds = 11;
+  optional double dmx_input_age_seconds = 12;
+  uint64 network_queued_bytes = 13;
 }

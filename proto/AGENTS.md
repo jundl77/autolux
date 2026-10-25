@@ -11,4 +11,4 @@
   or `[SERVER -> CLIENT]`. Do not annotate shared data structures. Keep messages
   standalone and nest types used by only one message. Use typed alternatives and
   enums for closed concepts. Initialization belongs in Login; sessions own resources.
-- Follow `../radius/AGENTS.md` for C++ style, ownership, naming and regression tests.
+- Follow the consuming component's AGENTS.md for ownership, naming and regression tests.

@@ -50,11 +50,26 @@ message Login {
   uint64 command_id = 1;
   RigDefinition rig = 2;
   repeated AutoloopDefinition autoloops = 3;
-  string artnet_destination = 4;  // IPv4:port.
+  oneof output {
+    string artnet_destination = 4;  // IPv4:port, for direct Art-Net output.
+    RadiusOutput radius = 10;       // Embedded audio/lighting transmitter.
+  }
   repeated Parameter parameters = 6;
   uint32 protocol_major = 7;  // Must match the server's major version.
   uint32 protocol_minor = 8;  // Backwards-compatible additions within this major.
   fixed64 run_id = 9;         // Shared Autolux/Radius/Starfire run; unrelated to replay seeds.
+  optional uint32 render_core = 11;  // Logical CPU index; omitted leaves OS scheduling enabled.
+
+  message RadiusOutput {
+    string receiver_address = 1;  // IPv4:TCP port.
+    string capture_device_id = 2;
+    double playback_delay_seconds = 3;  // Analysis look-ahead, applied once to capture.
+    uint32 receiver_buffer_ms = 4;
+    uint32 universe = 5;
+    optional uint32 network_core = 6;
+    bool receiver_audio_enabled = 8;
+    bool receiver_lighting_enabled = 9;
+  }
 }
 
 // [SERVER -> CLIENT]

@@ -1,5 +1,6 @@
 //! Owned rendering sessions and paced process I/O. Login acquires output resources.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -25,6 +26,7 @@ const MAX_CONTROLS_PER_FRAME: usize = 32;
 const MAX_QUEUED_EVENTS: usize = 2 * MAX_QUEUED_CONTROLS + 4;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
+const METRICS_INTERVAL: Duration = Duration::from_secs(1);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
 pub const PROTOCOL_MAJOR: u32 = wire::ProtocolVersion::ProtocolMajor as u32;
@@ -32,11 +34,110 @@ pub const PROTOCOL_MINOR: u32 = wire::ProtocolVersion::ProtocolMinor as u32;
 
 type SharedFailure = Arc<Mutex<Option<String>>>;
 
+enum LiveOutput {
+    ArtNet(ArtNetOutput),
+    Radius {
+        transmitter: radius::RadiusTx,
+        universe: u16,
+    },
+}
+
+impl LiveOutput {
+    fn open(login: &wire::Login, rig: &FixtureRig) -> Result<Self> {
+        match login.output.as_ref().context("login requires an output")? {
+            wire::login::Output::ArtnetDestination(address) => {
+                let destination: SocketAddrV4 = address
+                    .parse()
+                    .context("invalid Art-Net IPv4 destination")?;
+                let local = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
+                Ok(Self::ArtNet(ArtNetOutput::bind(local, destination)?))
+            }
+            wire::login::Output::Radius(settings) => {
+                let address: SocketAddrV4 = settings
+                    .receiver_address
+                    .parse()
+                    .context("invalid Radius receiver IPv4 address")?;
+                let universe =
+                    u16::try_from(settings.universe).context("invalid Radius universe")?;
+                let initial = rig.encode(&rig.empty_states())?;
+                ensure!(
+                    initial.len() == 1 && initial.contains_key(&universe),
+                    "Radius output requires exactly its configured universe"
+                );
+                let core = |value: Option<u32>| -> Result<i32> {
+                    value
+                        .map(i32::try_from)
+                        .transpose()
+                        .context("invalid CPU index")
+                        .map(|value| value.unwrap_or(-1))
+                };
+                let transmitter = radius::RadiusTx::start(radius::TxConfig {
+                    peer_address: address.ip().to_string(),
+                    bus_port: address.port(),
+                    run_id: login.run_id,
+                    audio_device_id: settings.capture_device_id.clone(),
+                    health_file: std::env::var_os("AUTOLUX_RUNTIME_DIR").map(|directory| {
+                        std::path::PathBuf::from(directory).join("transport-health.json")
+                    }),
+                    playback_delay_seconds: settings.playback_delay_seconds,
+                    audio_enabled: settings.receiver_audio_enabled,
+                    network_core: core(settings.network_core)?,
+                    receiver: radius::config::ReceiverSettings {
+                        audio_enabled: settings.receiver_audio_enabled,
+                        lighting_enabled: settings.receiver_lighting_enabled,
+                        jitter_buffer_ms: settings.receiver_buffer_ms,
+                    },
+                })?;
+                transmitter.update_light([0; radius::protocol::DMX_CHANNELS]);
+                let started = Instant::now();
+                while !transmitter.is_ready() {
+                    if let Some(error) = transmitter.error() {
+                        bail!(error);
+                    }
+                    ensure!(
+                        started.elapsed() < radius::protocol::LOGIN_TIMEOUT,
+                        "Radius receiver did not become ready"
+                    );
+                    thread::sleep(STOP_POLL_INTERVAL);
+                }
+                Ok(Self::Radius {
+                    transmitter,
+                    universe,
+                })
+            }
+        }
+    }
+
+    fn send_frame(&mut self, frames: &BTreeMap<u16, Vec<u8>>) -> Result<()> {
+        match self {
+            Self::ArtNet(output) => output.send_frame(frames),
+            Self::Radius {
+                transmitter,
+                universe,
+            } => {
+                if let Some(error) = transmitter.error() {
+                    bail!(error);
+                }
+                let channels = frames
+                    .get(universe)
+                    .context("rendered frame is missing the Radius universe")?;
+                transmitter.update_light(
+                    channels
+                        .as_slice()
+                        .try_into()
+                        .context("invalid DMX frame length")?,
+                );
+                Ok(())
+            }
+        }
+    }
+}
+
 struct LiveSession {
     run_id: u64,
     rig: FixtureRig,
     engine: Engine,
-    output: Option<ArtNetOutput>,
+    output: Option<LiveOutput>,
     last_states: FixtureStates,
     started: Instant,
 }
@@ -50,10 +151,9 @@ impl LiveSession {
             login.protocol_major,
             PROTOCOL_MAJOR
         );
-        let destination: SocketAddrV4 = login
-            .artnet_destination
-            .parse()
-            .context("invalid Art-Net IPv4 destination")?;
+        if let Some(core) = login.render_core {
+            radius::config::pin_worker(i32::try_from(core).context("invalid render CPU index")?)?;
+        }
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
         let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
         let autoloops = catalog.list();
@@ -81,8 +181,7 @@ impl LiveSession {
         for parameter in &login.parameters {
             engine.set_parameter(0.0, parameter)?;
         }
-        let local = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-        let output = ArtNetOutput::bind(local, destination)?;
+        let output = LiveOutput::open(login, &rig)?;
         let last_states = rig.empty_states();
         Ok(Self {
             run_id: login.run_id,
@@ -107,10 +206,11 @@ impl LiveSession {
         let last_render_duration_seconds = started.elapsed().as_secs_f64();
         self.last_states
             .clone_from(&frame.fixture_properties_before_strobe);
-        self.output
+        let output = self
+            .output
             .as_mut()
-            .context("rendering session is closed")?
-            .send_frame(&frame.dmx_frames_by_universe)?;
+            .context("rendering session is closed")?;
+        output.send_frame(&frame.dmx_frames_by_universe)?;
         Ok(wire::Metrics {
             run_id: self.run_id,
             elapsed_seconds: frame.time_seconds,
@@ -239,6 +339,7 @@ pub fn run_live(
     let mut session: Option<LiveSession> = None;
     let mut last_client_heartbeat = Instant::now();
     let mut last_server_heartbeat = Instant::now();
+    let mut last_metrics = Instant::now();
     let mut next_frame = 0_u64;
     let mut rendered_frames = 0_u64;
     let mut missed_render_deadlines = 0_u64;
@@ -367,8 +468,12 @@ pub fn run_live(
                 last_server_heartbeat = Instant::now();
                 report_metrics = true;
             }
-            if report_metrics || metrics.script_error != previous_script_error {
+            if report_metrics
+                || last_metrics.elapsed() >= METRICS_INTERVAL
+                || metrics.script_error != previous_script_error
+            {
                 send_event(&events, ServerMessage::Metrics(metrics.clone()))?;
+                last_metrics = Instant::now();
             }
             next_frame = due_frame + 1;
         }
@@ -447,7 +552,7 @@ mod tests {
                     "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(),1), sf.pan_tilt(sf.all(),0.2,0.8)} end}"
                         .into(),
             }],
-            artnet_destination: listener.local_addr().unwrap().to_string(),
+            output: Some(wire::login::Output::ArtnetDestination(listener.local_addr().unwrap().to_string())),
             ..Default::default()
         };
         let mut session = LiveSession::login(&login).unwrap();
@@ -471,7 +576,10 @@ mod tests {
                 },
             )
             .unwrap();
-        let source = session.output.as_ref().unwrap().local_addr().unwrap();
+        let Some(LiveOutput::ArtNet(output)) = session.output.as_ref() else {
+            panic!("expected Art-Net output");
+        };
+        let source = output.local_addr().unwrap();
         session.render(0.0, 1, 0, 0, 1).unwrap();
         let mut packet = [0; 1024];
         listener.recv(&mut packet).unwrap();

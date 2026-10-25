@@ -1,7 +1,0 @@
-add_subdirectory(core)
-add_subdirectory(config)
-add_subdirectory(bus)
-add_subdirectory(network)
-add_subdirectory(enttec)
-add_subdirectory(artnet)
-add_subdirectory(soundio)
