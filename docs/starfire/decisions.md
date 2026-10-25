@@ -67,12 +67,14 @@ prototype assumptions can change after an offline review and hardware audition.
 | P37 | Replay defaults to the dashboard's saved rig when present, otherwise the committed room rig; explicit paths win. | A custom fixture-store path requires the matching explicit replay rig. |
 | P38 | Beat corrections update authoritative musical position; animation phase integrates elapsed tempo/speed continuously and does not jump with corrections. | Speed-scaled phase corrections could make animation negative and visibly restart it. Authors can use beat_position for strict beat phase; a phase-lock/slew policy is a future review question. |
 | P39 | Blind naming review covers output stages, override lifetimes and the two sequence clocks. Rename ambiguous public frame fields and make the Lua speed-clock origin/units explicit. | See the naming review for exact reader predictions and retained contextual ambiguities; no exhaustive identifier pass. |
+| P40 | Buildup and Drop intensity oscillators follow absolute musical beat position, including phase corrections and selection between beats. Movement and colour use the continuous speed-scaled sequence clock. | A free-running animation clock can drift from detected beats; a sequence-relative origin can offset every pulse after a mid-beat selection. Speed controls those animations without desynchronizing intensity from musical beats. |
+| P41 | Fixture rows retain their original identity during edits so renaming preserves ordered group membership. | Group order drives spatial phase; treating a renamed fixture as a new member silently changes choreography. |
 
 ## Open questions and defaults
 
 | ID | Question | Prototype default |
 | --- | --- | --- |
-| Q01 | When should a valid Lua edit activate? | Explicit reload; preserve musical position and never create a sequence restart command. Automatic next-bar reload remains optional. |
+| Q01 | When should a valid Lua edit activate? | Start a fresh replay after editing in the prototype. Live reload should preserve musical position; explicit versus next-bar activation remains open. No restart command. |
 | Q02 | Should persistent manual colour overrides win over automatic accents? | Explicit priority; manual defaults above automatic on the same property. Unrelated intensity/strobe controls still combine. |
 | Q03 | Named calibrated movement targets or direct pan/tilt first? | Direct normalized pan/tilt with calibrated bounds; API leaves room for named positions without needing a 3D editor. |
 | Q04 | What are the exact CF805 and Mini Kinta IRC channel modes/calibrations? | Leave unverified hardware out of the audition patch; preserve addresses rather than guessing. |
@@ -121,3 +123,9 @@ Hardware audition is explicitly separate from deterministic offline validation.
   replay output needed safe shutdown and stale-frame skipping. Agents reassigned
   to existing dashboard setup, Autolux report/CLI integration and build checks.
   Real fixtures remain idle. Background 15-minute checkpoint timer is active.
+- 2026-10-25 02:02 local: second checkpoint. All delegated implementation and
+  independent reviews returned. Native replay, output lifecycle, bounded Lua,
+  patch persistence and report timing checks pass. Manual Edge review found and
+  fixed group-order and dropdown/reload issues. Naming review is bounded to three
+  API concepts. Full repository validation is compiling native dependencies;
+  Python/GPU workloads remain serialized. Four core/build commits are recorded.

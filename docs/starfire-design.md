@@ -1,7 +1,72 @@
 # Starfire design
 
-Status: discussion draft. Requirements below are agreed; architecture and API
-proposals need review before implementation. No Starfire runtime exists yet.
+Status: working prototype. Rust/Lua rendering, deterministic replay, Art-Net
+audition and fixture setup are implemented. Live Autolux input and precise
+Radius clock handoff remain integration work; production uses SoundSwitch.
+See the [decision log](starfire/decisions.md) for choices and open questions.
+
+## Working prototype
+
+One Rust crate separates musical clock, Lua execution, semantic composition,
+fixture encoding and output. A versioned JSON replay supplies timed commands;
+the root CLI also converts existing Autolux reports to musical-source time.
+No unused production transport schema or new frontend is included.
+
+```mermaid
+flowchart LR
+    Report[Autolux beats and sections] --> Adapter[Source-timeline adapter]
+    Adapter --> Input[Versioned replay]
+    Input --> Clock[Musical clock and commands]
+    Lua[Banked Lua sequences] --> Renderer[Semantic renderer]
+    Clock --> Renderer
+    Web[Existing dashboard Fixtures tab] --> Rig[Validated rig patch]
+    Rig --> Renderer
+    Renderer --> Capture[Deterministic DMX capture]
+    Renderer -->|Explicit paced output| ArtNet[Art-Net destination]
+```
+
+The renderer supports beat anchors, bank/name selection, cut or beat-duration
+crossfade, named property overrides, master intensity, animation speed, blackout
+and Stop. Same-time commands preserve input order. A duplicate selection never
+restarts the sequence. Effects set only their specified properties. Overrides
+resolve conflicts by priority then command order; multipliers combine before
+final master brightness. Overrides expire in beats/seconds or remain until
+cleared. Clearing exposes the continuing baseline.
+
+Lua receives read-only `time_seconds`, `beat_position`,
+`sequence_elapsed_beats` and `sequence_speed_scaled_elapsed_beats`. The latter
+integrates tempo and speed continuously from selection, preserving accumulated
+phase when tempo, speed or authoritative beat position changes. Its render
+function returns semantic effects via `sf.scene`, `sf.dimmer`, `sf.colour`,
+`sf.pan_tilt`, targets and optional oscillators. Authors can calculate arbitrary
+curves. Programs derive animation from supplied time, not render counts.
+Arbitrary Lua can retain closure state: identical cadence is part of the replay
+contract; bundled programs additionally pass 20/40 Hz equivalence checks.
+
+Lua 5.4 uses `mlua`, explicit libraries, 16 MiB per VM, 100,000 instructions per
+load/render, 128 KiB source, 512 effects and 512 targets. No I/O, ambient clocks,
+randomness, modules, coroutines or exception-catching loops. Catalogue and
+diagnostic sizes are bounded. There is no hot reload or arbitrary seek; edit
+and start a fresh replay. Future reload must preserve musical position.
+
+Four banked programs have checked 90-second full-DMX replay digests and semantic
+tests: Atmospheric/Blue Tide, Breakdown/Violet Space, Buildup/Current and
+Drop/Blue Impact. None has a repeating strobe or a fixed buildup ramp.
+The report adapter preserves source musical boundaries, not measured delivery
+lateness. Reports omit accents and true downbeat ordinals; conversion does not
+invent them. Silence and report EOF stop output.
+
+The room patch contains the verified two Spot 110 movers and four SePar units.
+Generic RGB/RGBW/dimmer profiles support portable replay. Mini Kinta IRC and
+CF805 await verified modes. Strobe uses software intensity gating, capped at
+10 Hz, while hardware shutters remain open. Network playback requires at least
+four samples per strobe cycle. Colour balance and movement need audition.
+
+Output is offline by default. Explicit real-time Art-Net replay skips stale
+frames after a stall. Completion, cancellation and send failure attempt blackout
+at the last emitted positions. UDP delivery still requires a receiver watchdog.
+The fixture tab validates edits with Rust before atomic save and rejects stale
+browser revisions. Changes apply next session; no inactive audition controls.
 
 ## Product
 
@@ -45,7 +110,7 @@ Agreed constraints:
   musical buildup. Faster tempo is not evidence of higher musical energy.
 - A long Drop must remain comfortable: a brief arrival accent followed by a
   sustainable look, with explicit brightness, movement and strobe limits.
-- Design first. No new renderer, protocol implementation or UI scaffolding yet.
+- Keep production changes behind an explicit, reviewed live integration.
 
 ## Ownership and deployment
 
@@ -57,11 +122,13 @@ Agreed constraints:
 | Existing webapp | Fixture setup, preview and existing system monitoring |
 | Root CLI | Configuration, process lifecycle and deployment |
 
-Proposed first deployment: a separate Starfire process on the controller PC.
+Deployment: a separate Starfire process on the controller PC.
 This preserves the receiver deployment and isolates program failures from audio.
 Running it inside Radius would introduce Rust/C++ integration; running it on the
 receiver would move program deployment and musical scheduling across the network.
 Neither change is necessary to establish the renderer.
+
+Target live integration (the prototype currently uses the recorded-input path):
 
 ```mermaid
 flowchart LR
@@ -78,10 +145,11 @@ Art-Net destination/interface selection must be explicit. The current route is
 local Art-Net into Radius; broadcasting to additional lighting receivers must
 not accidentally create a second, differently delayed output path.
 
-## Musical input contract
+## Live input contract to review
 
-Programs receive one immutable snapshot for the instant being rendered, plus
-discrete events. Input age, validity and source time travel with the values.
+The prototype contract is described above. Live integration needs an immutable
+snapshot and timed commands with input age, validity and source time. The table
+below defines the intended live contract, not extra prototype fields.
 
 | Input | Required semantics |
 | --- | --- |
@@ -207,8 +275,8 @@ Rust supplies beat/section time, reusable curves and movement helpers, validates
 results, converts fixture properties to DMX, and schedules output. Scripts do
 not sleep, run their own event loops or create network/device connections.
 Repeated render calls evaluate the current musical position; they do not advance
-an independent animation clock. Prefer explicit small state for section-entry
-accents over coroutine scheduling in the first version.
+an independent animation clock. Autolux supplies section-entry accents as timed
+overrides, independently of the repeating baseline.
 
 Lua adds a second language, dynamic errors, a binding API and garbage collection.
 The Rust binding `mlua` offers memory limits and instruction hooks, but those
@@ -216,8 +284,9 @@ are not hard real-time guarantees and do not bound blocking native calls. Use
 an explicit library allowlist, bounded host functions and validation of finite
 property values. Default "safe" libraries alone are not an application sandbox.
 Run scripts away from audio callbacks and measure the render budget on our rig.
-The Lua implementation/version and Rust binding remain to be selected; `mlua`
-is the initial binding candidate. No runtime dependency has been added.
+The prototype uses vendored Lua 5.4 through `mlua`. The remaining items below
+describe the live integration and future authoring contract, not extra APIs
+already exposed by the prototype.
 
 The sandbox proposal needs:
 
@@ -241,13 +310,12 @@ repetition also does not re-enter it. Shared Lua modules and Rust helpers avoid
 copying common effects. Banks group musically compatible alternatives; they do
 not imply automatic failover behavior.
 
-Proposed API: Lua writes semantic fixture properties and can calculate arbitrary
+Lua writes semantic fixture properties and can calculate arbitrary
 curves or choreography. Rust supplies groups, musical time, optional effect
 helpers, validation and profile encoding. A helper catalogue must not limit what
 can be authored: a script can use a circle helper or calculate its own movement
-path. Normal sequences do not write raw DMX channel addresses. The exact callback
-and state API, and the supported transition-policy parameters, remain discussion
-topics. Autolux owns selection of those policies.
+path. Normal sequences do not write raw DMX channel addresses. The implemented
+callback and transition policies are described above; Autolux owns their selection.
 
 ## Lighting model
 
@@ -313,7 +381,7 @@ render time, missed deadlines, input/clock age, late section events, output age
 and program faults. Show the active program/revision and section as context.
 Add queue metrics only where they help explain one of these failures.
 
-## Design validation before implementation
+## Design validation
 
 Review the design against concrete cases:
 
@@ -333,11 +401,11 @@ modes explicit: annotated sections for judging rendering, and live predictions
 for judging the end-to-end system. An annotation-driven show is not evidence of
 classifier accuracy.
 
-Open decisions: Lua binding and sandbox API, input framing, sequence
-composition/state, profile import subset, transition semantics and failure
-deadlines. Clock mapping and timestamp preservation remain Radius implementation
-work. Resolve the contracts with examples and measurable budgets before creating
-the Rust package or changing the network path.
+Open integration decisions: live input framing, profile import subset, hot
+reload, stale-input deadlines and Radius clock mapping. The current replay
+contract, composition and failure behavior are implemented and tested; details
+and unresolved questions are maintained in the decision log. Resolve live clock
+ownership before replacing the production SoundSwitch path.
 
 ## References
 

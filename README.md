@@ -11,6 +11,7 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/simulate/` | Replay, dashboard and evaluation |
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | C++ audiovisual transport: `radius_tx` and `radius_rx` |
+| `starfire/` | Rust/Lua lighting renderer, fixture setup and deterministic replay |
 | `proto/radius/` | Shared protocol schema and C++ codecs |
 | `tools/` | Development checks and diagnostics |
 | `loopMIDI/`, `docs/` | Shared setup and documentation |
@@ -20,6 +21,7 @@ Each component keeps its own `tests/` directory.
 ## Setup
 
 Windows, Python 3.11, uv and Visual Studio C++ Build Tools are required.
+Install Rust through rustup for Starfire; `rust-toolchain.toml` selects its version.
 
 ```powershell
 git submodule update --init --recursive
@@ -81,14 +83,17 @@ uv run autolux label path\to\track.mp3
 
 Backtests compare against committed baselines. Run GPU workloads serially.
 See [operations](docs/operations.md) and [Radius](radius/README.md).
+See [Starfire](starfire/README.md) for programmable lighting replay and fixture
+setup. Production uses SoundSwitch until the live renderer integration is reviewed.
 
 ## Formatting
 
-Both build scripts format Python with Ruff and C++/Protobuf with clang-format.
-Run `uv run pre-commit run --all-files` to apply both saved policies across the
+Build scripts format Python with Ruff, C++/Protobuf with clang-format and Rust
+with rustfmt. Run `uv run pre-commit run --all-files` to apply saved policies across the
 repository. Commit hooks format staged source files; re-stage any changes they make.
 
 Python uses four spaces, a 100-column target and preserved quotes. C++ uses tabs
 at width four, a 120-column target, expanded function/control braces and blank
 lines between definitions. Settings live in `pyproject.toml`, `.clang-format`
-and `.editorconfig`. Dependencies, generated files and training data are excluded.
+`.editorconfig` and `rustfmt.toml`. Dependencies, generated files and training data
+are excluded. Starfire's build also runs Clippy with warnings denied.
