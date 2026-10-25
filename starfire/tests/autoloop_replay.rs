@@ -104,7 +104,7 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
 
 fn check_replay(look: Look) {
     let replay = Replay::load(&root().join(format!("tests/replays/{}.json", look.bank))).unwrap();
-    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     let first = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     assert_eq!(first.frames.len(), 3601);
@@ -164,7 +164,7 @@ fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe
         ("drop", "blue_impact"),
     ] {
         let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-        let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
+        let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
         let mut engine = Engine::new(rig, catalog).unwrap();
         engine
             .apply(
@@ -243,7 +243,7 @@ fn drop_blue_impact_replay() {
 
 #[test]
 fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
     for entry in catalog.list() {
         let replay = Replay::load(&root().join(format!("tests/replays/{}.json", entry.bank)))
             .expect("every authored autoloop needs a replay fixture");
@@ -277,7 +277,7 @@ fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
 
 #[test]
 fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/generic.json")).unwrap();
     for entry in catalog.list() {
         let mut replay =
@@ -302,7 +302,7 @@ fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
 
 #[test]
 fn beat_corrections_change_pulses_without_restarting_choreography() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     for (bank, autoloop, initial_level, corrected_level) in [
         ("buildup", "current", 144.0 / 255.0, 72.0_f64 / 255.0),
@@ -376,7 +376,7 @@ fn beat_corrections_change_pulses_without_restarting_choreography() {
 
 #[test]
 fn drop_pulses_survive_animation_freeze_and_selection_across_global_phrase_boundaries() {
-    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloops")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     let mut pulse_traces = Vec::new();
     for selection_beat in [2.0, 2.25, 62.0, 62.25] {

@@ -22,10 +22,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ng_common import CAMP, CORPUS, LABEL9_WORKTREE, VENV_PY
+from ng_common import CAMP, CORPUS, VENV_PY
 
-W = str(LABEL9_WORKTREE)
-sys.path[:0] = [W, W + r"\training"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import module_source
+
+W = str(module_source.experiment_checkout("AUTOLUX_LABEL9_CHECKOUT"))
+sys.path[:0] = [W, str(Path(W) / "training")]
+module_source.require_imported_package_under_root("nn", Path(W))
 
 try:
     ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)

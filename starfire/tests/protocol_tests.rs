@@ -54,7 +54,7 @@ fn engine() -> Engine {
     Engine::new(
         FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
         AutoloopCatalog::load(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop"),
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
         )
         .unwrap(),
     )
@@ -360,7 +360,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
     };
     let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let catalog = AutoloopCatalog::load(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop"),
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
     )
     .unwrap();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();

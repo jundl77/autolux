@@ -10,8 +10,6 @@ CORPUS = REPO / "training" / "data" / "raveform"
 CAMP = CORPUS / "models" / "l9b_campaign"
 VENV_PY = REPO.parent / ".venv" / "Scripts" / "python.exe"
 
-LABEL9_WORKTREE = Path(r"C:\Users\Julian\Projects\soundswitch-label9-worktree")
-
 F3_DIR = CORPUS / "features_stream" / "MERT-v1-330M_L6-22_F3_hop1"
 
 # Decision #341 / ruling D1: the six new hand tracks, pre-seeded into train.

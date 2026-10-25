@@ -20,7 +20,7 @@ flowchart TB
     end
     subgraph Starfire["STARFIRE (Rust + Lua)"]
         Timing["Beat timing and live controls"]
-        Scripts["Banked Luan autoloops"]
+        Scripts["Banked Lua autoloops"]
         Frames["Compose effects and encode DMX"]
         Timing -->|"Embedded Lua 5.4: time and measured audio level"| Scripts
         Scripts -->|"Lua effect tables: fixture properties"| Frames
@@ -29,7 +29,7 @@ flowchart TB
     subgraph Radius["RADIUS (C++)"]
         TX["TX: capture, delay and transmit"]
         RX["RX: buffer and synchronized playback"]
-        TX -->|"Protobuf / UDP 19002: Login, audio, DMX, heartbeat"| RX
+        TX -->|"Protobuf / UDP 19002: Login, AudioFrame, LightFrame, heartbeat"| RX
         RX -->|"Protobuf / UDP 19002: LoginReply, errors, metrics, heartbeat"| TX
     end
     Speakers["Focusrite speakers"]
@@ -58,7 +58,7 @@ flowchart TB
   uses HTTP on port 8765.
 - **Beat timing and live controls:** receives typed commands, interpolates musical position
   between beats and supplies explicit time to the renderer.
-- **Banked Luan autoloops:** describe baseline colour, brightness and movement using groups.
+- **Banked Lua autoloops:** describe baseline colour, brightness and movement using groups.
   Atmospheric, Breakdown, Buildup and Drop are the first banks.
 - **Compose effects and encode DMX:** combines baseline, overrides, master and blackout;
   maps fixture properties to complete universe frames.
@@ -83,6 +83,7 @@ See the [protocol](starfire/protocol-design.md).
 [Radius's contract](../proto/radius/radius.proto) uses the same framing inside
 1,200-byte UDP datagrams. TX waits for LoginReply before capturing media. Both
 Login protocols require equal major versions and negotiate the lower minor.
+Version constants come from the schema enums and generated language bindings.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
 
 ## What "clock" means
@@ -126,7 +127,7 @@ handoff change, tracked in the [decision log](starfire/decisions.md).
   brightness and musical section. Lua can use it for modest modulation; faster BPM alone
   does not mean higher intensity. Updates follow detected beats; beatless passages hold
   the last value.
-- Every Luan autoloop has a replay test: identical inputs, rig, code and cadence produce
+- Every Lua autoloop has a replay test: identical inputs, rig, code and cadence produce
   identical DMX. Scripts cannot read wall time, files, network or randomness.
 - Queues and script work are bounded. Faults darken fixtures while preserving movement
   positions; there is no automatic autoloop retry.

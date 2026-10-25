@@ -16,7 +16,7 @@ are requested. Fixture setup uses the existing dashboard; saved patches apply
 next session. Native commands are also available in
 `starfire/target/release/starfire.exe --help`.
 
-Authored looks live in root `autoloop/`, grouped by bank. Autoloops return semantic
+Authored looks live in root `autoloops/`, grouped by bank. Autoloops return semantic
 effects from `render(ctx)`. Use supplied musical time,
 named groups and helpers in `src/lua/lighting.lua`; never depend on render count.
 `ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, or `nil` until

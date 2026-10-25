@@ -26,12 +26,12 @@ bool ValidPayload(const Heartbeat&)
 	return true;
 }
 
-bool ValidPayload(const Lighting& value)
+bool ValidPayload(const LightFrame& value)
 {
 	return value.channels().size() == DmxFrameSize;
 }
 
-bool ValidPayload(const Audio& value)
+bool ValidPayload(const AudioFrame& value)
 {
 	const auto samples = value.interleaved_samples_size();
 	if (samples <= 0 || samples > AudioFrames * Channels || samples % Channels ||
@@ -79,10 +79,10 @@ MessageType TypeOf(const Message& message)
 			    return LOGIN_REPLY;
 		    else if constexpr (std::is_same_v<T, ErrorReply>)
 			    return ERROR_REPLY;
-		    else if constexpr (std::is_same_v<T, Audio>)
-			    return AUDIO;
-		    else if constexpr (std::is_same_v<T, Lighting>)
-			    return LIGHTING;
+		    else if constexpr (std::is_same_v<T, AudioFrame>)
+			    return AUDIO_FRAME;
+		    else if constexpr (std::is_same_v<T, LightFrame>)
+			    return LIGHT_FRAME;
 		    else if constexpr (std::is_same_v<T, Heartbeat>)
 			    return HEARTBEAT;
 		    else
@@ -148,11 +148,11 @@ bool ParseMessage(const void* data, size_t size, uint64_t expectedSession, Messa
 	case ERROR_REPLY:
 		parsed = Decode<ErrorReply>(payload, length, message);
 		break;
-	case AUDIO:
-		parsed = Decode<Audio>(payload, length, message);
+	case AUDIO_FRAME:
+		parsed = Decode<AudioFrame>(payload, length, message);
 		break;
-	case LIGHTING:
-		parsed = Decode<Lighting>(payload, length, message);
+	case LIGHT_FRAME:
+		parsed = Decode<LightFrame>(payload, length, message);
 		break;
 	case HEARTBEAT:
 		parsed = Decode<Heartbeat>(payload, length, message);

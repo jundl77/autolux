@@ -16,7 +16,6 @@ constexpr uint32_t SampleRateHz = 44100;
 constexpr size_t AudioBytesPerFrame = Channels * sizeof(float);
 constexpr size_t MaxDatagramBytes = 1200; // Serialized payload budget, excluding IP/UDP headers.
 constexpr size_t FrameHeaderBytes = 5;
-constexpr uint32_t ProtocolMajor = 1, ProtocolMinor = 0;
 constexpr size_t MaxErrorBytes = 512;
 constexpr uint64_t LoginRetryMilliseconds = 250;
 constexpr uint64_t LoginTimeoutMilliseconds = 15000;
@@ -40,7 +39,7 @@ struct LightingFrame
 	std::array<uint8_t, DmxFrameSize> channels{};
 };
 
-using Message = std::variant<Login, LoginReply, ErrorReply, Audio, Lighting, Heartbeat, Metrics>;
+using Message = std::variant<Login, LoginReply, ErrorReply, AudioFrame, LightFrame, Heartbeat, Metrics>;
 
 MessageType TypeOf(const Message& message);
 bool IsValidMessage(const Message& message, uint64_t expectedSession = 0);

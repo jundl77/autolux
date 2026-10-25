@@ -10,13 +10,20 @@ option optimize_for = LITE_RUNTIME;
 // Only Login has a success reply. Media is best effort and never acknowledged.
 // Both endpoints send independent heartbeats every 10 seconds; timeout is 30 seconds.
 
+// Build constants, not a wire field.
+// Major changes are incompatible; minor additions are compatible.
+enum ProtocolVersion {
+  PROTOCOL_MINOR = 0;
+  PROTOCOL_MAJOR = 1;
+}
+
 enum MessageType {
   MESSAGE_TYPE_UNSPECIFIED = 0;
   LOGIN = 1;
   LOGIN_REPLY = 2;
   ERROR_REPLY = 3;
-  AUDIO = 4;
-  LIGHTING = 5;
+  AUDIO_FRAME = 4;
+  LIGHT_FRAME = 5;
   HEARTBEAT = 6;
   METRICS = 7;
 }
@@ -55,7 +62,7 @@ message ErrorReply {
 }
 
 // [CLIENT -> SERVER]
-message Audio {
+message AudioFrame {
   fixed64 session_id = 1;
   fixed64 audio_frame_position = 2;  // Session stereo frame index of the first sample.
   fixed32 sequence_number = 3;       // Per media kind; wraps modulo 2^32.
@@ -63,7 +70,7 @@ message Audio {
 }
 
 // [CLIENT -> SERVER]
-message Lighting {
+message LightFrame {
   fixed64 session_id = 1;
   fixed64 audio_frame_position = 2;  // Target audible audio-frame watermark.
   fixed32 sequence_number = 3;

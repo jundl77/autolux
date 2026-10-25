@@ -1,7 +1,6 @@
 # madmom migration — aubio keeps the filterbank, madmom takes the rhythm
 
 **Branch** `madmom_migration` off `origin/master` (`9749286`, post-PR-7).
-**Worktree** `C:\Users\Julian\Projects\soundswitch-madmom-worktree`.
 **Charter** `.superpowers/sdd/2026-07-28-madmom-migration/charter.md` (binding, owner-amended).
 **Gate** satisfied: decisions #81 — decoded sweep GO on madmom online beats.
 

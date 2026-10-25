@@ -27,8 +27,8 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
-pub const PROTOCOL_MAJOR: u32 = 1;
-pub const PROTOCOL_MINOR: u32 = 0;
+pub const PROTOCOL_MAJOR: u32 = wire::ProtocolVersion::ProtocolMajor as u32;
+pub const PROTOCOL_MINOR: u32 = wire::ProtocolVersion::ProtocolMinor as u32;
 
 type SharedFailure = Arc<Mutex<Option<String>>>;
 

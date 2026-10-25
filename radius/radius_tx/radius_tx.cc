@@ -14,8 +14,8 @@ void RadiusTx::Start()
 	mBus.Open(mConfig.mBindAddress, mConfig.mPeerAddress, mConfig.mBusPort, false);
 	mLogin.set_command_id(Bus::LoginCommandId);
 	mLogin.set_session_id(mConfig.mSession);
-	mLogin.set_protocol_major(Bus::ProtocolMajor);
-	mLogin.set_protocol_minor(Bus::ProtocolMinor);
+	mLogin.set_protocol_major(Bus::PROTOCOL_MAJOR);
+	mLogin.set_protocol_minor(Bus::PROTOCOL_MINOR);
 	mLogin.set_sample_rate_hz(mConfig.mAudioSampleRate);
 	mLogin.set_channel_count(Bus::Channels);
 	mLogin.set_audio_enabled(mConfig.mReceiverAudioEnabled);
@@ -35,8 +35,8 @@ void RadiusTx::Tick()
 	mBus.Poll(mConfig.mSession, [&](const Bus::Message& p) {
 		if (const auto* reply = std::get_if<Bus::LoginReply>(&p))
 		{
-			if (reply->command_id() != mLogin.command_id() || reply->protocol_major() != Bus::ProtocolMajor ||
-			    reply->protocol_minor() > Bus::ProtocolMinor || reply->max_message_bytes() != Bus::MaxDatagramBytes)
+			if (reply->command_id() != mLogin.command_id() || reply->protocol_major() != Bus::PROTOCOL_MAJOR ||
+			    reply->protocol_minor() > Bus::PROTOCOL_MINOR || reply->max_message_bytes() != Bus::MaxDatagramBytes)
 				throw std::runtime_error("receiver returned an incompatible LoginReply");
 			if (!mReady)
 			{
@@ -102,7 +102,7 @@ void RadiusTx::Tick()
 		const auto* block = mAudio.Front();
 		if (!block)
 			break;
-		Bus::Audio p;
+		Bus::AudioFrame p;
 		p.set_session_id(mConfig.mSession);
 		p.set_audio_frame_position(block->watermark);
 		p.set_sequence_number(++mAudioSequence);
@@ -113,7 +113,7 @@ void RadiusTx::Tick()
 	}
 	if (mConfig.mArtnetEnabled && now - mLastDmxSend >= DmxSendIntervalMilliseconds)
 	{
-		Bus::Lighting p;
+		Bus::LightFrame p;
 		p.set_session_id(mConfig.mSession);
 		p.set_audio_frame_position(mAudio.watermark.load());
 		p.set_sequence_number(++mDmxSequence);

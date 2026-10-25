@@ -28,12 +28,13 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-PHASE_B = Path(r"C:\Users\Julian\Projects\soundswitch-phase-b-worktree")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import module_source
+
+PHASE_B = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
 sys.path.insert(0, str(PHASE_B))
 sys.path.insert(0, str(HERE))
 sys.path.append(str(HERE.parent))
-
-import module_source  # noqa: E402
 
 # The gate decodes the phase-B generation: ``ceiling`` and ``paired`` exist
 # nowhere else, so every training.nn it reads must come from there too.

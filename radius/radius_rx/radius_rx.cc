@@ -43,7 +43,7 @@ void RadiusRx::Login(const Bus::Login& login)
 	}
 	if (!mLogin)
 	{
-		if (login.protocol_major() != Bus::ProtocolMajor)
+		if (login.protocol_major() != Bus::PROTOCOL_MAJOR)
 		{
 			reject("incompatible protocol major version");
 			return;
@@ -83,8 +83,8 @@ void RadiusRx::Login(const Bus::Login& login)
 	Bus::LoginReply reply;
 	reply.set_command_id(login.command_id());
 	reply.set_session_id(mConfig.mSession);
-	reply.set_protocol_major(Bus::ProtocolMajor);
-	reply.set_protocol_minor((std::min)(login.protocol_minor(), Bus::ProtocolMinor));
+	reply.set_protocol_major(Bus::PROTOCOL_MAJOR);
+	reply.set_protocol_minor((std::min<uint32_t>)(login.protocol_minor(), Bus::PROTOCOL_MINOR));
 	reply.set_max_message_bytes(Bus::MaxDatagramBytes);
 	mBus.Send(reply);
 }
@@ -180,7 +180,7 @@ void RadiusRx::Tick()
 			mLink.Received(now);
 			++mHeartbeatsReceived;
 		}
-		else if (const auto* audio = std::get_if<Bus::Audio>(&p); audio && mConfig.mAudioEnabled)
+		else if (const auto* audio = std::get_if<Bus::AudioFrame>(&p); audio && mConfig.mAudioEnabled)
 		{
 			Bus::AudioBlock block;
 			block.watermark = audio->audio_frame_position();
@@ -196,7 +196,7 @@ void RadiusRx::Tick()
 				mAudioAt = now;
 			}
 		}
-		else if (const auto* lighting = std::get_if<Bus::Lighting>(&p); lighting && mConfig.mDmxEnabled)
+		else if (const auto* lighting = std::get_if<Bus::LightFrame>(&p); lighting && mConfig.mDmxEnabled)
 		{
 			if (!Bus::IsNewerSequenceNumber(lighting->sequence_number(), mLastDmxSequenceNumber))
 			{

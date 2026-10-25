@@ -315,7 +315,7 @@ async def test_the_fifteen_minute_roll_keeps_the_beat_lock():
     assert analyser._rhythm.resets == 0, (
         'the roll re-locked madmom mid-audio; a gained or lost beat rotates the bar grid'
     )
-    assert analyser.beat_count == 2, 'the OS2L beat position re-based mid-song'
+    assert analyser.beat_count == 2, 'the musical beat position re-based mid-song'
     assert list(analyser._beat_stream_times) == bpm_window, 'the BPM window was torn down mid-lock'
 
 

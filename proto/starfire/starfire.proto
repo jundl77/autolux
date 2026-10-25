@@ -12,6 +12,13 @@ import "proto/starfire/rig.proto";
 // Rejections use ErrorReply. Metrics report the last processed command ID.
 // Both endpoints send heartbeats every 10 seconds; timeout is 30 seconds.
 
+// Build constants, not a wire field.
+// Major changes are incompatible; minor additions are compatible.
+enum ProtocolVersion {
+  PROTOCOL_MINOR = 0;
+  PROTOCOL_MAJOR = 1;
+}
+
 enum MessageType {
   MESSAGE_TYPE_UNSPECIFIED = 0;
   LOGIN = 1;
@@ -80,6 +87,12 @@ message PlayAutoloop {
 // Replace this identified effect. Only specified properties override the baseline.
 // Higher priority wins; ties use command order. Brightness/blackout parameters apply last.
 message SetActiveEffect {
+  message RgbColor {
+    double red = 1;  // Each channel is normalized to 0..1.
+    double green = 2;
+    double blue = 3;
+  }
+
   // Physical values use GDTF units; presets name a ChannelSet.
   message AttributeValue {
     oneof value {

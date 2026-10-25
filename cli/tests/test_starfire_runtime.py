@@ -12,7 +12,6 @@ import pytest
 
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
-from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 
@@ -235,14 +234,14 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
         assert value.command_id == 1
         assert value.HasField('rig') and value.rig.fixtures and value.autoloops
         assert value.artnet_destination
-        assert value.protocol_major == 1 and value.protocol_minor == 0
+        assert value.protocol_major == wire.PROTOCOL_MAJOR and value.protocol_minor == wire.PROTOCOL_MINOR
         if mode == 'login_error':
             event(wire.ErrorReply(command_id=value.command_id, message='fixture patch is missing'))
         else:
             event(wire.LoginReply(command_id=value.command_id,
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
-                protocol_major=2 if mode == 'wrong_major_reply' else 1,
-                protocol_minor=1 if mode == 'newer_minor_reply' else 0
+                protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
+                protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply')
             ))
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
@@ -528,7 +527,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         runtime = starfire_runtime.StarfireRuntime(
             binary,
             root / 'rigs/room.json',
-            root / 'autoloop',
+            root / 'autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
             initial_parameters=[wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0.5)],
@@ -542,7 +541,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
                     effect_id='held_red',
                     fixture='cf805_pixel_1',
                     intensity=0.75,
-                    colour=rig_wire.RgbColor(red=1.0),
+                    colour=wire.SetActiveEffect.RgbColor(red=1.0),
                 )
             )
             deadline = time.monotonic() + 2
@@ -588,7 +587,7 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     patch['fixtures'][0]['universe'] = 1
     rig = tmp_path / 'multi-universe.json'
     rig.write_text(json.dumps(patch))
-    autoloops = root / 'autoloop'
+    autoloops = root / 'autoloops'
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
@@ -607,7 +606,7 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
     rig = tmp_path / 'missing-strip.json'
     rig.write_text(json.dumps(patch))
     with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*autoloop ') as error:
-        starfire_runtime.validate_starfire(binary, rig, root / 'autoloop')
+        starfire_runtime.validate_starfire(binary, rig, root / 'autoloops')
     assert 'strip' in str(error.value)
 
 

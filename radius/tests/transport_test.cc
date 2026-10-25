@@ -72,7 +72,7 @@ void CheckBusPackets()
 	send(wire(heartbeat));
 	heartbeat.set_session_id(Session);
 	send(wire(heartbeat)); // No media or heartbeat may claim a receiver before Login.
-	Bus::Lighting lighting;
+	Bus::LightFrame lighting;
 	lighting.set_session_id(Session);
 	lighting.set_channels(std::string(DmxFrameSize, '\0'));
 	send(wire(lighting));

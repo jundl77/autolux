@@ -10,7 +10,6 @@
 
 ## Global Constraints
 
-- Branch: `eval_pipeline`, worktree `C:\Users\Julian\Projects\soundswitch-eval-worktree` (stacked on `stage1_classifier_measurement_fixes` + `raveform_data_pipeline` — both pushed, neither merged to master yet; this PR will re-target after they land). Never commit to master; do not push until the coordinator says so.
 - DATA lives at the main repo absolute path `C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\` (gitignored). Scripts committed; data never.
 - **A downloader/supervisor is LIVE, writing into `audio/`.** Only touch `*.mp3` files whose mtime is > 60 s old; never touch `*.part`, `*.webm`, supervisor/downloader files, or any process.
 - **Decode-cache discipline:** the sim writes `<mp3>.<samplerate>.npy` beside the audio (~7.7× mp3 size — the full corpus would be ~95 GiB). Batch workers MUST delete the `.npy` for a track immediately after its sim run. Verify no cache accumulation after the batch run.

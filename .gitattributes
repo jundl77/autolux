@@ -3,10 +3,9 @@ autolux/training/*.json text eol=lf
 autolux/training/nn/*.json text eol=lf
 autolux/training/data/raveform/annotations/*.hand.json text eol=lf
 
-# Media and captured lighting references must remain byte-identical.
+# Media must remain byte-identical.
 autolux/training/eval_audio/*.mp3 binary
-starfire/tests/reference/soundswitch/*.gz binary
 
 # Keep calibrated program and rig hashes stable across checkouts.
-autoloop/**/*.lua text eol=lf
+autoloops/**/*.lua text eol=lf
 rigs/*.json text eol=lf

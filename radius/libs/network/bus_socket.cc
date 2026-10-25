@@ -96,7 +96,7 @@ void BusSocket::Poll(uint64_t session, const std::function<void(const Bus::Messa
 			continue;
 		}
 		const auto type = Bus::TypeOf(packet);
-		const bool clientMessage = type == Bus::LOGIN || type == Bus::AUDIO || type == Bus::LIGHTING;
+		const bool clientMessage = type == Bus::LOGIN || type == Bus::AUDIO_FRAME || type == Bus::LIGHT_FRAME;
 		const bool serverMessage = type == Bus::LOGIN_REPLY || type == Bus::ERROR_REPLY || type == Bus::METRICS;
 		if ((mReceiver && serverMessage) || (!mReceiver && clientMessage) ||
 		    (mReceiver && !mConnected && type != Bus::LOGIN))

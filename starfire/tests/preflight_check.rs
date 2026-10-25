@@ -18,7 +18,7 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
 #[test]
 fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = check(&root.join("../rigs/room.json"), &root.join("../autoloop"));
+    let output = check(&root.join("../rigs/room.json"), &root.join("../autoloops"));
     assert!(
         output.status.success(),
         "{}",
@@ -38,7 +38,7 @@ fn preflight_rejects_a_valid_patch_missing_a_autoloop_group() {
     let path = directory.path().join("missing-strip.json");
     fs::write(&path, serde_json::to_vec(&rig).unwrap()).unwrap();
 
-    let output = check(&path, &root.join("../autoloop"));
+    let output = check(&path, &root.join("../autoloops"));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(error.contains("autoloop "), "{error}");

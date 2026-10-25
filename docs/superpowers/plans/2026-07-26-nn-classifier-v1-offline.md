@@ -10,7 +10,6 @@
 
 ## Global Constraints
 
-- Branch `eval_pipeline`, worktree `C:\Users\Julian\Projects\soundswitch-eval-worktree`. Never commit to master; no push without the coordinator.
 - DATA at `C:\Users\Julian\Projects\autolux\autolux\training\data\raveform\` (gitignored): model checkpoints under `models/`, posterior sidecars under `posteriors/`, splits file at `splits.json`. Committed code: `training/nn/` package + tests. No model binaries in git.
 - Dependencies: add a `[project.optional-dependencies] training = [...]` extra to pyproject (torch, onnx, onnxruntime pinned exact versions). `uv sync --extra training` documented. Nothing in the default deps changes; the live pipeline gains no new imports in this plan.
 - `lib/` and `simulate/` remain untouched (offline plan).

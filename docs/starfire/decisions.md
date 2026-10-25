@@ -8,23 +8,21 @@ prototype assumptions can change after an offline review and hardware audition.
 
 | ID | Decision | Consequence |
 | --- | --- | --- |
-| U01 | Afterglow inspires the scripting API; SoundSwitch inspires the platform. | Fixture-aware, composable effects; fixtures, groups, banks and looping autoloops. |
-| U02 | Rust engine, Luan autoloops. | Embedded Lua; no JVM, Wasm or Clojure compatibility requirement. |
+| U01 | Afterglow inspires the scripting API; the platform organizes fixtures, groups and banks. | Fixture-aware, composable effects; fixtures, groups, banks and looping autoloops. |
+| U02 | Rust engine, Lua autoloops. | Embedded Lua; no JVM, Wasm or Clojure compatibility requirement. |
 | U03 | Autolux selects named autoloops and transition policies. | Starfire executes commands; it does not classify music or select looks. |
 | U04 | One autoloop corresponds to one Lua script. | Autoloops repeat until changed. Selecting the active autoloop is a no-op; no restart command. |
 | U05 | Banks represent lighting categories. | Initial Atmospheric, Breakdown, Buildup and Drop banks; categories remain configuration. |
-| U06 | Inputs match the useful timing/control data sent to SoundSwitch. | Beat/tempo/position/transport and controls; no PCM, energy bands or audio analysis in Starfire. |
+| U06 | Autolux supplies musical timing and explicit controls. | Beat/tempo/position/transport and controls; no PCM, energy bands or audio analysis in Starfire. |
 | U07 | Radius owns timestamps and playback synchronization as implementation details. | Lua and the operator interface use musical time, never audio-frame watermarks. |
 | U08 | Autolux controls accents and persistent overrides above the Lua baseline. | Strobe, brightness, speed and fixture colour can change independently of the autoloop. |
 | U09 | Named fixture groups make autoloops portable between rigs. | Fixture setup maps roles such as wash and movers to actual hardware. |
 | U10 | Keep script-failure handling simple. | No automatic bank failover or retry system. |
 | U11 | Existing webapp gets fixture setup; keep one product entry point. | Root CLI coordinates components; no separate frontend. |
-| U12 | Keep Art-Net output and the existing receiver network path initially. | No production Radius protocol replacement in this prototype. |
-| U13 | Every Luan autoloop has a deterministic beatgrid-to-DMX replay test. | Identical input, rig, controls and program produce identical DMX; live and replay share the renderer. |
+| U12 | Keep Art-Net output and the existing receiver network path initially. | Starfire emits Art-Net; Radius owns synchronized audio and lighting transport. |
+| U13 | Every Lua autoloop has a deterministic beatgrid-to-DMX replay test. | Identical input, rig, controls and program produce identical DMX; live and replay share the renderer. |
 | U14 | Work in an isolated worktree; commit meaningful slices to a branch. | Production master remains separate from prototype integration. |
 | U15 | Delegate work, review it centrally and check progress every 15 minutes. | Three implementation workstreams; integration, decisions and final validation stay with the lead. |
-| U16 | Calibrate the four Lua loops against captured output from the authored SoundSwitch loops. | Compare controlled beatgrids, levels, fixture encoding and timing; thematic similarity alone is insufficient. |
-| U17 | Continue calibration while the user is away; speakers cannot be tested now. | Capture local Art-Net only; leave Radius and physical outputs stopped. Audible validation remains pending. |
 | U18 | Bounded hardware auditions are authorized when the user is present. | Audio and lights were confirmed working; the isolated beat pulse was judged on-beat. Startup alignment is a separate requirement. |
 | U19 | Use centered Control, Telemetry and Config tabs in the existing dashboard. | Control keeps essential performance, the timeline and horizontal diagnostics; detailed graphs live in Telemetry; Config owns fixture setup. |
 | U20 | Keep one current protocol; overwrite it in place and commit directly to this branch. | Both implementations change together; Git provides history, with no parallel v2 schema or compatibility layer. |
@@ -38,19 +36,24 @@ prototype assumptions can change after an offline review and hardware audition.
 | U28 | Autoloop IDs identify playback independently of banks. | Banks group supplied scripts; PlayAutoloop uses a globally unique ID only. |
 | U29 | Name the complete fixture setup RigDefinition and define it in rig.proto. | Login.rig contains fixtures, groups and their reusable DMX profiles. The name describes configuration rather than a running rig. starfire.proto imports the definition; both files share one generated contract. |
 | U30 | Store shared rig files and fixture profiles in root rigs/. | Autolux loads these assets into Login; native replay and validation use the same files. |
-| U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in root autoloop/. |
+| U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in root autoloops/. |
 | U32 | Use GDTF as the basis for generic fixture definitions and retain rig.proto. | Prefer reusable open-source GDTF schemas and parsers where suitable. GDTF describes device types; RigDefinition describes their installed instances. Profiles carry standard GDTF XML and the selected DMX mode; existing open-source parsers compile physical controls at Login. |
-
-
 | U33 | Radius follows the same protocol patterns as Starfire. | Standalone generated messages, Login/LoginReply, error-only replies, Metrics and independent heartbeats. Framing lives beside consumers. |
 | U34 | Both Login messages carry protocol major/minor versions. | Major mismatch rejects before output acquisition; minor additions remain compatible and the reply returns the lower supported minor. |
 | U35 | Enum definitions appear above messages. | Place them after package/import/options in every shared schema. |
+| U36 | Starfire is the sole lighting engine and owns all lighting concepts. | Keep native replay, fixture and transport verification; remove obsolete external-control artifacts. |
+| U37 | Define protocol versions in the schemas. | Consumers use generated major/minor constants; both protocols currently define 1.0. |
+| U38 | Name Radius media messages AudioFrame and LightFrame. | Their message-type values are AUDIO_FRAME and LIGHT_FRAME. |
+
+
+| U39 | Store authored autoloops in root autoloops/. | Directory paths are plural; the autoloop API concept remains singular. |
+| U40 | Use GDTF and MVR exclusively for fixture and rig assets. | Replace custom JSON fixture/patch storage; preserve standard archives and their resources. Implementation is pending. |
+| U41 | Keep the physical rig independent of scripts. | Fixture selection belongs to show programming. MVR scene organization must not require Lua-specific role names. The selection API is under discussion. |
 
 ## Prototype decisions
 
-Latest scope: Starfire is the sole lighting backend on this branch. The user
-approved removing SoundSwitch connectivity and requested the live contract in
-`proto/starfire/starfire.proto`; 40 Hz remains the output cadence.
+Starfire is the lighting backend. Its live contract is
+`proto/starfire/starfire.proto`; output cadence is 40 Hz.
 
 - P44: Use standalone Google Protobuf messages over the owned subprocess's
   stdin/stdout. Frame each with a generated MessageType byte and a four-byte
@@ -65,7 +68,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P46: Exchange renderer health and 10-second heartbeats; 30 seconds without
   controller input stops output. EOF, malformed input, queue overflow and fatal
   render errors attempt fixture-aware blackout and terminate the owned child.
-  A musical Stop command stops the look without terminating the renderer.
+  An empty PlayAutoloop enters idle without terminating the renderer.
 - P47: Supply measured music energy separately from user master brightness.
   Normalize the analyser's smoothed RMS through a named -48 to -12 dBFS range,
   clamped to 0..1. This is measured loudness, not perceptual musical intensity.
@@ -79,13 +82,12 @@ approved removing SoundSwitch connectivity and requested the live contract in
   runtime. Rust uses prost generation. Build hooks stay in `tools/`; bounded
   process framing stays beside its CLI consumer. No dynamic descriptor loading.
 - P50: The existing show-delay queue dispatches beat and measured energy
-  together. Replace channel-level note chasing with the selected Lua baseline.
+  together. Lua supplies the selected baseline look.
   Drop entry requests `drop_arrival`: 8 Hz strobe, one second, priority 100.
   A committed class change within the same lighting bank keeps the current
   autoloop and does not retrigger its entry accent. Persistent silence stops
   the renderer's look and discards queued commands that could reactivate it.
-- P51: Reports name semantic autoloops and accents, not transport channels.
-  Remove the unmeasured constant beat-strength field; retain raw RMS and the
+- P51: Reports name semantic autoloops and accents. Retain raw RMS and the
   original beat/section evidence. Compare those analysis invariants against the
   existing baseline without rewriting it. Validate changed lighting output with
   semantic command checks and deterministic DMX replay tests.
@@ -94,7 +96,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
   Audio level updates alongside detected beats and holds between them. A future
   continuous level stream also needs timestamped recording for replay parity.
 - P53: Name the new measured control `normalized_rms_level`, with
-  `SetNormalizedRmsLevel` and `rms_to_normalized_level`. Blind readers confused
+  `AUDIO_RMS_NORMALIZED` and `rms_to_normalized_level`. Blind readers confused
   "music energy" with perceptual intensity and general "audio level" with volume
   control. The final name exposes the measured quantity and normalization;
   numerical mapping remains an explicit protocol/API contract.
@@ -115,51 +117,25 @@ approved removing SoundSwitch connectivity and requested the live contract in
   attempts blackout. Do not add triple buffering or a backlog of completed DMX
   frames; consider a latest-frame handoff only if output separation is measured
   to be necessary. Radius's intentional synchronized playback buffer is separate.
-- P58: Keep SoundSwitch reference control and comparison helpers in development
-  tools or ignored validation artifacts. Production remains Starfire-only. Record
-  original asset hashes, supplied controls and captured DMX; distinguish exact
-  channel agreement from phase alignment and intentional profile differences.
+
 - P59: Run the standalone dashboard synchronously from the CLI main thread.
   Its blocking server and mDNS registration must not occupy an asyncio event
   loop or an executor worker that prevents bounded Ctrl-C shutdown.
-- P60: Calibrate against the saved Home patch using eight generic RGB pixels at
-  addresses 97, 100, ... 118 for the CF805's verified 24-channel mode. Keep this
-  reference patch separate until its scripts are ready. Mini Kinta channels
-  40..43 remain dark; compare them explicitly rather than inventing a profile.
-  Use Spot shutter value 7 and blue-wheel value 111, both inside the documented
-  open/blue ranges. Prove existing replay changes contain only these equivalent
-  channel encodings before updating their digests.
-- P61: Record two complete 64-beat SoundSwitch cycles per look at 120 BPM and
-  an independent 140 BPM run, with full master, normalized RMS 1 and no entry
-  accent. Use one common temporal alignment per look; report active properties
-  separately so inactive channels cannot dilute errors. Compare SoundSwitch's
-  own repeat variability before choosing comparison tolerances. Reconstruct
-  semantic authored curves; do not substitute raw DMX frame playback for Lua.
-- P62: Preserve the renderer's rounded fixture encoding. SoundSwitch truncates
-  some colour/intensity products; report the resulting one-byte quantization
-  residual instead of adding a second encoding policy solely for comparison.
-  Calibrated dimmer levels and movement coordinates remain semantic script values.
-  Promote the verified strip patch with the reconstructed scripts, and retain
-  named groups so programs remain independent of DMX addresses.
-- P63: After reconstructing the programs, record a fresh 156 BPM reference run
-  before evaluating it. Keep the formulas and alignment policy fixed for that
-  final check; 120/140 BPM captures remain available for detailed diagnostics.
+- P60: The room patch uses two Spot 110 movers, four SePar washes and eight
+  CF805 RGB cells at addresses 97, 100, ... 118 in its verified 24-channel mode.
+  Mini Kinta channels 40..43 stay dark until its profile is verified. The Spot
+  shutter value 7 and blue-wheel value 111 lie within documented open/blue ranges.
+
+- P62: Round fixture encoding to the nearest DMX value. Dimmer levels and
+  movement coordinates remain semantic script values; named groups keep programs
+  independent of patched addresses.
+
 - P64: Readiness must execute each registered Lua program once against the
   selected fixture patch, with no network output, and reject script/group errors
   before starting Radius. Parsing a rig and listing filenames cannot detect an
   incompatible saved patch. This is a startup probe; replay tests cover the
-  programs' later branches. Preserve custom saved patches; update this machine's
-  saved default only after confirming it is the unchanged six-fixture default.
-- P65: Keep maximum cross-capture errors visible, but do not treat an observed
-  self-shift maximum as a hard bound for independently sampled discontinuities.
-  The first comparison exposed a 198-unit Drop cut lasting 3.4 ms, exceeding a
-  194-unit observed-reference bound because SoundSwitch missed the true zero
-  endpoint between packets. Preserve that failed diagnostic and the original
-  budgets. Gate cadence with their unchanged mean/p95/p99 bounds, exact control
-  channels and complete coverage; direct captured-value anchors check waveform
-  accuracy separately with a declared 5 ms clock uncertainty. A synthetic
-  independent-sampling regression must cover this distinction before final
-  holdout evaluation. Never describe this as bit-identical cross-engine output.
+  programs' later branches. Preserve custom saved patches.
+
 - P66: Drop's rhythmic brightness envelope must keep running when animation
   speed is zero. Gate its initial hold with unscaled musical elapsed time, and
   align the authored envelope to the musical bar containing autoloop selection.
@@ -178,7 +154,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
   section-dependent looks and accents in the temporary audition. Verify the
   envelope and deterministic DMX replay before physical output. Do not apply a
   guessed phase offset after the user confirms the pulse is on-beat.
-- P70: Maintain one unversioned Starfire schema with standalone operations and
+- P70: Maintain one current Starfire schema with standalone operations and
   global enum parameter types plus validated values. Effects use direct fixture
   properties. See [protocol](protocol-design.md).
 - P71: Effect expiry uses elapsed seconds; crossfade duration uses accumulated
@@ -208,8 +184,8 @@ approved removing SoundSwitch connectivity and requested the live contract in
   Omitted effect target means all fixtures. No generic Empty marker is necessary.
 - P77: Load the controller's patch, used profiles and Lua sources before launching
   Starfire. Send this immutable snapshot through typed Login fields. Keep the
-  existing 64 KiB message bound; the room's 14 fixtures and four scripts use about
-  15 KiB. Oversized input fails before launch rather than adding asset-transfer machinery.
+  64 KiB message bound. Oversized input fails before launch; GDTF XML and Lua
+  source share the same session budget.
 - P78: Validate all supplied scripts with initial parameters in an output-free
   probe engine, then discard it. The real session begins pristine; script probes
   must not leak movement positions, Lua state or selection into idle. Acquire
@@ -220,24 +196,24 @@ approved removing SoundSwitch connectivity and requested the live contract in
 | P01 | Install pinned Rust 1.99.1 MSVC, rustfmt and Clippy; use the existing VS 2022 C++ build tools. | Pin updates deliberately after validation. |
 | P02 | Use embedded Lua 5.4 through `mlua`, with vendored Lua and explicit standard-library access. | Lua implementation can change without changing fixture semantics. |
 | P03 | One Rust crate with separate timing, autoloop, composition, fixture and output modules. | Avoid a framework, plugin graph or ECS before a concrete need. |
-| P04 | The first working input is a versioned JSON replay/command stream, also usable from Autolux's recorded reports. | Freeze a production Protobuf contract under root `proto/` after API review; do not add an unused schema. |
+| P04 | JSON replay streams and live Protobuf commands use the same renderer. | Shared schemas live under root `proto/`; generate language bindings. |
 | P05 | Render at 40 Hz by default; use supplied musical time rather than frame counts. | Test other cadences; no claim of sample-exact physical lighting. |
 | P06 | Semantic intensity/colour/pan/tilt/strobe properties are composed before fixture encoding. | No raw-channel writing in normal autoloops. |
 | P07 | Overrides have explicit targets, identities, priorities and lifetimes; highest priority then latest command wins conflicting absolute properties. | Manual versus automatic priority defaults need user review (Q02). |
-| P08 | Intensity multipliers compose with baseline intensity; a final master and blackout always win. | Absolute intensity remains available for persistent illumination. |
+| P08 | Literal property overrides compose with the baseline; global brightness and blackout always apply last. | Absolute intensity remains available for persistent illumination. |
 | P09 | Speed changes an integrated animation-beat clock; the musical beat clock stays unchanged. | Initial speed is global; per-group speed can follow a concrete use case. |
-| P10 | A script fault stops lighting, releases strobe and outputs fixture-aware blackout; audio remains independent. | No automatic replacement. Failed reloads keep the previous program. |
-| P11 | Start with verified Spot 110 and SePar profiles plus generic RGB/RGBW/dimmer fixtures. | Mini Kinta and CF805 need verified mode/profile data before real output (Q04). |
+| P10 | A script fault stops lighting, releases strobe and outputs fixture-aware blackout; audio remains independent. | No automatic replacement; asset changes require a new session. |
+| P11 | Start with verified Spot 110 and SePar profiles plus generic RGB/RGBW/dimmer fixtures. | Mini Kinta stays dark until its mode/profile is verified (Q04). |
 | P12 | All overnight validation is offline or UDP loopback. | Real fixture colour, movement and timing remain a later audition; never wake the room with test output. |
 | P13 | Each autoloop has a replay fixture and a checked full-frame DMX digest, plus semantic assertions. | Golden hashes alone are insufficient; assert expected light behaviour as well. |
 | P14 | Reuse the existing Python environment explicitly without installing an editable worktree over production. | Tests verify imports resolve to the worktree; no duplicate dataset/model copies. |
-| P15 | Embed a separate validated fixture-profile catalogue; rig files reference profile IDs. Preserve patch/group order. | Encoding performs no filesystem I/O. Verify nominal strobe-rate facts against manufacturer documentation. |
+| P15 | Autolux supplies a validated GDTF profile catalogue; rig files reference profile IDs. Preserve patch/group order. | Encoding performs no filesystem I/O. Verify nominal strobe-rate facts against manufacturer documentation. |
 | P16 | Lua returns semantic effects using `sf.scene`, `sf.dimmer`, `sf.colour`, `sf.pan_tilt`, groups and oscillators. | Authors can calculate their own curves; helpers do not limit creative effects. |
 | P17 | Bound each Lua VM to 16 MiB, 100,000 instructions per load/render, 128 KiB source and 512 effects per frame. | Named prototype limits; measure real autoloops and adjust explicitly. No ambient clocks, I/O, imports or unseeded randomness. |
 | P18 | Clock integration changes on beat/control events, not on rendered frames. | Replay cadence cannot change integrated animation speed. Beat-anchor corrections are distinct from speed changes. |
 | P19 | Crossfade continuous semantic properties; switch discrete strobe to incoming value at fade completion. | Avoid invalid intermediate shutter functions. An interrupted fade captures its current baseline, bounding active VMs. |
 | P20 | A fault retains the selected autoloop identity in stopped state; duplicate selection cannot retry it. | Explicit selection of a different autoloop recovers. Fault output clears overrides/strobe and preserves last valid movement. |
-| P21 | Global animation speed and intensity multipliers accept 0..8; clamp composed intensity before the final master. | Named prototype bounds, separate from device-specific movement/strobe limits. |
+| P21 | Global animation speed accepts 0..8; normalized brightness accepts 0..1. | Named prototype bounds, separate from device-specific movement/strobe limits. |
 | P22 | Implement strobe as deterministic intensity gating in the renderer; leave hardware shutter in its verified open range. Limit to 10 Hz at default 40 Hz rendering. | Manufacturer channel ranges do not establish calibrated Hz transfer curves for every fixture. Four samples/cycle improves representability; physical fidelity still needs audition. |
 | P23 | Keep semantic requested state for diagnostics; encode a separate shutter-gated state. | Prevents diagnostics from confusing the requested strobe with a hardware rate byte. |
 | P24 | Art-Net output is an explicit-destination ArtDmx adapter; support the user's existing broadcast path as an explicit compatibility option. | It is not a full Art-Net discovery/subscription node; default output is offline and tests use loopback. |
@@ -250,7 +226,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 | P31 | Fixture edits validate through the Rust encoder before atomic replacement; revision checks reject stale browser edits. Changes apply on the next session. | Preserve group member ordering; no patch hot reload in the prototype. |
 | P32 | Build checks run rustfmt, locked Clippy/tests and release compilation. The short production readiness check remains separate. | Do not add long suites to `--prod --check`. |
 | P33 | Explicit network playback requires at least four frames per requested strobe cycle. | Lower-rate offline replays are sampling diagnostics; reject aliased physical strobe output. |
-| P34 | Report conversion infers beat ordinals from detections, skips zero-tempo warm-up and holds the last positive tempo afterward. Silence and EOF produce Stop. | Reports do not preserve true bar origin; exact beat/downbeat phase requires a richer live capture contract. |
+| P34 | Report conversion infers beat ordinals from detections, skips zero-tempo warm-up and holds the last positive tempo afterward. Silence and EOF enter idle. | Reports do not preserve true bar origin; exact beat/downbeat phase requires a richer live capture contract. |
 | P35 | Root CLI requests blackout using an owned stop-file signal before bounded child shutdown. Native Ctrl-C remains available. | Windows headless children cannot reliably receive console signals; force termination remains the final timeout fallback. |
 | P36 | Bound rig input to 1 MiB, fixture/group counts to 512 and identifiers to 128 bytes. Bound latched diagnostics to 1 KiB and replay diagnostic storage to 8 MiB. | Lua memory limits alone do not bound host copies of errors or rig identifiers; adversarial resource regressions cover these boundaries. |
 | P37 | Replay defaults to the dashboard's saved rig when present, otherwise the committed room rig; explicit paths win. | A custom fixture-store path requires the matching explicit replay rig. |
@@ -276,7 +252,7 @@ approved removing SoundSwitch connectivity and requested the live contract in
 - P83: Radius retries identical Login every 250 ms for at most 15 seconds.
   UDP loss cannot strand startup. Repeated Login replies without resetting resources; changed initialization rejects. Receiver listener readiness precedes hardware-ready LoginReply. Source IP/session/first accepted source port route a session; this is not cryptographic authentication.
 
-- P84: Initialize both protocols at major 1, minor 0 and negotiate min(client, server).
+- P84: Schema enums define major 1, minor 0; use generated constants and negotiate min(client, server).
   Major compatibility is explicit. Message enums precede messages; only wire messages carry direction comments. Preserve bounded framing and generated language bindings.
 
 - P85: Keep GDTF physical controls distinct from fixed global parameters.
@@ -327,116 +303,20 @@ The fixtures tab maps named roles to concrete fixtures. Autoloop identity is a
 globally unique ID supplied with source at login. Banks are grouping metadata;
 playback never accepts a server-side file path.
 
-## Validation and checkpoints
+## Review checkpoint
 
-Record each slice's checks and the 15-minute reviews here as implementation lands.
-Hardware audition is explicitly separate from deterministic offline validation.
+2026-10-25: Native renderer, fixture, protocol and transport checks remain the
+validation contract. User decision U36 removes external-control artifacts and
+obsolete implementation plans; authored autoloops keep their native replay tests.
 
-- 2026-10-25 09:12 local: migration checkpoint. All three implementation slices
-  and cross-component reviews returned. Native Radius build and four test groups
-  pass; Rust covers 88 tests and a real 30-second heartbeat expiry with blackout.
-  Review fixed per-song beat resets and full-queue shutdown. Full Python tests
-  are running, with analysis baselines unchanged. Naming review found the new
-  measured-level API should distinguish RMS measurement from perceived intensity.
-- 2026-10-25 09:27 local: complete product build and 260 focused final checks pass.
-  The 90-second live Protobuf/Art-Net loopback delivered all 3,602 packets without
-  packet sequence gaps, exercised all four banks and shut down with blackout preserving
-  movement. Production readiness passed in under three seconds. Full Python run
-  found the expected changed-report hash and an incomplete build test; the latter
-  is fixed. Strict old/new ten-track analysis comparison continues separately.
-- 2026-10-25 09:42 local: final review. All ten tracks retain identical analysis;
-  only verified output-report hashes changed, and the failed benchmark test now
-  passes. Twenty native replays reproduce each track's DMX digest exactly. All
-  91 Rust tests pass, including performance floors: release measurements are
-  530.4x for the room and 82.2x for 64 fixtures. Nonblocking output and production
-  universe validation are covered. Final slices published; the timer continues
-  for the subsequently requested hardware run and reference calibration.
-- 2026-10-25 09:57 local: hardware run completed with user-confirmed lighting.
-  Audio transport had no packet loss, buffer overflows or buffer underruns; the
-  speaker was off, so audible output remains unconfirmed. The run exposed an
-  mDNS/dashboard lifecycle defect, now under regression review. Reference-loop
-  calibration takes priority while the user is away; local and remote Radius
-  processes are absent, and SoundSwitch output is captured on localhost only.
-- 2026-10-25 10:12 local: all three agents reviewed. Dashboard lifecycle fix is
-  published with 53 passing CLI checks. Fixture encoding is published with 92
-  passing Rust checks and proof that only equivalent blue/shutter bytes changed.
-  Both 120 and 140 BPM reference captures completed, covering two full cycles of
-  every look. Native palette/keyframe extraction and independent curve comparison
-  continue. No Radius, renderer or physical-output process is running.
-- 2026-10-25 10:27 local: native files and independent captures establish compact
-  colour, intensity and movement formulas. Lua reconstruction and 14-fixture room
-  patch are under regression review. Comparison budgets are frozen from reference
-  cadence before candidate evaluation; direct captured-value anchors will check
-  finer waveform accuracy. Review found startup did not execute scripts against
-  the saved rig; that readiness defect is being fixed before final publication.
-- 2026-10-25 10:42 local: readiness fixes are published; all eight 120/140 BPM
-  comparisons pass cadence gates with raw cut maxima retained. Direct-value
-  anchors exposed a late Drop discrepancy: native master keyframes have uneven
-  spacing, and the script is being corrected from those source records. An
-  independent clock review also found animation freeze could suppress musical
-  pulses during Drop's initial hold. Both corrections use existing evidence;
-  the fresh 156 BPM capture is complete and remains unevaluated.
-- 2026-10-25 10:57 local: all 12 comparisons pass, including the previously unseen
-  156 BPM capture, with unchanged phase policy and value-anchor tolerances. All
-  97 Rust tests, 57 CLI tests and 15 comparison tests pass. The final product
-  build passed Radius's four groups, formatting, Clippy, native release and
-  wheel/source packaging. A 90-second local live run delivered 3,602 packets
-  without gaps and shut down dark. Readiness passed again in two seconds after
-  the build. Release relinking changed only the executable artifact identity;
-  all ten recorded-stream outputs match the prior validated hashes after a fresh
-  20-run check. Physical output remains stopped. Publishing final slices and
-  stopping the owned checkpoint timer after the repository is clean.
 
-- 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
-  engine suites pass independently. Lead reviewed public boundaries and found
-  replay output needed safe shutdown and stale-frame skipping. Agents reassigned
-  to existing dashboard setup, Autolux report/CLI integration and build checks.
-  Real fixtures remain idle. Background 15-minute checkpoint timer is active.
-- 2026-10-25 02:02 local: second checkpoint. All delegated implementation and
-  independent reviews returned. Native replay, output lifecycle, bounded Lua,
-  patch persistence and report timing checks pass. Manual Edge review found and
-  fixed group-order and dropdown/reload issues. Naming review is bounded to three
-  API concepts. Full repository validation is compiling native dependencies;
-  Python/GPU workloads remain serialized. Four core/build commits are recorded.
-- 2026-10-25 02:17 local: third checkpoint. Full native build, four Radius test
-  groups and 76 Rust tests pass. The 90-second root-CLI loopback audition delivered
-  all 3,602 packets in order with exact offline payload parity and final blackout;
-  maximum observed interval was 25.93 ms. Python tests are running without failures;
-  backtest/simulation follow serially. All delegated work is reviewed and committed.
-- 2026-10-25 02:32 local: fourth checkpoint. Python completed with 2,343 passes
-  and one missing-warm-cache skip; that case will be rerun after cache generation.
-  The final Lua identity-reflection fix is committed; 77 Rust tests, strict
-  Clippy and the release rebuild pass. Final executable capture remains identical
-  to the paced reference. Backtest is at 5/10 tracks, generating missing caches
-  in this worktree. No baseline updates or additional feature work are planned.
-- 2026-10-25 02:41 local: final checkpoint. Full validation passed; all ten
-  backtest reports match the committed baseline and standalone simulation passes.
-  The initially skipped warm-cache case now passes, completing all 2,344 Python
-  cases. Final Rust checks cover 77 tests and the release capture matches the
-  paced reference. See [validation](validation.md) for evidence and limits.
-  Publishing the review branch and stopping the owned checkpoint timer.
+Pending standards work: preserve complete GDTF/MVR archives, extend break patching,
+geometry references, channel functions, virtual controls/relations and physical
+mappings. Carrying XML preserves data but does not imply full rendering support.
+The proposed use of MVR UserData for Lua selections is superseded by U41; no
+application-specific rig extension is approved. Movement restrictions remain an
+independent control-policy question.
 
-- 2026-10-25 16:00 UTC: team checkpoint. Autoloop rename and Python GDTF
-  import integration are complete; 59 focused importer/asset tests pass. Radius
-  passes all four native groups and 20 process/lifecycle cases. Rust fixture
-  encoding and all four replay hashes remain identical. Review found upstream
-  GDTF parser handling of optional Highlight and wide DMX values needs small
-  checked adapters; targeted regressions are in progress. Hardware remains idle.
-
-- 2026-10-25 16:06 UTC: review checkpoint. Independent Radius review found no
-  correctness defects; framing helpers now live beside native consumers. GDTF
-  review fixed movement-calibration bypass and brightness handling across cells;
-  unsupported conditional/split brightness rejects during initialization. All
-  five shipped XML profiles pass the official schema. Python focused validation
-  has 291 passes; four reference cases await the rebuilt release binary. The
-  full GPU/backtest suite is excluded from this protocol-focused pass.
-
-- 2026-10-25 16:12 UTC: final integration checkpoint. All 125 Rust tests and 298
-  focused Python/CLI/reference checks pass. All twelve SoundSwitch reference
-  comparisons keep their original tolerances; the four exact DMX hashes are
-  unchanged. Release rendering achieves 349x real time for the room and 81x for
-  64 fixtures. Native Radius, production readiness, source/wheel packaging and
-  isolated generated-binding imports pass. Ten cached reports prove the rename
-  changes labels only; checksum updates preserve every analysis value. No
-  hardware audition or full GPU rerun was performed. Publishing the two reviewed
-  implementation slices and stopping the owned checkpoint timer.
+Optional experiment drivers require explicitly selected source/interpreter paths,
+with provenance guards. Removing obsolete report metadata preserves all eight
+gated analysis invariants for each of the three recorded digest tracks.

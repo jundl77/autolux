@@ -38,7 +38,7 @@ fn render(input: &Replay) -> starfire::replay::ReplayResult {
     render_replay(
         input,
         FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
-        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop")).unwrap(),
+        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops")).unwrap(),
     )
     .unwrap()
 }
@@ -120,7 +120,7 @@ fn replay_memory_budget_is_checked_before_rendering() {
     assert!(input.validate().is_ok());
     let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let catalogue =
-        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop")).unwrap();
+        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops")).unwrap();
     assert!(
         render_replay(&input, rig, catalogue)
             .err()
@@ -142,7 +142,7 @@ fn cli(input: &Path) -> Process {
             "--profiles",
             "../rigs/profiles.json",
             "--autoloops",
-            "../autoloop",
+            "../autoloops",
         ]);
     command
 }
@@ -227,7 +227,7 @@ fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
             .arg(&rig)
             .arg("--profiles")
             .arg(&profiles)
-            .args(["--autoloops", "../autoloop", "--output"])
+            .args(["--autoloops", "../autoloops", "--output"])
             .arg(destination);
         if destination == &shared {
             command.arg("--summary").arg(&shared);

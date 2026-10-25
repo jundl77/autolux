@@ -19,7 +19,7 @@ DEFAULT_BINARY = (
     ROOT / 'starfire' / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
 )
 DEFAULT_RIG = ROOT / 'rigs' / 'room.json'
-DEFAULT_AUTOLOOPS = ROOT / 'autoloop'
+DEFAULT_AUTOLOOPS = ROOT / 'autoloops'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
 PROFILE_CATALOGUE = ROOT / 'rigs' / 'profiles.json'
 CHILD_STOP_TIMEOUT_SEC = 5.0

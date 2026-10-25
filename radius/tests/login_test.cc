@@ -51,8 +51,8 @@ void CheckReceiverLogin()
 	Bus::Login login;
 	login.set_command_id(Bus::LoginCommandId);
 	login.set_session_id(TestSession);
-	login.set_protocol_major(Bus::ProtocolMajor + 1);
-	login.set_protocol_minor(Bus::ProtocolMinor + 1);
+	login.set_protocol_major(Bus::PROTOCOL_MAJOR + 1);
+	login.set_protocol_minor(Bus::PROTOCOL_MINOR + 1);
 	login.set_sample_rate_hz(Bus::SampleRateHz);
 	login.set_channel_count(Bus::Channels);
 	login.set_jitter_buffer_ms(TestJitterMilliseconds);
@@ -71,7 +71,7 @@ void CheckReceiverLogin()
 				if (errors == 1)
 				{
 					Require(error->message().find("major") != std::string::npos);
-					login.set_protocol_major(Bus::ProtocolMajor);
+					login.set_protocol_major(Bus::PROTOCOL_MAJOR);
 					Require(client.Send(login));
 				}
 				else
@@ -87,8 +87,8 @@ void CheckReceiverLogin()
 			else if (const auto* reply = std::get_if<Bus::LoginReply>(&message))
 			{
 				Require(reply->command_id() == login.command_id());
-				Require(reply->protocol_major() == Bus::ProtocolMajor);
-				Require(reply->protocol_minor() == Bus::ProtocolMinor);
+				Require(reply->protocol_major() == Bus::PROTOCOL_MAJOR);
+				Require(reply->protocol_minor() == Bus::PROTOCOL_MINOR);
 				Require(reply->max_message_bytes() == Bus::MaxDatagramBytes);
 				++replies;
 				if (replies == 1)
@@ -148,8 +148,8 @@ void CheckTransmitterLoginRetry()
 				Bus::LoginReply reply;
 				reply.set_session_id(TestSession);
 				reply.set_command_id(login->command_id());
-				reply.set_protocol_major(Bus::ProtocolMajor);
-				reply.set_protocol_minor(Bus::ProtocolMinor);
+				reply.set_protocol_major(Bus::PROTOCOL_MAJOR);
+				reply.set_protocol_minor(Bus::PROTOCOL_MINOR);
 				reply.set_max_message_bytes(Bus::MaxDatagramBytes);
 				Require(receiver.Send(reply));
 			}

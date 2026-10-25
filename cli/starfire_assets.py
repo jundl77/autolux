@@ -10,8 +10,6 @@ from cli.starfire import PROFILE_CATALOGUE
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
-    PROTOCOL_MAJOR,
-    PROTOCOL_MINOR,
 )
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
@@ -150,8 +148,8 @@ def load_login(
         if catalogue:
             raise ValueError('Unknown fixture profile catalogue field')
         login = wire.Login(
-            protocol_major=PROTOCOL_MAJOR,
-            protocol_minor=PROTOCOL_MINOR,
+            protocol_major=wire.PROTOCOL_MAJOR,
+            protocol_minor=wire.PROTOCOL_MINOR,
             rig=rig_wire.RigDefinition(
                 fixtures=fixtures,
                 groups=groups,

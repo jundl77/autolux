@@ -19,7 +19,7 @@ use starfire::script::AutoloopCatalog;
 
 const DEFAULT_RIG: &str = "rigs/room.json";
 const DEFAULT_PROFILES: &str = "rigs/profiles.json";
-const DEFAULT_AUTOLOOPS: &str = "autoloop";
+const DEFAULT_AUTOLOOPS: &str = "autoloops";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
 

@@ -50,7 +50,7 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
         ),
         encoding='utf-8',
     )
-    autoloops = tmp_path / 'autoloop'
+    autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'test'
     bank.mkdir(parents=True)
     (bank / 'dimmer.lua').write_text(

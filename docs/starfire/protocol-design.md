@@ -47,7 +47,8 @@ Autolux owns fixture configuration and scripts. `Login` supplies a complete snap
   metadata and Lua source code, carried in `Login.autoloops`.
 - Initial parameters and the unicast Art-Net destination.
 - Protocol major/minor versions: majors must match; LoginReply negotiates the
-  lower minor version. Both protocols currently start at 1.0.
+  lower minor version. Both protocols define version 1.0 in schema enums;
+  consumers use generated constants.
 
 Starfire validates the patch and executes every script against it before acquiring
 output. `LoginReply` means initialization succeeded and the renderer is ready for
@@ -79,7 +80,8 @@ Radius owns audio watermarks and synchronized DMX playback. Renderer metrics do
 not measure physical illumination.
 
 Radius uses the same standalone message, Login, ErrorReply, Metrics and heartbeat
-patterns over UDP. Its complete datagram is bounded to 1,200 bytes. Audio and
-lighting carry session IDs and 64-bit audio-frame positions. TX retries the
+patterns over UDP. Its complete datagram is bounded to 1,200 bytes. `AudioFrame`
+and `LightFrame` carry session IDs and 64-bit audio-frame positions; their
+message types are `AUDIO_FRAME` and `LIGHT_FRAME`. TX retries the
 identical Login until ready; RX replies idempotently without resetting output.
 Media capture begins only after LoginReply.

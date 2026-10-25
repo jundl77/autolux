@@ -226,7 +226,7 @@
     },
     {
       "concept": "Autoloop vocabulary",
-      "implementation": "proto/starfire/starfire.proto uses AutoloopDefinition, PlayAutoloop, autoloop_id and Login.autoloops. starfire/src/script.rs provides AutoloopCatalog and LuaAutoloop; render context clocks use autoloop_elapsed_beats and autoloop_speed_scaled_elapsed_beats. Authored programs live in root autoloop/, grouped by bank.",
+      "implementation": "proto/starfire/starfire.proto uses AutoloopDefinition, PlayAutoloop, autoloop_id and Login.autoloops. starfire/src/script.rs provides AutoloopCatalog and LuaAutoloop; render context clocks use autoloop_elapsed_beats and autoloop_speed_scaled_elapsed_beats. Authored programs live in root autoloops/, grouped by bank.",
       "attempts": [],
       "disposition": "Contextual exception: the user explicitly selected autoloop for the entire concept. Earlier blind predictions remain verbatim evidence of prior names, not a blind pass for this rename. Art-Net packet sequence numbers and Lua create_sequence_from are unrelated external terminology and remain unchanged."
     }

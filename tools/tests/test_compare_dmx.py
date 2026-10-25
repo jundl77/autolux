@@ -5,7 +5,6 @@ import struct
 import numpy as np
 import pytest
 
-from tools.check_autoloop_reference import evaluate_metrics
 from tools.compare_dmx import Capture, compare, fit_shared_channel_offset_beats, read_capture
 
 
@@ -151,56 +150,3 @@ def test_capture_parser_rejects_short_dmx_and_nonmonotonic_timestamps(tmp_path):
     source.write_text(json.dumps(records))
     with pytest.raises(ValueError, match='strictly increasing'):
         read_capture(source, bpm=120)
-
-
-def test_independent_cut_samples_can_exceed_self_maximum_without_a_wrong_waveform():
-    def waveform(beats):
-        return np.rint(np.where(beats < 2, 100, np.minimum(255, 50 * (beats - 2))))
-
-    reference_beats = np.arange(0.04, 8.25, 0.1)
-    candidate_beats = np.arange(0, 8.25, 0.1)
-    reference = capture(reference_beats, {1: waveform(reference_beats)})
-    candidate = capture(candidate_beats, {1: waveform(candidate_beats)})
-    groups = {'fixture.dimmer': {'channels': [[1]]}}
-    window = {'start_beat': 0.2, 'end_beat': 8}
-    before = compare(reference, reference, groups, offset_beats=-0.1, **window)
-    after = compare(reference, reference, groups, offset_beats=0.1, **window)
-    metrics = ['mae_units', 'p95_error_units', 'p99_error_units', 'maximum_error_units']
-    limits = {
-        'fixture.dimmer': {
-            key + '_limit': max(
-                before['groups']['fixture.dimmer'][key], after['groups']['fixture.dimmer'][key]
-            )
-            + 1
-            for key in metrics
-        }
-    }
-    same_waveform = compare(reference, candidate, groups, **window)
-    failures, diagnostics = evaluate_metrics(same_waveform, limits, ['dimmer'])
-    assert not failures
-    assert len(diagnostics) == 1 and 'maximum_error_units' in diagnostics[0]
-
-    wrong_curve = capture(candidate_beats, {1: np.full(len(candidate_beats), 100)})
-    wrong_timing = capture(candidate_beats, {1: waveform(candidate_beats - 0.4)})
-    for wrong in [wrong_curve, wrong_timing]:
-        failures, _ = evaluate_metrics(
-            compare(reference, wrong, groups, **window), limits, ['dimmer']
-        )
-        assert any('mae_units' in failure for failure in failures)
-
-
-def test_safe_control_maximum_cannot_be_downgraded_to_a_cut_diagnostic():
-    reference = capture([0, 1], {7: [7, 7]})
-    candidate = capture([0, 0.999, 1], {7: [7, 128, 128]})
-    comparison = compare(
-        reference,
-        candidate,
-        {'shutter': {'channels': [[7]]}},
-        start_beat=0,
-        end_beat=1,
-        step_beats=0.0005,
-    )
-    failures, diagnostics = evaluate_metrics(
-        comparison, {'shutter': {'maximum_error_units_limit': 0}}, ['dimmer', 'rgb', 'pan', 'tilt']
-    )
-    assert failures and not diagnostics

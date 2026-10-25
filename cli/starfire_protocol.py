@@ -8,8 +8,6 @@ from google.protobuf.message import Message
 from proto.starfire import starfire_pb2 as wire
 
 MAX_MESSAGE_BYTES = 64 * 1024
-PROTOCOL_MAJOR = 1
-PROTOCOL_MINOR = 0
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
 FRAME_HEADER = struct.Struct('!BI')

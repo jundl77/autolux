@@ -43,7 +43,7 @@ Fixed-lag Viterbi (one state per canonical class) over the aggregated posteriors
 - Asymmetric error costs at the commit step (missing a drop ≠ spurious drop), adjustable per venue.
 - **Freeze rule**: the decision for audience-time T is read once at fixed lag (≈ 5–6 s into the 8 s budget, leaving margin for quantization + inference cadence + actuation) and is immutable. v2: confidence-gated early commit (Narasimhan/Viola-style) once fixed-lag works.
 - Commit quantization: next beat edge now; bar/phrase edges when Stage-2 downbeat tracking lands (Raveform boundaries are downbeat-aligned by annotation policy; DJ cue points cluster on 8/16-bar multiples). **The 200 ms requirement is met by grid-snapping, not by model localization** — no published system localizes section boundaries to ±200 ms from audio; the grid does it for us. Documented as such.
-- Decode-lag budget assertion in the sim tests: lag + inference + send latency < look-ahead, with margin. Also: measure the physical rig's MIDI→light actuation latency — the only unbounded term in the budget.
+- Decode-lag budget assertion in the sim tests: lag + inference + send latency < look-ahead, with margin. Also: measure the physical rig's controller-to-light actuation latency — the only unbounded term in the budget.
 
 ## Labels & data
 

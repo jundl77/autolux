@@ -16,13 +16,13 @@ SSH. Each binary also accepts a config path, or `--check-config <path>`.
 The bus uses standalone Google Protocol Buffers in UDP datagrams no larger than
 1200 bytes: a one-byte generated message type, four-byte big-endian payload
 length, and protobuf payload. [`radius.proto`](../proto/radius/radius.proto)
-defines Login, LoginReply, ErrorReply, Audio, Lighting, Heartbeat and Metrics.
+defines Login, LoginReply, ErrorReply, AudioFrame, LightFrame, Heartbeat and Metrics.
 Login negotiates protocol major/minor and initializes playback settings; the
 reply means receiver outputs are ready. TX retries identical logins until a
 reply arrives, then starts capture. Session IDs and audio watermarks use
 `fixed64`; samples use packed protobuf floats at 44.1 kHz stereo.
 
-TX holds the show delay. Login selects RX's 20–150 ms jitter target; bounded
+TX holds the show delay. Login selects RX's 20â€“150 ms jitter target; bounded
 clock correction follows the playback device. Device selection and thread
 affinity stay local. Network and audio-device latency are additional.
 

@@ -63,8 +63,8 @@ def test_login_preserves_exact_gdtf_source_and_explicit_zero_movement_limit(logi
     parameter = wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0)
     login = assets.load_login(rig, autoloops, '127.0.0.1:6454', [parameter])
     assert login.command_id == 0
-    assert login.protocol_major == protocol.PROTOCOL_MAJOR
-    assert login.protocol_minor == protocol.PROTOCOL_MINOR
+    assert login.protocol_major == wire.PROTOCOL_MAJOR
+    assert login.protocol_minor == wire.PROTOCOL_MINOR
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]

@@ -21,7 +21,6 @@ from pathlib import Path
 MAIN = Path(__file__).resolve().parents[2]
 DATA = MAIN / "training" / "data" / "raveform"
 CAMP = DATA / "models" / "l9c_campaign"
-LABEL9 = Path(r"C:\Users\Julian\Projects\soundswitch-label9-worktree")
 VENV_PY = MAIN.parent / ".venv" / "Scripts" / "python.exe"
 
 W = str(MAIN)
@@ -32,6 +31,7 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
+from autolux.training import module_source
 from autolux.lib.label_space import check_class_space  # noqa: E402
 
 
@@ -90,7 +90,9 @@ def main() -> int:
         label9_out = anchor_dir / "priors_label9_cli.json"
         main_out = anchor_dir / "priors_main_cli.json"
         print(f"label9 CLI -> {label9_out}", flush=True)
-        run_priors_cli(LABEL9, label9_out, args.split)
+        run_priors_cli(
+            module_source.experiment_checkout("AUTOLUX_LABEL9_CHECKOUT"), label9_out, args.split
+        )
         print(f"main  CLI -> {main_out}", flush=True)
         run_priors_cli(MAIN, main_out, args.split)
         a, b = label9_out.read_bytes(), main_out.read_bytes()

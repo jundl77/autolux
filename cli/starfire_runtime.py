@@ -25,8 +25,6 @@ from cli.starfire_assets import load_login
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
-    PROTOCOL_MAJOR,
-    PROTOCOL_MINOR,
     build_command,
     encode_command,
     read_event,
@@ -266,8 +264,8 @@ class StarfireRuntime:
                         or event.command_id == 0
                         or event.frame_rate_hz != DEFAULT_FRAME_RATE_HZ
                         or event.max_message_bytes != MAX_MESSAGE_BYTES
-                        or event.protocol_major != PROTOCOL_MAJOR
-                        or event.protocol_minor > PROTOCOL_MINOR
+                        or event.protocol_major != wire.PROTOCOL_MAJOR
+                        or event.protocol_minor > wire.PROTOCOL_MINOR
                     ):
                         raise ValueError('Unexpected Starfire login reply')
                     self._record_progress(event.command_id)

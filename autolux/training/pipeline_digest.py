@@ -204,10 +204,9 @@ def check_digest(name: str, digest: dict, fixture: dict) -> list:
     if name not in fixture:
         return [f'{name}: not in the fixture']
     failures = []
-    recorded = fixture[name]['survives']
     # Analysis invariants have their own contract; renderer payloads are checked
     # by the semantic relations and Starfire's full-DMX replay tests.
-    expected = {key: recorded[key] for key in ANALYSIS_DIGEST_KEYS if key in recorded}
+    expected = fixture[name]['survives']
     if digest['survives'] != expected:
         moved = sorted(set(digest['survives']) | set(expected))
         moved = [k for k in moved if expected.get(k) != digest['survives'].get(k)]
