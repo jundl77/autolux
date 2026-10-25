@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "requested_duration_seconds": 300,
+  "status": "interrupted",
+  "completed": false,
+  "media_started_at_utc": "2026-10-25T17:03:02.802Z",
+  "capture_failed_at_utc": "2026-10-25T17:03:54.417Z",
+  "elapsed_since_media_start_seconds": 51.615,
+  "failure": {
+    "radius_tx": "audio capture failed: 8",
+    "autolux": "audio capture failed at the same time",
+    "rdp_disconnect_observed_at": "2026-10-25T18:03:54+01:00",
+    "interpretation": "Capture failures coincided with an RDP session disconnect; transport counters do not establish the capture failure cause."
+  },
+  "user_observations": {
+    "audio_audible": true,
+    "lighting_visible": true,
+    "synchronization": "somewhat synchronized",
+    "lighting_start_late_seconds_approximate": 5
+  },
+  "last_transport_snapshot": {
+    "at_utc": "2026-10-25T17:03:54.115765+00:00",
+    "run_id": 8453096456198121169,
+    "tx": {
+      "capture_overruns_total": 0,
+      "queue_dropped_frames_total": 0,
+      "send_failures_total": 0
+    },
+    "rx": {
+      "audio_buffer_seconds": 0.15884353741496599,
+      "buffer_target_seconds": 0.15,
+      "audio_max_gap_seconds": 0.028,
+      "underruns_total": 0,
+      "device_underruns_total": 1,
+      "concealed_frames_total": 0,
+      "lost_frames_total": 0,
+      "overflow_frames_total": 0,
+      "late_packets_total": 0,
+      "dmx_frames_total": 1252,
+      "dmx_dropped_total": 0,
+      "dmx_lateness_seconds": 0.019115646258503403
+    }
+  },
+  "follow_up": {
+    "revision": "25363b4",
+    "change": "Start the baseline with delayed room audio without waiting for the first committed section; improve capture failure diagnostics.",
+    "automated_checks_passed": true,
+    "hardware_retested": false
+  },
+  "limits": [
+    "Not a passed 300-second test.",
+    "DMX scheduling counters do not measure physical flash latency."
+  ]
+}

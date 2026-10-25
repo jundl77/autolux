@@ -260,6 +260,235 @@ fn mode_master_is_resolved_before_dependent_channels_and_inactive_values_fail() 
 }
 
 #[test]
+fn function_ranges_follow_numeric_order_at_every_resolution_without_changing_initial_function() {
+    for bytes in 1..=4 {
+        let split = 1_u64 << (8 * bytes - 1);
+        let offsets = (1..=bytes)
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let functions = format!(
+            r#"
+          <ChannelFunction Name="High" Attribute="Zoom" DMXFrom="{split}/{bytes}" Default="{split}/{bytes}" PhysicalFrom="0" PhysicalTo="100"/>
+          <ChannelFunction Name="Low" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/>"#
+        );
+        let profile = profile(&channel("Fog1", "Base", &offsets, &functions));
+        let mut initial = vec![0; bytes];
+        initial[0] = 128;
+        assert_eq!(encode(&profile, &FixtureState::default()), initial);
+        let mut expected = vec![255; bytes];
+        expected[0] = 127;
+        assert_eq!(
+            encode(
+                &profile,
+                &values(&[("Fog1", AttributeValue::Number(100.0))])
+            ),
+            expected
+        );
+        assert_eq!(
+            encode(
+                &profile,
+                &values(&[("Zoom", AttributeValue::Number(100.0))])
+            ),
+            vec![255; bytes]
+        );
+    }
+}
+
+#[test]
+fn function_bounds_cross_logical_channels_on_the_same_physical_channel() {
+    let channels = r#"<DMXChannel Offset="1" Geometry="Base">
+      <LogicalChannel Attribute="Zoom"><ChannelFunction Name="High" Attribute="Zoom" DMXFrom="128/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel>
+      <LogicalChannel Attribute="Fog1"><ChannelFunction Name="Low" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel>
+    </DMXChannel>"#;
+    let profile = profile(channels);
+    assert_eq!(
+        encode(
+            &profile,
+            &values(&[("Fog1", AttributeValue::Number(100.0))])
+        ),
+        [127]
+    );
+    assert_eq!(
+        encode(&profile, &values(&[("Zoom", AttributeValue::Number(0.0))])),
+        [128]
+    );
+}
+
+#[test]
+fn repeated_function_starts_are_valid_in_mutually_exclusive_modes() {
+    let dependent = channel(
+        "Fog1",
+        "Base",
+        "1",
+        r#"
+      <ChannelFunction Name="LowMode" Attribute="Fog1" DMXFrom="0/1" ModeMaster="Base_Mode" ModeFrom="0/1" ModeTo="127/1" PhysicalFrom="0" PhysicalTo="100"/>
+      <ChannelFunction Name="HighMode" Attribute="Fog1" DMXFrom="0/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1" PhysicalFrom="0" PhysicalTo="100"/>
+      <ChannelFunction Name="Zoom" Attribute="Zoom" DMXFrom="128/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1" PhysicalFrom="0" PhysicalTo="100"/>"#,
+    );
+    let profile = profile(&(dependent + &channel("Mode", "Base", "2", &function("Mode", ""))));
+    for (mode, expected) in [(0.0, [128, 0]), (100.0, [64, 255])] {
+        assert_eq!(
+            encode(
+                &profile,
+                &values(&[
+                    ("Fog1", AttributeValue::Number(50.0)),
+                    ("Mode", AttributeValue::Number(mode))
+                ])
+            ),
+            expected
+        );
+    }
+}
+
+#[test]
+fn unconditional_function_range_expands_when_the_next_function_is_inactive() {
+    let dependent = channel(
+        "Fog1",
+        "Base",
+        "1",
+        r#"
+      <ChannelFunction Name="Fog" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/>
+      <ChannelFunction Name="Zoom" Attribute="Zoom" DMXFrom="128/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1" PhysicalFrom="0" PhysicalTo="100"/>"#,
+    );
+    let profile = profile(&(dependent + &channel("Mode", "Base", "2", &function("Mode", ""))));
+    for (mode, expected) in [(0.0, [128, 0]), (100.0, [64, 255])] {
+        assert_eq!(
+            encode(
+                &profile,
+                &values(&[
+                    ("Fog1", AttributeValue::Number(50.0)),
+                    ("Mode", AttributeValue::Number(mode))
+                ])
+            ),
+            expected
+        );
+    }
+}
+
+#[test]
+fn a_function_mode_master_requires_its_own_dmx_range_to_be_active() {
+    let dependent = channel(
+        "Fog1",
+        "Base",
+        "1",
+        &function(
+            "Fog1",
+            r#"ModeMaster="Base_Mode.Mode.Enabled" ModeFrom="0/1" ModeTo="255/1""#,
+        ),
+    );
+    let master = channel(
+        "Mode",
+        "Base",
+        "2",
+        r#"
+      <ChannelFunction Name="Idle" Attribute="Mode" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/>
+      <ChannelFunction Name="Enabled" Attribute="Mode" DMXFrom="128/1" PhysicalFrom="0" PhysicalTo="100"/>"#,
+    );
+    let profile = profile(&(dependent + &master));
+    let fog = ("Fog1", AttributeValue::Number(50.0));
+    assert!(
+        profile
+            .encode(
+                &values(&[
+                    fog.clone(),
+                    ("Base_Mode.Mode.Idle", AttributeValue::Number(100.0))
+                ]),
+                &mut [0; 2]
+            )
+            .is_err()
+    );
+    assert_eq!(
+        encode(
+            &profile,
+            &values(&[fog, ("Base_Mode.Mode.Enabled", AttributeValue::Number(0.0))])
+        ),
+        [128, 128]
+    );
+}
+
+#[test]
+fn a_function_mode_master_requires_its_own_mode_condition_to_be_active() {
+    let dependent = channel(
+        "Fog1",
+        "Base",
+        "1",
+        &function(
+            "Fog1",
+            r#"ModeMaster="Base_Mode.Mode.Enabled" ModeFrom="0/1" ModeTo="255/1""#,
+        ),
+    );
+    let master = channel(
+        "Mode",
+        "Base",
+        "2",
+        r#"
+      <ChannelFunction Name="Idle" Attribute="Mode" DMXFrom="0/1" ModeMaster="Head1_Mode" ModeFrom="0/1" ModeTo="127/1"/>
+      <ChannelFunction Name="Enabled" Attribute="Mode" DMXFrom="0/1" ModeMaster="Head1_Mode" ModeFrom="128/1" ModeTo="255/1"/>"#,
+    );
+    let gate = channel("Mode", "Head1", "3", &function("Mode", ""));
+    let profile = profile(&(dependent + &master + &gate));
+    let fog = ("Fog1", AttributeValue::Number(50.0));
+    assert!(
+        profile
+            .encode(&values(std::slice::from_ref(&fog)), &mut [0; 3])
+            .is_err()
+    );
+    assert_eq!(
+        encode(
+            &profile,
+            &values(&[fog, ("Head1.Mode", AttributeValue::Number(100.0))])
+        ),
+        [128, 0, 255]
+    );
+}
+
+#[test]
+fn channel_sets_are_sorted_and_cannot_escape_a_mode_dependent_function_range() {
+    let dependent = channel(
+        "Fog1",
+        "Base",
+        "1",
+        r#"
+      <ChannelFunction Name="Fog" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100">
+        <ChannelSet Name="Boost" DMXFrom="200/1" PhysicalFrom="50" PhysicalTo="100"/>
+        <ChannelSet Name="Low" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="49"/>
+      </ChannelFunction>
+      <ChannelFunction Name="Zoom" Attribute="Zoom" DMXFrom="128/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1"/>
+    "#,
+    );
+    let profile = profile(&(dependent + &channel("Mode", "Base", "2", &function("Mode", ""))));
+    assert_eq!(
+        encode(
+            &profile,
+            &values(&[("Fog1", AttributeValue::Preset("Boost".into()))])
+        ),
+        [200, 0]
+    );
+    assert!(
+        profile
+            .encode(
+                &values(&[
+                    ("Fog1", AttributeValue::Preset("Boost".into())),
+                    ("Mode", AttributeValue::Number(100.0))
+                ]),
+                &mut [0; 2]
+            )
+            .is_err()
+    );
+    assert_eq!(
+        encode(
+            &profile,
+            &values(&[
+                ("Fog1", AttributeValue::Number(49.0)),
+                ("Mode", AttributeValue::Number(100.0))
+            ])
+        ),
+        [127, 255]
+    );
+}
+
+#[test]
 fn malformed_offsets_cycles_and_unsupported_modes_fail_at_initialization() {
     let normal = channel("Fog1", "Base", "1", &function("Fog1", ""));
     for invalid in [

@@ -53,6 +53,9 @@ prototype assumptions can change after an offline review and hardware audition.
 | U43 | Autolux generates one random run_id for Radius and Starfire at each start. | Use a nonzero random 64-bit value; reject Radius audio/light packets from another run and expose the same identity in renderer telemetry. |
 | U44 | Keep the top Autolux title and place horizontal Control, Telemetry and Config tabs directly beside it. | No sidebar or centered navigation; remove decorative component/tagline labels. |
 | U45 | Defer a Rust Radius rewrite and hosting TX inside Starfire on a separate thread/core. | Keep current process boundaries for this implementation; RX remains the remote output endpoint. |
+| U46 | Replace Radius with Rust and embed TX in Starfire on a dedicated worker/core, superseding U45. | Keep Radius as a separate library boundary and RX as a remote executable; validate Rust audio and ENTTEC hardware early, then remove C++. All changes stay in PR 57. |
+| U47 | Audio leads and lighting follows; use TCP and a 500 ms receiver buffer. | Audio references a cached lighting sequence. No reverse sequence dependency or application retransmission protocol. Longer delay belongs to analysis, not receiver synchronization. |
+| U48 | Radius has no overlay functionality. | Starfire composes complete lighting states; Radius only transports, schedules and outputs them. |
 
 ## Prototype decisions
 
@@ -287,6 +290,19 @@ Starfire is the lighting backend. Its live contract is
   the cause. Windows session/device changes can invalidate both capture clients;
   do not mislabel this as buffer overflow or silently switch audio devices.
   Recovery currently requires starting a fresh run after the device stabilizes.
+
+- P91: Resolve GDTF function bounds numerically against currently active
+  ModeMaster branches, independent of XML order. Function-valued ModeMaster
+  references must themselves be active and contain the selected DMX value.
+  Sort ChannelSets and reject presets outside the effective function range.
+  Preserve authored InitialFunction defaults. This follows the maintainer's
+  clarification in [specification issue 103](https://github.com/mvrdevelopment/spec/issues/103);
+  the specification wording remains unresolved.
+
+- P92: Use CPAL/WASAPI for Rust audio and the safe libftd2xx binding for the
+  existing ENTTEC USB Pro protocol. Keep audio callbacks bounded and free of
+  allocation, network and USB operations. USB remains on a separate worker;
+  driver bindings do not require retaining application C++.
 
 ## Open questions and defaults
 

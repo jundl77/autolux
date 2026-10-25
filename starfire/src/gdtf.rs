@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result, bail, ensure};
 use gdtf::Description;
-use gdtf::dmx_mode::{DmxBreak, DmxChannel, DmxMode};
+use gdtf::dmx_mode::{DmxBreak, DmxChannel, DmxMode, ModeMaster};
 use gdtf::fixture_type::FixtureType;
 use gdtf::geometry::{AnyGeometry, Geometry};
 use gdtf::values::{ColorCie, DmxValue};
@@ -50,12 +50,20 @@ struct Function {
     attribute: String,
     qualified_attribute: String,
     first: u32,
-    last: u32,
+    maximum_dmx_value: u32,
     physical_from: f64,
     physical_to: f64,
     snap: bool,
     sets: Vec<ChannelSet>,
-    condition: Option<(usize, u32, u32)>,
+    condition: Option<ModeCondition>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ModeCondition {
+    channel: usize,
+    function: Option<usize>,
+    first: u32,
+    last: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +71,7 @@ struct Channel {
     offsets: Vec<usize>,
     default: u32,
     functions: Vec<Function>,
+    functions_by_dmx_start: Vec<usize>,
     has_dimmer: bool,
     has_rgb: bool,
     has_white: bool,
@@ -119,6 +128,13 @@ impl GdtfProfile {
             .context("GDTF mode references missing geometry")?;
         let mut geometries = BTreeMap::new();
         collect_geometries(geometry, &[], &mut geometries)?;
+        ensure!(
+            mode.dmx_channels.iter().all(|channel| channel
+                .logical_channels
+                .iter()
+                .all(|logical| logical.attribute.len() == 1)),
+            "GDTF logical-channel attribute must be a single name"
+        );
         let names: BTreeMap<_, _> = mode
             .dmx_channels
             .iter()
@@ -167,6 +183,8 @@ impl GdtfProfile {
                 .1;
             let default = dmx_value(initial.default, offsets.len())?;
             let functions = compile_functions(fixture, mode, channel, &names)?;
+            let mut functions_by_dmx_start: Vec<_> = (0..functions.len()).collect();
+            functions_by_dmx_start.sort_by_key(|&index| functions[index].first);
             for function in functions
                 .iter()
                 .filter(|function| is_brightness_attribute(&function.attribute))
@@ -191,6 +209,7 @@ impl GdtfProfile {
                 offsets: resolved_offsets,
                 default,
                 functions,
+                functions_by_dmx_start,
                 has_dimmer: false,
                 has_rgb: false,
                 has_white: false,
@@ -314,8 +333,12 @@ impl GdtfProfile {
             .iter()
             .map(|channel| channel.default)
             .collect();
+        let mut active_function_ends = vec![Vec::new(); self.channels.len()];
+        let mut resolved_attributes = BTreeSet::new();
         for &index in &self.order {
             let channel = &self.channels[index];
+            active_function_ends[index] =
+                channel.active_function_ends(&values, &active_function_ends, &self.channels);
             let dimmer = channel.has_dimmer;
             let rgb = channel.has_rgb;
             let white = if channel.has_white && rgb {
@@ -328,11 +351,11 @@ impl GdtfProfile {
                 0.0
             };
             let mut requested = None;
-            for function in &channel.functions {
-                if !function.active(&values) {
+            for (function_index, function) in channel.functions.iter().enumerate() {
+                let Some(last) = active_function_ends[index][function_index] else {
                     continue;
-                }
-                if let Some(value) = semantic_value(function, state, dimmer, rgb, white) {
+                };
+                if let Some(value) = semantic_value(function, last, state, dimmer, rgb, white) {
                     ensure!(
                         requested.is_none(),
                         "ambiguous semantic GDTF attribute on {}",
@@ -343,15 +366,18 @@ impl GdtfProfile {
             }
             let mut explicit = None;
             for (key, value) in &state.attributes {
-                for function in &channel.functions {
-                    if function.matches(key) && function.active(&values) {
+                for (function_index, function) in channel.functions.iter().enumerate() {
+                    let Some(last) = active_function_ends[index][function_index] else {
+                        continue;
+                    };
+                    if function.matches(key) {
                         if state.output_blackout
                             && !matches!(function.attribute.as_str(), "Pan" | "Tilt")
                         {
                             continue;
                         }
-                        if let Ok(mut encoded) = function.encode(value) {
-                            let span = f64::from(function.last - function.first);
+                        if let Ok(mut encoded) = function.encode_in_range(value, last) {
+                            let span = f64::from(last - function.first);
                             let position = if span == 0.0 {
                                 0.0
                             } else {
@@ -375,9 +401,8 @@ impl GdtfProfile {
                                     .round() as u32;
                             }
                             if !dimmer && function.attribute.starts_with("ColorSub_") {
-                                encoded = (f64::from(function.last)
-                                    - f64::from(function.last - encoded)
-                                        * state.attribute_brightness)
+                                encoded = (f64::from(last)
+                                    - f64::from(last - encoded) * state.attribute_brightness)
                                     .round() as u32;
                             }
                             ensure!(
@@ -386,6 +411,7 @@ impl GdtfProfile {
                                 function.path
                             );
                             explicit = Some(encoded);
+                            resolved_attributes.insert(key);
                         }
                     }
                 }
@@ -393,8 +419,11 @@ impl GdtfProfile {
             values[index] = explicit.or(requested).unwrap_or(channel.default);
         }
         // A supplied value must resolve in the final mode, not silently disappear behind ModeMaster.
-        for (key, value) in state.attributes.iter().filter(|_| !state.output_blackout) {
-            ensure!(self.matching_functions(key).iter().any(|(_, function)| function.active(&values) && function.encode(value).is_ok()), "GDTF attribute {key} value is inactive in the selected mode");
+        for key in state.attributes.keys().filter(|_| !state.output_blackout) {
+            ensure!(
+                resolved_attributes.contains(key),
+                "GDTF attribute {key} value is inactive in the selected mode"
+            );
         }
         for (channel, value) in self.channels.iter().zip(values) {
             for (index, &offset) in channel.offsets.iter().enumerate() {
@@ -420,21 +449,70 @@ impl GdtfProfile {
     }
 }
 
+impl Channel {
+    fn active_function_ends(
+        &self,
+        values: &[u32],
+        function_ends: &[Vec<Option<u32>>],
+        channels: &[Channel],
+    ) -> Vec<Option<u32>> {
+        let mut ends = vec![None; self.functions.len()];
+        let mut next_start = u64::from(self.functions[0].maximum_dmx_value) + 1;
+        let mut cursor = self.functions_by_dmx_start.len();
+        while cursor > 0 {
+            let first = self.functions[self.functions_by_dmx_start[cursor - 1]].first;
+            let mut any_active = false;
+            while cursor > 0 {
+                let index = self.functions_by_dmx_start[cursor - 1];
+                let function = &self.functions[index];
+                if function.first != first {
+                    break;
+                }
+                if function.active(values, function_ends, channels) {
+                    ends[index] = Some((next_start - 1) as u32);
+                    any_active = true;
+                }
+                cursor -= 1;
+            }
+            if any_active {
+                next_start = u64::from(first);
+            }
+        }
+        ends
+    }
+}
+
 impl Function {
     fn matches(&self, key: &str) -> bool {
         key == self.attribute || key == self.qualified_attribute || key == self.path
     }
-    fn active(&self, values: &[u32]) -> bool {
-        self.condition
-            .is_none_or(|(channel, first, last)| (first..=last).contains(&values[channel]))
+    fn active(
+        &self,
+        values: &[u32],
+        function_ends: &[Vec<Option<u32>>],
+        channels: &[Channel],
+    ) -> bool {
+        self.condition.is_none_or(|condition| {
+            let value = values[condition.channel];
+            (condition.first..=condition.last).contains(&value)
+                && condition.function.is_none_or(|index| {
+                    function_ends[condition.channel][index].is_some_and(|last| {
+                        (channels[condition.channel].functions[index].first..=last).contains(&value)
+                    })
+                })
+        })
     }
 
     fn encode(&self, value: &AttributeValue) -> Result<u32> {
+        self.encode_in_range(value, self.maximum_dmx_value)
+    }
+
+    fn encode_in_range(&self, value: &AttributeValue, last: u32) -> Result<u32> {
         match value {
             AttributeValue::Preset(name) => self
                 .sets
                 .iter()
-                .find(|set| &set.name == name)
+                .find(|set| &set.name == name && set.first <= last)
                 .map(|set| set.first)
                 .with_context(|| format!("unknown preset {name}")),
             AttributeValue::Number(value) => {
@@ -445,19 +523,20 @@ impl Function {
                         self.physical_from,
                         self.physical_to,
                         self.first,
-                        self.last,
+                        last,
                     )
                 } else {
                     let candidates: Vec<_> = self
                         .sets
                         .iter()
+                        .filter(|set| set.first <= last)
                         .filter_map(|set| {
                             physical_to_dmx(
                                 *value,
                                 set.physical_from,
                                 set.physical_to,
                                 set.first,
-                                set.last,
+                                set.last.min(last),
                             )
                             .ok()
                         })
@@ -472,9 +551,9 @@ impl Function {
         }
     }
 
-    fn normalized(&self, value: f64) -> Option<u32> {
+    fn normalized(&self, value: f64, last: u32) -> Option<u32> {
         if self.sets.is_empty() {
-            Some((f64::from(self.first) + f64::from(self.last - self.first) * value).round() as u32)
+            Some((f64::from(self.first) + f64::from(last - self.first) * value).round() as u32)
         } else {
             None
         }
@@ -483,6 +562,7 @@ impl Function {
 
 fn semantic_value(
     function: &Function,
+    last: u32,
     state: &FixtureState,
     dimmer: bool,
     rgb: bool,
@@ -500,6 +580,7 @@ fn semantic_value(
             .sets
             .iter()
             .rev()
+            .filter(|set| set.first <= last)
             .filter_map(|set| set.colour.map(|colour| (set, colour)))
             .min_by(|(_, left), (_, right)| {
                 colour_distance(*left, requested).total_cmp(&colour_distance(*right, requested))
@@ -519,7 +600,7 @@ fn semantic_value(
         "Tilt" => state.tilt,
         _ => return None,
     };
-    function.normalized(value)
+    function.normalized(value, last)
 }
 
 fn compile_functions(
@@ -564,16 +645,6 @@ fn compile_functions(
                 "missing GDTF attribute definition {attribute}"
             );
             let first = dmx_value(function.dmx_from, usize::from(bytes))?;
-            let last = if let Some(next) = logical.channel_functions.get(index + 1) {
-                let next = dmx_value(next.dmx_from, usize::from(bytes))?;
-                ensure!(
-                    next > first,
-                    "GDTF channel functions must have increasing ranges"
-                );
-                next - 1
-            } else {
-                maximum
-            };
             let function_name = function
                 .name
                 .as_ref()
@@ -584,10 +655,9 @@ fn compile_functions(
                 .mode_master
                 .as_ref()
                 .map(|condition| -> Result<_> {
-                    ensure!(
-                        condition.mode_master(mode).is_some(),
-                        "GDTF ModeMaster references a missing channel/function"
-                    );
+                    let linked = condition
+                        .mode_master(mode)
+                        .context("GDTF ModeMaster references a missing channel/function")?;
                     let master_name = condition
                         .node
                         .first()
@@ -604,24 +674,44 @@ fn compile_functions(
                     let from = dmx_value(condition.from, usize::from(width))?;
                     let to = dmx_value(condition.to, usize::from(width))?;
                     ensure!(from <= to, "invalid GDTF ModeMaster interval");
-                    Ok((master, from, to))
+                    let function = match linked {
+                        ModeMaster::DmxChannel(_) => None,
+                        ModeMaster::ChannelFunction(channel, _, function) => Some(
+                            channel
+                                .logical_channels
+                                .iter()
+                                .flat_map(|logical| &logical.channel_functions)
+                                .position(|candidate| std::ptr::eq(candidate, function))
+                                .context("GDTF ModeMaster function is missing")?,
+                        ),
+                    };
+                    Ok(ModeCondition {
+                        channel: master,
+                        function,
+                        first: from,
+                        last: to,
+                    })
                 })
                 .transpose()?;
             let mut sets = Vec::new();
-            for (set_index, set) in function.channel_sets.iter().enumerate() {
-                let set_first = dmx_value(set.dmx_from, usize::from(bytes))?;
-                let set_last = if let Some(next) = function.channel_sets.get(set_index + 1) {
-                    let next = dmx_value(next.dmx_from, usize::from(bytes))?;
+            let mut ordered_sets = function
+                .channel_sets
+                .iter()
+                .map(|set| Ok((dmx_value(set.dmx_from, usize::from(bytes))?, set)))
+                .collect::<Result<Vec<_>>>()?;
+            ordered_sets.sort_by_key(|(first, _)| *first);
+            for (set_index, &(set_first, set)) in ordered_sets.iter().enumerate() {
+                let set_last = if let Some(&(next, _)) = ordered_sets.get(set_index + 1) {
                     ensure!(
                         next > set_first,
                         "GDTF channel sets must have increasing ranges"
                     );
                     next - 1
                 } else {
-                    last
+                    maximum
                 };
                 ensure!(
-                    set_first >= first && set_first <= set_last && set_last <= last,
+                    set_first >= first && set_first <= set_last,
                     "GDTF channel set exceeds function range"
                 );
                 let physical_from = set.physical_from(function);
@@ -664,7 +754,7 @@ fn compile_functions(
                 attribute: attribute.clone(),
                 qualified_attribute: format!("{}.{attribute}", channel.geometry),
                 first,
-                last,
+                maximum_dmx_value: maximum,
                 physical_from: function.physical_from,
                 physical_to: function.physical_to,
                 snap: logical.snap,
@@ -674,6 +764,15 @@ fn compile_functions(
         }
     }
     ensure!(!functions.is_empty(), "GDTF channel contains no functions");
+    ensure!(
+        functions
+            .iter()
+            .map(|function| &function.path)
+            .collect::<BTreeSet<_>>()
+            .len()
+            == functions.len(),
+        "duplicate GDTF channel-function path"
+    );
     Ok(functions)
 }
 
@@ -686,7 +785,7 @@ fn dependency_order(channels: &[Channel]) -> Result<Vec<usize>> {
                 .functions
                 .iter()
                 .filter_map(|function| function.condition)
-                .all(|(master, _, _)| !remaining.contains(&master))
+                .all(|condition| !remaining.contains(&condition.channel))
         });
         let index = ready.context("cyclic GDTF ModeMaster dependencies")?;
         remaining.remove(&index);
