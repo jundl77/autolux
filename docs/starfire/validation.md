@@ -1,8 +1,34 @@
-# Starfire prototype validation
+# Starfire validation
 
-Validated on Windows on 2026-10-25. Final runtime reference: `27a1b0f`;
-subsequent changes are documentation. Production SoundSwitch remains the live
-path; Starfire hardware audition and live Radius clock integration are pending.
+Current branch uses Starfire for live lighting. Runtime reference: `04ccbfa`.
+Validated on Windows on 2026-10-25. The full ten-track comparison is in progress;
+its report hashes must be reconciled before the validation set is complete.
+Physical fixture audition and exact future-watermark handoff remain separate.
+
+## Current live integration
+
+| Check | Result |
+| --- | --- |
+| Full Python run | 2,331 passed; two failures identified. The build-test dependency is fixed; full report checksum comparison is still in progress. |
+| Focused final checks | 260 passed after the measured-RMS API rename, including the build-test fix and Python-to-Rust process integration. |
+| Rust | 88 tests passed; strict Clippy, rustfmt and release build passed. All four sequence reference digests remain unchanged at default RMS level. |
+| Radius | Both executables built; four native test groups passed. |
+| Distribution | Full product build, wheel and source package passed. Protobuf descriptors ship inside the wheel. |
+| Production readiness | The new branch's `autolux --prod --check` passed in under three seconds, including Starfire, fixtures, model, capture and SSH checks. |
+| Live loopback | 90 seconds through Python process ownership, Protobuf IPC and native Art-Net: all four banks observed; 3,602 packets, zero sequence gaps, final blackout with movement preserved. |
+| Failure handling | Missing-controller timeout exited at 30.000 seconds with blackout; malformed/oversized messages, script failures and full-queue shutdown are covered. |
+| Diagram | Mermaid rendered successfully; all 12 nodes have explanations and all three application boundaries are dotted rectangles. |
+
+The live loopback used 187 recorded beat anchors and 15 authored controls.
+Packet intervals: median 25.036 ms, p99 25.498 ms, maximum 26.658 ms.
+It exercised the real local control/output path without speakers or physical fixtures.
+
+Current evidence: `.live/starfire-validation/migration-*.log`,
+`live-pipeline-90s/validation.json` and `live-heartbeat-timeout.json`.
+
+## Deterministic renderer reference
+
+The preceding renderer baseline established these additional checks:
 
 | Check | Result |
 | --- | --- |

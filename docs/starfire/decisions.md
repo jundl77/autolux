@@ -26,6 +26,55 @@ prototype assumptions can change after an offline review and hardware audition.
 
 ## Prototype decisions
 
+Latest scope: Starfire is the sole lighting backend on this branch. The user
+approved removing SoundSwitch connectivity and requested the live contract in
+`proto/starfire/starfire.proto`; 40 Hz remains the output cadence.
+
+- P44: Use typed Google Protobuf commands and renderer events over the owned
+  subprocess's stdin/stdout, framed with a four-byte big-endian payload length.
+  Cap each payload at 64 KiB and validate protocol version 1. The root CLI owns
+  launch, readiness and shutdown; no separately exposed control listener.
+- P45: Apply accepted commands on the next 40 Hz render timestamp. The engine
+  receives explicit time; monotonic pacing stays in the host. This preserves
+  deterministic replay without assuming Python and Rust share a clock epoch.
+  Art-Net ingress still samples DMX against Radius's audio watermark; exact
+  target-watermark delivery remains a separate transport improvement.
+- P46: Exchange renderer health and 10-second heartbeats; 30 seconds without
+  controller input stops output. EOF, malformed input, queue overflow and fatal
+  render errors attempt fixture-aware blackout and terminate the owned child.
+  A musical Stop command stops the look without terminating the renderer.
+- P47: Supply measured music energy separately from user master brightness.
+  Normalize the analyser's smoothed RMS through a named -48 to -12 dBFS range,
+  clamped to 0..1. This is measured loudness, not perceptual musical intensity.
+  Missing energy in older replays defaults to 1; baseline programs may use a
+  modest 0.65..1 brightness factor while maintaining their section character.
+- P48: Remove the external channel-overlay protocol and mixer. Starfire owns
+  all composition; Radius transports its complete DMX frames with audio.
+- P49: Generate the Starfire Python descriptor with `protoc` in build output;
+  load it through the official Protobuf runtime. Include it in built wheels so
+  runtime installations need no compiler. Build/packaging hooks live in `tools/`,
+  with the schema and codec under `proto/starfire`; no handwritten wire fields.
+- P50: The existing show-delay queue dispatches beat and measured energy
+  together. Replace channel-level note chasing with the selected Lua baseline.
+  Drop entry requests `drop_arrival`: 8 Hz strobe, one second, priority 100.
+  A committed class change within the same lighting bank keeps the current
+  sequence and does not retrigger its entry accent. Persistent silence stops
+  the renderer's look and discards queued commands that could reactivate it.
+- P51: Reports name semantic sequences and accents, not transport channels.
+  Remove the unmeasured constant beat-strength field; retain raw RMS and the
+  original beat/section evidence. Compare those analysis invariants against the
+  existing baseline without rewriting it. Validate changed lighting output with
+  semantic command checks and deterministic DMX replay tests.
+- P52: Keep the lighting beat ordinal monotonic for the full controller session;
+  the analyser's per-song counter resets at silence and must not rewind Starfire.
+  Audio level updates alongside detected beats and holds between them. A future
+  continuous level stream also needs timestamped recording for replay parity.
+- P53: Name the new measured control `normalized_rms_level`, with
+  `SetNormalizedRmsLevel` and `rms_to_normalized_level`. Blind readers confused
+  "music energy" with perceptual intensity and general "audio level" with volume
+  control. The final name exposes the measured quantity and normalization;
+  numerical mapping remains an explicit protocol/API contract.
+
 | ID | Decision and reason | Alternative / review point |
 | --- | --- | --- |
 | P01 | Install pinned Rust 1.99.1 MSVC, rustfmt and Clippy; use the existing VS 2022 C++ build tools. | Pin updates deliberately after validation. |
@@ -119,6 +168,13 @@ registered bank/name pair, never an arbitrary caller-provided file path.
 
 Record each slice's checks and the 15-minute reviews here as implementation lands.
 Hardware audition is explicitly separate from deterministic offline validation.
+
+- 2026-10-25 09:12 local: migration checkpoint. All three implementation slices
+  and cross-component reviews returned. Native Radius build and four test groups
+  pass; Rust covers 88 tests and a real 30-second heartbeat expiry with blackout.
+  Review fixed per-song beat resets and full-queue shutdown. Full Python tests
+  are running, with analysis baselines unchanged. Naming review found the new
+  measured-level API should distinguish RMS measurement from perceived intensity.
 
 - 2026-10-25 01:47 local: first team checkpoint. Fixture/output, bounded Lua and
   engine suites pass independently. Lead reviewed public boundaries and found
