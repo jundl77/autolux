@@ -19,7 +19,7 @@ DEFAULT_BINARY = (
     ROOT / 'starfire' / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
 )
 DEFAULT_RIG = ROOT / 'rigs' / 'room.json'
-DEFAULT_SEQUENCES = ROOT / 'starfire' / 'sequences'
+DEFAULT_AUTOLOOPS = ROOT / 'autoloop'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
 PROFILE_CATALOGUE = ROOT / 'rigs' / 'profiles.json'
 CHILD_STOP_TIMEOUT_SEC = 5.0
@@ -41,7 +41,8 @@ def add_subparser(subparsers) -> None:
     replay.add_argument(
         '--rig', type=Path, help='Fixture patch; defaults to the saved setup or room rig'
     )
-    replay.add_argument('--sequences', type=Path, default=DEFAULT_SEQUENCES)
+    replay.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
+    replay.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
     replay.add_argument('--output', type=Path, help='Write a binary DMX capture')
     replay.add_argument('--summary', type=Path, help='Write render metrics and DMX digest')
     replay.add_argument('--artnet', help='Explicit destination IPv4:port; requires --realtime')
@@ -49,12 +50,20 @@ def add_subparser(subparsers) -> None:
     replay.add_argument('--broadcast', action='store_true')
     replay.set_defaults(func=run_native)
 
-    listing = actions.add_parser('list', help='List sequence banks and names')
-    listing.add_argument('--sequences', type=Path, default=DEFAULT_SEQUENCES)
+    listing = actions.add_parser('list', help='List autoloop banks and names')
+    listing.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
     listing.set_defaults(func=run_native)
     rig = actions.add_parser('rig', help='Validate a fixture patch without output')
     rig.add_argument('input', type=Path)
+    rig.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
     rig.set_defaults(func=run_native)
+
+    importer = actions.add_parser('import-fixture', help='Import a GDTF fixture mode for Starfire')
+    importer.add_argument('input', type=Path)
+    importer.add_argument('--profile-id', required=True)
+    importer.add_argument('--mode', required=True, help='Exact DMX mode name in the GDTF file')
+    importer.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
+    importer.set_defaults(func=run_import)
 
     convert = actions.add_parser(
         'convert-report',
@@ -68,6 +77,7 @@ def add_subparser(subparsers) -> None:
     ui = actions.add_parser('ui', help='Open the existing dashboard with fixture setup')
     ui.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT)
     ui.add_argument('--rig-store', type=Path, default=DEFAULT_FIXTURE_STORE)
+    ui.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
     ui.add_argument('--snapshot-port', type=int, help='Read the running controller snapshot')
     ui.set_defaults(func=run_ui)
 
@@ -113,7 +123,7 @@ async def run_native(args: argparse.Namespace) -> None:
     command = [str(_binary(args.binary)), args.starfire_action]
     if hasattr(args, 'input'):
         command.append(str(args.input.resolve()))
-    for name in ('rig', 'sequences', 'output', 'summary'):
+    for name in ('rig', 'autoloops', 'profiles', 'output', 'summary'):
         path = getattr(args, name, None)
         if name == 'rig' and args.starfire_action == 'replay' and path is None:
             path = DEFAULT_FIXTURE_STORE if DEFAULT_FIXTURE_STORE.is_file() else DEFAULT_RIG
@@ -154,10 +164,10 @@ async def convert_report(args: argparse.Namespace) -> None:
     print(f'Source-time replay: {args.output} ({len(replay["events"])} commands; accents omitted)')
 
 
-def _validate_patch(binary: Path, patch: Path) -> None:
+def _validate_patch(binary: Path, patch: Path, profiles: Path = PROFILE_CATALOGUE) -> None:
     try:
         completed = subprocess.run(
-            [str(binary), 'rig', str(patch.resolve())],
+            [str(binary), 'rig', str(patch.resolve()), '--profiles', str(profiles.resolve())],
             cwd=ROOT,
             check=False,
             capture_output=True,
@@ -173,6 +183,20 @@ def _validate_patch(binary: Path, patch: Path) -> None:
         raise ValueError(completed.stderr.strip() or 'Starfire rejected the fixture patch')
 
 
+def run_import(args: argparse.Namespace) -> None:
+    from autolux.lighting.gdtf import import_fixture
+
+    binary = _binary(args.binary)
+    metadata = import_fixture(
+        args.input.resolve(),
+        args.profiles.resolve(),
+        args.profile_id,
+        args.mode,
+        lambda patch, profiles: _validate_patch(binary, patch, profiles),
+    )
+    print(f'Imported {args.profile_id}: {metadata["notes"]}')
+
+
 def run_ui(args: argparse.Namespace) -> None:
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lighting.fixture_setup import FixtureStore
@@ -182,17 +206,18 @@ def run_ui(args: argparse.Namespace) -> None:
         raise ValueError(f'Dashboard port must be in 1..{MAX_TCP_PORT}')
     binary = _binary(args.binary)
     patch = args.rig_store.resolve()
+    profiles = getattr(args, 'profiles', PROFILE_CATALOGUE).resolve()
     if not patch.exists():
-        _validate_patch(binary, DEFAULT_RIG)
+        _validate_patch(binary, DEFAULT_RIG, profiles)
         patch.parent.mkdir(parents=True, exist_ok=True)
         try:
             with patch.open('xb') as target:
                 target.write(DEFAULT_RIG.read_bytes())
         except FileExistsError:
             pass
-    _validate_patch(binary, patch)
+    _validate_patch(binary, patch, profiles)
     store = FixtureStore(
-        patch, PROFILE_CATALOGUE, lambda candidate: _validate_patch(binary, candidate)
+        patch, profiles, lambda candidate: _validate_patch(binary, candidate, profiles)
     )
     source = EventBuffer()
     if getattr(args, 'snapshot_port', None) is not None:

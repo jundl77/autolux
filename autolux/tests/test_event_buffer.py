@@ -157,10 +157,10 @@ def test_infinite_window_keeps_old_events():
     buf = EventBuffer(window_sec=float('inf'), clock=clock)
     buf.start()
     buf.set_intent('GROOVE')
-    buf.add_effect('CH_A', 'SEQUENCE')
+    buf.add_effect('CH_A', 'AUTOLOOP')
     clock.advance(500.0)
     buf.set_intent('DROP')
-    buf.add_effect('CH_B', 'SEQUENCE')
+    buf.add_effect('CH_B', 'AUTOLOOP')
     report = buf.to_report()
     assert [e['intent'] for e in report['intents']] == ['GROOVE', 'DROP']
     assert report['intents'][0]['t'] == 0.0
@@ -193,11 +193,11 @@ def test_default_window_prunes_old_effects():
     clock = VirtualClock()
     buf = EventBuffer(window_sec=60.0, clock=clock)
     buf.start()
-    buf.add_effect('CH_A', 'SEQUENCE')
+    buf.add_effect('CH_A', 'AUTOLOOP')
     clock.advance(1.0)
-    buf.add_effect('CH_B', 'SEQUENCE')
+    buf.add_effect('CH_B', 'AUTOLOOP')
     clock.advance(500.0)
-    buf.add_effect('CH_C', 'SEQUENCE')
+    buf.add_effect('CH_C', 'AUTOLOOP')
     report = buf.to_report()
     names = [e['name'] for e in report['effects']]
     assert 'CH_A' not in names
@@ -231,11 +231,11 @@ def test_report_records_look_ahead_offset():
     assert buf.to_report()['metrics']['look_ahead_sec'] == pytest.approx(2.5)
 
 
-def test_brief_accent_preserves_the_active_sequence_and_reports_its_lifetime():
+def test_brief_accent_preserves_the_active_autoloop_and_reports_its_lifetime():
     clock = VirtualClock()
     buffer = EventBuffer(clock=clock)
     buffer.start()
-    buffer.add_effect('drop/blue_impact', 'SEQUENCE')
+    buffer.add_effect('drop/blue_impact', 'AUTOLOOP')
     buffer.add_effect('drop_arrival', 'ACCENT', duration_seconds=1.0)
     clock.advance(10.0)
     assert buffer.snapshot()['current_effect']['name'] == 'drop/blue_impact'

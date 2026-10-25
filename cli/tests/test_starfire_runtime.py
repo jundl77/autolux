@@ -44,18 +44,60 @@ def test_control_adapter_preserves_zero_values_and_named_targets():
     assert effect.duration_seconds == 1.0
 
 
+def test_control_adapter_preserves_gdtf_physical_values_and_named_presets():
+    effect = protocol.build_command(
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': 'detail',
+                'target': {'fixture': 'mover'},
+                'values': {'attributes': {'Zoom': 0.0, 'Gobo1': 'Open'}},
+            },
+        }
+    )
+    assert effect.attributes['Zoom'].WhichOneof('value') == 'number'
+    assert effect.attributes['Zoom'].number == 0.0
+    assert effect.attributes['Gobo1'].preset == 'Open'
+
+
+@pytest.mark.parametrize('attributes', [None, [], 'Zoom'])
+def test_control_adapter_rejects_non_mapping_gdtf_attributes(attributes):
+    with pytest.raises(ValueError, match='attributes must map'):
+        protocol.build_command(
+            {
+                'kind': 'set_override',
+                'value': {'id': 'detail', 'target': 'all', 'values': {'attributes': attributes}},
+            }
+        )
+
+
+@pytest.mark.parametrize('value', [True, [], {}, float('nan')])
+def test_control_adapter_rejects_invalid_gdtf_values(value):
+    with pytest.raises(ValueError):
+        protocol.build_command(
+            {
+                'kind': 'set_override',
+                'value': {
+                    'id': 'detail',
+                    'target': 'all',
+                    'values': {'attributes': {'Zoom': value}},
+                },
+            }
+        )
+
+
 @pytest.mark.parametrize(
     'command',
     [
         {'kind': 'set_normalized_rms_level', 'level': float('nan')},
         {'kind': 'set_master', 'intensity': float('inf')},
         {'kind': 'unknown'},
-        {'kind': 'stop', 'sequence': {'bank_id': 'drop', 'sequence_id': 'blue_impact'}},
-        {'kind': 'select', 'bank': 'drop', 'sequence': 'x', 'extra': 1},
+        {'kind': 'stop', 'autoloop': {'bank_id': 'drop', 'autoloop_id': 'blue_impact'}},
+        {'kind': 'select', 'bank': 'drop', 'autoloop': 'x', 'extra': 1},
         {
             'kind': 'select',
             'bank': 'drop',
-            'sequence': 'x',
+            'autoloop': 'x',
             'transition': {'kind': 'cut', 'extra': 1},
         },
     ],
@@ -186,18 +228,21 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
         record['id'] = value.command_id
         if mode != 'no_progress' or isinstance(value, wire.Login):
             last_processed = value.command_id
-    if isinstance(value, wire.PlaySequence) and value.sequence_id:
-        record['sequence'] = value.sequence_id
+    if isinstance(value, wire.PlayAutoloop) and value.autoloop_id:
+        record['autoloop'] = value.autoloop_id
     commands.append(record)
     if isinstance(value, wire.Login) and mode != 'no_login_reply':
         assert value.command_id == 1
-        assert value.HasField('rig') and value.rig.fixtures and value.scripts
+        assert value.HasField('rig') and value.rig.fixtures and value.autoloops
         assert value.artnet_destination
+        assert value.protocol_major == 1 and value.protocol_minor == 0
         if mode == 'login_error':
             event(wire.ErrorReply(command_id=value.command_id, message='fixture patch is missing'))
         else:
             event(wire.LoginReply(command_id=value.command_id,
-                frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES
+                frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
+                protocol_major=2 if mode == 'wrong_major_reply' else 1,
+                protocol_minor=1 if mode == 'newer_minor_reply' else 0
             ))
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
@@ -235,7 +280,7 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     runtime = _fake_runtime(tmp_path)
     with runtime:
         child = runtime.process
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'sequence': 'blue_impact'})
+        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'blue_impact'})
         runtime.send_command({'kind': 'stop'})
         runtime.send_command({'kind': 'heartbeat'})
         deadline = time.monotonic() + 2
@@ -249,8 +294,8 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     assert json.loads((tmp_path / 'commands.json').read_text()) == [
         {'id': 1, 'kind': 'Login'},
         {'kind': 'Heartbeat'},
-        {'id': 2, 'kind': 'PlaySequence', 'sequence': 'drop/blue_impact'},
-        {'id': 3, 'kind': 'PlaySequence'},
+        {'id': 2, 'kind': 'PlayAutoloop', 'autoloop': 'drop/blue_impact'},
+        {'id': 3, 'kind': 'PlayAutoloop'},
         {'kind': 'Heartbeat'},
     ]
     assert all(not thread.is_alive() for thread in runtime._threads)
@@ -273,13 +318,13 @@ def test_shutdown_discards_a_full_queue_and_closes_the_pipe_normally(tmp_path):
         runtime.send_command({'kind': 'stop'})
         assert blocked.wait(2)
         runtime._outgoing = queue.Queue(maxsize=1)
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'sequence': 'blue_impact'})
+        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'blue_impact'})
         threading.Timer(0.05, release.set).start()
         started = time.monotonic()
     assert time.monotonic() - started < 1
     assert child.poll() == 0
     assert all(
-        'sequence' not in command
+        'autoloop' not in command
         for command in json.loads((tmp_path / 'commands.json').read_text())
     )
     assert all(not thread.is_alive() for thread in runtime._threads)
@@ -295,6 +340,16 @@ def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason)
         with runtime:
             pytest.fail('invalid startup became ready')
     assert time.monotonic() - started < 3
+    assert runtime.process is None
+    assert all(not thread.is_alive() for thread in runtime._threads)
+
+
+@pytest.mark.parametrize('mode', ['wrong_major_reply', 'newer_minor_reply'])
+def test_login_rejects_an_incompatible_server_version_and_reaps_it(tmp_path, mode):
+    runtime = _fake_runtime(tmp_path, mode)
+    with pytest.raises(RuntimeError, match='Unexpected Starfire login reply'):
+        with runtime:
+            pytest.fail('incompatible server became ready')
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
 
@@ -396,7 +451,7 @@ def test_heartbeats_do_not_consume_command_ids_or_require_replies(tmp_path, monk
         if isinstance(command, wire.Login):
             runtime._record_progress(command.command_id)
             runtime._ready.set()
-        elif isinstance(command, wire.PlaySequence) and command.command_id == 2:
+        elif isinstance(command, wire.PlayAutoloop) and command.command_id == 2:
             now += starfire_runtime.HEARTBEAT_INTERVAL_SECONDS
 
     runtime._write = write_and_observe
@@ -404,9 +459,9 @@ def test_heartbeats_do_not_consume_command_ids_or_require_replies(tmp_path, monk
     assert recorded == [
         (1, 'Login'),
         (None, 'Heartbeat'),
-        (2, 'PlaySequence'),
+        (2, 'PlayAutoloop'),
         (None, 'Heartbeat'),
-        (3, 'PlaySequence'),
+        (3, 'PlayAutoloop'),
     ]
     assert runtime._last_sent_id == 3
     assert runtime._last_processed_id == 1
@@ -438,10 +493,10 @@ def test_repeated_metrics_do_not_hide_stalled_command_progress(tmp_path, monkeyp
     assert runtime._progress_deadline_at == 9.0 + starfire_runtime.HEARTBEAT_TIMEOUT_SECONDS
 
 
-def test_unknown_sequence_is_rejected_before_queueing(tmp_path):
+def test_unknown_autoloop_is_rejected_before_queueing(tmp_path):
     with _fake_runtime(tmp_path) as runtime:
-        with pytest.raises(ValueError, match='Unknown Starfire sequence'):
-            runtime.send_command(wire.PlaySequence(sequence_id='missing'))
+        with pytest.raises(ValueError, match='Unknown Starfire autoloop'):
+            runtime.send_command(wire.PlayAutoloop(autoloop_id='missing'))
         assert runtime._outgoing.empty()
         runtime.check_health()
 
@@ -473,14 +528,14 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         runtime = starfire_runtime.StarfireRuntime(
             binary,
             root / 'rigs/room.json',
-            root / 'starfire/sequences',
+            root / 'autoloop',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
             initial_parameters=[wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0.5)],
         )
         with runtime:
             runtime.send_command({'kind': 'beat', 'position_beats': 0.0, 'bpm': 120.0})
-            runtime.send_command({'kind': 'select', 'bank': 'drop', 'sequence': 'blue_impact'})
+            runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'blue_impact'})
             runtime.send_command({'kind': 'set_normalized_rms_level', 'level': 0.8})
             runtime.send_command(
                 wire.SetActiveEffect(
@@ -533,43 +588,43 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     patch['fixtures'][0]['universe'] = 1
     rig = tmp_path / 'multi-universe.json'
     rig.write_text(json.dumps(patch))
-    sequences = root / 'starfire/sequences'
+    autoloops = root / 'autoloop'
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
-        starfire_runtime.validate_starfire(binary, rig, sequences, expected_universe=0)
-    starfire_runtime.validate_starfire(binary, rig, sequences)
+        starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
+    starfire_runtime.validate_starfire(binary, rig, autoloops)
     starfire_runtime.validate_starfire(
-        binary, root / 'rigs/room.json', sequences, expected_universe=0
+        binary, root / 'rigs/room.json', autoloops, expected_universe=0
     )
 
 
-def test_preflight_renders_sequences_against_the_selected_patch(tmp_path):
+def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
     root = Path(__file__).resolve().parents[2]
     binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
-        pytest.skip('Build Starfire to exercise native sequence validation')
+        pytest.skip('Build Starfire to exercise native autoloop validation')
     patch = json.loads((root / 'rigs/room.json').read_text())
     del patch['groups']['strip']
     rig = tmp_path / 'missing-strip.json'
     rig.write_text(json.dumps(patch))
-    with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*sequence ') as error:
-        starfire_runtime.validate_starfire(binary, rig, root / 'starfire/sequences')
+    with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*autoloop ') as error:
+        starfire_runtime.validate_starfire(binary, rig, root / 'autoloop')
     assert 'strip' in str(error.value)
 
 
-def test_preflight_rejects_valid_catalog_missing_an_autolux_sequence(tmp_path):
-    from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT, LightIntent
+def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
+    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 
     root = Path(__file__).resolve().parents[2]
     binary = root / 'starfire/target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
-        pytest.skip('Build Starfire to exercise native sequence validation')
-    for intent, (bank, sequence) in SEQUENCE_BY_LIGHT_INTENT.items():
+        pytest.skip('Build Starfire to exercise native autoloop validation')
+    for intent, (bank, autoloop) in AUTOLOOP_BY_LIGHT_INTENT.items():
         if intent == LightIntent.DROP:
             continue
         directory = tmp_path / bank
         directory.mkdir()
-        (directory / f'{sequence}.lua').write_text(
+        (directory / f'{autoloop}.lua').write_text(
             'return { render = function(ctx) return {} end }'
         )
-    with pytest.raises(RuntimeError, match='missing Autolux sequences: drop/blue_impact'):
+    with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/blue_impact'):
         starfire_runtime.validate_starfire(binary, root / 'rigs/room.json', tmp_path)

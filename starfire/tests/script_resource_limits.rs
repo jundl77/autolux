@@ -5,7 +5,7 @@ use starfire::engine::MAX_SCRIPT_ERROR_BYTES;
 use starfire::fixtures::{FixtureRig, MAX_FIXTURES, MAX_RIG_INPUT_BYTES};
 use starfire::model::{Command, TimedCommand, Transition};
 use starfire::replay::{Replay, render_replay};
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 fn simple_rig() -> serde_json::Value {
     json!({"schema_version":1,"fixtures":[
@@ -13,7 +13,7 @@ fn simple_rig() -> serde_json::Value {
     ]})
 }
 
-fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, SequenceCatalog) {
+fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir(directory.path().join("test")).unwrap();
     fs::write(
@@ -21,7 +21,7 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, SequenceCatalog) 
         "return {render=function(ctx) error(string.rep('é', 800000)) end}",
     )
     .unwrap();
-    let catalog = SequenceCatalog::load(directory.path()).unwrap();
+    let catalog = AutoloopCatalog::load(directory.path()).unwrap();
     let rig = FixtureRig::from_json(&simple_rig().to_string()).unwrap();
     let replay = Replay {
         schema_version: 1,
@@ -31,7 +31,7 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, SequenceCatalog) 
             at_seconds: 0.0,
             command: Command::Select {
                 bank: "test".into(),
-                sequence: "fault".into(),
+                autoloop: "fault".into(),
                 transition: Transition::Cut,
             },
         }],

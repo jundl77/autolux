@@ -1,4 +1,4 @@
-# Sequence reference
+# Autoloop reference
 
 These localhost Art-Net captures contain two 64-beat cycles of each authored
 SoundSwitch loop at 120, 140 and 156 BPM. No audio or physical lights were driven.
@@ -21,7 +21,7 @@ holdout tempos. Never fit properties or holdout data independently.
 units (255 for bytes, 65535 for pan/tilt); maxima retain sharp-boundary differences.
 Receive cadence and output quantization prevent bit-identical cross-engine frames.
 
-Run `python -m tools.check_sequence_reference --output .live/sequence-reference`
+Run `python -m tools.check_autoloop_reference --output .live/autoloop-reference`
 to render the actual Lua programs at 40 Hz and check every fixture property at
 all three tempos. Cadence budgets were frozen from reference variation before candidate
 comparison. MAE, p95 and p99 are gates; safe controls and channel coverage are exact.

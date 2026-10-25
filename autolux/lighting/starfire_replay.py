@@ -11,14 +11,14 @@ from __future__ import annotations
 import math
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
-from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
+from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
 
 REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
-SEQUENCE_BY_INTENT = {
-    intent.value: sequence for intent, sequence in SEQUENCE_BY_LIGHT_INTENT.items()
+AUTOLOOP_BY_INTENT = {
+    intent.value: autoloop for intent, autoloop in AUTOLOOP_BY_LIGHT_INTENT.items()
 }
 
 
@@ -110,13 +110,13 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
             if at > duration:
                 raise ValueError('intent source time exceeds report duration')
             name = intent.get('intent')
-            if not isinstance(name, str) or name not in SEQUENCE_BY_INTENT:
+            if not isinstance(name, str) or name not in AUTOLOOP_BY_INTENT:
                 raise ValueError(f'unknown lighting intent: {name!r}')
-            bank, sequence = SEQUENCE_BY_INTENT[name]
+            bank, autoloop = AUTOLOOP_BY_INTENT[name]
             command = {
                 'kind': 'select',
                 'bank': bank,
-                'sequence': sequence,
+                'autoloop': autoloop,
                 'transition': {'kind': 'cut'},
             }
         events.append({'at_seconds': at, 'command': command})
@@ -128,7 +128,7 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
     for event in events:
         command = event['command']
         if command['kind'] == 'select':
-            identity = (command['bank'], command['sequence'])
+            identity = (command['bank'], command['autoloop'])
             if identity == selected:
                 continue
             selected = identity

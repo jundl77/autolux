@@ -1,5 +1,32 @@
 # Starfire validation
 
+## GDTF and typed sessions ? 2026-10-25
+
+- 125 Rust tests pass, including generic fixture encoding, startup/version checks,
+  bounded Lua, heartbeat supervision and unchanged full-DMX hashes for all four
+  autoloops. Rustfmt and Clippy pass.
+- 298 focused Python/CLI/reference checks pass; four GPU integrations excluded.
+  All twelve recorded SoundSwitch comparisons retain their original tolerances.
+- Radius builds and passes four native groups plus 20 process/lifecycle checks;
+  an independent review confirms media waits for LoginReply. Audio/DMX hardware
+  was disabled for endpoint tests.
+- All five shipped GDTF definitions validate against the official XSD. Real
+  import-to-Login loopback tests prove exact 8/16-bit DMX without rebuilding.
+- Release replay renders the 90-second room show in 0.258s (349x real time), and
+  64 fixtures in 1.110s (81x), above the 10x/2x regression floors.
+- Production readiness (`uv run autolux --prod --check`) passes. Wheel/source
+  builds and isolated wheel imports of generated messages and the importer pass.
+- Ten cached backtest reports exactly reproduce their committed input hashes.
+  Only 120 effect labels change from SEQUENCE to AUTOLOOP; every other report
+  value and analysis digest is identical. Only full-report checksums changed;
+  [parity evidence](autoloop-report-parity.json) records the proof.
+
+No physical audition was performed for these changes. GDTF support is a validated
+subset: unsupported modes fail at initialization; the 64 KiB live Login budget
+includes the whole rig and all Lua sources. Importing a large fixture definition
+does not increase that session limit.
+
+
 Validated on Windows on 2026-10-25. Starfire is this branch's live lighting backend.
 
 | Check | Result |
@@ -9,7 +36,7 @@ Validated on Windows on 2026-10-25. Starfire is this branch's live lighting back
 | Rust | Controller-owned Login: 41 focused protocol, lifecycle, fixture and replay checks passed. Supplied assets reproduce file-loaded DMX; probing leaves no playback state. Authored-loop hashes are unchanged. The preceding full suite and performance gates passed; strict Clippy, rustfmt and the release build pass. |
 | Radius | Both executables built; all four native test groups passed. |
 | Distribution | Wheel/source package and formatting passed. Standard generated Python Protobuf bindings and typing stubs are packaged; isolated wheel import and message round-trip passed without repository access. Eight build failure/propagation tests passed. |
-| Production readiness | This branch's `autolux --prod --check` passed in 2.2 seconds: binaries, Lua against the saved fixtures, required sequence identities, model, capture and SSH. |
+| Production readiness | This branch's `autolux --prod --check` passed in 2.2 seconds: binaries, Lua against the saved fixtures, required autoloop identities, model, capture and SSH. |
 | Analysis/backtest | All ten tracks preserve 9,298 beats, complete section boundaries, sound events and every analysis score/count. Full-report hashes reflect verified lighting changes; the strict comparison gate and previously failing benchmark test pass. |
 | Recorded command replay | All ten actual command streams rendered twice on the calibrated 14-fixture patch: 168,114 DMX frames per pass, identical repeated digests, zero script errors. Final release also matches the prior build exactly; slowest run: 473.1x real time. |
 | Live loopback | Python ownership to Protobuf IPC to native Art-Net: all four banks observed over 90 seconds; 3,602 packets, no sequence gaps, final blackout preserving movement. |

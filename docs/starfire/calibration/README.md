@@ -1,6 +1,6 @@
 # Lighting reference calibration
 
-All four Lua sequences pass comparison against captured SoundSwitch output at
+All four Lua autoloops pass comparison against captured SoundSwitch output at
 120, 140 and 156 BPM. Each capture contains two complete 64-beat cycles, using
 the same fixture patch, full master and no external accents. All output was
 captured locally; speakers and physical lights stayed off.
@@ -24,7 +24,7 @@ Colour rounding can differ by one byte. Remaining abrupt-cut outliers lasted
 
 Each fixture property is checked separately. Cadence limits come from the
 reference's measured variation and were fixed before evaluating Lua. One phase
-offset per sequence is fitted at 120 BPM and held unchanged at 140/156 BPM.
+offset per autoloop is fitted at 120 BPM and held unchanged at 140/156 BPM.
 Direct-value checks allow a declared 5 ms clock uncertainty plus one quantization
 unit; control channels must match exactly. No per-channel time shifts are used.
 
@@ -34,8 +34,8 @@ Both deterministic replay and captured-value tests run in the ordinary suites.
 
 ```powershell
 cargo test --locked --manifest-path starfire/Cargo.toml
-uv run pytest tools/tests/test_sequence_reference.py -q
-uv run python -m tools.check_sequence_reference --output .live/sequence-reference
+uv run pytest tools/tests/test_autoloop_reference.py -q
+uv run python -m tools.check_autoloop_reference --output .live/autoloop-reference
 ```
 
 [Capture provenance, controls and detailed comparisons](../../../starfire/tests/reference/soundswitch/README.md)

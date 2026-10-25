@@ -12,7 +12,7 @@ use crate::model::{
     OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
 };
 use crate::protocol::wire;
-use crate::script::{LuaSequence, SequenceCatalog};
+use crate::script::{AutoloopCatalog, LuaAutoloop};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -30,19 +30,19 @@ pub struct RenderedFrame {
     pub fixture_properties_before_strobe: FixtureStates,
     pub dmx_frames_by_universe: BTreeMap<u16, Vec<u8>>,
     pub active_bank: Option<String>,
-    pub active_sequence: Option<String>,
+    pub active_autoloop: Option<String>,
     pub script_error: Option<String>,
 }
 
-struct ActiveSequence {
+struct ActiveAutoloop {
     bank: String,
     name: String,
-    script: LuaSequence,
+    script: LuaAutoloop,
     start_beat: f64,
     start_animation_beats: f64,
 }
 
-impl ActiveSequence {
+impl ActiveAutoloop {
     fn render(
         &mut self,
         seconds: f64,
@@ -52,8 +52,8 @@ impl ActiveSequence {
         self.script.render(&RenderContext {
             time_seconds: seconds,
             beat_position: time.beat_position,
-            sequence_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
-            sequence_speed_scaled_elapsed_beats: (time.animation_beats
+            autoloop_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
+            autoloop_speed_scaled_elapsed_beats: (time.animation_beats
                 - self.start_animation_beats)
                 .max(0.0),
             normalized_rms_level,
@@ -62,7 +62,7 @@ impl ActiveSequence {
 }
 
 enum FadeSource {
-    Running(ActiveSequence),
+    Running(ActiveAutoloop),
     Frozen(FixtureStates),
 }
 
@@ -89,10 +89,10 @@ impl ActiveOverride {
 
 pub struct Engine {
     rig: FixtureRig,
-    catalog: SequenceCatalog,
+    catalog: AutoloopCatalog,
     clock: MusicalClock,
     last_time_seconds: f64,
-    active: Option<ActiveSequence>,
+    active: Option<ActiveAutoloop>,
     fade: Option<Crossfade>,
     overrides: BTreeMap<String, ActiveOverride>,
     override_order: u64,
@@ -104,7 +104,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(rig: FixtureRig, catalog: SequenceCatalog) -> Result<Self> {
+    pub fn new(rig: FixtureRig, catalog: AutoloopCatalog) -> Result<Self> {
         let last_output_states = rig.empty_states();
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
@@ -138,18 +138,18 @@ impl Engine {
             }
             Command::Select {
                 bank,
-                sequence,
+                autoloop,
                 transition,
             } => {
                 validate_identifier(bank)?;
-                validate_identifier(sequence)?;
+                validate_identifier(autoloop)?;
                 validate_transition(transition, time.elapsed_musical_beats)?;
                 if !self
                     .active
                     .as_ref()
-                    .is_some_and(|active| active.bank == *bank && active.name == *sequence)
+                    .is_some_and(|active| active.bank == *bank && active.name == *autoloop)
                 {
-                    self.select(at_seconds, time, bank, sequence, transition)?;
+                    self.select(at_seconds, time, bank, autoloop, transition)?;
                 }
             }
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
@@ -179,18 +179,18 @@ impl Engine {
         Ok(())
     }
 
-    pub fn play_sequence(
+    pub fn play_autoloop(
         &mut self,
         at_seconds: f64,
-        sequence_id: &str,
+        autoloop_id: &str,
         transition: Transition,
     ) -> Result<()> {
-        let (bank, sequence) = self.catalog.resolve(sequence_id)?.clone();
+        let (bank, autoloop) = self.catalog.resolve(autoloop_id)?.clone();
         self.apply(
             at_seconds,
             &Command::Select {
                 bank,
-                sequence,
+                autoloop,
                 transition,
             },
         )
@@ -238,6 +238,7 @@ impl Engine {
             self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states);
             for state in states.values_mut() {
                 state.intensity = state.intensity.clamp(0.0, 1.0) * self.master_intensity;
+                state.attribute_brightness = self.master_intensity;
             }
         }
         if self.blackout {
@@ -255,7 +256,7 @@ impl Engine {
             fixture_properties_before_strobe: states,
             dmx_frames_by_universe: universes,
             active_bank: self.active.as_ref().map(|active| active.bank.clone()),
-            active_sequence: self.active.as_ref().map(|active| active.name.clone()),
+            active_autoloop: self.active.as_ref().map(|active| active.name.clone()),
             script_error: self.script_error.clone(),
         })
     }
@@ -274,15 +275,15 @@ impl Engine {
         seconds: f64,
         time: ClockSample,
         bank: &str,
-        sequence: &str,
+        autoloop: &str,
         transition: &Transition,
     ) -> Result<()> {
         validate_identifier(bank)?;
-        validate_identifier(sequence)?;
+        validate_identifier(autoloop)?;
         let script = self
             .catalog
-            .instantiate(bank, sequence, &self.rig)
-            .with_context(|| format!("cannot load sequence {bank}/{sequence}"))?;
+            .instantiate(bank, autoloop, &self.rig)
+            .with_context(|| format!("cannot load autoloop {bank}/{autoloop}"))?;
 
         // A replacement is compiled before the active program is touched.
         let frozen_source = if matches!(transition, Transition::Crossfade { .. })
@@ -320,9 +321,9 @@ impl Engine {
                 })
             }
         };
-        self.active = Some(ActiveSequence {
+        self.active = Some(ActiveAutoloop {
             bank: bank.to_owned(),
-            name: sequence.to_owned(),
+            name: autoloop.to_owned(),
             script,
             start_beat: time.beat_position,
             start_animation_beats: time.animation_beats,
@@ -344,7 +345,7 @@ impl Engine {
         };
         let effects = active
             .render(seconds, time, self.normalized_rms_level)
-            .with_context(|| format!("sequence {}/{} failed", active.bank, active.name))?;
+            .with_context(|| format!("autoloop {}/{} failed", active.bank, active.name))?;
         let destination = states_for_effects(&self.rig, &effects)?;
         let Some(fade) = &mut self.fade else {
             return Ok(destination);
@@ -358,7 +359,7 @@ impl Engine {
         };
         let amount =
             ((time.elapsed_musical_beats - fade.start_beat) / fade.duration_beats).clamp(0.0, 1.0);
-        Ok(blend_states(source, destination, amount))
+        Ok(blend_states(&self.rig, source, destination, amount))
     }
 
     fn set_override(
@@ -388,6 +389,9 @@ impl Engine {
             "too many active lighting overrides"
         );
         let fixture_ids = self.rig.resolve(&value.target)?;
+        for id in &fixture_ids {
+            self.rig.validate_attributes(id, &value.values.attributes)?;
+        }
         let (expires_seconds, expires_beat) = match value.lifetime {
             OverrideLifetime::UntilCleared => (None, None),
             OverrideLifetime::Beats { duration_beats } => (
@@ -524,6 +528,7 @@ fn validate_properties(values: &PropertyValues) -> Result<()> {
 }
 
 fn apply_properties(state: &mut FixtureState, values: &PropertyValues) {
+    state.attributes.extend(values.attributes.clone());
     if let Some(value) = values.intensity {
         state.intensity = value;
     }
@@ -546,6 +551,7 @@ fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureSta
     for effect in effects {
         validate_properties(&effect.values)?;
         for id in rig.resolve(&effect.target)? {
+            rig.validate_attributes(&id, &effect.values.attributes)?;
             let state = states
                 .get_mut(&id)
                 .context("resolved fixture is absent from the rig")?;
@@ -556,12 +562,21 @@ fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureSta
 }
 
 fn blend_states(
+    rig: &FixtureRig,
     source: FixtureStates,
     mut destination: FixtureStates,
     amount: f64,
 ) -> FixtureStates {
     for (id, to) in &mut destination {
         if let Some(from) = source.get(id) {
+            for (key, value) in &from.attributes {
+                if let Some(destination) = to.attributes.get(key) {
+                    let blended = rig.interpolate_attribute(id, key, value, destination, amount);
+                    to.attributes.insert(key.clone(), blended);
+                } else if amount < 1.0 {
+                    to.attributes.insert(key.clone(), value.clone());
+                }
+            }
             to.intensity = interpolate(from.intensity, to.intensity, amount);
             to.colour = Rgb {
                 red: interpolate(from.colour.red, to.colour.red, amount),
@@ -586,6 +601,7 @@ fn extinguish(states: &mut FixtureStates) {
     for state in states.values_mut() {
         state.intensity = 0.0;
         state.strobe_hz = 0.0;
+        state.output_blackout = true;
     }
 }
 
@@ -600,6 +616,7 @@ fn apply_software_strobe(seconds: f64, states: &mut FixtureStates) {
             };
             if phase >= STROBE_OPEN_FRACTION {
                 state.intensity = 0.0;
+                state.attribute_brightness = 0.0;
             }
         }
         state.strobe_hz = 0.0;

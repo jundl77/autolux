@@ -83,7 +83,7 @@ class EventBuffer:
             now = self._now()
             for effect in reversed(self._effects):
                 if effect['type'] == effect_type and (
-                    effect_type == 'SEQUENCE' or effect['name'] == name
+                    effect_type == 'AUTOLOOP' or effect['name'] == name
                 ):
                     effect['end'] = min(effect.get('end', now), now)
                     break
@@ -199,7 +199,7 @@ class EventBuffer:
                     (
                         effect
                         for effect in reversed(self._effects)
-                        if effect['type'] == 'SEQUENCE' and effect.get('end', float('inf')) > now
+                        if effect['type'] == 'AUTOLOOP' and effect.get('end', float('inf')) > now
                     ),
                     None,
                 ),

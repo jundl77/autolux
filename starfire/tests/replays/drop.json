@@ -16,7 +16,7 @@
       "command": {
         "kind": "select",
         "bank": "drop",
-        "sequence": "blue_impact",
+        "autoloop": "blue_impact",
         "transition": {
           "kind": "cut"
         }
@@ -27,7 +27,7 @@
       "command": {
         "kind": "select",
         "bank": "drop",
-        "sequence": "blue_impact",
+        "autoloop": "blue_impact",
         "transition": {
           "kind": "cut"
         }

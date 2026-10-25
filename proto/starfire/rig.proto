@@ -29,33 +29,12 @@ message FixtureGroup {
   repeated string fixture_ids = 2;
 }
 
-// Channel indices are zero-based offsets within safe_values.
+// One standard GDTF fixture type and the selected DMX mode.
+// Autolux imports and stores the source; Starfire validates it once during Login.
 message FixtureProfile {
   string profile_id = 1;
-  bytes safe_values = 2;
-  string source = 3;
-  string notes = 4;
-  optional uint32 dimmer = 5;
-  repeated uint32 rgb = 6;  // Empty or exactly [red, green, blue] channels.
-  optional uint32 white = 7;
-  AxisChannels pan = 8;
-  AxisChannels tilt = 9;
-  ColourWheel colour_wheel = 10;
-
-  message AxisChannels {
-    uint32 coarse = 1;
-    optional uint32 fine = 2;
-  }
-
-  message ColourWheel {
-    uint32 channel = 1;
-    repeated Slot slots = 2;
-
-    message Slot {
-      uint32 value = 1;  // DMX byte, 0..255.
-      RgbColor colour = 2;
-    }
-  }
+  string gdtf_xml = 2;  // Complete description.xml, containing exactly one FixtureType.
+  string dmx_mode = 3;  // Exact DMXMode name in that definition.
 }
 
 message RgbColor {

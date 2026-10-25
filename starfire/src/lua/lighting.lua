@@ -78,6 +78,17 @@ function sf.strobe(target, rate_hz)
     return { target = target, values = { strobe_hz = rate_hz } }
 end
 
+function sf.physical_attribute(target, attribute, physical_value)
+    assert(type(attribute) == "string", "GDTF attribute name must be a string")
+    assert(finite(physical_value), "GDTF physical value must be finite")
+    return { target = target, values = { attributes = { [attribute] = physical_value } } }
+end
+
+function sf.channel_preset(target, attribute, preset)
+    assert(type(attribute) == "string" and type(preset) == "string", "GDTF attribute and preset names must be strings")
+    return { target = target, values = { attributes = { [attribute] = preset } } }
+end
+
 function sf.scene(effects)
     local result = {}
     local function append(item)

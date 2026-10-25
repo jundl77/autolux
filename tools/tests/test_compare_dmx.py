@@ -5,7 +5,7 @@ import struct
 import numpy as np
 import pytest
 
-from tools.check_sequence_reference import evaluate_metrics
+from tools.check_autoloop_reference import evaluate_metrics
 from tools.compare_dmx import Capture, compare, fit_shared_channel_offset_beats, read_capture
 
 

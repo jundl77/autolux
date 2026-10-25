@@ -75,7 +75,7 @@ def test_simulation_end_clamp_does_not_shift_a_recorded_source_boundary():
     assert selections(report_to_replay(saved))[0]['at_seconds'] == 4.0
 
 
-def test_silence_stops_immediately_and_same_sequence_can_resume_after_transport_stop():
+def test_silence_stops_immediately_and_same_autoloop_can_resume_after_transport_stop():
     source = report()
     source['intents'] = [
         {'t': 15.0, 'song_t': 1.0, 'intent': 'drop'},
@@ -89,7 +89,7 @@ def test_silence_stops_immediately_and_same_sequence_can_resume_after_transport_
     assert result['events'][-1] == {'at_seconds': 20.0, 'command': {'kind': 'stop'}}
 
 
-def test_all_four_intents_map_to_authored_sequences_in_stable_order():
+def test_all_four_intents_map_to_authored_autoloops_in_stable_order():
     source = report()
     source['intents'] = [
         {'t': 15.0, 'song_t': 1.0, 'intent': name}
@@ -98,7 +98,7 @@ def test_all_four_intents_map_to_authored_sequences_in_stable_order():
     result = report_to_replay(source)
     assert result['events'][0]['command']['kind'] == 'beat'
     assert [
-        (event['command']['bank'], event['command']['sequence']) for event in selections(result)
+        (event['command']['bank'], event['command']['autoloop']) for event in selections(result)
     ] == [
         ('atmospheric', 'blue_tide'),
         ('breakdown', 'violet_space'),

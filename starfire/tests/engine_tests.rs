@@ -5,7 +5,7 @@ use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 const RIG: &str = r#"{"schema_version":1,"fixtures":[
     {"id":"left","profile":"generic_rgb","universe":0,"address":1},
@@ -14,8 +14,8 @@ const RIG: &str = r#"{"schema_version":1,"fixtures":[
 const CONSTANT: &str =
     "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.5)} end}";
 const LOOP: &str = r#"return {render=function(ctx) return sf.scene {
-    sf.dimmer(sf.all(), (ctx.sequence_speed_scaled_elapsed_beats % 16) / 16),
-    sf.pan_tilt(sf.all(), (ctx.sequence_elapsed_beats % 16) / 16, 0.3),
+    sf.dimmer(sf.all(), (ctx.autoloop_speed_scaled_elapsed_beats % 16) / 16),
+    sf.pan_tilt(sf.all(), (ctx.autoloop_elapsed_beats % 16) / 16, 0.3),
     sf.colour(sf.all(), sf.rgb(0, 0, 1))} end}"#;
 const RED: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.all(), 0.2), sf.colour(sf.all(), sf.rgb(1, 0, 0)),
@@ -34,7 +34,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
         )
         .unwrap();
     }
-    let catalog = SequenceCatalog::load(directory.path()).unwrap();
+    let catalog = AutoloopCatalog::load(directory.path()).unwrap();
     let mut engine = Engine::new(FixtureRig::from_json(RIG).unwrap(), catalog).unwrap();
     engine
         .apply(
@@ -54,7 +54,7 @@ fn select(engine: &mut Engine, at: f64, name: &str, transition: Transition) {
             at,
             &Command::Select {
                 bank: "test".into(),
-                sequence: name.into(),
+                autoloop: name.into(),
                 transition,
             },
         )
@@ -114,7 +114,7 @@ fn duplicate_selection_never_restarts_a_loop_or_creates_a_transition() {
             frame.fixture_properties_before_strobe["left"].intensity,
             ((second * 2) % 16) as f64 / 16.0,
         );
-        assert_eq!(frame.active_sequence.as_deref(), Some("loop"));
+        assert_eq!(frame.active_autoloop.as_deref(), Some("loop"));
     }
 }
 
@@ -440,7 +440,7 @@ fn outgoing_loop_keeps_animating_and_interrupted_fade_keeps_current_blend() {
 }
 
 #[test]
-fn failed_replacement_load_keeps_running_sequence() {
+fn failed_replacement_load_keeps_running_autoloop() {
     let mut engine = engine(&[("loop", LOOP), ("invalid", "this is not Lua")]);
     select(&mut engine, 0.0, "loop", Transition::Cut);
     for name in ["missing", "invalid"] {
@@ -450,7 +450,7 @@ fn failed_replacement_load_keeps_running_sequence() {
                     1.0,
                     &Command::Select {
                         bank: "test".into(),
-                        sequence: name.into(),
+                        autoloop: name.into(),
                         transition: Transition::Cut
                     }
                 )
@@ -458,7 +458,7 @@ fn failed_replacement_load_keeps_running_sequence() {
         );
     }
     let continuing = engine.render_at(2.0).unwrap();
-    assert_eq!(continuing.active_sequence.as_deref(), Some("loop"));
+    assert_eq!(continuing.active_autoloop.as_deref(), Some("loop"));
     assert!(continuing.script_error.is_none());
     near(
         continuing.fixture_properties_before_strobe["left"].intensity,
@@ -468,7 +468,7 @@ fn failed_replacement_load_keeps_running_sequence() {
 
 #[test]
 fn runtime_fault_clears_overrides_latches_blackout_and_never_retries_duplicate_selection() {
-    let fault = "return {render=function(ctx) if ctx.sequence_elapsed_beats >= 2 then error('broken sequence') end return sf.scene {sf.dimmer(sf.all(), 0.7), sf.pan_tilt(sf.all(), 0.8, 0.2)} end}";
+    let fault = "return {render=function(ctx) if ctx.autoloop_elapsed_beats >= 2 then error('broken autoloop') end return sf.scene {sf.dimmer(sf.all(), 0.7), sf.pan_tilt(sf.all(), 0.8, 0.2)} end}";
     let mut engine = engine(&[("fault", fault), ("constant", CONSTANT)]);
     select(&mut engine, 0.0, "fault", Transition::Cut);
     set_override(
@@ -490,7 +490,7 @@ fn runtime_fault_clears_overrides_latches_blackout_and_never_retries_duplicate_s
             .script_error
             .as_deref()
             .unwrap()
-            .contains("broken sequence")
+            .contains("broken autoloop")
     );
     near(
         faulted.fixture_properties_before_strobe["left"].intensity,
@@ -520,7 +520,7 @@ fn runtime_fault_clears_overrides_latches_blackout_and_never_retries_duplicate_s
 }
 
 #[test]
-fn stop_cancels_sequence_and_overrides_while_retaining_movement() {
+fn stop_cancels_autoloop_and_overrides_while_retaining_movement() {
     let mut engine = engine(&[("blue", BLUE)]);
     select(&mut engine, 0.0, "blue", Transition::Cut);
     set_override(
@@ -537,7 +537,7 @@ fn stop_cancels_sequence_and_overrides_while_retaining_movement() {
     let before = engine.render_at(0.0).unwrap();
     engine.apply(1.0, &Command::Stop).unwrap();
     let stopped = engine.render_at(2.0).unwrap();
-    assert!(stopped.active_sequence.is_none());
+    assert!(stopped.active_autoloop.is_none());
     near(
         stopped.fixture_properties_before_strobe["left"].pan,
         before.fixture_properties_before_strobe["left"].pan,
@@ -639,7 +639,7 @@ fn invalid_commands_do_not_mutate_the_active_show() {
             .is_err()
     );
     let frame = engine.render_at(2.0).unwrap();
-    assert_eq!(frame.active_sequence.as_deref(), Some("loop"));
+    assert_eq!(frame.active_autoloop.as_deref(), Some("loop"));
     near(
         frame.fixture_properties_before_strobe["left"].intensity,
         0.25,
@@ -693,7 +693,7 @@ fn expired_overrides_release_capacity_even_without_an_intervening_render() {
 
 #[test]
 fn script_error_while_interrupting_a_fade_stops_the_existing_show() {
-    let fault = "return {render=function(ctx) if ctx.sequence_elapsed_beats >= 2 then error('fade fault') end return sf.scene {sf.dimmer(sf.all(), 0.5)} end}";
+    let fault = "return {render=function(ctx) if ctx.autoloop_elapsed_beats >= 2 then error('fade fault') end return sf.scene {sf.dimmer(sf.all(), 0.5)} end}";
     let mut engine = engine(&[("fault", fault), ("constant", CONSTANT), ("blue", BLUE)]);
     select(&mut engine, 0.0, "fault", Transition::Cut);
     select(
@@ -709,7 +709,7 @@ fn script_error_while_interrupting_a_fade_stops_the_existing_show() {
         1.0,
         &Command::Select {
             bank: "test".into(),
-            sequence: "blue".into(),
+            autoloop: "blue".into(),
             transition: Transition::Crossfade {
                 duration_beats: 4.0,
             },
@@ -788,7 +788,7 @@ fn invalid_override_replacement_preserves_the_existing_property_and_deadline() {
 }
 
 #[test]
-fn invalid_fade_duration_does_not_replace_the_running_sequence() {
+fn invalid_fade_duration_does_not_replace_the_running_autoloop() {
     let mut engine = engine(&[("constant", CONSTANT), ("blue", BLUE)]);
     select(&mut engine, 0.0, "constant", Transition::Cut);
     for duration_beats in [0.0, -1.0, f64::NAN, f64::INFINITY, 1025.0] {
@@ -798,7 +798,7 @@ fn invalid_fade_duration_does_not_replace_the_running_sequence() {
                     1.0,
                     &Command::Select {
                         bank: "test".into(),
-                        sequence: "blue".into(),
+                        autoloop: "blue".into(),
                         transition: Transition::Crossfade { duration_beats }
                     }
                 )
@@ -806,7 +806,7 @@ fn invalid_fade_duration_does_not_replace_the_running_sequence() {
         );
     }
     let frame = engine.render_at(1.0).unwrap();
-    assert_eq!(frame.active_sequence.as_deref(), Some("constant"));
+    assert_eq!(frame.active_autoloop.as_deref(), Some("constant"));
     near(
         frame.fixture_properties_before_strobe["left"].intensity,
         0.5,

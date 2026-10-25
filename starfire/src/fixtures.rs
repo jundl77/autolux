@@ -9,14 +9,13 @@ use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
-use crate::model::{DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
+use crate::gdtf::GdtfProfile;
+use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
 use crate::protocol::wire;
 
 const RIG_SCHEMA_VERSION: u32 = 1;
 const PROFILE_SCHEMA_VERSION: u32 = 1;
 const PROFILE_CATALOGUE: &str = include_str!("../../rigs/profiles.json");
-const DMX_MAX: f64 = u8::MAX as f64;
-const FINE_POSITION_MAX: f64 = u16::MAX as f64;
 pub const MAX_RIG_INPUT_BYTES: usize = 1024 * 1024;
 pub const MAX_FIXTURES: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
@@ -92,230 +91,22 @@ impl MovementRange {
 #[serde(deny_unknown_fields)]
 struct ProfileCatalogue {
     schema_version: u32,
-    profiles: BTreeMap<String, FixtureProfile>,
+    profiles: BTreeMap<String, ProfileDefinition>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FixtureProfile {
-    source: String,
-    notes: String,
-    /// Safe complete channel state; semantic effects may change only mapped channels.
-    safe_values: Vec<u8>,
-    dimmer: Option<usize>,
-    rgb: Option<[usize; 3]>,
-    white: Option<usize>,
-    colour_wheel: Option<ColourWheel>,
-    pan: Option<AxisChannels>,
-    tilt: Option<AxisChannels>,
+struct ProfileDefinition {
+    gdtf_xml: String,
+    dmx_mode: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ColourWheel {
-    channel: usize,
-    slots: Vec<ColourSlot>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ColourSlot {
-    value: u8,
-    colour: Rgb,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AxisChannels {
-    coarse: usize,
-    fine: Option<usize>,
-}
-
-impl FixtureProfile {
-    fn from_wire(value: &wire::FixtureProfile) -> Result<Self> {
-        let rgb = if value.rgb.is_empty() {
-            None
-        } else {
-            ensure!(value.rgb.len() == 3, "RGB requires exactly three channels");
-            Some([
-                value.rgb[0] as usize,
-                value.rgb[1] as usize,
-                value.rgb[2] as usize,
-            ])
-        };
-        let axis = |value: &wire::fixture_profile::AxisChannels| AxisChannels {
-            coarse: value.coarse as usize,
-            fine: value.fine.map(|channel| channel as usize),
-        };
-        let colour_wheel = value
-            .colour_wheel
-            .as_ref()
-            .map(|wheel| -> Result<_> {
-                let slots = wheel
-                    .slots
-                    .iter()
-                    .map(|slot| -> Result<_> {
-                        let colour = slot
-                            .colour
-                            .as_ref()
-                            .context("colour wheel slot requires colour")?;
-                        Ok(ColourSlot {
-                            value: u8::try_from(slot.value)
-                                .context("colour wheel value exceeds DMX byte")?,
-                            colour: Rgb {
-                                red: colour.red,
-                                green: colour.green,
-                                blue: colour.blue,
-                            },
-                        })
-                    })
-                    .collect::<Result<_>>()?;
-                Ok(ColourWheel {
-                    channel: wheel.channel as usize,
-                    slots,
-                })
-            })
-            .transpose()?;
-        Ok(Self {
-            source: value.source.clone(),
-            notes: value.notes.clone(),
-            safe_values: value.safe_values.clone(),
-            dimmer: value.dimmer.map(|channel| channel as usize),
-            rgb,
-            white: value.white.map(|channel| channel as usize),
-            colour_wheel,
-            pan: value.pan.as_ref().map(axis),
-            tilt: value.tilt.as_ref().map(axis),
-        })
-    }
-
-    fn validate(&self) -> Result<()> {
-        ensure!(!self.source.trim().is_empty(), "profile source is required");
-        ensure!(!self.notes.trim().is_empty(), "profile notes are required");
-        ensure!(
-            (1..=DMX_CHANNELS).contains(&self.safe_values.len()),
-            "invalid profile footprint"
-        );
-        ensure!(
-            self.dimmer.is_some() || self.rgb.is_some(),
-            "profile cannot control brightness"
-        );
-        ensure!(
-            self.white.is_none() || self.rgb.is_some(),
-            "white channel requires RGB channels"
-        );
-        ensure!(
-            self.colour_wheel.is_none() || self.rgb.is_none(),
-            "conflicting colour encoders"
-        );
-        ensure!(
-            self.colour_wheel.is_none() || self.dimmer.is_some(),
-            "colour wheel requires dimmer"
-        );
-
-        let mut channels = Vec::new();
-        channels.extend(self.dimmer);
-        channels.extend(self.rgb.into_iter().flatten());
-        channels.extend(self.white);
-        if let Some(wheel) = &self.colour_wheel {
-            ensure!(!wheel.slots.is_empty(), "colour wheel has no slots");
-            let mut values = BTreeSet::new();
-            for slot in &wheel.slots {
-                validate_colour(slot.colour)?;
-                ensure!(
-                    colour_peak(slot.colour) > 0.0,
-                    "colour wheel slot must emit light"
-                );
-                ensure!(values.insert(slot.value), "duplicate colour wheel slot");
-            }
-            channels.push(wheel.channel);
-        }
-        for axis in [&self.pan, &self.tilt].into_iter().flatten() {
-            channels.push(axis.coarse);
-            channels.extend(axis.fine);
-        }
-        let mut used = BTreeSet::new();
-        for channel in channels {
-            ensure!(
-                channel < self.safe_values.len(),
-                "profile channel exceeds footprint"
-            );
-            ensure!(used.insert(channel), "overlapping profile channels");
-        }
-        Ok(())
-    }
-
-    fn encode(&self, patch: &FixturePatch, state: &FixtureState, channels: &mut [u8]) {
-        channels.copy_from_slice(&self.safe_values);
-        let colour_gain = if self.dimmer.is_some() {
-            1.0
-        } else {
-            state.intensity
-        };
-        if let Some([red, green, blue]) = self.rgb {
-            let white = if self.white.is_some() {
-                state
-                    .colour
-                    .red
-                    .min(state.colour.green)
-                    .min(state.colour.blue)
-            } else {
-                0.0
-            };
-            channels[red] = dmx_byte((state.colour.red - white) * colour_gain);
-            channels[green] = dmx_byte((state.colour.green - white) * colour_gain);
-            channels[blue] = dmx_byte((state.colour.blue - white) * colour_gain);
-            if let Some(channel) = self.white {
-                channels[channel] = dmx_byte(white * colour_gain);
-            }
-        }
-        let mut intensity = state.intensity;
-        if let Some(wheel) = &self.colour_wheel {
-            let peak = colour_peak(state.colour);
-            intensity *= peak;
-            let requested = if peak > 0.0 {
-                normalize_colour(state.colour, peak)
-            } else {
-                Rgb::default()
-            };
-            let slot = wheel
-                .slots
-                .iter()
-                .min_by(|left, right| {
-                    colour_distance(left.colour, requested)
-                        .total_cmp(&colour_distance(right.colour, requested))
-                })
-                .expect("validated colour wheel has slots");
-            channels[wheel.channel] = slot.value;
-        }
-        if let Some(channel) = self.dimmer {
-            channels[channel] = dmx_byte(intensity);
-        }
-        for (axis, range, position) in [
-            (&self.pan, &patch.pan, state.pan),
-            (&self.tilt, &patch.tilt, state.tilt),
-        ] {
-            if let Some(axis) = axis {
-                let position = range.map(position);
-                if let Some(fine) = axis.fine {
-                    let [coarse_value, fine_value] =
-                        ((position * FINE_POSITION_MAX).round() as u16).to_be_bytes();
-                    channels[axis.coarse] = coarse_value;
-                    channels[fine] = fine_value;
-                } else {
-                    channels[axis.coarse] = dmx_byte(position);
-                }
-            }
-        }
-    }
-}
-
-/// An immutable, validated patch with fixture data separate from sequence logic.
+/// An immutable, validated patch with fixture data separate from autoloop logic.
 #[derive(Clone, Debug)]
 pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
     groups: BTreeMap<String, Vec<String>>,
-    profiles: BTreeMap<String, FixtureProfile>,
+    profiles: BTreeMap<String, GdtfProfile>,
 }
 
 impl FixtureRig {
@@ -347,7 +138,7 @@ impl FixtureRig {
         }
         let mut profiles = BTreeMap::new();
         for profile in &rig.profiles {
-            let converted = FixtureProfile::from_wire(profile)
+            let converted = GdtfProfile::from_xml(&profile.gdtf_xml, &profile.dmx_mode)
                 .with_context(|| format!("profile {}", profile.profile_id))?;
             ensure!(
                 profiles
@@ -361,19 +152,25 @@ impl FixtureRig {
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        let mut json = String::new();
-        File::open(path)
-            .with_context(|| format!("open rig {}", path.display()))?
-            .take((MAX_RIG_INPUT_BYTES + 1) as u64)
-            .read_to_string(&mut json)
-            .with_context(|| format!("read rig {}", path.display()))?;
-        Self::from_json(&json).with_context(|| format!("load rig {}", path.display()))
+        Self::from_json(&read_rig_file(path)?)
+    }
+
+    pub fn load_with_profiles(path: &Path, profiles: &Path) -> Result<Self> {
+        Self::from_json_with_profiles(&read_rig_file(path)?, &read_rig_file(profiles)?)
     }
 
     pub fn from_json(json: &str) -> Result<Self> {
+        Self::from_json_with_profiles(json, PROFILE_CATALOGUE)
+    }
+
+    pub fn from_json_with_profiles(json: &str, profiles_json: &str) -> Result<Self> {
         ensure!(
             json.len() <= MAX_RIG_INPUT_BYTES,
             "fixture rig exceeds input byte limit"
+        );
+        ensure!(
+            profiles_json.len() <= MAX_RIG_INPUT_BYTES,
+            "profile catalogue exceeds input byte limit"
         );
         let definition: RigDefinition = serde_json::from_str(json).context("parse fixture rig")?;
         ensure!(
@@ -381,18 +178,33 @@ impl FixtureRig {
             "unsupported rig schema version"
         );
         let catalogue: ProfileCatalogue =
-            serde_json::from_str(PROFILE_CATALOGUE).context("parse fixture profiles")?;
+            serde_json::from_str(profiles_json).context("parse GDTF profile catalogue")?;
         ensure!(
             catalogue.schema_version == PROFILE_SCHEMA_VERSION,
             "unsupported fixture profile version"
         );
-        Self::from_parts(definition.fixtures, definition.groups, catalogue.profiles)
+        let used_profiles: BTreeSet<_> = definition
+            .fixtures
+            .iter()
+            .map(|fixture| fixture.profile.as_str())
+            .collect();
+        let profiles = catalogue
+            .profiles
+            .into_iter()
+            .filter(|(id, _)| used_profiles.contains(id.as_str()))
+            .map(|(id, profile)| {
+                let compiled = GdtfProfile::from_xml(&profile.gdtf_xml, &profile.dmx_mode)
+                    .with_context(|| format!("profile {id}"))?;
+                Ok((id, compiled))
+            })
+            .collect::<Result<_>>()?;
+        Self::from_parts(definition.fixtures, definition.groups, profiles)
     }
 
     fn from_parts(
         fixtures: Vec<FixturePatch>,
         groups: BTreeMap<String, Vec<String>>,
-        profiles: BTreeMap<String, FixtureProfile>,
+        profiles: BTreeMap<String, GdtfProfile>,
     ) -> Result<Self> {
         ensure!(
             !fixtures.is_empty() && fixtures.len() <= MAX_FIXTURES,
@@ -406,11 +218,8 @@ impl FixtureRig {
             profiles.len() <= MAX_FIXTURES,
             "fixture profile count exceeds limit"
         );
-        for (id, profile) in &profiles {
+        for id in profiles.keys() {
             validate_identifier(id)?;
-            profile
-                .validate()
-                .with_context(|| format!("profile {id}"))?;
         }
 
         let mut ids = BTreeSet::new();
@@ -436,7 +245,7 @@ impl FixtureRig {
                 "fixture {} has invalid DMX address",
                 patch.id
             );
-            let end = patch.address - 1 + profile.safe_values.len();
+            let end = patch.address - 1 + profile.footprint();
             ensure!(
                 end <= DMX_CHANNELS,
                 "fixture {} exceeds universe boundary",
@@ -508,6 +317,35 @@ impl FixtureRig {
         &self.groups
     }
 
+    pub fn validate_attributes(
+        &self,
+        fixture_id: &str,
+        values: &BTreeMap<String, AttributeValue>,
+    ) -> Result<()> {
+        let patch = self
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.id == fixture_id)
+            .context("unknown fixture")?;
+        self.profiles[&patch.profile].validate_attributes(values)
+    }
+
+    pub fn interpolate_attribute(
+        &self,
+        fixture_id: &str,
+        key: &str,
+        from: &AttributeValue,
+        to: &AttributeValue,
+        amount: f64,
+    ) -> AttributeValue {
+        let patch = self
+            .fixtures
+            .iter()
+            .find(|fixture| fixture.id == fixture_id)
+            .expect("validated fixture state");
+        self.profiles[&patch.profile].interpolate_attribute(key, from, to, amount)
+    }
+
     pub fn fixture_ids(&self) -> Vec<String> {
         self.fixtures
             .iter()
@@ -540,11 +378,17 @@ impl FixtureRig {
                 .entry(fixture.universe)
                 .or_insert_with(|| vec![0; DMX_CHANNELS]);
             let start = fixture.address - 1;
-            profile.encode(
-                fixture,
-                state,
-                &mut frame[start..start + profile.safe_values.len()],
-            );
+            let mut calibrated = state.clone();
+            calibrated.pan = fixture.pan.map(state.pan);
+            calibrated.tilt = fixture.tilt.map(state.tilt);
+            profile
+                .encode_calibrated(
+                    &calibrated,
+                    &mut frame[start..start + profile.footprint()],
+                    |position| fixture.pan.map(position),
+                    |position| fixture.tilt.map(position),
+                )
+                .with_context(|| format!("fixture {}", fixture.id))?;
         }
         Ok(universes)
     }
@@ -560,6 +404,7 @@ fn validate_identifier(identifier: &str) -> Result<()> {
 
 fn validate_state(state: &FixtureState) -> Result<()> {
     unit_interval("intensity", state.intensity)?;
+    unit_interval("attribute brightness", state.attribute_brightness)?;
     validate_colour(state.colour)?;
     unit_interval("pan", state.pan)?;
     unit_interval("tilt", state.tilt)?;
@@ -584,24 +429,16 @@ fn validate_colour(colour: Rgb) -> Result<()> {
     unit_interval("blue", colour.blue)
 }
 
-fn colour_peak(colour: Rgb) -> f64 {
-    colour.red.max(colour.green).max(colour.blue)
-}
-
-fn normalize_colour(colour: Rgb, peak: f64) -> Rgb {
-    Rgb {
-        red: colour.red / peak,
-        green: colour.green / peak,
-        blue: colour.blue / peak,
-    }
-}
-
-fn colour_distance(left: Rgb, right: Rgb) -> f64 {
-    (left.red - right.red).powi(2)
-        + (left.green - right.green).powi(2)
-        + (left.blue - right.blue).powi(2)
-}
-
-fn dmx_byte(value: f64) -> u8 {
-    (value * DMX_MAX).round() as u8
+fn read_rig_file(path: &Path) -> Result<String> {
+    let mut json = String::new();
+    File::open(path)
+        .with_context(|| format!("open fixture data {}", path.display()))?
+        .take((MAX_RIG_INPUT_BYTES + 1) as u64)
+        .read_to_string(&mut json)
+        .with_context(|| format!("read fixture data {}", path.display()))?;
+    ensure!(
+        json.len() <= MAX_RIG_INPUT_BYTES,
+        "fixture data exceeds input byte limit"
+    );
+    Ok(json)
 }

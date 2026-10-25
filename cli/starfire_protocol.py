@@ -8,13 +8,15 @@ from google.protobuf.message import Message
 from proto.starfire import starfire_pb2 as wire
 
 MAX_MESSAGE_BYTES = 64 * 1024
+PROTOCOL_MAJOR = 1
+PROTOCOL_MINOR = 0
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
 FRAME_HEADER = struct.Struct('!BI')
 
 COMMAND_MESSAGES = {
     wire.LOGIN: wire.Login,
-    wire.PLAY_SEQUENCE: wire.PlaySequence,
+    wire.PLAY_AUTOLOOP: wire.PlayAutoloop,
     wire.SET_ACTIVE_EFFECT: wire.SetActiveEffect,
     wire.UNSET_ACTIVE_EFFECT: wire.UnsetActiveEffect,
     wire.UPDATE_BEAT: wire.UpdateBeat,
@@ -54,8 +56,8 @@ def build_command(command: dict | Message) -> Message:
                 )
             elif kind == 'select':
                 transition = value.pop('transition', {'kind': 'cut'})
-                message = wire.PlaySequence(
-                    sequence_id=f'{value.pop("bank")}/{value.pop("sequence")}',
+                message = wire.PlayAutoloop(
+                    autoloop_id=f'{value.pop("bank")}/{value.pop("autoloop")}',
                     transition=_transition(transition),
                     **value,
                 )
@@ -81,7 +83,7 @@ def build_command(command: dict | Message) -> Message:
             elif kind == 'stop':
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
-                message = wire.PlaySequence()
+                message = wire.PlayAutoloop()
             elif kind == 'heartbeat':
                 message = wire.Heartbeat(**value)
             else:
@@ -97,9 +99,9 @@ def _transition(value):
     if kind == 'cut':
         if value:
             raise ValueError('Cut transition contains unexpected fields')
-        return wire.PlaySequence.Transition()
+        return wire.PlayAutoloop.Transition()
     if kind == 'crossfade':
-        return wire.PlaySequence.Transition(crossfade_beats=value.pop('duration_beats'), **value)
+        return wire.PlayAutoloop.Transition(crossfade_beats=value.pop('duration_beats'), **value)
     raise ValueError('Invalid Starfire transition')
 
 
@@ -118,8 +120,20 @@ def _active_effect(value):
     elif duration != 'seconds' or set(lifetime) != {'duration_seconds'}:
         raise ValueError('Effects support seconds or an explicitly cleared lifetime')
     properties = dict(value.pop('values', {}))
-    if not properties.keys() <= {'intensity', 'colour', 'pan', 'tilt', 'strobe_hz'}:
+    if not properties.keys() <= {'intensity', 'colour', 'pan', 'tilt', 'strobe_hz', 'attributes'}:
         raise ValueError('Unknown effect property')
+    if 'attributes' in properties:
+        if not isinstance(properties['attributes'], dict):
+            raise ValueError('GDTF attributes must map identifiers to physical values or presets')
+        attributes = {}
+        for name, setting in properties['attributes'].items():
+            if type(setting) in (int, float):
+                attributes[name] = wire.SetActiveEffect.AttributeValue(number=setting)
+            elif isinstance(setting, str):
+                attributes[name] = wire.SetActiveEffect.AttributeValue(preset=setting)
+            else:
+                raise ValueError('GDTF attribute values must be physical numbers or preset names')
+        properties['attributes'] = attributes
     if value.pop('intensity_multiplier', None) is not None:
         raise ValueError('Effects set intensity directly; multipliers are not supported')
     return wire.SetActiveEffect(

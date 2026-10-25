@@ -23,9 +23,9 @@ struct Renderer {
 }
 
 fn play(name: &str) -> Operation {
-    Operation::PlaySequence(wire::PlaySequence {
+    Operation::PlayAutoloop(wire::PlayAutoloop {
         command_id: 1,
-        sequence_id: name.into(),
+        autoloop_id: name.into(),
         transition: None,
     })
 }
@@ -67,19 +67,26 @@ impl Renderer {
         });
         let login = wire::Login {
             command_id: 0,
+            protocol_major: starfire::live::PROTOCOL_MAJOR,
+            protocol_minor: starfire::live::PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     fixture_id: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
                 }],
                 groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()] }],
-                profiles: vec![wire::FixtureProfile {
-                    profile_id: "rgb".into(), source: "test".into(), notes: "RGB fixture".into(),
-                    safe_values: vec![0;3], rgb: vec![0,1,2], ..Default::default()
+                profiles: vec![{
+                    let profiles: serde_json::Value = serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
+                    let profile = &profiles["profiles"]["generic_rgb"];
+                    wire::FixtureProfile {
+                        profile_id: "rgb".into(),
+                        gdtf_xml: profile["gdtf_xml"].as_str().unwrap().into(),
+                        dmx_mode: profile["dmx_mode"].as_str().unwrap().into(),
+                    }
                 }],
             }),
-            scripts: vec![
-                wire::Script { sequence_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into() },
-                wire::Script { sequence_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into() },
+            autoloops: vec![
+                wire::AutoloopDefinition { autoloop_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into() },
+                wire::AutoloopDefinition { autoloop_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into() },
             ],
             artnet_destination: socket.local_addr().unwrap().to_string(),
             parameters: vec![],
@@ -215,6 +222,25 @@ impl Drop for Renderer {
 }
 
 #[test]
+fn login_rejects_incompatible_major_and_negotiates_compatible_minor_before_output() {
+    let mut renderer = Renderer::start();
+    let mut login = renderer.login.clone();
+    login.protocol_major += 1;
+    assert!(matches!(
+        renderer.reply(Operation::Login(login)),
+        Event::ErrorReply(value) if value.message.contains("protocol major")
+    ));
+    renderer.assert_no_output();
+    let mut login = renderer.login.clone();
+    login.protocol_minor += 1;
+    let Event::LoginReply(reply) = renderer.reply(Operation::Login(login)) else {
+        panic!("compatible client did not become ready");
+    };
+    assert_eq!(reply.protocol_major, starfire::live::PROTOCOL_MAJOR);
+    assert_eq!(reply.protocol_minor, starfire::live::PROTOCOL_MINOR);
+}
+
+#[test]
 fn login_is_required_and_duplicate_login_preserves_owned_scene() {
     let mut renderer = Renderer::start();
     assert!(renderer.events.recv_timeout(SILENT_CHECK_TIMEOUT).is_err());
@@ -246,8 +272,8 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
     let mut renderer = Renderer::start();
     let mut missing_rig = renderer.login.clone();
     missing_rig.rig = None;
-    let mut missing_sequences = renderer.login.clone();
-    missing_sequences.scripts.clear();
+    let mut missing_autoloops = renderer.login.clone();
+    missing_autoloops.autoloops.clear();
     let mut invalid_output = renderer.login.clone();
     invalid_output.artnet_destination = "0.0.0.0:0".into();
     let mut invalid_parameter = renderer.login.clone();
@@ -263,7 +289,7 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
     ];
     for login in [
         missing_rig,
-        missing_sequences,
+        missing_autoloops,
         invalid_output,
         invalid_parameter,
     ] {
@@ -300,14 +326,14 @@ fn login_probes_every_script_without_output_and_uses_initial_parameters() {
         "return {render=function(ctx) error('invalid supplied script') end}",
     ] {
         let mut login = renderer.login.clone();
-        login.scripts[0].lua_source = source.into();
+        login.autoloops[0].lua_source = source.into();
         assert!(matches!(
             renderer.reply(Operation::Login(login)),
             Event::ErrorReply(_)
         ));
         renderer.assert_no_output();
     }
-    renderer.login.scripts[0].lua_source = "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), ctx.normalized_rms_level * 0.5)} end}".into();
+    renderer.login.autoloops[0].lua_source = "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), ctx.normalized_rms_level * 0.5)} end}".into();
     renderer.login.parameters.push(setting(
         wire::ParameterType::AudioRmsNormalized,
         wire::parameter::Value::Number(0.8),
@@ -329,11 +355,11 @@ fn typed_controls_drive_artnet_idle_retains_settings_and_eof_blacks_out() {
         wire::parameter::Value::Number(0.8),
     )));
     let first = renderer.metrics();
-    assert_eq!(first.active_sequence, "energy");
+    assert_eq!(first.active_autoloop, "energy");
     renderer.wait_for_red(102);
-    renderer.send(Operation::PlaySequence(wire::PlaySequence::default()));
+    renderer.send(Operation::PlayAutoloop(wire::PlayAutoloop::default()));
     let idle = renderer.metrics();
-    assert!(idle.active_sequence.is_empty());
+    assert!(idle.active_autoloop.is_empty());
     assert!(idle.rendered_frames >= first.rendered_frames);
     renderer.wait_for_red(0);
     assert!(renderer.child.try_wait().unwrap().is_none());

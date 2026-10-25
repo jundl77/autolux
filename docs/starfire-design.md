@@ -20,7 +20,7 @@ flowchart TB
     end
     subgraph Starfire["STARFIRE (Rust + Lua)"]
         Timing["Beat timing and live controls"]
-        Scripts["Banked Lua sequences"]
+        Scripts["Banked Luan autoloops"]
         Frames["Compose effects and encode DMX"]
         Timing -->|"Embedded Lua 5.4: time and measured audio level"| Scripts
         Scripts -->|"Lua effect tables: fixture properties"| Frames
@@ -29,8 +29,8 @@ flowchart TB
     subgraph Radius["RADIUS (C++)"]
         TX["TX: capture, delay and transmit"]
         RX["RX: buffer and synchronized playback"]
-        TX -->|"Protobuf / UDP 19002: audio, DMX, heartbeat"| RX
-        RX -->|"Protobuf / UDP 19002: health, heartbeat"| TX
+        TX -->|"Protobuf / UDP 19002: Login, audio, DMX, heartbeat"| RX
+        RX -->|"Protobuf / UDP 19002: LoginReply, errors, metrics, heartbeat"| TX
     end
     Speakers["Focusrite speakers"]
     Lights["Enttec adapter and lighting fixtures"]
@@ -51,14 +51,14 @@ flowchart TB
 
 - **Music input:** the same feed is captured independently for analysis and room playback.
 - **Audio analysis:** detects beats, tempo and nine section classes; measures smoothed RMS loudness.
-- **Lighting decisions and show delay:** commits sections, selects a sequence ID, requests transitions
+- **Lighting decisions and show delay:** commits sections, selects an autoloop ID, requests transitions
   and accents, and delays commands to match TX audio.
 - **Dashboard and fixture setup:** monitors the show and owns addresses, profiles, calibration
   and named groups. Autolux supplies these and its Lua sources at login. Browser access
   uses HTTP on port 8765.
 - **Beat timing and live controls:** receives typed commands, interpolates musical position
   between beats and supplies explicit time to the renderer.
-- **Banked Lua sequences:** describe baseline colour, brightness and movement using groups.
+- **Banked Luan autoloops:** describe baseline colour, brightness and movement using groups.
   Atmospheric, Breakdown, Buildup and Drop are the first banks.
 - **Compose effects and encode DMX:** combines baseline, overrides, master and blackout;
   maps fixture properties to complete universe frames.
@@ -77,10 +77,12 @@ and four-byte big-endian payload length before each standalone Protobuf message
 on owned stdin/stdout pipes.
 Login carries the complete rig, required profiles, Lua sources and initial settings;
 LoginReply confirms readiness. Asset edits apply on a new session.
-The four control families are PlaySequence, active effects, UpdateBeat and
+The four control families are PlayAutoloop, active effects, UpdateBeat and
 SetParameter. Rejections use ErrorReply; Metrics reports command progress.
 See the [protocol](starfire/protocol-design.md).
-[Radius's contract](../proto/radius/radius.proto) uses Protobuf UDP datagrams.
+[Radius's contract](../proto/radius/radius.proto) uses the same framing inside
+1,200-byte UDP datagrams. TX waits for LoginReply before capturing media. Both
+Login protocols require equal major versions and negotiate the lower minor.
 Both links exchange 10-second heartbeats and time out after 30 seconds.
 
 ## What "clock" means
@@ -88,7 +90,7 @@ Both links exchange 10-second heartbeats and time out after 30 seconds.
 - **Musical position:** where we are in the music. Beat messages provide position and BPM.
   At 120 BPM, position advances two beats per second; halfway between beats 10 and 11
   it is 10.5. New anchors correct the estimate. Starfire never receives audio.
-- **Animation position:** how far a sequence has moved. It advances with tempo and requested
+- **Animation position:** how far an autoloop has moved. It advances with tempo and requested
   animation speed without jumping when speed changes. Beat pulses use musical position;
   movement can use animation position.
 - **Elapsed musical beats:** accumulated beats at the current tempo, without phase jumps.
@@ -115,7 +117,7 @@ handoff change, tracked in the [decision log](starfire/decisions.md).
 
 ## Show behavior
 
-- Selecting the active sequence ID continues its loop. Banks group the supplied scripts.
+- Selecting the active autoloop ID continues its loop. Banks group the supplied scripts.
   A different selection changes the look;
   transitions are cuts or crossfades measured in beats.
 - Accents and persistent overrides affect only their targeted properties. Clearing them
@@ -124,10 +126,10 @@ handoff change, tracked in the [decision log](starfire/decisions.md).
   brightness and musical section. Lua can use it for modest modulation; faster BPM alone
   does not mean higher intensity. Updates follow detected beats; beatless passages hold
   the last value.
-- Every Lua sequence has a replay test: identical inputs, rig, code and cadence produce
+- Every Luan autoloop has a replay test: identical inputs, rig, code and cadence produce
   identical DMX. Scripts cannot read wall time, files, network or randomness.
 - Queues and script work are bounded. Faults darken fixtures while preserving movement
-  positions; there is no automatic sequence retry.
+  positions; there is no automatic autoloop retry.
 
 ## Performance
 

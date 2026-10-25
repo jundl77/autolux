@@ -1,4 +1,4 @@
-//! Bounded Lua sequences operating on musical time and fixture properties.
+//! Bounded Lua autoloops operating on musical time and fixture properties.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -19,9 +19,9 @@ use crate::protocol::wire;
 
 const MAX_SOURCE_BYTES: usize = 128 * 1024;
 const MAX_CATALOGUE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_SEQUENCES: usize = 256;
+const MAX_AUTOLOOPS: usize = 256;
 const MAX_IDENTIFIER_BYTES: usize = 64;
-const MAX_SEQUENCE_ID_BYTES: usize = 128;
+const MAX_AUTOLOOP_ID_BYTES: usize = 128;
 const LUA_MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
@@ -29,22 +29,22 @@ const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct SequenceInfo {
+pub struct AutoloopInfo {
     pub bank: String,
-    pub sequence: String,
+    pub autoloop: String,
 }
 
 #[derive(Clone, Debug)]
-pub struct SequenceCatalog {
+pub struct AutoloopCatalog {
     sources: BTreeMap<(String, String), String>,
     identities: BTreeMap<String, (String, String)>,
 }
 
-impl SequenceCatalog {
+impl AutoloopCatalog {
     pub fn load(root: &Path) -> Result<Self> {
         let root = root
             .canonicalize()
-            .context("cannot open sequence directory")?;
+            .context("cannot open autoloop directory")?;
         let mut sources = BTreeMap::new();
         let mut source_bytes = 0;
         for entry in fs::read_dir(&root)? {
@@ -57,24 +57,24 @@ impl SequenceCatalog {
                 .into_string()
                 .map_err(|_| anyhow::anyhow!("bank name is not UTF-8"))?;
             validate_identifier(&bank)?;
-            for sequence in fs::read_dir(entry.path())? {
-                let sequence = sequence?;
-                let path = sequence.path();
+            for autoloop in fs::read_dir(entry.path())? {
+                let autoloop = autoloop?;
+                let path = autoloop.path();
                 if path.extension().and_then(|value| value.to_str()) != Some("lua") {
                     continue;
                 }
                 ensure!(
-                    sequence.file_type()?.is_file(),
-                    "sequence must be a regular file"
+                    autoloop.file_type()?.is_file(),
+                    "autoloop must be a regular file"
                 );
                 ensure!(
                     path.canonicalize()?.starts_with(&root),
-                    "sequence escapes catalogue directory"
+                    "autoloop escapes catalogue directory"
                 );
                 let name = path
                     .file_stem()
                     .and_then(|value| value.to_str())
-                    .context("sequence name is not UTF-8")?
+                    .context("autoloop name is not UTF-8")?
                     .to_owned();
                 validate_identifier(&name)?;
                 let mut source = String::new();
@@ -83,33 +83,33 @@ impl SequenceCatalog {
                     .read_to_string(&mut source)?;
                 ensure!(
                     source.len() <= MAX_SOURCE_BYTES,
-                    "sequence {bank}/{name} exceeds source limit"
+                    "autoloop {bank}/{name} exceeds source limit"
                 );
                 source_bytes += source.len();
                 ensure!(
                     source_bytes <= MAX_CATALOGUE_BYTES,
-                    "sequence catalogue exceeds source limit"
+                    "autoloop catalogue exceeds source limit"
                 );
                 ensure!(
-                    sources.len() < MAX_SEQUENCES,
-                    "too many sequences in catalogue"
+                    sources.len() < MAX_AUTOLOOPS,
+                    "too many autoloops in catalogue"
                 );
                 ensure!(
                     sources.insert((bank.clone(), name), source).is_none(),
-                    "duplicate sequence identity"
+                    "duplicate autoloop identity"
                 );
             }
         }
         ensure!(
             !sources.is_empty(),
-            "sequence catalogue contains no Lua sequences"
+            "autoloop catalogue contains no Lua autoloops"
         );
         let identities = sources
             .keys()
-            .map(|(bank, sequence)| {
+            .map(|(bank, autoloop)| {
                 (
-                    format!("{bank}/{sequence}"),
-                    (bank.clone(), sequence.clone()),
+                    format!("{bank}/{autoloop}"),
+                    (bank.clone(), autoloop.clone()),
                 )
             })
             .collect();
@@ -119,10 +119,10 @@ impl SequenceCatalog {
         })
     }
 
-    pub fn from_scripts(scripts: &[wire::Script]) -> Result<Self> {
+    pub fn from_definitions(scripts: &[wire::AutoloopDefinition]) -> Result<Self> {
         ensure!(
-            !scripts.is_empty() && scripts.len() <= MAX_SEQUENCES,
-            "catalogue must contain 1..{MAX_SEQUENCES} scripts"
+            !scripts.is_empty() && scripts.len() <= MAX_AUTOLOOPS,
+            "catalogue must contain 1..{MAX_AUTOLOOPS} scripts"
         );
         let mut sources = BTreeMap::new();
         let mut identities = BTreeMap::new();
@@ -130,29 +130,29 @@ impl SequenceCatalog {
         for script in scripts {
             validate_identifier(&script.bank)?;
             ensure!(
-                !script.sequence_id.is_empty()
-                    && script.sequence_id.len() <= MAX_SEQUENCE_ID_BYTES
-                    && script.sequence_id.trim() == script.sequence_id
-                    && !script.sequence_id.chars().any(char::is_control),
-                "sequence ID must contain 1..{MAX_SEQUENCE_ID_BYTES} non-control bytes without surrounding whitespace"
+                !script.autoloop_id.is_empty()
+                    && script.autoloop_id.len() <= MAX_AUTOLOOP_ID_BYTES
+                    && script.autoloop_id.trim() == script.autoloop_id
+                    && !script.autoloop_id.chars().any(char::is_control),
+                "autoloop ID must contain 1..{MAX_AUTOLOOP_ID_BYTES} non-control bytes without surrounding whitespace"
             );
             ensure!(
                 script.lua_source.len() <= MAX_SOURCE_BYTES,
-                "sequence {} exceeds source limit",
-                script.sequence_id
+                "autoloop {} exceeds source limit",
+                script.autoloop_id
             );
             source_bytes += script.lua_source.len();
             ensure!(
                 source_bytes <= MAX_CATALOGUE_BYTES,
-                "sequence catalogue exceeds source limit"
+                "autoloop catalogue exceeds source limit"
             );
-            let identity = (script.bank.clone(), script.sequence_id.clone());
+            let identity = (script.bank.clone(), script.autoloop_id.clone());
             ensure!(
                 identities
-                    .insert(script.sequence_id.clone(), identity.clone())
+                    .insert(script.autoloop_id.clone(), identity.clone())
                     .is_none(),
-                "duplicate sequence ID {}",
-                script.sequence_id
+                "duplicate autoloop ID {}",
+                script.autoloop_id
             );
             sources.insert(identity, script.lua_source.clone());
         }
@@ -162,47 +162,47 @@ impl SequenceCatalog {
         })
     }
 
-    pub fn resolve(&self, sequence_id: &str) -> Result<&(String, String)> {
+    pub fn resolve(&self, autoloop_id: &str) -> Result<&(String, String)> {
         self.identities
-            .get(sequence_id)
-            .with_context(|| format!("unknown sequence ID {sequence_id}"))
+            .get(autoloop_id)
+            .with_context(|| format!("unknown autoloop ID {autoloop_id}"))
     }
 
-    pub fn list(&self) -> Vec<SequenceInfo> {
+    pub fn list(&self) -> Vec<AutoloopInfo> {
         self.sources
             .keys()
-            .map(|(bank, sequence)| SequenceInfo {
+            .map(|(bank, autoloop)| AutoloopInfo {
                 bank: bank.clone(),
-                sequence: sequence.clone(),
+                autoloop: autoloop.clone(),
             })
             .collect()
     }
 
-    pub fn instantiate(&self, bank: &str, sequence: &str, rig: &FixtureRig) -> Result<LuaSequence> {
+    pub fn instantiate(&self, bank: &str, autoloop: &str, rig: &FixtureRig) -> Result<LuaAutoloop> {
         let source = self
             .sources
-            .get(&(bank.to_owned(), sequence.to_owned()))
-            .with_context(|| format!("unknown sequence {bank}/{sequence}"))?;
-        LuaSequence::new(bank, sequence, source, rig)
+            .get(&(bank.to_owned(), autoloop.to_owned()))
+            .with_context(|| format!("unknown autoloop {bank}/{autoloop}"))?;
+        LuaAutoloop::new(bank, autoloop, source, rig)
     }
 }
 
 fn validate_identifier(value: &str) -> Result<()> {
     ensure!(
         !value.is_empty() && value.len() <= MAX_IDENTIFIER_BYTES,
-        "sequence and bank names must contain 1..{MAX_IDENTIFIER_BYTES} characters"
+        "autoloop and bank names must contain 1..{MAX_IDENTIFIER_BYTES} characters"
     );
     ensure!(
         value.bytes().all(|byte| byte.is_ascii_lowercase()
             || byte.is_ascii_digit()
             || byte == b'_'
             || byte == b'-'),
-        "sequence and bank names use lowercase letters, digits, underscores or hyphens"
+        "autoloop and bank names use lowercase letters, digits, underscores or hyphens"
     );
     Ok(())
 }
 
-pub struct LuaSequence {
+pub struct LuaAutoloop {
     lua: Lua,
     render: Function,
     instruction_budget: Arc<AtomicU32>,
@@ -210,8 +210,8 @@ pub struct LuaSequence {
     identity: String,
 }
 
-impl LuaSequence {
-    fn new(bank: &str, sequence: &str, source: &str, rig: &FixtureRig) -> Result<Self> {
+impl LuaAutoloop {
+    fn new(bank: &str, autoloop: &str, source: &str, rig: &FixtureRig) -> Result<Self> {
         ensure!(
             rig.fixture_ids().len() <= MAX_FIXTURES,
             "Lua fixture target limit exceeded"
@@ -231,7 +231,7 @@ impl LuaSequence {
                 });
                 if remaining.is_err() {
                     return Err(mlua::Error::RuntimeError(
-                        "sequence instruction budget exhausted".to_owned(),
+                        "autoloop instruction budget exhausted".to_owned(),
                     ));
                 }
                 Ok(VmState::Continue)
@@ -292,17 +292,17 @@ impl LuaSequence {
             })?,
         )?;
         globals.set("sf", api)?;
-        let identity = format!("{bank}/{sequence}");
+        let identity = format!("{bank}/{autoloop}");
         instruction_budget.store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
         let definition: Table = lua
             .load(source)
             .set_name(&identity)
             .set_mode(ChunkMode::Text)
             .eval()
-            .with_context(|| format!("cannot load sequence {identity}"))?;
+            .with_context(|| format!("cannot load autoloop {identity}"))?;
         let render: Function = definition
             .get("render")
-            .context("sequence must return a table with a render function")?;
+            .context("autoloop must return a table with a render function")?;
         Ok(Self {
             lua,
             render,
@@ -322,8 +322,8 @@ impl LuaSequence {
         for value in [
             context.time_seconds,
             context.beat_position,
-            context.sequence_elapsed_beats,
-            context.sequence_speed_scaled_elapsed_beats,
+            context.autoloop_elapsed_beats,
+            context.autoloop_speed_scaled_elapsed_beats,
         ] {
             ensure!(
                 value.is_finite() && value >= 0.0,
@@ -354,32 +354,35 @@ impl LuaSequence {
         let result: Table = self
             .render
             .call(snapshot)
-            .with_context(|| format!("sequence {} failed", self.identity))?;
+            .with_context(|| format!("autoloop {} failed", self.identity))?;
         let length = result.raw_len();
         ensure!(
             length <= MAX_EFFECTS_PER_FRAME,
-            "sequence returned more than {MAX_EFFECTS_PER_FRAME} effects"
+            "autoloop returned more than {MAX_EFFECTS_PER_FRAME} effects"
         );
         let mut entries = 0;
         for entry in result.clone().pairs::<Value, Value>() {
             let (key, _) = entry?;
             ensure!(
                 matches!(key, Value::Integer(index) if index >= 1 && index <= length as i64),
-                "sequence must return a dense effect array"
+                "autoloop must return a dense effect array"
             );
             entries += 1;
             ensure!(
                 entries <= MAX_EFFECTS_PER_FRAME,
-                "sequence effect limit exceeded"
+                "autoloop effect limit exceeded"
             );
         }
         ensure!(
             entries == length,
-            "sequence must return a dense effect array"
+            "autoloop must return a dense effect array"
         );
         let effects: Vec<Effect> = self.lua.from_value(Value::Table(result))?;
         for effect in &effects {
-            self.rig.resolve(&effect.target)?;
+            for id in self.rig.resolve(&effect.target)? {
+                self.rig
+                    .validate_attributes(&id, &effect.values.attributes)?;
+            }
             validate_properties(&effect.values)?;
         }
         Ok(effects)

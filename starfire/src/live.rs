@@ -17,7 +17,7 @@ use crate::protocol::{
     ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message, read_control,
     wire, write_event,
 };
-use crate::script::SequenceCatalog;
+use crate::script::AutoloopCatalog;
 
 const MAX_QUEUED_CONTROLS: usize = 1024;
 const MAX_CONTROLS_PER_FRAME: usize = 32;
@@ -27,6 +27,8 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const NANOSECONDS_PER_SECOND: u128 = 1_000_000_000;
+pub const PROTOCOL_MAJOR: u32 = 1;
+pub const PROTOCOL_MINOR: u32 = 0;
 
 type SharedFailure = Arc<Mutex<Option<String>>>;
 
@@ -40,23 +42,29 @@ struct LiveSession {
 
 impl LiveSession {
     fn login(login: &wire::Login) -> Result<Self> {
+        ensure!(
+            login.protocol_major == PROTOCOL_MAJOR,
+            "incompatible protocol major {}; expected {}",
+            login.protocol_major,
+            PROTOCOL_MAJOR
+        );
         let destination: SocketAddrV4 = login
             .artnet_destination
             .parse()
             .context("invalid Art-Net IPv4 destination")?;
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
-        let catalog = SequenceCatalog::from_scripts(&login.scripts)?;
-        let sequences = catalog.list();
+        let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
+        let autoloops = catalog.list();
         let mut probe = Engine::new(rig.clone(), catalog.clone())?;
         for parameter in &login.parameters {
             probe.set_parameter(0.0, parameter)?;
         }
-        for sequence in sequences {
+        for autoloop in autoloops {
             probe.apply(
                 0.0,
                 &Command::Select {
-                    bank: sequence.bank,
-                    sequence: sequence.sequence,
+                    bank: autoloop.bank,
+                    autoloop: autoloop.autoloop,
                     transition: Transition::Cut,
                 },
             )?;
@@ -107,7 +115,7 @@ impl LiveSession {
             queued_commands: queued_commands as u32,
             last_render_duration_seconds,
             active_bank: frame.active_bank.unwrap_or_default(),
-            active_sequence: frame.active_sequence.unwrap_or_default(),
+            active_autoloop: frame.active_autoloop.unwrap_or_default(),
             script_error: frame.script_error.unwrap_or_default(),
             runtime_error: String::new(),
             last_processed_command_id,
@@ -120,6 +128,7 @@ impl LiveSession {
         };
         for state in self.last_states.values_mut() {
             state.intensity = 0.0;
+            state.output_blackout = true;
             state.strobe_hz = 0.0;
         }
         output
@@ -281,12 +290,17 @@ pub fn run_live(
                                 last_client_heartbeat = Instant::now();
                                 last_server_heartbeat = Instant::now();
                                 report_metrics = true;
+                                // Preserve negotiation as compatible minor versions are added.
+                                #[allow(clippy::unnecessary_min_or_max)]
+                                let protocol_minor = login.protocol_minor.min(PROTOCOL_MINOR);
                                 send_event(
                                     &events,
                                     ServerMessage::LoginReply(wire::LoginReply {
                                         command_id: login.command_id,
                                         frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
                                         max_message_bytes: MAX_MESSAGE_BYTES as u32,
+                                        protocol_major: PROTOCOL_MAJOR,
+                                        protocol_minor,
                                     }),
                                 )?;
                             }
@@ -399,6 +413,8 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(1)))
             .unwrap();
         let login = wire::Login {
+            protocol_major: PROTOCOL_MAJOR,
+            protocol_minor: PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     fixture_id: "lamp".into(),
@@ -406,18 +422,19 @@ mod tests {
                     address: 1,
                     ..Default::default()
                 }],
-                profiles: vec![wire::FixtureProfile {
-                    profile_id: "rgb".into(),
-                    safe_values: vec![0; 3],
-                    rgb: vec![0, 1, 2],
-                    source: "test".into(),
-                    notes: "RGB fixture".into(),
-                    ..Default::default()
+                profiles: vec![{
+                    let profiles: serde_json::Value = serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
+                    let profile = &profiles["profiles"]["generic_rgb"];
+                    wire::FixtureProfile {
+                        profile_id: "rgb".into(),
+                        gdtf_xml: profile["gdtf_xml"].as_str().unwrap().into(),
+                        dmx_mode: profile["dmx_mode"].as_str().unwrap().into(),
+                    }
                 }],
                 ..Default::default()
             }),
-            scripts: vec![wire::Script {
-                sequence_id: "steady".into(),
+            autoloops: vec![wire::AutoloopDefinition {
+                autoloop_id: "steady".into(),
                 bank: "test".into(),
                 lua_source:
                     "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(),1), sf.pan_tilt(sf.all(),0.2,0.8)} end}"
@@ -428,9 +445,12 @@ mod tests {
         };
         let mut session = LiveSession::login(&login).unwrap();
         let idle = session.engine.render_at(0.0).unwrap();
+        let mut expected_idle = session.rig.empty_states();
+        for state in expected_idle.values_mut() {
+            state.output_blackout = true;
+        }
         assert_eq!(
-            idle.fixture_properties_before_strobe,
-            session.rig.empty_states(),
+            idle.fixture_properties_before_strobe, expected_idle,
             "preflight must not leak script positions into idle"
         );
         session
@@ -439,7 +459,7 @@ mod tests {
                 0.0,
                 &crate::model::Command::Select {
                     bank: "test".into(),
-                    sequence: "steady".into(),
+                    autoloop: "steady".into(),
                     transition: crate::model::Transition::Cut,
                 },
             )

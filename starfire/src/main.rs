@@ -15,10 +15,11 @@ use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 const DEFAULT_RIG: &str = "rigs/room.json";
-const DEFAULT_SEQUENCES: &str = "starfire/sequences";
+const DEFAULT_PROFILES: &str = "rigs/profiles.json";
+const DEFAULT_AUTOLOOPS: &str = "autoloop";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
 
@@ -31,12 +32,14 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Action {
-    /// Render each sequence once at beat zero against the patch, without output.
+    /// Render each autoloop once at beat zero against the patch, without output.
     Check {
         #[arg(long, default_value = DEFAULT_RIG)]
         rig: PathBuf,
-        #[arg(long, default_value = DEFAULT_SEQUENCES)]
-        sequences: PathBuf,
+        #[arg(long, default_value = DEFAULT_PROFILES)]
+        profiles: PathBuf,
+        #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
+        autoloops: PathBuf,
     },
     /// Render live controls from framed protobuf on stdin; status uses stdout.
     Live,
@@ -45,8 +48,10 @@ enum Action {
         input: PathBuf,
         #[arg(long, default_value = DEFAULT_RIG)]
         rig: PathBuf,
-        #[arg(long, default_value = DEFAULT_SEQUENCES)]
-        sequences: PathBuf,
+        #[arg(long, default_value = DEFAULT_PROFILES)]
+        profiles: PathBuf,
+        #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
+        autoloops: PathBuf,
         #[arg(long)]
         output: Option<PathBuf>,
         #[arg(long)]
@@ -64,13 +69,17 @@ enum Action {
         #[arg(long, requires = "artnet")]
         stop_file: Option<PathBuf>,
     },
-    /// List registered bank/sequence identities.
+    /// List registered bank/autoloop identities.
     List {
-        #[arg(long, default_value = DEFAULT_SEQUENCES)]
-        sequences: PathBuf,
+        #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
+        autoloops: PathBuf,
     },
     /// Validate a fixture patch without emitting DMX.
-    Rig { input: PathBuf },
+    Rig {
+        input: PathBuf,
+        #[arg(long, default_value = DEFAULT_PROFILES)]
+        profiles: PathBuf,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -85,22 +94,26 @@ fn main() -> std::process::ExitCode {
 
 fn run(arguments: Arguments) -> Result<()> {
     match arguments.command {
-        Action::Check { rig, sequences } => {
-            let rig = FixtureRig::load(&rig)?;
-            let catalog = SequenceCatalog::load(&sequences)?;
-            let sequences = catalog.list();
-            for sequence in &sequences {
+        Action::Check {
+            rig,
+            profiles,
+            autoloops,
+        } => {
+            let rig = FixtureRig::load_with_profiles(&rig, &profiles)?;
+            let catalog = AutoloopCatalog::load(&autoloops)?;
+            let autoloops = catalog.list();
+            for autoloop in &autoloops {
                 let mut engine = Engine::new(rig.clone(), catalog.clone())?;
                 engine.apply(
                     0.0,
                     &Command::Select {
-                        bank: sequence.bank.clone(),
-                        sequence: sequence.sequence.clone(),
+                        bank: autoloop.bank.clone(),
+                        autoloop: autoloop.autoloop.clone(),
                         transition: Transition::Cut,
                     },
                 )?;
                 let frame = engine.render_at(0.0).with_context(|| {
-                    format!("check sequence {}/{}", sequence.bank, sequence.sequence)
+                    format!("check autoloop {}/{}", autoloop.bank, autoloop.autoloop)
                 })?;
                 if let Some(error) = frame.script_error {
                     anyhow::bail!("{error}");
@@ -114,7 +127,7 @@ fn run(arguments: Arguments) -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(&json!({
                     "fixtures": rig.fixture_ids(), "groups": rig.groups(),
-                    "universes": universes, "checked_sequences": sequences,
+                    "universes": universes, "checked_autoloops": autoloops,
                 }))?
             );
         }
@@ -125,14 +138,14 @@ fn run(arguments: Arguments) -> Result<()> {
                 .context("install live stop handler")?;
             starfire::live::run_live(std::io::stdin(), std::io::stdout(), &stop)?;
         }
-        Action::List { sequences } => {
+        Action::List { autoloops } => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&SequenceCatalog::load(&sequences)?.list())?
+                serde_json::to_string_pretty(&AutoloopCatalog::load(&autoloops)?.list())?
             );
         }
-        Action::Rig { input } => {
-            let rig = FixtureRig::load(&input)?;
+        Action::Rig { input, profiles } => {
+            let rig = FixtureRig::load_with_profiles(&input, &profiles)?;
             let universes = rig
                 .encode(&rig.empty_states())?
                 .into_keys()
@@ -147,7 +160,8 @@ fn run(arguments: Arguments) -> Result<()> {
         Action::Replay {
             input,
             rig,
-            sequences,
+            profiles,
+            autoloops,
             output,
             summary,
             artnet,
@@ -159,10 +173,16 @@ fn run(arguments: Arguments) -> Result<()> {
                 artnet.is_none() || realtime,
                 "network playback requires --realtime"
             );
-            validate_output_paths(&input, &rig, output.as_deref(), summary.as_deref())?;
+            validate_output_paths(
+                &input,
+                &rig,
+                &profiles,
+                output.as_deref(),
+                summary.as_deref(),
+            )?;
             let replay = Replay::load(&input)?;
-            let rig = FixtureRig::load(&rig)?;
-            let catalogue = SequenceCatalog::load(&sequences)?;
+            let rig = FixtureRig::load_with_profiles(&rig, &profiles)?;
+            let catalogue = AutoloopCatalog::load(&autoloops)?;
             let started = Instant::now();
             let result = render_replay(&replay, rig.clone(), catalogue)?;
             let render_elapsed_seconds = started.elapsed().as_secs_f64();
@@ -224,10 +244,15 @@ fn run(arguments: Arguments) -> Result<()> {
 fn validate_output_paths(
     input: &Path,
     rig: &Path,
+    profiles: &Path,
     output: Option<&Path>,
     summary: Option<&Path>,
 ) -> Result<()> {
-    let mut paths = vec![input.canonicalize()?, rig.canonicalize()?];
+    let mut paths = vec![
+        input.canonicalize()?,
+        rig.canonicalize()?,
+        profiles.canonicalize()?,
+    ];
     for path in [output, summary].into_iter().flatten() {
         let resolved = if path.exists() {
             path.canonicalize()?
@@ -302,6 +327,7 @@ fn play_frames(
     for state in last_states.values_mut() {
         state.intensity = 0.0;
         state.strobe_hz = 0.0;
+        state.output_blackout = true;
     }
     let blackout = rig
         .encode(&last_states)
@@ -328,7 +354,7 @@ mod tests {
             fixture_properties_before_strobe: BTreeMap::new(),
             dmx_frames_by_universe: BTreeMap::new(),
             active_bank: None,
-            active_sequence: None,
+            active_autoloop: None,
             script_error: None,
         });
         assert_eq!(latest_due_frame(&frames, 0, 0.06), 2);
@@ -371,7 +397,7 @@ mod tests {
             )]),
             dmx_frames_by_universe: BTreeMap::new(),
             active_bank: None,
-            active_sequence: None,
+            active_autoloop: None,
             script_error: None,
         };
         assert!(validate_output_cadence(std::slice::from_ref(&frame), 10).is_err());

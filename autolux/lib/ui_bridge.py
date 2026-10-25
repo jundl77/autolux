@@ -140,6 +140,8 @@ def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
             '--rig-store',
             str(fixture_setup['rig_store']),
         ]
+        if fixture_setup.get('profiles') is not None:
+            command.extend(['--profiles', str(fixture_setup['profiles'])])
     return command + [
         '--port',
         str(ui_port),

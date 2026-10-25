@@ -23,7 +23,7 @@ Link, telemetry and hardware faults appear only when they need attention.
   device-clock differences; repeated latency recovery indicates sustained stalls.
   Audio delivery-gap and signal-peak metrics distinguish delayed packets from silence.
 - **Lighting unavailable:** inspect the Starfire process log, fixture patch and Lua
-  sequence, the Radius Art-Net universe, and the receiver's Enttec connection.
+  autoloop, the Radius Art-Net universe, and the receiver's Enttec connection.
 - **Analysis degraded:** inspect the GPU fault and timing panels. Rhythm continues
   while the analysis worker recovers.
 

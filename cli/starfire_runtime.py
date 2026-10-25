@@ -11,13 +11,22 @@ from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
-from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
+from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
-from cli.starfire import DEFAULT_BINARY, DEFAULT_FIXTURE_STORE, DEFAULT_RIG, DEFAULT_SEQUENCES, ROOT
+from cli.starfire import (
+    DEFAULT_BINARY,
+    DEFAULT_FIXTURE_STORE,
+    DEFAULT_RIG,
+    DEFAULT_AUTOLOOPS,
+    PROFILE_CATALOGUE,
+    ROOT,
+)
 from cli.starfire_assets import load_login
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
+    PROTOCOL_MAJOR,
+    PROTOCOL_MINOR,
     build_command,
     encode_command,
     read_event,
@@ -37,7 +46,8 @@ DEFAULT_ARTNET_DESTINATION = '127.0.0.1:6454'
 def add_arguments(parser, *, include_artnet=False):
     parser.add_argument('--starfire-binary', type=Path, default=DEFAULT_BINARY)
     parser.add_argument('--rig', type=Path, help='Fixture patch; defaults to the saved room patch')
-    parser.add_argument('--sequences', type=Path, default=DEFAULT_SEQUENCES)
+    parser.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
+    parser.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
     if include_artnet:
         parser.add_argument('--artnet', default=DEFAULT_ARTNET_DESTINATION)
 
@@ -56,10 +66,13 @@ def fixture_setup(args):
     return {
         'binary': Path(args.starfire_binary).resolve(),
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
+        'profiles': Path(getattr(args, 'profiles', PROFILE_CATALOGUE)).resolve(),
     }
 
 
-def validate_starfire(binary, rig, sequences, *, expected_universe=None):
+def validate_starfire(
+    binary, rig, autoloops, *, expected_universe=None, profiles=PROFILE_CATALOGUE
+):
     binary = Path(binary).resolve()
     if not binary.is_file():
         raise RuntimeError(f'Starfire binary is missing: {binary}. Run build-starfire.ps1.')
@@ -70,8 +83,10 @@ def validate_starfire(binary, rig, sequences, *, expected_universe=None):
             'check',
             '--rig',
             str(Path(rig).resolve()),
-            '--sequences',
-            str(Path(sequences).resolve()),
+            '--autoloops',
+            str(Path(autoloops).resolve()),
+            '--profiles',
+            str(Path(profiles).resolve()),
         ],
         cwd=ROOT,
         check=False,
@@ -83,13 +98,13 @@ def validate_starfire(binary, rig, sequences, *, expected_universe=None):
     if result.returncode:
         raise RuntimeError(f'Starfire validation failed: {result.stderr.strip()}')
     report = json.loads(result.stdout)
-    checked_sequences = {
-        (sequence['bank'], sequence['sequence']) for sequence in report['checked_sequences']
+    checked_autoloops = {
+        (autoloop['bank'], autoloop['autoloop']) for autoloop in report['checked_autoloops']
     }
-    missing_sequences = set(SEQUENCE_BY_LIGHT_INTENT.values()) - checked_sequences
-    if missing_sequences:
-        names = ', '.join(f'{bank}/{sequence}' for bank, sequence in sorted(missing_sequences))
-        raise RuntimeError(f'Starfire is missing Autolux sequences: {names}')
+    missing_autoloops = set(AUTOLOOP_BY_LIGHT_INTENT.values()) - checked_autoloops
+    if missing_autoloops:
+        names = ', '.join(f'{bank}/{autoloop}' for bank, autoloop in sorted(missing_autoloops))
+        raise RuntimeError(f'Starfire is missing Autolux autoloops: {names}')
     if expected_universe is not None:
         universes = report.get('universes')
         if universes != [expected_universe]:
@@ -104,21 +119,23 @@ class StarfireRuntime:
         self,
         binary,
         rig,
-        sequences,
+        autoloops,
         artnet,
         run_dir,
         *,
         startup_timeout=STARTUP_TIMEOUT_SECONDS,
         stop_timeout=STOP_TIMEOUT_SECONDS,
         initial_parameters=(),
+        profiles=PROFILE_CATALOGUE,
     ):
         self.command = [str(Path(binary).resolve()), 'live']
         self._rig_path = Path(rig).resolve()
-        self._sequence_directory = Path(sequences).resolve()
+        self._profiles_path = Path(profiles).resolve()
+        self._autoloop_directory = Path(autoloops).resolve()
         self._artnet_destination = artnet
         self._initial_parameters = initial_parameters
         self._login = None
-        self._sequence_ids = frozenset()
+        self._autoloop_ids = frozenset()
         self.run_dir = Path(run_dir)
         self.startup_timeout = startup_timeout
         self.stop_timeout = stop_timeout
@@ -143,11 +160,12 @@ class StarfireRuntime:
         try:
             self._login = load_login(
                 self._rig_path,
-                self._sequence_directory,
+                self._autoloop_directory,
                 self._artnet_destination,
                 parameters=self._initial_parameters,
+                profiles=self._profiles_path,
             )
-            self._sequence_ids = frozenset(script.sequence_id for script in self._login.scripts)
+            self._autoloop_ids = frozenset(script.autoloop_id for script in self._login.autoloops)
             self.run_dir.mkdir(parents=True, exist_ok=False)
             with (self.run_dir / 'process.log').open('wb') as log:
                 self.process = subprocess.Popen(
@@ -189,11 +207,11 @@ class StarfireRuntime:
             raise RuntimeError('Starfire control channel is closing')
         message = build_command(command)
         if (
-            isinstance(message, wire.PlaySequence)
-            and message.sequence_id
-            and message.sequence_id not in self._sequence_ids
+            isinstance(message, wire.PlayAutoloop)
+            and message.autoloop_id
+            and message.autoloop_id not in self._autoloop_ids
         ):
-            raise ValueError(f'Unknown Starfire sequence: {message.sequence_id}')
+            raise ValueError(f'Unknown Starfire autoloop: {message.autoloop_id}')
         # Leave room for the writer-assigned uint64 ID, including its field tag.
         if message.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES > MAX_MESSAGE_BYTES:
             raise ValueError('Starfire command exceeds the message limit')
@@ -227,7 +245,7 @@ class StarfireRuntime:
                         'last_render_ms': metrics.last_render_duration_seconds
                         * MILLISECONDS_PER_SECOND,
                         'active_bank': metrics.active_bank,
-                        'active_sequence': metrics.active_sequence,
+                        'active_autoloop': metrics.active_autoloop,
                         'script_error': metrics.script_error,
                         'last_processed_command_id': metrics.last_processed_command_id,
                     }
@@ -248,6 +266,8 @@ class StarfireRuntime:
                         or event.command_id == 0
                         or event.frame_rate_hz != DEFAULT_FRAME_RATE_HZ
                         or event.max_message_bytes != MAX_MESSAGE_BYTES
+                        or event.protocol_major != PROTOCOL_MAJOR
+                        or event.protocol_minor > PROTOCOL_MINOR
                     ):
                         raise ValueError('Unexpected Starfire login reply')
                     self._record_progress(event.command_id)

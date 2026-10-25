@@ -16,7 +16,7 @@ enum MessageType {
   MESSAGE_TYPE_UNSPECIFIED = 0;
   LOGIN = 1;
   LOGIN_REPLY = 2;
-  PLAY_SEQUENCE = 3;
+  PLAY_AUTOLOOP = 3;
   ERROR_REPLY = 4;
   SET_ACTIVE_EFFECT = 5;
   UNSET_ACTIVE_EFFECT = 7;
@@ -26,15 +26,25 @@ enum MessageType {
   METRICS = 14;
 }
 
+enum ParameterType {
+  PARAMETER_TYPE_UNSPECIFIED = 0;
+  OUTPUT_BRIGHTNESS = 1;     // Number, 0..1; final output multiplier.
+  ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
+  OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
+  AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
+}
+
 // [CLIENT -> SERVER]
 // Supply the complete controller-owned setup for one session; no server-side paths.
 // Failure releases partially acquired resources. Asset edits require a new session.
 message Login {
   uint64 command_id = 1;
   RigDefinition rig = 2;
-  repeated Script scripts = 3;
+  repeated AutoloopDefinition autoloops = 3;
   string artnet_destination = 4;  // IPv4:port.
   repeated Parameter parameters = 6;
+  uint32 protocol_major = 7;  // Must match the server's major version.
+  uint32 protocol_minor = 8;  // Backwards-compatible additions within this major.
 }
 
 // [SERVER -> CLIENT]
@@ -43,6 +53,8 @@ message LoginReply {
   uint64 command_id = 1;
   uint32 frame_rate_hz = 3;
   uint32 max_message_bytes = 4;
+  uint32 protocol_major = 5;
+  uint32 protocol_minor = 6;  // Negotiated minimum of client and server minor versions.
 }
 
 // [SERVER -> CLIENT]
@@ -52,11 +64,11 @@ message ErrorReply {
 }
 
 // [CLIENT -> SERVER]
-// One sequence plays at a time; repeating its identity never restarts it.
+// One autoloop plays at a time; repeating its identity never restarts it.
 // An empty ID enters idle, clears effects and outputs darkness.
-message PlaySequence {
+message PlayAutoloop {
   uint64 command_id = 1;
-  string sequence_id = 2;
+  string autoloop_id = 2;
   Transition transition = 4;  // Omitted means cut; idle accepts no transition.
 
   message Transition {
@@ -68,6 +80,14 @@ message PlaySequence {
 // Replace this identified effect. Only specified properties override the baseline.
 // Higher priority wins; ties use command order. Brightness/blackout parameters apply last.
 message SetActiveEffect {
+  // Physical values use GDTF units; presets name a ChannelSet.
+  message AttributeValue {
+    oneof value {
+      double number = 1;
+      string preset = 2;
+    }
+  }
+
   uint64 command_id = 1;
   string effect_id = 2;
   oneof target {  // Omitted targets all fixtures.
@@ -81,6 +101,8 @@ message SetActiveEffect {
   optional double strobe_hz = 9;  // 0..10.
   sint32 priority = 10;
   optional double duration_seconds = 11;  // Positive; absent lasts until unset.
+  // GDTF attribute, Geometry.Attribute or full function path.
+  map<string, AttributeValue> attributes = 12;
 }
 
 // [CLIENT -> SERVER]
@@ -114,32 +136,24 @@ message Metrics {
   uint32 queued_commands = 4;
   double last_render_duration_seconds = 5;
   string active_bank = 6;
-  string active_sequence = 7;
+  string active_autoloop = 7;
   string script_error = 8;
   string runtime_error = 9;
   uint64 last_processed_command_id = 10;  // Includes accepted and rejected commands.
 }
 
 // Supplied source is sandboxed and bounded by Starfire; no file loading at runtime.
-message Script {
-  string sequence_id = 1;  // Unique across all banks; PlaySequence uses only this ID.
+message AutoloopDefinition {
+  string autoloop_id = 1;  // Unique across all banks; PlayAutoloop uses only this ID.
   string bank = 2;         // Grouping metadata.
   string lua_source = 3;
 }
 
-// Shared by initialization and runtime updates. Independent of the active sequence.
+// Shared by initialization and runtime updates. Independent of the active autoloop.
 message Parameter {
   ParameterType type = 1;
   oneof value {
     double number = 2;
     bool boolean = 3;
   }
-}
-
-enum ParameterType {
-  PARAMETER_TYPE_UNSPECIFIED = 0;
-  OUTPUT_BRIGHTNESS = 1;     // Number, 0..1; final output multiplier.
-  ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
-  OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
-  AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
 }

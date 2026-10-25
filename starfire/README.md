@@ -1,7 +1,7 @@
 # Starfire
 
-Rust lighting renderer with banked Lua sequences, fixture-aware composition and
-deterministic DMX replay. Autolux chooses sequences and accents; Radius owns
+Rust lighting renderer with banked Lua autoloops, fixture-aware composition and
+deterministic DMX replay. Autolux chooses autoloops and accents; Radius owns
 synchronized transport.
 
 ```powershell
@@ -16,16 +16,17 @@ are requested. Fixture setup uses the existing dashboard; saved patches apply
 next session. Native commands are also available in
 `starfire/target/release/starfire.exe --help`.
 
-Sequences return semantic effects from `render(ctx)`. Use supplied musical time,
+Authored looks live in root `autoloop/`, grouped by bank. Autoloops return semantic
+effects from `render(ctx)`. Use supplied musical time,
 named groups and helpers in `src/lua/lighting.lua`; never depend on render count.
 `ctx.normalized_rms_level` is measured audio RMS normalized to 0..1, or `nil` until
-measured. Bundled sequences keep their baseline brightness when it is unknown.
-The supplied sequences expect `wash`, `movers` and `strip` groups in the rig.
-Selecting the current sequence ID keeps it running. Overrides affect only their
+measured. Bundled autoloops keep their baseline brightness when it is unknown.
+The supplied autoloops expect `wash`, `movers` and `strip` groups in the rig.
+Selecting the current autoloop ID keeps it running. Overrides affect only their
 properties; clearing reveals the continuing baseline. Global brightness,
 animation speed, blackout and measured audio level use typed parameters.
 
-Every sequence has a checked full-DMX replay plus behavior assertions. Run
+Every autoloop has a checked full-DMX replay plus behavior assertions. Run
 `cargo test --locked --manifest-path starfire/Cargo.toml`. The build also runs
 rustfmt, Clippy and release compilation. Toolchain and formatting are pinned at
 the repository root.
@@ -44,14 +45,29 @@ both ways every ten seconds and expire after thirty seconds. Only login has a
 success reply; rejected commands produce `ErrorReply`, and `Metrics` reports the
 last processed command ID. Standalone messages are generated from [starfire.proto](../proto/starfire/starfire.proto).
 Each frame carries a message type, bounded length and generated Protobuf payload.
-An empty `PlaySequence` enters idle; no sequence restarts on repeated selection.
+An empty `PlayAutoloop` enters idle; no autoloop restarts on repeated selection.
 
 Shared patches and profiles live in root `rigs/`. The room rig has two Spot 110
 movers, four SePar washes and eight RGB cells of
 the CF805 in 24-channel mode. These are 14 independently controlled fixtures.
 Mini Kinta remains dark until its control profile is verified. Production
-readiness probes every sequence against the selected patch before deployment.
+readiness probes every autoloop against the selected patch before deployment.
 Physical timing measurements are described in the validation record.
 See the [design and diagrams](../docs/starfire-design.md) and
 [decision log](../docs/starfire/decisions.md).
 See [validation](../docs/starfire/validation.md) for tested behavior and hardware limits.
+
+Fixture types use standard GDTF XML and a selected DMX mode. Import a `.gdtf`
+archive with `uv run autolux starfire import-fixture fixture.gdtf --profile-id spot --mode "16ch"`.
+The renderer validates the mode before saving it in `rigs/profiles.json`; imported
+profiles are available next session without rebuilding. Use `--profiles` for a
+separate catalogue. Patch installed fixtures in the existing Config tab.
+
+Lua `sf.physical_attribute(target, "Zoom", 25)` uses the GDTF physical unit;
+`sf.channel_preset(target, "Gobo1", "Open")` selects a named channel preset.
+Qualify ambiguous properties as `Geometry.Attribute` or a full function path.
+The same controls are available through active effects. Explicit attributes
+win over convenience values on the same channel; master and blackout apply last. Standard colour,
+intensity and calibrated movement helpers remain convenient for portable looks.
+Unsupported GDTF constructs reject during validation; this is not full GDTF
+conformance. See the [decision log](../docs/starfire/decisions.md) for limits.

@@ -31,9 +31,16 @@ serves metrics on port 8766. Use `--duration 90` for a bounded live test.
 Starfire uses an owned subprocess with framed protobuf over its pipes. Autolux
 loads the fixture patch, required profiles and Lua sources into Login; LoginReply
 confirms readiness. Model preparation precedes audio capture. Independent heartbeats
-run every ten seconds with a thirty-second deadline. `--rig`, `--sequences` and `--starfire-binary`
-select the fixture patch, Lua catalogue and executable. Art-Net goes to the
+run every ten seconds with a thirty-second deadline. `--rig`, `--profiles`,
+`--autoloops` and `--starfire-binary` select the fixture patch, GDTF catalogue,
+Lua catalogue and executable. Art-Net goes to the
 configured Radius TX ingress; the receiver alone drives the physical fixtures.
+
+`autolux starfire import-fixture fixture.gdtf --profile-id my_fixture --mode "Standard"`
+validates and stores a GDTF mode in `rigs/profiles.json`. Config lists imported
+profiles for patching. Imports replace the selected profile ID atomically and take
+effect next session; no native rebuild is needed. Unsupported modes are rejected
+before saving, and the complete GDTF description travels in Login.
 
 The dashboard has Control for the timeline and essential performance, Telemetry
 for detailed graphs, and Config for fixture setup. Renderer FPS is measured from

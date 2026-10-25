@@ -7,7 +7,8 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
+    AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target,
+    Transition,
 };
 
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
@@ -53,7 +54,7 @@ macro_rules! messages {
 
 messages!(ClientMessage {
     Login,
-    PlaySequence,
+    PlayAutoloop,
     SetActiveEffect,
     UnsetActiveEffect,
     UpdateBeat,
@@ -71,7 +72,7 @@ impl ClientMessage {
     pub fn command_id(&self) -> Option<u64> {
         Some(match self {
             Self::Login(value) => value.command_id,
-            Self::PlaySequence(value) => value.command_id,
+            Self::PlayAutoloop(value) => value.command_id,
             Self::SetActiveEffect(value) => value.command_id,
             Self::UnsetActiveEffect(value) => value.command_id,
             Self::UpdateBeat(value) => value.command_id,
@@ -83,7 +84,7 @@ impl ClientMessage {
     pub fn set_command_id(&mut self, command_id: u64) {
         match self {
             Self::Login(value) => value.command_id = command_id,
-            Self::PlaySequence(value) => value.command_id = command_id,
+            Self::PlayAutoloop(value) => value.command_id = command_id,
             Self::SetActiveEffect(value) => value.command_id = command_id,
             Self::UnsetActiveEffect(value) => value.command_id = command_id,
             Self::UpdateBeat(value) => value.command_id = command_id,
@@ -175,8 +176,8 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 bpm: value.tempo_bpm,
             },
         ),
-        ClientMessage::PlaySequence(value) => {
-            if value.sequence_id.is_empty() {
+        ClientMessage::PlayAutoloop(value) => {
+            if value.autoloop_id.is_empty() {
                 ensure!(
                     value.transition.is_none(),
                     "idle does not accept a transition"
@@ -189,7 +190,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 .and_then(|value| value.crossfade_beats)
                 .map(|duration_beats| Transition::Crossfade { duration_beats })
                 .unwrap_or(Transition::Cut);
-            engine.play_sequence(at_seconds, &value.sequence_id, transition)
+            engine.play_autoloop(at_seconds, &value.autoloop_id, transition)
         }
         ClientMessage::SetParameter(value) => engine.set_parameter(
             at_seconds,
@@ -206,6 +207,25 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 pan: value.pan,
                 tilt: value.tilt,
                 strobe_hz: value.strobe_hz,
+                attributes: value
+                    .attributes
+                    .iter()
+                    .map(|(name, value)| {
+                        let value = match value
+                            .value
+                            .as_ref()
+                            .context("GDTF attribute value is missing")?
+                        {
+                            wire::set_active_effect::attribute_value::Value::Number(number) => {
+                                AttributeValue::Number(*number)
+                            }
+                            wire::set_active_effect::attribute_value::Value::Preset(preset) => {
+                                AttributeValue::Preset(preset.clone())
+                            }
+                        };
+                        Ok((name.clone(), value))
+                    })
+                    .collect::<Result<_>>()?,
             };
             ensure!(
                 values != PropertyValues::default(),

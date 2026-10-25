@@ -41,22 +41,22 @@
     "atmospheric": {
       "ss_file": "SSAutoLoop33.ssfile",
       "midi_note": 35,
-      "sequence": "blue_tide"
+      "autoloop": "blue_tide"
     },
     "breakdown": {
       "ss_file": "SSAutoLoop38.ssfile",
       "midi_note": 40,
-      "sequence": "violet_space"
+      "autoloop": "violet_space"
     },
     "buildup": {
       "ss_file": "SSAutoLoop1.ssfile",
       "midi_note": 27,
-      "sequence": "current"
+      "autoloop": "current"
     },
     "drop": {
       "ss_file": "SSAutoLoop6.ssfile",
       "midi_note": 32,
-      "sequence": "blue_impact"
+      "autoloop": "blue_impact"
     }
   },
   "native_loop_beats": 64,
@@ -73,7 +73,7 @@
       124
     ],
     "maximum_shared_offset_beats": 0.15,
-    "rule": "One offset per sequence, fitted only at 120 BPM; unchanged at 140 BPM. No per-channel shifts or time warps.",
+    "rule": "One offset per autoloop, fitted only at 120 BPM; unchanged at 140 BPM. No per-channel shifts or time warps.",
     "final_holdout_bpm": 156
   },
   "limitations": [

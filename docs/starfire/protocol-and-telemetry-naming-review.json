@@ -3,7 +3,7 @@
   "implementation": {
     "rates": "autolux/lib/telemetry_history.py derives completed render and skipped deadline counter differences over renderer elapsed time. Repeated fresh reports hold the prior interval rate; restarts/outages clear it.",
     "duration": "starfire/src/live.rs measures engine.render_at duration; autolux/lib/telemetry_history.py exposes the last completed render sample in milliseconds, not a timestamp or average.",
-    "protocol": "proto/starfire/starfire.proto defines messages and imports rig.proto for RigDefinition and fixture types. Login carries controller-owned typed rig/profiles, Lua sources and initial settings; LoginReply means ready. Four command families are silent on success; ErrorReply reports rejection. Metrics and independent empty Heartbeat report progress and liveness. Parameter is a global enum type plus number/boolean value. PlaySequence uses one globally unique sequence_id; banks group supplied scripts. SetActiveEffect carries literal fixture properties and optional duration_seconds."
+    "protocol": "proto/starfire/starfire.proto defines messages and imports rig.proto for RigDefinition and fixture types. Login carries controller-owned typed rig/profiles, Lua sources and initial settings; LoginReply means ready. Four command families are silent on success; ErrorReply reports rejection. Metrics and independent empty Heartbeat report progress and liveness. Parameter is a global enum type plus number/boolean value. PlayAutoloop uses one globally unique autoloop_id; banks group supplied scripts. SetActiveEffect carries literal fixture properties and optional duration_seconds."
   },
   "readers": {
     "fork_turns": "none",
@@ -131,7 +131,7 @@
     },
     {
       "concept": "User-selected core vocabulary and typed parameter variants",
-      "implementation": "proto/starfire/starfire.proto: standalone SetParameter, PlaySequence and SetActiveEffect. ParameterType defines global identities; a number/boolean value is validated against the enum. User-selected Login includes all typed fixture assets and Lua source, with readiness confirmed by LoginReply.",
+      "implementation": "proto/starfire/starfire.proto: standalone SetParameter, PlayAutoloop and SetActiveEffect. ParameterType defines global identities; a number/boolean value is validated against the enum. User-selected Login includes all typed fixture assets and Lua source, with readiness confirmed by LoginReply.",
       "attempts": [
         {
           "names": [
@@ -181,7 +181,9 @@
       "implementation": "starfire/src/live.rs run_live advances last_processed_command_id for every accepted or rejected command in input order; proto/starfire/starfire.proto Metrics documents both outcomes. cli/starfire_runtime.py _record_progress rejects backward/unsent IDs and detects stalled processing independently of liveness.",
       "attempts": [
         {
-          "names": ["last_processed_command_id"],
+          "names": [
+            "last_processed_command_id"
+          ],
           "reader": "/root/blind_processed_progress",
           "prediction": "`last_processed_command_id` likely stores the identifier of the most recent command whose processing has completed.\n\nAmbiguities:\n- “Processed” could mean attempted, successfully completed, or merely acknowledged.\n- “Last” could mean most recently completed or highest identifier in an ordered sequence.\n- It does not indicate whether this is a checkpoint for skipping earlier commands or just diagnostic state.\n\nNo unclear abbreviations.",
           "comparison": "Aligned on completed command progress, but names alone do not establish accepted-or-rejected semantics or ordered processing. Retain the concise name with explicit schema contract and behavioral tests; not a blind pass on those invariants."
@@ -194,13 +196,39 @@
       "implementation": "proto/starfire/rig.proto RigDefinition contains fixture instances, ordered groups and referenced profiles. Login.rig sends this declarative snapshot; starfire/src/fixtures.rs from_wire validates it into the runtime FixtureRig.",
       "attempts": [
         {
-          "names": ["RigDefinition"],
+          "names": [
+            "RigDefinition"
+          ],
           "reader": "/root/blind_rig_definition",
           "prediction": "`RigDefinition` likely describes the structure or configuration of a “rig”: its components, connections, and settings. “Definition” suggests declarative data rather than an active runtime instance.\n\nAmbiguities:\n- “Rig” could mean an animation skeleton, equipment setup, test apparatus, or another assembled system.\n- The name does not clarify whether it represents a schema, a reusable template, or one specific configuration.\n- It gives no indication of validation or runtime behavior.",
           "comparison": "Aligned on declarative configuration versus a runtime instance. Fixture contents and validation remain explicit in the schema and conversion boundary."
         }
       ],
       "disposition": "User-selected name; blind reader confirms the intended configuration/runtime distinction."
+    },
+    {
+      "concept": "Supplied sequence definition",
+      "implementation": "proto/starfire/starfire.proto AutoloopDefinition carries a globally unique autoloop_id, grouping bank and inline Lua source. Login.autoloops supplies definitions; starfire/src/script.rs from_definitions validates them before live initialization.",
+      "attempts": [
+        {
+          "names": [
+            "SequenceDefinition",
+            "sequence_id",
+            "bank",
+            "lua_source"
+          ],
+          "reader": "/root/blind_sequence_definition",
+          "prediction": "- `SequenceDefinition`: A data structure describing an ordered series of steps or events, probably its configuration rather than a running instance. Unclear whether it contains the steps or references their implementation.\n- `sequence_id`: An identifier for a sequence. Its scope, format, and relationship to `SequenceDefinition` are unspecified.\n- `bank`: A named or numbered collection or storage slot. Highly ambiguous: it could group sequences, select a resource collection, or identify a location.\n- `lua_source`: Lua program source code, likely stored as text. Could also mean a source file path or origin; `lua_source_code` or `lua_source_path` would distinguish those meanings.\n\nTogether, the names suggest a sequence definition identified by `sequence_id`, assigned to a `bank`, and implemented or configured through Lua code. That relationship is only an inference.",
+          "comparison": "Recognizes the definition/instance distinction and Lua implementation grouped by bank. Global identity and inline-source semantics remain explicit schema contracts."
+        }
+      ],
+      "disposition": "Contextual exception for user-selected SequenceDefinition and bank vocabulary; preserved source terminology with explicit inline-source documentation."
+    },
+    {
+      "concept": "Autoloop vocabulary",
+      "implementation": "proto/starfire/starfire.proto uses AutoloopDefinition, PlayAutoloop, autoloop_id and Login.autoloops. starfire/src/script.rs provides AutoloopCatalog and LuaAutoloop; render context clocks use autoloop_elapsed_beats and autoloop_speed_scaled_elapsed_beats. Authored programs live in root autoloop/, grouped by bank.",
+      "attempts": [],
+      "disposition": "Contextual exception: the user explicitly selected autoloop for the entire concept. Earlier blind predictions remain verbatim evidence of prior names, not a blind pass for this rename. Art-Net packet sequence numbers and Lua create_sequence_from are unrelated external terminology and remain unchanged."
     }
   ],
   "user_design_decisions": "Final names and protocol simplifications are explicitly user-selected, not a claimed blind-naming pass. Prior predictions are retained as review evidence; rejected abstractions are not part of the current schema."

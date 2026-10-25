@@ -4,20 +4,21 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
-fn check(rig: &Path, sequences: &Path) -> Output {
+fn check(rig: &Path, autoloops: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_starfire"))
         .args(["check", "--rig"])
         .arg(rig)
-        .arg("--sequences")
-        .arg(sequences)
+        .args(["--profiles", "../rigs/profiles.json"])
+        .arg("--autoloops")
+        .arg(autoloops)
         .output()
         .unwrap()
 }
 
 #[test]
-fn preflight_renders_every_shipped_sequence_and_reports_patch_universes() {
+fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = check(&root.join("../rigs/room.json"), &root.join("sequences"));
+    let output = check(&root.join("../rigs/room.json"), &root.join("../autoloop"));
     assert!(
         output.status.success(),
         "{}",
@@ -25,11 +26,11 @@ fn preflight_renders_every_shipped_sequence_and_reports_patch_universes() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["universes"], serde_json::json!([0]));
-    assert_eq!(report["checked_sequences"].as_array().unwrap().len(), 4);
+    assert_eq!(report["checked_autoloops"].as_array().unwrap().len(), 4);
 }
 
 #[test]
-fn preflight_rejects_a_valid_patch_missing_a_sequence_group() {
+fn preflight_rejects_a_valid_patch_missing_a_autoloop_group() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
     let mut rig: Value = serde_json::from_str(include_str!("../../rigs/room.json")).unwrap();
@@ -37,15 +38,15 @@ fn preflight_rejects_a_valid_patch_missing_a_sequence_group() {
     let path = directory.path().join("missing-strip.json");
     fs::write(&path, serde_json::to_vec(&rig).unwrap()).unwrap();
 
-    let output = check(&path, &root.join("sequences"));
+    let output = check(&path, &root.join("../autoloop"));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
-    assert!(error.contains("sequence "), "{error}");
+    assert!(error.contains("autoloop "), "{error}");
     assert!(error.contains("unknown fixture group strip"), "{error}");
 }
 
 #[test]
-fn preflight_executes_render_callbacks_in_every_sequence() {
+fn preflight_executes_render_callbacks_in_every_autoloop() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
     let bank = directory.path().join("test");

@@ -71,12 +71,12 @@ end
 
 return {
     render = function(ctx)
-        local beat = ctx.sequence_speed_scaled_elapsed_beats % LOOP_BEATS
+        local beat = ctx.autoloop_speed_scaled_elapsed_beats % LOOP_BEATS
         local brightness = MIN_AUDIO_BRIGHTNESS + AUDIO_BRIGHTNESS_RANGE * (ctx.normalized_rms_level or 1)
         local level = LOW_LEVEL
-        if ctx.sequence_elapsed_beats >= ENTRY_HOLD_BEATS then
-            local sequence_start_beat = ctx.beat_position - ctx.sequence_elapsed_beats
-            local pulse_origin_beat = math.floor(sequence_start_beat / BEATS_PER_BAR) * BEATS_PER_BAR
+        if ctx.autoloop_elapsed_beats >= ENTRY_HOLD_BEATS then
+            local autoloop_start_beat = ctx.beat_position - ctx.autoloop_elapsed_beats
+            local pulse_origin_beat = math.floor(autoloop_start_beat / BEATS_PER_BAR) * BEATS_PER_BAR
             level = pulse_level(ctx.beat_position - pulse_origin_beat)
         end
         local accent_active = beat >= ACCENT_START and beat < ACCENT_END

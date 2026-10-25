@@ -90,6 +90,11 @@ def native_specs(args, delay):
     rx['bus_port'] = tx['bus_port']
     tx.setdefault('artnet_address', '127.0.0.1')
     tx['playback_delay_seconds'] = delay
+    tx['receiver'] = {
+        'audio_enabled': rx.get('audio_enabled', True),
+        'lighting_enabled': rx.get('dmx_enabled', True),
+        'jitter_buffer_ms': rx.get('jitter_buffer_ms', 150),
+    }
     specs = []
     for role, config in zip(('tx', 'rx'), configs):
         name = f'radius_{role}'
@@ -255,8 +260,9 @@ async def _run_session(args, *, checking=False):
         validate_starfire(
             args.starfire_binary,
             rig,
-            args.sequences,
+            args.autoloops,
             expected_universe=tx.config['dmx_universe'],
+            profiles=args.profiles,
         )
         run_dir = (
             ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
@@ -277,9 +283,10 @@ async def _run_session(args, *, checking=False):
         renderer = StarfireRuntime(
             args.starfire_binary,
             rig,
-            args.sequences,
+            args.autoloops,
             f"{tx.config['artnet_address']}:{tx.config.get('artnet_port', 6454)}",
             run_dir / 'local/starfire',
+            profiles=args.profiles,
         )
 
         def send_lighting_command(command):

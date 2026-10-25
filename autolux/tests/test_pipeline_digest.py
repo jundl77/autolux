@@ -51,8 +51,8 @@ def _event(t=1.0, **command):
     return {'at_seconds': t, 'command': command}
 
 
-def _selection(t=1.0, bank='drop', sequence='blue_impact'):
-    return _event(t, kind='select', bank=bank, sequence=sequence)
+def _selection(t=1.0, bank='drop', autoloop='blue_impact'):
+    return _event(t, kind='select', bank=bank, autoloop=autoloop)
 
 
 def _accent(t=1.0):
@@ -68,7 +68,7 @@ def _drop_report():
         [_beat()],
         intents=[{'t': 1.0, 'end': 10.0, 'intent': 'drop'}],
         effects=[
-            {'t': 1.0, 'name': 'drop/blue_impact', 'type': 'SEQUENCE'},
+            {'t': 1.0, 'name': 'drop/blue_impact', 'type': 'AUTOLOOP'},
             {'t': 1.0, 'name': 'drop_arrival', 'type': 'ACCENT'},
         ],
     )
@@ -101,7 +101,7 @@ def test_sound_boundaries_remain_gated():
     assert original != changed
 
 
-def test_sequence_and_accent_commands_match_report_in_order():
+def test_autoloop_and_accent_commands_match_report_in_order():
     relations = relations_digest(_drop_report(), _streams(_selection(), _accent()))
     assert all(relations.values())
 
@@ -127,10 +127,10 @@ def test_command_time_must_not_go_backwards():
 
 
 @pytest.mark.parametrize('name', ['buildup/current', 'unknown/program'])
-def test_sequence_must_belong_to_committed_intent(name):
+def test_autoloop_must_belong_to_committed_intent(name):
     report = _drop_report()
     report['effects'][0]['name'] = name
-    assert not relations_digest(report)['sequences_match_intents']
+    assert not relations_digest(report)['autoloops_match_intents']
 
 
 def test_non_effect_commands_do_not_add_reported_effects():

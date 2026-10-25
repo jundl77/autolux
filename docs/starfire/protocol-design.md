@@ -9,10 +9,10 @@ Only top-level wire messages have direction annotations.
 
 | Command | Behavior |
 | --- | --- |
-| `PlaySequence` | Play one globally unique sequence ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
+| `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. |
 | `UpdateBeat` | Supply fractional beat position and tempo. Starfire interpolates between updates; animation speed does not change musical phase. |
-| `SetParameter` | Change one global parameter, independently of the active sequence. |
+| `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
 Each `Parameter` contains a defined enum type and a number or boolean value.
 It is shared by Login's initial settings and runtime updates.
@@ -25,11 +25,15 @@ It is shared by Login's initial settings and runtime updates.
 | `AUDIO_RMS_NORMALIZED` | Number, 0..1; measured RMS, unknown until supplied. |
 
 Unknown parameter types, wrong value types and invalid ranges are rejected.
-There are no arbitrary parameter names or sequence-owned parameters.
+There are no arbitrary parameter names or autoloop-owned parameters.
 
 Effects target all fixtures by default, or a named group/fixture. They replace
-only specified intensity, colour, pan, tilt or strobe values. Higher priority
+only specified intensity, colour, pan, tilt, strobe or GDTF attribute values.
+Generic attributes use physical numbers or named ChannelSet presets; qualify
+ambiguous names with geometry or a full function path. Higher priority
 wins; command order breaks ties. Global brightness and blackout apply last.
+Explicit physical attributes take precedence over convenience values on the
+same channel; global brightness and blackout still apply last.
 Removing an effect reveals the continuing baseline. There is no blend-mode API.
 
 ## Session and transport
@@ -37,10 +41,13 @@ Removing an effect reveals the continuing baseline. There is no blend-mode API.
 Autolux owns fixture configuration and scripts. `Login` supplies a complete snapshot:
 
 - `RigDefinition`: fixtures, addresses, movement calibration, ordered groups and
-  required profiles. Each profile describes a fixture model/mode's DMX channel
-  mapping and safe values; fixtures reference it by ID.
-- Lua sources with globally unique sequence IDs and bank grouping metadata.
+  required profiles. Each profile carries complete GDTF description XML and an
+  exact DMX mode; fixtures reference it by ID. Rust compiles mappings at Login.
+- `AutoloopDefinition` entries with globally unique autoloop IDs, bank grouping
+  metadata and Lua source code, carried in `Login.autoloops`.
 - Initial parameters and the unicast Art-Net destination.
+- Protocol major/minor versions: majors must match; LoginReply negotiates the
+  lower minor version. Both protocols currently start at 1.0.
 
 Starfire validates the patch and executes every script against it before acquiring
 output. `LoginReply` means initialization succeeded and the renderer is ready for
@@ -61,7 +68,7 @@ Only Login has a success reply. Rejections send `ErrorReply` with the command ID
 and a reason; rejection preserves accepted state. There are no automatic retries.
 
 `Metrics` reports completed frames, missed deadlines, queue depth, render duration,
-active sequence, faults and `last_processed_command_id`. This progress counter
+active autoloop, faults and `last_processed_command_id`. This progress counter
 includes accepted and rejected commands; it is not a per-command success receipt.
 FPS comes from frame-count and elapsed-time differences. Both endpoints send
 independent ten-second heartbeats and time out after thirty seconds. Heartbeats
@@ -70,3 +77,9 @@ Final fault metrics are best-effort; exit status and stderr remain authoritative
 
 Radius owns audio watermarks and synchronized DMX playback. Renderer metrics do
 not measure physical illumination.
+
+Radius uses the same standalone message, Login, ErrorReply, Metrics and heartbeat
+patterns over UDP. Its complete datagram is bounded to 1,200 bytes. Audio and
+lighting carry session IDs and 64-bit audio-frame positions. TX retries the
+identical Login until ready; RX replies idempotently without resetting output.
+Media capture begins only after LoginReply.

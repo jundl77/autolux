@@ -44,6 +44,15 @@ pub struct PropertyValues {
     pub pan: Option<f64>,
     pub tilt: Option<f64>,
     pub strobe_hz: Option<f64>,
+    pub attributes: BTreeMap<String, AttributeValue>,
+}
+
+/// A physical value or a named GDTF channel-set preset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AttributeValue {
+    Number(f64),
+    Preset(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -60,6 +69,12 @@ pub struct FixtureState {
     pub pan: f64,
     pub tilt: f64,
     pub strobe_hz: f64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, AttributeValue>,
+    #[serde(skip)]
+    pub output_blackout: bool,
+    #[serde(skip, default = "unit_brightness")]
+    pub attribute_brightness: f64,
 }
 
 impl Default for FixtureState {
@@ -70,8 +85,15 @@ impl Default for FixtureState {
             pan: 0.5,
             tilt: 0.5,
             strobe_hz: 0.0,
+            attributes: BTreeMap::new(),
+            output_blackout: false,
+            attribute_brightness: 1.0,
         }
     }
+}
+
+fn unit_brightness() -> f64 {
+    1.0
 }
 
 pub type FixtureStates = BTreeMap<String, FixtureState>;
@@ -80,8 +102,8 @@ pub type FixtureStates = BTreeMap<String, FixtureState>;
 pub struct RenderContext {
     pub time_seconds: f64,
     pub beat_position: f64,
-    pub sequence_elapsed_beats: f64,
-    pub sequence_speed_scaled_elapsed_beats: f64,
+    pub autoloop_elapsed_beats: f64,
+    pub autoloop_speed_scaled_elapsed_beats: f64,
     /// Measured RMS mapped to 0..1, independent of operator brightness.
     pub normalized_rms_level: Option<f64>,
 }
@@ -91,8 +113,8 @@ impl Default for RenderContext {
         Self {
             time_seconds: 0.0,
             beat_position: 0.0,
-            sequence_elapsed_beats: 0.0,
-            sequence_speed_scaled_elapsed_beats: 0.0,
+            autoloop_elapsed_beats: 0.0,
+            autoloop_speed_scaled_elapsed_beats: 0.0,
             normalized_rms_level: None,
         }
     }
@@ -144,7 +166,7 @@ pub enum Command {
     },
     Select {
         bank: String,
-        sequence: String,
+        autoloop: String,
         #[serde(default)]
         transition: Transition,
     },

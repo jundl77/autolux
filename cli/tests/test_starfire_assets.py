@@ -1,11 +1,16 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from cli import starfire_assets as assets
 from cli import starfire_protocol as protocol
-from cli.starfire import DEFAULT_RIG, DEFAULT_SEQUENCES, PROFILE_CATALOGUE
+from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG, PROFILE_CATALOGUE
 from proto.starfire import starfire_pb2 as wire
+
+GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').read_text(
+    encoding='utf-8'
+)
 
 
 @pytest.fixture
@@ -36,12 +41,8 @@ def login_assets(tmp_path, monkeypatch):
                 'schema_version': 1,
                 'profiles': {
                     'test_mover': {
-                        'source': 'Fixture manual',
-                        'notes': 'Calibrated movement',
-                        'safe_values': [0, 0, 0, 0, 128, 0],
-                        'rgb': [1, 2, 3],
-                        'dimmer': 5,
-                        'pan': {'coarse': 4, 'fine': 0},
+                        'gdtf_xml': GDTF_XML,
+                        'dmx_mode': '16 bit',
                     },
                     'unused': {'source': 'Not installed'},
                 },
@@ -50,18 +51,20 @@ def login_assets(tmp_path, monkeypatch):
         encoding='utf-8',
     )
     monkeypatch.setattr(assets, 'PROFILE_CATALOGUE', profiles)
-    sequences = tmp_path / 'sequences'
-    bank = sequences / 'atmospheric'
+    autoloops = tmp_path / 'autoloops'
+    bank = autoloops / 'atmospheric'
     bank.mkdir(parents=True)
     (bank / 'blue.lua').write_text('return { render = function(ctx) end }\n', encoding='utf-8')
-    return rig, sequences, profiles
+    return rig, autoloops, profiles
 
 
-def test_login_preserves_typed_patch_source_and_zero_channel_presence(login_assets):
-    rig, sequences, _ = login_assets
+def test_login_preserves_exact_gdtf_source_and_explicit_zero_movement_limit(login_assets):
+    rig, autoloops, _ = login_assets
     parameter = wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0)
-    login = assets.load_login(rig, sequences, '127.0.0.1:6454', [parameter])
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', [parameter])
     assert login.command_id == 0
+    assert login.protocol_major == protocol.PROTOCOL_MAJOR
+    assert login.protocol_minor == protocol.PROTOCOL_MINOR
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]
@@ -73,22 +76,19 @@ def test_login_preserves_typed_patch_source_and_zero_channel_presence(login_asse
     assert login.rig.groups[0].fixture_ids == ['front']
     assert len(login.rig.profiles) == 1
     profile = login.rig.profiles[0]
-    assert profile.source == 'Fixture manual'
-    assert profile.notes == 'Calibrated movement'
-    assert profile.safe_values == bytes([0, 0, 0, 0, 128, 0])
-    assert profile.pan.HasField('fine')
-    assert profile.pan.fine == 0
-    script = login.scripts[0]
-    assert script.sequence_id == 'atmospheric/blue'
+    assert profile.gdtf_xml == GDTF_XML
+    assert profile.dmx_mode == '16 bit'
+    script = login.autoloops[0]
+    assert script.autoloop_id == 'atmospheric/blue'
     assert script.bank == 'atmospheric'
-    assert script.lua_source == (sequences / 'atmospheric/blue.lua').read_bytes().decode('utf-8')
+    assert script.lua_source == (autoloops / 'atmospheric/blue.lua').read_bytes().decode('utf-8')
     login.command_id = protocol.MAX_COMMAND_ID
     encoded = protocol.encode_command(login)
     assert wire.Login.FromString(encoded[protocol.FRAME_HEADER.size :]) == login
 
 
 def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts():
-    login = assets.load_login(DEFAULT_RIG, DEFAULT_SEQUENCES, '127.0.0.1:6454')
+    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454')
     rig = json.loads(DEFAULT_RIG.read_text(encoding='utf-8'))
     profiles = json.loads(PROFILE_CATALOGUE.read_text(encoding='utf-8'))['profiles']
     assert [fixture.fixture_id for fixture in login.rig.fixtures] == [
@@ -99,24 +99,23 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
     }
     for profile in login.rig.profiles:
         source = profiles[profile.profile_id]
-        assert profile.source == source['source']
-        assert profile.notes == source['notes']
-        assert profile.safe_values == bytes(source['safe_values'])
-    assert {script.sequence_id for script in login.scripts} == {
-        path.relative_to(DEFAULT_SEQUENCES).with_suffix('').as_posix()
-        for path in DEFAULT_SEQUENCES.glob('*/*.lua')
+        assert profile.gdtf_xml == source['gdtf_xml']
+        assert profile.dmx_mode == source['dmx_mode']
+    assert {script.autoloop_id for script in login.autoloops} == {
+        path.relative_to(DEFAULT_AUTOLOOPS).with_suffix('').as_posix()
+        for path in DEFAULT_AUTOLOOPS.glob('*/*.lua')
     }
-    for script in login.scripts:
+    for script in login.autoloops:
         assert script.lua_source == (
-            DEFAULT_SEQUENCES / f'{script.sequence_id}.lua'
+            DEFAULT_AUTOLOOPS / f'{script.autoloop_id}.lua'
         ).read_bytes().decode('utf-8')
     assert login.ByteSize() + protocol.COMMAND_ID_MAX_ENCODED_BYTES <= protocol.MAX_MESSAGE_BYTES
 
 
-@pytest.mark.parametrize('location', ['root', 'fixture', 'movement', 'profile', 'axis'])
+@pytest.mark.parametrize('location', ['root', 'fixture', 'movement', 'profile'])
 def test_unknown_fields_are_not_silently_dropped(login_assets, location):
-    rig, sequences, profiles = login_assets
-    path = profiles if location in {'profile', 'axis'} else rig
+    rig, autoloops, profiles = login_assets
+    path = profiles if location == 'profile' else rig
     data = json.loads(path.read_text(encoding='utf-8'))
     if location == 'root':
         target = data
@@ -124,14 +123,12 @@ def test_unknown_fields_are_not_silently_dropped(login_assets, location):
         target = data['fixtures'][0]
     elif location == 'movement':
         target = data['fixtures'][0]['pan']
-    elif location == 'profile':
-        target = data['profiles']['test_mover']
     else:
-        target = data['profiles']['test_mover']['pan']
+        target = data['profiles']['test_mover']
     target['typo'] = None
     path.write_text(json.dumps(data), encoding='utf-8')
     with pytest.raises(ValueError, match='Invalid Starfire login assets'):
-        assets.load_login(rig, sequences, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454')
 
 
 @pytest.mark.parametrize(
@@ -144,33 +141,40 @@ def test_unknown_fields_are_not_silently_dropped(login_assets, location):
     ],
 )
 def test_invalid_json_shapes_and_duplicate_fields_are_rejected(login_assets, document):
-    rig, sequences, _ = login_assets
+    rig, autoloops, _ = login_assets
     rig.write_text(document, encoding='utf-8')
     with pytest.raises(ValueError, match='Invalid Starfire login assets'):
-        assets.load_login(rig, sequences, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454')
 
 
-@pytest.mark.parametrize('channels', [[1, 2], [1, 2, 3, 4], [True, 2, 3]])
-def test_rgb_channel_data_is_not_truncated_or_coerced(login_assets, channels):
-    rig, sequences, profiles = login_assets
+@pytest.mark.parametrize('field,value', [('gdtf_xml', ''), ('gdtf_xml', 5), ('dmx_mode', None)])
+def test_invalid_gdtf_payload_is_not_coerced(login_assets, field, value):
+    rig, autoloops, profiles = login_assets
     data = json.loads(profiles.read_text(encoding='utf-8'))
-    data['profiles']['test_mover']['rgb'] = channels
+    data['profiles']['test_mover'][field] = value
     profiles.write_text(json.dumps(data), encoding='utf-8')
     with pytest.raises(ValueError, match='Invalid Starfire login assets'):
-        assets.load_login(rig, sequences, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454')
+
+
+def test_login_uses_selected_profile_catalogue(login_assets, monkeypatch):
+    rig, autoloops, profiles = login_assets
+    monkeypatch.setattr(assets, 'PROFILE_CATALOGUE', profiles.with_name('missing.json'))
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', profiles=profiles)
+    assert login.rig.profiles[0].gdtf_xml == GDTF_XML
 
 
 def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_assets):
-    rig, sequences, _ = login_assets
-    (sequences / 'atmospheric/blue.lua').write_text(
+    rig, autoloops, _ = login_assets
+    (autoloops / 'atmospheric/blue.lua').write_text(
         ' ' * protocol.MAX_MESSAGE_BYTES, encoding='utf-8'
     )
     with pytest.raises(ValueError, match='Login assets exceed the renderer message limit'):
-        assets.load_login(rig, sequences, '127.0.0.1:6454')
+        assets.load_login(rig, autoloops, '127.0.0.1:6454')
 
 
-def test_invalid_sequence_name_is_rejected(login_assets):
-    rig, sequences, _ = login_assets
-    (sequences / 'atmospheric/blue.lua').rename(sequences / 'atmospheric/Blue Sky.lua')
-    with pytest.raises(ValueError, match='Invalid sequence name'):
-        assets.load_login(rig, sequences, '127.0.0.1:6454')
+def test_invalid_autoloop_name_is_rejected(login_assets):
+    rig, autoloops, _ = login_assets
+    (autoloops / 'atmospheric/blue.lua').rename(autoloops / 'atmospheric/Blue Sky.lua')
+    with pytest.raises(ValueError, match='Invalid autoloop name'):
+        assets.load_login(rig, autoloops, '127.0.0.1:6454')

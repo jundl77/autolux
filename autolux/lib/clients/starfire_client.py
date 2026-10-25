@@ -30,7 +30,7 @@ class StarfireClient:
 
     def __init__(self, send_command: Callable[[dict], None]):
         self._send_command = send_command
-        self.selected_sequence: tuple[str, str] | None = None
+        self.selected_autoloop: tuple[str, str] | None = None
 
     def beat(self, position_beats: float, bpm: float) -> None:
         self._send_command({'kind': 'beat', 'position_beats': position_beats, 'bpm': bpm})
@@ -38,19 +38,19 @@ class StarfireClient:
     def set_normalized_rms_level(self, level: float) -> None:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})
 
-    def select_sequence(self, bank: str, sequence: str, *, transition: dict | None = None) -> bool:
-        identity = bank, sequence
-        if identity == self.selected_sequence:
+    def select_autoloop(self, bank: str, autoloop: str, *, transition: dict | None = None) -> bool:
+        identity = bank, autoloop
+        if identity == self.selected_autoloop:
             return False
         self._send_command(
             {
                 'kind': 'select',
                 'bank': bank,
-                'sequence': sequence,
+                'autoloop': autoloop,
                 'transition': {'kind': 'cut'} if transition is None else transition,
             }
         )
-        self.selected_sequence = identity
+        self.selected_autoloop = identity
         return True
 
     def set_override(self, override: dict) -> None:
@@ -70,4 +70,4 @@ class StarfireClient:
 
     def stop(self) -> None:
         self._send_command({'kind': 'stop'})
-        self.selected_sequence = None
+        self.selected_autoloop = None

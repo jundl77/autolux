@@ -499,7 +499,7 @@ def _build_show_overview(snapshot: dict) -> list:
     health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
     effect = snapshot.get('current_effect') or {}
     effect_name = effect.get('name', '—')
-    sequence_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
+    autoloop_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
     return [
         _build_stat_card(
             'Health',
@@ -512,7 +512,7 @@ def _build_show_overview(snapshot: dict) -> list:
             'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
         ),
         _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
-        _build_stat_card('Sequence', html.Span(sequence_name, title=effect_name)),
+        _build_stat_card('Autoloop', html.Span(autoloop_name, title=effect_name)),
         _build_stat_card('Room position', html.Span(room_text, id='room-clock')),
         _build_stat_card('Source position', html.Span(song_text, id='song-clock')),
         _build_stat_card('Show delay', html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s')),

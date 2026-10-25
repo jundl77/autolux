@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from autolux.lib.clients.starfire_client import StarfireClient
-from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT, LightIntent
+from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -23,12 +23,12 @@ class EffectController:
         self.event_buffer = event_buffer
 
     async def change_effect(self, intent: LightIntent) -> None:
-        bank, sequence = SEQUENCE_BY_LIGHT_INTENT[intent]
-        if not self.lighting_client.select_sequence(bank, sequence):
+        bank, autoloop = AUTOLOOP_BY_LIGHT_INTENT[intent]
+        if not self.lighting_client.select_autoloop(bank, autoloop):
             return
         if self.event_buffer:
-            self.event_buffer.add_effect(f'{bank}/{sequence}', 'SEQUENCE')
-        LOGGER.info('[lighting] intent=%s | sequence=%s/%s', intent.name, bank, sequence)
+            self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
+        LOGGER.info('[lighting] intent=%s | autoloop=%s/%s', intent.name, bank, autoloop)
 
         if intent == LightIntent.DROP:
             self.lighting_client.set_override(

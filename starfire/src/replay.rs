@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use crate::engine::{Engine, RenderedFrame};
 use crate::fixtures::FixtureRig;
 use crate::model::{DMX_CHANNELS, MAX_FRAME_RATE_HZ, TimedCommand};
-use crate::script::SequenceCatalog;
+use crate::script::AutoloopCatalog;
 
 pub const REPLAY_SCHEMA_VERSION: u32 = 1;
 pub const MAX_REPLAY_INPUT_BYTES: u64 = 8 * 1024 * 1024;
@@ -91,7 +91,7 @@ pub struct ReplayResult {
 pub fn render_replay(
     replay: &Replay,
     rig: FixtureRig,
-    catalog: SequenceCatalog,
+    catalog: AutoloopCatalog,
 ) -> Result<ReplayResult> {
     let frame_count = replay.validate()?;
     let states = rig.empty_states();

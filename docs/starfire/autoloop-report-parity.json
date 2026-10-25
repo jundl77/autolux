@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "reference_revision": "73d5d3d5a50a13faba95ce68521fedd5a3a1d5e4",
+  "source_reports": ".live/starfire-validation/backend-parity/current",
+  "transformation": "Only effects[*].type SEQUENCE becomes AUTOLOOP.",
+  "checks": [
+    "All ten original full-report SHA256 hashes match the committed baseline.",
+    "All other report values, source audio hashes, sound events and analysis digests are unchanged.",
+    "Every baseline score, count, aggregate and annotation-space value is unchanged.",
+    "Renamed lighting commands satisfy current report/intent/order/timing relations.",
+    "The strict comparison changes only report checksums; no thresholds were relaxed."
+  ],
+  "gpu_analysis_rerun": false,
+  "tracks": {
+    "0064.hzIFjGcOKbg": {
+      "before_report_sha256": "2f83320f194bf979a035a7c1b988b4f827905e40508649214ded1d4cfc18e076",
+      "after_report_sha256": "e98fb8f2d90d7041dc09146bde884be57ec5ac1d0840a11a5329ca161fde9da5",
+      "renamed_effect_events": 6,
+      "unchanged_analysis_sha256": "3d8c1ca971fbde42b3c55597c47ad9c3d6cde967e42e4e36800be5267fe6ca9b",
+      "audio_sha256": "a337b736681bc8f52e4bdd282357e52e480f8d0348dc721a4c1f805718ced18f"
+    },
+    "0096.PNpXKsge4xM": {
+      "before_report_sha256": "9948287a996601f3ef037c6a24dcb7f1ee1a6e5fa3d68cbd5c37042f02bc6609",
+      "after_report_sha256": "fa341f72e4102f2831fdfc76cec2b54fee3dc4bf65e035e1ce7c93a2b98627fd",
+      "renamed_effect_events": 6,
+      "unchanged_analysis_sha256": "5faea535b85e698df6142fb869beb972d8993224c1c11dfe606915b42a434bc2",
+      "audio_sha256": "4dd2bad4594108320dfb681026e7a50da52871d5331321745830ac0e4bc5786d"
+    },
+    "0136.FO566BKY2Jc": {
+      "before_report_sha256": "6508c96094074ce6f00cddb9bf3f13b613e0d50577eaa6475bdd7e5064cdc79b",
+      "after_report_sha256": "84ad3432d32696b27260788c434a99f1063d94b82211b1e44cb62c345eb0712d",
+      "renamed_effect_events": 18,
+      "unchanged_analysis_sha256": "8d3db6b8fc263b35c8d7385db744c09959438b0fb0fb4286b7bae54b878b066f",
+      "audio_sha256": "844dca753671ed12ac8e86d22f8bbf0b738913794bbc83e2b7f5d2b0accd0e77"
+    },
+    "0434.SBnxzXkc_qw": {
+      "before_report_sha256": "78896eb68198a158f911948f26381c297b6b13a5197545a958f5c579a973a62d",
+      "after_report_sha256": "19b47fa398404f10920160e37d54ca1f775688c01210323f97bfdeadf8ab7a2f",
+      "renamed_effect_events": 10,
+      "unchanged_analysis_sha256": "2442e7f93ddf7d1af1251d68566c3a4007c80c1bf28d800f39c21ea1e5582457",
+      "audio_sha256": "be465a508d38cf378c7b700c29b38cb1a3a86e9a0e7e29e05fc4291ccfc14029"
+    },
+    "0485.MRRgXXq-0rc": {
+      "before_report_sha256": "e94aaefb9360944afc98c3dd40d660fc47b2217cf493846bc7ff9f0ec1ea13b9",
+      "after_report_sha256": "c7578ab6042e9925f04ea42f94f3981aac78fee0fade57b12de74dc5e1a028cb",
+      "renamed_effect_events": 15,
+      "unchanged_analysis_sha256": "8d3ec022f7239f08a8cc13cea49cc4e1d3d226fc64b30100614857c48ec01a77",
+      "audio_sha256": "bfa286c8a26eacea1ce00498ca944dde262113a48b860d1aba76898c7aefb7ce"
+    },
+    "0501.hwdjIgtMFq8": {
+      "before_report_sha256": "2068848ac50559889b219e49cc119c2422c5292923c78fce6ef6b6dcfa46a5ad",
+      "after_report_sha256": "3bcfe62b5e45b36994d1a0a3513545375ca060e8db283fe4ad621b0066dd351f",
+      "renamed_effect_events": 13,
+      "unchanged_analysis_sha256": "0cb01e42e0ccd41b7d5cc70ca928eb586d95eadb62893ab106cd2a1c0ef13211",
+      "audio_sha256": "17a3d873d16a46ab33ff1020d4aa169a80385c1b031ea752121bc6d3c0b0d4b2"
+    },
+    "0640.4o4joooH5tg": {
+      "before_report_sha256": "06619f048fc5cc0fc1760c03c2754177ee7d27656f4a654d07f1a296d1a9448c",
+      "after_report_sha256": "1c00348c4f47148d9498c8d49d3d5263a8aa04da45096df39f13edfac186042a",
+      "renamed_effect_events": 12,
+      "unchanged_analysis_sha256": "586fb209e49c40d80f9d17fd706635ad1311c7cd0eaa6005e9fc669a61e648b0",
+      "audio_sha256": "cab600016b259776fbb659a69861d4188eed4091d825f7a6e7dd3f3f0e1d58eb"
+    },
+    "0834.NyEKXA7_6z0": {
+      "before_report_sha256": "c3e3ed8304c06b662b0860362cc6c601e12d5a427d08947a1097db320b91a28d",
+      "after_report_sha256": "cb853376e2082d8951a32fc4a8f2e3c5ddf466fd094461f1c62dbb07086ce17b",
+      "renamed_effect_events": 10,
+      "unchanged_analysis_sha256": "446c1bb9baed5b8d06a8f5c0fe4b399f608d774744db431ee4b02c50dd37e24b",
+      "audio_sha256": "af92fbd43834e6ea02267c6df0dfe59a060b5c700ed58a2dd99d7a7d9d1df183"
+    },
+    "0911.hSCcLy_OBLM": {
+      "before_report_sha256": "3c5637a9d58a916cb160718d44f05f62ce3194da711913fc99442b2cf0b48a80",
+      "after_report_sha256": "57dcceb416d96a2959914066714a359f7911a55e3ee8f0d0e1312334b1f776c4",
+      "renamed_effect_events": 14,
+      "unchanged_analysis_sha256": "fb714d086559ac05b7236aa411d3909764750d509e73a68fdaa71e66141a0a9b",
+      "audio_sha256": "b7180316fcd5421fb1a03257ce5457245c0db6483961ab14feb78af7f8f09a9a"
+    },
+    "1110.DnhxAxnCbrY": {
+      "before_report_sha256": "e4e6046c8a8d708e59942f1cf901e7b16a851925282a9f8e59683a555d561ce0",
+      "after_report_sha256": "6a698100503a7f2f4334e4cbf3f5ef3c5a2aed2ff59b274ac0e27f2ead1e0517",
+      "renamed_effect_events": 16,
+      "unchanged_analysis_sha256": "c2c8ecb7cf1bb9d0ade2bd03523214af3cbc000534a4c8fa8d31e30a22337ab0",
+      "audio_sha256": "239fbb22740b3640b0890326b6b2c7e918377641c809ddfe204b2267741d6b5d"
+    }
+  }
+}

@@ -5,6 +5,10 @@ inherited conversation, low reasoning and an explicit no-tools instruction.
 The neutral names-only prompt came from the personal blind-naming-test skill.
 Routine locals and protocol-standard terminology were excluded.
 
+Current terminology uses `AutoloopDefinition`, `PlayAutoloop`, `autoloop_id` and
+`autoloop_*_elapsed_beats`, selected explicitly by the user. Prior reader quotes
+below retain their original identifiers; they are historical naming evidence.
+
 The measured input review is recorded separately in
 [normalized RMS naming evidence](naming-review-audio-level.json).
 
@@ -110,3 +114,43 @@ not an additional blind pass.
 Validation: Rust formatting, Clippy, all behavioral tests and unchanged sequence
 DMX digests cover the renames. This is a bounded API review, not exhaustive naming
 certification.
+
+
+## GDTF attribute controls
+
+Implementation: `starfire/src/lua/lighting.lua` constructs declarative fixture
+property effects. Numbers use GDTF physical units; named presets select a
+ChannelSet. `starfire/src/gdtf.rs::validate_attributes` resolves qualification,
+range and presets before encoding. `SetActiveEffect.AttributeValue` exposes the
+same alternatives on the wire.
+
+Fresh names-only readers used no inherited history or tools, with low reasoning.
+`blind_fixture_attribute` read `attribute`, `channel_set`:
+
+> - `attribute`: A named property or characteristic of something. Its owner, type, and whether it holds a value or metadata are unclear.
+> - `channel_set`: Likely a collection of channels. It could instead mean a channel configuration, a command to set a channel, or a Boolean indicating that a channel has been selected. The noun ?set? and verb ?set? are ambiguous.
+>
+> Neither name contains an abbreviation.
+
+Mismatch: the names hid physical values and made a preset sound like a collection.
+`blind_fixture_attribute_retry` read `physical_attribute`, `channel_preset`:
+
+> - `physical_attribute`: A property describing something tangible or measurable, such as size, weight, or position. Unclear whether this holds a value, identifies a property, or distinguishes physical properties from logical ones.
+> - `channel_preset`: A predefined configuration for a channel. ?Channel? is ambiguous: it could mean a communication route, data stream, or numbered slot. Unclear whether the preset configures one channel or represents a saved channel selection.
+
+Core property/preset meaning improved; constructor behavior remained unclear.
+`blind_fixture_effects` read longer candidates:
+
+> - `physical_attribute_effect`: An effect associated with, or changing, a physical property. Unclear whether it describes an operation, its result, or an effect configuration. ?Physical? may contrast with logical or virtual properties.
+> - `channel_preset_effect`: An effect associated with a channel preset, or the result of applying that preset. The kind of channel and the relationship between preset and effect are unclear.
+>
+> Neither name contains abbreviations.
+
+Disposition: keep concise `sf.physical_attribute` and `sf.channel_preset` as a
+contextual exception, not a blind pass. Like `sf.colour`, these functions construct
+effects; target arguments and the API documentation define that convention.
+Longer suffixes did not resolve the remaining ambiguity. This bounded review is
+closed without claiming exhaustive naming clarity. The interrupted
+`blind_gdtf_attributes` attempt used an unintended candidate and is discarded.
+User-selected AutoloopDefinition/PlayAutoloop and protocol major/minor terminology
+are explicit naming requirements, not additional blind passes.

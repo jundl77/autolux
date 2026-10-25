@@ -10,8 +10,10 @@ publish = false
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ctrlc = { version = "3.5", features = ["termination"] }
+gdtf = "=0.3.0"
 mlua = { version = "0.12.2", features = ["lua54", "vendored", "serde", "error-send"] }
 prost = "0.14"
+quick-xml = "=0.41.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

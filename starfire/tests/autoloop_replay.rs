@@ -5,7 +5,7 @@ use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay};
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 const FLOAT_TOLERANCE: f64 = 1e-10;
 const ROOM_FIXTURE_COUNT: usize = 14;
@@ -13,7 +13,7 @@ const LOOP_BEATS: f64 = 64.0;
 
 struct Look {
     bank: &'static str,
-    sequence: &'static str,
+    autoloop: &'static str,
     wash_range: (f64, f64),
     mover_range: (f64, f64),
     pan_range: (f64, f64),
@@ -37,7 +37,7 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
     for frame in frames {
         assert!(frame.script_error.is_none(), "{:?}", frame.script_error);
         assert_eq!(frame.active_bank.as_deref(), Some(look.bank));
-        assert_eq!(frame.active_sequence.as_deref(), Some(look.sequence));
+        assert_eq!(frame.active_autoloop.as_deref(), Some(look.autoloop));
         assert_eq!(
             frame.fixture_properties_before_strobe.len(),
             ROOM_FIXTURE_COUNT
@@ -55,7 +55,7 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
             );
             assert_eq!(
                 state.strobe_hz, 0.0,
-                "baseline sequences must never repeat strobe"
+                "baseline autoloops must never repeat strobe"
             );
             if mover {
                 within(state.colour.blue, (1.0, 1.0));
@@ -104,7 +104,7 @@ fn assert_semantics(frames: &[RenderedFrame], look: &Look) {
 
 fn check_replay(look: Look) {
     let replay = Replay::load(&root().join(format!("tests/replays/{}.json", look.bank))).unwrap();
-    let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     let first = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     assert_eq!(first.frames.len(), 3601);
@@ -114,7 +114,7 @@ fn check_replay(look: Look) {
     let digest = dmx_digest(&first.frames);
     assert_eq!(digest, dmx_digest(&second.frames));
 
-    // Duplicate selections cannot restart the current sequence.
+    // Duplicate selections cannot restart the current autoloop.
     let mut without_duplicate = replay.clone();
     without_duplicate.events.retain(|event| {
         event.at_seconds == 0.0 || !matches!(event.command, Command::Select { .. })
@@ -147,7 +147,7 @@ fn check_replay(look: Look) {
 fn atmospheric_blue_tide_replay() {
     check_replay(Look {
         bank: "atmospheric",
-        sequence: "blue_tide",
+        autoloop: "blue_tide",
         wash_range: (63.0 / 255.0, 63.0 / 255.0),
         mover_range: (63.0 / 255.0, 245.0 / 255.0),
         pan_range: (0.23, 0.43),
@@ -157,14 +157,14 @@ fn atmospheric_blue_tide_replay() {
 
 #[test]
 fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe() {
-    for (bank, sequence) in [
+    for (bank, autoloop) in [
         ("atmospheric", "blue_tide"),
         ("breakdown", "violet_space"),
         ("buildup", "current"),
         ("drop", "blue_impact"),
     ] {
         let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-        let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+        let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
         let mut engine = Engine::new(rig, catalog).unwrap();
         engine
             .apply(
@@ -180,7 +180,7 @@ fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe
                 0.0,
                 &Command::Select {
                     bank: bank.into(),
-                    sequence: sequence.into(),
+                    autoloop: autoloop.into(),
                     transition: Transition::Cut,
                 },
             )
@@ -209,7 +209,7 @@ fn every_bank_uses_measured_energy_without_changing_movement_or_repeating_strobe
 fn breakdown_violet_space_replay() {
     check_replay(Look {
         bank: "breakdown",
-        sequence: "violet_space",
+        autoloop: "violet_space",
         wash_range: (37.0 / 255.0, 37.0 / 255.0),
         mover_range: (37.0 / 255.0, 37.0 / 255.0),
         pan_range: (32767.0 / 65535.0, 32767.0 / 65535.0),
@@ -221,7 +221,7 @@ fn breakdown_violet_space_replay() {
 fn buildup_current_replay() {
     check_replay(Look {
         bank: "buildup",
-        sequence: "current",
+        autoloop: "current",
         wash_range: (0.0, 144.0 / 255.0),
         mover_range: (0.0, 144.0 / 255.0),
         pan_range: (0.40, 0.60),
@@ -233,7 +233,7 @@ fn buildup_current_replay() {
 fn drop_blue_impact_replay() {
     check_replay(Look {
         bank: "drop",
-        sequence: "blue_impact",
+        autoloop: "blue_impact",
         wash_range: (124.0 / 255.0, 245.0 / 255.0),
         mover_range: (0.0, 245.0 / 255.0),
         pan_range: (0.23, 0.43),
@@ -242,19 +242,19 @@ fn drop_blue_impact_replay() {
 }
 
 #[test]
-fn every_registered_sequence_has_an_executable_replay_and_expected_dmx() {
-    let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
+    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
     for entry in catalog.list() {
         let replay = Replay::load(&root().join(format!("tests/replays/{}.json", entry.bank)))
-            .expect("every authored sequence needs a replay fixture");
+            .expect("every authored autoloop needs a replay fixture");
         assert!(
             replay.events.iter().any(|event| {
-                matches!(&event.command, Command::Select { bank, sequence, .. }
-                if bank == &entry.bank && sequence == &entry.sequence)
+                matches!(&event.command, Command::Select { bank, autoloop, .. }
+                if bank == &entry.bank && autoloop == &entry.autoloop)
             }),
             "replay does not exercise {}/{}",
             entry.bank,
-            entry.sequence
+            entry.autoloop
         );
         let result = render_replay(
             &replay,
@@ -264,7 +264,7 @@ fn every_registered_sequence_has_an_executable_replay_and_expected_dmx() {
         .unwrap();
         let expected =
             fs::read_to_string(root().join(format!("tests/golden/{}.sha256", entry.bank)))
-                .expect("every authored sequence needs a reviewed full DMX digest");
+                .expect("every authored autoloop needs a reviewed full DMX digest");
         assert!(
             result
                 .frames
@@ -276,8 +276,8 @@ fn every_registered_sequence_has_an_executable_replay_and_expected_dmx() {
 }
 
 #[test]
-fn the_same_sequences_work_on_a_different_rig_through_named_groups() {
-    let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
+    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/generic.json")).unwrap();
     for entry in catalog.list() {
         let mut replay =
@@ -302,9 +302,9 @@ fn the_same_sequences_work_on_a_different_rig_through_named_groups() {
 
 #[test]
 fn beat_corrections_change_pulses_without_restarting_choreography() {
-    let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
-    for (bank, sequence, initial_level, corrected_level) in [
+    for (bank, autoloop, initial_level, corrected_level) in [
         ("buildup", "current", 144.0 / 255.0, 72.0_f64 / 255.0),
         ("drop", "blue_impact", 198.0 / 255.0, 124.0 / 255.0),
     ] {
@@ -324,7 +324,7 @@ fn beat_corrections_change_pulses_without_restarting_choreography() {
                 0.25,
                 &Command::Select {
                     bank: bank.into(),
-                    sequence: sequence.into(),
+                    autoloop: autoloop.into(),
                     transition: Transition::Cut,
                 },
             )
@@ -376,7 +376,7 @@ fn beat_corrections_change_pulses_without_restarting_choreography() {
 
 #[test]
 fn drop_pulses_survive_animation_freeze_and_selection_across_global_phrase_boundaries() {
-    let catalog = SequenceCatalog::load(&root().join("sequences")).unwrap();
+    let catalog = AutoloopCatalog::load(&root().join("../autoloop")).unwrap();
     let rig = FixtureRig::load(&root().join("../rigs/room.json")).unwrap();
     let mut pulse_traces = Vec::new();
     for selection_beat in [2.0, 2.25, 62.0, 62.25] {
@@ -396,7 +396,7 @@ fn drop_pulses_survive_animation_freeze_and_selection_across_global_phrase_bound
                     0.0,
                     &Command::Select {
                         bank: "drop".into(),
-                        sequence: "blue_impact".into(),
+                        autoloop: "blue_impact".into(),
                         transition: Transition::Cut,
                     },
                 )

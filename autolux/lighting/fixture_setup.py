@@ -8,6 +8,8 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from autolux.lighting.gdtf import MAX_CATALOGUE_BYTES, profile_metadata, read_bounded
+
 
 class FixtureStore:
     def __init__(self, patch_path: Path, profiles_path: Path, validate: Callable[[Path], None]):
@@ -17,7 +19,11 @@ class FixtureStore:
         self._lock = threading.Lock()
 
     def profiles(self) -> dict:
-        return json.loads(self.profiles_path.read_text(encoding='utf-8'))['profiles']
+        profiles = json.loads(read_bounded(self.profiles_path, MAX_CATALOGUE_BYTES))['profiles']
+        return {
+            name: profile_metadata(profile['gdtf_xml'], profile['dmx_mode'])
+            for name, profile in profiles.items()
+        }
 
     def load(self) -> tuple[dict, str]:
         with self._lock:

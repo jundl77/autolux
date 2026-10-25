@@ -18,6 +18,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "protobuf>=4.25,<5",
+    "pygdtf==1.4.5",
     "cython",
     "madmom",
     "numpy>=1.26,<2",

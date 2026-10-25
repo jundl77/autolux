@@ -16,7 +16,7 @@
       "command": {
         "kind": "select",
         "bank": "atmospheric",
-        "sequence": "blue_tide",
+        "autoloop": "blue_tide",
         "transition": {
           "kind": "cut"
         }
@@ -27,7 +27,7 @@
       "command": {
         "kind": "select",
         "bank": "atmospheric",
-        "sequence": "blue_tide",
+        "autoloop": "blue_tide",
         "transition": {
           "kind": "cut"
         }

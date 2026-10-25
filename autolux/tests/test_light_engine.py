@@ -689,7 +689,7 @@ async def test_boundary_scores_never_replace_a_held_sections_loop(score):
         ('breakdown', 'bridge', 'cooldown'),
     ],
 )
-async def test_same_family_sections_preserve_the_sequence_but_commit_their_boundaries(
+async def test_same_family_sections_preserve_the_autoloop_but_commit_their_boundaries(
     queued, labels
 ):
     decoder = FakeDecoder()

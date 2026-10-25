@@ -1,4 +1,4 @@
-"""Render the four Lua sequences offline and compare their actual DMX to captured references."""
+"""Render the four Lua autoloops offline and compare their actual DMX to captured references."""
 
 import argparse
 import gzip
@@ -29,7 +29,7 @@ def find_binary():
             candidate = ROOT / 'starfire/target' / profile / name
             if candidate.is_file():
                 return candidate
-    raise FileNotFoundError('Build Starfire before checking real sequence output')
+    raise FileNotFoundError('Build Starfire before checking real autoloop output')
 
 
 def evaluate_metrics(comparison, limits, continuous_properties):
@@ -55,13 +55,13 @@ def evaluate_metrics(comparison, limits, continuous_properties):
     return failures, diagnostics
 
 
-def check_sequence(bank, binary, output_dir):
+def check_autoloop(bank, binary, output_dir):
     manifest = read_json(REFERENCE / 'manifest.json')
     groups = read_json(REFERENCE / 'channel-groups.json')
     alignment = manifest['alignment']
     details = manifest['banks'][bank]
     output_dir.mkdir(parents=True, exist_ok=True)
-    script = ROOT / 'starfire/sequences' / bank / f'{details["sequence"]}.lua'
+    script = ROOT / 'autoloop' / bank / f'{details["autoloop"]}.lua'
     result = {'script_sha256': hashlib.sha256(script.read_bytes()).hexdigest(), 'captures': {}}
     offset = None
     for reference in manifest['captures']:
@@ -81,7 +81,7 @@ def check_sequence(bank, binary, output_dir):
                     'command': {
                         'kind': 'select',
                         'bank': bank,
-                        'sequence': details['sequence'],
+                        'autoloop': details['autoloop'],
                         'transition': {'kind': 'cut'},
                     },
                 },
@@ -95,8 +95,8 @@ def check_sequence(bank, binary, output_dir):
                 str(stem.with_suffix('.replay.json')),
                 '--rig',
                 str(ROOT / 'rigs/room.json'),
-                '--sequences',
-                str(ROOT / 'starfire/sequences'),
+                '--autoloops',
+                str(ROOT / 'autoloop'),
                 '--output',
                 str(stem.with_suffix('.dmx')),
                 '--summary',
@@ -152,7 +152,7 @@ def main():
     args = parser.parse_args()
     binary = args.binary or find_binary()
     manifest = read_json(REFERENCE / 'manifest.json')
-    report = {bank: check_sequence(bank, binary, args.output) for bank in manifest['banks']}
+    report = {bank: check_autoloop(bank, binary, args.output) for bank in manifest['banks']}
     (args.output / 'comparison.json').write_text(
         json.dumps(report, indent=2) + '\n', encoding='utf-8'
     )

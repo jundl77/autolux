@@ -5,7 +5,7 @@ use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 fn steady_room() -> Engine {
     let directory = tempfile::tempdir().unwrap();
@@ -23,7 +23,7 @@ fn steady_room() -> Engine {
     "#,
     )
     .unwrap();
-    let catalogue = SequenceCatalog::load(directory.path()).unwrap();
+    let catalogue = AutoloopCatalog::load(directory.path()).unwrap();
     let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let mut engine = Engine::new(rig, catalogue).unwrap();
     engine
@@ -31,7 +31,7 @@ fn steady_room() -> Engine {
             0.0,
             &Command::Select {
                 bank: "test".into(),
-                sequence: "steady".into(),
+                autoloop: "steady".into(),
                 transition: Transition::Cut,
             },
         )

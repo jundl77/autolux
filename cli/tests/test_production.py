@@ -6,6 +6,36 @@ from cli import production
 from cli.native_runtime import NativeSpec
 
 
+def test_receiver_playback_settings_are_sent_in_transmitter_login(tmp_path):
+    import json
+
+    for role in ('tx', 'rx'):
+        config = {
+            'peer_address': '127.0.0.1',
+            'bus_port': 19002,
+            'sample_rate': 44100,
+            'jitter_buffer_ms': 75,
+            'audio_enabled': False,
+            'dmx_enabled': False,
+        }
+        directory = tmp_path / f'radius_{role}'
+        directory.mkdir()
+        (directory / f'radius_{role}.json').write_text(json.dumps(config))
+        binary = tmp_path / f'cmake-build-release/radius_{role}/radius_{role}.exe'
+        binary.parent.mkdir(parents=True)
+        binary.touch()
+    args = argparse.Namespace(
+        radius_dir=tmp_path, tx_config=None, rx_config=None, receiver_host=None
+    )
+    transmitter, receiver = production.native_specs(args, 14)
+    assert transmitter.config['session'] == receiver.config['session']
+    assert transmitter.config['receiver'] == {
+        'audio_enabled': False,
+        'lighting_enabled': False,
+        'jitter_buffer_ms': 75,
+    }
+
+
 @pytest.mark.parametrize('exit_code', [0, 7])
 async def test_full_check_delegates_to_tools_before_device_readiness(
     tmp_path, monkeypatch, exit_code
@@ -102,7 +132,7 @@ def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypa
     [
         ('universe_mismatch', False),
         ('script_failure', False),
-        ('missing_sequence', False),
+        ('missing_autoloop', False),
         ('controller_init', False),
         ('receiver_start', False),
         ('transmitter_start', False),
@@ -119,7 +149,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     from cli import main, remote_runtime, windows_runtime, starfire_runtime, health_monitor
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
-    from autolux.lib.engine.effect_definitions import SEQUENCE_BY_LIGHT_INTENT
+    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
     from types import SimpleNamespace
     import json
 
@@ -154,18 +184,18 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             return SimpleNamespace(
                 returncode=1,
                 stdout='',
-                stderr='sequence atmospheric/blue_tide failed: unknown group strip',
+                stderr='autoloop atmospheric/blue_tide failed: unknown group strip',
             )
         universes = [1] if failure == 'universe_mismatch' else [0]
-        checked_sequences = [
-            {'bank': bank, 'sequence': sequence}
-            for bank, sequence in SEQUENCE_BY_LIGHT_INTENT.values()
+        checked_autoloops = [
+            {'bank': bank, 'autoloop': autoloop}
+            for bank, autoloop in AUTOLOOP_BY_LIGHT_INTENT.values()
         ]
-        if failure == 'missing_sequence':
-            checked_sequences.pop()
+        if failure == 'missing_autoloop':
+            checked_autoloops.pop()
         return SimpleNamespace(
             returncode=0,
-            stdout=json.dumps({'universes': universes, 'checked_sequences': checked_sequences}),
+            stdout=json.dumps({'universes': universes, 'checked_autoloops': checked_autoloops}),
             stderr='',
         )
 
@@ -216,7 +246,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             pass
 
     class Renderer:
-        def __init__(self, binary, rig, sequences, artnet, directory):
+        def __init__(self, binary, rig, autoloops, artnet, directory, **kwargs):
             assert artnet == '127.0.0.1:6454'
             self.process = None
 
@@ -285,7 +315,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         await production._run_session(args, checking=True)
     else:
         await production.run(args)
-    preflight_failures = ('universe_mismatch', 'script_failure', 'missing_sequence')
+    preflight_failures = ('universe_mismatch', 'script_failure', 'missing_autoloop')
     construction_failures = (*preflight_failures, 'controller_init')
     assert events.count('app_stop') == (0 if checking or failure in construction_failures else 1)
     assert events[-1] == 'unlock'

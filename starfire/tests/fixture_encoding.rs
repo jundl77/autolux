@@ -55,6 +55,7 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
             pan: 0.25,
             tilt: 0.75,
             strobe_hz: 0.0,
+            ..FixtureState::default()
         };
     }
     let frame = &rig.encode(&states).unwrap()[&0];

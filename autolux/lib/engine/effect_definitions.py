@@ -21,7 +21,7 @@ SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'altoutro': LightIntent.ATMOSPHERIC,
 }
 
-SEQUENCE_BY_LIGHT_INTENT: dict[LightIntent, tuple[str, str]] = {
+AUTOLOOP_BY_LIGHT_INTENT: dict[LightIntent, tuple[str, str]] = {
     LightIntent.ATMOSPHERIC: ('atmospheric', 'blue_tide'),
     LightIntent.BREAKDOWN: ('breakdown', 'violet_space'),
     LightIntent.BUILDUP: ('buildup', 'current'),

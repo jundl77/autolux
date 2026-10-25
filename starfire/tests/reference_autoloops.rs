@@ -7,7 +7,7 @@ use serde::Deserialize;
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, DMX_CHANNELS, Transition};
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 const REFERENCE_SCHEMA_VERSION: u32 = 1;
 const MAX_REPORTED_FAILURES: usize = 30;
@@ -25,7 +25,7 @@ struct Reference {
 #[derive(Deserialize)]
 struct Anchor {
     bank: String,
-    sequence: String,
+    autoloop: String,
     source_elapsed_beats: f64,
     render_at_seconds: f64,
     expected_dmx_hex: String,
@@ -46,7 +46,7 @@ fn channel_value(frame: &[u8], component: &[usize]) -> u32 {
 }
 
 #[test]
-fn all_four_sequences_match_independent_sound_switch_value_anchors() {
+fn all_four_autoloops_match_independent_sound_switch_value_anchors() {
     let reference: Reference =
         serde_json::from_str(include_str!("reference/soundswitch/value-anchors.json")).unwrap();
     let groups: BTreeMap<String, ChannelGroup> =
@@ -55,7 +55,7 @@ fn all_four_sequences_match_independent_sound_switch_value_anchors() {
     assert!(!reference.samples.is_empty());
     let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
     let catalog =
-        SequenceCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences")).unwrap();
+        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop")).unwrap();
     let mut engines = BTreeMap::new();
     let mut failures = Vec::new();
     for anchor in reference.samples {
@@ -75,7 +75,7 @@ fn all_four_sequences_match_independent_sound_switch_value_anchors() {
                     0.0,
                     &Command::Select {
                         bank: anchor.bank.clone(),
-                        sequence: anchor.sequence.clone(),
+                        autoloop: anchor.autoloop.clone(),
                         transition: Transition::Cut,
                     },
                 )

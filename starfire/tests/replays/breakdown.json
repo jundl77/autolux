@@ -16,7 +16,7 @@
       "command": {
         "kind": "select",
         "bank": "breakdown",
-        "sequence": "violet_space",
+        "autoloop": "violet_space",
         "transition": {
           "kind": "cut"
         }
@@ -27,7 +27,7 @@
       "command": {
         "kind": "select",
         "bank": "breakdown",
-        "sequence": "violet_space",
+        "autoloop": "violet_space",
         "transition": {
           "kind": "cut"
         }

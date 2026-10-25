@@ -84,7 +84,7 @@ def survives_digest(report: dict, streams: dict | None = None) -> dict:
 
 def _command_effect(command: dict) -> tuple[str, str] | None:
     if command['kind'] == 'select':
-        return ('SEQUENCE', f"{command['bank']}/{command['sequence']}")
+        return ('AUTOLOOP', f"{command['bank']}/{command['autoloop']}")
     if command['kind'] == 'set_override':
         return ('ACCENT', command['value']['id'])
     return None
@@ -106,11 +106,11 @@ def _intent_at(intents: list, t: float) -> str | None:
 
 
 def _effects_match_intents(report: dict) -> bool:
-    from autolux.lib.engine.effect_definitions import LightIntent, SEQUENCE_BY_LIGHT_INTENT
+    from autolux.lib.engine.effect_definitions import LightIntent, AUTOLOOP_BY_LIGHT_INTENT
 
     pools = {
-        intent.value: {f'{bank}/{sequence}'}
-        for intent, (bank, sequence) in SEQUENCE_BY_LIGHT_INTENT.items()
+        intent.value: {f'{bank}/{autoloop}'}
+        for intent, (bank, autoloop) in AUTOLOOP_BY_LIGHT_INTENT.items()
     }
     pools[LightIntent.DROP.value].add('drop_arrival')
     return all(
@@ -126,7 +126,7 @@ def relations_digest(report: dict, streams: dict | None = None) -> dict:
     return {
         'lighting_arrives_in_order': _non_decreasing(e['at_seconds'] for e in events),
         'lighting_matches_report': _effects_match_report(events, report['effects']),
-        'sequences_match_intents': _effects_match_intents(report),
+        'autoloops_match_intents': _effects_match_intents(report),
         'queue_error_within_tolerance': max(errors_ms, default=0.0) < TIMING_ACCURACY_MAX_MS,
     }
 

@@ -149,7 +149,7 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(patch_file):
     assert store.load()[0]['fixtures'][0]['address'] == winners[0]
 
 
-def test_renaming_fixture_preserves_group_order_used_by_sequence_spread(patch_file):
+def test_renaming_fixture_preserves_group_order_used_by_autoloop_spread(patch_file):
     from autolux.simulate.visualizer_app import _fixture_patch, _fixture_rows
 
     store = store_for(patch_file, lambda _staged: None)

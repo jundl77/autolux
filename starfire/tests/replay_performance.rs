@@ -51,7 +51,7 @@ fn mixed_show() -> Replay {
             },
         );
     }
-    for (at_seconds, bank, sequence) in [
+    for (at_seconds, bank, autoloop) in [
         (0.0, "atmospheric", "blue_tide"),
         (15.0, "breakdown", "violet_space"),
         (30.0, "buildup", "current"),
@@ -63,7 +63,7 @@ fn mixed_show() -> Replay {
             at_seconds,
             Command::Select {
                 bank: bank.into(),
-                sequence: sequence.into(),
+                autoloop: autoloop.into(),
                 transition: if at_seconds == 0.0 {
                     Transition::Cut
                 } else {
@@ -155,8 +155,10 @@ fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
         .arg(replay_path)
         .arg("--rig")
         .arg(rig_path)
-        .arg("--sequences")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences"))
+        .arg("--profiles")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs/profiles.json"))
+        .arg("--autoloops")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop"))
         .output()
         .unwrap();
     assert!(

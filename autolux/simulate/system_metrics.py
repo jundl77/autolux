@@ -240,7 +240,7 @@ def build_telemetry_notices(snapshot, *, now=None):
         if not renderer_is_fresh(system, age):
             messages.append('Starfire telemetry unavailable; gaps are not zero measurements.')
         elif renderer.get('script_error'):
-            messages.append(f'Starfire stopped its sequence: {renderer["script_error"]}')
+            messages.append(f'Starfire stopped its autoloop: {renderer["script_error"]}')
         else:
             history = snapshot.get('system_history') or []
             if not history or history[-1].get('starfire_measured_render_frames_per_second') is None:

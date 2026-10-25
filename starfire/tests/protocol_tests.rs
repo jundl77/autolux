@@ -11,7 +11,7 @@ use starfire::protocol::{
     read_event, wire,
 };
 use starfire::replay::{Replay, render_replay};
-use starfire::script::SequenceCatalog;
+use starfire::script::AutoloopCatalog;
 
 fn encoded(mut command: Operation) -> Vec<u8> {
     command.set_command_id(1);
@@ -28,13 +28,13 @@ impl Read for Fragmented {
     }
 }
 
-fn play(bank: &str, sequence: &str) -> Operation {
-    Operation::PlaySequence(wire::PlaySequence {
+fn play(bank: &str, autoloop: &str) -> Operation {
+    Operation::PlayAutoloop(wire::PlayAutoloop {
         command_id: 1,
-        sequence_id: if bank.is_empty() && sequence.is_empty() {
+        autoloop_id: if bank.is_empty() && autoloop.is_empty() {
             String::new()
         } else {
-            format!("{bank}/{sequence}")
+            format!("{bank}/{autoloop}")
         },
         transition: None,
     })
@@ -53,8 +53,10 @@ fn parameter(kind: wire::ParameterType, value: wire::parameter::Value) -> Operat
 fn engine() -> Engine {
     Engine::new(
         FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
-        SequenceCatalog::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences"))
-            .unwrap(),
+        AutoloopCatalog::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop"),
+        )
+        .unwrap(),
     )
     .unwrap()
 }
@@ -63,13 +65,13 @@ fn engine() -> Engine {
 fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
     let selection = play("atmospheric", "blue_tide");
     let mut data = encoded(selection.clone());
-    assert_eq!(data[0], wire::MessageType::PlaySequence as u8);
+    assert_eq!(data[0], wire::MessageType::PlayAutoloop as u8);
     assert_eq!(
         u32::from_be_bytes(data[1..5].try_into().unwrap()) as usize,
         data.len() - 5
     );
-    let payload = wire::PlaySequence::decode(&data[5..]).unwrap();
-    assert_eq!(payload.sequence_id, "atmospheric/blue_tide");
+    let payload = wire::PlayAutoloop::decode(&data[5..]).unwrap();
+    assert_eq!(payload.autoloop_id, "atmospheric/blue_tide");
     assert_eq!(payload.command_id, 1);
     data.extend(encoded(play("", "")));
     let mut input = Fragmented(Cursor::new(data));
@@ -114,7 +116,7 @@ fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
     }
     assert!(
         read_control(&mut Cursor::new([
-            wire::MessageType::PlaySequence as u8,
+            wire::MessageType::PlayAutoloop as u8,
             0,
             0,
             0,
@@ -169,20 +171,20 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
 }
 
 #[test]
-fn playback_resolves_sequence_ids_or_idle_and_validates_repeated_selection() {
+fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
     let mut engine = engine();
     apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for operation in [
         play("atmospheric", ""),
         play("", "blue_tide"),
-        Operation::PlaySequence(wire::PlaySequence {
-            transition: Some(wire::play_sequence::Transition::default()),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            transition: Some(wire::play_autoloop::Transition::default()),
             ..Default::default()
         }),
-        Operation::PlaySequence(wire::PlaySequence {
-            sequence_id: "atmospheric/blue_tide".into(),
-            transition: Some(wire::play_sequence::Transition {
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            autoloop_id: "atmospheric/blue_tide".into(),
+            transition: Some(wire::play_autoloop::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
             ..Default::default()
@@ -192,7 +194,7 @@ fn playback_resolves_sequence_ids_or_idle_and_validates_repeated_selection() {
         assert_eq!(engine.render_at(0.0).unwrap(), expected);
     }
     apply_command(&mut engine, 0.0, &play("", "")).unwrap();
-    assert!(engine.render_at(0.0).unwrap().active_sequence.is_none());
+    assert!(engine.render_at(0.0).unwrap().active_autoloop.is_none());
 }
 
 #[test]
@@ -272,7 +274,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             play("atmospheric", "blue_tide"),
             Command::Select {
                 bank: "atmospheric".into(),
-                sequence: "blue_tide".into(),
+                autoloop: "blue_tide".into(),
                 transition: Transition::Cut,
             },
         ),
@@ -288,16 +290,16 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         ),
         (
             0.75,
-            Operation::PlaySequence(wire::PlaySequence {
-                sequence_id: "drop/blue_impact".into(),
-                transition: Some(wire::play_sequence::Transition {
+            Operation::PlayAutoloop(wire::PlayAutoloop {
+                autoloop_id: "drop/blue_impact".into(),
+                transition: Some(wire::play_autoloop::Transition {
                     crossfade_beats: Some(2.0),
                 }),
                 ..Default::default()
             }),
             Command::Select {
                 bank: "drop".into(),
-                sequence: "blue_impact".into(),
+                autoloop: "blue_impact".into(),
                 transition: Transition::Crossfade {
                     duration_beats: 2.0,
                 },
@@ -357,9 +359,10 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             .collect(),
     };
     let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
-    let catalog =
-        SequenceCatalog::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sequences"))
-            .unwrap();
+    let catalog = AutoloopCatalog::load(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloop"),
+    )
+    .unwrap();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     let mut engine = Engine::new(rig, catalog).unwrap();
     let mut controls = controls.into_iter().peekable();
