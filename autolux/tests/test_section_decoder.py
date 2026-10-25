@@ -440,6 +440,7 @@ def test_the_nominal_bar_is_the_corpus_median_until_bars_are_measured():
 
 def test_a_reused_chain_is_handed_out_reset():
     from autolux.simulate import runner
+    from autolux.lib import section_chain
 
     used = decoder(lag_bars=2)
     feed(used, bars=8, labels=[0] * 8)
@@ -447,9 +448,11 @@ def test_a_reused_chain_is_handed_out_reset():
     chain.stream = type('Stream', (), {'reset': lambda self: None})()
     chain.decoder = used
     runner._SECTION_CHAIN = chain
+    runner._SECTION_CHAIN_DATA_DIR = section_chain.corpus_dir().resolve()
     try:
         handed = runner.load_section_chain()
         assert handed.decoder.bar_edges == []
         assert handed.decoder.bars_pushed == 0
     finally:
         runner._SECTION_CHAIN = runner._UNBUILT
+        runner._SECTION_CHAIN_DATA_DIR = None
