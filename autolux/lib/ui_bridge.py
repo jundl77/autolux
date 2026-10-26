@@ -25,6 +25,9 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
+# The engine loop takes commands every audio buffer (~6 ms); longer means the loop is stalled.
+HANDOFF_TIMEOUT_SEC = 0.25
+CORS_MAX_AGE_SEC = 600
 HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
 VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -160,8 +163,23 @@ def command_refusal(
     return None
 
 
+def _dashboard_origin(origin: str | None, dashboard_port: int | None) -> bool:
+    # Any host name: phones reach the dashboard by IP or by the mDNS name.
+    if origin is None or dashboard_port is None:
+        return False
+    return re.fullmatch(rf'http://[^/:\s]+:{dashboard_port}', origin) is not None
+
+
+def _await_handoff(commands: queue.Queue, timeout: float) -> bool:
+    # The engine calls task_done once it has applied each command; it drains them all at once.
+    with commands.all_tasks_done:
+        return commands.all_tasks_done.wait_for(lambda: commands.unfinished_tasks == 0, timeout)
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
+    # Headers and body go out as two writes; Nagle would hold the body for the client's delayed ACK.
+    disable_nagle_algorithm = True
 
     def handle(self) -> None:
         try:
@@ -191,10 +209,29 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_OPTIONS(self) -> None:
+        if self.path != CONTROL_PATH or self.server.commands is None or not self._cross_origin():
+            self.send_error(404 if self.path != CONTROL_PATH else 403)
+            return
+        self.send_response(204)
+        self._cors_headers()
+        self.send_header('Access-Control-Allow-Methods', 'POST')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Max-Age', str(CORS_MAX_AGE_SEC))
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def do_POST(self) -> None:
         commands = self.server.commands
         if self.path != CONTROL_PATH or commands is None:
             self.send_error(404)
+            return
+        if 'Origin' in self.headers and not self._cross_origin():
+            self.send_error(403)
+            return
+        if self.headers.get_content_type() != 'application/json':
+            # Forces a preflight for any cross-site page, so the origin check above cannot be skipped.
+            self.send_error(415)
             return
         try:
             length = int(self.headers.get('Content-Length', 0))
@@ -217,11 +254,24 @@ class _Handler(BaseHTTPRequestHandler):
         except queue.Full:
             self._reply(503, {'error': 'the show is busy; try again'})
             return
+        timeout = self.server.handoff_timeout
+        if timeout is not None and not _await_handoff(commands, timeout):
+            self._reply(504, {'error': 'the show has not taken the command yet'})
+            return
         self._reply(202, {'accepted': command['action']})
+
+    def _cross_origin(self) -> bool:
+        return _dashboard_origin(self.headers.get('Origin'), self.server.dashboard_port)
+
+    def _cors_headers(self) -> None:
+        if self._cross_origin():
+            self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
+            self.send_header('Vary', 'Origin')
 
     def _reply(self, status: int, body: dict) -> None:
         content = json.dumps(body).encode()
         self.send_response(status)
+        self._cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(content)))
         self.end_headers()
@@ -238,10 +288,21 @@ class _Http(ThreadingHTTPServer):
 
 
 class SnapshotServer:
-    def __init__(self, event_buffer, port: int, commands: queue.Queue | None = None):
-        self._http = _Http((SNAPSHOT_HOST, port), _Handler)
+    def __init__(
+        self,
+        event_buffer,
+        port: int,
+        commands: queue.Queue | None = None,
+        *,
+        host: str = SNAPSHOT_HOST,
+        dashboard_port: int | None = None,
+        handoff_timeout: float | None = None,
+    ):
+        self._http = _Http((host, port), _Handler)
         self._http.event_buffer = event_buffer
         self._http.commands = commands
+        self._http.dashboard_port = dashboard_port
+        self._http.handoff_timeout = handoff_timeout
         self._thread = threading.Thread(
             target=self._http.serve_forever, name='snapshot-server', daemon=True
         )
@@ -352,7 +413,15 @@ def start(
     commands: queue.Queue | None = None,
 ) -> UiBridge | None:
     try:
-        server = SnapshotServer(event_buffer, snapshot_port(ui_port), commands)
+        # Bound like the dashboard so its page can POST controls here directly.
+        server = SnapshotServer(
+            event_buffer,
+            snapshot_port(ui_port),
+            commands,
+            host=DASHBOARD_BIND_ADDRESS,
+            dashboard_port=ui_port,
+            handoff_timeout=HANDOFF_TIMEOUT_SEC,
+        )
         server.start()
     except OSError as error:
         logging.warning(

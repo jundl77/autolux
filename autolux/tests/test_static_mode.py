@@ -345,3 +345,29 @@ async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
     await light.leave_static()
     await beat_at_phase(light, decoder, 0)
     assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+
+
+async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_the_delay(
+    tmp_path,
+):
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    light, queue, clock, lighting = static_engine()
+    clock.advance(5.0)
+    blue = (0.0, 0.0, 1.0)
+    for command in (
+        {'action': 'mode', 'mode': 'static'},
+        {'action': 'static', 'kind': 'look', 'target': 'all', 'colour': blue, 'dimmer': 1.0},
+        {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.3},
+    ):
+        control.commands.put_nowait(command)
+    await control.apply_pending(light)
+
+    looks = sent(lighting, 'set_override')
+    assert [at for at, _ in looks] == [clock.monotonic()] * 2
+    assert [look['value']['id'] for _, look in looks] == ['static_all', 'static_wash']
+    # No lifetime or transition: Starfire cuts an override in on its next 25 ms frame.
+    assert all(look['value'].keys() == {'id', 'target', 'values', 'priority'} for _, look in looks)
+    assert queue.pending == 0, 'operator looks must never wait behind the playback delay'
+    assert control.commands.unfinished_tasks == 0, 'each command is marked handed to the engine'
