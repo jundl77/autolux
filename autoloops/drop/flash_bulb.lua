@@ -1,4 +1,7 @@
 -- 8-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- energy: 2
+-- family: cold
+-- movement: snap
 -- wash: cold flash on beats 1 and 3 with a long decay that melts into an accent fill
 -- (up to 0.3 with RMS); beats 2 and 4 stay in the fill.
 -- strip: primary kick hit on every beat.

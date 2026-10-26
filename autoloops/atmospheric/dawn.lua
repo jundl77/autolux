@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: warm
+-- movement: still
 -- wash: sunrise, colour climbs secondary -> cold across the phrase and sinks back, level rises with it.
 -- strip: warm glow rising from both ends towards the centre as the sun comes up.
 -- movers: cold, parked wide and mirrored, tilt lifting slowly with the sun.

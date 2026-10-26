@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 2
+-- family: accent
+-- movement: still
 -- wash: accent, one soft lub-dub per bar: a swell on the one, a hold, a higher swell
 -- to beat 2, then a slow decay. Holding (not dipping) between them keeps one peak per bar.
 -- strip: off.

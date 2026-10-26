@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: off.
 -- strip: off except the centre pair (4 and 5), one cold point breathing over 8 beats.
 -- movers: cold, tilting slowly up while their pans cross and return once per loop.

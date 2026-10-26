@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: warm
+-- movement: still
 -- wash: secondary, one slow breath per loop up to 0.2.
 -- strip: off.
 -- movers: primary, still, both on centre. Palette slots: primary, secondary, black.

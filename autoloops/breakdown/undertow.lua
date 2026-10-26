@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: still
 -- wash: off.
 -- strip: cold, lit everywhere except a soft gap travelling the strip once per loop
 -- (wrapping, so the restart is seamless).

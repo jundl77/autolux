@@ -1,4 +1,7 @@
 -- 16-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- energy: 2
+-- family: warm
+-- movement: still
 -- wash: secondary, an accent flash on each bar's one whose depth grows with the ramp.
 -- strip: cold, counts down 8 to 1 lit pixels, one fewer every half bar across the 4-bar phrase.
 -- movers: primary, mirrored, still, closing toward centre with the ramp.

@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: warm
+-- movement: still
 -- wash: low level, colour crossfades secondary -> primary -> secondary across the phrase.
 -- strip: one secondary glow drifting end to end and back, crossfading between pixels.
 -- movers: primary, parked wide and mirrored, tiny slow tilt breathe.

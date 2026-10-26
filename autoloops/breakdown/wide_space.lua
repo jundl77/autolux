@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: accent
+-- movement: sweep
 -- wash: near-black, accent fades in over 12 beats and back out over the last 4.
 -- strip: one dim accent pixel crossfading along the strip, one step per 2 beats.
 -- movers: wide, very slow mirrored sweep. Palette slots: accent, cold.
