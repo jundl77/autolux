@@ -70,7 +70,6 @@ FIXTURE_CSS = '''
 .mvr-editor h4 {margin:16px 0 8px;font-size:12px;color:#c9d7e6;font-weight:600;}
 .mvr-editor .mvr-row {display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:6px;align-items:center;margin-bottom:6px;}
 .mvr-editor .mvr-row label {color:#94a6b9;font-size:11px;overflow:hidden;text-overflow:ellipsis;}
-.mvr-editor .mvr-row.invalid input,.mvr-editor .mvr-row.invalid select {border-color:#e69478;}
 .mvr-editor .mvr-helper {display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 8px;}
 .mvr-editor .mvr-adders {display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;}
 #config-panel .mvr-editor button.mvr-small {padding:2px 7px;font-size:11px;}

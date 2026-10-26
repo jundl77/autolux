@@ -62,8 +62,10 @@ See [validation](../docs/starfire/validation.md) for tested behavior and hardwar
 Fixture types use standard GDTF XML and a selected DMX mode. Import a `.gdtf`
 archive with `uv run autolux starfire import-fixture fixture.gdtf --profile-id spot --mode "16ch"`.
 The renderer validates the mode before saving it in the `rigs/profiles.json`
-library. Rigs are MVR files (`rigs/room.mvr`) that embed the GDTF files they use;
-`check`, `rig` and `replay` take `--rig some.mvr`. Moving-head homes come from
+library. Rigs are MVR files (`rigs/room.mvr`) that embed the GDTF files they use.
+Autolux parses them; the native `check`, `rig` and `replay` commands take the exported
+`RigDefinition` (`autolux starfire export-rig room.mvr room.rig.pb`; the Autolux CLI
+exports automatically). Moving-head homes come from
 each fixture's MVR Matrix ([rig-mvr](../docs/starfire/rig-mvr.md)). Patch and
 place fixtures in the existing Config tab.
 
