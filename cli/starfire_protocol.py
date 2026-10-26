@@ -21,6 +21,7 @@ COMMAND_MESSAGES = {
     wire.UNSET_ACTIVE_EFFECT: wire.UnsetActiveEffect,
     wire.UPDATE_BEAT: wire.UpdateBeat,
     wire.SET_PARAMETER: wire.SetParameter,
+    wire.DISCARD_DELAYED_AUDIO: wire.DiscardDelayedAudio,
     wire.HEARTBEAT: wire.Heartbeat,
 }
 EVENT_MESSAGES = {
@@ -93,6 +94,10 @@ def build_command(command: dict | Message) -> Message:
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
                 message = wire.PlayAutoloop()
+            elif kind == 'discard_delayed_audio':
+                if value:
+                    raise ValueError('Discarding delayed audio takes no fields')
+                message = wire.DiscardDelayedAudio()
             elif kind == 'heartbeat':
                 message = wire.Heartbeat(**value)
             else:

@@ -5,6 +5,7 @@ from pathlib import Path
 from autolux.lib.engine.effect_definitions import (
     AUTOLOOP_META_VALUES,
     PREFERRED_AUTOLOOPS,
+    STANDBY_AUTOLOOP,
     AutoloopMeta,
     AutoloopMetaTable,
     AutoloopTable,
@@ -30,6 +31,10 @@ def discover_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> AutoloopTable:
 
 
 def required_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> set[tuple[str, str]]:
+    return rotation_autoloops(directory) | {STANDBY_AUTOLOOP}
+
+
+def rotation_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> set[tuple[str, str]]:
     return {loop for loops in discover_autoloops(directory).values() for loop in loops}
 
 
@@ -65,7 +70,8 @@ def parse_autoloop_meta(source: str) -> AutoloopMeta:
 def read_autoloop_meta(directory: Path = AUTOLOOP_DIRECTORY) -> AutoloopMetaTable:
     """Every discovered loop's metadata; one error names every loop that is wrong."""
     table, problems = {}, []
-    for loop in sorted(required_autoloops(directory)):
+    # Standby is never chosen by the policy, so it carries no selection metadata.
+    for loop in sorted(rotation_autoloops(directory)):
         bank, name = loop
         path = Path(directory) / bank / f'{name}.lua'
         if not path.is_file():

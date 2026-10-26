@@ -11,6 +11,8 @@ from autolux.lib.engine.autoloop_policy import AutoloopChoice, AutoloopPolicy, S
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
+    STANDBY_AUTOLOOP,
+    STANDBY_CROSSFADE_SECONDS,
     STROBE_BURST_BEATS,
     STROBE_RATE_HZ,
     AutoloopMetaTable,
@@ -75,14 +77,15 @@ class EffectController:
         intent: LightIntent,
         bpm: float | None = None,
         context: SelectionContext | None = None,
+        *,
+        cut: bool = False,
     ) -> bool:
         """True when a look was sent; nothing is remembered for one that was not."""
         context = context or SelectionContext(intent)
         choice, fresh = self._entry_choice(context)
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
-        if not self.lighting_client.select_autoloop(
-            bank, autoloop, transition=transition_for(intent)
-        ):
+        transition = {'kind': 'cut'} if cut else transition_for(intent)
+        if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
             return False
         if fresh:
             self._policy.record(context, choice)
@@ -112,6 +115,22 @@ class EffectController:
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
         return True
+
+    def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
+        self.lighting_client.clear_override(DROP_ACCENT_ID)
+        bank, autoloop = STANDBY_AUTOLOOP
+        # Starfire fades in beats on its last tempo; without one, or with its clock
+        # frozen by pause, a fade would never end.
+        transition = (
+            {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
+            if bpm and bpm > 0 and not renderer_paused
+            else {'kind': 'cut'}
+        )
+        if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
+            return
+        if self.event_buffer:
+            self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
+        LOGGER.info('[lighting] standby | autoloop=%s/%s', bank, autoloop)
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
         settings = self._settings()

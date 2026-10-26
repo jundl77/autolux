@@ -109,6 +109,26 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
     }
 }
 
+#[test]
+fn discarding_delayed_audio_round_trips_and_leaves_lighting_untouched() {
+    let discard = Operation::DiscardDelayedAudio(wire::DiscardDelayedAudio { command_id: 7 });
+    let data = encoded(discard);
+    assert_eq!(data[0], wire::MessageType::DiscardDelayedAudio as u8);
+    let decoded = read_control(&mut Fragmented(Cursor::new(data)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(decoded.command_id(), Some(1));
+    assert!(matches!(decoded, Operation::DiscardDelayedAudio(_)));
+
+    let mut engine = engine();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    let before = engine.render_at(0.5).unwrap();
+    apply_command(&mut engine, 0.5, &decoded).unwrap();
+    let after = engine.render_at(0.5).unwrap();
+    assert_eq!(before.dmx_frames_by_universe, after.dmx_frames_by_universe);
+    assert_eq!(after.active_autoloop.as_deref(), Some("cold_breathe"));
+}
+
 fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
     Operation::Login(wire::Login {
         command_id: 1,

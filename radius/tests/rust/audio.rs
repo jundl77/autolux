@@ -41,6 +41,7 @@ fn assembler(capacity: usize) -> CaptureAssembler {
         queue_overflow_frames: Arc::new(AtomicU64::new(0)),
         discontinuities: Arc::new(CaptureDiscontinuities::default()),
         counters: Arc::new(StreamCounters::new()),
+        discard_requested: Arc::new(AtomicBool::new(false)),
     }
 }
 
@@ -275,6 +276,110 @@ fn a_gap_the_capture_queue_cannot_hold_faults_before_queueing_partial_audio() {
         Some("a capture gap exceeded the capture queue headroom")
     );
     assert_eq!(capture.queue.len(), 3);
+}
+
+#[test]
+fn discarding_silences_the_delayed_tail_and_rebuilds_the_delay_from_new_audio() {
+    let seconds = 0.25;
+    let lag = (seconds * f64::from(SAMPLE_RATE)).round() as usize;
+    let mut delay = AudioDelay::new(seconds).unwrap();
+    for _ in 0..lag * 3 / 2 {
+        delay.frame([0.5, -0.5]);
+    }
+    delay.discard_buffered();
+    let mut previous_gain = 1.0;
+    for frame in 0..lag {
+        let input = [frame as f32 + 1.0, -(frame as f32 + 1.0)];
+        let output = delay.frame(input);
+        let gain = output[0] / 0.5;
+        assert!(
+            gain <= previous_gain && gain >= 0.0,
+            "frame {frame} must fade"
+        );
+        assert_eq!(output[1], -output[0]);
+        if frame >= DISCARD_FADE_FRAMES - 1 {
+            assert_eq!(output, [0.0; CHANNELS], "frame {frame} must be silent");
+        }
+        previous_gain = gain;
+    }
+    // Audio captured after the discard plays exactly one delay later.
+    for frame in 0..lag {
+        let expected = [frame as f32 + 1.0, -(frame as f32 + 1.0)];
+        assert_eq!(delay.frame([0.0; CHANNELS]), expected);
+    }
+}
+
+#[test]
+fn discard_request_keeps_receiver_playout_contiguous_and_silent_without_rebuffering() {
+    // One block captured, sent and played per step keeps RX at its steady fill.
+    fn step(
+        capture: &mut CaptureAssembler,
+        sender: &mut PlayoutSender,
+        playout: &mut Playout,
+        input: f32,
+    ) -> Vec<f32> {
+        let first_frame = capture.device_frames.load(Ordering::Relaxed);
+        capture.capture_at(
+            &[input; BLOCK_FRAMES * CHANNELS],
+            CaptureClock::frame_nanos(first_frame),
+        );
+        while let Some(audio) = capture.queue.pop() {
+            sender
+                .enqueue(PlaybackBlock {
+                    audio,
+                    light_sequence_number: 1,
+                    channels: [0; 512],
+                })
+                .unwrap();
+        }
+        playout.begin_callback();
+        let mut output = [0.0; CHANNELS];
+        let played = (0..BLOCK_FRAMES)
+            .map(|_| {
+                playout.frame(&mut output);
+                output[0]
+            })
+            .collect();
+        while sender.lighting.pop().is_some() {}
+        played
+    }
+
+    let mut capture = assembler(CAPTURE_QUEUE_BLOCKS);
+    capture.delay = AudioDelay::new(0.25).unwrap();
+    let (mut playout, mut sender) = Playout::new(JITTER_BUFFER_MS).unwrap();
+    let blocks_per_second = SAMPLE_RATE as usize / BLOCK_FRAMES;
+    let mut played = Vec::new();
+    for _ in 0..blocks_per_second {
+        played = step(&mut capture, &mut sender, &mut playout, 0.5);
+    }
+    assert!(played.iter().all(|&sample| sample == 0.5));
+    assert!(playout.is_primed());
+
+    // New audio (0.25) starts with the discard; the old tail (0.5) must not play.
+    capture.discard_requested.store(true, Ordering::Release);
+    let mut after_discard = Vec::new();
+    for _ in 0..blocks_per_second {
+        after_discard.extend(step(&mut capture, &mut sender, &mut playout, 0.25));
+        assert!(playout.is_primed(), "RX must not rebuffer");
+    }
+    assert!(!capture.counters.faulted.load(Ordering::Acquire));
+    assert_eq!(sender.counters.underruns.load(Ordering::Relaxed), 0);
+    assert_eq!(sender.counters.rebuffer_count.load(Ordering::Relaxed), 0);
+
+    let silence_starts = after_discard
+        .iter()
+        .position(|&sample| sample == 0.0)
+        .expect("the discarded tail must reach RX as silence");
+    let resumes = silence_starts
+        + after_discard[silence_starts..]
+            .iter()
+            .position(|&sample| sample > 0.0)
+            .expect("new audio must emerge one delay later");
+    let delay_frames = (0.25 * f64::from(SAMPLE_RATE)).round() as usize;
+    // RX clock correction interpolates, so each edge may blur by one frame.
+    let silent_frames = resumes - silence_starts;
+    assert!(silent_frames.abs_diff(delay_frames - DISCARD_FADE_FRAMES + 1) <= 2);
+    assert!(after_discard[resumes + 1..].iter().all(|&s| s == 0.25));
 }
 
 #[test]

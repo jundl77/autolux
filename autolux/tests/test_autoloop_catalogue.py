@@ -3,6 +3,7 @@ import pytest
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     PREFERRED_AUTOLOOPS,
+    STANDBY_AUTOLOOP,
     AutoloopMeta,
     LightIntent,
 )
@@ -82,6 +83,7 @@ def test_reading_the_library_reports_every_bad_loop_at_once(tmp_path):
 
 def test_every_shipped_loop_declares_metadata_and_the_defaults_match_their_files():
     meta = read_autoloop_meta()
-    assert set(meta) == required_autoloops()
+    # Standby is required but never selected, so it carries no selection metadata.
+    assert set(meta) == required_autoloops() - {STANDBY_AUTOLOOP}
     for loop, declared in DEFAULT_AUTOLOOP_META.items():
         assert meta[loop] == declared

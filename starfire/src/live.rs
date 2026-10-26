@@ -108,6 +108,13 @@ impl LiveOutput {
         }
     }
 
+    fn discard_delayed_audio(&self) {
+        // Art-Net carries no audio, so there is nothing delayed to discard.
+        if let Self::Radius { transmitter, .. } = self {
+            transmitter.discard_delayed_audio();
+        }
+    }
+
     fn send_frame(&mut self, frames: &BTreeMap<u16, Vec<u8>>) -> Result<()> {
         match self {
             Self::ArtNet(output) => output.send_frame(frames),
@@ -428,6 +435,11 @@ pub fn run_live(
                     _ => {
                         let result = match &mut session {
                             Some(session) => {
+                                if let (ClientMessage::DiscardDelayedAudio(_), Some(output)) =
+                                    (&command, &session.output)
+                                {
+                                    output.discard_delayed_audio();
+                                }
                                 apply_command(&mut session.engine, at_seconds, &command)
                             }
                             None => Err(anyhow::anyhow!(
