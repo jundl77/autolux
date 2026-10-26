@@ -1,3 +1,5 @@
+mod support;
+
 use std::io::Write;
 use std::net::UdpSocket;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -97,13 +99,8 @@ impl Renderer {
                 }],
                 groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()] }],
                 profiles: vec![{
-                    let profiles: serde_json::Value = serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
-                    let profile = &profiles["profiles"]["generic_rgb"];
-                    wire::FixtureProfile {
-                        profile_id: "rgb".into(),
-                        gdtf_xml: profile["gdtf_xml"].as_str().unwrap().into(),
-                        dmx_mode: profile["dmx_mode"].as_str().unwrap().into(),
-                    }
+                    let (gdtf_xml, dmx_mode) = support::catalogue_profile("generic_rgb").unwrap();
+                    wire::FixtureProfile { profile_id: "rgb".into(), gdtf_xml, dmx_mode }
                 }],
             }),
             autoloops: vec![

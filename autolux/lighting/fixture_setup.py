@@ -99,14 +99,14 @@ def _revision(content: bytes) -> str:
 
 
 class FixtureStore:
-    def __init__(self, rig_path: Path, profiles_path: Path, validate: Callable[[Path], None]):
+    def __init__(self, rig_path: Path, library_path: Path, validate: Callable[[Path], None]):
         self.rig_path = Path(rig_path)
-        self.profiles_path = Path(profiles_path)
+        self.library_path = Path(library_path)
         self._validate = validate
         self._lock = threading.Lock()
 
     def library(self) -> dict:
-        return fixture_library(self.profiles_path)
+        return fixture_library(self.library_path)
 
     def load(self) -> tuple[dict, str]:
         with self._lock:

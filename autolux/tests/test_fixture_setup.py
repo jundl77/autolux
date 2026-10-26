@@ -9,7 +9,7 @@ from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy
 
 ROOT = Path(__file__).resolve().parents[2]
-CATALOGUE = ROOT / 'rigs/profiles.json'
+LIBRARY = ROOT / 'rigs/library'
 MODES = {'rgb.gdtf': {'3ch': {'channels': 3}}, 'mover.gdtf': {'12ch': {'channels': 12}}}
 
 
@@ -69,7 +69,7 @@ def rig_file(tmp_path):
 
 
 def store_for(path, validate):
-    return FixtureStore(path, CATALOGUE, validate)
+    return FixtureStore(path, LIBRARY, validate)
 
 
 def fixture_node(draft, name):
@@ -241,3 +241,11 @@ def test_class_order_follows_document_order_after_moving_a_fixture(rig_file):
     store.save(draft, revision)
     fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
     assert mvr.groups(fixtures)['movers'] == ['spot_right', 'spot_left']
+
+
+def test_config_names_the_library_folder_it_lists():
+    from autolux.simulate.fixture_panel import library_folder
+
+    assert library_folder(LIBRARY) == 'rigs/library'
+    listed = FixtureStore(ROOT / 'rigs/room.mvr', LIBRARY, lambda _: None).library()
+    assert set(listed) == {path.name for path in LIBRARY.glob('*.gdtf')}

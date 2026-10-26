@@ -36,13 +36,11 @@ fn rig() -> wire::RigDefinition {
 }
 
 fn profile(id: &str) -> wire::FixtureProfile {
-    let profiles: serde_json::Value =
-        serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
-    let value = &profiles["profiles"][id];
+    let (gdtf_xml, dmx_mode) = support::catalogue_profile(id).unwrap();
     wire::FixtureProfile {
         profile_id: id.into(),
-        gdtf_xml: value["gdtf_xml"].as_str().unwrap().into(),
-        dmx_mode: value["dmx_mode"].as_str().unwrap().into(),
+        gdtf_xml,
+        dmx_mode,
     }
 }
 

@@ -571,12 +571,18 @@ mod tests {
                     ..Default::default()
                 }],
                 profiles: vec![{
-                    let profiles: serde_json::Value = serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
-                    let profile = &profiles["profiles"]["generic_rgb"];
+                    let generic = wire::RigDefinition::decode(
+                        include_bytes!("../../rigs/generic.rig.pb").as_slice(),
+                    )
+                    .unwrap();
+                    let profile = generic
+                        .profiles
+                        .into_iter()
+                        .find(|profile| profile.profile_id.contains("@generic_rgb.gdtf#"))
+                        .unwrap();
                     wire::FixtureProfile {
                         profile_id: "rgb".into(),
-                        gdtf_xml: profile["gdtf_xml"].as_str().unwrap().into(),
-                        dmx_mode: profile["dmx_mode"].as_str().unwrap().into(),
+                        ..profile
                     }
                 }],
                 ..Default::default()

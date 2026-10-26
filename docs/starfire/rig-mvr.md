@@ -3,8 +3,10 @@
 `rigs/room.mvr` is an MVR 1.6 (DIN SPEC 15801) archive: `GeneralSceneDescription.xml`
 plus every `.gdtf` (DIN SPEC 15800, `description.xml` inside) its fixtures reference, all
 at the archive root, STORE or DEFLATE. GDTF files are named
-`<Manufacturer>@<FixtureType>.gdtf`. `rigs/profiles.json` is only the fixture *library*:
-Config embeds a library GDTF into the MVR when a fixture first uses it.
+`<Manufacturer>@<FixtureType>.gdtf`. `rigs/library/` holds the fixture *library* as GDTF 1.2
+archives under the same names: Config embeds a library archive into the MVR byte for byte
+when a fixture first uses it, so a rig rebuilt from the library exports the same
+`RigDefinition`.
 
 ## Contract
 

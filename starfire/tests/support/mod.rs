@@ -8,8 +8,6 @@ use starfire::fixtures::FixtureRig;
 use starfire::palette::{PaletteDefinition, PaletteTable};
 use starfire::protocol::wire;
 
-pub const PROFILES: &str = include_str!("../../../rigs/profiles.json");
-
 pub fn palette_definitions() -> Vec<PaletteDefinition> {
     serde_json::from_str(include_str!("../palettes.json")).unwrap()
 }
@@ -26,13 +24,25 @@ pub fn room() -> FixtureRig {
     FixtureRig::load(&rigs().join("room.rig.pb")).unwrap()
 }
 
-fn catalogue_profile(profile: &str) -> Option<(String, String)> {
-    let catalogue: Value = serde_json::from_str(PROFILES).unwrap();
-    let source = catalogue["profiles"].get(profile)?;
-    Some((
-        source["gdtf_xml"].as_str().unwrap().into(),
-        source["dmx_mode"].as_str().unwrap().into(),
-    ))
+/// A shipped fixture type's GDTF description and mode, as the exported rigs carry them.
+pub fn catalogue_profile(fixture_type: &str) -> Option<(String, String)> {
+    ["generic.rig.pb", "room.rig.pb"]
+        .into_iter()
+        .find_map(|file| {
+            let rig =
+                wire::RigDefinition::decode(std::fs::read(rigs().join(file)).unwrap().as_slice())
+                    .unwrap();
+            rig.profiles
+                .into_iter()
+                .find(|profile| shipped_type(&profile.profile_id) == Some(fixture_type))
+                .map(|profile| (profile.gdtf_xml, profile.dmx_mode))
+        })
+}
+
+/// "Manufacturer@type.gdtf#mode" names the MVR GDTFSpec and its mode.
+fn shipped_type(profile_id: &str) -> Option<&str> {
+    let (_, spec) = profile_id.split_once('@')?;
+    Some(spec.split_once(".gdtf#")?.0)
 }
 
 fn number(fixture: &Value, key: &str) -> u32 {

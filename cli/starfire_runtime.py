@@ -23,7 +23,7 @@ from cli.starfire import (
     DEFAULT_AUTOLOOPS,
     DEFAULT_BINARY,
     DEFAULT_FIXTURE_STORE,
-    PROFILE_CATALOGUE,
+    FIXTURE_LIBRARY,
     ROOT,
     saved_rig,
 )
@@ -55,7 +55,7 @@ def add_arguments(parser, *, include_artnet=False):
     parser.add_argument('--rig', type=Path, help='MVR rig; defaults to the saved room rig')
     parser.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
     parser.add_argument(
-        '--profiles', type=Path, default=PROFILE_CATALOGUE, help='Fixture library for Config'
+        '--library', type=Path, default=FIXTURE_LIBRARY, help='GDTF folder Config offers'
     )
     if include_artnet:
         parser.add_argument('--artnet', default=DEFAULT_ARTNET_DESTINATION)
@@ -69,7 +69,7 @@ def fixture_setup(args):
     return {
         'binary': Path(args.starfire_binary).resolve(),
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
-        'profiles': Path(getattr(args, 'profiles', PROFILE_CATALOGUE)).resolve(),
+        'library': Path(getattr(args, 'library', FIXTURE_LIBRARY)).resolve(),
     }
 
 

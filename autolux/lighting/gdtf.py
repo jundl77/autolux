@@ -1,7 +1,5 @@
 import io
-import json
 import os
-import re
 import tempfile
 import zipfile
 from collections.abc import Callable
@@ -15,13 +13,11 @@ from autolux.lighting import mvr
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 4096
 MAX_DESCRIPTION_BYTES = 1024 * 1024
-MAX_CATALOGUE_BYTES = 1024 * 1024
+MAX_LIBRARY_ARCHIVES = 256
 MAX_XML_NODES = 32768
 MAX_XML_DEPTH = 64
 MAX_DMX_CHANNELS = 512
 MAX_CHANNEL_BYTES = 4
-PROFILE_ID = re.compile(r'[a-z0-9_-]{1,64}')
-SCHEMA_VERSION = 1
 
 
 def read_bounded(path: Path, limit: int) -> bytes:
@@ -129,81 +125,63 @@ def profile_metadata(xml: str, mode_name: str) -> dict:
         raise ValueError(f'Invalid GDTF description: {error}') from error
 
 
-def _registry(content: bytes) -> dict:
-    registry = json.loads(content)
-    if (
-        not isinstance(registry, dict)
-        or set(registry) != {'schema_version', 'profiles'}
-        or type(registry['schema_version']) is not int
-        or registry['schema_version'] != SCHEMA_VERSION
-        or not isinstance(registry['profiles'], dict)
-    ):
-        raise ValueError('Invalid fixture profile catalogue')
-    return registry
+def _library_entry(archive: Path) -> dict:
+    content = read_bounded(archive, MAX_ARCHIVE_BYTES)
+    xml = read_description(archive)
+    try:
+        fixture = _parse(xml)
+    except (ElementTree.ParseError, AttributeError, IndexError, KeyError, TypeError) as error:
+        raise ValueError(f'Invalid GDTF description {archive.name}: {error}') from error
+    spec = mvr.gdtf_spec_name(fixture.manufacturer, fixture.name)
+    if archive.name != spec:
+        # The file name is the GDTFSpec an MVR patch names it by.
+        raise ValueError(f'{archive.name} describes {spec}; name the file {spec}')
+    modes = mvr.gdtf_modes(xml, spec)
+    if not modes:
+        raise ValueError(f'{spec} has no DMX mode')
+    return {
+        'profile_id': fixture.name,
+        'name': fixture.name,
+        'manufacturer': fixture.manufacturer,
+        'fixture_type_id': fixture.fixture_type_id,
+        'gdtf_xml': xml,
+        'archive': content,
+        'default_mode': next(iter(modes)),
+        'modes': modes,
+    }
 
 
-def read_catalogue(catalogue: Path) -> dict:
-    return _registry(read_bounded(catalogue, MAX_CATALOGUE_BYTES))
-
-
-def fixture_library(catalogue: Path) -> dict:
-    library = {}
-    for profile_id, profile in read_catalogue(catalogue)['profiles'].items():
-        try:
-            fixture = _parse(profile['gdtf_xml'])
-        except (ElementTree.ParseError, AttributeError, IndexError, KeyError, TypeError) as error:
-            raise ValueError(f'Invalid GDTF description {profile_id}: {error}') from error
-        spec = mvr.gdtf_spec_name(fixture.manufacturer, fixture.name)
-        if spec in library:
-            if library[spec]['gdtf_xml'] != profile['gdtf_xml']:
-                raise ValueError(
-                    f'Profiles {library[spec]["profile_id"]} and {profile_id} share {spec}'
-                )
-            continue
-        library[spec] = {
-            'profile_id': profile_id,
-            'name': fixture.name,
-            'manufacturer': fixture.manufacturer,
-            'fixture_type_id': fixture.fixture_type_id,
-            'gdtf_xml': profile['gdtf_xml'],
-            'default_mode': profile['dmx_mode'],
-            'modes': mvr.gdtf_modes(profile['gdtf_xml'], spec),
-        }
-    return library
+def fixture_library(directory: Path) -> dict:
+    """The installed GDTF archives, keyed by the GDTFSpec file name an MVR patch uses."""
+    archives = sorted(Path(directory).glob('*' + mvr.GDTF_SUFFIX))
+    if len(archives) > MAX_LIBRARY_ARCHIVES:
+        raise ValueError(f'Fixture library holds more than {MAX_LIBRARY_ARCHIVES} archives')
+    return {archive.name: _library_entry(archive) for archive in archives}
 
 
 def import_fixture(
     archive: Path,
-    catalogue: Path,
-    profile_id: str,
+    library: Path,
     mode_name: str,
-    validate: Callable[[Path, Path], None],
+    validate: Callable[[Path], None],
 ) -> dict:
-    if PROFILE_ID.fullmatch(profile_id) is None:
-        raise ValueError('Profile ID must contain 1..64 lowercase letters, digits, _ or -')
+    """Install a GDTF archive as is once Starfire renders the chosen mode."""
+    content = read_bounded(archive, MAX_ARCHIVE_BYTES)
     xml = read_description(archive)
     metadata = profile_metadata(xml, mode_name)
-    before = read_bounded(catalogue, MAX_CATALOGUE_BYTES) if catalogue.exists() else None
-    registry = (
-        _registry(before)
-        if before is not None
-        else {'schema_version': SCHEMA_VERSION, 'profiles': {}}
-    )
-    registry['profiles'][profile_id] = {'gdtf_xml': xml, 'dmx_mode': mode_name}
-    content = (json.dumps(registry, indent=2, ensure_ascii=False) + '\n').encode('utf-8')
-    if len(content) > MAX_CATALOGUE_BYTES:
-        raise ValueError('Fixture profile catalogue exceeds its size limit')
-    catalogue.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='.gdtf-', dir=catalogue.parent) as temporary:
-        staged = Path(temporary) / 'profiles.json'
-        with staged.open('wb') as target:
-            target.write(content)
-            target.flush()
-            os.fsync(target.fileno())
+    spec = mvr.gdtf_spec_name(metadata['manufacturer'], metadata['name'])
+    target = library / spec
+    before = target.read_bytes() if target.exists() else None
+    library.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.gdtf-', dir=library) as temporary:
+        staged = Path(temporary) / spec
+        with staged.open('wb') as destination:
+            destination.write(content)
+            destination.flush()
+            os.fsync(destination.fileno())
         patch = Path(temporary) / 'rig.mvr'
         scene = mvr.new_scene()
-        spec = mvr.gdtf_spec_name(metadata['manufacturer'], metadata['name'])
-        mvr.embed_gdtf(scene, spec, xml)
+        mvr.embed_archive(scene, spec, content)
         mvr.add_fixture(
             scene,
             name='imported',
@@ -214,9 +192,9 @@ def import_fixture(
             fixture_id=1,
         )
         patch.write_bytes(mvr.write(scene))
-        validate(patch, staged)
-        current = read_bounded(catalogue, MAX_CATALOGUE_BYTES) if catalogue.exists() else None
+        validate(patch)
+        current = target.read_bytes() if target.exists() else None
         if current != before:
-            raise ValueError('Fixture profile catalogue changed during validation; retry')
-        os.replace(staged, catalogue)
+            raise ValueError(f'{spec} changed in the library during validation; retry')
+        os.replace(staged, target)
     return metadata

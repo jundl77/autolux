@@ -13,7 +13,7 @@ from autolux.lighting.mvr_validation import validate
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(__file__).parent / 'data'
-LIBRARY = fixture_library(ROOT / 'rigs/profiles.json')
+LIBRARY = fixture_library(ROOT / 'rigs/library')
 DIMMER_SPEC = 'Autolux@Test Dimmer.gdtf'
 HANGING_HALF_TURN = [-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]
 STANDING = [1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0]

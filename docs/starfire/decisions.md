@@ -339,6 +339,9 @@ Starfire is the lighting backend. Its live contract is
   from the fixture Matrix, superseding the `pan_offset_degrees` fields. The
   `--profiles` catalogue is only the fixture library for import and Config; it no
   longer flows through replay, production or Login (supersedes P81's last clause).
+  2026-10-26: the library is `rigs/library/`, real GDTF 1.2 archives named by their
+  GDTFSpec, replacing `rigs/profiles.json` (XML in JSON); import installs the archive as is
+  and `--library` replaces `--profiles`.
 
 ## Open questions and defaults
 

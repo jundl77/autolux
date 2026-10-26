@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -18,17 +17,10 @@ SPEC = 'Autolux@Test Dimmer.gdtf'
 
 @pytest.fixture
 def login_assets(tmp_path, write_rig):
-    profiles = tmp_path / 'profiles.json'
-    profiles.write_text(
-        json.dumps(
-            {
-                'schema_version': 1,
-                'profiles': {'test_mover': {'gdtf_xml': GDTF_XML, 'dmx_mode': '16 bit'}},
-            }
-        ),
-        encoding='utf-8',
-    )
-    rig = write_rig(profiles, 'front', 'movers', (180.0, 0.0, 0.0), invert_pan=True)
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / SPEC).write_bytes(mvr.gdtf_package(GDTF_XML))
+    rig = write_rig(library, 'front', 'movers', (180.0, 0.0, 0.0), invert_pan=True, mode='16 bit')
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'atmospheric'
     bank.mkdir(parents=True)
@@ -225,3 +217,19 @@ def test_static_looks_for_the_room_rig_build_small_wire_accents():
         'static_fx',
         'static_strobe',
     }
+
+
+@pytest.mark.parametrize('name', ['room', 'generic'])
+def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(tmp_path, name):
+    from autolux.lighting.gdtf import fixture_library
+
+    shipped = ROOT / 'rigs' / f'{name}.mvr'
+    scene = mvr.read(shipped.read_bytes())
+    without_gdtf = {k: v for k, v in scene.entries.items() if not k.endswith(mvr.GDTF_SUFFIX)}
+    bare = mvr.Scene(scene.root, without_gdtf)
+    library = fixture_library(ROOT / 'rigs/library')
+    rebuilt = tmp_path / f'{name}.mvr'
+    rebuilt.write_bytes(mvr.write(mvr.apply_draft(bare, mvr.draft(scene), library)))
+    assert rebuilt.read_bytes() == shipped.read_bytes()
+    exported = assets.rig_definition(rebuilt).SerializeToString()
+    assert exported == (ROOT / 'rigs' / f'{name}.rig.pb').read_bytes()

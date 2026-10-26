@@ -38,7 +38,7 @@ Route music to **CABLE Input**; analysis and Radius both capture **CABLE Output*
 The receiver needs speakers, the Enttec USB device and key-based Windows SSH.
 See [receiver setup](cli/README.md). The rig is `rigs/room.mvr` (MVR with
 embedded GDTF, see [rig-mvr](docs/starfire/rig-mvr.md)); the fixture library is
-`rigs/profiles.json`; named Lua autoloops live in `show/autoloops/`. Saved fixture
+the GDTF 1.2 archives in `rigs/library/`; named Lua autoloops live in `show/autoloops/`. Saved fixture
 edits apply on the next session.
 
 The dashboard's **Config** tab provides a fixture library, a 512-channel DMX map
