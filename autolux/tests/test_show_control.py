@@ -3,6 +3,7 @@ import queue
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -15,11 +16,13 @@ from autolux.simulate.visualizer_app import (
     INTENSITY_LEVELS,
     PALETTE_POLICY,
     PALETTE_SYNC_JS,
+    STATIC_CHIP_IDS,
     ControlExpectations,
     SnapshotPoller,
     _with_base_palette,
     build_app,
     control_command,
+    control_page_config,
     decimal_text,
     expected_control_values,
     setting_text,
@@ -303,7 +306,7 @@ def test_each_static_control_reaches_the_controller_queue_as_parsed(
 
 async def test_red_with_target_wash_lights_only_the_wash(static_show):
     poller, commands = static_show
-    app = build_app(poller)
+    app = build_app(poller, direct_control=False)
     output = next(key for key in app.callback_map if key.startswith('..static-status.children'))
     state = {'mode': 'static', 'static': {'targets': ['all', 'wash', 'strip'], 'blackout': False}}
     _run_callback(
@@ -394,6 +397,8 @@ def _run_callback(app, output, values, triggered):
         {'id': part.split('.')[0], 'property': part.split('.')[1].split('@')[0]}
         for part in output.strip('.').split('...')
     ]
+    if not output.startswith('..'):
+        outputs = outputs[0]
     return app.server.test_client().post(
         '/_dash-update-component',
         json={
@@ -408,18 +413,16 @@ def _run_callback(app, output, values, triggered):
 
 def test_a_snapshot_sets_the_mode_tab_once_and_never_overwrites_a_click(show):
     poller, _ = show
-    app = build_app(poller)
-    writers = [key for key in app.callback_map if 'control-mode.value' in key]
-    assert writers == ['..control-mode.value...control-mode-synced.data..']
+    app = build_app(poller, direct_control=False)
+    assert not [key for key in app.callback_map if 'control-mode.value' in key]
+    loader = 'control-mode-synced.data'
 
-    first = _run_callback(
-        app, writers[0], {'control-state': {'mode': 'static'}}, 'control-state.data'
-    )
-    assert first.get_json()['response']['control-mode']['value'] == 'static'
+    first = _run_callback(app, loader, {'control-state': {'mode': 'static'}}, 'control-state.data')
+    assert first.get_json()['sideUpdate'] == {'control-mode': {'value': 'static'}}
 
     stale = _run_callback(
         app,
-        writers[0],
+        loader,
         {'control-state': {'mode': 'auto'}, 'control-mode-synced': True},
         'control-state.data',
     )
@@ -429,7 +432,7 @@ def test_a_snapshot_sets_the_mode_tab_once_and_never_overwrites_a_click(show):
 @pytest.mark.parametrize(('shown', 'picked'), [('auto', 'static'), ('static', 'auto')])
 def test_picking_a_mode_tab_sends_that_mode_and_shows_it_at_once(show, shown, picked):
     poller, commands = show
-    app = build_app(poller)
+    app = build_app(poller, direct_control=False)
     output = next(key for key in app.callback_map if key.startswith('..static-status.children'))
     state = {'mode': shown, 'static': {'targets': ['all'], 'blackout': False}}
     response = _run_callback(
@@ -451,7 +454,7 @@ def _send_control(app, trigger, value, state):
 
 def test_each_intensity_segment_sends_its_mapped_level(show):
     poller, commands = show
-    app = build_app(poller)
+    app = build_app(poller, direct_control=False)
     options = app.layout['control-intensity'].options
     assert [(o['label'], o['value']) for o in options] == list(INTENSITY_LEVELS)
     state = {'settings': {'intensity': 0.7}}
@@ -464,7 +467,7 @@ def test_each_intensity_segment_sends_its_mapped_level(show):
 
 def test_a_palette_pick_sends_the_palette_command(show):
     poller, commands = show
-    app = build_app(poller)
+    app = build_app(poller, direct_control=False)
     choices = [o['value'] for o in app.layout['control-palette'].options]
     assert choices == [PALETTE_POLICY, *PALETTE_NAMES]
     _send_control(app, 'control-palette.value', 'ice', {'palette': {'name': 'techno'}})
@@ -478,9 +481,11 @@ NODE = shutil.which('node')
 
 def _run_js(function_source, calls):
     script = (
-        "const window = {dash_clientside: {no_update: '__nu__'}};\n"
+        'const written = [];\n'
+        "const window = {dash_clientside: {set_props: (id, props) => written.push([id, props])}};\n"
         f'const fn = {function_source};\n'
-        f'console.log(JSON.stringify({json.dumps(calls)}.map((args) => fn(...args))));'
+        f'{json.dumps(calls)}.forEach((args) => fn(...args));\n'
+        'console.log(JSON.stringify(written));'
     )
     result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
     return json.loads(result.stdout)
@@ -489,7 +494,7 @@ def _run_js(function_source, calls):
 @pytest.mark.skipif(NODE is None, reason='needs node to run the clientside callback')
 def test_a_palette_pick_survives_the_next_poll_and_sends_the_pin(show):
     poller, commands = show
-    app = build_app(poller)
+    app = build_app(poller, direct_control=False)
     unpinned = {'palette': {'name': 'techno', 'pinned': False}}
     _send_control(app, 'control-palette.value', 'ice', unpinned)
     assert commands.get_nowait() == {'action': 'palette', 'name': 'ice'}
@@ -505,4 +510,148 @@ def test_a_palette_pick_survives_the_next_poll_and_sends_the_pin(show):
     assert landed['palette'] == {'name': 'ice', 'pinned': True}
 
     writes = _run_js(PALETTE_SYNC_JS, [[unpinned], [unpinned], [landed], [landed]])
-    assert [value for value, _ in writes] == [PALETTE_POLICY, '__nu__', 'ice', '__nu__']
+    assert writes == [
+        ['control-palette', {'value': PALETTE_POLICY}],
+        ['control-palette', {'value': 'ice'}],
+    ]
+
+
+CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
+
+
+def _run_control_js(body: str):
+    script = (
+        'globalThis.window = {};\n'
+        + CONTROL_JS.read_text(encoding='utf8')
+        + '\nconst control = window.autoluxControl;\n'
+        + body
+    )
+    result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
+
+
+class _Recorder:
+    def __init__(self):
+        self.commands = []
+
+    def snapshot(self):
+        return {}
+
+    def control(self, command):
+        self.commands.append(command)
+        return {'accepted': command['action']}
+
+
+AUTO_STATE = {
+    'paused': False,
+    'master_brightness': 0.8,
+    'settings': {'intensity': 0.7},
+    'intent': 'drop',
+    'palette': {'name': 'ice', 'pinned': True},
+    'mode': 'auto',
+    'static': {'targets': ['all', 'wash'], 'blackout': False},
+}
+STATIC_STATE = {**AUTO_STATE, 'mode': 'static'}
+# (trigger, value, control-state, static target, the helper call that must build the same JSON)
+OPERATOR_CASES = [
+    ('control-toggle.n_clicks', 1, AUTO_STATE, 'all', 'build.toggle(false)'),
+    ('control-toggle.n_clicks', 1, {**AUTO_STATE, 'paused': True}, 'all', 'build.toggle(true)'),
+    ('control-next.n_clicks', 1, AUTO_STATE, 'all', 'build.next()'),
+    ('control-palette.value', 'techno', AUTO_STATE, 'all', "build.palette('techno')"),
+    (
+        'control-palette.value',
+        PALETTE_POLICY,
+        AUTO_STATE,
+        'all',
+        f"build.palette('{PALETTE_POLICY}')",
+    ),
+    ('control-brightness.value', 0.42, AUTO_STATE, 'all', 'build.master(0.42)'),
+    ('control-brightness-live.data', 0.35, AUTO_STATE, 'all', 'build.master(0.35)'),
+    ('control-intensity.value', 0.3, AUTO_STATE, 'all', 'build.intensity(0.3)'),
+    ('control-mode.value', 'static', AUTO_STATE, 'all', "build.mode('static')"),
+    *[
+        (f'{chip}.n_clicks', 1, STATIC_STATE, target, f"build.static('{chip}', '{target}')")
+        for chip in STATIC_CHIP_IDS
+        for target in ('all', 'wash')
+    ],
+]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_browser_helper_builds_the_payload_the_python_callback_sends():
+    source = _Recorder()
+    app = build_app(source, direct_control=False)
+    control_output = next(k for k in app.callback_map if k.startswith('..control-status.children'))
+    static_output = next(k for k in app.callback_map if k.startswith('..static-status.children'))
+    for trigger, value, state, target, _ in OPERATOR_CASES:
+        component = trigger.split('.')[0]
+        is_static = component.startswith('static-') or component == 'control-mode'
+        _run_callback(
+            app,
+            static_output if is_static else control_output,
+            {component: value, 'control-state': state, 'static-target': target},
+            trigger,
+        )
+    config = json.dumps(control_page_config(source, True))
+    browser = _run_control_js(
+        f'window.autoluxControlConfig = {config};\n'
+        'console.log(JSON.stringify(['
+        + ', '.join(f'control.{case[4]}' for case in OPERATOR_CASES)
+        + ']));'
+    )
+    assert source.commands == browser
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_master_drags_coalesce_to_one_request_in_flight_and_fall_back_to_the_relay():
+    calls = _run_control_js(
+        """
+window.autoluxControlConfig = {direct: true, bridgePort: 8766};
+globalThis.location = {protocol: 'http:', hostname: 'autolux.local'};
+const calls = [];
+const pending = [];
+globalThis.fetch = (url, options) => {
+    calls.push([url, JSON.parse(options.body).level]);
+    if (url.includes(':8766')) {
+        return Promise.reject(new TypeError('no CORS yet'));
+    }
+    return new Promise((resolve) => pending.push(
+        () => resolve({json: () => ({accepted: 'master'})})));
+};
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+(async () => {
+    const done = control.sendLatest('master', control.build.master(0.1));
+    await settle();
+    control.sendLatest('master', control.build.master(0.2));
+    control.sendLatest('master', control.build.master(0.3));
+    pending.shift()();
+    await settle();
+    pending.shift()();
+    await done;
+    console.log(JSON.stringify(calls));
+})();
+"""
+    )
+    assert calls == [
+        ['http://autolux.local:8766/control', 0.1],
+        ['/control-relay', 0.1],
+        ['/control-relay', 0.3],
+    ]
+
+
+def test_the_relay_forwards_a_browser_command_and_refuses_what_the_show_refuses(show):
+    poller, commands = show
+    client = build_app(poller).server.test_client()
+    reply = client.post('/control-relay', json={'action': 'master', 'level': 0.42})
+    assert reply.get_json() == {'accepted': 'master'}
+    assert commands.get_nowait() == {'action': 'master', 'level': 0.42}
+    refused = client.post('/control-relay', json={'action': 'master', 'level': 4})
+    assert 'error' in refused.get_json()
+    assert commands.empty()
+
+
+def test_no_poll_output_writes_an_operator_control():
+    # An Output on these would make the operator's own callback wait for each in-flight poll.
+    app = build_app(_Recorder())
+    owned = ('control-brightness.value', 'control-intensity.value', 'control-palette.value')
+    assert not [key for key in app.callback_map for prop in owned if prop in key]

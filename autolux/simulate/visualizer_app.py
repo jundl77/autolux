@@ -2,6 +2,7 @@ import argparse
 import http.client
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -520,7 +521,7 @@ def _build_show_status(snapshot: dict) -> list:
     items = [
         html.Span([_dot(cfg['primary']), cfg['label'].capitalize()]),
         html.Span(name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—', title=detail),
-        html.Span(f'{palette_name} (pinned)' if palette.get('pinned') else palette_name),
+        html.Span(palette_name),
         html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM'),
         html.Span([_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'),
     ]
@@ -587,6 +588,8 @@ NOT_A_NUMBER = '{label}: "{raw}" is not a number'
 LIVE_FADER_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
 CONTROL_EXPECT_SECONDS = 2.0
+DIRECT_CONTROL_ENV = 'AUTOLUX_DIRECT_CONTROL'
+RELAY_PATH = '/control-relay'
 
 
 class ControlExpectations:
@@ -623,6 +626,8 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'settings': command['settings']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
+    if action == 'mode':
+        return {'mode': command['mode']}
     return {}
 
 
@@ -765,21 +770,22 @@ def _with_base_palette(snapshot: dict) -> dict:
 
 # The dropdown is the operator's: a poll writes it only when the show reports a different pin
 # than the last poll did, so a pick survives the stale polls before its pin lands.
+# Poll-driven writes to operator controls go through set_props rather than Outputs: an Output
+# would make the control's own callback wait for every in-flight poll before it may run.
 PALETTE_SYNC_JS = (
     """function(state) {
-    const nu = window.dash_clientside.no_update;
     const palette = state && state.palette;
     if (!palette) {
-        return [nu, true];
+        return true;
     }
     const shown = palette.pinned ? palette.name : """
     + json.dumps(PALETTE_POLICY)
     + """;
-    if (shown === window.autoluxPaletteSynced) {
-        return [nu, false];
+    if (shown !== window.autoluxPaletteSynced) {
+        window.autoluxPaletteSynced = shown;
+        window.dash_clientside.set_props('control-palette', {value: shown});
     }
-    window.autoluxPaletteSynced = shown;
-    return [shown, false];
+    return false;
 }"""
 )
 
@@ -888,7 +894,7 @@ def _build_control_card() -> list:
                                     disabled=True,
                                 ),
                                 html.Span(id='control-intensity-value', className='fader-value'),
-                                html.Span('Palette', className='control-label'),
+                                html.Span('Colors', className='control-label'),
                                 dcc.Dropdown(
                                     id='control-palette',
                                     options=_palette_options(),
@@ -1022,7 +1028,92 @@ def _build_static_panel():
     )
 
 
-def _register_static_callbacks(app, snapshot_source, expectations, can_control) -> None:
+def _register_direct_auto_controls(app) -> None:
+    # Visual state flips here at click time; the bridge round trip never gates it.
+    app.clientside_callback(
+        """function(toggles, nexts, palette, intensity, mode, state) {
+            const control = window.autoluxControl;
+            const nu = window.dash_clientside.no_update;
+            const triggered = (window.dash_clientside.callback_context.triggered || [])
+                .map((t) => t.prop_id);
+            const shown = control.view(state) || {};
+            const status = 'control-status';
+            if (triggered.includes('control-toggle.n_clicks')) {
+                const paused = !!shown.paused;
+                control.hold({paused: !paused});
+                control.dispatch(control.build.toggle(paused), status, ['paused']);
+                return paused ? '\u23f8\ufe0e' : '\u25b6\ufe0e';
+            }
+            if (triggered.includes('control-next.n_clicks')) {
+                control.dispatch(control.build.next(), status);
+            } else if (triggered.includes('control-palette.value')) {
+                const pin = shown.palette || {};
+                const current = pin.pinned ? pin.name : """
+        + json.dumps(PALETTE_POLICY)
+        + """;
+                if (palette && palette !== current) {
+                    control.dispatch(control.build.palette(palette), status);
+                }
+            } else if (triggered.includes('control-intensity.value')) {
+                const current = (shown.settings || {}).intensity;
+                if (intensity !== null && intensity !== undefined
+                        && (current === undefined || Math.abs(intensity - current) >= 0.005)) {
+                    control.dispatch(control.build.intensity(intensity), status);
+                }
+            } else if (triggered.includes('control-mode.value')) {
+                if (mode && mode !== shown.mode) {
+                    control.hold({mode: mode});
+                    control.dispatch(control.build.mode(mode), 'static-status', ['mode']);
+                }
+            }
+            return nu;
+        }""",
+        Output('control-toggle', 'children', allow_duplicate=True),
+        Input('control-toggle', 'n_clicks'),
+        Input('control-next', 'n_clicks'),
+        Input('control-palette', 'value'),
+        Input('control-intensity', 'value'),
+        Input('control-mode', 'value'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+
+
+STATIC_CHIP_IDS = (*STATIC_PRESET_IDS, *STATIC_BUTTONS)
+
+
+def _register_direct_static_controls(app) -> None:
+    app.clientside_callback(
+        """function(...args) {
+            const control = window.autoluxControl;
+            const ids = """
+        + json.dumps(list(STATIC_CHIP_IDS))
+        + """;
+            const target = args[ids.length];
+            const classes = args.slice(ids.length + 1);
+            const triggered = (window.dash_clientside.callback_context.triggered || [])
+                .map((t) => t.prop_id.split('.')[0]);
+            const chip = ids.find((id) => triggered.includes(id));
+            if (!chip) {
+                return classes.map(() => window.dash_clientside.no_update);
+            }
+            control.dispatch(control.build.static(chip, target), 'static-status');
+            if (chip === 'static-strobe') {
+                return ids.map((id, i) => id === chip
+                    ? (classes[i] === 'active' ? '' : 'active') : classes[i] || '');
+            }
+            return ids.map((id, i) => id === chip ? 'active'
+                : id === 'static-strobe' ? classes[i] || '' : '');
+        }""",
+        *[Output(name, 'className') for name in STATIC_CHIP_IDS],
+        *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
+        State('static-target', 'value'),
+        *[State(name, 'className') for name in STATIC_CHIP_IDS],
+        prevent_initial_call=True,
+    )
+
+
+def _register_static_callbacks(app, snapshot_source, expectations, can_control, direct) -> None:
     app.clientside_callback(
         '''function(mode) {
             return [{display: mode === 'static' ? 'none' : 'block'},
@@ -1046,7 +1137,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
     )
 
     @app.callback(
-        Output('control-mode', 'value'),
         Output('control-mode-synced', 'data'),
         Input('control-state', 'data'),
         State('control-mode-synced', 'data'),
@@ -1056,22 +1146,35 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         mode = (state or {}).get('mode')
         if synced or mode is None:
             raise dash.exceptions.PreventUpdate
-        return mode, True
+        dash.set_props('control-mode', {'value': mode})
+        return True
+
+    if direct:
+        _register_direct_static_controls(app)
+    operator_inputs = (
+        []
+        if direct
+        else [
+            Input('control-mode', 'value'),
+            *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
+            *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
+        ]
+    )
 
     @app.callback(
         Output('static-status', 'children'),
         Output('control-state', 'data', allow_duplicate=True),
-        Input('control-mode', 'value'),
-        *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
-        *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
+        *operator_inputs,
         Input('static-colour', 'value'),
         State('static-target', 'value'),
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_static(mode, *values):
-        *_, colour, target, state = values
-        state = state or {}
+    def send_static(*_):
+        mode = dash.ctx.inputs.get('control-mode.value')
+        colour = dash.ctx.inputs['static-colour.value']
+        target = dash.ctx.states['static-target.value']
+        state = dash.ctx.states.get('control-state.data') or {}
         trigger = dash.ctx.triggered_id
         if not can_control:
             raise dash.exceptions.PreventUpdate
@@ -1585,6 +1688,7 @@ class SnapshotPoller:
         timeout: float = POLL_TIMEOUT_SEC,
     ):
         self._host, self._port, self._timeout = host, port, timeout
+        self.port = port
         self._connection = None
         self._last = dict(BLANK_SNAPSHOT)
         self._answering = True
@@ -1645,7 +1749,26 @@ class SnapshotPoller:
         return reply
 
 
-def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
+def direct_control_default() -> bool:
+    return os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
+
+
+def control_page_config(snapshot_source, direct: bool) -> dict:
+    return {
+        'direct': direct,
+        'bridgePort': getattr(snapshot_source, 'port', None),
+        'relayPath': RELAY_PATH,
+        'holdMs': int(CONTROL_EXPECT_SECONDS * 1000),
+        'allFixtures': ALL_FIXTURES,
+        'presetColours': {name: colour_hex(rgb) for name, rgb in PRESET_COLOURS.items()},
+    }
+
+
+def build_app(
+    snapshot_source,
+    fixture_store: FixtureStore | None = None,
+    direct_control: bool | None = None,
+) -> dash.Dash:
     app = dash.Dash(
         __name__,
         title=TITLE,
@@ -1653,8 +1776,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>')
-    from flask import request
+    can_control = callable(getattr(snapshot_source, 'control', None))
+    direct = can_control and (
+        direct_control_default() if direct_control is None else direct_control
+    )
+    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
+        '{%css%}',
+        '{%css%}<script>window.autoluxControlConfig = '
+        + json.dumps(control_page_config(snapshot_source, direct))
+        + ';</script>',
+    )
+    from flask import jsonify, request
     from prometheus_client import make_wsgi_app
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
@@ -1684,7 +1816,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'fontWeight': '500',
         'flex': 'none',
     }
-    can_control = callable(getattr(snapshot_source, 'control', None))
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
         build_fixture_panel(app, fixture_store)
@@ -1889,6 +2020,18 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     expectations = ControlExpectations()
 
+    @app.server.route(RELAY_PATH, methods=['POST'])
+    def relay_control():
+        command = request.get_json(silent=True)
+        if not can_control:
+            return jsonify({'error': 'this dashboard cannot control the show'}), 403
+        if not isinstance(command, dict):
+            return jsonify({'error': 'a command must be a JSON object'}), 400
+        reply = snapshot_source.control(command)
+        if 'error' not in reply:
+            expectations.expect(**expected_control_values(command, reply))
+        return jsonify(reply)
+
     @app.callback(
         [
             Output('sync', 'data'),
@@ -1965,6 +2108,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     setting_names = json.dumps(list(FORM_SETTINGS))
     app.clientside_callback(
         '''function(state) {
+            state = window.autoluxControl ? window.autoluxControl.view(state) : state;
             const ready = !!state && state.paused !== null && state.paused !== undefined;
             const settable = !ready || !state.settings;
             const skippable = ready && !state.paused && !!state.intent
@@ -2000,13 +2144,14 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             const dragging = drag !== null && drag !== undefined && drag !== value;
             const focused = document.activeElement ? document.activeElement.id : '';
             const next = {...synced};
-            let level = nu;
+            const set = window.dash_clientside.set_props;
             if (!touched && !dragging && state.master_brightness !== synced.master) {
-                level = next.master = state.master_brightness;
+                next.master = state.master_brightness;
+                set('control-brightness', {value: next.master});
             }
-            let intensity = nu;
             if (!touched && state.settings.intensity !== synced.intensity) {
-                intensity = next.intensity = state.settings.intensity;
+                next.intensity = state.settings.intensity;
+                set('control-intensity', {value: next.intensity});
             }
             const fields = names.map((name) => {
                 if (touched || focused === 'control-' + name || text[name] === synced[name]) {
@@ -2015,10 +2160,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 next[name] = text[name];
                 return text[name];
             });
-            return [level, intensity, ...fields, next];
+            return [...fields, next];
         }''',
-        Output('control-brightness', 'value'),
-        Output('control-intensity', 'value'),
         *[Output(f'control-{name}', 'value') for name in FORM_SETTINGS],
         Output('control-synced', 'data'),
         Input('control-state', 'data'),
@@ -2026,25 +2169,50 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         State('control-brightness', 'value'),
         State('control-synced', 'data'),
     )
-    app.clientside_callback(
-        '''function(level) {
-            window.autoluxControlTouchedAt = Date.now();
-            const label = level === null || level === undefined
-                ? '—' : Math.round(level * 100) + '%';
-            const now = Date.now();
-            if (level === null || level === undefined
-                    || now - (window.autoluxFaderSentAt || 0) < '''
-        + str(LIVE_FADER_INTERVAL_MS)
-        + ''') {
-                return [label, window.dash_clientside.no_update];
-            }
-            window.autoluxFaderSentAt = now;
-            return [label, level];
-        }''',
-        Output('control-brightness-value', 'children'),
-        Output('control-brightness-live', 'data'),
-        Input('control-brightness', 'drag_value'),
-    )
+    if direct:
+        app.clientside_callback(
+            '''function(drag, released, state) {
+                const level = drag === null || drag === undefined ? released : drag;
+                if (level === null || level === undefined) {
+                    return '—';
+                }
+                const shown = window.autoluxControl.view(state) || {};
+                if (level !== shown.master_brightness && level !== window.autoluxMasterSent) {
+                    window.autoluxControlTouchedAt = Date.now();
+                    window.autoluxMasterSent = level;
+                    window.autoluxControl.hold({master_brightness: level});
+                    window.autoluxControl.sendLatest(
+                        'master', window.autoluxControl.build.master(level), 'control-status');
+                }
+                return Math.round(level * 100) + '%';
+            }''',
+            Output('control-brightness-value', 'children'),
+            Input('control-brightness', 'drag_value'),
+            Input('control-brightness', 'value'),
+            State('control-state', 'data'),
+            prevent_initial_call=True,
+        )
+        _register_direct_auto_controls(app)
+    else:
+        app.clientside_callback(
+            '''function(level) {
+                window.autoluxControlTouchedAt = Date.now();
+                const label = level === null || level === undefined
+                    ? '—' : Math.round(level * 100) + '%';
+                const now = Date.now();
+                if (level === null || level === undefined
+                        || now - (window.autoluxFaderSentAt || 0) < '''
+            + str(LIVE_FADER_INTERVAL_MS)
+            + ''') {
+                    return [label, window.dash_clientside.no_update];
+                }
+                window.autoluxFaderSentAt = now;
+                return [label, level];
+            }''',
+            Output('control-brightness-value', 'children'),
+            Output('control-brightness-live', 'data'),
+            Input('control-brightness', 'drag_value'),
+        )
     app.clientside_callback(
         '''function(level) {
             const presets = '''
@@ -2058,35 +2226,39 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     )
     app.clientside_callback(
         PALETTE_SYNC_JS,
-        Output('control-palette', 'value'),
         Output('control-palette', 'disabled'),
         Input('control-state', 'data'),
+    )
+
+    operator_inputs = (
+        []
+        if direct
+        else [
+            Input('control-toggle', 'n_clicks'),
+            Input('control-next', 'n_clicks'),
+            Input('control-palette', 'value'),
+            Input('control-brightness', 'value'),
+            Input('control-brightness-live', 'data'),
+            Input('control-intensity', 'value'),
+        ]
     )
 
     @app.callback(
         Output('control-status', 'children'),
         Output('control-state', 'data', allow_duplicate=True),
-        Input('control-toggle', 'n_clicks'),
-        Input('control-next', 'n_clicks'),
-        Input('control-palette', 'value'),
-        Input('control-brightness', 'value'),
-        Input('control-brightness-live', 'data'),
-        Input('control-intensity', 'value'),
+        *operator_inputs,
         *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_control(
-        _toggle,
-        _next,
-        palette,
-        released,
-        live,
-        intensity_picked,
-        *settings_and_state,
-    ):
-        *settings, state = settings_and_state
-        state = state or {}
+    def send_control(*_):
+        values = dash.ctx.inputs
+        state = dash.ctx.states.get('control-state.data') or {}
+        palette = values.get('control-palette.value')
+        released = values.get('control-brightness.value')
+        live = values.get('control-brightness-live.data')
+        intensity_picked = values.get('control-intensity.value')
+        settings = [values[f'control-{name}.value'] for name in FORM_SETTINGS]
         intensity = (state.get('settings') or {}).get('intensity', DEFAULT_INTENSITY)
         trigger = dash.ctx.triggered_id
         faders = {
@@ -2130,7 +2302,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         return '', dash.no_update
 
     _register_settings_drawer(app)
-    _register_static_callbacks(app, snapshot_source, expectations, can_control)
+    _register_static_callbacks(app, snapshot_source, expectations, can_control, direct)
 
     app.clientside_callback(
         ANIMATION_JS,
