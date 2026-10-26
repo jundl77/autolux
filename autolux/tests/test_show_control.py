@@ -7,12 +7,14 @@ from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.ui_bridge import SnapshotServer
 from autolux.simulate.visualizer_app import (
+    SETTINGS_GROUPS,
     ControlExpectations,
     SnapshotPoller,
     control_command,
     decimal_text,
     expected_control_values,
     setting_text,
+    settings_group_summary,
 )
 
 
@@ -94,6 +96,27 @@ def test_text_that_is_not_a_plain_decimal_never_reaches_the_controller(raw, reas
 def test_settings_fill_with_a_dot_decimal_whatever_the_locale():
     assert [decimal_text(v) for v in (0.15, 60.0, 0.125, 4.0)] == ['0.15', '60', '0.125', '4']
     assert setting_text('quiet_brightness', 0.155) == '15.5'
+
+
+def test_each_collapsed_settings_group_summarises_its_live_values():
+    settings = {
+        'crossfade_beats': 1.0,
+        'quiet_brightness': 0.15,
+        'digital_silence_seconds': 2.0,
+        'strobe_max_rate_hz': 8.0,
+        'strobe_max_burst_seconds': 4.0,
+        'strobe_burst_seconds': 1.0,
+        'drop_strobe_cooldown_seconds': 60.0,
+    }
+    assert {
+        group.key: settings_group_summary(group.names, settings) for group in SETTINGS_GROUPS
+    } == {
+        'transitions': '1 beats · quiet 15 % · standby 2 s',
+        'strobe': '8 Hz · burst 4 s · drop burst 1 s · cooldown 60 s',
+    }
+    assert settings_group_summary(SETTINGS_GROUPS[1].names, {}) == (
+        '— Hz · burst — s · drop burst — s · cooldown — s'
+    )
 
 
 def test_a_busy_show_is_reported_instead_of_raising(show):
