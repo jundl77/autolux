@@ -35,6 +35,11 @@ PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
 
 AutoloopTable = dict[LightIntent, tuple[tuple[str, str], ...]]
 
+# Shown while the source is stopped. Its bank is no intent, so rotation never
+# reaches it; readiness still requires it.
+STANDBY_AUTOLOOP = ('standby', 'warm_white')
+STANDBY_CROSSFADE_SECONDS = 1.0
+
 # Without a discovered catalogue (unit tests, offline tools) every intent keeps
 # one fixed look, which keeps recorded command streams stable.
 DEFAULT_AUTOLOOPS: AutoloopTable = {

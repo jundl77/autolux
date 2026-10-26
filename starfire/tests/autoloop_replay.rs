@@ -29,6 +29,14 @@ const MIN_REPLAY_SECONDS: f64 = 16.0 * 4.0 * SECONDS_PER_BEAT;
 const RAMP_PLATEAU_BEATS: f64 = 128.0;
 const WASH: [&str; 4] = ["wash_left", "wash_mid_left", "wash_mid_right", "wash_right"];
 const WRITE_GOLDEN_VAR: &str = "STARFIRE_WRITE_GOLDEN";
+// Shown while the source is stopped, so its looks deliberately ignore the music.
+const STANDBY_BANK: &str = "standby";
+// The techno palette's primary slot in lighting.lua.
+const WARM_WHITE: Rgb = Rgb {
+    red: 1.0,
+    green: 0.82,
+    blue: 0.6,
+};
 
 struct Look {
     bank: String,
@@ -41,6 +49,10 @@ impl Look {
     /// Buildup looks also depend on time since selection, not only on bar phase.
     fn ramps(&self) -> bool {
         self.bank == "buildup"
+    }
+
+    fn follows_music(&self) -> bool {
+        self.bank != STANDBY_BANK
     }
 
     fn engine(&self, select_beat: f64) -> Engine {
@@ -336,7 +348,7 @@ fn selecting_mid_bar_keeps_the_musical_phrase() {
 
 #[test]
 fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
-    for look in looks() {
+    for look in looks().into_iter().filter(Look::follows_music) {
         let mut engine = look.engine(4.0);
         set_rms(&mut engine, 1.0);
         let strong = engine.render_at(0.25).unwrap();
@@ -369,7 +381,7 @@ fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
 
 #[test]
 fn silence_drops_wash_to_a_tenth_of_loud_level() {
-    for look in looks() {
+    for look in looks().into_iter().filter(Look::follows_music) {
         let mean_wash = |level: f64| {
             let mut engine = look.engine(0.0);
             set_rms(&mut engine, level);
@@ -386,6 +398,46 @@ fn silence_drops_wash_to_a_tenth_of_loud_level() {
             silent < 0.15 * loud || (loud == 0.0 && silent == 0.0),
             "{look}: silent wash {silent} vs loud {loud}"
         );
+    }
+}
+
+#[test]
+fn standby_is_a_still_dim_warm_look_that_ignores_beat_and_loudness() {
+    for look in looks_in(&[STANDBY_BANK]) {
+        let mut engine = look.engine(0.0);
+        let reference = render(&mut engine, 0.0);
+        for (step, level) in [0.0, 0.9, 0.3, 1.0]
+            .into_iter()
+            .cycle()
+            .take(64)
+            .enumerate()
+        {
+            let beat = step as f64 * 0.37;
+            engine
+                .apply(
+                    beat * SECONDS_PER_BEAT,
+                    &Command::SetNormalizedRmsLevel { level },
+                )
+                .unwrap();
+            let frame = render(&mut engine, beat);
+            assert_eq!(
+                frame.dmx_frames_by_universe, reference.dmx_frames_by_universe,
+                "{look} moved with the music at beat {beat}"
+            );
+        }
+        for (id, state) in &reference.fixture_properties_before_strobe {
+            assert_eq!(state.strobe_hz, 0.0, "{look}: {id} strobes");
+            assert!(state.intensity <= 0.2, "{look}: {id} is not dim");
+            if state.intensity > 0.0 {
+                assert_eq!(state.colour, WARM_WHITE, "{look}: {id} is not warm white");
+            }
+        }
+        for id in WASH {
+            assert!(
+                reference.fixture_properties_before_strobe[id].intensity > 0.0,
+                "{look}: {id} is dark"
+            );
+        }
     }
 }
 

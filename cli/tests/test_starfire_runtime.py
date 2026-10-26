@@ -43,6 +43,19 @@ def test_control_adapter_preserves_zero_values_and_named_targets():
     assert effect.duration_seconds == 1.0
 
 
+def test_discarding_delayed_audio_frames_as_its_own_standalone_command():
+    command = protocol.build_command({'kind': 'discard_delayed_audio'})
+    command.command_id = 3
+    encoded = protocol.encode_command(command)
+    message_type, length = protocol.FRAME_HEADER.unpack(encoded[: protocol.FRAME_HEADER.size])
+    assert message_type == wire.DISCARD_DELAYED_AUDIO
+    assert length == len(encoded) - protocol.FRAME_HEADER.size
+    value = wire.DiscardDelayedAudio.FromString(encoded[protocol.FRAME_HEADER.size :])
+    assert value.command_id == 3
+    with pytest.raises(ValueError, match='no fields'):
+        protocol.build_command({'kind': 'discard_delayed_audio', 'seconds': 1.0})
+
+
 def test_control_adapter_preserves_gdtf_physical_values_and_named_presets():
     effect = protocol.build_command(
         {
@@ -706,7 +719,8 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     )
     with pytest.raises(
         RuntimeError,
+        # Standby sits outside the rotation but readiness still requires it.
         match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
-        'drop/slam$',
+        'drop/slam, standby/warm_white$',
     ):
         starfire_runtime.validate_starfire(binary, 'rig.json', tmp_path)

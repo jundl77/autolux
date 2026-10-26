@@ -3,6 +3,10 @@
 One Lua file per look, `autoloops/<bank>/<loop>.lua`; banks are the intents
 `atmospheric`, `breakdown`, `buildup`, `drop`. The API is `starfire/src/lua/lighting.lua`.
 
+`standby/warm_white` is the exception: Autolux shows it while the input is digitally
+silent (the player stopped). It is outside the rotation, required by readiness, and
+deliberately static: no beat or loudness response, movers parked dark, warm white only.
+
 ## Rules
 
 - **Bar-locked.** 8- or 16-beat loops, a pure function of `ctx.beat_position`

@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from autolux.lib.engine.effect_definitions import PREFERRED_AUTOLOOPS, AutoloopTable
+from autolux.lib.engine.effect_definitions import (
+    PREFERRED_AUTOLOOPS,
+    STANDBY_AUTOLOOP,
+    AutoloopTable,
+)
 
 AUTOLOOP_DIRECTORY = Path(__file__).resolve().parents[2] / 'autoloops'
 
@@ -20,4 +24,5 @@ def discover_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> AutoloopTable:
 
 
 def required_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> set[tuple[str, str]]:
-    return {loop for loops in discover_autoloops(directory).values() for loop in loops}
+    rotation = {loop for loops in discover_autoloops(directory).values() for loop in loops}
+    return rotation | {STANDBY_AUTOLOOP}
