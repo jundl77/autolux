@@ -189,14 +189,14 @@ class EffectController:
                 'AUTOLOOP',
                 selection={
                     'energy': meta.energy,
-                    'family': meta.family,
+                    'texture': meta.texture,
                     'movement': meta.movement,
                     'palette': palette,
                     'reason': choice.reason,
                 },
             )
         LOGGER.info(
-            '%s intent=%s | autoloop=%s/%s | palette=%s | energy=%d family=%s movement=%s '
+            '%s intent=%s | autoloop=%s/%s | palette=%s | energy=%d movement=%s texture=%s '
             '| reason=%s',
             prefix,
             intent.name,
@@ -204,8 +204,8 @@ class EffectController:
             autoloop,
             palette,
             meta.energy,
-            meta.family,
             meta.movement,
+            meta.texture,
             choice.reason,
         )
 

@@ -1,7 +1,7 @@
 -- 8-beat loop
 -- energy: 3
--- family: warm
 -- movement: still
+-- texture: mixed
 local palette = sf.palette()
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS = 0.3

@@ -903,7 +903,7 @@ async def test_boundary_scores_never_replace_a_held_sections_loop(score):
         ('breakdown', 'bridge', 'cooldown'),
     ],
 )
-async def test_same_family_sections_preserve_the_autoloop_but_commit_their_boundaries(
+async def test_same_intent_sections_preserve_the_autoloop_but_commit_their_boundaries(
     queued, labels
 ):
     decoder = FakeDecoder()
@@ -919,7 +919,7 @@ async def test_same_family_sections_preserve_the_autoloop_but_commit_their_bound
     assert selections(lighting)[0]['command']['bank'] == light.current_intent.value
 
 
-async def test_a_same_family_section_change_waits_for_room_playback():
+async def test_a_same_intent_section_change_waits_for_room_playback():
     decoder, chain = FakeDecoder(), FakeChain()
     light, queue, clock, lighting = engine(decoder=decoder, chain=chain)
     await held(light, decoder, chain, clock, queue, label='intro')

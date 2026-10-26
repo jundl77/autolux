@@ -1,7 +1,7 @@
 -- 8-beat loop
 -- energy: 2
--- family: cold
 -- movement: sweep
+-- texture: mixed
 local palette = sf.palette()
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128

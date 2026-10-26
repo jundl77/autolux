@@ -14,6 +14,7 @@ from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import (
     LOUDNESS_TREND_BEATS,
     SelectionContext,
+    arrival_of_peak,
     loudness_trend,
 )
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
@@ -49,6 +50,8 @@ FALLBACK_BAR_SECONDS = BEATS_PER_BAR * 60.0 / 128.0
 BUILD_INTENTS = (LightIntent.BREAKDOWN, LightIntent.BUILDUP)
 OUTRO_LABELS = ('outro', 'altoutro')
 INTRO_LABELS = ('intro', 'altintro')
+BUILD_INTERRUPTION_BARS = 8
+TRACK_LEVEL_BEATS = 2048
 
 
 class LightEngine(IMusicAnalyserHandler):
@@ -113,8 +116,12 @@ class LightEngine(IMusicAnalyserHandler):
         self._entered_intent: LightIntent | None = None
         self._entered_label: str | None = None
         self._build_started_at: float | None = None
+        self._build_interrupted_at: float | None = None
         self._last_drop_at: float | None = None
         self._after_silence = True
+        self._beat_levels: deque[tuple[float, float]] = deque(maxlen=TRACK_LEVEL_BEATS)
+        self._track_started_audio_sec = 0.0
+        self._current_arrival_of_peak: float | None = None
         self._track_mood = TrackMoodMeter(MEASURED_BARS * BEATS_PER_BAR)
         self._static_mode = False
         self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
@@ -367,6 +374,7 @@ class LightEngine(IMusicAnalyserHandler):
             self._last_drop_at = self._clock.monotonic()
         self._entered_intent = None
         self._build_started_at = None
+        self._build_interrupted_at = None
         self._after_silence = True
         if self.event_buffer is not None:
             self.event_buffer.stop_effects()
@@ -402,6 +410,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._floor_armed = True
         self._committed = None
         self._audio_sec = 0.0
+        self._beat_levels.clear()
+        self._track_started_audio_sec = 0.0
         if self.section_chain is not None:
             self.section_chain.reset()
         if self.section_decoder is not None:
@@ -467,6 +477,7 @@ class LightEngine(IMusicAnalyserHandler):
 
         published_bpm = self._publishable_bpm(self._published_bpm, self.analyser.get_detector_bpm())
         normalized_rms_level = rms_to_normalized_level(rms_energy)
+        self._beat_levels.append((self._audio_sec, normalized_rms_level))
         measured = MeasuredBeat(
             bpm, normalized_rms_level, spectrum.centroid_hz, spectrum.bass_over_treble_db
         )
@@ -511,6 +522,7 @@ class LightEngine(IMusicAnalyserHandler):
         context = self._selection_context(intent, label, now)
         if context.new_track:
             self._start_track_mood()
+            self._track_started_audio_sec = self._audio_sec - self._playback_delay_sec
         cut = self._paused and self._showing_standby
         bpm = self._published_bpm.get('last')
         if await self.effect_controller.change_effect(intent, bpm, context=context, cut=cut):
@@ -529,9 +541,10 @@ class LightEngine(IMusicAnalyserHandler):
             and label in INTRO_LABELS
             and (previous == LightIntent.DROP or self._entered_label in OUTRO_LABELS)
         )
-        building = intent in (LightIntent.BUILDUP, LightIntent.DROP) and previous in BUILD_INTENTS
-        bpm = self._published_bpm.get('last')
-        bar_seconds = BEATS_PER_BAR * 60.0 / bpm if bpm else FALLBACK_BAR_SECONDS
+        building = intent in (LightIntent.BUILDUP, LightIntent.DROP) and (
+            previous in BUILD_INTENTS or self._resumes_build(intent, now)
+        )
+        bar_seconds = self._bar_seconds()
         ending_drop = previous == LightIntent.DROP and intent != LightIntent.DROP
         left_drop_at = now if ending_drop else self._last_drop_at
         return SelectionContext(
@@ -542,16 +555,34 @@ class LightEngine(IMusicAnalyserHandler):
             else 0.0,
             loudness=loudness_trend(self._room_levels),
             new_track=new_track,
+            arrival_of_peak=self._current_arrival_of_peak if intent == LightIntent.DROP else None,
+        )
+
+    def _bar_seconds(self) -> float:
+        bpm = self._published_bpm.get('last')
+        return BEATS_PER_BAR * 60.0 / bpm if bpm else FALLBACK_BAR_SECONDS
+
+    def _resumes_build(self, intent: LightIntent, now: float) -> bool:
+        return (
+            intent in BUILD_INTENTS
+            and self._entered_intent == LightIntent.ATMOSPHERIC
+            and self._build_interrupted_at is not None
+            and now - self._build_interrupted_at <= BUILD_INTERRUPTION_BARS * self._bar_seconds()
         )
 
     def _note_new_look(self, intent: LightIntent, now: float) -> None:
         previous = self._entered_intent
         if previous == LightIntent.DROP and intent != LightIntent.DROP:
             self._last_drop_at = now
-        if intent not in BUILD_INTENTS:
-            self._build_started_at = None
-        elif previous not in BUILD_INTENTS:
-            self._build_started_at = now
+        resumed = self._resumes_build(intent, now)
+        if intent == LightIntent.ATMOSPHERIC and previous in BUILD_INTENTS:
+            self._build_interrupted_at = now
+        else:
+            self._build_interrupted_at = None
+            if intent not in BUILD_INTENTS:
+                self._build_started_at = None
+            elif previous not in BUILD_INTENTS and not resumed:
+                self._build_started_at = now
         self._entered_intent = intent
         self._after_silence = False
 
@@ -671,14 +702,21 @@ class LightEngine(IMusicAnalyserHandler):
             return
 
         song_sec = None if self.event_buffer is None else self.event_buffer.elapsed() - age_sec
+        arrival = (
+            arrival_of_peak(
+                self._beat_levels, self._audio_sec - age_sec, self._track_started_audio_sec
+            )
+            if intent == LightIntent.DROP
+            else None
+        )
         if not self.command_queue:
-            await self._apply_intent(None, intent, song_sec, section_label)
+            await self._apply_intent(None, intent, song_sec, section_label, arrival)
             return
         entry = (fire_at, intent, section_label)
         self._pending_intents.append(entry)
         await self.command_queue.enqueue(
             'intent',
-            lambda: self._apply_intent(entry, intent, song_sec, section_label),
+            lambda: self._apply_intent(entry, intent, song_sec, section_label, arrival),
             delay_sec=fire_at - now,
         )
 
@@ -696,7 +734,12 @@ class LightEngine(IMusicAnalyserHandler):
             LOGGER.info('[engine] the chain is back inside the playback delay')
 
     async def _apply_intent(
-        self, entry, intent: LightIntent, song_sec: float | None, section_label: str | None
+        self,
+        entry,
+        intent: LightIntent,
+        song_sec: float | None,
+        section_label: str | None,
+        arrival: float | None = None,
     ) -> None:
         if entry is not None:
             if not any(pending is entry for pending in self._pending_intents):
@@ -707,6 +750,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self.event_buffer:
             self.event_buffer.set_intent(intent.value, song_sec=song_sec)
         self._current_intent = intent
+        self._current_arrival_of_peak = arrival
         self._section_class_at_playback = section_label
         self._intent_commits += 1
         if self._holding_the_look():

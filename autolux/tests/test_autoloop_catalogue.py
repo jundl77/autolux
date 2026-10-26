@@ -35,27 +35,29 @@ def test_the_shipped_catalogue_covers_every_lua_file_with_the_originals_first():
     assert required_autoloops() == on_disk
 
 
-HEADER = '-- 8-beat loop, no strobe.\n-- energy: 2\n-- family: warm\n-- movement: snap\n'
+HEADER = '-- 8-beat loop, no strobe.\n-- energy: 2\n-- movement: snap\n-- texture: beam\n'
+RETIRED_HEADER = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\n'
 
 
 def test_the_header_block_after_the_loop_length_line_is_the_metadata():
     source = HEADER + '-- wash: primary kick.\nlocal palette = sf.palette("techno")\n'
-    assert parse_autoloop_meta(source) == AutoloopMeta(2, 'warm', 'snap')
+    assert parse_autoloop_meta(source) == AutoloopMeta(2, 'snap', 'beam')
 
 
 @pytest.mark.parametrize(
     ('header', 'message'),
     [
-        (HEADER.replace('-- family: warm\n', ''), 'missing family'),
+        (HEADER.replace('-- texture: beam\n', ''), 'missing texture'),
+        (RETIRED_HEADER, 'missing movement, texture'),
         (HEADER.replace('-- energy: 2\n', '') + '-- wash: x\n-- energy: 2\n', 'missing energy'),
         (HEADER.replace('energy: 2', 'enrgy: 2'), 'missing energy'),
         (HEADER.replace('energy: 2', 'energy: 4'), "energy '4' is not one of 1, 2, 3"),
         (HEADER.replace('energy: 2', 'energy: 03'), "energy '03'"),
         (HEADER.replace('energy: 2', 'energy: 2 '), "energy '2 '"),
         (HEADER.replace('energy: 2', 'energy: high'), "energy 'high' is not one of"),
-        (HEADER.replace('family: warm', 'family: hot'), "family 'hot' is not one of"),
+        (HEADER.replace('texture: beam', 'texture: strobe'), "texture 'strobe' is not one of wash"),
         (HEADER.replace('movement: snap', 'movement: snap  -- jumps'), 'movement'),
-        (HEADER + '-- family: cold\n', 'family declared twice'),
+        (HEADER + '-- texture: wash\n', 'texture declared twice'),
     ],
 )
 def test_a_bad_header_block_names_what_is_wrong(header, message):
@@ -73,7 +75,7 @@ def test_reading_the_library_reports_every_bad_loop_at_once(tmp_path):
         (tmp_path / bank / f'{name}.lua').write_text(source)
     with pytest.raises(AutoloopMetaError) as error:
         read_autoloop_meta(tmp_path)
-    assert 'breakdown/wide_space: missing energy, family, movement' in str(error.value)
+    assert 'breakdown/wide_space: missing energy, movement, texture' in str(error.value)
     assert "drop/slam: energy '9'" in str(error.value)
     assert 'drop/kick' not in str(error.value)
 

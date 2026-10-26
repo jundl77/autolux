@@ -1,7 +1,7 @@
 -- 8-beat loop
 -- energy: 3
--- family: warm
 -- movement: snap
+-- texture: pixel
 local palette = sf.palette()
 local LOOP_BEATS = 8
 local BAR_BEATS = 4

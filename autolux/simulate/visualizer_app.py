@@ -494,7 +494,7 @@ def _build_stat_card(label, value):
 def _selection_tags(effect: dict) -> str:
     selection = effect.get('selection') or {}
     tags = [f'E{selection["energy"]}'] if 'energy' in selection else []
-    tags += [selection[key] for key in ('family', 'movement') if selection.get(key)]
+    tags += [selection[key] for key in ('movement', 'texture') if selection.get(key)]
     return ' · '.join(tags)
 
 

@@ -11,7 +11,7 @@ class LightIntent(Enum):
     DROP = 'drop'
 
 
-# Nine musical sections share four lighting families.
+# Nine musical sections map onto four lighting intents.
 SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'intro': LightIntent.ATMOSPHERIC,
     'altintro': LightIntent.ATMOSPHERIC,
@@ -42,17 +42,16 @@ DEFAULT_AUTOLOOPS: AutoloopTable = {
 
 AUTOLOOP_META_VALUES: dict[str, tuple[str, ...]] = {
     'energy': ('1', '2', '3'),
-    'family': ('cold', 'warm', 'accent'),
     'movement': ('still', 'sweep', 'snap'),
+    'texture': ('wash', 'beam', 'pixel', 'mixed'),
 }
-FAMILIES = AUTOLOOP_META_VALUES['family']
 
 
 @dataclass(frozen=True)
 class AutoloopMeta:
     energy: int
-    family: str
     movement: str
+    texture: str
 
     def __post_init__(self):
         if type(self.energy) is not int:
@@ -67,10 +66,10 @@ class AutoloopMeta:
 AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
 
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
-    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'cold', 'sweep'),
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
-    ('buildup', 'ramp'): AutoloopMeta(2, 'warm', 'sweep'),
-    ('drop', 'kick'): AutoloopMeta(3, 'warm', 'snap'),
+    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('buildup', 'ramp'): AutoloopMeta(2, 'sweep', 'mixed'),
+    ('drop', 'kick'): AutoloopMeta(3, 'snap', 'wash'),
 }
 
 

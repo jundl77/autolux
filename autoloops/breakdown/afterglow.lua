@@ -1,7 +1,7 @@
 -- 16-beat loop
 -- energy: 1
--- family: accent
 -- movement: still
+-- texture: wash
 local palette = sf.palette()
 local LOOP_BARS = 4
 local IGNITE_SHARE = 1 / 32

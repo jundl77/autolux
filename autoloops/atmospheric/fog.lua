@@ -1,7 +1,7 @@
 -- 16-beat loop
 -- energy: 1
--- family: cold
 -- movement: sweep
+-- texture: wash
 local palette = sf.palette()
 local LOOP_BEATS = 16
 local WASH_LOW, WASH_HIGH = 0.05, 0.25
