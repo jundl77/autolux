@@ -13,6 +13,7 @@ from autolux.lib.engine.effect_definitions import (
 )
 from autolux.lib.engine.special_policy import Special
 from autolux.lib.engine.static_mode import (
+    STATIC_FLOOR_PRIORITY,
     STATIC_GROUP_PRIORITY,
     STATIC_PRIORITY,
     STATIC_SPECIAL_ID,
@@ -129,6 +130,47 @@ async def test_the_uv_preset_darkens_everything_but_the_blacklit_washes():
     assert overrides(lighting)[-2]['value']['values'] == {'intensity': 0.0}
 
 
+DARK_FLOOR = {
+    'id': 'static_floor',
+    'target': 'all',
+    'values': {'intensity': 0.0},
+    'priority': STATIC_FLOOR_PRIORITY,
+}
+
+
+async def test_off_darkens_the_rig_instead_of_revealing_the_held_automatic_look():
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    light.static().preset('white')
+    light.static().preset('off')
+    assert overrides(lighting)[-2:] == [
+        {'kind': 'clear_override', 'id': 'static_all'},
+        {'kind': 'set_override', 'value': DARK_FLOOR},
+    ]
+    assert STATIC_FLOOR_PRIORITY > DROP_ACCENT_PRIORITY
+    lighting.events.clear()
+    await light.leave_static()
+    assert overrides(lighting) == [{'kind': 'clear_override', 'id': 'static_floor'}]
+
+
+async def test_a_wash_look_lights_only_the_wash_and_darkens_the_other_groups():
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    light.static_look('wash', colour=(1.0, 0.0, 0.0))
+    assert [c['value'] for c in overrides(lighting)] == [
+        DARK_FLOOR,
+        {
+            'id': 'static_wash',
+            'target': {'group': 'wash'},
+            'values': {'colour': {'red': 1.0, 'green': 0.0, 'blue': 0.0}, 'intensity': 1.0},
+            'priority': STATIC_GROUP_PRIORITY,
+        },
+    ]
+    light.static_look('movers', dimmer=0.5)
+    assert overrides(lighting)[-1]['value']['target'] == {'group': 'movers'}
+    assert [c['value']['id'] for c in overrides(lighting)].count('static_floor') == 1
+
+
 async def test_static_strobe_obeys_the_caps_toggles_off_and_has_no_cooldown():
     settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0, intensity=1.0)
     light, _, clock, lighting = static_engine(settings=lambda: settings)
@@ -151,6 +193,20 @@ async def test_static_strobe_obeys_the_caps_toggles_off_and_has_no_cooldown():
     assert [c['kind'] for c in overrides(lighting)] == ['set_override', 'clear_override'] + [
         'set_override'
     ] * 2
+
+
+async def test_an_explicit_strobe_state_repeated_by_a_retry_changes_nothing():
+    settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0, intensity=1.0)
+    light, _, clock, lighting = static_engine(settings=lambda: settings)
+    light.enter_static()
+    looks = light.static()
+    looks.strobe(False)
+    looks.strobe(True)
+    clock.advance(0.5)
+    looks.strobe(True)
+    looks.strobe(False)
+    looks.strobe(False)
+    assert [c['kind'] for c in overrides(lighting)] == ['set_override', 'clear_override']
 
 
 async def test_leaving_static_clears_every_look_and_applies_the_current_intent_on_the_downbeat():
@@ -235,7 +291,10 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         {},
         False,
     )
-    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': 'static_wash'}
+    assert overrides(lighting)[-2:] == [
+        {'kind': 'clear_override', 'id': 'static_wash'},
+        {'kind': 'clear_override', 'id': 'static_floor'},
+    ]
 
 
 async def test_a_group_look_outranks_all_and_a_colour_on_all_takes_the_groups_colour_back():
@@ -396,3 +455,29 @@ async def test_static_releases_the_auto_special_and_auto_brings_it_back():
     await light.leave_static()
     await beat_at_phase(light, decoder, 0)
     assert [c['value']['id'] for c in overrides(lighting)] == ['special']
+
+
+async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_the_delay(
+    tmp_path,
+):
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    light, queue, clock, lighting = static_engine()
+    clock.advance(5.0)
+    blue = (0.0, 0.0, 1.0)
+    for command in (
+        {'action': 'mode', 'mode': 'static'},
+        {'action': 'static', 'kind': 'look', 'target': 'all', 'colour': blue, 'dimmer': 1.0},
+        {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.3},
+    ):
+        control.commands.put_nowait(command)
+    await control.apply_pending(light)
+
+    looks = sent(lighting, 'set_override')
+    assert [at for at, _ in looks] == [clock.monotonic()] * 2
+    assert [look['value']['id'] for _, look in looks] == ['static_all', 'static_wash']
+    # No lifetime or transition: Starfire cuts an override in on its next 25 ms frame.
+    assert all(look['value'].keys() == {'id', 'target', 'values', 'priority'} for _, look in looks)
+    assert queue.pending == 0, 'operator looks must never wait behind the playback delay'
+    assert control.commands.unfinished_tasks == 0, 'each command is marked handed to the engine'

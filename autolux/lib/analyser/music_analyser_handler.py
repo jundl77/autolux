@@ -19,6 +19,9 @@ class IMusicAnalyserHandler(ABC):
     def on_signal_return(self):
         pass
 
+    def on_digital_gap(self, started_sec: float, seconds: float) -> None:
+        pass
+
     @abstractmethod
     async def on_cycle(self):
         pass

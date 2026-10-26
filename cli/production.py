@@ -343,6 +343,9 @@ async def _run_session(args, *, checking=False):
                 renderer.check_health()
                 state = monitor.snapshot()
                 state['starfire'] = renderer.snapshot()
+                app.light_engine.note_capture_discontinuities(
+                    (state.get('tx') or {}).get('capture_discontinuities_total')
+                )
                 app.event_buffer.set_system_health(state)
                 health_log.update(
                     state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)

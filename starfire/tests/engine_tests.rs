@@ -1639,7 +1639,8 @@ fn pan_after_snap(intensity: f64) -> Vec<f64> {
             },
         ),
     );
-    (1..=40)
+    // Three seconds: the slowest glide at 0.3 needs about two to cross half the range.
+    (1..=120)
         .map(|frame| {
             let state = &engine
                 .render_at(frame as f64 * FRAME_SECONDS)
@@ -1666,6 +1667,19 @@ fn a_snap_at_low_intensity_glides_to_its_target_without_overshooting() {
             .all(|pair| pair[0] <= pair[1] && pair[1] <= 1.0)
     );
     assert!(pans[frames_to_target..].iter().all(|pan| *pan == 1.0));
+}
+
+#[test]
+fn low_and_mid_intensity_move_at_clearly_different_speeds() {
+    let frames_to_target = |intensity| {
+        pan_after_snap(intensity)
+            .iter()
+            .position(|pan| *pan == 1.0)
+            .unwrap()
+            + 1
+    };
+    let (low, mid) = (frames_to_target(0.3), frames_to_target(0.7));
+    assert!(low >= 3 * mid, "0.3 took {low} frames, 0.7 took {mid}");
 }
 
 #[test]

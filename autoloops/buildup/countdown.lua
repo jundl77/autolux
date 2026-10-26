@@ -1,7 +1,7 @@
 -- 16-beat loop
 -- energy: 2
--- family: warm
 -- movement: sweep
+-- texture: pixel
 local palette = sf.palette()
 local LOOP_BEATS = 16
 local RAMP_BEATS = 128

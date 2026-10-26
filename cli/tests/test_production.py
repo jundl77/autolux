@@ -285,6 +285,10 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         def snapshot(self):
             return None
 
+    class LightEngine:
+        def note_capture_discontinuities(self, total):
+            pass
+
     class App:
         def __init__(self, *_, **kwargs):
             assert not any(name in events for name in ('rx_start', 'starfire_start'))
@@ -293,6 +297,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             self.lighting_client = kwargs['lighting_client']
             assert self.lighting_client.groups() == []
             self.event_buffer = EventBuffer()
+            self.light_engine = LightEngine()
             events.append('app_initialized')
 
         def _shut_down(self):

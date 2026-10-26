@@ -42,8 +42,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Rust formatting failed.' }
     & $Cargo clippy @packageArguments --locked --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { throw 'Rust linting failed.' }
-    & $Cargo test @packageArguments --locked
-    if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
+    # Tee so stdout still streams live (success path unchanged) while we keep
+    # the lines needed to pinpoint a failure without re-running the suite.
+    & $Cargo test @packageArguments --locked | Tee-Object -Variable cargoTestOutput
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Host '--- Rust test failures ---'
+        $cargoTestOutput | Select-String -Pattern '^test .* FAILED', 'panicked at', 'test result: FAILED' |
+            ForEach-Object { $_.Line }
+        Write-Host ''
+        Write-Host '--- Last 30 lines of cargo test output ---'
+        $cargoTestOutput | Select-Object -Last 30
+        throw 'Rust tests failed.'
+    }
     & $Cargo build @packageArguments --locked --release
     if ($LASTEXITCODE -ne 0) { throw 'Rust release build failed.' }
 }

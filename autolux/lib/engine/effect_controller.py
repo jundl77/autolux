@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import random
 from collections.abc import Callable, Sequence
@@ -7,7 +8,12 @@ from typing import TYPE_CHECKING
 
 from autolux.lib.clients.starfire_client import StarfireClient, special_target
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
-from autolux.lib.engine.autoloop_policy import AutoloopChoice, AutoloopPolicy, SelectionContext
+from autolux.lib.engine.autoloop_policy import (
+    AutoloopChoice,
+    AutoloopPolicy,
+    SelectionContext,
+    max_energy_for_intensity,
+)
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
@@ -29,7 +35,7 @@ from autolux.lib.engine.special_policy import (
     SpecialCapabilities,
     SpecialPolicy,
 )
-from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Palette
+from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -40,6 +46,7 @@ DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 SPECIAL_PRIORITY = DROP_ACCENT_PRIORITY
 SPECIAL_ID = 'special'
+OPERATOR_FADE_SECONDS = 0.1
 
 
 def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
@@ -55,6 +62,13 @@ def strobe_rate_hz(settings: ShowSettings, special: Special = DROP_STROBE) -> fl
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
     return settings.drop_strobe_cooldown_seconds / settings.intensity
+
+
+def operator_transition(bpm: float | None) -> dict:
+    # Starfire fades autoloops in beats; without a tempo there is no beat to fade over.
+    if bpm and bpm > 0:
+        return {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * OPERATOR_FADE_SECONDS}
+    return {'kind': 'cut'}
 
 
 def strobe_override(
@@ -126,23 +140,30 @@ class EffectController:
         self._publish_palette()
         LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
 
+    def choose_track_palette(self, mood: Mood, *, send_now: bool = True) -> str:
+        chosen = self._palette_policy.choose_for_track(mood)
+        LOGGER.info(
+            '[lighting] track mood temperature=%+.2f weight=%+.2f drive=%+.2f | palette %s',
+            *mood.axes(),
+            chosen,
+        )
+        palette = self._palette_for_current_look()
+        if send_now and palette is not None and palette != self.lighting_client.palette:
+            self.lighting_client.set_palette(palette)
+            self._publish_palette()
+        return chosen
+
     def _palette_for_current_look(self) -> str | None:
         intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[0]
         if self._pinned_palette is not None:
             return palette_variant(self._pinned_palette, intent)
-        if self._entered is None or self._palette_policy.track_palette is None:
+        if self._entered is None:
             return None
         return self._palette_policy.variant_for(intent)
 
     def _palette_for(self, context: SelectionContext) -> str:
-        policy_palette = self._palette_policy.palette_for(
-            context.intent,
-            new_track=context.new_track,
-            temperature_bias=self._settings().palette_temperature_bias,
-        )
-        if self._pinned_palette is None:
-            return policy_palette
-        return palette_variant(self._pinned_palette, context.intent)
+        base = self._pinned_palette or self._palette_policy.track_palette
+        return palette_variant(base, context.intent)
 
     def _publish_palette(self) -> None:
         if self.event_buffer is not None:
@@ -189,6 +210,36 @@ class EffectController:
             self._restore_special()
         return True
 
+    def cap_energy(self, context: SelectionContext, bpm: float | None) -> AutoloopChoice | None:
+        """Swap the running loop for a calmer one; a raised cap waits for the next entry."""
+        if self._entered is None or self._entered[0] != context.intent:
+            return None
+        current = self._entered[1]
+        if self.lighting_client.selected_autoloop != (current.bank, current.autoloop):
+            return None  # Standby or another look is showing; the next entry obeys the cap.
+        intensity = self._settings().intensity
+        max_energy = max_energy_for_intensity(intensity)
+        if current.meta.energy <= max_energy:
+            return None
+        try:
+            choice = self._policy.choose(
+                context, exclude=(current.bank, current.autoloop), intensity=intensity
+            )
+        except ValueError:
+            return None
+        if choice.meta.energy >= current.meta.energy:
+            return None
+        choice = dataclasses.replace(choice, reason=f'intensity cap; {choice.reason}')
+        self.lighting_client.select_autoloop(
+            choice.bank, choice.autoloop, transition=operator_transition(bpm)
+        )
+        # Not recorded: an operator swap must not spend the loop's turn in the rotation.
+        self._entered = context.intent, choice
+        self._announce(
+            '[lighting] intensity cap |', context.intent, choice, self.lighting_client.palette
+        )
+        return choice
+
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
         choice = self._policy.choose(
             context,
@@ -213,14 +264,14 @@ class EffectController:
                 'AUTOLOOP',
                 selection={
                     'energy': meta.energy,
-                    'family': meta.family,
+                    'texture': meta.texture,
                     'movement': meta.movement,
                     'palette': palette,
                     'reason': choice.reason,
                 },
             )
         LOGGER.info(
-            '%s intent=%s | autoloop=%s/%s | palette=%s | energy=%d family=%s movement=%s '
+            '%s intent=%s | autoloop=%s/%s | palette=%s | energy=%d movement=%s texture=%s '
             '| reason=%s',
             prefix,
             intent.name,
@@ -228,8 +279,8 @@ class EffectController:
             autoloop,
             palette,
             meta.energy,
-            meta.family,
             meta.movement,
+            meta.texture,
             choice.reason,
         )
 
@@ -249,8 +300,8 @@ class EffectController:
         LOGGER.info('[lighting] standby | autoloop=%s/%s', bank, autoloop)
 
     def _intense_blocked(self, settings: ShowSettings, now: float) -> str | None:
-        if settings.intensity < STROBE_GATE_INTENSITY:
-            return f'intensity {settings.intensity:.2f} below {STROBE_GATE_INTENSITY:.2f}'
+        if settings.intensity <= STROBE_GATE_INTENSITY:
+            return f'intensity {settings.intensity:.2f} at or below {STROBE_GATE_INTENSITY:.2f}'
         cooldown = drop_strobe_cooldown_seconds(settings)
         last = self._last_intense_at
         if last is not None and now - last < cooldown:
