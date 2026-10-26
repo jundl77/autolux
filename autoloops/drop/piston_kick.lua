@@ -1,7 +1,7 @@
 -- 8-beat loop
 -- energy: 2
--- family: warm
 -- movement: snap
+-- texture: wash
 local palette = sf.palette()
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS, STRIP_WIDTH_BEATS = 0.4, 0.7

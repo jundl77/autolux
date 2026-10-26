@@ -1,7 +1,7 @@
 -- 16-beat loop
 -- energy: 2
--- family: accent
 -- movement: snap
+-- texture: pixel
 local palette = sf.palette()
 local LOOP_BEATS = 16
 local HOLD_BEATS = 8

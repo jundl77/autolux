@@ -101,8 +101,8 @@ fn looks() -> Vec<Look> {
 
 const META_KEYS: [(&str, &[&str]); 3] = [
     ("energy", &["1", "2", "3"]),
-    ("family", &["cold", "warm", "accent"]),
     ("movement", &["still", "sweep", "snap"]),
+    ("texture", &["wash", "beam", "pixel", "mixed"]),
 ];
 
 fn metadata(look: &Look) -> Result<[String; 3], String> {

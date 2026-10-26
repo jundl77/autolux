@@ -1,7 +1,7 @@
 -- 16-beat loop
 -- energy: 1
--- family: accent
 -- movement: sweep
+-- texture: mixed
 local palette = sf.palette()
 local LOOP_BEATS = 16
 local FADE_IN_SHARE = 0.75

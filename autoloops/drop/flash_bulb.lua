@@ -1,7 +1,7 @@
 -- 8-beat loop
 -- energy: 2
--- family: cold
 -- movement: snap
+-- texture: wash
 local palette = sf.palette()
 local LOOP_BEATS = 8
 local HALF_BAR_BEATS = 2

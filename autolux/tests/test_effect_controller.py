@@ -149,8 +149,8 @@ ROTATION = {
     LightIntent.DROP: (('drop', 'kick'), ('drop', 'slam'), ('drop', 'chase')),
 }
 ROTATION_META = {
-    **{loop: AutoloopMeta(1, 'cold', 'still') for loops in ROTATION.values() for loop in loops},
-    **{loop: AutoloopMeta(3, 'warm', 'snap') for loop in ROTATION[LightIntent.DROP]},
+    **{loop: AutoloopMeta(1, 'still', 'wash') for loops in ROTATION.values() for loop in loops},
+    **{loop: AutoloopMeta(3, 'snap', 'wash') for loop in ROTATION[LightIntent.DROP]},
 }
 
 
@@ -176,7 +176,7 @@ async def test_each_entry_plays_every_look_of_its_tier_before_any_repeats(
             await controller.change_effect(LightIntent.BUILDUP)
     looks = [name for name in selected(recorded_lighting) if name.startswith('atmospheric/')]
     assert sorted(looks) == sorted(f'{b}/{n}' for b, n in ROTATION[LightIntent.ATMOSPHERIC])
-    assert 'energy=1 family=cold movement=still | reason=calm' in caplog.text
+    assert 'energy=1 movement=still texture=wash | reason=calm' in caplog.text
 
 
 async def test_repeating_the_current_intent_keeps_its_look(recorded_lighting):
@@ -224,7 +224,7 @@ async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting)
     assert effect['selection'].pop('palette') == recorded_lighting.palette
     assert effect['selection'] == {
         'energy': 3,
-        'family': 'warm',
+        'texture': 'wash',
         'movement': 'snap',
         'reason': 'long build or long since the last drop',
     }
@@ -234,7 +234,6 @@ async def test_a_look_that_was_not_sent_is_not_remembered(recorded_lighting):
     controller = rotating(recorded_lighting)
     recorded_lighting.select_autoloop = lambda *_, **__: False
     assert not await controller.change_effect(LightIntent.ATMOSPHERIC)
-    assert controller._policy.track_family is None
     assert controller._entered is None
 
 
@@ -286,8 +285,8 @@ TWO_BREAKDOWN_LOOPS = {
     LightIntent.BREAKDOWN: (('breakdown', 'wide_space'), ('breakdown', 'deep_space'))
 }
 TWO_BREAKDOWN_META = {
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
-    ('breakdown', 'deep_space'): AutoloopMeta(1, 'cold', 'sweep'),
+    ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'deep_space'): AutoloopMeta(1, 'sweep', 'beam'),
 }
 
 
@@ -362,7 +361,7 @@ async def test_the_intensity_setting_caps_the_drop_energy_at_selection_time(reco
         autoloops={**DEFAULT_AUTOLOOPS, LightIntent.DROP: (('drop', 'kick'), ('drop', 'soft'))},
         autoloop_meta={
             **DEFAULT_AUTOLOOP_META,
-            ('drop', 'soft'): AutoloopMeta(2, 'warm', 'snap'),
+            ('drop', 'soft'): AutoloopMeta(2, 'snap', 'wash'),
         },
     )
     await controller.change_effect(LightIntent.DROP, context=SelectionContext(LightIntent.DROP))
@@ -371,7 +370,7 @@ async def test_the_intensity_setting_caps_the_drop_energy_at_selection_time(reco
 
 
 CAPPED_DROPS = {**DEFAULT_AUTOLOOPS, LightIntent.DROP: (('drop', 'kick'), ('drop', 'soft'))}
-CAPPED_DROP_META = {**DEFAULT_AUTOLOOP_META, ('drop', 'soft'): AutoloopMeta(2, 'warm', 'snap')}
+CAPPED_DROP_META = {**DEFAULT_AUTOLOOP_META, ('drop', 'soft'): AutoloopMeta(2, 'snap', 'wash')}
 
 
 def _capped_show(tmp_path):
