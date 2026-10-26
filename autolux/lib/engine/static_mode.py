@@ -12,6 +12,8 @@ from autolux.lib.engine.effect_definitions import ShowSettings
 LOGGER = logging.getLogger(__name__)
 
 STATIC_PRIORITY = DROP_ACCENT_PRIORITY + 1000
+STATIC_FLOOR_PRIORITY = STATIC_PRIORITY - 1
+STATIC_FLOOR_ID = 'static_floor'
 STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
 STATIC_STROBE_ID = 'static_strobe'
@@ -56,6 +58,7 @@ class StaticLooks:
         self._settings = settings
         self._looks: dict[str, dict] = {}
         self._strobe_until: float | None = None
+        self._floor = False
         self.blackout = False
 
     def look(self, target: str, colour=None, dimmer=None, uv=None) -> None:
@@ -73,6 +76,9 @@ class StaticLooks:
                     other.pop('colour', None)
                     other.pop('uv', None)
                     self._send(name)
+        if target != ALL_FIXTURES and ALL_FIXTURES not in self._looks:
+            # Without it the held automatic look keeps lighting every other group.
+            self._set_floor()
         look = self._looks.setdefault(target, {})
         if colour is not None and uv is None:
             look.pop('uv', None)
@@ -101,6 +107,9 @@ class StaticLooks:
         elif name == 'uv':
             self.look(ALL_FIXTURES, dimmer=0.0)
             self.blacklight()
+        elif name == 'off':
+            # Clearing alone would reveal the held automatic look (warm-white standby when idle).
+            self._set_floor()
 
     def set_blackout(self, enabled: bool) -> None:
         if enabled == self.blackout:
@@ -124,6 +133,8 @@ class StaticLooks:
 
     def resend(self) -> None:
         self._strobe_until = None
+        if self._floor:
+            self._send_floor()
         for target in self._looks:
             self._send(target)
 
@@ -131,6 +142,9 @@ class StaticLooks:
         for target in self._looks:
             self._lighting.clear_override(STATIC_LOOK_PREFIX + target)
         self._looks.clear()
+        if self._floor:
+            self._floor = False
+            self._lighting.clear_override(STATIC_FLOOR_ID)
         if self._strobe_until is not None:
             self._strobe_until = None
             self._lighting.clear_override(STATIC_STROBE_ID)
@@ -150,6 +164,21 @@ class StaticLooks:
                 for target, look in self._looks.items()
             },
         }
+
+    def _set_floor(self) -> None:
+        if not self._floor:
+            self._floor = True
+            self._send_floor()
+
+    def _send_floor(self) -> None:
+        self._lighting.set_override(
+            {
+                'id': STATIC_FLOOR_ID,
+                'target': ALL_FIXTURES,
+                'values': {'intensity': 0.0},
+                'priority': STATIC_FLOOR_PRIORITY,
+            }
+        )
 
     def _send(self, target: str) -> None:
         look = self._looks[target]

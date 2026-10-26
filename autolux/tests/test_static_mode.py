@@ -11,6 +11,7 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
 )
 from autolux.lib.engine.static_mode import (
+    STATIC_FLOOR_PRIORITY,
     STATIC_GROUP_PRIORITY,
     STATIC_PRIORITY,
     StaticLooks,
@@ -124,6 +125,47 @@ async def test_the_uv_preset_darkens_everything_but_the_blacklit_washes():
     assert overrides(lighting)[-2]['value']['values'] == {'intensity': 0.0}
 
 
+DARK_FLOOR = {
+    'id': 'static_floor',
+    'target': 'all',
+    'values': {'intensity': 0.0},
+    'priority': STATIC_FLOOR_PRIORITY,
+}
+
+
+async def test_off_darkens_the_rig_instead_of_revealing_the_held_automatic_look():
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    light.static().preset('white')
+    light.static().preset('off')
+    assert overrides(lighting)[-2:] == [
+        {'kind': 'clear_override', 'id': 'static_all'},
+        {'kind': 'set_override', 'value': DARK_FLOOR},
+    ]
+    assert STATIC_FLOOR_PRIORITY > DROP_ACCENT_PRIORITY
+    lighting.events.clear()
+    await light.leave_static()
+    assert overrides(lighting) == [{'kind': 'clear_override', 'id': 'static_floor'}]
+
+
+async def test_a_wash_look_lights_only_the_wash_and_darkens_the_other_groups():
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    light.static_look('wash', colour=(1.0, 0.0, 0.0))
+    assert [c['value'] for c in overrides(lighting)] == [
+        DARK_FLOOR,
+        {
+            'id': 'static_wash',
+            'target': {'group': 'wash'},
+            'values': {'colour': {'red': 1.0, 'green': 0.0, 'blue': 0.0}, 'intensity': 1.0},
+            'priority': STATIC_GROUP_PRIORITY,
+        },
+    ]
+    light.static_look('movers', dimmer=0.5)
+    assert overrides(lighting)[-1]['value']['target'] == {'group': 'movers'}
+    assert [c['value']['id'] for c in overrides(lighting)].count('static_floor') == 1
+
+
 async def test_static_strobe_obeys_the_caps_toggles_off_and_has_no_cooldown():
     settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0, intensity=1.0)
     light, _, clock, lighting = static_engine(settings=lambda: settings)
@@ -229,7 +271,10 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         {},
         False,
     )
-    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': 'static_wash'}
+    assert overrides(lighting)[-2:] == [
+        {'kind': 'clear_override', 'id': 'static_wash'},
+        {'kind': 'clear_override', 'id': 'static_floor'},
+    ]
 
 
 async def test_a_group_look_outranks_all_and_a_colour_on_all_takes_the_groups_colour_back():
