@@ -116,7 +116,7 @@ type Bridge<'a> = (&'a [(usize, Event)], i64, u64, u64, u64);
 #[test]
 fn discontinuities_reanchor_the_sample_timeline_to_device_time() {
     use Event::*;
-    let band = CAPTURE_JITTER_DEAD_BAND_FRAMES as i64 - 1;
+    let band = CAPTURE_JITTER_DEAD_BAND_FRAMES as i64;
     let stall = (10, CallbackStall(20 * PACKET_FRAMES));
     let cases: [Bridge<'_>; 4] = [
         (&[(60, Xrun(3_000))], 3_000, 3_000, 0, 0),
@@ -248,6 +248,36 @@ fn stream_errors_fault_distinctly_while_capture_xruns_and_priority_denial_contin
     assert_eq!(
         device.capture.counters.stream.error_message(),
         Some("audio callback delivered a partial stereo frame")
+    );
+
+    let mut untimed = Device::new(0.25);
+    untimed.run(0..1, &[]);
+    let timing = CaptureTiming {
+        captured_at_nanos: 0,
+        callback_nanos: 0,
+        callback_at: Instant::now(),
+    };
+    untimed
+        .capture
+        .capture(&[0.5; BLOCK_FRAMES * CHANNELS], timing);
+    let stamped = untimed.capture.queue.pop().unwrap().assembly_completed_at;
+    assert_eq!(stamped, timing.callback_at);
+    untimed
+        .capture
+        .counters
+        .stream
+        .error(cpal::ErrorKind::Xrun.into());
+    untimed.capture.capture(&[0.5; CHANNELS], timing);
+    assert_eq!(
+        untimed.capture.counters.stream.error_message(),
+        Some("a capture discontinuity arrived without a device timestamp")
+    );
+
+    let disconnected = StreamCounters::default();
+    disconnected.error(cpal::ErrorKind::DeviceNotAvailable.into());
+    assert_eq!(
+        disconnected.error_message(),
+        Some("audio endpoint disconnected")
     );
 
     let playback = StreamCounters::default();
