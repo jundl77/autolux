@@ -706,3 +706,17 @@ def test_the_page_sends_the_strobe_state_it_wants_so_a_retry_cannot_flip_it(stat
     for command, enabled in ((start, True), (stop, False)):
         assert poller.control(command) == {'accepted': 'static'}
         assert commands.get_nowait() == {'action': 'static', 'kind': 'strobe', 'enabled': enabled}
+
+
+def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_poll():
+    from autolux.simulate import system_metrics
+
+    app = build_app(_Recorder())
+    graphs = [f'metric-{panel}' for panel, *_ in system_metrics.PANELS]
+    assert all(app.layout[graph] is not None for graph in graphs)
+    refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
+    gate = {'tab': 'control', 'metrics': True, 'timeline': False}
+    reply = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()
+    figures = reply['response']['telemetry-figures']['data']
+    assert len(figures) == len(graphs)
+    assert all('data' in figure and 'layout' in figure for figure in figures)

@@ -532,25 +532,37 @@ def _build_show_status(snapshot: dict, now: float) -> list:
     bpm = _room_bpm(snapshot)
     health = _health(snapshot)
     fps = _latest_telemetry(snapshot, now).get('starfire_measured_render_frames_per_second')
+    palette_name = palette.get('name')
     items = [
-        _status_item('Intent', [_dot(cfg['primary']), cfg['label'].capitalize()]),
-        _status_item(
-            'Autoloop',
-            name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
-            title=detail,
-        ),
-        _status_item('Colors', palette.get('name') or '—'),
-        _status_item('Tempo', f'{bpm:.0f} BPM' if bpm else '— BPM'),
         _status_item(
             'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
         ),
-        _status_item('Render', f'{fps:.0f} fps' if finite(fps) else '— fps'),
+        _status_item(
+            'Autoloop',
+            [
+                _dot(cfg['primary']),
+                name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
+                html.Span(cfg['label'].lower(), className='status-tag'),
+            ],
+            title=detail,
+        ),
+        _status_item(
+            'Colors',
+            [
+                *_palette_marks(palette_name if palette.get('pinned') else None),
+                palette_name or '—',
+            ],
+        ),
     ]
     special = snapshot.get('special')
     if special:
         items.append(
             _status_item('Fx', special.get('name', '—') if isinstance(special, dict) else special)
         )
+    items += [
+        _status_item('Tempo', f'{bpm:.0f} BPM' if bpm else '— BPM'),
+        _status_item('Render', f'{fps:.0f} fps' if finite(fps) else '— fps'),
+    ]
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
         items.append(_status_item('Strobe', f'in {cooldown:.0f} s' if cooldown > 0 else 'ready'))
@@ -725,17 +737,25 @@ def _setting_input(name):
 
 
 def _build_settings():
-    return html.Details(
-        [
-            html.Summary('Settings', className='settings-toggle'),
-            html.Div([_setting_input(name) for name in SETTINGS_ORDER], className='settings-form'),
-        ],
+    return html.Div(
+        [_setting_input(name) for name in SETTINGS_ORDER],
         id='settings-drawer',
-        className='settings',
+        className='settings-form',
+        style={'display': 'none'},
     )
 
 
 def _register_settings_drawer(app) -> None:
+    app.clientside_callback(
+        '''function(clicks) {
+            const open = (clicks || 0) % 2 === 1;
+            return [open ? {} : {display: 'none'}, open ? 'settings-toggle open' : 'settings-toggle'];
+        }''',
+        Output('settings-drawer', 'style'),
+        Output('settings-toggle', 'className'),
+        Input('settings-toggle', 'n_clicks'),
+        prevent_initial_call=True,
+    )
     limits = [
         [
             setting_text(name, low),
@@ -814,19 +834,22 @@ def _rgb_css(rgb) -> str:
     return 'rgb({}, {}, {})'.format(*(round(channel * 255) for channel in rgb))
 
 
+PALETTES_BY_NAME = {palette.name: palette for palette in PALETTES}
+
+
+def _palette_marks(name: str | None) -> list:
+    palette = PALETTES_BY_NAME.get(name)
+    if palette is None:
+        return [html.Span(className='dot dot-auto')]
+    return [_dot(_rgb_css(getattr(palette, slot))) for slot in PALETTE_SWATCH_SLOTS]
+
+
 def _palette_options() -> list:
     def option(name, marks):
         return html.Span([*marks, html.Span(name)], className='palette-option')
 
-    auto = option('auto', [html.Span(className='dot dot-auto')])
-    return [{'label': auto, 'value': PALETTE_POLICY}] + [
-        {
-            'label': option(
-                palette.name,
-                [_dot(_rgb_css(getattr(palette, s))) for s in PALETTE_SWATCH_SLOTS],
-            ),
-            'value': palette.name,
-        }
+    return [{'label': option('auto', _palette_marks(None)), 'value': PALETTE_POLICY}] + [
+        {'label': option(palette.name, _palette_marks(palette.name)), 'value': palette.name}
         for palette in PALETTES
     ]
 
@@ -852,10 +875,10 @@ def _fader(slider_id: str, value_id: str, **slider):
 
 def _build_control_card() -> list:
     return [
+        html.Div(id='show-status', className='show-status'),
         html.Div('Show control', className='section-label'),
         html.Section(
             [
-                html.Div(id='show-status', className='show-status'),
                 html.Div(
                     [
                         html.Button(
@@ -866,9 +889,9 @@ def _build_control_card() -> list:
                             disabled=True,
                         ),
                         html.Button(
-                            '\u23ed\ufe0e',
+                            'Autoloop \u23ed\ufe0e',
                             id='control-next',
-                            className='icon-button',
+                            className='transport-button',
                             title='Next autoloop',
                             disabled=True,
                         ),
@@ -922,6 +945,9 @@ def _build_control_card() -> list:
                                     searchable=False,
                                     disabled=True,
                                     className='palette-select',
+                                ),
+                                html.Button(
+                                    'Settings', id='settings-toggle', className='settings-toggle'
                                 ),
                             ],
                             className='control-row',
@@ -1062,7 +1088,9 @@ def _register_direct_auto_controls(app) -> None:
                 const paused = !!shown.paused;
                 control.hold({paused: !paused});
                 control.dispatch(control.build.toggle(paused), status, ['paused']);
-                return paused ? '\u23f8\ufe0e' : '\u25b6\ufe0e';
+                return paused
+                    ? ['\u23f8\ufe0e', 'icon-button playing']
+                    : ['\u25b6\ufe0e', 'icon-button paused'];
             }
             if (triggered.includes('control-next.n_clicks')) {
                 control.dispatch(control.build.next(), status);
@@ -1086,9 +1114,10 @@ def _register_direct_auto_controls(app) -> None:
                     control.dispatch(control.build.mode(mode), 'static-status', ['mode']);
                 }
             }
-            return nu;
+            return [nu, nu];
         }""",
         Output('control-toggle', 'children', allow_duplicate=True),
+        Output('control-toggle', 'className', allow_duplicate=True),
         Input('control-toggle', 'n_clicks'),
         Input('control-next', 'n_clicks'),
         Input('control-palette', 'value'),
@@ -2042,7 +2071,12 @@ def build_app(
     )
     app.clientside_callback(
         '''function(figures, selected) {
-            if (selected !== 'telemetry' || !figures) throw window.dash_clientside.PreventUpdate;
+            // The first figures build the charts while hidden, so the tab opens populated;
+            // after that they redraw only while the tab is shown.
+            if (!figures || (selected !== 'telemetry' && window.autoluxTelemetryPrimed)) {
+                throw window.dash_clientside.PreventUpdate;
+            }
+            window.autoluxTelemetryPrimed = true;
             return figures;
         }''',
         [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
@@ -2152,13 +2186,15 @@ def build_app(
             const settable = !ready || !state.settings;
             const skippable = ready && !state.paused && !!state.intent
                 && state.intent !== 'standby';
-            return [ready && state.paused ? '\u25b6\ufe0e' : '\u23f8\ufe0e', !ready,
+            return [ready && state.paused ? '\u25b6\ufe0e' : '\u23f8\ufe0e',
+                    'icon-button' + (!ready ? '' : state.paused ? ' paused' : ' playing'), !ready,
                     !skippable, !ready || state.master_brightness === null, settable,
                     ...'''
         + setting_names
         + '''.map(() => settable)];
         }''',
         Output('control-toggle', 'children'),
+        Output('control-toggle', 'className'),
         Output('control-toggle', 'disabled'),
         Output('control-next', 'disabled'),
         Output('control-brightness', 'disabled'),
