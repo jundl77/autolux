@@ -57,7 +57,9 @@ def _guard_xml(content: bytes, label: str) -> ElementTree.Element:
     return root
 
 
-def _archive(content: bytes, label: str) -> dict[str, tuple[zipfile.ZipInfo, bytes]]:
+def _archive(
+    content: bytes, label: str, only: str | None = None
+) -> dict[str, tuple[zipfile.ZipInfo, bytes]]:
     if len(content) > MAX_MVR_BYTES:
         raise ValueError(f'{label} exceeds its size limit')
     try:
@@ -85,7 +87,8 @@ def _archive(content: bytes, label: str) -> dict[str, tuple[zipfile.ZipInfo, byt
                 if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
                     raise ValueError(f'{label} entries must be STORE or DEFLATE compressed')
                 folded.add(name.casefold())
-                entries[name] = (member, package.read(member))
+                if only is None or name == only:
+                    entries[name] = (member, package.read(member))
             return entries
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
         raise ValueError(f'Invalid {label}: {error}') from error
@@ -166,14 +169,14 @@ def gdtf_package(description: str, other: dict | None = None) -> bytes:
     return output.getvalue()
 
 
-def gdtf_entries(scene: Scene, spec: str) -> dict:
+def gdtf_entries(scene: Scene, spec: str, only: str | None = None) -> dict:
     if spec not in scene.entries:
         raise ValueError(f'GDTFSpec {spec} is not in the MVR archive')
-    return _archive(scene.entries[spec][1], f'GDTF {spec}')
+    return _archive(scene.entries[spec][1], f'GDTF {spec}', only)
 
 
 def gdtf_description(scene: Scene, spec: str) -> str:
-    entries = gdtf_entries(scene, spec)
+    entries = gdtf_entries(scene, spec, GDTF_DESCRIPTION)
     if GDTF_DESCRIPTION not in entries:
         raise ValueError(f'GDTF {spec} has no {GDTF_DESCRIPTION}')
     try:
@@ -624,6 +627,9 @@ def set_movement_limits(scene: Scene, identity: str, axis: str, low: float, high
     )
     if data is None:
         data = ElementTree.SubElement(user_data, 'Data', provider=schema.AUTOLUX_PROVIDER, ver='1')
+    for node in data.findall('Movement'):
+        if node.get('fixture') == identity and node.get('axis') == axis.title():
+            data.remove(node)
     ElementTree.SubElement(
         data,
         'Movement',

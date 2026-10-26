@@ -1,3 +1,5 @@
+"""Convert a pre-MVR rig.json fixture patch into an MVR archive."""
+
 import argparse
 import json
 from pathlib import Path

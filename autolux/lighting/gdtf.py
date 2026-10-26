@@ -159,22 +159,21 @@ def fixture_library(catalogue: Path) -> dict:
         except (ElementTree.ParseError, AttributeError, IndexError, KeyError, TypeError) as error:
             raise ValueError(f'Invalid GDTF description {profile_id}: {error}') from error
         spec = mvr.gdtf_spec_name(fixture.manufacturer, fixture.name)
-        if spec in library and library[spec]['gdtf_xml'] != profile['gdtf_xml']:
-            raise ValueError(
-                f'Profiles {library[spec]["profile_id"]} and {profile_id} share {spec}'
-            )
-        library.setdefault(
-            spec,
-            {
-                'profile_id': profile_id,
-                'name': fixture.name,
-                'manufacturer': fixture.manufacturer,
-                'fixture_type_id': fixture.fixture_type_id,
-                'gdtf_xml': profile['gdtf_xml'],
-                'default_mode': profile['dmx_mode'],
-                'modes': mvr.gdtf_modes(profile['gdtf_xml'], spec),
-            },
-        )
+        if spec in library:
+            if library[spec]['gdtf_xml'] != profile['gdtf_xml']:
+                raise ValueError(
+                    f'Profiles {library[spec]["profile_id"]} and {profile_id} share {spec}'
+                )
+            continue
+        library[spec] = {
+            'profile_id': profile_id,
+            'name': fixture.name,
+            'manufacturer': fixture.manufacturer,
+            'fixture_type_id': fixture.fixture_type_id,
+            'gdtf_xml': profile['gdtf_xml'],
+            'default_mode': profile['dmx_mode'],
+            'modes': mvr.gdtf_modes(profile['gdtf_xml'], spec),
+        }
     return library
 
 

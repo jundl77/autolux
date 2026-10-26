@@ -10,13 +10,12 @@ use anyhow::{Context, Result, ensure};
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::GdtfProfile;
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
-use crate::mvr;
+use crate::mvr::{self, MATRIX_VALUES};
 use crate::protocol::wire;
 
 pub const MAX_FIXTURES: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
 const MAX_IDENTIFIER_BYTES: usize = 128;
-const MATRIX_VALUES: usize = 12;
 const ORTHONORMAL_TOLERANCE: f64 = 1e-3;
 const GIMBAL_TOLERANCE: f64 = 1e-9;
 const FULL_TURN_DEGREES: f64 = 360.0;
@@ -125,16 +124,12 @@ pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
         pitch.abs() <= MAX_PITCH_DEGREES,
         "fixture pitch {pitch:.1} exceeds +/-{MAX_PITCH_DEGREES} degrees; the tilt home is only approximated for near-level bases"
     );
-    let yaw = if v[2].abs() > 1.0 - GIMBAL_TOLERANCE {
+    let mut yaw = if v[2].abs() > 1.0 - GIMBAL_TOLERANCE {
         u[1].atan2(u[0])
     } else {
         (-v[0]).atan2(v[1])
     }
     .to_degrees();
-    let mut yaw = yaw % FULL_TURN_DEGREES;
-    if yaw > HALF_TURN_DEGREES {
-        yaw -= FULL_TURN_DEGREES;
-    }
     if yaw <= -HALF_TURN_DEGREES {
         yaw += FULL_TURN_DEGREES;
     }
@@ -391,23 +386,15 @@ impl FixtureRig {
             let pan_range = profile.movement_range("Pan");
             let tilt_range = profile.movement_range("Tilt");
             let pan = |position| {
+                let position = fixture.pan.map(position);
                 pan_range.map_or(position, |(from, to)| {
-                    offset_pan(
-                        fixture.pan.map(position),
-                        fixture.pan_offset_degrees,
-                        from,
-                        to,
-                    )
+                    offset_pan(position, fixture.pan_offset_degrees, from, to)
                 })
             };
             let tilt = |position| {
+                let position = fixture.tilt.map(position);
                 tilt_range.map_or(position, |(from, to)| {
-                    offset_tilt(
-                        fixture.tilt.map(position),
-                        fixture.tilt_offset_degrees,
-                        from,
-                        to,
-                    )
+                    offset_tilt(position, fixture.tilt_offset_degrees, from, to)
                 })
             };
             let mut calibrated = state.clone();

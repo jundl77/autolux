@@ -143,6 +143,7 @@ impl MusicalClock {
             grid_beat,
         };
         if self.paused {
+            self.tempo_bpm = beat.bpm;
             self.beats_per_bar = beat.beats_per_bar;
             self.last_received = Some(received);
             return Ok(());

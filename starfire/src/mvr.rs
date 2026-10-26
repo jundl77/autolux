@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail, ensure};
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
+use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::MAX_GDTF_XML_BYTES;
 use crate::protocol::wire;
 
@@ -16,8 +17,7 @@ const MAX_ARCHIVE_ENTRIES: usize = 4096;
 const MAX_XML_NODES: usize = 65_536;
 const MAX_XML_DEPTH: usize = 64;
 const DMX_UNIVERSE_SIZE: u32 = 512;
-const MAX_ARTNET_UNIVERSE: u32 = 32_767;
-const MATRIX_VALUES: usize = 12;
+pub const MATRIX_VALUES: usize = 12;
 const IDENTITY: [f64; MATRIX_VALUES] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
 const AUTOLUX_PROVIDER: &str = "Autolux";
 const OBJECT_TAGS: [&str; 8] = [
@@ -184,7 +184,7 @@ pub fn parse_address(text: &str) -> Result<(u32, u32)> {
         }
     };
     ensure!(
-        universe <= MAX_ARTNET_UNIVERSE && (1..=DMX_UNIVERSE_SIZE).contains(&address),
+        universe <= u32::from(MAX_ARTNET_UNIVERSE) && (1..=DMX_UNIVERSE_SIZE).contains(&address),
         "MVR DMX address {text:?} is outside universes 1..32768, 1..512"
     );
     Ok((universe, address))

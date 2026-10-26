@@ -428,7 +428,8 @@ class LightEngine(IMusicAnalyserHandler):
         now = self._clock.monotonic()
         context = self._selection_context(intent, label, now)
         cut = self._paused and self._showing_standby
-        if await self.effect_controller.change_effect(intent, context=context, cut=cut):
+        bpm = self._published_bpm.get('last')
+        if await self.effect_controller.change_effect(intent, bpm, context=context, cut=cut):
             self._note_new_look(intent, now)
         self._entered_label = label
         if self._showing_standby:
