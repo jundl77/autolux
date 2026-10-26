@@ -70,18 +70,18 @@ async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, record
 @pytest.mark.parametrize(
     ('intent', 'transition'),
     [
-        (LightIntent.ATMOSPHERIC, {'kind': 'crossfade', 'duration_beats': 1}),
-        (LightIntent.BREAKDOWN, {'kind': 'crossfade', 'duration_beats': 1}),
-        (LightIntent.BUILDUP, {'kind': 'crossfade', 'duration_beats': 1}),
+        (LightIntent.ATMOSPHERIC, None),
+        (LightIntent.BREAKDOWN, None),
+        (LightIntent.BUILDUP, None),
         (LightIntent.DROP, {'kind': 'cut'}),
     ],
 )
-async def test_a_drop_cuts_in_and_every_other_change_crossfades_over_a_beat(
+async def test_a_drop_cuts_in_and_every_other_change_takes_the_renderer_crossfade(
     effect_controller, recorded_lighting, intent, transition
 ):
     await effect_controller.change_effect(intent)
     [select] = [e['command'] for e in recorded_lighting.events if e['command']['kind'] == 'select']
-    assert select['transition'] == transition
+    assert select.get('transition') == transition
 
 
 async def _drop_after(controller, lighting, clock, seconds):

@@ -97,6 +97,10 @@ class ShowControl:
         if applied:
             self.publish(light_engine)
 
+    def start(self, light_engine) -> None:
+        # Starfire starts from its own defaults; a restart must restore the saved show.
+        light_engine.send_renderer_settings()
+
     def publish(self, light_engine) -> None:
         if self._event_buffer is not None:
             self._event_buffer.set_control_state(
@@ -235,6 +239,7 @@ class AutoluxController:
         self.is_running = True
 
         LOGGER.info("[main] Autolux is ready, starting")
+        self.control.start(self.light_engine)
 
         last_100ms_callback_execution: datetime.datetime = datetime.datetime.now()
         last_1sec_callback_execution: datetime.datetime = datetime.datetime.now()

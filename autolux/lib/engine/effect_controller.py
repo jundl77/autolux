@@ -12,7 +12,6 @@ from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
     STROBE_BURST_BEATS,
-    STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
     AutoloopMetaTable,
     AutoloopTable,
@@ -26,13 +25,13 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DROP_STROBE_HZ = STROBE_RATE_HZ
 DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 
 
-def strobe_burst_seconds(bpm: float | None, burst_seconds: float) -> float:
-    duration = min(burst_seconds, STROBE_MAX_BURST_SECONDS)
+def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
+    # Kept inside Starfire's cap so the accent ends on its own timer, not on the guard.
+    duration = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
     return duration
@@ -82,7 +81,7 @@ class EffectController:
         choice, fresh = self._entry_choice(context)
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         if not self.lighting_client.select_autoloop(
-            bank, autoloop, transition=transition_for(intent, self._settings())
+            bank, autoloop, transition=transition_for(intent)
         ):
             return False
         if fresh:
@@ -127,12 +126,12 @@ class EffectController:
             )
             return
         self._last_strobe_started_at = now
-        duration = strobe_burst_seconds(bpm, settings.strobe_burst_seconds)
+        duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
             {
                 'id': DROP_ACCENT_ID,
                 'target': 'all',
-                'values': {'strobe_hz': DROP_STROBE_HZ},
+                'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
                 'priority': DROP_ACCENT_PRIORITY,
                 'lifetime': {'kind': 'seconds', 'duration_seconds': duration},
             }

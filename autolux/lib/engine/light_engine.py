@@ -37,7 +37,9 @@ LOGGER = logging.getLogger(__name__)
 _LATENCY_LOG_STEP_SEC = 0.25
 _SHED_PUBLISH_SEC = 1.0
 COLD_START_FLOOR_MARGIN_SEC = 4.0
+# Automatic dims (quiet, pause) ease; an operator's knob must track the hand.
 BRIGHTNESS_FADE_SECONDS = 1.0
+OPERATOR_FADE_SECONDS = 0.1
 # Before a tempo is known, bar lengths are counted at a typical techno tempo.
 FALLBACK_BAR_SECONDS = BEATS_PER_BAR * 60.0 / 128.0
 BUILD_INTENTS = (LightIntent.BREAKDOWN, LightIntent.BUILDUP)
@@ -130,20 +132,26 @@ class LightEngine(IMusicAnalyserHandler):
         return self._master_level
 
     def pause(self) -> None:
-        """Freeze the look: the running loop continues, decisions stop switching it."""
+        """Freeze the renderer (PAUSED) and stop decisions switching loops.
+
+        As policy, separate from the freeze, the rig also dims to the quiet level.
+        """
         if self._paused:
             return
-        LOGGER.info('[engine] paused by the operator')
+        LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
-        self._send_brightness()
+        # The operator acts on what the room sees now, so this skips the playback delay.
+        self.lighting_client.set_paused(True)
+        self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
     async def resume(self) -> None:
         if not self._paused:
             return
-        LOGGER.info('[engine] resumed by the operator')
+        LOGGER.info('[engine] play')
         self._paused = False
-        self._send_brightness()
+        self.lighting_client.set_paused(False)
+        self._send_brightness(BRIGHTNESS_FADE_SECONDS)
         # The model kept deciding while paused; its latest intent takes the
         # next downbeat like any committed change.
         if self._current_intent is not None and self._room_playing:
@@ -156,19 +164,31 @@ class LightEngine(IMusicAnalyserHandler):
             raise ValueError('master brightness must be within 0..1')
         self._master_level = float(level)
         # The operator is turning a knob now, so this skips the playback delay.
-        self._send_brightness()
+        self._send_brightness(OPERATOR_FADE_SECONDS)
 
     def settings_changed(self) -> None:
-        self._send_brightness()
+        self.send_renderer_settings()
+        self._send_brightness(OPERATOR_FADE_SECONDS)
 
-    def _send_brightness(self) -> None:
+    def send_renderer_settings(self) -> None:
+        """Starfire owns these behaviours; resent whole so a restarted renderer matches."""
+        settings = self._settings()
+        self.lighting_client.set_paused(self._paused)
+        self.lighting_client.set_default_crossfade_beats(settings.crossfade_beats)
+        self.lighting_client.set_strobe_limits(
+            settings.strobe_max_rate_hz, settings.strobe_max_burst_seconds
+        )
+
+    def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
+        # Computed at send time from the latest master and room-quiet state, so a
+        # delayed quiet change never restores a level the operator has since moved.
         dimmed = self._room_quiet or self._paused
         brightness = self._master_level * (self._settings().quiet_brightness if dimmed else 1.0)
         if brightness == self._sent_brightness:
             return
         self._sent_brightness = brightness
-        LOGGER.info(f'[engine] master brightness {brightness:.3f}')
-        self.lighting_client.set_master(brightness, fade_seconds=BRIGHTNESS_FADE_SECONDS)
+        LOGGER.debug(f'[engine] set_master {brightness:.3f} fade {fade_seconds:g}s')
+        self.lighting_client.set_master(brightness, fade_seconds=fade_seconds)
 
     @property
     def audio_sec(self) -> float:

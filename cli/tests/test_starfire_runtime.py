@@ -127,6 +127,10 @@ def test_incomplete_and_oversized_events_are_rejected(payload):
         ('set_speed', 'multiplier', wire.ANIMATION_SPEED, 'number', 0.0),
         ('set_blackout', 'enabled', wire.OUTPUT_BLACKOUT, 'boolean', False),
         ('set_normalized_rms_level', 'level', wire.AUDIO_RMS_NORMALIZED, 'number', 0.0),
+        ('set_paused', 'paused', wire.PAUSED, 'boolean', True),
+        ('set_default_crossfade_beats', 'beats', wire.DEFAULT_CROSSFADE_BEATS, 'number', 2.0),
+        ('set_strobe_max_rate_hz', 'hz', wire.STROBE_MAX_RATE_HZ, 'number', 6.0),
+        ('set_strobe_max_burst_seconds', 'seconds', wire.STROBE_MAX_BURST_SECONDS, 'number', 3.0),
     ],
 )
 def test_controls_use_typed_parameters(kind, field, parameter, value_type, value):
@@ -738,3 +742,12 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
     )
     with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
         starfire_runtime.validate_starfire(binary, 'rig.json', tmp_path)
+
+
+def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():
+    default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'ramp'})
+    assert not default.HasField('transition')
+    cut = protocol.build_command(
+        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}
+    )
+    assert cut.HasField('transition') and not cut.transition.HasField('crossfade_beats')
