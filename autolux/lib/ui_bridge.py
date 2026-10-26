@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import queue
+import re
 import signal
 import subprocess
 import sys
@@ -24,6 +25,7 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
+HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
 VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
@@ -79,16 +81,64 @@ def parse_control_command(payload) -> dict:
         return {'action': action, 'level': float(level)}
     if action == 'settings':
         return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
+    if action == 'mode':
+        mode = payload.get('mode')
+        if mode not in ('auto', 'static'):
+            raise ValueError('mode must be auto or static')
+        return {'action': action, 'mode': mode}
+    if action == 'static':
+        return {'action': action, **_static_command(payload)}
     raise ValueError(f'unknown control action {action!r}')
 
 
-def command_refusal(command: dict, intent: str | None, paused: bool | None) -> str | None:
+def _static_command(payload: dict) -> dict:
+    from autolux.lib.engine.static_mode import PRESETS
+
+    kind = payload.get('kind')
+    if kind in ('blacklight', 'strobe'):
+        return {'kind': kind}
+    if kind == 'blackout':
+        if type(payload.get('enabled')) is not bool:
+            raise ValueError('blackout must be true or false')
+        return {'kind': kind, 'enabled': payload['enabled']}
+    if kind == 'preset':
+        if payload.get('preset') not in PRESETS:
+            raise ValueError(f'unknown static preset {payload.get("preset")!r}')
+        return {'kind': kind, 'preset': payload['preset']}
+    if kind != 'look':
+        raise ValueError(f'unknown static command {kind!r}')
+    target, colour, dimmer = payload.get('target'), payload.get('colour'), payload.get('dimmer')
+    if not isinstance(target, str) or not target:
+        raise ValueError('a static look needs a target')
+    if colour is not None:
+        if not isinstance(colour, str) or not HEX_COLOUR.fullmatch(colour):
+            raise ValueError('colour must be #rrggbb')
+        colour = tuple(round(int(colour[i : i + 2], 16) / 255, 6) for i in (1, 3, 5))
+    if dimmer is not None and (type(dimmer) not in (int, float) or not 0.0 <= dimmer <= 1.0):
+        raise ValueError('a static dimmer must be within 0..1')
+    if colour is None and dimmer is None:
+        raise ValueError('a static look needs a colour or a dimmer')
+    return {
+        'kind': kind,
+        'target': target,
+        'colour': colour,
+        'dimmer': None if dimmer is None else float(dimmer),
+    }
+
+
+def command_refusal(
+    command: dict, intent: str | None, paused: bool | None, mode: str | None = None
+) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
+    if command['action'] == 'static' and mode != 'static':
+        return 'the show is in auto mode'
     if command['action'] != 'next_autoloop':
         return None
     if paused:
         return 'the show is paused'
+    if mode == 'static':
+        return 'the show is in static mode'
     if intent in (None, STANDBY_INTENT):
         return 'no section is playing yet'
     return None
