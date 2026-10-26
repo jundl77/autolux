@@ -44,7 +44,7 @@ async def run_cmd(args: argparse.Namespace):
         run_id=run_id,
     ) as renderer:
         global_app = AutoluxController(
-            lighting_client=StarfireClient(renderer.send_command),
+            lighting_client=StarfireClient(renderer.send_command, groups=lambda: renderer.groups),
             input_device_index=input_device_index,
             output_device_index=output_device_index,
             debug_mode=debug_mode,

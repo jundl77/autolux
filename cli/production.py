@@ -310,7 +310,7 @@ async def _run_session(args, *, checking=False):
 
         logging.getLogger(__name__).info('[prod] preparing analysis models before starting audio')
         app = main.AutoluxController(
-            lighting_client=StarfireClient(send_lighting_command),
+            lighting_client=StarfireClient(send_lighting_command, groups=lambda: renderer.groups),
             input_device_index=input_index,
             enable_ui=not args.no_ui,
             ui_port=args.ui_port,
