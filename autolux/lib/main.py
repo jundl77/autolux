@@ -76,7 +76,7 @@ def apply_static(light_engine, command: dict) -> None:
     elif kind == 'blackout':
         looks.set_blackout(command['enabled'])
     elif kind == 'strobe':
-        looks.strobe()
+        looks.strobe(command.get('enabled'))
 
 
 class ShowControl:

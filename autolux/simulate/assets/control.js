@@ -10,9 +10,10 @@
     const inflight = {};
     let directDownAt = -Infinity;
 
-    function staticCommand(trigger, target, presetColours) {
+    // strobeActive: whether the page shows the strobe running; omitted, the command toggles.
+    function staticCommand(trigger, target, strobeActive) {
         const all = config().allFixtures || 'all';
-        const colours = presetColours || config().presetColours || {};
+        const colours = config().presetColours || {};
         if (trigger.startsWith('static-preset-')) {
             const preset = trigger.slice('static-preset-'.length);
             if (target !== all && preset in colours) {
@@ -27,7 +28,9 @@
             return {action: 'static', kind: 'blacklight'};
         }
         if (trigger === 'static-strobe') {
-            return {action: 'static', kind: 'strobe'};
+            return typeof strobeActive === 'boolean'
+                ? {action: 'static', kind: 'strobe', enabled: !strobeActive}
+                : {action: 'static', kind: 'strobe'};
         }
         return null;
     }

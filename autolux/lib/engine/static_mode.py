@@ -117,11 +117,17 @@ class StaticLooks:
         self.blackout = enabled
         self._lighting.set_blackout(enabled)
 
-    def strobe(self) -> None:
+    def strobe(self, enabled: bool | None = None) -> None:
         now = self._clock.monotonic()
-        if self._strobe_until is not None and now < self._strobe_until:
-            self._strobe_until = None
-            self._lighting.clear_override(STATIC_STROBE_ID)
+        running = self._strobe_until is not None and now < self._strobe_until
+        if enabled is None:
+            enabled = not running
+        if not enabled:
+            if running:
+                self._strobe_until = None
+                self._lighting.clear_override(STATIC_STROBE_ID)
+            return
+        if running:
             return
         settings = self._settings()
         # Starfire caps the burst at this scaled length; matching it keeps the toggle in step.
