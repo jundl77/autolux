@@ -14,7 +14,7 @@ receives (-48..-12 dBFS onto 0..1); the 90th percentile lets an opening's loud b
 for drive even when its quiet bars pull the mean down. Each range maps linearly onto
 -1..1 and clamps outside it.
 
-Calibration: tools/track_mood_measures.py --labels over 8 eval-set tracks
+Calibration: the opening window of 8 eval-set tracks
 (autolux/training/eval_audio), window ended at the labelled first buildup or drop; tempo is
 the labelled bpm, folded, because librosa's tracker misread two of them. Raw values:
 
