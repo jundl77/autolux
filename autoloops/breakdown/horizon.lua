@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: off.
 -- strip: one cold glow entering at pixel 1 and leaving past pixel 8 once per loop; it is
 -- off-strip at the wrap, so the restart is invisible.

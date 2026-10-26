@@ -74,7 +74,12 @@ class EventBuffer:
             )
 
     def add_effect(
-        self, name: str, effect_type: str, *, duration_seconds: float | None = None
+        self,
+        name: str,
+        effect_type: str,
+        *,
+        duration_seconds: float | None = None,
+        selection: dict | None = None,
     ) -> None:
         if duration_seconds is not None and (
             not math.isfinite(duration_seconds) or duration_seconds <= 0
@@ -91,6 +96,8 @@ class EventBuffer:
             effect = {'t': now, 'name': name, 'type': effect_type}
             if duration_seconds is not None:
                 effect['end'] = now + duration_seconds
+            if selection is not None:
+                effect['selection'] = selection
             self._effects.append(effect)
             cutoff = now - self._window_sec * 2
             self._effects = [e for e in self._effects if e.get('end', now) >= cutoff]

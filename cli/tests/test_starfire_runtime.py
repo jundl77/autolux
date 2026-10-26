@@ -728,6 +728,34 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
         starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
 
 
+def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    loops = [
+        ('atmospheric', 'cold_breathe'),
+        ('breakdown', 'wide_space'),
+        ('buildup', 'ramp'),
+        ('drop', 'kick'),
+    ]
+    for bank, name in loops:
+        (tmp_path / bank).mkdir()
+        source = header.replace('family: warm', 'family: neon') if bank == 'drop' else header
+        (tmp_path / bank / f'{name}.lua').write_text(source)
+    # Starfire renders every loop; only Autolux's selection metadata is wrong.
+    checked = [{'bank': bank, 'autoloop': name} for bank, name in loops]
+    report = json.dumps({'universes': [0], 'checked_autoloops': checked})
+    binary = tmp_path / 'starfire.exe'
+    binary.touch()
+    monkeypatch.setattr(
+        starfire_runtime.subprocess,
+        'run',
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
+    )
+    with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
+        starfire_runtime.validate_starfire(binary, 'rig.json', tmp_path)
+
+
 def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():
     default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'ramp'})
     assert not default.HasField('transition')

@@ -11,7 +11,11 @@ from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
-from autolux.lighting.autoloop_catalogue import required_autoloops
+from autolux.lighting.autoloop_catalogue import (
+    AutoloopMetaError,
+    read_autoloop_meta,
+    required_autoloops,
+)
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
 from cli.starfire import (
     DEFAULT_AUTOLOOPS,
@@ -95,6 +99,11 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
     if missing_autoloops:
         names = ', '.join(f'{bank}/{autoloop}' for bank, autoloop in sorted(missing_autoloops))
         raise RuntimeError(f'Starfire is missing Autolux autoloops: {names}')
+    try:
+        read_autoloop_meta(autoloops)
+    except AutoloopMetaError as error:
+        # Starfire renders these loops fine; Autolux could not choose between them.
+        raise RuntimeError(f'Autolux cannot select from these autoloops: {error}') from None
     if expected_universe is not None:
         universes = report.get('universes')
         if universes != [expected_universe]:

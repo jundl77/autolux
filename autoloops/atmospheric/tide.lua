@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: faint secondary, steady.
 -- strip: cold wave travelling from pixel 1 to pixel 8 once per loop, with a soft trailing tail.
 -- movers: cold, slow mirrored pan sway. Palette slots: secondary, cold.

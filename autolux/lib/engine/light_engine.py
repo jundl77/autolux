@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,11 @@ from autolux.lib.analyser.music_analyser_handler import IMusicAnalyserHandler
 from autolux.lib.audio_config import SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient, rms_to_normalized_level
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
+from autolux.lib.engine.autoloop_policy import (
+    LOUDNESS_TREND_BEATS,
+    SelectionContext,
+    loudness_trend,
+)
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
@@ -34,6 +40,11 @@ COLD_START_FLOOR_MARGIN_SEC = 4.0
 # Automatic dims (quiet, pause) ease; an operator's knob must track the hand.
 BRIGHTNESS_FADE_SECONDS = 1.0
 OPERATOR_FADE_SECONDS = 0.1
+# Before a tempo is known, bar lengths are counted at a typical techno tempo.
+FALLBACK_BAR_SECONDS = BEATS_PER_BAR * 60.0 / 128.0
+BUILD_INTENTS = (LightIntent.BREAKDOWN, LightIntent.BUILDUP)
+OUTRO_LABELS = ('outro', 'altoutro')
+INTRO_LABELS = ('intro', 'altintro')
 
 
 class LightEngine(IMusicAnalyserHandler):
@@ -91,6 +102,14 @@ class LightEngine(IMusicAnalyserHandler):
         self._master_level = 1.0
         # Starfire boots at full brightness, so only a change needs sending.
         self._sent_brightness = 1.0
+        # Loop selection context, all on the room's clock (after the playback delay);
+        # updated only once a look has actually been sent.
+        self._room_levels: deque[float] = deque(maxlen=LOUDNESS_TREND_BEATS)
+        self._entered_intent: LightIntent | None = None
+        self._entered_label: str | None = None
+        self._build_started_at: float | None = None
+        self._last_drop_at: float | None = None
+        self._after_silence = True
         self._log_chain_latency()
 
     def set_analyser(self, analyser: MusicAnalyser):
@@ -253,6 +272,12 @@ class LightEngine(IMusicAnalyserHandler):
         self._section_class_at_playback = None
         self._held_intent = None
         self._room_beat_phase = None
+        self._room_levels.clear()
+        if self._entered_intent == LightIntent.DROP:
+            self._last_drop_at = self._clock.monotonic()  # silence ends a drop too
+        self._entered_intent = None
+        self._build_started_at = None
+        self._after_silence = True
         self.lighting_client.stop()
         if self.event_buffer is not None:
             self.event_buffer.stop_effects()
@@ -340,6 +365,7 @@ class LightEngine(IMusicAnalyserHandler):
 
         async def publish():
             self.lighting_client.set_normalized_rms_level(normalized_rms_level)
+            self._room_levels.append(normalized_rms_level)
             if published_bpm > 0:
                 self.lighting_client.beat(grid_beat, published_bpm)
             await self._on_room_beat(phase)
@@ -369,8 +395,52 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
-        if intent is not None and not self._paused:
-            await self.effect_controller.change_effect(intent)
+        if intent is None or self._paused:
+            return
+        label = self._section_class_at_playback
+        now = self._clock.monotonic()
+        context = self._selection_context(intent, label, now)
+        if await self.effect_controller.change_effect(intent, context=context):
+            self._note_new_look(intent, now)
+        # The label is what the room hears even when the look stays (intro -> outro).
+        self._entered_label = label
+
+    def _selection_context(
+        self, intent: LightIntent, label: str | None, now: float
+    ) -> SelectionContext:
+        previous = self._entered_intent
+        new_track = self._after_silence or (
+            intent == LightIntent.ATMOSPHERIC
+            and label in INTRO_LABELS
+            and (previous == LightIntent.DROP or self._entered_label in OUTRO_LABELS)
+        )
+        building = intent in (LightIntent.BUILDUP, LightIntent.DROP) and previous in BUILD_INTENTS
+        bpm = self._published_bpm.get('last')
+        bar_seconds = BEATS_PER_BAR * 60.0 / bpm if bpm else FALLBACK_BAR_SECONDS
+        # A drop ends when the next section starts, which may be this one.
+        ending_drop = previous == LightIntent.DROP and intent != LightIntent.DROP
+        left_drop_at = now if ending_drop else self._last_drop_at
+        return SelectionContext(
+            intent,
+            seconds_since_drop=None if left_drop_at is None else now - left_drop_at,
+            build_bars=(now - self._build_started_at) / bar_seconds
+            if building and self._build_started_at is not None
+            else 0.0,
+            loudness=loudness_trend(self._room_levels),
+            new_track=new_track,
+        )
+
+    def _note_new_look(self, intent: LightIntent, now: float) -> None:
+        previous = self._entered_intent
+        if previous == LightIntent.DROP and intent != LightIntent.DROP:
+            self._last_drop_at = now
+        if intent not in BUILD_INTENTS:
+            self._build_started_at = None
+        elif previous not in BUILD_INTENTS:
+            # A build starts at its first breakdown or buildup.
+            self._build_started_at = now
+        self._entered_intent = intent
+        self._after_silence = False
 
     @staticmethod
     def _publishable_bpm(state: dict, bpm: float) -> float:

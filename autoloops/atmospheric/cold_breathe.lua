@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: slow cold breathe at low level. strip: soft cold wave travelling up the strip.
 -- movers: slow mirrored pan sweep. Palette slots: cold.
 local palette = sf.palette("techno")

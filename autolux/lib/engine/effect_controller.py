@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import logging
+import random
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
+from autolux.lib.engine.autoloop_policy import AutoloopChoice, AutoloopPolicy, SelectionContext
 from autolux.lib.engine.effect_definitions import (
+    DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
     STROBE_BURST_BEATS,
     STROBE_RATE_HZ,
+    AutoloopMetaTable,
     AutoloopTable,
     LightIntent,
     ShowSettings,
@@ -41,6 +45,8 @@ class EffectController:
         clock: Clock = SYSTEM_CLOCK,
         settings: Callable[[], ShowSettings] = ShowSettings,
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
+        autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
+        seed: int = 0,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
@@ -48,43 +54,64 @@ class EffectController:
         # Read at use so a dashboard edit applies to the next change.
         self._settings = settings
         self._last_strobe_started_at: float | None = None
-        self._autoloops = autoloops
-        # Cursors live for the whole session, so every look of an intent plays
-        # once before any repeats; round-robin keeps replays deterministic.
-        self._cursors = dict.fromkeys(autoloops, 0)
-        self._entered: tuple[LightIntent, int] | None = None
+        # Seeded per session: the same seed and the same run of sections pick
+        # the same looks.
+        self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
+        self._entered: tuple[LightIntent, AutoloopChoice] | None = None
 
-    def _entry_index(self, intent: LightIntent) -> int:
+    def _entry_choice(self, context: SelectionContext) -> tuple[AutoloopChoice, bool]:
         # Re-sending the current intent (resume, restart after stop) keeps its
-        # look; only a change of intent moves on to the next one.
-        if self._entered is not None and self._entered[0] == intent:
-            return self._entered[1]
-        index = self._cursors[intent] % len(self._autoloops[intent])
-        self._cursors[intent] = index + 1
-        self._entered = intent, index
-        return index
+        # look; a change of intent or a new track chooses again.
+        if (
+            self._entered is not None
+            and self._entered[0] == context.intent
+            and not context.new_track
+        ):
+            return self._entered[1], False
+        return self._policy.choose(context), True
 
-    async def change_effect(self, intent: LightIntent, bpm: float | None = None) -> None:
-        loops = self._autoloops[intent]
-        index = self._entry_index(intent)
-        bank, autoloop = loops[index]
+    async def change_effect(
+        self,
+        intent: LightIntent,
+        bpm: float | None = None,
+        context: SelectionContext | None = None,
+    ) -> bool:
+        """True when a look was sent; nothing is remembered for one that was not."""
+        context = context or SelectionContext(intent)
+        choice, fresh = self._entry_choice(context)
+        bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         if not self.lighting_client.select_autoloop(
             bank, autoloop, transition=transition_for(intent)
         ):
-            return
+            return False
+        if fresh:
+            self._policy.record(context, choice)
+            self._entered = intent, choice
         if self.event_buffer:
-            self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
+            self.event_buffer.add_effect(
+                f'{bank}/{autoloop}',
+                'AUTOLOOP',
+                selection={
+                    'energy': meta.energy,
+                    'family': meta.family,
+                    'movement': meta.movement,
+                    'reason': choice.reason,
+                },
+            )
         LOGGER.info(
-            '[lighting] intent=%s | autoloop=%s/%s (%d of %d)',
+            '[lighting] intent=%s | autoloop=%s/%s | energy=%d family=%s movement=%s | reason=%s',
             intent.name,
             bank,
             autoloop,
-            index + 1,
-            len(loops),
+            meta.energy,
+            meta.family,
+            meta.movement,
+            choice.reason,
         )
 
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
+        return True
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
         settings = self._settings()

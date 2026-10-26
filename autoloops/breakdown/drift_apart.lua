@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: faint cold.
 -- strip: off.
 -- movers: cold, start together at centre and drift apart (mirrored) for 14 beats, then

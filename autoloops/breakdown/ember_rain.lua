@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: accent
+-- movement: still
 -- wash: accent, a constant faint 0.05.
 -- strip: every 2 beats one accent pixel lights and decays; the pixel comes from a fixed
 -- scatter indexed by floor(beats / 2) % 8, so every loop rains the same pattern.

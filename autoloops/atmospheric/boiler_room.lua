@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 2
+-- family: warm
+-- movement: still
 -- wash: primary around 0.2, slow breathe with its own phase per wash so the room never pulses as one.
 -- strip: amber ember flicker from two slow sines per pixel at different periods.
 -- movers: primary, low and close, parked mirrored. Palette slots: primary, secondary.
