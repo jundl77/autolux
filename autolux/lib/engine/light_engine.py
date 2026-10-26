@@ -34,7 +34,7 @@ from autolux.lib.engine.event_buffer import (
 )
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
-from autolux.lib.engine.track_mood import MEASURED_BARS, MeasuredBeat, TrackMoodMeter
+from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat, TrackMoodMeter
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -51,6 +51,7 @@ BUILD_INTENTS = (LightIntent.BREAKDOWN, LightIntent.BUILDUP)
 OUTRO_LABELS = ('outro', 'altoutro')
 INTRO_LABELS = ('intro', 'altintro')
 BUILD_INTERRUPTION_BARS = 8
+MEASUREMENT_ENDING_INTENTS = (LightIntent.BUILDUP, LightIntent.DROP)
 TRACK_LEVEL_BEATS = 2048
 
 
@@ -122,7 +123,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._beat_levels: deque[tuple[float, float]] = deque(maxlen=TRACK_LEVEL_BEATS)
         self._track_started_audio_sec = 0.0
         self._current_arrival_of_peak: float | None = None
-        self._track_mood = TrackMoodMeter(MEASURED_BARS * BEATS_PER_BAR)
+        self._track_mood = TrackMoodMeter(MAX_MEASURED_BARS * BEATS_PER_BAR)
         self._static_mode = False
         self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
         self._log_chain_latency()
@@ -507,10 +508,13 @@ class LightEngine(IMusicAnalyserHandler):
         if mood is not None:
             self.effect_controller.choose_track_palette(mood, send_now=not self._holding_the_look())
 
+    def _finish_track_mood(self) -> None:
+        mood = self._track_mood.finish()
+        if mood is not None:
+            self.effect_controller.choose_track_palette(mood, send_now=False)
+
     def _start_track_mood(self) -> None:
-        unfinished = self._track_mood.finish()
-        if unfinished is not None:
-            self.effect_controller.choose_track_palette(unfinished, send_now=False)
+        self._finish_track_mood()
         self._track_mood.start()
 
     async def _switch_held_intent(self) -> None:
@@ -523,6 +527,8 @@ class LightEngine(IMusicAnalyserHandler):
         if context.new_track:
             self._start_track_mood()
             self._track_started_audio_sec = self._audio_sec - self._playback_delay_sec
+        elif intent in MEASUREMENT_ENDING_INTENTS:
+            self._finish_track_mood()
         cut = self._paused and self._showing_standby
         bpm = self._published_bpm.get('last')
         if await self.effect_controller.change_effect(intent, bpm, context=context, cut=cut):

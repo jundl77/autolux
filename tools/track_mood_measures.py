@@ -1,11 +1,14 @@
 """Print the per-track measures the palette mood is built from, for a directory of audio.
 
-The live engine measures the first MEASURED_BARS bars after a new track; this replays that
-offline with the same per-beat features (folded tempo, normalised RMS level, spectral
-centroid, bass-over-treble balance) so the reference ranges in track_mood can be calibrated.
-Beats come from librosa's DSP beat tracker, not the live madmom network.
+The live engine measures from a new track until its first buildup or drop, at most
+MAX_MEASURED_BARS bars; this replays that offline with the same per-beat features (folded
+tempo, normalised RMS level, spectral centroid, bass-over-treble balance) so the reference
+ranges in track_mood can be calibrated. Beats come from librosa's DSP beat tracker, not the
+live madmom network. With --labels (an eval_labels.json) the window ends at the labelled
+first buildup or drop and the tempo is the labelled bpm; without, the window is the cap.
 
-    python tools/track_mood_measures.py autolux/training/eval_audio --limit 8
+    python tools/track_mood_measures.py autolux/training/eval_audio \
+        --labels autolux/training/eval_labels.json --limit 8
 
 Each file is decoded (or read from its .44100.npy cache) and processed one at a time.
 """
@@ -13,6 +16,9 @@ Each file is decoded (or read from its .44100.npy cache) and processed one at a 
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import json
 import sys
 from pathlib import Path
 from statistics import fmean, median
@@ -31,10 +37,29 @@ from autolux.lib.analyser.music_analyser import (  # noqa: E402
 from autolux.lib.audio_config import BUFFER_SIZE  # noqa: E402
 from autolux.lib.clients.starfire_client import rms_to_normalized_level  # noqa: E402
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR  # noqa: E402
-from autolux.lib.engine.track_mood import MEASURED_BARS, MeasuredBeat, track_mood  # noqa: E402
+from autolux.lib.engine.track_mood import (  # noqa: E402
+    DRIVE_LEVEL_PERCENTILE,
+    MAX_MEASURED_BARS,
+    MeasuredBeat,
+    percentile,
+    track_mood,
+)
 
 AUDIO_SUFFIXES = ('.mp3', '.wav', '.flac', '.ogg')
 DECODED_SUFFIX = f'.{SAMPLE_RATE}.npy'
+WINDOW_ENDING_SECTIONS = ('buildup', 'drop')
+
+
+def labelled_tracks(path: Path | None) -> dict[str, dict]:
+    if path is None:
+        return {}
+    tracks = json.loads(path.read_text(encoding='utf-8'))['tracks']
+    return {audio_stem(track['id']): track for track in tracks}
+
+
+def audio_stem(youtube_id: str) -> str:
+    digest = hashlib.sha256(youtube_id.encode()).digest()
+    return base64.urlsafe_b64encode(digest).decode()[:10]
 
 
 def load(path: Path) -> np.ndarray:
@@ -75,9 +100,11 @@ def measured_beat(samples: np.ndarray, at: int, bpm: float) -> MeasuredBeat | No
 
 def row(name: str, beats: list[MeasuredBeat]) -> str:
     mood = track_mood(beats)
+    levels = [beat.level for beat in beats]
     return (
-        f'{name:24s} {len(beats):4d} {median(b.bpm for b in beats):6.1f} '
-        f'{fmean(b.level for b in beats):6.3f} {fmean(b.centroid_hz for b in beats):8.0f} '
+        f'{name:12s} {len(beats):4d} {median(b.bpm for b in beats):6.1f} '
+        f'{fmean(levels):6.3f} {percentile(levels, DRIVE_LEVEL_PERCENTILE):6.3f} '
+        f'{fmean(b.centroid_hz for b in beats):8.0f} '
         f'{fmean(b.bass_over_treble_db for b in beats):7.1f}   '
         f'{mood.temperature:+.2f} {mood.weight:+.2f} {mood.drive:+.2f}'
     )
@@ -86,8 +113,10 @@ def row(name: str, beats: list[MeasuredBeat]) -> str:
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('audio', type=Path, nargs='+', help='audio files or directories')
+    parser.add_argument('--labels', type=Path, help='eval_labels.json for section windows')
     parser.add_argument('--limit', type=int, default=8)
     args = parser.parse_args(argv)
+    labels = labelled_tracks(args.labels)
     paths = [
         path
         for given in args.audio
@@ -95,16 +124,25 @@ def main(argv=None) -> None:
         if path.suffix in AUDIO_SUFFIXES
     ]
     print(
-        f'{"track (window)":24s} {"beats":>4s} {"bpm":>6s} {"level":>6s} {"centroid":>8s} '
+        f'{"track":12s} {"beats":>4s} {"bpm":>6s} {"level":>6s} {"p90":>6s} {"centroid":>8s} '
         f'{"bass/tr":>7s}   temp   weight drive'
     )
     for path in paths[: args.limit]:
         samples = load(path)
         bpm, beats = beat_samples(samples, sound_start(samples))
+        track = labels.get(path.stem)
+        if track is not None:
+            bpm = MusicAnalyser._fold_bpm(track['average_bpm'])
+            ends = [
+                section['start']
+                for section in track['sections']
+                if section['name'] in WINDOW_ENDING_SECTIONS
+            ]
+            if ends:
+                beats = beats[beats < min(ends) * SAMPLE_RATE]
+        beats = beats[: MAX_MEASURED_BARS * BEATS_PER_BAR]
         measured = [beat for at in beats if (beat := measured_beat(samples, int(at), bpm))]
-        stem = path.stem
-        print(row(f'{stem} first {MEASURED_BARS} bars', measured[: MEASURED_BARS * BEATS_PER_BAR]))
-        print(row(f'{stem} whole', measured), flush=True)
+        print(row(path.stem, measured), flush=True)
 
 
 if __name__ == '__main__':

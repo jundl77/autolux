@@ -10,6 +10,7 @@ from autolux.lib.engine.palette_policy import FINALISTS, PalettePolicy, palette_
 from autolux.lib.engine.track_mood import (
     BASS_OVER_TREBLE_RANGE_DB,
     CENTROID_RANGE_HZ,
+    DRIVE_LEVEL_RANGE,
     LEVEL_RANGE,
     TEMPO_RANGE_BPM,
     MeasuredBeat,
@@ -139,24 +140,33 @@ def midpoint(reference):
     return sum(reference) / 2
 
 
-def middle_beat():
+def middle_beat(level=None):
     return beat(
         midpoint(TEMPO_RANGE_BPM),
-        midpoint(LEVEL_RANGE),
+        midpoint(LEVEL_RANGE) if level is None else level,
         midpoint(CENTROID_RANGE_HZ),
         midpoint(BASS_OVER_TREBLE_RANGE_DB),
     )
 
 
 def test_the_reference_ranges_map_their_ends_onto_the_mood_axes():
-    hard = beat(
-        TEMPO_RANGE_BPM[1], LEVEL_RANGE[1], CENTROID_RANGE_HZ[0], BASS_OVER_TREBLE_RANGE_DB[0]
-    )
+    hard = beat(TEMPO_RANGE_BPM[1], 1.0, CENTROID_RANGE_HZ[0], BASS_OVER_TREBLE_RANGE_DB[0])
     assert track_mood([hard]) == Mood(temperature=-1.0, weight=0.0, drive=1.0)
     soft = beat(TEMPO_RANGE_BPM[0] - 20, 0.0, CENTROID_RANGE_HZ[1] + 1000, 40.0)
     assert track_mood([soft]) == Mood(temperature=1.0, weight=0.0, drive=-1.0)
-    middle = middle_beat()
-    assert track_mood([middle]).axes() == pytest.approx((0.0, 0.0, 0.0))
+    middle = track_mood([middle_beat()])
+    assert (middle.temperature, middle.weight) == pytest.approx((0.0, 0.0))
+
+
+def test_drive_is_mostly_tempo_and_counts_the_loud_beats_of_the_opening():
+    at_tempo_midpoint = [middle_beat(level=midpoint(DRIVE_LEVEL_RANGE))]
+    assert track_mood(at_tempo_midpoint).drive == pytest.approx(0.0)
+    fast_but_quiet = beat(TEMPO_RANGE_BPM[1], 0.0, 2000.0, 0.0)
+    assert track_mood([fast_but_quiet]).drive == pytest.approx(0.2)
+    quiet_bars = [middle_beat(level=0.0)] * 9
+    loud_beat = [middle_beat(level=DRIVE_LEVEL_RANGE[1])]
+    assert track_mood(quiet_bars + loud_beat).drive == pytest.approx(-0.4)
+    assert track_mood(quiet_bars[1:] + loud_beat * 2).drive == pytest.approx(0.4)
 
 
 def test_the_meter_measures_only_after_a_start_and_reports_once_the_window_fills():
@@ -165,7 +175,7 @@ def test_the_meter_measures_only_after_a_start_and_reports_once_the_window_fills
     assert meter.add(middle) is None and not meter.measuring
     meter.start()
     assert [meter.add(middle) for _ in range(2)] == [None, None]
-    assert meter.add(middle).axes() == pytest.approx((0.0, 0.0, 0.0))
+    assert meter.add(middle) == track_mood([middle] * 3)
     assert not meter.measuring and meter.finish() is None
 
 
@@ -333,3 +343,26 @@ async def test_a_choice_made_for_the_next_look_is_not_sent_early():
     assert len(lighting.events) == sent
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     assert palette_kinds(lighting)[-1] == ('select', chosen)
+
+
+async def test_the_opening_is_measured_until_the_first_buildup_and_committed_with_it():
+    from autolux.lib.clock import VirtualClock
+    from autolux.lib.engine.effect_controller import EffectController
+    from autolux.lib.engine.light_engine import LightEngine
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
+
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock)
+    light = LightEngine(lighting, EffectController(lighting, seed=4), None, clock=clock)
+    light._room_playing = True
+    light._held_intent = LightIntent.ATMOSPHERIC
+    await light._switch_held_intent()
+    warm_bright_laid_back = beat(TEMPO_RANGE_BPM[0], 1.0, CENTROID_RANGE_HZ[1], 40.0)
+    for _ in range(16):
+        light._measure_track_mood(warm_bright_laid_back)
+    assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE)]
+    light._held_intent = LightIntent.BUILDUP
+    await light._switch_held_intent()
+    [_, (kind, palette)] = palette_kinds(lighting)
+    assert kind == 'select' and palette in SUNSET_LIKE
+    assert not light._track_mood.measuring
