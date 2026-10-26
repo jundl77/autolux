@@ -161,10 +161,10 @@ async def test_renderer_beat_anchors_and_tempo_have_the_same_units(detector_bpm)
     for previous, current in zip(anchors, anchors[1:]):
         anchor = previous['command']
         extrapolated = (
-            anchor['position_beats']
+            anchor['beat_index']
             + (current['at_seconds'] - previous['at_seconds']) * anchor['bpm'] / 60.0
         )
-        assert extrapolated == pytest.approx(current['command']['position_beats'])
+        assert extrapolated == pytest.approx(current['command']['beat_index'])
 
 
 def test_an_unmeasured_bpm_is_not_a_bpm_change(analyser):

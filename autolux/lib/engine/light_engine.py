@@ -65,7 +65,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._section_class_at_playback: str | None = None
         self._pending_intents: list = []
         self._published_bpm: dict = {}
-        self._grid_beat: int | None = None
+        self._beat_count: int = 0
         self._room_beat_phase: int | None = None
         self._room_beat_at: float = float('-inf')
         self._held_intent: LightIntent | None = None
@@ -313,7 +313,10 @@ class LightEngine(IMusicAnalyserHandler):
         if self.section_decoder is not None:
             await self._commit(self.section_decoder.push_beat(self._audio_sec))
             phase = self.section_decoder.beat_phase
-        grid_beat = self._advance_grid(phase)
+        # Counted for every detected beat, published or not: an unpublished beat
+        # leaves a gap Starfire's grid steps over instead of slipping the bar.
+        self._beat_count += 1
+        beat_index = self._beat_count
 
         published_bpm = self._publishable_bpm(self._published_bpm, self.analyser.get_detector_bpm())
         normalized_rms_level = rms_to_normalized_level(rms_energy)
@@ -321,25 +324,13 @@ class LightEngine(IMusicAnalyserHandler):
         async def publish():
             self.lighting_client.set_normalized_rms_level(normalized_rms_level)
             if published_bpm > 0:
-                self.lighting_client.beat(grid_beat, published_bpm)
+                self.lighting_client.beat(beat_index, phase, BEATS_PER_BAR, published_bpm)
             await self._on_room_beat(phase)
 
         if self.command_queue:
             await self.command_queue.enqueue('beat', publish)
         else:
             await publish()
-
-    def _advance_grid(self, phase: int | None) -> int:
-        # Starfire's clock rejects a beat behind the last one it saw, so a
-        # phase correction moves the grid forward to the next matching beat.
-        if self._grid_beat is None:
-            # With no bar phase the grid keeps the plain one-based beat count.
-            self._grid_beat = 1 if phase is None else phase
-        else:
-            self._grid_beat += 1
-            if phase is not None:
-                self._grid_beat += (phase - self._grid_beat) % BEATS_PER_BAR
-        return self._grid_beat
 
     async def _on_room_beat(self, phase: int | None) -> None:
         self._room_beat_phase = phase

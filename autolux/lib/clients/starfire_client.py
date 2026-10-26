@@ -32,8 +32,17 @@ class StarfireClient:
         self._send_command = send_command
         self.selected_autoloop: tuple[str, str] | None = None
 
-    def beat(self, position_beats: float, bpm: float) -> None:
-        self._send_command({'kind': 'beat', 'position_beats': position_beats, 'bpm': bpm})
+    def beat(self, beat_index: int, bar_phase: int | None, beats_per_bar: int, bpm: float) -> None:
+        """Report a detected beat; Starfire builds the bar-aligned grid from these facts."""
+        self._send_command(
+            {
+                'kind': 'beat',
+                'beat_index': beat_index,
+                'bar_phase': bar_phase,
+                'beats_per_bar': beats_per_bar,
+                'bpm': bpm,
+            }
+        )
 
     def set_normalized_rms_level(self, level: float) -> None:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})

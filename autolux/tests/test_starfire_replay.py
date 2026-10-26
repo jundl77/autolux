@@ -132,7 +132,8 @@ def test_zero_tempo_warmup_is_skipped_without_losing_detected_beat_count():
     beats = [
         event for event in report_to_replay(source)['events'] if event['command']['kind'] == 'beat'
     ]
-    assert [event['command']['position_beats'] for event in beats] == [1, 2]
+    assert [event['command']['beat_index'] for event in beats] == [1, 2]
+    assert {event['command']['bar_phase'] for event in beats} == {None}
     assert [event['command']['bpm'] for event in beats] == [120.0, 120.0]
 
 

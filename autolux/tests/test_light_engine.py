@@ -1238,24 +1238,23 @@ async def beat_at_phase(light, decoder, phase, *, decision=None):
     await light.on_beat(1, 128.0, False)
 
 
-def grid_positions(lighting):
-    return [
-        e['command']['position_beats'] for e in lighting.events if e['command']['kind'] == 'beat'
-    ]
+def sent_beats(lighting):
+    return [e['command'] for e in lighting.events if e['command']['kind'] == 'beat']
 
 
-async def test_downbeats_land_on_bar_lines_and_a_phase_correction_never_rewinds_the_grid():
+async def test_beats_carry_the_trackers_phase_and_count_and_leave_the_grid_to_starfire():
     decoder = FakeDecoder()
     light, _, _, lighting = engine(decoder=decoder, queue=False)
-    # The tracker skips phase 2 (a forward correction), then pulls the bar back a beat.
-    phases = [1, 2, 3, 0, 1, 3, 0, 1, 0]
+    # Corrections and unknown phases pass through untouched; Starfire aligns its grid.
+    # The analyser's own beat number restarts per song, so it is not the index.
+    phases = [1, 2, 3, 0, 1, 3, 0, None, 0]
     for phase in phases:
         await beat_at_phase(light, decoder, phase)
 
-    positions = grid_positions(lighting)
-    assert positions == [1, 2, 3, 4, 5, 7, 8, 9, 12]
-    assert all(pos % 4 == 0 for pos, phase in zip(positions, phases) if phase == 0)
-    assert positions == sorted(set(positions))
+    beats = sent_beats(lighting)
+    assert [beat['beat_index'] for beat in beats] == list(range(1, len(phases) + 1))
+    assert [beat['bar_phase'] for beat in beats] == phases
+    assert {beat['beats_per_bar'] for beat in beats} == {4}
 
 
 async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest_one_wins():

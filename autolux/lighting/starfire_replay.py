@@ -12,6 +12,7 @@ import math
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
 from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS
+from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 
 REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
@@ -86,7 +87,15 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
             events.append(
                 {
                     'at_seconds': at,
-                    'command': {'kind': 'beat', 'position_beats': beat_index, 'bpm': last_bpm},
+                    # Reports do not record the tracker's bar phase, so Starfire
+                    # counts beats plainly from the first one.
+                    'command': {
+                        'kind': 'beat',
+                        'beat_index': beat_index,
+                        'bar_phase': None,
+                        'beats_per_bar': BEATS_PER_BAR,
+                        'bpm': last_bpm,
+                    },
                 }
             )
     if last_bpm is None:

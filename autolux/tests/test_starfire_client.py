@@ -66,7 +66,7 @@ async def test_measured_energy_and_beat_share_the_playback_delay():
     first = [event['command'] for event in lighting.events]
     assert first == [
         {'kind': 'set_normalized_rms_level', 'level': pytest.approx(rms_to_normalized_level(0.01))},
-        {'kind': 'beat', 'position_beats': 1, 'bpm': 120.0},
+        {'kind': 'beat', 'beat_index': 1, 'bar_phase': None, 'beats_per_bar': 4, 'bpm': 120.0},
     ]
     clock.advance(0.5)
     await queue.drain()
@@ -88,7 +88,7 @@ async def test_warmup_never_sends_zero_tempo_and_song_stop_preserves_beat_ordina
     light.analyser.bpm = 0.0
     await light.on_beat(3, 0.0, False)
     anchors = [event['command'] for event in lighting.events if event['command']['kind'] == 'beat']
-    assert [anchor['position_beats'] for anchor in anchors] == [2, 3]
+    assert [anchor['beat_index'] for anchor in anchors] == [2, 3]
     assert [anchor['bpm'] for anchor in anchors] == [120.0, 120.0]
 
 
@@ -111,4 +111,4 @@ async def test_song_relative_beat_reset_cannot_rewind_starfire(playback_stop):
     clock.advance(14.0)
     await queue.drain()
     anchors = [event['command'] for event in lighting.events if event['command']['kind'] == 'beat']
-    assert [anchor['position_beats'] for anchor in anchors] == [1, 2, 3, 4]
+    assert [anchor['beat_index'] for anchor in anchors] == [1, 2, 3, 4]
