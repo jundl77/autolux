@@ -25,7 +25,7 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
-# The engine loop takes commands every audio buffer (~6 ms); longer means the loop is stalled.
+# The engine takes commands every Starfire frame (25 ms); ten frames means its loop is stalled.
 HANDOFF_TIMEOUT_SEC = 0.25
 CORS_MAX_AGE_SEC = 600
 HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
