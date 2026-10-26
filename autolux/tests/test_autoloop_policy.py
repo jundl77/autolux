@@ -158,40 +158,6 @@ def test_the_loop_used_last_for_an_intent_never_plays_twice_running():
     assert all(a != b for a, b in pairwise(picks))
 
 
-def test_the_track_movement_is_set_by_a_new_track_only():
-    lib = library(
-        {
-            ATMOSPHERIC: [('parked', 1, 'still', 'wash')],
-            DROP: [('hit', 3, 'snap', 'wash')],
-        }
-    )
-    chooser = policy(lib)
-    assert chooser.track_movement is None
-    pick(chooser, DROP)
-    assert chooser.track_movement is None
-    pick(chooser, ATMOSPHERIC, new_track=True)
-    assert chooser.track_movement == 'still'
-    pick(chooser, DROP)
-    assert chooser.track_movement == 'still'
-    pick(chooser, DROP, new_track=True)
-    assert chooser.track_movement == 'snap'
-
-
-def test_a_still_track_may_still_enter_any_movement():
-    lib = library(
-        {
-            ATMOSPHERIC: [('parked', 1, 'still', 'wash')],
-            BREAKDOWN: [('jump', 1, 'snap', 'wash'), ('glide', 1, 'sweep', 'wash')],
-        }
-    )
-    seen = set()
-    for seed in range(20):
-        chooser = policy(lib, seed)
-        pick(chooser, ATMOSPHERIC, new_track=True)
-        seen.add(pick(chooser, BREAKDOWN).autoloop)
-    assert seen == {'jump', 'glide'}
-
-
 def test_an_empty_tier_falls_back_to_the_nearest_energy():
     lib = library({DROP: [('driving', 2, 'snap', 'wash')], BREAKDOWN: [('big', 3, 'snap', 'wash')]})
     chooser = policy(lib)
@@ -320,6 +286,16 @@ def test_a_short_atmospheric_interruption_keeps_the_build_clock():
     light._note_new_look(BUILDUP, resumed_at)
     drop = light._selection_context(DROP, 'drop', 40.0)
     assert drop.build_bars == pytest.approx(20)
+
+
+def test_a_short_atmospheric_interruption_before_the_drop_keeps_the_build_clock():
+    light = build_engine()
+    light._note_new_look(BUILDUP, 0.0)
+    light._note_new_look(ATMOSPHERIC, 60.0)
+    drop = light._selection_context(DROP, 'drop', 60.0 + 8 * BAR_SECONDS_AT_120)
+    assert drop.build_bars == pytest.approx(38)
+    late = light._selection_context(DROP, 'drop', 60.0 + 8 * BAR_SECONDS_AT_120 + 0.1)
+    assert late.build_bars == 0.0
 
 
 def test_a_long_or_repeated_interruption_restarts_the_build_clock():

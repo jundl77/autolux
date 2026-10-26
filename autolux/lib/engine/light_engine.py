@@ -36,6 +36,7 @@ from autolux.lib.engine.event_buffer import (
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
 from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat, TrackMoodMeter
+from autolux.lighting.palettes import Mood
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -129,6 +130,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._capture_discontinuities: int | None = None
         self._capture_discontinuity_seen_at: deque[float] = deque(maxlen=8)
         self._track_mood = TrackMoodMeter(MAX_MEASURED_BARS * BEATS_PER_BAR)
+        self._measured_track_mood: Mood | None = None
         self._static_mode = False
         self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
         self._log_chain_latency()
@@ -424,6 +426,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._build_started_at = None
         self._build_interrupted_at = None
         self._after_silence = True
+        self._discard_track_mood()
         if self.event_buffer is not None:
             self.event_buffer.stop_effects()
 
@@ -537,7 +540,7 @@ class LightEngine(IMusicAnalyserHandler):
                 self.lighting_client.beat(beat_index, phase, BEATS_PER_BAR, published_bpm)
             await self._on_room_beat(phase)
             if bpm > 0:
-                self._measure_track_mood(measured)
+                self._measure_track_mood(measured, phase)
 
         if self.command_queue:
             await self.command_queue.enqueue('beat', publish)
@@ -550,18 +553,24 @@ class LightEngine(IMusicAnalyserHandler):
         if phase == 0:
             await self._switch_held_intent()
 
-    def _measure_track_mood(self, beat: MeasuredBeat) -> None:
-        mood = self._track_mood.add(beat)
-        if mood is not None:
+    def _measure_track_mood(self, beat: MeasuredBeat, phase: int | None) -> None:
+        self._measured_track_mood = self._track_mood.add(beat) or self._measured_track_mood
+        if self._measured_track_mood is not None and phase in (0, None):
+            mood, self._measured_track_mood = self._measured_track_mood, None
             self.effect_controller.choose_track_palette(mood, send_now=not self._holding_the_look())
 
     def _finish_track_mood(self) -> None:
-        mood = self._track_mood.finish()
+        mood = self._track_mood.finish() or self._measured_track_mood
+        self._measured_track_mood = None
         if mood is not None:
             self.effect_controller.choose_track_palette(mood, send_now=False)
 
+    def _discard_track_mood(self) -> None:
+        self._track_mood.finish()
+        self._measured_track_mood = None
+
     def _start_track_mood(self) -> None:
-        self._finish_track_mood()
+        self._discard_track_mood()
         self._track_mood.start()
 
     async def _switch_held_intent(self) -> None:
@@ -617,7 +626,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     def _resumes_build(self, intent: LightIntent, now: float) -> bool:
         return (
-            intent in BUILD_INTENTS
+            intent in (*BUILD_INTENTS, LightIntent.DROP)
             and self._entered_intent == LightIntent.ATMOSPHERIC
             and self._build_interrupted_at is not None
             and now - self._build_interrupted_at <= BUILD_INTERRUPTION_BARS * self._bar_seconds()

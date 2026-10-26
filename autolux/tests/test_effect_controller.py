@@ -234,7 +234,6 @@ async def test_a_look_that_was_not_sent_is_not_remembered(recorded_lighting):
     controller = rotating(recorded_lighting)
     recorded_lighting.select_autoloop = lambda *_, **__: False
     assert not await controller.change_effect(LightIntent.ATMOSPHERIC)
-    assert controller._policy.track_movement is None
     assert controller._entered is None
 
 

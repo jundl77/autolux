@@ -60,9 +60,12 @@ def test_temperature_comes_from_the_colours_so_amber_techno_is_warm():
     for palette in PALETTES:
         assert palette.mood.temperature == colour_temperature(palette.slots())
     temperature = {palette.name: palette.mood.temperature for palette in PALETTES}
-    assert temperature['techno'] > 0.9 and temperature['ember'] > 0.9
-    assert temperature['ice'] < -0.9 and temperature['mono_cold'] < -0.9
-    assert colour_temperature(by_name('ice').slots() | {'primary': (1.0, 1.0, 1.0)}) < -0.9
+    assert temperature['techno'] > 0.5 and temperature['ember'] > 0.8
+    assert temperature['ice'] < -0.6 and temperature['uv'] < -0.4
+    for grey, saturated in [('mono_cold', 'ice'), ('mono_warm', 'ember')]:
+        assert abs(temperature[grey]) < abs(temperature[saturated]) - 0.2
+    white = {slot: (1.0, 1.0, 1.0) for slot in ('primary', 'secondary', 'accent')}
+    assert colour_temperature(white) == 0.0
 
 
 def test_hand_set_weight_follows_the_colours_luminance():
@@ -345,7 +348,7 @@ async def test_a_choice_made_for_the_next_look_is_not_sent_early():
     assert palette_kinds(lighting)[-1] == ('select', chosen)
 
 
-async def test_the_opening_is_measured_until_the_first_buildup_and_committed_with_it():
+async def engine_showing_an_intro():
     from autolux.lib.clock import VirtualClock
     from autolux.lib.engine.effect_controller import EffectController
     from autolux.lib.engine.light_engine import LightEngine
@@ -357,12 +360,59 @@ async def test_the_opening_is_measured_until_the_first_buildup_and_committed_wit
     light._room_playing = True
     light._held_intent = LightIntent.ATMOSPHERIC
     await light._switch_held_intent()
-    warm_bright_laid_back = beat(TEMPO_RANGE_BPM[0], 1.0, CENTROID_RANGE_HZ[1], 40.0)
-    for _ in range(16):
-        light._measure_track_mood(warm_bright_laid_back)
+    return light, lighting
+
+
+WARM_BRIGHT_LAID_BACK_BEAT = beat(TEMPO_RANGE_BPM[0], 1.0, CENTROID_RANGE_HZ[1], 40.0)
+
+
+async def test_the_opening_is_measured_until_the_first_buildup_and_committed_with_it():
+    light, lighting = await engine_showing_an_intro()
+    for index in range(16):
+        light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, index % 4)
     assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE)]
     light._held_intent = LightIntent.BUILDUP
     await light._switch_held_intent()
     [_, (kind, palette)] = palette_kinds(lighting)
     assert kind == 'select' and palette in SUNSET_LIKE
     assert not light._track_mood.measuring
+
+
+async def test_a_full_window_commits_its_palette_on_the_next_downbeat():
+    from autolux.lib.engine.track_mood import TrackMoodMeter
+
+    light, lighting = await engine_showing_an_intro()
+    light._track_mood = TrackMoodMeter(beats_to_measure=6)
+    light._track_mood.start()
+    phases = [0, 1, 2, 3, 0, 1, 2, 3]
+    sent_at_phase = []
+    for phase in phases:
+        before = len(palette_kinds(lighting))
+        light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, phase)
+        sent_at_phase += [phase] * (len(palette_kinds(lighting)) - before)
+    assert sent_at_phase == []
+    light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, 0)
+    [(kind, palette)] = palette_kinds(lighting)[1:]
+    assert kind == 'set_palette' and palette in SUNSET_LIKE
+
+
+async def test_a_partial_window_is_discarded_on_a_new_track_and_the_palette_holds():
+    light, lighting = await engine_showing_an_intro()
+    for index in range(8):
+        light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, index % 4)
+    light._after_silence = True
+    light._held_intent = LightIntent.ATMOSPHERIC
+    await light._switch_held_intent()
+    assert {palette for _, palette in palette_kinds(lighting)} == {DEFAULT_PALETTE}
+    assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
+    assert light._track_mood.measuring
+
+
+async def test_a_silence_restart_discards_the_window():
+    light, lighting = await engine_showing_an_intro()
+    for index in range(8):
+        light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, index % 4)
+    light._forget_room_look()
+    assert not light._track_mood.measuring
+    light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, 0)
+    assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE

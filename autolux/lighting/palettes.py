@@ -26,6 +26,11 @@ class Mood:
         order of its colours' luminance; a track's loudness and spectral brightness.
     drive: laid-back -1 .. hard +1. How pushed a palette feels, hand-set; a track's tempo
         and energy.
+
+    The shipped palettes (temperature / weight / drive): techno +0.60/+0.2/+0.9,
+    house +0.49/+0.3/+0.4, ice -0.65/+0.4/0, acid +0.37/+0.7/+0.8, sunset +0.39/-0.3/-0.8,
+    uv -0.43/-0.8/+0.3, ember +0.87/-0.6/-0.2, mono_cold -0.09/+0.6/+0.5,
+    mono_warm +0.42/+0.5/-0.6.
     """
 
     temperature: float
@@ -42,14 +47,16 @@ class Mood:
 
 
 def colour_temperature(colours: dict[str, Rgb]) -> float:
-    """Hue warmth (cos of the distance from orange, 30 deg) averaged by slot share x chroma."""
-    warmth = weights = 0.0
-    for slot, share in COLOUR_SHARES:
-        hue, saturation, value = colorsys.rgb_to_hsv(*colours[slot])
-        weight = share * saturation * value
-        warmth += weight * math.cos(math.radians(hue * 360.0 - WARMEST_HUE_DEGREES))
-        weights += weight
-    return round(warmth / weights, 2) if weights else 0.0
+    """Hue warmth (cos of the distance from orange, 30 deg) x chroma, averaged by slot share.
+
+    Chroma scales each slot's say, so near-grey palettes come out mild rather than extreme.
+    """
+    warmth = sum(
+        share * saturation * value * math.cos(math.radians(hue * 360.0 - WARMEST_HUE_DEGREES))
+        for slot, share in COLOUR_SHARES
+        for hue, saturation, value in [colorsys.rgb_to_hsv(*colours[slot])]
+    )
+    return round(warmth / sum(share for _, share in COLOUR_SHARES), 2)
 
 
 def luminance(colours: dict[str, Rgb]) -> float:

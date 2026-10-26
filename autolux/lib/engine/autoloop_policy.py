@@ -112,11 +112,6 @@ class AutoloopPolicy:
         self._last_used: dict[tuple[str, str], int] = {}
         self._last_by_intent: dict[LightIntent, tuple[str, str]] = {}
         self._last_drop_energy: int | None = None
-        self._track_movement: str | None = None
-
-    @property
-    def track_movement(self) -> str | None:
-        return self._track_movement
 
     def choose(
         self,
@@ -148,8 +143,6 @@ class AutoloopPolicy:
         self._selections[context.intent] += 1
         self._last_used[loop] = self._selections[context.intent]
         self._last_by_intent[context.intent] = loop
-        if context.new_track:
-            self._track_movement = choice.meta.movement
         if context.intent == LightIntent.DROP:
             self._last_drop_energy = choice.meta.energy
 
