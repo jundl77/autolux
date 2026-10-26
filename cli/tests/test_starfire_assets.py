@@ -4,13 +4,11 @@ from pathlib import Path
 import pytest
 
 from autolux.lighting import mvr
-from autolux.lighting.gdtf import fixture_library
 from cli import starfire_assets as assets
 from cli import starfire_protocol as protocol
 from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG, ROOT
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
-from tools.rig_json_to_mvr import convert
 
 GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').read_text(
     encoding='utf-8'
@@ -19,7 +17,7 @@ SPEC = 'Autolux@Test Dimmer.gdtf'
 
 
 @pytest.fixture
-def login_assets(tmp_path):
+def login_assets(tmp_path, write_rig):
     profiles = tmp_path / 'profiles.json'
     profiles.write_text(
         json.dumps(
@@ -30,27 +28,7 @@ def login_assets(tmp_path):
         ),
         encoding='utf-8',
     )
-    rig = tmp_path / 'rig.mvr'
-    rig.write_bytes(
-        convert(
-            {
-                'schema_version': 1,
-                'fixtures': [
-                    {
-                        'id': 'front',
-                        'profile': 'test_mover',
-                        'universe': 0,
-                        'address': 1,
-                        'pan': {'min': 0, 'inverted': True},
-                        'pan_offset_degrees': 180,
-                    }
-                ],
-                'groups': {'movers': ['front']},
-            },
-            fixture_library(profiles),
-            'login-test',
-        )
-    )
+    rig = write_rig(profiles, 'front', 'movers', (180.0, 0.0, 0.0), invert_pan=True)
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'atmospheric'
     bank.mkdir(parents=True)
@@ -113,7 +91,7 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
         path.relative_to(DEFAULT_AUTOLOOPS).with_suffix('').as_posix()
         for path in DEFAULT_AUTOLOOPS.glob('*/*.lua')
     }
-    assert login.ByteSize() + protocol.COMMAND_ID_MAX_ENCODED_BYTES <= protocol.MAX_MESSAGE_BYTES
+    assert login.ByteSize() + protocol.COMMAND_ID_MAX_ENCODED_BYTES <= protocol.MAX_LOGIN_BYTES
 
 
 @pytest.mark.parametrize(
@@ -163,9 +141,11 @@ def test_single_autoloop_over_its_cap_is_rejected(login_assets):
 
 def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_assets, monkeypatch):
     rig, autoloops = login_assets
-    monkeypatch.setattr(assets, 'MAX_MESSAGE_BYTES', 64 * 1024)
+    monkeypatch.setitem(protocol.PAYLOAD_LIMITS, wire.LOGIN, 64 * 1024)
     _fill_bank(autoloops, 40, 3 * 1024)
-    with pytest.raises(ValueError, match=r'renderer message limit: \d+ > 65536 bytes'):
+    with pytest.raises(
+        ValueError, match=r'LOGIN payload of \d+ bytes exceeds the 65536-byte limit'
+    ):
         assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 
@@ -182,5 +162,7 @@ def test_committed_native_rig_is_the_exported_login_rig(name):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     with assets.native_rig(rig) as exported:
         content = exported.read_bytes()
-    assert content == (ROOT / f'rigs/{name}.rig.pb').read_bytes()
+    assert content == (ROOT / f'rigs/{name}.rig.pb').read_bytes(), (
+        f'Regenerate with: uv run autolux starfire export-rig rigs/{name}.mvr rigs/{name}.rig.pb'
+    )
     assert rig_wire.RigDefinition.FromString(content) == login.rig

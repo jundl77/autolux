@@ -11,7 +11,7 @@ Only top-level wire messages have direction annotations.
 | --- | --- |
 | `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. |
-| `UpdateBeat` | Report one detected beat: index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire owns the bar-aligned grid and interpolates between beats; animation speed does not change musical phase. |
+| `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
 `DiscardDelayedAudio` is the one transport command: when the source stops, the embedded
@@ -67,7 +67,8 @@ session and attempts darkness while preserving movement positions.
 
 Commands and replies are standalone messages. Each frame contains a one-byte
 `MessageType`, a four-byte big-endian payload length, then the generated Protobuf
-payload, bounded to 4 MiB. There are no Render envelopes or custom serializers.
+payload. Login, which carries the session assets, is bounded to 4 MiB; every
+other message is real-time and bounded to 4 KiB. There are no Render envelopes or custom serializers.
 Wrong directions, unknown types, oversized and truncated frames are rejected.
 
 Commands have positive increasing IDs and apply in order at render boundaries.

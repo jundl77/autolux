@@ -15,7 +15,7 @@ use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
-use starfire::script::AutoloopCatalog;
+use starfire::script::{AutoloopCatalog, missing_groups_warning};
 
 const DEFAULT_RIG: &str = "rigs/room.rig.pb";
 const DEFAULT_AUTOLOOPS: &str = "autoloops";
@@ -88,6 +88,10 @@ fn run(arguments: Arguments) -> Result<()> {
         Action::Check { rig, autoloops } => {
             let rig = FixtureRig::load(&rig)?;
             let catalog = AutoloopCatalog::load(&autoloops)?;
+            let missing_groups = catalog.groups_missing_from(&rig);
+            if let Some(warning) = missing_groups_warning(&missing_groups) {
+                eprintln!("starfire: warning: {warning}");
+            }
             let autoloops = catalog.list();
             for autoloop in &autoloops {
                 let mut engine = Engine::new(rig.clone(), catalog.clone())?;
@@ -115,6 +119,7 @@ fn run(arguments: Arguments) -> Result<()> {
                 serde_json::to_string_pretty(&json!({
                     "fixtures": rig.fixture_ids(), "groups": rig.groups(),
                     "universes": universes, "checked_autoloops": autoloops,
+                    "missing_groups": missing_groups,
                 }))?
             );
         }

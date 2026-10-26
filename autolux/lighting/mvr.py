@@ -458,12 +458,6 @@ def _text(node, tag: str) -> str:
     return (node.findtext(tag) or '').strip()
 
 
-def _autolux_data(root: ElementTree.Element):
-    return next(
-        (node for node in root.findall('UserData/Data') if node.get('provider') == PROVIDER), None
-    )
-
-
 def patched_fixtures(scene: Scene) -> list[dict]:
     root = scene.root
     classes = {
@@ -570,22 +564,3 @@ def class_uuid(scene: Scene, name: str) -> str:
         auxdata, 'Class', uuid=(identity := stable_uuid('class', name)), name=name
     )
     return identity
-
-
-def set_movement_limits(scene: Scene, identity: str, axis: str, low: float, high: float) -> None:
-    root = scene.root
-    if (user_data := root.find('UserData')) is None:
-        root.insert(0, user_data := ElementTree.Element('UserData'))
-    if (data := _autolux_data(root)) is None:
-        data = ElementTree.SubElement(user_data, 'Data', provider=PROVIDER, ver='1')
-    for node in data.findall('Movement'):
-        if node.get('fixture') == identity and node.get('axis') == axis.title():
-            data.remove(node)
-    ElementTree.SubElement(
-        data,
-        'Movement',
-        fixture=identity,
-        axis=axis.title(),
-        minimum=_number(low),
-        maximum=_number(high),
-    )

@@ -8,7 +8,7 @@ use serde_json::json;
 use starfire::engine::MAX_SCRIPT_ERROR_BYTES;
 use starfire::fixtures::{FixtureRig, MAX_FIXTURES};
 use starfire::model::{Command, TimedCommand, Transition};
-use starfire::protocol::MAX_MESSAGE_BYTES;
+use starfire::protocol::MAX_LOGIN_BYTES;
 use starfire::replay::{Replay, render_replay};
 use starfire::script::AutoloopCatalog;
 
@@ -134,7 +134,7 @@ fn repeated_fault_diagnostics_have_a_total_replay_memory_budget() {
 fn rig_size_is_bounded_before_decoding() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("oversized.pb");
-    fs::write(&path, vec![0; MAX_MESSAGE_BYTES + 1]).unwrap();
+    fs::write(&path, vec![0; MAX_LOGIN_BYTES + 1]).unwrap();
     let error = FixtureRig::load(&path).unwrap_err();
     assert!(format!("{error:#}").contains("input byte limit"));
 }

@@ -11,12 +11,10 @@ from pathlib import Path
 import pytest
 
 from autolux.lighting import mvr
-from autolux.lighting.gdtf import fixture_library
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
-from cli.starfire import DEFAULT_RIG, PROFILE_CATALOGUE
+from cli.starfire import DEFAULT_RIG
 from proto.starfire import starfire_pb2 as wire
-from tools.rig_json_to_mvr import convert
 
 
 def edited_room(path: Path, old: str, new: str) -> Path:
@@ -137,6 +135,7 @@ def test_invalid_control_cannot_enter_the_pipe(command):
     [
         b'\x00',
         protocol.FRAME_HEADER.pack(wire.METRICS, protocol.MAX_MESSAGE_BYTES + 1),
+        protocol.FRAME_HEADER.pack(200, 0xFFFFFFFF),
         protocol.FRAME_HEADER.pack(wire.METRICS, 2) + b'\x08',
     ],
 )
@@ -144,6 +143,42 @@ def test_incomplete_and_oversized_events_are_rejected(payload):
     with pytest.raises(ValueError):
         protocol.read_event(io.BytesIO(payload))
     assert protocol.read_event(io.BytesIO()) is None
+
+
+def _padded(message_class, size):
+    unknown_field = wire.AutoloopDefinition(lua_source='-' * size).SerializeToString()
+    message = message_class.FromString(b'z' + unknown_field[1:])
+    message.command_id = 1
+    return message
+
+
+def _round_trip(message):
+    message_type, length = protocol.FRAME_HEADER.unpack_from(
+        frame := protocol.encode_command(message)
+    )
+    assert length == len(frame) - protocol.FRAME_HEADER.size
+    return protocol.COMMAND_MESSAGES[message_type].FromString(frame[protocol.FRAME_HEADER.size :])
+
+
+@pytest.mark.parametrize(
+    'message_class,size,accepted',
+    [
+        (wire.SetParameter, 5 * 1024, False),
+        (wire.UpdateBeat, protocol.MAX_MESSAGE_BYTES - 5, True),
+        (wire.UpdateBeat, protocol.MAX_MESSAGE_BYTES - 4, False),
+        (wire.PlayAutoloop, 3 * 1024, True),
+        (wire.Login, 1024 * 1024, True),
+        (wire.Login, protocol.MAX_LOGIN_BYTES + 100 * 1024, False),
+    ],
+)
+def test_only_login_may_use_the_large_message_limit(message_class, size, accepted):
+    message = _padded(message_class, size)
+    if accepted:
+        assert _round_trip(message) == message
+    else:
+        name = wire.MessageType.Name(protocol.MESSAGE_TYPE_BY_CLASS[message_class])
+        with pytest.raises(ValueError, match=rf'{name} payload of \d+ bytes exceeds'):
+            protocol.encode_command(message)
 
 
 @pytest.mark.parametrize(
@@ -313,24 +348,12 @@ with open(recording, 'w') as output:
 
 
 def _fake_runtime(tmp_path, mode='normal', **kwargs):
-    rig = tmp_path / 'rig.mvr'
-    rig.write_bytes(
-        convert(
-            {
-                'schema_version': 1,
-                'fixtures': [{'id': 'lamp', 'profile': 'generic_rgb', 'universe': 0, 'address': 1}],
-                'groups': {'wash': ['lamp']},
-            },
-            fixture_library(PROFILE_CATALOGUE),
-            'runtime-test',
-        )
-    )
     scripts = tmp_path / 'scripts'
     (scripts / 'drop').mkdir(parents=True)
     (scripts / 'drop/kick.lua').write_text('return {render=function(ctx) return {} end}')
     runtime = starfire_runtime.StarfireRuntime(
         sys.executable,
-        rig,
+        DEFAULT_RIG,
         scripts,
         '127.0.0.1:6454',
         tmp_path / 'run',
@@ -396,7 +419,7 @@ def test_shutdown_discards_a_full_queue_and_closes_the_pipe_normally(tmp_path):
 
 
 @pytest.mark.parametrize(
-    'mode,reason', [('stall', 'startup deadline'), ('malformed', 'event size')]
+    'mode,reason', [('stall', 'startup deadline'), ('malformed', 'METRICS payload of')]
 )
 def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason):
     runtime = _fake_runtime(tmp_path, mode, startup_timeout=0.5, stop_timeout=0.1)
@@ -602,6 +625,10 @@ def test_full_command_queue_fails_instead_of_blocking_audio_thread(tmp_path):
         runtime.check_health()
 
 
+def red_at_squared_master(brightness, held_intensity=0.75):
+    return round(255 * held_intensity * brightness**2)
+
+
 def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
     root = Path(__file__).resolve().parents[2]
     binary = root / 'target/debug/starfire.exe'
@@ -640,7 +667,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
                 runtime.check_health()
                 # The strip is RGB-only at address 97; pan/colour-wheel parking
                 # values on other fixtures must not count as emitted light.
-                if packet[18 + 96 : 18 + 99] == bytes([96, 0, 0]):
+                if packet[18 + 96 : 18 + 99] == bytes([red_at_squared_master(0.5), 0, 0]):
                     break
             else:
                 pytest.fail('no rendered lighting arrived')
@@ -651,7 +678,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             while time.monotonic() < deadline:
                 packet = receiver.recv(1024)
                 runtime.check_health()
-                if packet[18 + 96 : 18 + 99] == bytes([191, 0, 0]):
+                if packet[18 + 96 : 18 + 99] == bytes([red_at_squared_master(1.0), 0, 0]):
                     break
             else:
                 pytest.fail('reusing the initialization parameter did not change output')
@@ -684,15 +711,15 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     )
 
 
-def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
+def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path, caplog):
     root = Path(__file__).resolve().parents[2]
     binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
     rig = edited_room(tmp_path / 'missing-strip.mvr', 'name="strip"', 'name="pixels"')
-    with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*autoloop ') as error:
+    with caplog.at_level('WARNING'):
         starfire_runtime.validate_starfire(binary, rig, root / 'autoloops')
-    assert 'strip' in str(error.value)
+    assert 'groups not in this rig: strip' in caplog.text
 
 
 def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
@@ -777,6 +804,36 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
     )
     with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
         starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
+
+
+def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplog):
+    from types import SimpleNamespace
+
+    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    loops = [
+        ('atmospheric', 'cold_breathe'),
+        ('breakdown', 'wide_space'),
+        ('buildup', 'ramp'),
+        ('drop', 'kick'),
+        ('standby', 'warm_white'),
+    ]
+    for bank, name in loops:
+        (tmp_path / bank).mkdir()
+        (tmp_path / bank / f'{name}.lua').write_text(header)
+    checked = [{'bank': bank, 'autoloop': name} for bank, name in loops]
+    report = json.dumps(
+        {'universes': [0], 'checked_autoloops': checked, 'missing_groups': ['fx', 'lasers']}
+    )
+    binary = tmp_path / 'starfire.exe'
+    binary.touch()
+    monkeypatch.setattr(
+        starfire_runtime.subprocess,
+        'run',
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
+    )
+    with caplog.at_level('WARNING'):
+        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
+    assert 'groups not in this rig: fx, lasers' in caplog.text
 
 
 def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():

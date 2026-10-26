@@ -22,7 +22,7 @@ Link, telemetry and hardware faults appear only when they need attention.
   Capture absorbs stalls up to 200 ms in its device buffer. A longer stall loses audio;
   the device timestamp measures the gap, which is filled with silence so the show delay
   stays exact, and the health line counts it as a capture resync. Three resyncs within
-  10 s, or a gap the 743 ms capture queue cannot hold, stop the session.
+  10 s, or a gap or consumer stall the 500 ms capture queue cannot hold, stop the session.
 - **Buffer drift:** the target is 500 ms to absorb Wi-Fi delivery bursts. Clock correction handles slow
   device-clock differences; repeated rebuffering indicates sustained stalls.
   Audio delivery-gap and signal-peak metrics distinguish delayed packets from silence.

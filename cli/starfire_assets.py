@@ -8,7 +8,7 @@ from autolux.lighting.fixture_setup import load_rig
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
-    MAX_MESSAGE_BYTES,
+    check_payload_size,
 )
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
@@ -129,12 +129,7 @@ def load_login(
         )
         if render_core is not None:
             login.render_core = render_core
-        size = login.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES
-        if size > MAX_MESSAGE_BYTES:
-            raise ValueError(
-                f'Login assets exceed the renderer message limit: '
-                f'{size} > {MAX_MESSAGE_BYTES} bytes'
-            )
+        check_payload_size(wire.LOGIN, login.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES)
         return login
     except (KeyError, TypeError, ValueError, OverflowError) as error:
         raise ValueError(f'Invalid Starfire login assets: {error}') from error

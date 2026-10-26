@@ -115,7 +115,7 @@ impl Renderer {
             panic!("renderer did not accept login");
         };
         assert_eq!(reply.frame_rate_hz, 40);
-        assert_eq!(reply.max_message_bytes, 4 * 1024 * 1024);
+        assert_eq!(reply.max_message_bytes, 4 * 1024);
         assert_eq!(reply.run_id, renderer.login.run_id);
         let metrics = renderer.next_metrics();
         assert_eq!(metrics.run_id, renderer.login.run_id);
@@ -421,7 +421,7 @@ fn login_probes_every_script_without_output_and_uses_initial_parameters() {
     let mut renderer = Renderer::start();
     for source in [
         "this is not Lua",
-        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.group('missing'), 1)} end}",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.fixture('missing'), 1)} end}",
         "return {render=function(ctx) error('invalid supplied script') end}",
     ] {
         let mut login = renderer.login.clone();

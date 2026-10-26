@@ -9,11 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from autolux.lighting.gdtf import fixture_library
 from cli import starfire
 from cli.starfire_assets import load_login
 from cli.starfire_runtime import StarfireRuntime
-from tools.rig_json_to_mvr import convert
 
 ROOT = Path(__file__).parents[2]
 BINARY = ROOT / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
@@ -23,7 +21,9 @@ TEST_TIMEOUT_SECONDS = 5.0
 
 
 @pytest.mark.parametrize('mode,expected', [('8 bit', b'\x80'), ('16 bit', b'\x80\x00')])
-def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, expected):
+def test_imported_fixture_renders_from_login_without_rebuilding(
+    tmp_path, write_rig, mode, expected
+):
     if not BINARY.is_file():
         pytest.skip('Build Starfire to test native GDTF import')
     archive = tmp_path / 'fixture.gdtf'
@@ -40,17 +40,7 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
             mode=mode,
         )
     )
-    rig = tmp_path / 'rig.mvr'
-    rig.write_bytes(
-        convert(
-            {
-                'schema_version': 1,
-                'fixtures': [{'id': 'lamp', 'profile': 'imported', 'universe': 0, 'address': 1}],
-            },
-            fixture_library(profiles),
-            'import-test',
-        )
-    )
+    rig = write_rig(profiles, 'lamp')
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'test'
     bank.mkdir(parents=True)

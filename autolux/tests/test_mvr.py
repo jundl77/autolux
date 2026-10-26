@@ -137,7 +137,7 @@ def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
     content = (ROOT / 'rigs/room.mvr').read_bytes()
     scene, fixtures = load_rig(ROOT / 'rigs/room.mvr')
     assert validate(scene) == []
-    assert len(fixtures) == 14
+    assert len(fixtures) == 15
     assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
     first = mvr.draft(scene)
     saved = mvr.write(mvr.apply_draft(scene, first, LIBRARY))

@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from statistics import median
+from typing import NamedTuple
 
 import dash
 import plotly.graph_objects as go
@@ -564,14 +565,41 @@ SETTING_LABELS = {
     for name, (label, unit) in SETTING_DISPLAY.items()
 }
 PERCENT_SETTINGS = frozenset(name for name, (_, unit) in SETTING_DISPLAY.items() if unit == '%')
+TRANSITION_SETTINGS = ('crossfade_beats', 'quiet_brightness', 'digital_silence_seconds')
 STROBE_SETTINGS = (
-    'drop_strobe_cooldown_seconds',
-    'strobe_burst_seconds',
     'strobe_max_rate_hz',
     'strobe_max_burst_seconds',
+    'strobe_burst_seconds',
+    'drop_strobe_cooldown_seconds',
 )
+SETTING_SUMMARY = {
+    'crossfade_beats': '{} beats',
+    'quiet_brightness': 'quiet {} %',
+    'digital_silence_seconds': 'standby {} s',
+    'strobe_max_rate_hz': '{} Hz',
+    'strobe_max_burst_seconds': 'burst {} s',
+    'strobe_burst_seconds': 'drop burst {} s',
+    'drop_strobe_cooldown_seconds': 'cooldown {} s',
+}
+
+
+class SettingsGroup(NamedTuple):
+    key: str
+    title: str
+    names: tuple[str, ...]
+    default_open: bool
+    marker: str | None = None
+
+
+SETTINGS_GROUPS = (
+    SettingsGroup('transitions', 'Transitions & standby', TRANSITION_SETTINGS, True),
+    SettingsGroup('strobe', 'Strobe limits', STROBE_SETTINGS, False, 'Intense effects'),
+)
+SETTINGS_GROUPS_STORAGE_KEY = 'autolux.settings-groups'
 SETTING_IDS = {f'control-{name}': name for name in SHOW_SETTING_RANGES}
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
+NEEDS_A_NUMBER = '{label} needs a number'
+NOT_A_NUMBER = '{label}: "{raw}" is not a number'
 LIVE_BRIGHTNESS_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
 CONTROL_EXPECT_SECONDS = 2.0
@@ -623,9 +651,9 @@ def setting_text(name: str, value: float) -> str:
 def parse_decimal(name: str, raw) -> float:
     text = '' if raw is None else str(raw).strip().replace(',', '.')
     if not text:
-        raise ValueError(f'{SETTING_LABELS[name]} needs a number')
+        raise ValueError(NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]))
     if not PLAIN_DECIMAL_TEXT.fullmatch(text):
-        raise ValueError(f'{SETTING_LABELS[name]}: "{raw}" is not a number')
+        raise ValueError(NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw=raw))
     return round(float(text) / 100, 6) if name in PERCENT_SETTINGS else float(text)
 
 
@@ -646,27 +674,164 @@ def control_command(trigger, paused, level, settings) -> dict | None:
     return None
 
 
+def settings_group_summary(names, settings) -> str:
+    settings = settings or {}
+    return ' · '.join(
+        SETTING_SUMMARY[name].format(
+            '—' if settings.get(name) is None else setting_text(name, settings[name])
+        )
+        for name in names
+    )
+
+
+def setting_range_text(name: str) -> str:
+    low, high = SHOW_SETTING_RANGES[name]
+    return f'{setting_text(name, low)}–{setting_text(name, high)}'
+
+
 def _setting_input(name):
     label, unit = SETTING_DISPLAY[name]
-    low, high = SHOW_SETTING_RANGES[name]
-    return html.Label(
+    return html.Div(
         [
-            html.Span(label, className='control-name'),
-            dcc.Input(
-                id=f'control-{name}',
-                type='text',
-                inputMode='decimal',
-                pattern=r'-?[0-9]*[.,]?[0-9]*',
-                debounce=0.15,
-                disabled=True,
+            html.Label(label, htmlFor=f'control-{name}', className='setting-name'),
+            html.Div(
+                [
+                    dcc.Input(
+                        id=f'control-{name}',
+                        type='text',
+                        inputMode='decimal',
+                        pattern=r'-?[0-9]*[.,]?[0-9]*',
+                        debounce=0.15,
+                        disabled=True,
+                    ),
+                    html.Span(unit, className='setting-unit'),
+                ],
+                className='setting-value',
             ),
-            html.Span(unit, className='control-unit'),
             html.Span(
-                f'{setting_text(name, low)} – {setting_text(name, high)}',
-                className='control-range',
+                setting_range_text(name),
+                title=f'Allowed {setting_range_text(name)} {unit}',
+                className='setting-range',
             ),
+            html.Span(id=f'control-{name}-error', role='alert', className='setting-error'),
         ],
-        className='control-field',
+        className='setting-row',
+    )
+
+
+def _settings_group(group: SettingsGroup, rows: list):
+    header = [html.Span(group.title, className='settings-group-title')]
+    if group.marker:
+        header.append(html.Span(group.marker, className='settings-group-marker'))
+    header.append(html.Span(id=f'settings-summary-{group.key}', className='settings-group-summary'))
+    return html.Details(
+        [
+            html.Summary(header, className='settings-group-header'),
+            html.Div(rows, className='settings-group-body'),
+        ],
+        id=f'settings-group-{group.key}',
+        open=group.default_open,
+        className=f'settings-group settings-group-{group.key}',
+        **{'data-settings-group': group.key},
+    )
+
+
+def _build_settings_drawer():
+    return html.Div(
+        [
+            html.Div('Show settings', className='stat-label control-heading'),
+            *[
+                _settings_group(group, [_setting_input(name) for name in group.names])
+                for group in SETTINGS_GROUPS
+            ],
+        ],
+        id='settings-drawer',
+        className='control-group settings-drawer',
+    )
+
+
+def _register_settings_drawer(app) -> None:
+    app.clientside_callback(
+        '''function() {
+            const key = '''
+        + json.dumps(SETTINGS_GROUPS_STORAGE_KEY)
+        + ''';
+            const read = () => {
+                try {
+                    return JSON.parse(window.localStorage.getItem(key) || '{}') || {};
+                } catch (error) {
+                    return {};
+                }
+            };
+            if (!window.autoluxSettingsGroupsWatched) {
+                window.autoluxSettingsGroupsWatched = true;
+                document.addEventListener('toggle', (event) => {
+                    const group = event.target.dataset && event.target.dataset.settingsGroup;
+                    if (!group) {
+                        return;
+                    }
+                    try {
+                        const saved = read();
+                        saved[group] = event.target.open;
+                        window.localStorage.setItem(key, JSON.stringify(saved));
+                    } catch (error) {}
+                }, true);
+            }
+            const saved = read();
+            return '''
+        + json.dumps([[group.key, group.default_open] for group in SETTINGS_GROUPS])
+        + '''.map(([group, open]) => typeof saved[group] === 'boolean' ? saved[group] : open);
+        }''',
+        *[Output(f'settings-group-{group.key}', 'open') for group in SETTINGS_GROUPS],
+        Input('settings-drawer', 'id'),
+    )
+
+    @app.callback(
+        *[Output(f'settings-summary-{group.key}', 'children') for group in SETTINGS_GROUPS],
+        Input('control-state', 'data'),
+    )
+    def summarize_settings(state):
+        if not state or not state.get('settings'):
+            raise dash.exceptions.PreventUpdate
+        return [settings_group_summary(group.names, state['settings']) for group in SETTINGS_GROUPS]
+
+    limits = [
+        [
+            setting_text(name, low),
+            setting_text(name, high),
+            SETTING_DISPLAY[name][1],
+            NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]),
+            NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw='{raw}'),
+        ]
+        for name, (low, high) in SHOW_SETTING_RANGES.items()
+    ]
+    app.clientside_callback(
+        r'''function(...values) {
+            const decimal = new RegExp('^(?:' + '''
+        + json.dumps(PLAIN_DECIMAL_TEXT.pattern)
+        + r''' + ')$');
+            return '''
+        + json.dumps(limits)
+        + r'''.map(([low, high, unit, needs, notNumber], index) => {
+                const raw = values[index];
+                const text = raw === null || raw === undefined
+                    ? '' : String(raw).trim().replace(',', '.');
+                if (!text) {
+                    return 'Rejected: ' + needs;
+                }
+                if (!decimal.test(text)) {
+                    return 'Rejected: ' + notNumber.replace('{raw}', raw);
+                }
+                const value = parseFloat(text);
+                if (value < parseFloat(low) || value > parseFloat(high)) {
+                    return 'Rejected: must be within ' + low + '–' + high + ' ' + unit;
+                }
+                return '';
+            });
+        }''',
+        *[Output(f'control-{name}-error', 'children') for name in SHOW_SETTING_RANGES],
+        *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        prevent_initial_call=True,
     )
 
 
@@ -720,31 +885,7 @@ def _build_control_card() -> list:
                     ],
                     className='control-group control-master',
                 ),
-                html.Div(
-                    [
-                        html.Div('Show settings', className='stat-label control-heading'),
-                        html.Div(
-                            [
-                                _setting_input(name)
-                                for name in SHOW_SETTING_RANGES
-                                if name not in STROBE_SETTINGS
-                            ],
-                            className='control-fields',
-                        ),
-                    ],
-                    className='control-group',
-                ),
-                html.Details(
-                    [
-                        html.Summary('Strobe · intense effects', className='stat-label'),
-                        html.Div(
-                            [_setting_input(name) for name in STROBE_SETTINGS],
-                            className='control-fields',
-                        ),
-                    ],
-                    open=True,
-                    className='control-group control-strobe',
-                ),
+                _build_settings_drawer(),
                 html.P(id='control-status', role='status', className='control-status'),
                 dcc.Store(id='control-state'),
                 dcc.Store(id='control-synced'),
@@ -956,21 +1097,46 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .control-master .dash-slider-range { background: #73b6ff; border-radius: 3px; }
 .control-scale { display: flex; justify-content: space-between; margin-top: 8px;
                  color: #8293a6; font-size: 10px; }
-.control-fields { display: grid; gap: 10px; }
-.control-field { display: grid; grid-template-columns: minmax(0, 1fr) 76px 34px;
-                 column-gap: 8px; align-items: center; }
-.control-name { color: #9baabb; font-size: 12px; }
-.control-unit { color: #8293a6; font-size: 11px; }
-.control-range { grid-column: 1; color: #8293a6; font-size: 10px; }
-.control-field input { width: 100%; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
-                       border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px;
+.settings-drawer { grid-column: span 2; display: grid; gap: 8px; align-content: start; }
+.settings-drawer .control-heading { margin-bottom: 4px; }
+.settings-group { border: 1px solid #273344; border-radius: 4px; background: #0e151f; }
+.settings-group-header { display: flex; align-items: baseline; gap: 8px; padding: 9px 12px;
+                         cursor: pointer; list-style: none; user-select: none; }
+.settings-group-header::-webkit-details-marker { display: none; }
+.settings-group-header::before { content: '▸'; color: #8293a6; font-size: 10px;
+                                 transition: transform .12s; }
+.settings-group[open] > .settings-group-header::before { transform: rotate(90deg); }
+.settings-group-header:hover { background: #162130; }
+.settings-group-header:focus-visible { outline: 1px solid #73b6ff; outline-offset: -1px; }
+.settings-group-title { color: #dce8f5; font-size: 12px; font-weight: 600; }
+.settings-group-marker { color: #f0883e; font-size: 10px; text-transform: uppercase;
+                         letter-spacing: .04em; }
+.settings-group-summary { margin-left: auto; color: #8293a6; font-size: 11px; white-space: nowrap;
+                          overflow: hidden; text-overflow: ellipsis; min-width: 0;
+                          font-variant-numeric: tabular-nums; }
+.settings-group[open] .settings-group-summary { visibility: hidden; }
+.settings-group-body { display: grid; gap: 2px; padding: 2px 12px 10px 28px; }
+.settings-group-strobe { box-shadow: inset 3px 0 0 #f0883e; }
+.settings-group-strobe .settings-group-title { color: #f0883e; }
+.setting-row { display: grid; grid-template-columns: minmax(0, 1fr) 118px 64px;
+               column-gap: 10px; align-items: center; min-height: 30px; }
+.setting-name { color: #9baabb; font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+.setting-value { display: flex; align-items: center; background: #0b121c;
+                 border: 1px solid #344256; border-radius: 4px; }
+.setting-value:focus-within { border-color: #73b6ff; }
+.setting-value:has(input:invalid),
+.setting-row:has(.setting-error:not(:empty)) .setting-value { border-color: #e8b56d; }
+.setting-value:has(input:disabled) { opacity: .4; }
+.setting-value input { flex: 1; min-width: 0; width: 100%; background: transparent; color: #e6edf3;
+                       border: 0; padding: 5px 4px 5px 8px; font: inherit; font-size: 12px;
                        text-align: right; font-variant-numeric: tabular-nums; }
-.control-field input:focus { outline: none; border-color: #73b6ff; }
-.control-field input:invalid { border-color: #e8b56d; }
-.control-field input:disabled { opacity: .4; }
-.control-strobe { box-shadow: inset 3px 0 0 #f0883e; }
-.control-strobe summary { cursor: pointer; color: #f0883e; margin-bottom: 12px; }
-.control-strobe:not([open]) summary { margin-bottom: 0; }
+.setting-value input:focus { outline: none; }
+.setting-unit { flex: 0 0 38px; padding-right: 8px; color: #8293a6; font-size: 11px; }
+.setting-range { color: #8293a6; font-size: 10px; text-align: right;
+                 font-variant-numeric: tabular-nums; white-space: nowrap; }
+.setting-error { grid-column: 1 / -1; color: #ff7b72; font-size: 11px; padding: 2px 0 4px; }
+.setting-error:empty { display: none; }
 #show-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
                        border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
 #show-control button:disabled { opacity: .4; cursor: default; }
@@ -1793,6 +1959,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         if 'paused' in expected:
             return '', {**state, 'paused': expected['paused']}
         return '', dash.no_update
+
+    _register_settings_drawer(app)
 
     app.clientside_callback(
         ANIMATION_JS,

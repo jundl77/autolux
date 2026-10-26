@@ -43,7 +43,7 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
 }
 
 #[test]
-fn preflight_rejects_a_valid_patch_missing_a_autoloop_group() {
+fn preflight_warns_about_autoloop_groups_the_rig_lacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
     let mut rig = support::room_definition();
@@ -56,10 +56,14 @@ fn preflight_rejects_a_valid_patch_missing_a_autoloop_group() {
     fs::write(&path, rig.encode_to_vec()).unwrap();
 
     let output = check(&path, &root.join("../autoloops"));
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success());
-    assert!(error.contains("autoloop "), "{error}");
-    assert!(error.contains("unknown fixture group strip"), "{error}");
+    let warning = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{warning}");
+    assert!(
+        warning.contains("groups not in this rig: strip"),
+        "{warning}"
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["missing_groups"], serde_json::json!(["strip"]));
 }
 
 #[test]

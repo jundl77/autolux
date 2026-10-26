@@ -1,6 +1,6 @@
 //! Bounded Lua autoloops operating on musical time and fixture properties.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
@@ -178,6 +178,14 @@ impl AutoloopCatalog {
             .collect()
     }
 
+    pub fn groups_missing_from(&self, rig: &FixtureRig) -> BTreeSet<String> {
+        self.sources
+            .values()
+            .flat_map(|source| referenced_groups(source))
+            .filter(|group| !rig.groups().contains_key(group))
+            .collect()
+    }
+
     pub fn instantiate(&self, bank: &str, autoloop: &str, rig: &FixtureRig) -> Result<LuaAutoloop> {
         let source = self
             .sources
@@ -185,6 +193,24 @@ impl AutoloopCatalog {
             .with_context(|| format!("unknown autoloop {bank}/{autoloop}"))?;
         LuaAutoloop::new(bank, autoloop, source, rig)
     }
+}
+
+pub fn missing_groups_warning(missing: &BTreeSet<String>) -> Option<String> {
+    (!missing.is_empty()).then(|| {
+        format!(
+            "groups not in this rig: {}",
+            missing.iter().cloned().collect::<Vec<_>>().join(", ")
+        )
+    })
+}
+
+fn referenced_groups(source: &str) -> impl Iterator<Item = String> + '_ {
+    source.split("sf.group(").skip(1).filter_map(|call| {
+        let call = call.trim_start();
+        let quote = call.chars().next().filter(|c| matches!(c, '"' | '\''))?;
+        let name = &call[1..];
+        Some(name[..name.find(quote)?].to_owned())
+    })
 }
 
 fn validate_identifier(value: &str) -> Result<()> {
@@ -284,6 +310,10 @@ impl LuaAutoloop {
             "members",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
+                if matches!(&target, Target::Group(group) if !targets.groups().contains_key(group))
+                {
+                    return lua.create_table();
+                }
                 let members = targets.resolve(&target).map_err(mlua::Error::external)?;
                 if members.len() > MAX_FIXTURES {
                     return Err(mlua::Error::RuntimeError(
@@ -380,7 +410,11 @@ impl LuaAutoloop {
             entries == length,
             "autoloop must return a dense effect array"
         );
-        let effects: Vec<Effect> = self.lua.from_value(Value::Table(result))?;
+        let mut effects: Vec<Effect> = self.lua.from_value(Value::Table(result))?;
+        effects.retain(|effect| match &effect.target {
+            Target::Group(group) => self.rig.groups().contains_key(group),
+            _ => true,
+        });
         for effect in &effects {
             for id in self.rig.resolve(&effect.target)? {
                 self.rig

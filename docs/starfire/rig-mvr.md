@@ -5,7 +5,6 @@ plus every `.gdtf` (DIN SPEC 15800, `description.xml` inside) its fixtures refer
 at the archive root, STORE or DEFLATE. GDTF files are named
 `<Manufacturer>@<FixtureType>.gdtf`. `rigs/profiles.json` is only the fixture *library*:
 Config embeds a library GDTF into the MVR when a fixture first uses it.
-`uv run python -m tools.rig_json_to_mvr old.json new.mvr` converts legacy JSON rigs.
 
 ## Contract
 

@@ -10,7 +10,7 @@ use starfire::replay::{Replay, dmx_digest, render_replay};
 use starfire::script::AutoloopCatalog;
 
 const FLOAT_TOLERANCE: f64 = 1e-9;
-const ROOM_FIXTURE_COUNT: usize = 14;
+const ROOM_FIXTURE_COUNT: usize = 15;
 const REPLAY_BPM: f64 = 120.0;
 const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
 const MIN_REPLAY_SECONDS: f64 = 16.0 * 4.0 * SECONDS_PER_BEAT;

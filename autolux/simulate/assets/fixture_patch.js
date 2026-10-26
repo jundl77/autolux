@@ -497,6 +497,7 @@
 
         editPatch(_add, _remove, _close, action, response, settings, busy, draft, revision, selection, profile, quantity, universe, address) {
             const unchanged = [ds.no_update, ds.no_update, ds.no_update, ds.no_update];
+            // Dash can batch an edit queued during a save with its response; the response wins.
             const persisted = ds.callback_context.triggered?.some((input) => input.prop_id === "fixture-server-result.data");
             const trigger = persisted ? "fixture-server-result" : ds.callback_context.triggered_id;
             if (trigger === "fixture-server-result") {
@@ -689,11 +690,21 @@
                 : [textInput(value, edit, context.optional), button("new", { action: "new-uuid", key: context.node.key }, "Generate a new UUID")],
         matrix: (field, value, edit, context) => [textInput(value, edit, context.optional), null, matrixHelper(context.node, value)],
         dmx_address: (field, value, edit, context) => [textInput(value, edit, context.optional), null, addressHelper(context.node)],
+        GDTFSpec: (field, value, edit, { draft, settings, optional }) => {
+            const specs = [...new Set([...Object.keys(draft.gdtf), ...Object.keys(settings.library)])];
+            return [choice(specs.map((spec) => [spec, spec]), value, edit, optional)];
+        },
+        GDTFMode: (field, value, edit, { draft, settings, node, optional }) => {
+            const tree = gdtfTree(draft, settings, textOf(node, "GDTFSpec"));
+            const modes = tree ? [...walk(tree)].filter(([entry]) => entry.tag === "DMXMode").map(([entry]) => entry.attributes.Name) : [];
+            return [choice(modes.map((mode) => [mode, mode]), value, edit, optional)];
+        },
         default: (field, value, edit, context) => [textInput(value, edit, context.optional)]
     };
 
     function fieldRows(label, field, value, edit, context, extra) {
-        const [input, own, helpers = []] = (FIELD_TYPES[field.kind] || FIELD_TYPES.default)(field, value, edit, context);
+        const render = FIELD_TYPES[field.name] || FIELD_TYPES[field.kind] || FIELD_TYPES.default;
+        const [input, own, helpers = []] = render(field, value, edit, context);
         return [row(label, input, own || extra), ...helpers];
     }
 
@@ -722,7 +733,7 @@
         const schema = nodeSchema(settings, key);
         const crumbs = h("div", { className: "patch-muted" }, path.slice(0, -1).map((entry) => h("span", { className: "mvr-link", "data-node-key": entry.key }, entry.tag, " › ")), h("strong", { text: node.tag }));
         if (!schema) return [crumbs, muted(`${node.tag} is not an MVR 1.6 node here; saving will be refused until it is removed.`)];
-        const context = { draft, node };
+        const context = { draft, settings, node };
         const parts = [crumbs, h("h4", { text: "Attributes" })];
         for (const field of schema.attributes) {
             const required = field.count === "1";
@@ -814,6 +825,7 @@
         current.label?.remove();
         if (current.moved) {
             suppressedClick = current.block;
+            // Swallow only the click this pointer release generates, never a later keyboard click.
             setTimeout(() => suppressedClick === current.block && (suppressedClick = null));
         }
         if (current.grid.hasPointerCapture(current.pointerId)) current.grid.releasePointerCapture(current.pointerId);

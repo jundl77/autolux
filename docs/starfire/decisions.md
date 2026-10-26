@@ -65,7 +65,8 @@ Starfire is the lighting backend. Its live contract is
 - P44: Use standalone Google Protobuf messages over the owned subprocess's
   stdin/stdout. Frame each with a generated MessageType byte and a four-byte
   big-endian payload length.
-  Cap each payload at 4 MiB. The root CLI owns
+  Cap the Login payload, which carries the session assets, at 4 MiB and every
+  other message at 4 KiB, checked by type before the payload is read. The root CLI owns
   launch, readiness and shutdown; no separately exposed control listener.
 - P45: Apply accepted commands on the next 40 Hz render timestamp. The engine
   receives explicit time; monotonic pacing stays in the host. This preserves
@@ -191,7 +192,7 @@ Starfire is the lighting backend. Its live contract is
   Omitted effect target means all fixtures. No generic Empty marker is necessary.
 - P77: Load the controller's patch, used profiles and Lua sources before launching
   Starfire. Send this immutable snapshot through typed Login fields. Keep the
-  4 MiB message bound (64 KiB per Lua source). Oversized input fails before launch; GDTF XML and Lua
+  4 MiB Login bound (64 KiB per Lua source). Oversized input fails before launch; GDTF XML and Lua
   source share the same session budget.
 - P78: Validate all supplied scripts with initial parameters in an output-free
   probe engine, then discard it. The real session begins pristine; script probes

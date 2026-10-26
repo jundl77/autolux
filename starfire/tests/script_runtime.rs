@@ -207,7 +207,6 @@ fn invalid_properties_and_unknown_targets_are_rejected() {
         "sf.pan_tilt(sf.all(), -0.1, 0.5)",
         "sf.colour(sf.all(), sf.rgb(0, 0, 2))",
         "sf.strobe(sf.all(), 100)",
-        "sf.dimmer(sf.group('missing'), 0.5)",
         "sf.dimmer(sf.fixture('missing'), 0.5)",
         "{target = sf.all(), values = {}}",
         "{target = sf.all(), values = {dmx = 255}}",
@@ -218,15 +217,6 @@ fn invalid_properties_and_unknown_targets_are_rejected() {
             "accepted invalid effect: {expression}"
         );
     }
-}
-
-#[test]
-fn unknown_group_fails_inside_dynamic_fixture_spread() {
-    let mut autoloop = autoloop(
-        "return {render = function(ctx) return sf.each(sf.group('missing'), function(f) return sf.dimmer(f, 1) end) end}",
-    );
-    let error = autoloop.render(&snapshot(0.0)).unwrap_err();
-    assert!(format!("{error:#}").contains("missing"), "{error:#}");
 }
 
 #[test]
@@ -263,4 +253,49 @@ fn oversized_sources_are_rejected_before_compilation() {
     .unwrap();
     let error = AutoloopCatalog::load(directory.path()).unwrap_err();
     assert!(error.to_string().contains("source limit"));
+}
+
+#[test]
+fn a_group_absent_from_the_rig_renders_nothing_without_error() {
+    let mut autoloop = autoloop(
+        r#"return {render = function(ctx)
+          return sf.scene({
+            sf.dimmer(sf.group("fx"), 1),
+            sf.each(sf.group("fx"), function(fixture) return sf.dimmer(fixture, 1) end),
+          })
+        end}"#,
+    );
+    assert!(autoloop.render(&snapshot(0.0)).unwrap().is_empty());
+}
+
+#[test]
+fn an_unknown_fixture_is_still_an_error() {
+    let mut autoloop = autoloop(
+        r#"return {render = function(ctx) return {sf.dimmer(sf.fixture("ghost"), 1)} end}"#,
+    );
+    let error = format!("{:#}", autoloop.render(&snapshot(0.0)).unwrap_err());
+    assert!(error.contains("unknown fixture ghost"), "{error}");
+}
+
+#[test]
+fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
+    let catalog = catalog(
+        r#"return {render = function(ctx)
+          return {sf.dimmer(sf.group("wash"), 1), sf.dimmer(sf.group('fx'), 1),
+            sf.dimmer(sf.group( "strip" ), 1), sf.dimmer(sf.group("fx"), 1)}
+        end}"#,
+    );
+    let missing = catalog.groups_missing_from(&rig());
+    assert_eq!(
+        missing.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["fx", "strip"]
+    );
+    assert_eq!(
+        starfire::script::missing_groups_warning(&missing).as_deref(),
+        Some("groups not in this rig: fx, strip")
+    );
+    assert_eq!(
+        starfire::script::missing_groups_warning(&Default::default()),
+        None
+    );
 }

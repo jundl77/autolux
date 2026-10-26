@@ -12,6 +12,7 @@ from pathlib import Path
 
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
+from cli.starfire_assets import native_rig, rig_definition
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
@@ -31,11 +32,7 @@ def saved_rig() -> Path:
     if DEFAULT_FIXTURE_STORE.is_file():
         return DEFAULT_FIXTURE_STORE
     if LEGACY_FIXTURE_STORE.is_file():
-        raise RuntimeError(
-            f'{LEGACY_FIXTURE_STORE} is a pre-MVR fixture patch. Convert it with '
-            f'"uv run python -m tools.rig_json_to_mvr {LEGACY_FIXTURE_STORE} '
-            f'{DEFAULT_FIXTURE_STORE}" or delete it to use the room rig.'
-        )
+        raise RuntimeError(f'rig.json is no longer supported; the rig is {DEFAULT_FIXTURE_STORE}')
     return DEFAULT_RIG
 
 
@@ -164,17 +161,7 @@ async def run_native(args: argparse.Namespace) -> None:
             await _run_child(command)
 
 
-@contextlib.contextmanager
-def native_rig(path: Path):
-    from cli.starfire_assets import native_rig as exported_rig
-
-    with exported_rig(path) as exported:
-        yield exported
-
-
 async def export_rig(args: argparse.Namespace) -> None:
-    from cli.starfire_assets import rig_definition
-
     args.output.write_bytes(rig_definition(args.input).SerializeToString())
 
 

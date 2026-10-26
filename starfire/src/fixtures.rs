@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::GdtfProfile;
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
-use crate::protocol::{MAX_MESSAGE_BYTES, wire};
+use crate::protocol::{MAX_LOGIN_BYTES, wire};
 use prost::Message;
 
 pub const MAX_FIXTURES: usize = 512;
@@ -197,7 +197,7 @@ impl FixtureRig {
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        Self::decode(&read_bounded(path, MAX_MESSAGE_BYTES)?)
+        Self::decode(&read_bounded(path, MAX_LOGIN_BYTES)?)
     }
 
     pub fn decode(definition: &[u8]) -> Result<Self> {
@@ -363,6 +363,7 @@ impl FixtureRig {
             .collect()
     }
 
+    // Blackout zeroes intensity only; movement and device-control bytes keep their values.
     pub fn encode(&self, states: &FixtureStates) -> Result<BTreeMap<u16, Vec<u8>>> {
         ensure!(
             states.len() == self.fixtures.len(),
