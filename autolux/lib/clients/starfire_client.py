@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from autolux.lighting.palettes import DEFAULT_PALETTE
 
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
+WHOLE_RIG = 'all'
 
 
 def rms_to_normalized_level(rms: float) -> float:
@@ -27,11 +28,29 @@ def rms_to_normalized_level(rms: float) -> float:
     )
 
 
+def special_target(group: str) -> str | dict:
+    return WHOLE_RIG if group == WHOLE_RIG else {'group': group}
+
+
+def special_override(override_id: str, group: str, special: dict, *, priority: int) -> dict:
+    return {
+        'id': override_id,
+        'target': special_target(group),
+        'special': dict(special),
+        'priority': priority,
+    }
+
+
 class StarfireClient:
     """Submit commands to a bounded nonblocking transport or simulation recorder."""
 
-    def __init__(self, send_command: Callable[[dict], None]):
+    def __init__(
+        self,
+        send_command: Callable[[dict], None],
+        groups: Callable[[], Sequence[dict]] = tuple,
+    ):
         self._send_command = send_command
+        self.groups = groups
         self.selected_autoloop: tuple[str, str] | None = None
         self.palette: str = DEFAULT_PALETTE
 
@@ -75,6 +94,9 @@ class StarfireClient:
 
     def set_override(self, override: dict) -> None:
         self._send_command({'kind': 'set_override', 'value': override})
+
+    def set_special(self, override_id: str, group: str, special: dict, *, priority: int) -> None:
+        self.set_override(special_override(override_id, group, special, priority=priority))
 
     def clear_override(self, override_id: str) -> None:
         self._send_command({'kind': 'clear_override', 'id': override_id})

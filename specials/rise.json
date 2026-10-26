@@ -1,0 +1,16 @@
+{
+  "name": "rise",
+  "intents": [
+    "buildup"
+  ],
+  "group": "fx",
+  "colour_slot": "secondary",
+  "energy": 0.6,
+  "speed": 0.5,
+  "attack_beats": 128,
+  "release_beats": 4,
+  "scaling": [
+    "energy",
+    "speed"
+  ]
+}

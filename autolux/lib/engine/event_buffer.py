@@ -46,6 +46,8 @@ class EventBuffer:
             'static': None,
         }
         self._palette: dict | None = None
+        self._special: dict | None = None
+        self._special_groups: dict[str, list[str]] = {}
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -181,6 +183,21 @@ class EventBuffer:
         with self._lock:
             self._palette = {'name': name, 'pinned': pinned}
 
+    def set_special(
+        self, name: str | None, group: str | None = None, duration_seconds: float | None = None
+    ) -> None:
+        with self._lock:
+            if name is None:
+                self._special = None
+                return
+            self._special = {'name': name, 'group': group}
+            if duration_seconds is not None:
+                self._special['end'] = self._now() + duration_seconds
+
+    def set_special_groups(self, groups: dict[str, list[str]]) -> None:
+        with self._lock:
+            self._special_groups = copy.deepcopy(groups)
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
@@ -253,6 +270,12 @@ class EventBuffer:
                 'shed': dict(self._shed_state),
                 **copy.deepcopy(self._control_state),
                 'palette': copy.deepcopy(self._palette),
+                'special': (
+                    None
+                    if self._special is None or self._special.get('end', now) < now
+                    else dict(self._special)
+                ),
+                'special_groups': copy.deepcopy(self._special_groups),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

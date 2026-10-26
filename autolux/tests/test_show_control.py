@@ -10,12 +10,15 @@ from autolux.simulate.visualizer_app import (
     SETTINGS_GROUPS,
     ControlExpectations,
     SnapshotPoller,
+    _build_show_overview,
     control_command,
     decimal_text,
     expected_control_values,
     setting_text,
     settings_group_summary,
+    special_groups_view,
     static_control_command,
+    static_special_command,
 )
 
 
@@ -348,3 +351,101 @@ def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
 def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
     with pytest.raises(ValueError, match='is not a #rrggbb colour'):
         static_control_command('static-colour', 'all', '#12345', None, False)
+
+
+def test_the_static_special_control_reaches_the_controller_queue_as_parsed(static_show):
+    poller, commands = static_show
+    command = static_special_command('fx', 'cold', 0.5, 0.25, 2)
+    assert poller.control(command) == {'accepted': 'static'}
+    assert commands.get_nowait() == {
+        'action': 'static',
+        'kind': 'special',
+        'group': 'fx',
+        'colour_slot': 'cold',
+        'energy': 0.5,
+        'speed': 0.25,
+        'pulse_beats': 2,
+    }
+    assert static_special_command('fx', 'cold', 0.5, 0.25, 0)['pulse_beats'] is None
+    clear = static_control_command('static-special-clear', 'all', None, None, False)
+    assert poller.control(clear) == {'accepted': 'static'}
+    assert commands.get_nowait() == {'action': 'static', 'kind': 'special_clear'}
+
+
+@pytest.mark.parametrize(
+    ('change', 'reason'),
+    [
+        ({'group': ''}, 'needs a group'),
+        ({'colour_slot': 'pink'}, 'colour slot must be one of'),
+        ({'energy': 2}, 'special energy must be within 0..1'),
+        ({'speed': None}, 'special speed must be within 0..1'),
+        ({'pulse_beats': 0}, 'a special pulse must be a whole number'),
+    ],
+)
+def test_malformed_static_specials_return_the_reason(static_show, change, reason):
+    poller, commands = static_show
+    payload = static_special_command('fx', 'cold', 0.5, 0.5, None) | change
+    assert reason in poller.control(payload)['error']
+    assert commands.empty()
+
+
+def test_a_special_without_a_group_never_reaches_the_controller():
+    with pytest.raises(ValueError, match='choose a group'):
+        static_special_command(None, 'cold', 0.5, 0.5, None)
+
+
+def test_the_status_strip_names_the_active_special_and_its_group():
+    cards = _build_show_overview({'special': {'name': 'cold_spin', 'group': 'fx'}})
+    labels = [card.children[0].children for card in cards]
+    assert labels.index('Special') == labels.index('Autoloop') + 1
+    name, group = cards[labels.index('Special')].children[1].children
+    assert (name.children, group.children) == ('Cold Spin', 'fx')
+
+
+def test_the_config_area_lists_each_special_capable_group_with_its_axes():
+    [row] = special_groups_view({'fx': ['colour', 'pulse', 'speed']})
+    name, axes = row.children
+    assert (name.children, axes.children) == ('fx', 'energy · colour · pulse · speed')
+    [empty] = special_groups_view({})
+    assert 'no group' in empty.children
+
+
+def _ids(component) -> set:
+    found = {getattr(component, 'id', None)}
+    children = getattr(component, 'children', None)
+    for child in children if isinstance(children, list) else [children]:
+        if child is not None and not isinstance(child, str | int | float):
+            found |= _ids(child)
+    return found - {None}
+
+
+def _find(component, wanted):
+    if getattr(component, 'id', None) == wanted:
+        return component
+    children = getattr(component, 'children', None)
+    for child in children if isinstance(children, list) else [children]:
+        if child is not None and not isinstance(child, str | int | float):
+            hit = _find(child, wanted)
+            if hit is not None:
+                return hit
+    return None
+
+
+def test_show_wide_controls_sit_above_the_mode_tabs_and_each_tab_holds_its_own():
+    from autolux.simulate.visualizer_app import build_app
+
+    buffer = EventBuffer()
+    buffer.set_special_groups({'fx': ['colour', 'speed']})
+    app = build_app(buffer)
+    show_wide = _ids(_find(app.layout, 'show-control'))
+    assert {'control-toggle', 'control-palette', 'control-brightness', 'control-intensity'} <= (
+        show_wide
+    )
+    assert 'control-next' not in show_wide
+    assert {'control-next', 'auto-special'} <= _ids(_find(app.layout, 'auto-mode-panel'))
+    static = _ids(_find(app.layout, 'static-mode-panel'))
+    assert {'static-special-group', 'static-special-fire', 'static-special-clear'} <= static
+    assert 'special-groups' in _ids(_find(app.layout, 'config-panel'))
+    client = app.server.test_client()
+    assert client.get('/_dash-layout').status_code == 200
+    assert client.get('/_dash-dependencies').status_code == 200

@@ -1,5 +1,6 @@
 import pytest
 
+from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.effect_controller import (
     DROP_ACCENT_ID,
     DROP_ACCENT_PRIORITY,
@@ -13,9 +14,12 @@ from autolux.lib.engine.effect_definitions import (
 from autolux.lib.engine.static_mode import (
     STATIC_GROUP_PRIORITY,
     STATIC_PRIORITY,
+    STATIC_SPECIAL_ID,
+    STATIC_SPECIAL_RELEASE_BEATS,
     StaticLooks,
     StaticRig,
 )
+from autolux.simulate.lighting_recorder import RecordingStarfireClient
 from autolux.tests.test_light_engine import FakeDecoder, beat_at_phase, engine, selections, sent
 
 ROOM = StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
@@ -218,6 +222,8 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         'targets': ['all', 'fx', 'movers', 'strip', 'wash'],
         'blacklight': True,
         'blackout': True,
+        'special_groups': {},
+        'special': None,
         'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
 
@@ -300,3 +306,70 @@ async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
     await light.leave_static()
     await beat_at_phase(light, decoder, 0)
     assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+
+
+FX_GROUP = {'name': 'fx', 'fixture_count': 1, 'colour': True, 'speed': True, 'pulse': False}
+
+
+def special_looks():
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock, groups=[FX_GROUP])
+    return StaticLooks(lighting, ROOM, clock, ShowSettings), lighting
+
+
+def test_a_static_special_is_the_same_dict_at_the_static_priority():
+    looks, lighting = special_looks()
+    looks.special('fx', 'cold', 0.6, 0.4)
+    assert overrides(lighting) == [
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': STATIC_SPECIAL_ID,
+                'target': {'group': 'fx'},
+                'special': {
+                    'colour_slot': 'cold',
+                    'energy': 0.6,
+                    'speed': 0.4,
+                    'pulse_beats': None,
+                    'attack_beats': 0.0,
+                    'release_beats': STATIC_SPECIAL_RELEASE_BEATS,
+                    'pattern': None,
+                },
+                'priority': STATIC_PRIORITY,
+            },
+        }
+    ]
+    assert looks.state()['special'] == {
+        'group': 'fx',
+        'colour_slot': 'cold',
+        'energy': 0.6,
+        'speed': 0.4,
+        'pulse_beats': None,
+    }
+    assert looks.state()['special_groups'] == {'fx': ['colour', 'speed']}
+
+
+@pytest.mark.parametrize(
+    ('arguments', 'message'),
+    [
+        (('wash', 'cold', 0.5, 0.5), "'wash' cannot render this special"),
+        (('fx', 'cold', 0.5, 0.5, 1), "'fx' cannot render this special"),
+        (('fx', 'pink', 0.5, 0.5), "colour slot 'pink'"),
+        (('fx', 'cold', 1.5, 0.5), 'within 0..1'),
+    ],
+)
+def test_a_static_special_the_group_cannot_render_is_refused(arguments, message):
+    looks, lighting = special_looks()
+    with pytest.raises(ValueError, match=message):
+        looks.special(*arguments)
+    assert overrides(lighting) == []
+
+
+def test_clearing_static_releases_the_special_and_resend_restores_it():
+    looks, lighting = special_looks()
+    looks.special('fx', 'primary', 0.5, 0.5)
+    looks.resend()
+    assert [c['value']['id'] for c in overrides(lighting)] == [STATIC_SPECIAL_ID] * 2
+    looks.clear()
+    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': STATIC_SPECIAL_ID}
+    assert looks.state()['special'] is None

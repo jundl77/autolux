@@ -4,7 +4,12 @@ import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
-from autolux.lib.engine.effect_controller import EffectController
+from autolux.lib.engine.effect_controller import (
+    DROP_ACCENT_ID,
+    SPECIAL_ID,
+    SPECIAL_PRIORITY,
+    EffectController,
+)
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
@@ -16,6 +21,9 @@ from autolux.lib.engine.effect_definitions import (
     LightIntent,
     ShowSettings,
 )
+from autolux.lib.engine.event_buffer import EventBuffer
+from autolux.lib.engine.special_policy import DROP_STROBE, Special
+from autolux.lighting.special_catalogue import discover_specials
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
 FULL_INTENSITY = ShowSettings(intensity=1.0)
@@ -109,7 +117,7 @@ async def test_drop_strobe_respects_cooldown_but_the_drop_still_cuts(recorded_li
     assert select['kind'] == 'select'
     assert select['autoloop'] == 'kick'
     assert select['transition'] == {'kind': 'cut'}
-    assert 'drop strobe suppressed' in caplog.text
+    assert 'intense special suppressed | cooldown' in caplog.text
 
     third = await _drop_after(controller, recorded_lighting, clock, 61 - 30)
     assert [e['command']['kind'] for e in third] == ['select', 'set_override']
@@ -368,3 +376,174 @@ async def test_the_intensity_setting_caps_the_drop_energy_at_selection_time(reco
     await controller.change_effect(LightIntent.DROP, context=SelectionContext(LightIntent.DROP))
     [select] = [e['command'] for e in recorded_lighting.events if e['command']['kind'] == 'select']
     assert select['autoloop'] == 'soft'
+
+
+FX_GROUP = {
+    'name': 'fx',
+    'fixture_count': 1,
+    'colour': True,
+    'speed': True,
+    'pulse': True,
+    'pattern': False,
+}
+SPIN = Special(
+    'spin',
+    (LightIntent.DROP,),
+    'fx',
+    colour_slot='primary',
+    energy=0.8,
+    speed=0.8,
+    pulse_beats=1,
+    release_beats=4,
+    scaling=('energy', 'speed'),
+)
+DRIFT = Special(
+    'drift',
+    (LightIntent.ATMOSPHERIC,),
+    'fx',
+    colour_slot='secondary',
+    energy=0.2,
+    speed=0.1,
+    attack_beats=32,
+    release_beats=32,
+    scaling=('energy', 'speed'),
+)
+
+
+def with_specials(specials, groups=(FX_GROUP,), settings=FULL_INTENSITY, event_buffer=None):
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock, groups=groups)
+    controller = EffectController(
+        lighting,
+        event_buffer=event_buffer,
+        clock=clock,
+        settings=lambda: settings,
+        specials=specials,
+    )
+    return controller, lighting, clock
+
+
+def accents(lighting, start=0):
+    return [
+        e['command']
+        for e in lighting.events[start:]
+        if e['command']['kind'] in ('set_override', 'clear_override')
+    ]
+
+
+async def test_a_special_is_sent_in_the_wire_vocabulary_scaled_by_intensity():
+    controller, lighting, _ = with_specials([DRIFT], settings=ShowSettings(intensity=0.5))
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    assert accents(lighting) == [
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': SPECIAL_ID,
+                'target': {'group': 'fx'},
+                'special': {
+                    'colour_slot': 'secondary',
+                    'energy': 0.1,
+                    'speed': 0.05,
+                    'pulse_beats': None,
+                    'attack_beats': 32.0,
+                    'release_beats': 32.0,
+                    'pattern': None,
+                },
+                'priority': SPECIAL_PRIORITY,
+            },
+        }
+    ]
+
+
+async def test_each_intent_gets_its_catalogue_row_and_breakdown_releases_it():
+    controller, lighting, _ = with_specials(discover_specials())
+    sent = []
+    for intent in (LightIntent.ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.BREAKDOWN):
+        start = len(lighting.events)
+        await controller.change_effect(intent)
+        sent.append(accents(lighting, start))
+    [atmospheric], [buildup], [breakdown] = sent
+    assert atmospheric['value']['target'] == {'group': 'fx'}
+    assert atmospheric['value']['special']['attack_beats'] == 32.0
+    assert buildup['value']['id'] == SPECIAL_ID
+    assert buildup['value']['special']['attack_beats'] == 128.0
+    assert breakdown == {'kind': 'clear_override', 'id': SPECIAL_ID}
+
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    [drop] = accents(lighting, start)
+    if drop['value']['id'] == SPECIAL_ID:
+        assert drop['value']['special']['pulse_beats'] == 1
+    else:
+        assert drop['value']['id'] == DROP_ACCENT_ID
+        assert drop['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
+
+
+async def test_a_strobe_row_releases_the_running_special_before_it_bursts():
+    controller, lighting, _ = with_specials([DRIFT, DROP_STROBE])
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    clear, strobe = accents(lighting, start)
+    assert clear == {'kind': 'clear_override', 'id': SPECIAL_ID}
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+
+
+async def test_intense_specials_and_the_strobe_burst_share_one_cooldown(caplog):
+    controller, lighting, clock = with_specials([SPIN, DROP_STROBE])
+    fired = []
+    for wait in (0, 30, 31):
+        start = len(lighting.events)
+        with caplog.at_level(logging.INFO):
+            await _drop_after(controller, lighting, clock, wait)
+        fired.append([c['value']['id'] for c in accents(lighting, start) if 'value' in c])
+    first, second, third = fired
+    assert second == []
+    assert 'intense special suppressed | cooldown 30s of 60s left' in caplog.text
+    assert {*first, *third} == {SPECIAL_ID, DROP_ACCENT_ID}
+
+
+async def test_without_reported_groups_only_the_whole_rig_strobe_remains():
+    controller, lighting, _ = with_specials(discover_specials(), groups=())
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    assert accents(lighting) == []
+    await controller.change_effect(LightIntent.DROP)
+    [strobe] = accents(lighting)
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+
+
+async def test_capabilities_are_read_when_an_intent_starts_not_when_built():
+    groups = []
+    controller, lighting, _ = with_specials([DRIFT], groups=groups)
+    groups.append(FX_GROUP)
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID]
+
+
+async def test_below_the_strobe_gate_no_intense_special_is_sent(caplog):
+    controller, lighting, _ = with_specials([SPIN], settings=ShowSettings(intensity=0.29))
+    with caplog.at_level(logging.INFO):
+        await controller.change_effect(LightIntent.DROP)
+    assert accents(lighting) == []
+    assert 'intense special suppressed | intensity 0.29 below 0.30' in caplog.text
+
+
+async def test_standby_releases_the_special_with_the_accent():
+    controller, lighting, _ = with_specials([DRIFT])
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    start = len(lighting.events)
+    controller.enter_standby(120.0)
+    assert accents(lighting, start) == [
+        {'kind': 'clear_override', 'id': DROP_ACCENT_ID},
+        {'kind': 'clear_override', 'id': SPECIAL_ID},
+    ]
+
+
+async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups():
+    buffer = EventBuffer(clock=VirtualClock())
+    controller, _, _ = with_specials([DRIFT], event_buffer=buffer)
+    assert buffer.snapshot()['special_groups'] == {'fx': ['colour', 'pulse', 'speed']}
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    assert buffer.snapshot()['special'] == {'name': 'drift', 'group': 'fx'}
+    await controller.change_effect(LightIntent.BREAKDOWN)
+    assert buffer.snapshot()['special'] is None

@@ -77,6 +77,16 @@ def apply_static(light_engine, command: dict) -> None:
         looks.set_blackout(command['enabled'])
     elif kind == 'strobe':
         looks.strobe()
+    elif kind == 'special':
+        looks.special(
+            command['group'],
+            command['colour_slot'],
+            command['energy'],
+            command['speed'],
+            command['pulse_beats'],
+        )
+    elif kind == 'special_clear':
+        looks.clear_special()
 
 
 class ShowControl:
@@ -193,6 +203,7 @@ class AutoluxController:
         from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
         from autolux.lib.engine.effect_controller import EffectController
         from autolux.lib.engine.light_engine import LightEngine
+        from autolux.lighting.special_catalogue import discover_specials
 
         self.lighting_client = lighting_client
         self.enable_ui: bool = enable_ui
@@ -245,6 +256,7 @@ class AutoluxController:
             autoloops=autoloops,
             autoloop_meta=autoloop_meta,
             seed=selection_seed,
+            specials=discover_specials(),
         )
         self.light_engine: LightEngine = LightEngine(
             self.lighting_client,
