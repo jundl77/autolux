@@ -1,4 +1,7 @@
 -- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- energy: 2
+-- family: cold
+-- movement: sweep
 -- All groups shift from secondary to cold with the ramp: amber drains into white.
 -- wash: per-beat pulse whose depth grows with the ramp.
 -- strip: same pulse, half a beat late, so the strip answers the wash.

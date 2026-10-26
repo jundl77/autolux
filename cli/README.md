@@ -29,20 +29,21 @@ The default dashboard is port 8765, with Prometheus at `/metrics`. Headless mode
 serves metrics on port 8766. Use `--duration 90` for a bounded live test.
 
 Starfire uses an owned subprocess with framed protobuf over its pipes. Autolux
-loads the fixture patch, required profiles and Lua sources into Login; LoginReply
+loads the MVR rig, its embedded GDTF modes and Lua sources into Login; LoginReply
 confirms readiness. Model preparation precedes audio capture. Independent heartbeats
-run every ten seconds with a thirty-second deadline. `--rig`, `--profiles`,
-`--autoloops` and `--starfire-binary` select the fixture patch, GDTF catalogue,
-Lua catalogue and executable. Starfire passes complete DMX frames directly to
+run every ten seconds with a thirty-second deadline. `--rig`, `--autoloops` and
+`--starfire-binary` select the MVR rig, Lua catalogue and executable; `--profiles`
+selects the fixture library offered in Config. Starfire passes complete DMX frames directly to
 its Radius TX worker. One TCP connection carries audio, lights and telemetry;
 RX uses a 500 ms buffer and schedules lighting against audible audio.
 Standalone Starfire can also output Art-Net.
 
 `autolux starfire import-fixture fixture.gdtf --profile-id my_fixture --mode "Standard"`
-validates and stores a GDTF mode in `rigs/profiles.json`. Config lists imported
-profiles for patching. Imports replace the selected profile ID atomically and take
-effect next session; no native rebuild is needed. Unsupported modes are rejected
-before saving, and the complete GDTF description travels in Login.
+validates and stores a GDTF mode in the `rigs/profiles.json` library. Config lists
+imported profiles for patching and embeds the GDTF in the MVR when a fixture uses it.
+Imports replace the selected profile ID atomically; no native rebuild is needed.
+Unsupported modes are rejected before saving. A pre-MVR `.live/starfire/rig.json`
+is refused with a conversion hint: `uv run python -m tools.rig_json_to_mvr`.
 
 The dashboard has Control for the timeline and essential performance, Telemetry
 for detailed graphs, and Config for fixture setup. Renderer FPS is measured from

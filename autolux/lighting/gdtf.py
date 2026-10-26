@@ -12,6 +12,8 @@ from xml.etree import ElementTree
 
 import pygdtf
 
+from autolux.lighting import mvr
+
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 4096
 MAX_DESCRIPTION_BYTES = 1024 * 1024
@@ -97,11 +99,15 @@ def _guard_description(xml: str) -> None:
         pending.extend((child, depth + 1) for child in node)
 
 
+def _parse(xml: str):
+    _guard_description(xml)
+    return pygdtf.FixtureType(dsc_file=io.BytesIO(xml.encode('utf-8')))
+
+
 def profile_metadata(xml: str, mode_name: str) -> dict:
     """Describe a selected GDTF mode using the standard parser."""
     try:
-        _guard_description(xml)
-        fixture = pygdtf.FixtureType(dsc_file=io.BytesIO(xml.encode('utf-8')))
+        fixture = _parse(xml)
         modes = {mode.name: mode for mode in fixture.dmx_modes}
         if mode_name not in modes:
             raise ValueError(f'Unknown GDTF mode {mode_name!r}; available: {", ".join(modes)}')
@@ -128,6 +134,51 @@ def profile_metadata(xml: str, mode_name: str) -> dict:
         raise ValueError(f'Invalid GDTF description: {error}') from error
 
 
+def _registry(content: bytes) -> dict:
+    registry = json.loads(content)
+    if (
+        not isinstance(registry, dict)
+        or set(registry) != {'schema_version', 'profiles'}
+        or type(registry['schema_version']) is not int
+        or registry['schema_version'] != SCHEMA_VERSION
+        or not isinstance(registry['profiles'], dict)
+    ):
+        raise ValueError('Invalid fixture profile catalogue')
+    return registry
+
+
+def read_catalogue(catalogue: Path) -> dict:
+    return _registry(read_bounded(catalogue, MAX_CATALOGUE_BYTES))
+
+
+def fixture_library(catalogue: Path) -> dict:
+    """Installed GDTF fixture types keyed by the GDTFSpec file name MVR fixtures use."""
+    library = {}
+    for profile_id, profile in read_catalogue(catalogue)['profiles'].items():
+        try:
+            fixture = _parse(profile['gdtf_xml'])
+        except (ElementTree.ParseError, AttributeError, IndexError, KeyError, TypeError) as error:
+            raise ValueError(f'Invalid GDTF description {profile_id}: {error}') from error
+        spec = mvr.gdtf_spec_name(fixture.manufacturer, fixture.name)
+        if spec in library and library[spec]['gdtf_xml'] != profile['gdtf_xml']:
+            raise ValueError(
+                f'Profiles {library[spec]["profile_id"]} and {profile_id} share {spec}'
+            )
+        library.setdefault(
+            spec,
+            {
+                'profile_id': profile_id,
+                'name': fixture.name,
+                'manufacturer': fixture.manufacturer,
+                'fixture_type_id': fixture.fixture_type_id,
+                'gdtf_xml': profile['gdtf_xml'],
+                'default_mode': profile['dmx_mode'],
+                'modes': mvr.gdtf_modes(profile['gdtf_xml'], spec),
+            },
+        )
+    return library
+
+
 def import_fixture(
     archive: Path,
     catalogue: Path,
@@ -142,18 +193,10 @@ def import_fixture(
     metadata = profile_metadata(xml, mode_name)
     before = read_bounded(catalogue, MAX_CATALOGUE_BYTES) if catalogue.exists() else None
     registry = (
-        json.loads(before)
+        _registry(before)
         if before is not None
         else {'schema_version': SCHEMA_VERSION, 'profiles': {}}
     )
-    if (
-        not isinstance(registry, dict)
-        or set(registry) != {'schema_version', 'profiles'}
-        or type(registry['schema_version']) is not int
-        or registry['schema_version'] != SCHEMA_VERSION
-        or not isinstance(registry['profiles'], dict)
-    ):
-        raise ValueError('Invalid fixture profile catalogue')
     registry['profiles'][profile_id] = {'gdtf_xml': xml, 'dmx_mode': mode_name}
     content = (json.dumps(registry, indent=2, ensure_ascii=False) + '\n').encode('utf-8')
     if len(content) > MAX_CATALOGUE_BYTES:
@@ -165,19 +208,20 @@ def import_fixture(
             target.write(content)
             target.flush()
             os.fsync(target.fileno())
-        patch = Path(temporary) / 'rig.json'
-        patch.write_text(
-            json.dumps(
-                {
-                    'schema_version': SCHEMA_VERSION,
-                    'fixtures': [
-                        {'id': 'imported', 'profile': profile_id, 'universe': 0, 'address': 1}
-                    ],
-                    'groups': {},
-                }
-            ),
-            encoding='utf-8',
+        patch = Path(temporary) / 'rig.mvr'
+        scene = mvr.new_scene()
+        spec = mvr.gdtf_spec_name(metadata['manufacturer'], metadata['name'])
+        mvr.embed_gdtf(scene, spec, xml)
+        mvr.add_fixture(
+            scene,
+            name='imported',
+            gdtf_spec=spec,
+            gdtf_mode=mode_name,
+            universe=0,
+            address=1,
+            fixture_id=1,
         )
+        patch.write_bytes(mvr.write(scene))
         validate(patch, staged)
         current = read_bounded(catalogue, MAX_CATALOGUE_BYTES) if catalogue.exists() else None
         if current != before:

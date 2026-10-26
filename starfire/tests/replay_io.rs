@@ -39,7 +39,7 @@ fn replay(duration_seconds: f64) -> Replay {
 fn render(input: &Replay) -> starfire::replay::ReplayResult {
     render_replay(
         input,
-        FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
+        FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap(),
         AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops")).unwrap(),
     )
     .unwrap()
@@ -120,7 +120,7 @@ fn replay_memory_budget_is_checked_before_rendering() {
     input.frame_rate_hz = 50;
     input.duration_seconds -= 0.02;
     assert!(input.validate().is_ok());
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+    let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
     let catalogue =
         AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops")).unwrap();
     assert!(
@@ -138,14 +138,7 @@ fn cli(input: &Path) -> Process {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args(["replay"])
         .arg(input)
-        .args([
-            "--rig",
-            "../rigs/room.json",
-            "--profiles",
-            "../rigs/profiles.json",
-            "--autoloops",
-            "../autoloops",
-        ]);
+        .args(["--rig", "../rigs/room.mvr", "--autoloops", "../autoloops"]);
     command
 }
 
@@ -210,16 +203,13 @@ fn native_cli_rejects_unpaced_network_output_without_sending() {
 fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("replay.json");
-    let rig = directory.path().join("rig.json");
-    let profiles = directory.path().join("profiles.json");
+    let rig = directory.path().join("rig.mvr");
     let shared = directory.path().join("capture");
     let source = serde_json::to_vec(&replay(0.0)).unwrap();
-    let patch = include_bytes!("../../rigs/room.json");
+    let patch = include_bytes!("../../rigs/room.mvr");
     fs::write(&input, &source).unwrap();
     fs::write(&rig, patch).unwrap();
-    let catalogue = include_bytes!("../../rigs/profiles.json");
-    fs::write(&profiles, catalogue).unwrap();
-    for destination in [&input, &rig, &profiles, &shared] {
+    for destination in [&input, &rig, &shared] {
         let mut command = Process::new(env!("CARGO_BIN_EXE_starfire"));
         command
             .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -227,8 +217,6 @@ fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
             .arg(&input)
             .arg("--rig")
             .arg(&rig)
-            .arg("--profiles")
-            .arg(&profiles)
             .args(["--autoloops", "../autoloops", "--output"])
             .arg(destination);
         if destination == &shared {
@@ -239,7 +227,6 @@ fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("must not overwrite"));
         assert_eq!(fs::read(&input).unwrap(), source);
         assert_eq!(fs::read(&rig).unwrap(), patch);
-        assert_eq!(fs::read(&profiles).unwrap(), catalogue);
         assert!(!shared.exists());
     }
 }

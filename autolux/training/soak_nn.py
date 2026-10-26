@@ -288,7 +288,6 @@ async def _soak(args) -> dict:
         args.artnet,
         ROOT / '.live' / 'starfire' / f'soak-{uuid.uuid4().hex}',
         run_id=secrets.randbits(64) or 1,
-        profiles=args.profiles,
     ) as renderer:
         app = AutoluxController(
             lighting_client=StarfireClient(renderer.send_command),

@@ -331,6 +331,13 @@ Starfire is the lighting backend. Its live contract is
   Autolux combines both for the existing dashboard. This supersedes the short-lived
   cross-protocol metrics import; no duplicated transport message definitions.
 
+- P100: The rig is an MVR 1.6 file with its GDTF files embedded
+  ([rig-mvr.md](rig-mvr.md)). Autolux validates and parses it into the existing
+  Login rig; Starfire reads the same archive offline. Moving-head homes derive
+  from the fixture Matrix, superseding the `pan_offset_degrees` fields. The
+  `--profiles` catalogue is only the fixture library for import and Config; it no
+  longer flows through replay, production or Login (supersedes P81's last clause).
+
 ## Open questions and defaults
 
 | ID | Question | Prototype default |

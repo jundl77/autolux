@@ -35,6 +35,7 @@ enum MessageType {
   SET_PARAMETER = 11;
   HEARTBEAT = 13;
   METRICS = 14;
+  DISCARD_DELAYED_AUDIO = 15;
 }
 
 enum ParameterType {
@@ -43,6 +44,15 @@ enum ParameterType {
   ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
   OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
   AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
+  // Boolean; freezes musical, animation and script time so the current frame holds,
+  // and releases strobes. Overrides timed in seconds keep expiring on wall time; beat
+  // lifetimes hold. UpdateBeat is ignored while paused; resume continues from the
+  // held position and the next UpdateBeat re-anchors phase, which only moves forward.
+  PAUSED = 5;
+  DEFAULT_CROSSFADE_BEATS = 6;  // Number, 0..1024; PlayAutoloop without a transition. 0 cuts.
+  STROBE_MAX_RATE_HZ = 7;       // Number, 0..10; caps every strobe, effect or script.
+  // Number, >0..60; a fixture strobing longer than this is released until its strobe stops.
+  STROBE_MAX_BURST_SECONDS = 8;
 }
 
 // [CLIENT -> SERVER]
@@ -97,7 +107,8 @@ message ErrorReply {
 message PlayAutoloop {
   uint64 command_id = 1;
   string autoloop_id = 2;
-  Transition transition = 4;  // Omitted means cut; idle accepts no transition.
+  // Omitted uses DEFAULT_CROSSFADE_BEATS (cut until set); idle accepts no transition.
+  Transition transition = 4;
 
   message Transition {
     optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
@@ -143,6 +154,15 @@ message SetActiveEffect {
 message UnsetActiveEffect {
   uint64 command_id = 1;
   string effect_id = 2;  // Removing an absent ID does nothing.
+}
+
+// [CLIENT -> SERVER]
+// The source stopped: silence the capture already held for the playback delay.
+// The receiver keeps a contiguous stream and plays silence; capture taken after
+// this command is audible one playback delay later. No effect on lighting or
+// on an Art-Net output.
+message DiscardDelayedAudio {
+  uint64 command_id = 1;
 }
 
 // [CLIENT -> SERVER]

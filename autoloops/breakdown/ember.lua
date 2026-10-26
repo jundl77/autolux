@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: accent
+-- movement: still
 -- wash: accent, one slow swell per bar (low on the one, peak on beat 3).
 -- strip: off except the two centre pixels (4 and 5) breathing in accent over 8 beats.
 -- movers: accent, still, both pointed at centre. Palette slots: accent.

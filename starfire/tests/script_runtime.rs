@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 
 use starfire::fixtures::FixtureRig;
@@ -5,13 +7,15 @@ use starfire::model::{RenderContext, Target};
 use starfire::script::{AutoloopCatalog, LuaAutoloop};
 
 fn rig() -> FixtureRig {
-    FixtureRig::from_json(
-        r#"{"schema_version":1,"fixtures":[
+    support::rig(
+        serde_json::from_str(
+            r#"{"schema_version":1,"fixtures":[
           {"id":"left","profile":"generic_rgb","universe":0,"address":1},
           {"id":"right","profile":"generic_rgb","universe":0,"address":4}],
           "groups":{"wash":["right","left"]}}"#,
+        )
+        .unwrap(),
     )
-    .unwrap()
 }
 
 fn catalog(source: &str) -> AutoloopCatalog {

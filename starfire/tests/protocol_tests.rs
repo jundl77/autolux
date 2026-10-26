@@ -64,7 +64,7 @@ fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation 
 
 fn engine() -> Engine {
     Engine::new(
-        FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
+        FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap(),
         AutoloopCatalog::load(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
         )
@@ -107,6 +107,26 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
             Some(message)
         );
     }
+}
+
+#[test]
+fn discarding_delayed_audio_round_trips_and_leaves_lighting_untouched() {
+    let discard = Operation::DiscardDelayedAudio(wire::DiscardDelayedAudio { command_id: 7 });
+    let data = encoded(discard);
+    assert_eq!(data[0], wire::MessageType::DiscardDelayedAudio as u8);
+    let decoded = read_control(&mut Fragmented(Cursor::new(data)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(decoded.command_id(), Some(1));
+    assert!(matches!(decoded, Operation::DiscardDelayedAudio(_)));
+
+    let mut engine = engine();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    let before = engine.render_at(0.5).unwrap();
+    apply_command(&mut engine, 0.5, &decoded).unwrap();
+    let after = engine.render_at(0.5).unwrap();
+    assert_eq!(before.dmx_frames_by_universe, after.dmx_frames_by_universe);
+    assert_eq!(after.active_autoloop.as_deref(), Some("cold_breathe"));
 }
 
 fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
@@ -422,7 +442,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+    let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
     let catalog = AutoloopCatalog::load(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
     )
@@ -447,4 +467,81 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         }
         assert_eq!(engine.render_at(frame.time_seconds).unwrap(), frame);
     }
+}
+
+#[test]
+fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
+    use wire::{ParameterType as Kind, parameter::Value};
+    let mut engine = engine();
+    for operation in [
+        parameter(Kind::Paused, Value::Boolean(true)),
+        parameter(Kind::Paused, Value::Boolean(false)),
+        parameter(Kind::DefaultCrossfadeBeats, Value::Number(2.0)),
+        parameter(Kind::StrobeMaxRateHz, Value::Number(6.0)),
+        parameter(Kind::StrobeMaxBurstSeconds, Value::Number(3.0)),
+    ] {
+        assert_eq!(
+            read_control(&mut Cursor::new(encoded(operation.clone()))).unwrap(),
+            Some(operation.clone())
+        );
+        apply_command(&mut engine, 0.0, &operation).unwrap();
+    }
+    for invalid in [
+        parameter(Kind::Paused, Value::Number(1.0)),
+        parameter(Kind::DefaultCrossfadeBeats, Value::Boolean(true)),
+        faded(Kind::StrobeMaxRateHz, 6.0, 1.0),
+        Operation::SetParameter(wire::SetParameter {
+            command_id: 1,
+            parameter: Some(wire::Parameter {
+                r#type: Kind::Paused as i32,
+                value: Some(Value::Boolean(true)),
+                fade_seconds: 1.0,
+            }),
+        }),
+    ] {
+        assert!(apply_command(&mut engine, 0.0, &invalid).is_err());
+    }
+}
+
+#[test]
+fn an_omitted_transition_uses_the_default_and_an_empty_one_cuts() {
+    use wire::{ParameterType as Kind, parameter::Value};
+    let mut engine = engine();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(
+        &mut engine,
+        0.0,
+        &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
+    )
+    .unwrap();
+    let before = engine.render_at(0.0).unwrap();
+    let cut = Operation::PlayAutoloop(wire::PlayAutoloop {
+        command_id: 1,
+        autoloop_id: "drop/kick".into(),
+        transition: Some(wire::play_autoloop::Transition::default()),
+    });
+    let mut cutting = engine;
+    apply_command(&mut cutting, 0.0, &cut).unwrap();
+    let mut defaulted = self::engine();
+    apply_command(&mut defaulted, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(
+        &mut defaulted,
+        0.0,
+        &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
+    )
+    .unwrap();
+    apply_command(&mut defaulted, 0.0, &play("drop", "kick")).unwrap();
+    // At the first instant a crossfade still shows the outgoing look; a cut does not.
+    let faded = defaulted.render_at(0.0).unwrap();
+    assert_eq!(
+        faded.fixture_properties_before_strobe,
+        before.fixture_properties_before_strobe
+    );
+    assert_ne!(
+        cutting
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe,
+        before.fixture_properties_before_strobe
+    );
 }

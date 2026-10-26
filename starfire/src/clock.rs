@@ -48,6 +48,7 @@ pub struct MusicalClock {
     speed_multiplier: f64,
     beats_per_bar: u32,
     last_received: Option<ReceivedBeat>,
+    paused: bool,
 }
 
 impl Default for MusicalClock {
@@ -61,6 +62,7 @@ impl Default for MusicalClock {
             speed_multiplier: 1.0,
             beats_per_bar: DEFAULT_BEATS_PER_BAR,
             last_received: None,
+            paused: false,
         }
     }
 }
@@ -72,8 +74,11 @@ impl MusicalClock {
             time_seconds >= self.anchor_seconds,
             "time precedes the musical clock anchor"
         );
-        let elapsed_beats =
-            (time_seconds - self.anchor_seconds) * self.tempo_bpm / SECONDS_PER_MINUTE;
+        let elapsed_beats = if self.paused {
+            0.0
+        } else {
+            (time_seconds - self.anchor_seconds) * self.tempo_bpm / SECONDS_PER_MINUTE
+        };
         let beat_position = self.anchor_beat + elapsed_beats;
         let elapsed_musical_beats = self.anchor_elapsed_musical_beats + elapsed_beats;
         let animation_beats = self.anchor_animation_beats + elapsed_beats * self.speed_multiplier;
@@ -152,6 +157,17 @@ impl MusicalClock {
             None => counted,
         };
         ensure!(grid_beat <= MAX_GRID_BEAT, "musical clock overflow");
+        let received = ReceivedBeat {
+            beat_index: beat.beat_index,
+            grid_beat,
+        };
+        if self.paused {
+            // The held position must not move. Beats keep the grid counting, so the
+            // first beat after resume re-anchors forward to the true musical position.
+            self.beats_per_bar = beat.beats_per_bar;
+            self.last_received = Some(received);
+            return Ok(());
+        }
         let before = self.sample_at(time_seconds)?;
         self.anchor_seconds = time_seconds;
         self.anchor_beat = grid_beat as f64;
@@ -160,10 +176,22 @@ impl MusicalClock {
         self.anchor_animation_beats = before.animation_beats;
         self.tempo_bpm = beat.bpm;
         self.beats_per_bar = beat.beats_per_bar;
-        self.last_received = Some(ReceivedBeat {
-            beat_index: beat.beat_index,
-            grid_beat,
-        });
+        self.last_received = Some(received);
+        Ok(())
+    }
+
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Holds every musical position at `time_seconds`; resume continues from there.
+    pub fn set_paused(&mut self, time_seconds: f64, paused: bool) -> Result<()> {
+        let before = self.sample_at(time_seconds)?;
+        self.anchor_seconds = time_seconds;
+        self.anchor_beat = before.beat_position;
+        self.anchor_elapsed_musical_beats = before.elapsed_musical_beats;
+        self.anchor_animation_beats = before.animation_beats;
+        self.paused = paused;
         Ok(())
     }
 

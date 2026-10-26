@@ -10,9 +10,23 @@ from pathlib import Path
 
 import pytest
 
+from autolux.lighting import mvr
+from autolux.lighting.gdtf import fixture_library
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
+from cli.starfire import DEFAULT_RIG, PROFILE_CATALOGUE
 from proto.starfire import starfire_pb2 as wire
+from tools.rig_json_to_mvr import convert
+
+
+def edited_room(path: Path, old: str, new: str) -> Path:
+    """The room rig with one scene text replacement; GDTF entries stay embedded."""
+    scene = mvr.read(DEFAULT_RIG.read_bytes())
+    xml = mvr._xml_bytes(scene.root).decode('utf-8')
+    assert old in xml
+    scene.root = mvr._guard_xml(xml.replace(old, new, 1).encode('utf-8'), path.name)
+    path.write_bytes(mvr.write(scene))
+    return path
 
 
 def test_control_adapter_preserves_zero_values_and_named_targets():
@@ -41,6 +55,19 @@ def test_control_adapter_preserves_zero_values_and_named_targets():
     assert effect.intensity == 0.0
     assert not effect.HasField('pan')
     assert effect.duration_seconds == 1.0
+
+
+def test_discarding_delayed_audio_frames_as_its_own_standalone_command():
+    command = protocol.build_command({'kind': 'discard_delayed_audio'})
+    command.command_id = 3
+    encoded = protocol.encode_command(command)
+    message_type, length = protocol.FRAME_HEADER.unpack(encoded[: protocol.FRAME_HEADER.size])
+    assert message_type == wire.DISCARD_DELAYED_AUDIO
+    assert length == len(encoded) - protocol.FRAME_HEADER.size
+    value = wire.DiscardDelayedAudio.FromString(encoded[protocol.FRAME_HEADER.size :])
+    assert value.command_id == 3
+    with pytest.raises(ValueError, match='no fields'):
+        protocol.build_command({'kind': 'discard_delayed_audio', 'seconds': 1.0})
 
 
 def test_control_adapter_preserves_gdtf_physical_values_and_named_presets():
@@ -127,6 +154,10 @@ def test_incomplete_and_oversized_events_are_rejected(payload):
         ('set_speed', 'multiplier', wire.ANIMATION_SPEED, 'number', 0.0),
         ('set_blackout', 'enabled', wire.OUTPUT_BLACKOUT, 'boolean', False),
         ('set_normalized_rms_level', 'level', wire.AUDIO_RMS_NORMALIZED, 'number', 0.0),
+        ('set_paused', 'paused', wire.PAUSED, 'boolean', True),
+        ('set_default_crossfade_beats', 'beats', wire.DEFAULT_CROSSFADE_BEATS, 'number', 2.0),
+        ('set_strobe_max_rate_hz', 'hz', wire.STROBE_MAX_RATE_HZ, 'number', 6.0),
+        ('set_strobe_max_burst_seconds', 'seconds', wire.STROBE_MAX_BURST_SECONDS, 'number', 3.0),
     ],
 )
 def test_controls_use_typed_parameters(kind, field, parameter, value_type, value):
@@ -283,14 +314,16 @@ with open(recording, 'w') as output:
 
 
 def _fake_runtime(tmp_path, mode='normal', **kwargs):
-    rig = tmp_path / 'rig.json'
-    rig.write_text(
-        json.dumps(
+    rig = tmp_path / 'rig.mvr'
+    rig.write_bytes(
+        convert(
             {
                 'schema_version': 1,
                 'fixtures': [{'id': 'lamp', 'profile': 'generic_rgb', 'universe': 0, 'address': 1}],
                 'groups': {'wash': ['lamp']},
-            }
+            },
+            fixture_library(PROFILE_CATALOGUE),
+            'runtime-test',
         )
     )
     scripts = tmp_path / 'scripts'
@@ -580,7 +613,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         receiver.settimeout(3)
         runtime = starfire_runtime.StarfireRuntime(
             binary,
-            root / 'rigs/room.json',
+            root / 'rigs/room.mvr',
             root / 'autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
@@ -640,16 +673,15 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     binary = root / 'target/debug/starfire.exe'
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native fixture validation')
-    patch = json.loads((root / 'rigs/room.json').read_text())
-    patch['fixtures'][0]['universe'] = 1
-    rig = tmp_path / 'multi-universe.json'
-    rig.write_text(json.dumps(patch))
+    rig = edited_room(
+        tmp_path / 'multi-universe.mvr', '<Address break="0">1<', '<Address break="0">513<'
+    )
     autoloops = root / 'autoloops'
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
     starfire_runtime.validate_starfire(
-        binary, root / 'rigs/room.json', autoloops, expected_universe=0
+        binary, root / 'rigs/room.mvr', autoloops, expected_universe=0
     )
 
 
@@ -658,10 +690,7 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
     binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
-    patch = json.loads((root / 'rigs/room.json').read_text())
-    del patch['groups']['strip']
-    rig = tmp_path / 'missing-strip.json'
-    rig.write_text(json.dumps(patch))
+    rig = edited_room(tmp_path / 'missing-strip.mvr', 'name="strip"', 'name="pixels"')
     with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*autoloop ') as error:
         starfire_runtime.validate_starfire(binary, rig, root / 'autoloops')
     assert 'strip' in str(error.value)
@@ -683,7 +712,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
-        starfire_runtime.validate_starfire(binary, root / 'rigs/room.json', tmp_path)
+        starfire_runtime.validate_starfire(binary, root / 'rigs/room.mvr', tmp_path)
 
 
 def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
@@ -718,7 +747,46 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     )
     with pytest.raises(
         RuntimeError,
+        # Standby sits outside the rotation but readiness still requires it.
         match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
-        'drop/slam$',
+        'drop/slam, standby/warm_white$',
     ):
+        starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
+
+
+def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    loops = [
+        ('atmospheric', 'cold_breathe'),
+        ('breakdown', 'wide_space'),
+        ('buildup', 'ramp'),
+        ('drop', 'kick'),
+        ('standby', 'warm_white'),
+    ]
+    for bank, name in loops:
+        (tmp_path / bank).mkdir()
+        source = header.replace('family: warm', 'family: neon') if bank == 'drop' else header
+        (tmp_path / bank / f'{name}.lua').write_text(source)
+    # Starfire renders every loop; only Autolux's selection metadata is wrong.
+    checked = [{'bank': bank, 'autoloop': name} for bank, name in loops]
+    report = json.dumps({'universes': [0], 'checked_autoloops': checked})
+    binary = tmp_path / 'starfire.exe'
+    binary.touch()
+    monkeypatch.setattr(
+        starfire_runtime.subprocess,
+        'run',
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
+    )
+    with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
         starfire_runtime.validate_starfire(binary, 'rig.json', tmp_path)
+
+
+def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():
+    default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'ramp'})
+    assert not default.HasField('transition')
+    cut = protocol.build_command(
+        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}
+    )
+    assert cut.HasField('transition') and not cut.transition.HasField('crossfade_beats')

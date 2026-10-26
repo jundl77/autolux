@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A third-party-style MVR 1.6 scene touching every node type; resources are added by tests. -->
+<GeneralSceneDescription verMajor="1" verMinor="6" provider="OtherCAD" providerVersion="2024.1">
+  <UserData>
+    <Data provider="OtherCAD" ver="3"><Layout sheet="A1"><Note>kept verbatim</Note></Layout></Data>
+  </UserData>
+  <Scene>
+    <AUXData>
+      <Symdef uuid="11111111-0000-4000-8000-000000000001" name="Pipe">
+        <ChildList>
+          <Geometry3D fileName="pipe.glb"><Matrix>{1,0,0}{0,1,0}{0,0,1}{0,0,0}</Matrix></Geometry3D>
+        </ChildList>
+      </Symdef>
+      <Position uuid="11111111-0000-4000-8000-000000000002" name="FOH Truss"/>
+      <MappingDefinition uuid="11111111-0000-4000-8000-000000000003" name="Wall">
+        <SizeX>1920</SizeX>
+        <SizeY>1080</SizeY>
+        <Source linkedGeometry="Display" type="File">movie.mov</Source>
+        <ScaleHandeling>ScaleKeepRatio</ScaleHandeling>
+      </MappingDefinition>
+      <Class uuid="11111111-0000-4000-8000-000000000004" name="wash"/>
+    </AUXData>
+    <Layers>
+      <Layer uuid="22222222-0000-4000-8000-000000000001" name="Stage">
+        <Matrix>{1,0,0}{0,1,0}{0,0,1}{0,0,1000}</Matrix>
+        <ChildList>
+          <GroupObject uuid="33333333-0000-4000-8000-000000000001" name="Upstage">
+            <Matrix>{0,1,0}{-1,0,0}{0,0,1}{0,2000,0}</Matrix>
+            <Classing>11111111-0000-4000-8000-000000000004</Classing>
+            <ChildList>
+              <Fixture uuid="44444444-0000-4000-8000-000000000001" name="Dim 1">
+                <Matrix>{1,0,0}{0,1,0}{0,0,1}{500,0,0}</Matrix>
+                <Classing>11111111-0000-4000-8000-000000000004</Classing>
+                <GDTFSpec>Autolux@Test Dimmer.gdtf</GDTFSpec>
+                <GDTFMode>16 bit</GDTFMode>
+                <Focus>55555555-0000-4000-8000-000000000001</Focus>
+                <CastShadow>true</CastShadow>
+                <DMXInvertPan>false</DMXInvertPan>
+                <DMXInvertTilt>false</DMXInvertTilt>
+                <Position>11111111-0000-4000-8000-000000000002</Position>
+                <Function>Key light</Function>
+                <FixtureID>101</FixtureID>
+                <FixtureIDNumeric>101</FixtureIDNumeric>
+                <UnitNumber>1</UnitNumber>
+                <ChildPosition>Base</ChildPosition>
+                <Addresses>
+                  <Address break="0">2.5</Address>
+                  <Network geometry="ethernet_1" ipv4="192.168.11.5" subnetmask="255.255.0.0"/>
+                  <Network geometry="ethernet_2" ipv6="2001:0db8:85a3:0000:0000:8a2e:0370:7344"/>
+                </Addresses>
+                <Protocols><Protocol geometry="NetworkInOut_1" name="Net" type="Art-Net" transmission="Unicast"/></Protocols>
+                <Alignments><Alignment geometry="Base" up="0,0,1" direction="0,0,-1"/></Alignments>
+                <CustomCommands><CustomCommand>Base_Dimmer,f 50</CustomCommand></CustomCommands>
+                <Overwrites><Overwrite universal="Universal Wheel 1.Universal Wheel Slot 1" target="Wheel 1.Wheel Slot"/></Overwrites>
+                <Connections><Connection own="Input" other="Output1" toObject="66666666-0000-4000-8000-000000000001"/></Connections>
+                <Color>0.314303,0.328065,87.699166</Color>
+                <CustomIdType>1</CustomIdType>
+                <CustomId>7</CustomId>
+                <Mappings>
+                  <Mapping linkedDef="11111111-0000-4000-8000-000000000003"><ux>10</ux><uy>10</uy><ox>5</ox><oy>5</oy><rz>45</rz></Mapping>
+                </Mappings>
+                <Gobo rotation="32.5">gobo.png</Gobo>
+              </Fixture>
+              <Fixture uuid="44444444-0000-4000-8000-000000000002" name="Dim 1 multipatch" multipatch="44444444-0000-4000-8000-000000000001">
+                <GDTFSpec>Autolux@Test Dimmer.gdtf</GDTFSpec>
+                <GDTFMode>8 bit</GDTFMode>
+                <UnitNumber>2</UnitNumber>
+                <Addresses><Address break="0">20</Address></Addresses>
+              </Fixture>
+            </ChildList>
+          </GroupObject>
+          <FocusPoint uuid="55555555-0000-4000-8000-000000000001" name="Centre">
+            <Matrix>{1,0,0}{0,1,0}{0,0,1}{0,0,0}</Matrix>
+            <Geometries><Geometry3D fileName="target.3ds"/></Geometries>
+          </FocusPoint>
+          <Truss uuid="66666666-0000-4000-8000-000000000001" name="Truss 1">
+            <Matrix>{1,0,0}{0,1,0}{0,0,1}{0,2000,4000}</Matrix>
+            <Position>11111111-0000-4000-8000-000000000002</Position>
+            <Geometries><Symbol uuid="66666666-0000-4000-8000-000000000002" symdef="11111111-0000-4000-8000-000000000001"/></Geometries>
+            <Function>Lighting pipe</Function>
+            <FixtureID>T1</FixtureID>
+            <FixtureIDNumeric>1</FixtureIDNumeric>
+          </Truss>
+          <Support uuid="77777777-0000-4000-8000-000000000001" name="Hoist 1">
+            <Geometries><Geometry3D fileName="target.3ds"/></Geometries>
+            <ChainLength>3500.5</ChainLength>
+            <FixtureID>H1</FixtureID>
+            <FixtureIDNumeric>1</FixtureIDNumeric>
+          </Support>
+          <SceneObject uuid="88888888-0000-4000-8000-000000000001" name="Riser">
+            <Geometries><Geometry3D fileName="target.3ds"/></Geometries>
+            <FixtureID></FixtureID>
+            <FixtureIDNumeric>0</FixtureIDNumeric>
+          </SceneObject>
+          <VideoScreen uuid="99999999-0000-4000-8000-000000000001" name="LED wall">
+            <Geometries><Geometry3D fileName="target.3ds"/></Geometries>
+            <Sources><Source linkedGeometry="Display" type="NDI">Stream 1</Source></Sources>
+            <FixtureID>V1</FixtureID>
+            <FixtureIDNumeric>1</FixtureIDNumeric>
+          </VideoScreen>
+          <Projector uuid="AAAAAAAA-0000-4000-8000-000000000001" name="Projector 1">
+            <Geometries><Geometry3D fileName="target.3ds"/></Geometries>
+            <Projections>
+              <Projection>
+                <Source linkedGeometry="Beam" type="File">movie.mov</Source>
+                <ScaleHandeling>KeepSizeCenter</ScaleHandeling>
+              </Projection>
+            </Projections>
+            <FixtureID>P1</FixtureID>
+            <FixtureIDNumeric>1</FixtureIDNumeric>
+          </Projector>
+        </ChildList>
+      </Layer>
+    </Layers>
+  </Scene>
+</GeneralSceneDescription>

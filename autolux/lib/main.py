@@ -8,7 +8,13 @@ from pathlib import Path
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
-from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS, AutoloopTable, ShowSettings
+from autolux.lib.engine.effect_definitions import (
+    DEFAULT_AUTOLOOP_META,
+    DEFAULT_AUTOLOOPS,
+    AutoloopMetaTable,
+    AutoloopTable,
+    ShowSettings,
+)
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 LOGGER = logging.getLogger(__name__)
@@ -91,6 +97,10 @@ class ShowControl:
         if applied:
             self.publish(light_engine)
 
+    def start(self, light_engine) -> None:
+        # Starfire starts from its own defaults; a restart must restore the saved show.
+        light_engine.send_renderer_settings()
+
     def publish(self, light_engine) -> None:
         if self._event_buffer is not None:
             self._event_buffer.set_control_state(
@@ -114,6 +124,8 @@ class AutoluxController:
         fixture_setup: dict | None = None,
         show_config_path: Path = SHOW_CONFIG_PATH,
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
+        autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
+        selection_seed: int = 0,
     ):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.clients.pyaudio_client import PyAudioClient
@@ -171,6 +183,8 @@ class AutoluxController:
             event_buffer=self.event_buffer,
             settings=lambda: self.control.settings,
             autoloops=autoloops,
+            autoloop_meta=autoloop_meta,
+            seed=selection_seed,
         )
         self.light_engine: LightEngine = LightEngine(
             self.lighting_client,
@@ -182,6 +196,7 @@ class AutoluxController:
             section_decoder=None if self.section is None else self.section.decoder,
             watchdog=self.drift_watchdog,
             settings=lambda: self.control.settings,
+            silence_monitor=self._monitor.silence,
         )
         self.control.publish(self.light_engine)
 
@@ -191,6 +206,7 @@ class AutoluxController:
             self.light_engine,
             note_clicks=debug_mode,
             watchdog=self.drift_watchdog,
+            settings=lambda: self.control.settings,
         )
         self.light_engine.set_analyser(self.music_analyser)
 
@@ -225,6 +241,7 @@ class AutoluxController:
         self.is_running = True
 
         LOGGER.info("[main] Autolux is ready, starting")
+        self.control.start(self.light_engine)
 
         last_100ms_callback_execution: datetime.datetime = datetime.datetime.now()
         last_1sec_callback_execution: datetime.datetime = datetime.datetime.now()

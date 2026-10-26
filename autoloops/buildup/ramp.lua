@@ -1,4 +1,7 @@
 -- 8-beat loop; time since selection lifts intensity to an 85% plateau over 32 bars,
+-- energy: 2
+-- family: warm
+-- movement: sweep
 -- measured RMS supplies the last 15%. No strobe: that is reserved for the drop.
 -- wash: secondary, beat pulses that deepen with the ramp.
 -- strip: primary rising chase, doubling speed every 8 bars.

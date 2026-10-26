@@ -21,6 +21,7 @@ COMMAND_MESSAGES = {
     wire.UNSET_ACTIVE_EFFECT: wire.UnsetActiveEffect,
     wire.UPDATE_BEAT: wire.UpdateBeat,
     wire.SET_PARAMETER: wire.SetParameter,
+    wire.DISCARD_DELAYED_AUDIO: wire.DiscardDelayedAudio,
     wire.HEARTBEAT: wire.Heartbeat,
 }
 EVENT_MESSAGES = {
@@ -31,6 +32,18 @@ EVENT_MESSAGES = {
 }
 MESSAGE_TYPE_BY_CLASS = {
     message: message_type for message_type, message in (COMMAND_MESSAGES | EVENT_MESSAGES).items()
+}
+
+
+PARAMETERS = {
+    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
+    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
+    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
+    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
+    'set_paused': (wire.PAUSED, 'paused', 'boolean'),
+    'set_default_crossfade_beats': (wire.DEFAULT_CROSSFADE_BEATS, 'beats', 'number'),
+    'set_strobe_max_rate_hz': (wire.STROBE_MAX_RATE_HZ, 'hz', 'number'),
+    'set_strobe_max_burst_seconds': (wire.STROBE_MAX_BURST_SECONDS, 'seconds', 'number'),
 }
 
 
@@ -59,19 +72,15 @@ def build_command(command: dict | Message) -> Message:
                 if bar_phase is not None:
                     message.bar_phase = bar_phase
             elif kind == 'select':
-                transition = value.pop('transition', {'kind': 'cut'})
+                # Absent, Starfire applies its DEFAULT_CROSSFADE_BEATS.
+                if 'transition' in value:
+                    value['transition'] = _transition(value['transition'])
                 message = wire.PlayAutoloop(
                     autoloop_id=f'{value.pop("bank")}/{value.pop("autoloop")}',
-                    transition=_transition(transition),
                     **value,
                 )
-            elif kind in ('set_master', 'set_speed', 'set_blackout', 'set_normalized_rms_level'):
-                parameter, field, value_type = {
-                    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
-                    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
-                    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
-                    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
-                }[kind]
+            elif kind in PARAMETERS:
+                parameter, field, value_type = PARAMETERS[kind]
                 setting = wire.Parameter(type=parameter, **{value_type: value.pop(field)})
                 if kind == 'set_master':
                     setting.fade_seconds = value.pop('fade_seconds', 0.0)
@@ -89,6 +98,10 @@ def build_command(command: dict | Message) -> Message:
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
                 message = wire.PlayAutoloop()
+            elif kind == 'discard_delayed_audio':
+                if value:
+                    raise ValueError('Discarding delayed audio takes no fields')
+                message = wire.DiscardDelayedAudio()
             elif kind == 'heartbeat':
                 message = wire.Heartbeat(**value)
             else:

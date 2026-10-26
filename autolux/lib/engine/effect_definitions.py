@@ -1,4 +1,5 @@
 import math
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
 
@@ -23,9 +24,10 @@ SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'altoutro': LightIntent.ATMOSPHERIC,
 }
 
-# Each intent's bank (named after the intent) is discovered from disk, so new
-# looks join the rotation without code changes. The audited originals open
-# their bank so a fresh show starts on the known-good set.
+# Each intent's bank (named after the intent) is discovered from disk, and the
+# selection policy chooses among all of it by the metadata each loop declares.
+# The audited originals are the one fixed look per intent when no catalogue is
+# loaded, and readiness requires them on disk.
 PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
     LightIntent.ATMOSPHERIC: 'cold_breathe',
     LightIntent.BREAKDOWN: 'wide_space',
@@ -35,10 +37,50 @@ PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
 
 AutoloopTable = dict[LightIntent, tuple[tuple[str, str], ...]]
 
+# Shown while the source is stopped. Its bank is no intent, so rotation never
+# reaches it; readiness still requires it.
+STANDBY_AUTOLOOP = ('standby', 'warm_white')
+STANDBY_CROSSFADE_SECONDS = 1.0
+
 # Without a discovered catalogue (unit tests, offline tools) every intent keeps
 # one fixed look, which keeps recorded command streams stable.
 DEFAULT_AUTOLOOPS: AutoloopTable = {
     intent: ((intent.value, autoloop),) for intent, autoloop in PREFERRED_AUTOLOOPS.items()
+}
+
+# The header vocabulary of `autoloops/README.md`, as the strings a header spells.
+AUTOLOOP_META_VALUES: dict[str, tuple[str, ...]] = {
+    'energy': ('1', '2', '3'),
+    'family': ('cold', 'warm', 'accent'),
+    'movement': ('still', 'sweep', 'snap'),
+}
+FAMILIES = AUTOLOOP_META_VALUES['family']
+
+
+@dataclass(frozen=True)
+class AutoloopMeta:
+    energy: int
+    family: str
+    movement: str
+
+    def __post_init__(self):
+        if type(self.energy) is not int:
+            raise ValueError(f'energy {self.energy!r} must be an integer')
+        for name, allowed in AUTOLOOP_META_VALUES.items():
+            if str(getattr(self, name)) not in allowed:
+                raise ValueError(
+                    f'{name} {getattr(self, name)!r} is not one of {", ".join(allowed)}'
+                )
+
+
+AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
+
+# The headers of DEFAULT_AUTOLOOPS' files; a test keeps them equal.
+DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
+    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'cold', 'sweep'),
+    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
+    ('buildup', 'ramp'): AutoloopMeta(2, 'warm', 'sweep'),
+    ('drop', 'kick'): AutoloopMeta(3, 'warm', 'snap'),
 }
 
 
@@ -52,31 +94,51 @@ BEAT_LOSS_SECONDS = 2.5
 
 # Living-room parties: a strobe is a rare accent, never a sustained wash.
 STROBE_BURST_BEATS = 8  # two bars at most
+# Defaults for the caps Starfire enforces on every strobe, whatever its source.
 STROBE_MAX_BURST_SECONDS = 4.0
 STROBE_RATE_HZ = 8.0  # ceiling; faster flicker is harsh in a small room
+# Starfire's own bounds on its strobe-cap parameters; must match MAX_STROBE_HZ in
+# starfire/src/model.rs and MAX_STROBE_BURST_SECONDS in starfire/src/engine.rs.
+STARFIRE_MAX_STROBE_HZ = 10.0
+STARFIRE_MAX_STROBE_BURST_SECONDS = 60.0
 STROBE_BURST_SECONDS = 1.0
 STROBE_COOLDOWN_SECONDS = 60.0
 CROSSFADE_BEATS = 1.0
 MAX_STROBE_COOLDOWN_SECONDS = 600.0
+# Exact zeros this long mean the player stopped, not a quiet passage. Long
+# enough to ride over a gapless track change; raise it for a track whose
+# break is true digital silence.
+DIGITAL_SILENCE_SECONDS = 2.0
+MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
 
 SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'drop_strobe_cooldown_seconds': (0.0, MAX_STROBE_COOLDOWN_SECONDS),
     # Starfire refuses a zero-length burst or crossfade.
-    'strobe_burst_seconds': (0.1, STROBE_MAX_BURST_SECONDS),
+    'strobe_burst_seconds': (0.1, STARFIRE_MAX_STROBE_BURST_SECONDS),
     'crossfade_beats': (0.25, MAX_CROSSFADE_BEATS),
     'quiet_brightness': (0.0, 1.0),
+    'digital_silence_seconds': (0.5, MAX_DIGITAL_SILENCE_SECONDS),
+    'strobe_max_rate_hz': (0.0, STARFIRE_MAX_STROBE_HZ),
+    'strobe_max_burst_seconds': (0.1, STARFIRE_MAX_STROBE_BURST_SECONDS),
 }
 
 
 @dataclass(frozen=True)
 class ShowSettings:
-    """Operator-tunable show policy; the controller owns the live instance."""
+    """Operator-tunable show settings; the controller owns the live instance.
+
+    Cooldown, burst and quiet brightness are Autolux decision policy. Crossfade
+    and the strobe caps are renderer behaviour, sent to Starfire as parameters.
+    """
 
     drop_strobe_cooldown_seconds: float = STROBE_COOLDOWN_SECONDS
     strobe_burst_seconds: float = STROBE_BURST_SECONDS
     crossfade_beats: float = CROSSFADE_BEATS
     quiet_brightness: float = QUIET_BRIGHTNESS
+    digital_silence_seconds: float = DIGITAL_SILENCE_SECONDS
+    strobe_max_rate_hz: float = STROBE_RATE_HZ
+    strobe_max_burst_seconds: float = STROBE_MAX_BURST_SECONDS
 
     def __post_init__(self):
         for name, (low, high) in SHOW_SETTING_RANGES.items():
@@ -102,11 +164,9 @@ class ShowSettings:
         return asdict(self)
 
 
-def transition_for(intent: LightIntent, settings: ShowSettings) -> dict:
-    # A drop should hit, so it cuts; every other change blends.
-    if intent == LightIntent.DROP:
-        return {'kind': 'cut'}
-    return {'kind': 'crossfade', 'duration_beats': settings.crossfade_beats}
+def transition_for(intent: LightIntent) -> dict | None:
+    """A drop should hit, so it cuts; None takes Starfire's default crossfade."""
+    return {'kind': 'cut'} if intent == LightIntent.DROP else None
 
 
 def intent_for_class(label: str) -> LightIntent:

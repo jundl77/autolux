@@ -3,6 +3,10 @@
 One Lua file per look, `autoloops/<bank>/<loop>.lua`; banks are the intents
 `atmospheric`, `breakdown`, `buildup`, `drop`. The API is `starfire/src/lua/lighting.lua`.
 
+`standby/warm_white` is the exception: Autolux shows it while the input is digitally
+silent (the player stopped). It is outside the rotation, required by readiness, and
+deliberately static: no beat or loudness response, movers parked dark, warm white only.
+
 ## Rules
 
 - **Bar-locked.** 8- or 16-beat loops, a pure function of `ctx.beat_position`, so
@@ -20,7 +24,26 @@ One Lua file per look, `autoloops/<bank>/<loop>.lua`; banks are the intents
 - **Living room.** Slow symmetric mover sweeps (mirror with `sf.side(index)`, centre pan 0.5),
   nothing frantic, wash peaks at or below 0.9. Groups: `movers` (2), `wash` (4), `strip` (8).
 - **Small.** At most ~80 lines. The header comment's first line is `-- <8|16>-beat loop...`
-  (the tests read the loop length from it), then one line per group, then `Palette slots: ...`.
+  (the tests read the loop length from it), then the metadata block, then one line per group,
+  then `Palette slots: ...`.
+
+## Metadata
+
+Right after the loop-length line, exactly these three lines (any order), which Autolux uses to
+choose a loop when an intent starts. Both Autolux readiness and the Starfire tests reject a
+missing key or an unknown value.
+
+```
+-- energy: 2
+-- family: warm
+-- movement: sweep
+```
+
+- `energy`: baseline intensity. `1` calm, `2` driving, `3` maximal. Atmospheric and breakdown
+  stay at or below 2; drops are 2 or 3; a buildup's energy is the drop it leads into.
+- `family`: dominant colour character. `cold` (cool white), `warm` (warm white/amber), `accent` (red).
+- `movement`: mover vocabulary. `still` (parked or barely drifting), `sweep` (continuous motion),
+  `snap` (jumps between positions).
 
 ## Adding a loop
 

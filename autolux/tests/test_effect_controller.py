@@ -3,12 +3,14 @@ import logging
 import pytest
 
 from autolux.lib.clock import VirtualClock
+from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
     STROBE_BURST_SECONDS,
     STROBE_COOLDOWN_SECONDS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
+    AutoloopMeta,
     LightIntent,
 )
 
@@ -68,18 +70,18 @@ async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, record
 @pytest.mark.parametrize(
     ('intent', 'transition'),
     [
-        (LightIntent.ATMOSPHERIC, {'kind': 'crossfade', 'duration_beats': 1}),
-        (LightIntent.BREAKDOWN, {'kind': 'crossfade', 'duration_beats': 1}),
-        (LightIntent.BUILDUP, {'kind': 'crossfade', 'duration_beats': 1}),
+        (LightIntent.ATMOSPHERIC, None),
+        (LightIntent.BREAKDOWN, None),
+        (LightIntent.BUILDUP, None),
         (LightIntent.DROP, {'kind': 'cut'}),
     ],
 )
-async def test_a_drop_cuts_in_and_every_other_change_crossfades_over_a_beat(
+async def test_a_drop_cuts_in_and_every_other_change_takes_the_renderer_crossfade(
     effect_controller, recorded_lighting, intent, transition
 ):
     await effect_controller.change_effect(intent)
     [select] = [e['command'] for e in recorded_lighting.events if e['command']['kind'] == 'select']
-    assert select['transition'] == transition
+    assert select.get('transition') == transition
 
 
 async def _drop_after(controller, lighting, clock, seconds):
@@ -145,6 +147,14 @@ ROTATION = {
     ),
     LightIntent.DROP: (('drop', 'kick'), ('drop', 'slam'), ('drop', 'chase')),
 }
+ROTATION_META = {
+    **{loop: AutoloopMeta(1, 'cold', 'still') for loops in ROTATION.values() for loop in loops},
+    **{loop: AutoloopMeta(3, 'warm', 'snap') for loop in ROTATION[LightIntent.DROP]},
+}
+
+
+def rotating(lighting, **kwargs):
+    return EffectController(lighting, autoloops=ROTATION, autoloop_meta=ROTATION_META, **kwargs)
 
 
 def selected(lighting):
@@ -155,24 +165,21 @@ def selected(lighting):
     ]
 
 
-async def test_each_entry_of_an_intent_takes_the_next_look_and_wraps(recorded_lighting, caplog):
-    controller = EffectController(recorded_lighting, autoloops=ROTATION)
+async def test_each_entry_plays_every_look_of_its_tier_before_any_repeats(
+    recorded_lighting, caplog
+):
+    controller = rotating(recorded_lighting)
     with caplog.at_level(logging.INFO):
-        for _ in range(4):
+        for _ in range(3):
             await controller.change_effect(LightIntent.ATMOSPHERIC)
             await controller.change_effect(LightIntent.BUILDUP)
     looks = [name for name in selected(recorded_lighting) if name.startswith('atmospheric/')]
-    assert looks == [
-        'atmospheric/cold_breathe',
-        'atmospheric/amber_drift',
-        'atmospheric/pixel_rain',
-        'atmospheric/cold_breathe',
-    ]
-    assert 'intent=ATMOSPHERIC | autoloop=atmospheric/pixel_rain (3 of 3)' in caplog.text
+    assert sorted(looks) == sorted(f'{b}/{n}' for b, n in ROTATION[LightIntent.ATMOSPHERIC])
+    assert 'energy=1 family=cold movement=still | reason=calm' in caplog.text
 
 
-async def test_repeating_the_current_intent_keeps_its_look_and_cursor(recorded_lighting):
-    controller = EffectController(recorded_lighting, autoloops=ROTATION)
+async def test_repeating_the_current_intent_keeps_its_look(recorded_lighting):
+    controller = rotating(recorded_lighting)
     for _ in range(3):
         await controller.change_effect(LightIntent.ATMOSPHERIC)
     # A stop (silence, pause) followed by the same intent resumes the same look.
@@ -180,22 +187,97 @@ async def test_repeating_the_current_intent_keeps_its_look_and_cursor(recorded_l
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     await controller.change_effect(LightIntent.BREAKDOWN)
     await controller.change_effect(LightIntent.ATMOSPHERIC)
-    assert selected(recorded_lighting) == [
-        'atmospheric/cold_breathe',
-        'atmospheric/cold_breathe',
-        'breakdown/only',
-        'atmospheric/amber_drift',
-    ]
+    first, again, breakdown, after = selected(recorded_lighting)
+    assert first == again and breakdown == 'breakdown/only' and after != first
 
 
-async def test_a_rotated_drop_still_cuts_and_keeps_the_strobe_cooldown(recorded_lighting):
+async def test_a_new_track_chooses_again_within_the_same_intent(recorded_lighting):
+    controller = rotating(recorded_lighting, clock=VirtualClock())
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    await controller.change_effect(
+        LightIntent.ATMOSPHERIC,
+        context=SelectionContext(LightIntent.ATMOSPHERIC, new_track=True),
+    )
+    first, second = selected(recorded_lighting)
+    assert first != second
+
+
+async def test_a_chosen_drop_still_cuts_and_keeps_the_strobe_cooldown(recorded_lighting):
     clock = VirtualClock()
-    controller = EffectController(recorded_lighting, clock=clock, autoloops=ROTATION)
+    controller = rotating(recorded_lighting, clock=clock)
     first = await _drop_after(controller, recorded_lighting, clock, 0)
     second = await _drop_after(controller, recorded_lighting, clock, 30)
-    assert [(e['command']['kind'], e['command'].get('autoloop')) for e in first + second] == [
-        ('select', 'kick'),
-        ('set_override', None),
-        ('select', 'slam'),
-    ]
+    assert [e['command']['kind'] for e in first + second] == ['select', 'set_override', 'select']
+    assert first[0]['command']['autoloop'] != second[0]['command']['autoloop']
     assert second[0]['command']['transition'] == {'kind': 'cut'}
+
+
+async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting):
+    from autolux.lib.engine.event_buffer import EventBuffer
+
+    buffer = EventBuffer(window_sec=float('inf'), clock=VirtualClock())
+    buffer.start()
+    controller = EffectController(recorded_lighting, event_buffer=buffer, clock=VirtualClock())
+    await controller.change_effect(LightIntent.DROP)
+    effect = buffer.snapshot()['current_effect']
+    assert effect['name'] == 'drop/kick'
+    assert effect['selection'] == {
+        'energy': 3,
+        'family': 'warm',
+        'movement': 'snap',
+        'reason': 'long build or long since the last drop',
+    }
+
+
+async def test_a_look_that_was_not_sent_is_not_remembered(recorded_lighting):
+    controller = rotating(recorded_lighting)
+    recorded_lighting.select_autoloop = lambda *_, **__: False
+    assert not await controller.change_effect(LightIntent.ATMOSPHERIC)
+    # No track was started and nothing counts as played or entered.
+    assert controller._policy.track_family is None
+    assert controller._entered is None
+
+
+async def test_a_realistic_set_gets_tiers_that_follow_the_music(recorded_lighting):
+    from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
+
+    meta = read_autoloop_meta()
+    clock = VirtualClock()
+    controller = EffectController(
+        recorded_lighting,
+        clock=clock,
+        autoloops=discover_autoloops(),
+        autoloop_meta=meta,
+        seed=7,
+    )
+    bar = 1.875  # 128 BPM, so 90 s is 48 bars
+    # (intent, bars it lasts, build bars at entry, expected energies)
+    set_list = [
+        (LightIntent.ATMOSPHERIC, 32, 0, {1}),
+        (LightIntent.BUILDUP, 16, 0, {3}),  # no drop yet: the first one is maximal
+        (LightIntent.DROP, 32, 16, {3}),
+        (LightIntent.BREAKDOWN, 16, 0, {1}),  # calm after a maximal drop
+        (LightIntent.BUILDUP, 8, 16, {2}),
+        (LightIntent.DROP, 32, 24, {2}),  # never maximal twice running
+        (LightIntent.BREAKDOWN, 8, 0, {1, 2}),
+        (LightIntent.BUILDUP, 8, 8, {2}),
+        (LightIntent.DROP, 16, 16, {2}),  # short build, 30 s since the last drop
+        (LightIntent.BREAKDOWN, 24, 0, {1, 2}),
+        (LightIntent.BUILDUP, 8, 24, {2}),
+        (LightIntent.DROP, 16, 32, {3}),  # 32-bar build earns it, though only 60 s passed
+        (LightIntent.ATMOSPHERIC, 16, 0, {1}),
+    ]
+    left_drop_at = None
+    previous = None
+    for intent, length, build_bars, _ in set_list:
+        if previous == LightIntent.DROP:
+            left_drop_at = clock.monotonic()
+        since = None if left_drop_at is None else clock.monotonic() - left_drop_at
+        context = SelectionContext(intent, seconds_since_drop=since, build_bars=build_bars)
+        await controller.change_effect(intent, context=context)
+        previous = intent
+        clock.advance(length * bar)
+    energies = [meta[tuple(name.split('/'))].energy for name in selected(recorded_lighting)]
+    assert len(energies) == len(set_list)
+    for energy, (intent, *_, expected) in zip(energies, set_list, strict=True):
+        assert energy in expected, (intent, energy)

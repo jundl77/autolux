@@ -11,7 +11,10 @@ shared random `run_id`, negotiates protocol major/minor, and opens outputs befor
 LoginReply. Every message is bounded to 1200 bytes. Both endpoints heartbeat
 every 10 seconds and fail after 30 seconds without the peer heartbeat.
 
-Audio is 44.1 kHz stereo Float32. TX applies the analysis delay once. Each audio
+Audio is 44.1 kHz stereo Float32. TX applies the analysis delay once. Discarding
+the delayed audio fades the delay line to silence over 10 ms while frame positions
+stay contiguous, so RX plays silence without rebuffering; capture taken after the
+discard is audible one delay later. Each audio
 block references the preceding lighting state; RX admits them together. A light
 message alone never changes the fixtures. DMX follows the audible sample position,
 including the audio device's reported latency, with at most 40 updates per second.

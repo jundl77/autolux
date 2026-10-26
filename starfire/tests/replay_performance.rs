@@ -1,5 +1,7 @@
 //! Coarse regression budgets for the complete replay renderer, including Lua.
 
+mod support;
+
 use std::path::Path;
 use std::process::Command as Process;
 
@@ -160,19 +162,17 @@ fn scaled_rig() -> Value {
     json!({"schema_version": 1, "fixtures": fixtures, "groups": {"movers": movers, "wash": wash, "strip": strip}})
 }
 
-fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
+fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
     let directory = tempfile::tempdir().unwrap();
     let replay_path = directory.path().join("show.json");
-    let rig_path = directory.path().join("rig.json");
+    let rig_path = directory.path().join("rig.mvr");
     std::fs::write(&replay_path, serde_json::to_vec(&mixed_show()).unwrap()).unwrap();
-    std::fs::write(&rig_path, serde_json::to_vec(rig).unwrap()).unwrap();
+    std::fs::write(&rig_path, rig).unwrap();
     let output = Process::new(env!("CARGO_BIN_EXE_starfire"))
         .arg("replay")
         .arg(replay_path)
         .arg("--rig")
         .arg(rig_path)
-        .arg("--profiles")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs/profiles.json"))
         .arg("--autoloops")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"))
         .output()
@@ -203,15 +203,15 @@ fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig: Value = serde_json::from_str(include_str!("../../rigs/room.json")).unwrap();
-    assert_render_budget("room / 14 fixtures", &rig, MIN_ROOM_REALTIME_FACTOR);
+    let rig = include_bytes!("../../rigs/room.mvr");
+    assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
 }
 
 #[test]
 fn sixty_four_fixture_show_keeps_twice_realtime_headroom() {
     assert_render_budget(
         "scaled / 64 fixtures",
-        &scaled_rig(),
+        &support::mvr(&scaled_rig()),
         MIN_SCALED_REALTIME_FACTOR,
     );
 }

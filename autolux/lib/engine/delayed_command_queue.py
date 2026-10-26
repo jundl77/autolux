@@ -69,6 +69,12 @@ class DelayedCommandQueue:
             self._last_fire_at.pop(label, None)
         return dropped
 
+    def clear(self) -> int:
+        dropped = len(self._queue)
+        self._queue = []
+        self._last_fire_at.clear()
+        return dropped
+
     async def drain(self) -> None:
         if not self._queue:
             return
