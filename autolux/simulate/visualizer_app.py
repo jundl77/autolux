@@ -1044,6 +1044,16 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
+# Targets and UV come from the rig the show published; a rig without UV fixtures
+# greys both UV chips rather than offering commands the show would refuse.
+STATIC_TARGETS_JS = '''function(state) {
+    const all = %s;
+    const ready = !!state && !!state.mode && !!state.static;
+    const statics = ready ? state.static : {targets: [all], blacklight: false};
+    const options = statics.targets.map((target) =>
+        ({label: target === all ? 'All' : target, value: target}));
+    return [options, !statics.blacklight, !statics.blacklight];
+}''' % json.dumps(ALL_FIXTURES)
 STATIC_BUTTONS = {
     'static-blacklight': 'blacklight',
     'static-strobe': 'strobe',
@@ -1130,8 +1140,8 @@ def _build_static_panel():
                     html.Span('Target', className='control-label'),
                     dcc.RadioItems(
                         id='static-target',
-                        options=[{'label': 'All', 'value': 'all'}],
-                        value='all',
+                        options=[{'label': 'All', 'value': ALL_FIXTURES}],
+                        value=ALL_FIXTURES,
                         inline=True,
                         className='segmented',
                     ),
@@ -1291,15 +1301,10 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         Input('control-mode', 'value'),
     )
     app.clientside_callback(
-        '''function(state) {
-            const ready = !!state && !!state.mode && !!state.static;
-            const statics = ready ? state.static : {targets: ['all'], blacklight: false};
-            const options = statics.targets.map((target) =>
-                ({label: target === 'all' ? 'All' : target, value: target}));
-            return [options, !statics.blacklight];
-        }''',
+        STATIC_TARGETS_JS,
         Output('static-target', 'options'),
         Output('static-blacklight', 'disabled'),
+        Output('static-preset-uv', 'disabled'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(

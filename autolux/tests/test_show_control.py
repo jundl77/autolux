@@ -22,6 +22,7 @@ from autolux.simulate.visualizer_app import (
     PALETTE_POLICY,
     PALETTE_SYNC_JS,
     STATIC_CHIP_IDS,
+    STATIC_TARGETS_JS,
     ControlExpectations,
     SnapshotPoller,
     _with_base_palette,
@@ -520,6 +521,24 @@ def test_a_palette_pick_survives_the_next_poll_and_sends_the_pin(show):
         ['control-palette', {'value': PALETTE_POLICY}],
         ['control-palette', {'value': 'ice'}],
     ]
+
+
+def _static_targets(state):
+    script = f'console.log(JSON.stringify(({STATIC_TARGETS_JS})({json.dumps(state)})));'
+    result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run the clientside callback')
+def test_static_targets_and_uv_chips_follow_the_published_rig():
+    # Group names a venue might use that the room rig does not have.
+    venue = {'targets': ['all', 'truss_a', 'floor_pars'], 'blacklight': False}
+    options, blacklight_off, uv_off = _static_targets({'mode': 'static', 'static': venue})
+    assert [option['value'] for option in options] == venue['targets']
+    assert options[0]['label'] == 'All'
+    assert blacklight_off and uv_off
+    uv_rig = {'targets': ['all', 'uv_bar'], 'blacklight': True}
+    assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False, False]
 
 
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
