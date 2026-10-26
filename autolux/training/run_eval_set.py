@@ -1,5 +1,28 @@
 #!/usr/bin/env python
-"""Run the frozen eval set through the simulation and score it against labels."""
+"""Run the frozen eval set through the simulation and score it against labels.
+
+The baseline is cut from a warm analysis cache: each track's MERT cells and bar
+tracker chunks replay from sidecars beside its mp3 (simulate/cell_cache.py,
+simulate/tracker_cache.py). A cold run extracts on the GPU, and live extraction
+is not byte-identical to a replay. Measured 2026-10-26, cold first run against
+warm replay: 0136, 0485, 0911, 1110 and 0834 moved their checksums with the same
+beats and intent changes. --check-cache lists the sidecars a run would miss
+without simulating anything.
+
+Open bug: 0501, 0640 and 0834 never warm. A sidecar records how many source
+samples the chain was fed (total_pushed), and open_replay rejects it as
+miss_truncated when that is fewer than the file holds, because a short recording
+cannot replay a full run. Since 7ea05da, threshold-length digital silence puts
+the engine in standby, and LightEngine.on_audio returns before feeding the
+section chain until the show restarts. So on these tracks the chain sees less
+than the file holds, and every run re-records a sidecar that the next run
+rejects. Their baseline entries therefore come from live extraction, and two
+live runs of 0501 and of 0834 already disagreed (the first ran while the live
+show held the GPU), so the gate is not reliable on them yet. The fix:
+the recording chain records what the file holds (count standby samples as
+pushed), or the cache key accounts for the skip. The gate test should only call
+cold_sidecars after that.
+"""
 
 from __future__ import annotations
 
@@ -203,6 +226,33 @@ def missing_inputs(data_dir: Path, tracks: list, labels: Path | None = None) -> 
         if not mp3.exists():
             problems.append(f"{AUDIO_MISSING_HINT}: {track['track_id']} ({mp3})")
     return problems
+
+
+def cold_sidecars(data_dir: Path, tracks: list) -> list:
+    """One line per analysis sidecar a run of these tracks would recompute, not replay."""
+    from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+    from autolux.simulate.fake_audio_client import FileAudioClient
+    from autolux.simulate.runner import cache_misses
+
+    lines = []
+    for track in tracks:
+        path = audio_path(Path(data_dir), track["youtube_id"])
+        client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, str(path))
+        for kind, reason in cache_misses(client, data_dir=data_dir):
+            lines.append(f"{track['track_id']}: {kind} sidecar {reason}")
+    return lines
+
+
+def cold_cache_message(lines: list, track_ids: list) -> str:
+    # The baseline is cut from replayed sidecars and a live GPU extraction is not
+    # byte-identical to a replay, so a cold run cannot be compared against it.
+    return (
+        "the analysis cache is cold, so this run would recompute on the GPU instead of "
+        "replaying what the baseline was cut from:\n"
+        + "\n".join(f"  - {line}" for line in lines)
+        + "\n  warm it with: uv run --no-sync python autolux/training/run_eval_set.py "
+        + f"--only {','.join(track_ids)}"
+    )
 
 
 def missing_model(data_dir: Path) -> str | None:
@@ -1016,6 +1066,12 @@ def build_parser() -> argparse.ArgumentParser:
         "wedges rather than slows (default: %(default)s)",
     )
     parser.add_argument("--quiet", action="store_true", help="only the table and the verdict")
+    parser.add_argument(
+        "--check-cache",
+        action="store_true",
+        help="list the tracks whose analysis sidecars would miss, run nothing, "
+        "and exit 1 if any would",
+    )
     return parser
 
 
@@ -1031,6 +1087,17 @@ def main(argv: list | None = None) -> int:
         if absent:
             print(absent, file=sys.stderr)
             return 2
+        if args.check_cache:
+            tracks = select_tracks(document, only)
+            lines = cold_sidecars(Path(args.data_dir), tracks)
+            if lines:
+                print(
+                    cold_cache_message(lines, [track["track_id"] for track in tracks]),
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"analysis cache warm for {len(tracks)} track(s)")
+            return 0
         if args.write_baseline:
             refusal = partial_baseline_refusal(
                 select_tracks(document, only),
