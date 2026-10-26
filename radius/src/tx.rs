@@ -224,6 +224,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut light_at = None;
     let mut health_error_at: Option<Instant> = None;
     let mut reported_discontinuities = 0;
+    let mut reported_realtime_denied = false;
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -317,6 +318,12 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                     stats.discontinuities
                 );
                 reported_discontinuities = stats.discontinuities;
+            }
+            if stats.realtime_denied != 0 && !reported_realtime_denied {
+                eprintln!(
+                    "Radius capture runs without realtime scheduling; overruns are more likely under load"
+                );
+                reported_realtime_denied = true;
             }
             ensure!(
                 capture_started.elapsed() < CALLBACK_STALE_TIMEOUT
@@ -434,12 +441,15 @@ mod tests {
     fn capture_fault_names_the_discontinuity_limit_and_last_gap() {
         let stats = CaptureMetrics {
             callbacks: 1,
-            captured_frames: 0,
+            device_frames: 0,
             queue_overflow_frames: 0,
             device_xruns: 3,
             discontinuities: 3,
             last_gap_frames: Some(441),
+            resync_silence_frames: 1_323,
+            resync_dropped_frames: 0,
             stream_errors: 0,
+            realtime_denied: 0,
             last_callback_age: None,
             queued_frames: 0,
             faulted: true,
