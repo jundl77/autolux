@@ -84,7 +84,12 @@ class SpecialCapabilities:
 @dataclass(frozen=True)
 class SpecialChoice:
     special: Special | None
+    strobes: tuple[Special, ...] = ()
     suppressed: str | None = None
+
+    @property
+    def intense(self) -> bool:
+        return bool(self.strobes) or (self.special is not None and self.special.intense)
 
 
 DROP_STROBE = Special(
@@ -111,12 +116,15 @@ class SpecialPolicy:
             for special in self._specials
             if intent in special.intents and capabilities.allows(special)
         ]
-        calm = [special for special in rows if not special.intense]
-        suppressed = intense_blocked if intense_blocked and len(calm) < len(rows) else None
-        pool = calm if intense_blocked else rows
-        if not pool:
-            return SpecialChoice(None, suppressed)
-        return SpecialChoice(self._least_recent(pool), suppressed)
+        strobes = tuple(special for special in rows if special.strobe_hz is not None)
+        selectable = [special for special in rows if special.strobe_hz is None]
+        calm = [special for special in selectable if not special.intense]
+        if intense_blocked:
+            suppressed = intense_blocked if strobes or len(calm) < len(selectable) else None
+            chosen = self._least_recent(calm) if calm else None
+            return SpecialChoice(chosen, suppressed=suppressed)
+        chosen = self._least_recent(selectable) if selectable else None
+        return SpecialChoice(chosen, strobes)
 
     def record(self, special: Special) -> None:
         self._selections += 1

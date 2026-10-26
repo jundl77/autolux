@@ -51,7 +51,24 @@ def test_a_row_needs_its_group_and_every_axis_it_sets():
 
 def test_an_empty_capability_list_leaves_only_whole_rig_rows():
     policy = SpecialPolicy([row('spin', pulse=1), DROP_STROBE], random.Random(0))
-    assert policy.choose(DROP, SpecialCapabilities()).special == DROP_STROBE
+    choice = policy.choose(DROP, SpecialCapabilities())
+    assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
+
+
+def test_the_strobe_burst_always_joins_the_chosen_row_and_is_never_selected():
+    policy = SpecialPolicy([row('spin', pulse=1), DROP_STROBE], random.Random(0))
+    for _ in range(5):
+        choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]))
+        policy.record(choice.special)
+        assert (choice.special.name, choice.strobes) == ('spin', (DROP_STROBE,))
+        assert choice.intense
+
+
+def test_a_blocked_drop_drops_the_strobe_and_keeps_a_calm_row():
+    policy = SpecialPolicy([row('calm'), row('spin', pulse=1), DROP_STROBE], random.Random(0))
+    choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), 'cooldown')
+    assert (choice.special.name, choice.strobes, choice.suppressed) == ('calm', (), 'cooldown')
+    assert not choice.intense
 
 
 def test_every_row_plays_before_any_repeats_and_the_seed_fixes_the_order():

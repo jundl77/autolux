@@ -36,8 +36,9 @@ names a rig group (an MVR class such as `fx`), and any fixture patched into that
 - `scaling` (optional): which of `energy`, `speed` the intensity macro scales.
 
 A strobe row has `name`, `intents`, `group`, `strobe_hz` and optional `scaling: ["strobe_hz"]`
-instead, and goes out as the capped strobe accent (`strobe_burst` is today's drop burst; its
-length follows the strobe burst settings).
+instead, and goes out as the capped strobe accent; its length follows the strobe burst settings.
+A strobe row is never selected: it fires on every eligible entry of its intents, alongside the
+selected special. `strobe_burst` is the drop burst.
 
 Unknown or missing keys, out-of-range values and a name that does not match the file are
 rejected at startup, with the file and field named.
@@ -45,9 +46,11 @@ rejected at startup, with the file and field named.
 ## Intense
 
 A special is intense when it pulses, strobes, or its speed is above `INTENSE_SPEED` (0.6).
-This is derived from the values and never declared. Intense specials and the strobe burst draw
-from one cooldown, the drop strobe cooldown setting (longer as intensity falls), and none fire
-below intensity 0.3. Calm specials are free.
+This is derived from the values and never declared. An entry that fires the strobe burst
+and an intense special counts as one intense event on one cooldown, the drop strobe cooldown
+setting (longer as intensity falls), and nothing intense fires below intensity 0.3. While the
+cooldown runs neither the burst nor an intense special fires; a calm special may. Calm specials
+are free.
 
 ## Selection
 
@@ -55,7 +58,8 @@ When an intent starts, Autolux picks among that intent's specials that the rig c
 the group must be reported by Starfire at login with fixtures in it, and able to express every
 axis the special sets (colour, speed when above 0, pulse, pattern; energy always). Within those
 it plays each one before repeating any, then favours the least recently used, seeded like the
-loops. An intent with no playable special releases the one running.
+loops; strobe rows are not candidates and join whichever special is chosen. An intent with no
+playable special releases the one running.
 
 `breakdown` has none on purpose: the room falls back to the loop alone, and the next buildup's
 rise reads against that.

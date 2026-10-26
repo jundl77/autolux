@@ -471,12 +471,11 @@ async def test_each_intent_gets_its_catalogue_row_and_breakdown_releases_it():
 
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    [drop] = accents(lighting, start)
-    if drop['value']['id'] == SPECIAL_ID:
-        assert drop['value']['special']['pulse_beats'] == 1
-    else:
-        assert drop['value']['id'] == DROP_ACCENT_ID
-        assert drop['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
+    spin, strobe = accents(lighting, start)
+    assert spin['value']['id'] == SPECIAL_ID
+    assert spin['value']['special']['pulse_beats'] == 1
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+    assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
 
 
 async def test_a_strobe_row_releases_the_running_special_before_it_bursts():
@@ -489,7 +488,7 @@ async def test_a_strobe_row_releases_the_running_special_before_it_bursts():
     assert strobe['value']['id'] == DROP_ACCENT_ID
 
 
-async def test_intense_specials_and_the_strobe_burst_share_one_cooldown(caplog):
+async def test_a_drop_fires_its_row_and_the_strobe_as_one_event_on_one_cooldown(caplog):
     controller, lighting, clock = with_specials([SPIN, DROP_STROBE])
     fired = []
     for wait in (0, 30, 31):
@@ -497,10 +496,8 @@ async def test_intense_specials_and_the_strobe_burst_share_one_cooldown(caplog):
         with caplog.at_level(logging.INFO):
             await _drop_after(controller, lighting, clock, wait)
         fired.append([c['value']['id'] for c in accents(lighting, start) if 'value' in c])
-    first, second, third = fired
-    assert second == []
+    assert fired == [[SPECIAL_ID, DROP_ACCENT_ID], [], [SPECIAL_ID, DROP_ACCENT_ID]]
     assert 'intense special suppressed | cooldown 30s of 60s left' in caplog.text
-    assert {*first, *third} == {SPECIAL_ID, DROP_ACCENT_ID}
 
 
 async def test_without_reported_groups_only_the_whole_rig_strobe_remains():

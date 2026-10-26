@@ -261,18 +261,15 @@ class EffectController:
         )
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
-        special = choice.special
-        if special is None or special.strobe_hz is not None:
-            self._release_special()
-        if special is None:
-            return
-        self._special_policy.record(special)
-        if special.intense:
+        if choice.intense:
             self._last_intense_at = now
-        if special.strobe_hz is not None:
-            self._strobe(special, bpm, settings)
+        if choice.special is None:
+            self._release_special()
         else:
-            self._fire_special(special.scaled(settings.intensity))
+            self._special_policy.record(choice.special)
+            self._fire_special(choice.special.scaled(settings.intensity))
+        for strobe in choice.strobes:
+            self._strobe(strobe, bpm, settings)
 
     def _fire_special(self, special: Special) -> None:
         self.lighting_client.set_special(
@@ -311,5 +308,8 @@ class EffectController:
         )
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)
-            self.event_buffer.set_special(special.name, special.group, duration_seconds=duration)
+            if self._special is None:
+                self.event_buffer.set_special(
+                    special.name, special.group, duration_seconds=duration
+                )
         LOGGER.info('[lighting] drop accent | duration=%.1fs', duration)
