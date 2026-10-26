@@ -14,6 +14,10 @@ Only top-level wire messages have direction annotations.
 | `UpdateBeat` | Supply fractional beat position and tempo. Starfire interpolates between updates; animation speed does not change musical phase. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
+`DiscardDelayedAudio` is the one transport command: when the source stops, the embedded
+Radius TX silences the audio it holds for the playback delay instead of playing it out.
+Lighting is unaffected; Art-Net output ignores it.
+
 Each `Parameter` contains a defined enum type and a number or boolean value.
 It is shared by Login's initial settings and runtime updates.
 

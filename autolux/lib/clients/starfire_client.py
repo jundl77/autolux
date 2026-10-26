@@ -72,6 +72,10 @@ class StarfireClient:
     def set_blackout(self, enabled: bool) -> None:
         self._send_command({'kind': 'set_blackout', 'enabled': enabled})
 
+    def discard_delayed_audio(self) -> None:
+        """Silence the room now instead of after the show-delayed tail plays out."""
+        self._send_command({'kind': 'discard_delayed_audio'})
+
     def stop(self) -> None:
         self._send_command({'kind': 'stop'})
         self.selected_autoloop = None

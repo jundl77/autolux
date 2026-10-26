@@ -62,6 +62,7 @@ messages!(ClientMessage {
     UnsetActiveEffect,
     UpdateBeat,
     SetParameter,
+    DiscardDelayedAudio,
     Heartbeat
 });
 messages!(ServerMessage {
@@ -80,6 +81,7 @@ impl ClientMessage {
             Self::UnsetActiveEffect(value) => value.command_id,
             Self::UpdateBeat(value) => value.command_id,
             Self::SetParameter(value) => value.command_id,
+            Self::DiscardDelayedAudio(value) => value.command_id,
             Self::Heartbeat(_) => return None,
         })
     }
@@ -92,6 +94,7 @@ impl ClientMessage {
             Self::UnsetActiveEffect(value) => value.command_id = command_id,
             Self::UpdateBeat(value) => value.command_id = command_id,
             Self::SetParameter(value) => value.command_id = command_id,
+            Self::DiscardDelayedAudio(value) => value.command_id = command_id,
             Self::Heartbeat(_) => {}
         }
     }
@@ -172,6 +175,8 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
     match command {
         ClientMessage::Login(_) => bail!("login is handled by the process host"),
         ClientMessage::Heartbeat(_) => Ok(()),
+        // Audio transport only; the live host forwards it to its Radius output.
+        ClientMessage::DiscardDelayedAudio(_) => Ok(()),
         ClientMessage::UpdateBeat(value) => engine.apply(
             at_seconds,
             &Command::Beat {
