@@ -135,19 +135,19 @@ fn engine(rig: &FixtureRig) -> Engine {
     engine
 }
 
-fn special(group: &str, value: wire::Special) -> ClientMessage {
+fn special(group: &str, value: wire::SpecialFx) -> ClientMessage {
     ClientMessage::SetActiveEffect(wire::SetActiveEffect {
         command_id: 1,
         effect_id: "special".into(),
         target: Some(wire::set_active_effect::Target::Group(group.into())),
         priority: 100,
-        special: Some(value),
+        special_fx: Some(value),
         ..Default::default()
     })
 }
 
-fn steady(colour_slot: &str, energy: f32, speed: f32) -> wire::Special {
-    wire::Special {
+fn steady(colour_slot: &str, energy: f32, speed: f32) -> wire::SpecialFx {
+    wire::SpecialFx {
         colour_slot: colour_slot.into(),
         energy,
         speed,
@@ -294,7 +294,7 @@ fn colour_energy_and_speed_reach_mixing_and_a_centred_pan_scan() {
 fn pulses_step_the_pattern_wheel_or_gate_the_shutter_on_the_beat_grid() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
-    let pulsed = wire::Special {
+    let pulsed = wire::SpecialFx {
         pulse_beats: Some(1),
         pattern: Some(0.5),
         ..steady("primary", 1.0, 0.0)
@@ -322,7 +322,7 @@ fn pulses_step_the_pattern_wheel_or_gate_the_shutter_on_the_beat_grid() {
 fn attack_and_release_follow_the_musical_clock_without_snapping() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
-    let eased = wire::Special {
+    let eased = wire::SpecialFx {
         attack_beats: 4.0,
         release_beats: 4.0,
         ..steady("primary", 1.0, 0.0)
@@ -344,12 +344,12 @@ fn attack_and_release_follow_the_musical_clock_without_snapping() {
 fn a_replacement_crossfades_through_the_releasing_special() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
-    let first = wire::Special {
+    let first = wire::SpecialFx {
         release_beats: 2.0,
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", first));
-    let second = wire::Special {
+    let second = wire::SpecialFx {
         attack_beats: 2.0,
         ..steady("primary", 0.0, 0.0)
     };
@@ -388,7 +388,7 @@ fn an_absent_group_renders_nothing_and_low_intensity_gates_pulse_but_only_slows_
             }),
         }),
     );
-    let pulsed = wire::Special {
+    let pulsed = wire::SpecialFx {
         pulse_beats: Some(1),
         ..steady("primary", 1.0, 1.0)
     };
@@ -441,15 +441,15 @@ fn invalid_specials_are_rejected() {
     for invalid in [
         steady("primary", 1.5, 0.0),
         steady("primary", 1.0, f32::NAN),
-        wire::Special {
+        wire::SpecialFx {
             pulse_beats: Some(0),
             ..steady("primary", 1.0, 0.0)
         },
-        wire::Special {
+        wire::SpecialFx {
             attack_beats: -1.0,
             ..steady("primary", 1.0, 0.0)
         },
-        wire::Special {
+        wire::SpecialFx {
             pattern: Some(2.0),
             ..steady("primary", 1.0, 0.0)
         },
@@ -521,7 +521,7 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
         dmx(&mut engine, 0.0)[fixture.clone()],
         dark[fixture.clone()]
     );
-    let pulsed = wire::Special {
+    let pulsed = wire::SpecialFx {
         pulse_beats: Some(1),
         ..steady("primary", 1.0, 1.0)
     };
@@ -603,7 +603,7 @@ fn pulses_lengthen_to_the_strobe_rate_cap_and_gates_stop_after_the_burst() {
         0.0,
         &parameter(wire::ParameterType::StrobeMaxBurstSeconds, 1.0),
     );
-    let pulsed = wire::Special {
+    let pulsed = wire::SpecialFx {
         pulse_beats: Some(1),
         ..steady("primary", 1.0, 0.0)
     };

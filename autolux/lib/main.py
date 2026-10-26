@@ -80,7 +80,7 @@ def apply_static(light_engine, command: dict) -> None:
         looks.set_blackout(command['enabled'])
     elif kind == 'strobe':
         looks.strobe(command.get('enabled'))
-    elif kind == 'special':
+    elif kind == 'special_fx':
         looks.special(
             command['group'],
             command['colour_slot'],
@@ -88,7 +88,7 @@ def apply_static(light_engine, command: dict) -> None:
             command['speed'],
             command['pulse_beats'],
         )
-    elif kind == 'special_clear':
+    elif kind == 'special_fx_clear':
         looks.clear_special()
 
 

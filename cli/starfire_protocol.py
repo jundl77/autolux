@@ -166,8 +166,8 @@ def _active_effect(value):
         properties['attributes'] = attributes
     if value.pop('intensity_multiplier', None) is not None:
         raise ValueError('Effects set intensity directly; multipliers are not supported')
-    if (special := value.pop('special', None)) is not None:
-        value['special'] = _special(special)
+    if (special := value.pop('special_fx', None)) is not None:
+        value['special_fx'] = _special_fx(special)
     return wire.SetActiveEffect(
         effect_id=value.pop('id'),
         **target,
@@ -177,7 +177,7 @@ def _active_effect(value):
     )
 
 
-SPECIAL_FIELDS = {
+SPECIAL_FX_FIELDS = {
     'colour_slot',
     'energy',
     'speed',
@@ -188,10 +188,12 @@ SPECIAL_FIELDS = {
 }
 
 
-def _special(value):
-    if not isinstance(value, dict) or not value.keys() <= SPECIAL_FIELDS:
-        raise ValueError('Unknown special field')
-    return wire.Special(**{name: setting for name, setting in value.items() if setting is not None})
+def _special_fx(value):
+    if not isinstance(value, dict) or not value.keys() <= SPECIAL_FX_FIELDS:
+        raise ValueError('Unknown special_fx field')
+    return wire.SpecialFX(
+        **{name: setting for name, setting in value.items() if setting is not None}
+    )
 
 
 def login_groups(reply) -> list[dict]:

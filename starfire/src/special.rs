@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 
 use crate::fixtures::FixtureRig;
 use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
-use crate::model::{AttributeValue, FixtureState, Rgb, Special};
+use crate::model::{AttributeValue, FixtureState, Rgb, SpecialFx};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
 
@@ -217,7 +217,7 @@ pub fn capabilities(rig: &FixtureRig) -> Vec<wire::GroupCapability> {
         .collect()
 }
 
-pub fn validate(special: &Special) -> Result<()> {
+pub fn validate(special: &SpecialFx) -> Result<()> {
     for (name, value) in [("energy", special.energy), ("speed", special.speed)]
         .into_iter()
         .chain(special.pattern.map(|pattern| ("pattern", pattern)))
@@ -269,7 +269,7 @@ impl Progress {
         self.scan_cycles = replaced.scan_cycles;
     }
 
-    pub fn advance(&mut self, special: &Special, beat: f64, speed_scale: f64) {
+    pub fn advance(&mut self, special: &SpecialFx, beat: f64, speed_scale: f64) {
         let elapsed = (beat - self.last_beat).max(0.0);
         self.scan_cycles += elapsed * special.speed * speed_scale * MAX_SCAN_CYCLES_PER_BEAT;
         self.last_beat = beat;
@@ -294,7 +294,7 @@ pub fn capped_pulse_beats(
     })
 }
 
-pub fn attack_level(special: &Special, elapsed_beats: f64) -> f64 {
+pub fn attack_level(special: &SpecialFx, elapsed_beats: f64) -> f64 {
     if special.attack_beats > 0.0 {
         (elapsed_beats / special.attack_beats).clamp(0.0, 1.0)
     } else {
@@ -302,7 +302,7 @@ pub fn attack_level(special: &Special, elapsed_beats: f64) -> f64 {
     }
 }
 
-pub fn release_level(special: &Special, from_level: f64, elapsed_beats: f64) -> f64 {
+pub fn release_level(special: &SpecialFx, from_level: f64, elapsed_beats: f64) -> f64 {
     if special.release_beats > 0.0 {
         from_level * (1.0 - elapsed_beats / special.release_beats).clamp(0.0, 1.0)
     } else {
@@ -327,7 +327,7 @@ pub fn apply(
     state: &mut FixtureState,
     map: &FixtureMap,
     profile: &GdtfProfile,
-    special: &Special,
+    special: &SpecialFx,
     frame: &SpecialFrame,
 ) {
     let level = frame.level;

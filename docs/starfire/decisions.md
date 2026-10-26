@@ -442,8 +442,9 @@ accent cooldown divides by `i`. Pan/tilt slew at most `0.6 / (1 - i)^2` of the
 normalised range per second, unlimited at 1.0. The selection policy caps energy at
 tier 1 below 0.35 and tier 2 below 0.7, then applies the nearest-tier fallback.
 
-2026-10-26 specials: `SetActiveEffect.special` renders a fixture-agnostic accent on its
-target group at the message priority, keyed only on GDTF attribute families.
+2026-10-26 specials: `SetActiveEffect.special_fx` (a `SpecialFX`) renders a
+fixture-agnostic accent on its target group at the message priority, keyed only on GDTF
+attribute families.
 Colour slot: active palette colour, then ColorAdd/ColorSub mixing or the nearest
 coloured Color(n) wheel slot. Energy: semantic intensity (Dimmer, mixing gain, dark
 wheel slot). Speed: `*Rotate`/`*WheelSpin` over their physical range (from zero when

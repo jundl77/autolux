@@ -150,7 +150,7 @@ pub enum OverrideLifetime {
 /// Fixture-agnostic accent vocabulary; the renderer maps each axis onto GDTF attribute families.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-pub struct Special {
+pub struct SpecialFx {
     pub colour_slot: String,
     pub energy: f64,
     pub speed: f64,
@@ -173,7 +173,7 @@ pub struct LightingOverride {
     #[serde(default)]
     pub priority: i32,
     #[serde(default)]
-    pub special: Option<Box<Special>>,
+    pub special_fx: Option<Box<SpecialFx>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

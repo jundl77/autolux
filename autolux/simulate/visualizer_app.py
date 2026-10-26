@@ -520,7 +520,7 @@ def _status_item(caption: str, value, **props):
 
 
 def _fx_text(snapshot: dict) -> str | None:
-    special = snapshot.get('special') or ((snapshot.get('static') or {}).get('special'))
+    special = snapshot.get('special') or ((snapshot.get('static') or {}).get('special_fx'))
     if not special:
         return None
     # A static special is the operator's own and has no catalogue name.
@@ -1055,14 +1055,14 @@ def fx_axes(groups: dict, target: str) -> list:
 def static_fx_command(trigger, target, energy, speed, pulse, axes, active_slot=None):
     """The FX payload; control.js build.fx mirrors it. A segment change re-fires the active slot."""
     if trigger == FX_CLEAR_ID:
-        return {'action': 'static', 'kind': 'special_clear'}
+        return {'action': 'static', 'kind': 'special_fx_clear'}
     slot = FX_SLOT_IDS.get(trigger) or (active_slot if trigger in FX_SEGMENT_IDS else None)
     if slot is None:
         return None
     # A disabled segment still holds a value; the group could not render that axis.
     return {
         'action': 'static',
-        'kind': 'special',
+        'kind': 'special_fx',
         'group': target,
         'colour_slot': slot,
         'energy': energy,
@@ -1340,7 +1340,7 @@ FX_DIRECT_JS = (
                     id, {className: classes[i] || ''}));
             }
         });
-        const lit = command.kind === 'special' ? 'static-fx-' + command.colour_slot : null;
+        const lit = command.kind === 'special_fx' ? 'static-fx-' + command.colour_slot : null;
         return chips.map((id) => id === lit ? 'active' : '');
     }"""
 )
@@ -1422,7 +1422,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
 
     def _fx_command(trigger, target, state):
         inputs = dash.ctx.inputs
-        active = ((state.get('static') or {}).get('special') or {}).get('colour_slot')
+        active = ((state.get('static') or {}).get('special_fx') or {}).get('colour_slot')
         return static_fx_command(
             trigger,
             target,

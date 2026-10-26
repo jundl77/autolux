@@ -205,7 +205,7 @@ class StaticLooks:
             'targets': list(self.rig.targets),
             'blacklight': bool(self.rig.uv_groups),
             'blackout': self.blackout,
-            'special': None
+            'special_fx': None
             if self._special is None
             else {
                 'group': self._special.group,

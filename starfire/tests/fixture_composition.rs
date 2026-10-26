@@ -53,7 +53,7 @@ fn lighting_override(id: &str, target: Target, values: PropertyValues) -> Comman
             intensity_multiplier: None,
             lifetime: OverrideLifetime::UntilCleared,
             priority: 0,
-            special: None,
+            special_fx: None,
         },
     }
 }
@@ -229,7 +229,7 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
                     intensity_multiplier: None,
                     lifetime: OverrideLifetime::UntilCleared,
                     priority: 1101,
-                    special: None,
+                    special_fx: None,
                 },
             },
         )
@@ -254,7 +254,7 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
                     intensity_multiplier: None,
                     lifetime: OverrideLifetime::UntilCleared,
                     priority: 100,
-                    special: None,
+                    special_fx: None,
                 },
             },
         )

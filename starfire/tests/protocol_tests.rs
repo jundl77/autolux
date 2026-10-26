@@ -541,7 +541,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                         duration_seconds: 0.5,
                     },
                     priority: 0,
-                    special: None,
+                    special_fx: None,
                 },
             },
         ),

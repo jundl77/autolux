@@ -154,11 +154,11 @@ message SetActiveEffect {
   // GDTF attribute, Geometry.Attribute or full function path.
   map<string, AttributeValue> attributes = 12;
   // Rendered on the target; a group absent from the rig renders nothing.
-  Special special = 13;
+  SpecialFX special_fx = 13;
 }
 
 // Fixture-agnostic accent; Starfire maps each axis onto the profiles' GDTF attribute families.
-message Special {
+message SpecialFX {
   string colour_slot = 1;  // Active palette slot: "primary", "secondary", "cold", ...
   float energy = 2;        // 0..1.
   float speed = 3;         // 0..1.

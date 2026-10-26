@@ -396,7 +396,7 @@ def test_the_static_special_command_reaches_the_controller_queue_as_parsed(stati
     poller, commands = static_show
     command = {
         'action': 'static',
-        'kind': 'special',
+        'kind': 'special_fx',
         'group': 'fx',
         'colour_slot': 'cold',
         'energy': 0.5,
@@ -405,8 +405,10 @@ def test_the_static_special_command_reaches_the_controller_queue_as_parsed(stati
     }
     assert poller.control(command) == {'accepted': 'static'}
     assert commands.get_nowait() == command
-    assert poller.control({'action': 'static', 'kind': 'special_clear'}) == {'accepted': 'static'}
-    assert commands.get_nowait() == {'action': 'static', 'kind': 'special_clear'}
+    assert poller.control({'action': 'static', 'kind': 'special_fx_clear'}) == {
+        'accepted': 'static'
+    }
+    assert commands.get_nowait() == {'action': 'static', 'kind': 'special_fx_clear'}
 
 
 def _run_callback(app, output, values, triggered):
@@ -787,7 +789,7 @@ FX_CASES = [
     (
         'static-fx-speed',
         'all',
-        {**FX_STATE, 'static': {**FX_STATE['static'], 'special': {'colour_slot': 'accent'}}},
+        {**FX_STATE, 'static': {**FX_STATE['static'], 'special_fx': {'colour_slot': 'accent'}}},
         {'group': 'all', 'colour_slot': 'accent', 'energy': 0.9, 'speed': 0.2, 'pulse_beats': 1},
     ),
 ]
@@ -805,14 +807,14 @@ def test_the_static_fx_chips_send_the_special_dict_from_python_and_the_browser_a
         kind = 'value' if trigger == 'static-fx-speed' else 'n_clicks'
         _run_callback(app, static_output, values, f'{trigger}.{kind}')
     _run_callback(app, static_output, {'control-state': FX_STATE}, 'static-fx-clear.n_clicks')
-    expected = [{'action': 'static', 'kind': 'special', **payload} for *_, payload in FX_CASES]
-    expected.append({'action': 'static', 'kind': 'special_clear'})
+    expected = [{'action': 'static', 'kind': 'special_fx', **payload} for *_, payload in FX_CASES]
+    expected.append({'action': 'static', 'kind': 'special_fx_clear'})
     assert source.commands == expected
 
     calls = [
         f'control.build.fx({json.dumps(trigger)}, {json.dumps(target)}, 0.9, 0.2, 1, '
         f'{json.dumps(fx_axes(state["special_groups"], target))}, '
-        f'{json.dumps((state["static"].get("special") or {}).get("colour_slot"))})'
+        f'{json.dumps((state["static"].get("special_fx") or {}).get("colour_slot"))})'
         for trigger, target, state, _ in FX_CASES
     ]
     calls.append("control.build.fx('static-fx-clear', 'all', 0.6, 0.5, 0, [], null)")
@@ -870,7 +872,7 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
     assert shown['Strobe'] == 'in 41 s'
     labels = [item.children[0].children for item in _build_show_status(buffer.snapshot(), 0.0)]
     assert labels.index('FX') == labels.index('Colors') + 1
-    static = {'static': {'special': {'group': 'wash', 'colour_slot': 'cold'}}}
+    static = {'static': {'special_fx': {'group': 'wash', 'colour_slot': 'cold'}}}
     assert items(static)['FX'] == 'Static · wash'
 
 
@@ -916,7 +918,7 @@ def test_a_clicked_fx_chip_lights_and_a_later_segment_change_refires_it_in_the_b
         f'const c = run("static-fx-speed.value", [0.9, 0.9, 2], {json.dumps(blank)});\n'
         'console.log(JSON.stringify([sent, a, b, c]));'
     )
-    special = {'action': 'static', 'kind': 'special', 'group': 'fx', 'colour_slot': 'cold'}
+    special = {'action': 'static', 'kind': 'special_fx', 'group': 'fx', 'colour_slot': 'cold'}
     assert sent == [
         {**special, 'energy': 0.6, 'speed': 0.5, 'pulse_beats': None},
         {**special, 'energy': 0.9, 'speed': 0.5, 'pulse_beats': 2},

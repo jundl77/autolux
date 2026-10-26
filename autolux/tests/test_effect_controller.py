@@ -450,7 +450,7 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
             'value': {
                 'id': SPECIAL_ID,
                 'target': {'group': 'fx'},
-                'special': {
+                'special_fx': {
                     'colour_slot': 'secondary',
                     'energy': 0.2,
                     'speed': 0.1,
@@ -474,16 +474,16 @@ async def test_each_intent_gets_its_catalogue_row_and_breakdown_releases_it():
         sent.append(accents(lighting, start))
     [atmospheric], [buildup], [breakdown] = sent
     assert atmospheric['value']['target'] == {'group': 'fx'}
-    assert atmospheric['value']['special']['attack_beats'] == 32.0
+    assert atmospheric['value']['special_fx']['attack_beats'] == 32.0
     assert buildup['value']['id'] == SPECIAL_ID
-    assert buildup['value']['special']['attack_beats'] == 128.0
+    assert buildup['value']['special_fx']['attack_beats'] == 128.0
     assert breakdown == {'kind': 'clear_override', 'id': SPECIAL_ID}
 
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
     spin, strobe = accents(lighting, start)
     assert spin['value']['id'] == SPECIAL_ID
-    assert spin['value']['special']['pulse_beats'] == 1
+    assert spin['value']['special_fx']['pulse_beats'] == 1
     assert strobe['value']['id'] == DROP_ACCENT_ID
     assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
 

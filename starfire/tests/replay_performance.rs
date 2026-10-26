@@ -115,7 +115,7 @@ fn mixed_show() -> Replay {
                         duration_seconds: 1.0,
                     },
                     priority: 100,
-                    special: None,
+                    special_fx: None,
                 },
             },
         );

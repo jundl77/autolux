@@ -279,7 +279,7 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         'targets': ['all', 'fx', 'movers', 'strip', 'wash'],
         'blacklight': True,
         'blackout': True,
-        'special': None,
+        'special_fx': None,
         'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
 
@@ -385,7 +385,7 @@ def test_a_static_special_is_the_same_dict_at_the_static_priority():
             'value': {
                 'id': STATIC_SPECIAL_ID,
                 'target': {'group': 'fx'},
-                'special': {
+                'special_fx': {
                     'colour_slot': 'cold',
                     'energy': 0.6,
                     'speed': 0.4,
@@ -398,7 +398,7 @@ def test_a_static_special_is_the_same_dict_at_the_static_priority():
             },
         }
     ]
-    assert looks.state()['special'] == {
+    assert looks.state()['special_fx'] == {
         'group': 'fx',
         'colour_slot': 'cold',
         'energy': 0.6,
@@ -430,7 +430,7 @@ def test_clearing_static_releases_the_special_and_resend_restores_it():
     assert [c['value']['id'] for c in overrides(lighting)] == [STATIC_SPECIAL_ID] * 2
     looks.clear()
     assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': STATIC_SPECIAL_ID}
-    assert looks.state()['special'] is None
+    assert looks.state()['special_fx'] is None
 
 
 async def test_static_releases_the_auto_special_and_auto_brings_it_back():

@@ -36,7 +36,7 @@ def special_override(override_id: str, group: str, special: dict, *, priority: i
     return {
         'id': override_id,
         'target': special_target(group),
-        'special': dict(special),
+        'special_fx': dict(special),
         'priority': priority,
     }
 

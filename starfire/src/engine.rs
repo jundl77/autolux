@@ -9,7 +9,7 @@ use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::fixtures::FixtureRig;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
-    OverrideLifetime, PropertyValues, RenderContext, Rgb, Special, Target, Transition,
+    OverrideLifetime, PropertyValues, RenderContext, Rgb, SpecialFx, Target, Transition,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
@@ -104,7 +104,7 @@ impl ActiveOverride {
     }
 
     fn release(self, beat: f64) -> Option<ReleasingSpecial> {
-        let special = *self.value.special?;
+        let special = *self.value.special_fx?;
         let from_level = special::attack_level(&special, beat - self.progress.started_beat);
         (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
             special,
@@ -119,7 +119,7 @@ impl ActiveOverride {
 }
 
 struct ReleasingSpecial {
-    special: Special,
+    special: SpecialFx,
     fixture_ids: Vec<String>,
     priority: i32,
     order: u64,
@@ -638,7 +638,7 @@ impl Engine {
     ) -> Result<()> {
         validate_identifier(&value.id)?;
         validate_properties(&value.values)?;
-        if let Some(special) = &value.special {
+        if let Some(special) = &value.special_fx {
             special::validate(special)?;
         }
         if let Some(multiplier) = value.intensity_multiplier {
@@ -661,7 +661,7 @@ impl Engine {
         );
         let fixture_ids = match &value.target {
             Target::Group(group)
-                if value.special.is_some() && !self.rig.groups().contains_key(group) =>
+                if value.special_fx.is_some() && !self.rig.groups().contains_key(group) =>
             {
                 Vec::new()
             }
@@ -740,7 +740,7 @@ impl Engine {
         let max_gate_seconds = self.strobe_max_burst_seconds * strobe_scale;
         let beats_per_second = self.clock.beats_per_second();
         for value in self.overrides.values_mut() {
-            if let Some(special) = &value.value.special {
+            if let Some(special) = &value.value.special_fx {
                 value.progress.advance(special, beat, self.intensity);
             }
         }
@@ -753,7 +753,7 @@ impl Engine {
             .overrides
             .values()
             .map(|value| {
-                let special = value.value.special.as_deref().map(|special| {
+                let special = value.value.special_fx.as_deref().map(|special| {
                     (
                         special,
                         special::attack_level(special, beat - value.progress.started_beat),

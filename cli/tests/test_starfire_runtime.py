@@ -79,11 +79,11 @@ def test_control_adapter_translates_a_special_one_to_one():
     }
     command = {
         'kind': 'set_override',
-        'value': {'id': 'accent', 'target': {'group': 'fx'}, 'special': special, 'priority': 50},
+        'value': {'id': 'accent', 'target': {'group': 'fx'}, 'special_fx': special, 'priority': 50},
     }
     effect = protocol.build_command(command)
     assert (effect.group, effect.priority, effect.HasField('intensity')) == ('fx', 50, False)
-    assert {field.name: value for field, value in effect.special.ListFields()} == special
+    assert {field.name: value for field, value in effect.special_fx.ListFields()} == special
     effect.command_id = 1
     encoded = protocol.encode_command(effect)
     assert wire.SetActiveEffect.FromString(encoded[protocol.FRAME_HEADER.size :]) == effect
@@ -94,17 +94,17 @@ def test_control_adapter_translates_a_special_one_to_one():
             'value': {
                 'id': 'accent',
                 'target': {'group': 'fx'},
-                'special': {**special, 'pulse_beats': None, 'pattern': None},
+                'special_fx': {**special, 'pulse_beats': None, 'pattern': None},
             },
         }
     )
-    assert not continuous.special.HasField('pulse_beats')
-    assert not continuous.special.HasField('pattern')
+    assert not continuous.special_fx.HasField('pulse_beats')
+    assert not continuous.special_fx.HasField('pattern')
     with pytest.raises(ValueError, match='special'):
         protocol.build_command(
             {
                 'kind': 'set_override',
-                'value': {'id': 'accent', 'target': 'all', 'special': {'strobe_hz': 4.0}},
+                'value': {'id': 'accent', 'target': 'all', 'special_fx': {'strobe_hz': 4.0}},
             }
         )
 

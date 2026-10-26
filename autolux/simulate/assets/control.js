@@ -46,7 +46,7 @@
     // Mirrors static_fx_command; a segment trigger re-fires activeSlot.
     function fxCommand(trigger, target, energy, speed, pulse, axes, activeSlot) {
         if (trigger === 'static-fx-clear') {
-            return {action: 'static', kind: 'special_clear'};
+            return {action: 'static', kind: 'special_fx_clear'};
         }
         const slot = trigger.startsWith('static-fx-') && !trigger.match(/-(energy|speed|pulse)$/)
             ? trigger.slice('static-fx-'.length) : activeSlot;
@@ -55,7 +55,7 @@
         }
         return {
             action: 'static',
-            kind: 'special',
+            kind: 'special_fx',
             group: target,
             colour_slot: slot,
             energy: energy,

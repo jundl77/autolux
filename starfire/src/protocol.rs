@@ -7,7 +7,7 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Special,
+    AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, SpecialFx,
     Target, Transition,
 };
 
@@ -269,8 +269,8 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                     })
                     .collect::<Result<_>>()?,
             };
-            let special = value.special.as_ref().map(|special| {
-                Box::new(Special {
+            let special = value.special_fx.as_ref().map(|special| {
+                Box::new(SpecialFx {
                     colour_slot: special.colour_slot.clone(),
                     energy: f64::from(special.energy),
                     speed: f64::from(special.speed),
@@ -305,7 +305,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                         intensity_multiplier: None,
                         lifetime,
                         priority: value.priority,
-                        special,
+                        special_fx: special,
                     },
                 },
             )
