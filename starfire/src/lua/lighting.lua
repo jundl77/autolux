@@ -83,13 +83,26 @@ function sf.phrase_phase(ctx_or_beats, bars)
     return (ctx_or_beats / (bars * BEATS_PER_BAR)) % 1
 end
 
+local PULSE_GAIN_AT_ZERO_INTENSITY = 0.35
+local render_intensity = 1
+
+local function use_render_intensity(intensity)
+    assert(finite(intensity) and intensity >= 0 and intensity <= 1, "intensity must be within 0..1")
+    render_intensity = intensity
+end
+
+function sf.intensity_pulse_gain(intensity)
+    return sf.lerp(PULSE_GAIN_AT_ZERO_INTENSITY, 1, intensity)
+end
+
 function sf.on_beat(ctx_or_beats, width, period)
     assert(finite(width) and width > 0, "beat envelope width must be positive and finite")
     period = period or 1
     assert(finite(period) and period > 0, "beat envelope period must be positive and finite")
     if type(ctx_or_beats) == "table" then ctx_or_beats = ctx_or_beats.beat_position end
-    local remaining = math.max(0, 1 - (ctx_or_beats % period) / width)
-    return remaining * remaining
+    local decay_width = width * (2 - render_intensity)
+    local remaining = math.max(0, 1 - (ctx_or_beats % period) / decay_width)
+    return remaining * remaining * sf.intensity_pulse_gain(render_intensity)
 end
 
 local LEFT, RIGHT = -1, 1
@@ -178,4 +191,4 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
-return sf
+return sf, use_render_intensity

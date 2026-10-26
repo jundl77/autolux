@@ -1216,3 +1216,106 @@ fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
     near(rate(&mut engine, 1.0), 0.0);
     near(rate(&mut engine, 5.0), 0.0);
 }
+
+fn set_intensity(engine: &mut Engine, at: f64, level: f64) {
+    engine.apply(at, &Command::SetIntensity { level }).unwrap();
+}
+
+#[test]
+fn intensity_gates_strobes_below_the_threshold_and_scales_the_caps_above_it() {
+    let mut engine = engine(&[("blue", BLUE)]);
+    select(&mut engine, 0.0, "blue", Transition::Cut);
+    engine
+        .apply(0.0, &Command::SetStrobeMaxBurstSeconds { seconds: 2.0 })
+        .unwrap();
+    let rate = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz
+    };
+    set_intensity(&mut engine, 0.0, 0.29);
+    near(rate(&mut engine, 0.0), 0.0);
+    set_intensity(&mut engine, 1.0, 0.5);
+    near(rate(&mut engine, 1.0), 5.0);
+    near(rate(&mut engine, 1.9), 5.0);
+    near(rate(&mut engine, 2.0), 0.0);
+}
+
+#[test]
+fn full_intensity_leaves_strobes_at_the_operator_caps() {
+    let mut engine = engine(&[("blue", BLUE)]);
+    select(&mut engine, 0.0, "blue", Transition::Cut);
+    set_intensity(&mut engine, 0.0, 1.0);
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        8.0,
+    );
+}
+
+fn pan_after_snap(intensity: f64) -> Vec<f64> {
+    const FRAME_SECONDS: f64 = 1.0 / 40.0;
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    set_intensity(&mut engine, 0.0, intensity);
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .pan,
+        0.5,
+    );
+    set_override(
+        &mut engine,
+        0.0,
+        lighting_override(
+            "snap",
+            PropertyValues {
+                pan: Some(1.0),
+                tilt: Some(0.0),
+                ..Default::default()
+            },
+        ),
+    );
+    (1..=40)
+        .map(|frame| {
+            let state = &engine
+                .render_at(frame as f64 * FRAME_SECONDS)
+                .unwrap()
+                .fixture_properties_before_strobe["left"];
+            near(state.pan - 0.5, 0.5 - state.tilt);
+            state.pan
+        })
+        .collect()
+}
+
+#[test]
+fn a_snap_at_full_intensity_reaches_its_target_in_one_frame() {
+    assert!(pan_after_snap(1.0).iter().all(|pan| *pan == 1.0));
+}
+
+#[test]
+fn a_snap_at_low_intensity_glides_to_its_target_without_overshooting() {
+    let pans = pan_after_snap(0.3);
+    let frames_to_target = pans.iter().position(|pan| *pan == 1.0).unwrap() + 1;
+    assert!(frames_to_target > 5, "{pans:?}");
+    assert!(
+        pans.windows(2)
+            .all(|pair| pair[0] <= pair[1] && pair[1] <= 1.0)
+    );
+    assert!(pans[frames_to_target..].iter().all(|pan| *pan == 1.0));
+}
+
+#[test]
+fn intensity_outside_zero_to_one_is_rejected() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    for level in [-0.1, 1.1, f64::NAN] {
+        assert!(engine.apply(0.0, &Command::SetIntensity { level }).is_err());
+    }
+}

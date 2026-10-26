@@ -27,6 +27,7 @@ const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
 const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
+const RENDER_INTENSITY_SETTER: &str = "starfire_render_intensity_setter";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AutoloopInfo {
@@ -274,11 +275,12 @@ impl LuaAutoloop {
             string.set(name, Value::Nil)?;
         }
 
-        let api: Table = lua
+        let (api, use_render_intensity): (Table, Function) = lua
             .load(LIGHTING_API)
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
+        lua.set_named_registry_value(RENDER_INTENSITY_SETTER, use_render_intensity)?;
         let targets = rig.clone();
         api.set(
             "members",
@@ -321,6 +323,10 @@ impl LuaAutoloop {
                 .is_none_or(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
             "normalized RMS level must be finite and between zero and one"
         );
+        ensure!(
+            context.intensity.is_finite() && (0.0..=1.0).contains(&context.intensity),
+            "intensity must be finite and between zero and one"
+        );
         for value in [
             context.time_seconds,
             context.beat_position,
@@ -335,6 +341,10 @@ impl LuaAutoloop {
         }
         self.instruction_budget
             .store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
+        self.lua
+            .named_registry_value::<Function>(RENDER_INTENSITY_SETTER)?
+            .call::<()>(context.intensity)
+            .context("set render intensity")?;
         let values = self.lua.to_value_with(
             context,
             SerializeOptions::new().serialize_none_to_null(false),
