@@ -106,6 +106,11 @@ impl MusicalClock {
     /// forward to the next beat with the reported phase, never back: loops are pure
     /// functions of the position, so rewinding would replay or reverse their motion.
     /// A beat without a phase keeps plain counting, which preserves the last alignment.
+    ///
+    /// The first beat anchors at its bar phase, not its index: a loop selected before
+    /// it, or a renderer restarted mid-session, must not see elapsed beats jump by the
+    /// session's beat count. The index only measures gaps after that.
+    /// Beats per bar is fixed for the session; changing it would move bar_index back.
     pub fn set_beat(&mut self, time_seconds: f64, beat: BeatFact) -> Result<()> {
         ensure!(
             beat.bpm.is_finite() && beat.bpm > 0.0 && beat.bpm <= MAX_TEMPO_BPM,
@@ -126,11 +131,16 @@ impl MusicalClock {
                     beat.beat_index > last.beat_index,
                     "beat indices must increase"
                 );
+                ensure!(
+                    beat.beats_per_bar == self.beats_per_bar,
+                    "beats per bar is fixed for the session ({})",
+                    self.beats_per_bar
+                );
                 last.grid_beat
                     .checked_add(beat.beat_index - last.beat_index)
                     .context("musical clock overflow")?
             }
-            None => beat.beat_index,
+            None => 0,
         };
         let grid_beat = match beat.bar_phase {
             Some(phase) => {

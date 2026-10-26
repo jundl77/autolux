@@ -1257,6 +1257,20 @@ async def test_beats_carry_the_trackers_phase_and_count_and_leave_the_grid_to_st
     assert {beat['beats_per_bar'] for beat in beats} == {4}
 
 
+async def test_an_unpublished_beat_leaves_an_index_gap_and_the_next_beat_keeps_its_phase():
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    # No tempo measured yet: the beat is detected and counted but not published.
+    light.analyser.bpm = 0.0
+    await beat_at_phase(light, decoder, 3)
+    light.analyser.bpm = 120.0
+    await beat_at_phase(light, decoder, 0)
+    await beat_at_phase(light, decoder, 1)
+
+    beats = sent_beats(lighting)
+    assert [(beat['beat_index'], beat['bar_phase']) for beat in beats] == [(2, 0), (3, 1)]
+
+
 async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest_one_wins():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)

@@ -36,7 +36,7 @@ fn mixed_show() -> Replay {
     let anchor_count = (SHOW_DURATION_SECONDS / BEAT_ANCHOR_INTERVAL_SECONDS) as usize;
     for index in 0..=anchor_count {
         let at_seconds = index as f64 * BEAT_ANCHOR_INTERVAL_SECONDS;
-        let position_beats = at_seconds.min(TEMPO_CHANGE_SECONDS) * INITIAL_TEMPO_BPM
+        let grid_position = at_seconds.min(TEMPO_CHANGE_SECONDS) * INITIAL_TEMPO_BPM
             / SECONDS_PER_MINUTE
             + (at_seconds - TEMPO_CHANGE_SECONDS).max(0.0) * FINAL_TEMPO_BPM / SECONDS_PER_MINUTE;
         push(
@@ -44,7 +44,7 @@ fn mixed_show() -> Replay {
             // Anchors are 1.5 beats apart after the tempo change; the latest whole beat
             // is close enough for a throughput budget.
             Command::Beat {
-                beat_index: position_beats.floor() as u64,
+                beat_index: grid_position.floor() as u64,
                 bar_phase: None,
                 beats_per_bar: 4,
                 bpm: if at_seconds < TEMPO_CHANGE_SECONDS {

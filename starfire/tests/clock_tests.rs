@@ -23,9 +23,40 @@ fn clock_waits_for_beat_input_and_tracks_tempo_changes() {
     let mut clock = MusicalClock::default();
     assert_eq!(clock.sample_at(60.0).unwrap().beat_position, 0.0);
     clock.set_beat(2.0, counted(8, 120.0)).unwrap();
-    assert_eq!(clock.sample_at(5.0).unwrap().beat_position, 14.0);
+    assert_eq!(clock.sample_at(5.0).unwrap().beat_position, 6.0);
     clock.set_beat(5.0, counted(14, 60.0)).unwrap();
-    assert_eq!(clock.sample_at(7.0).unwrap().beat_position, 16.0);
+    assert_eq!(clock.sample_at(7.0).unwrap().beat_position, 8.0);
+}
+
+#[test]
+fn the_first_beat_anchors_at_its_bar_phase_not_its_index() {
+    for (bar_phase, expected) in [(None, 0.0), (Some(0), 0.0), (Some(3), 3.0)] {
+        let mut clock = MusicalClock::default();
+        let before = clock.sample_at(1.0).unwrap();
+        clock
+            .set_beat(
+                1.0,
+                BeatFact {
+                    bar_phase,
+                    ..counted(1, 120.0)
+                },
+            )
+            .unwrap();
+        let after = clock.sample_at(1.0).unwrap();
+        assert_eq!(after.beat_position, expected);
+        assert_eq!(after.elapsed_musical_beats, before.elapsed_musical_beats);
+    }
+}
+
+#[test]
+fn a_renderer_restarted_mid_session_does_not_jump_by_the_session_beat_count() {
+    let mut clock = MusicalClock::default();
+    clock.set_beat(0.0, phased(90_001, 1)).unwrap();
+    assert_eq!(clock.sample_at(0.0).unwrap().beat_position, 1.0);
+    clock.set_beat(0.5, phased(90_002, 2)).unwrap();
+    let sample = clock.sample_at(0.5).unwrap();
+    assert_eq!(sample.beat_position, 2.0);
+    assert_eq!(sample.elapsed_musical_beats, 1.0);
 }
 
 #[test]
@@ -80,36 +111,34 @@ fn every_received_beat_lands_on_its_phase_and_the_grid_never_moves_back() {
 fn unknown_phase_counts_beats_and_keeps_the_last_alignment() {
     let mut clock = MusicalClock::default();
     clock.set_beat(0.0, counted(5, 120.0)).unwrap();
-    assert_eq!(clock.sample_at(0.0).unwrap().beat_position, 5.0);
+    assert_eq!(clock.sample_at(0.0).unwrap().beat_position, 0.0);
     clock.set_beat(0.5, counted(6, 120.0)).unwrap();
-    assert_eq!(clock.sample_at(0.5).unwrap().beat_position, 6.0);
+    assert_eq!(clock.sample_at(0.5).unwrap().beat_position, 1.0);
     clock.set_beat(1.0, phased(7, 0)).unwrap();
-    assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 8.0);
-    // Three beats later (one dropped in transit) without a phase: still bar-aligned.
+    assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 4.0);
+    // Three beats later (two dropped in transit) without a phase: still bar-aligned.
     clock.set_beat(2.0, counted(10, 120.0)).unwrap();
-    assert_eq!(clock.sample_at(2.0).unwrap().beat_position, 11.0);
+    assert_eq!(clock.sample_at(2.0).unwrap().beat_position, 7.0);
 }
 
 #[test]
 fn bar_fields_are_continuous_and_follow_beats_per_bar() {
     let mut clock = MusicalClock::default();
     clock.set_beat(0.0, phased(6, 2)).unwrap();
-    let sample = clock.sample_at(0.25).unwrap();
+    clock.set_beat(0.5, phased(7, 3)).unwrap();
+    let sample = clock.sample_at(0.75).unwrap();
     assert_eq!(
         (sample.beat_position, sample.bar_phase, sample.bar_index),
-        (6.5, 2.5, 1)
+        (3.5, 3.5, 0)
     );
-    clock
-        .set_beat(
-            0.5,
-            BeatFact {
-                bar_phase: Some(1),
-                beats_per_bar: 3,
-                ..counted(7, 120.0)
-            },
-        )
-        .unwrap();
-    let edge = clock.sample_at(1.5).unwrap();
+    let waltz = |beat_index, bar_phase| BeatFact {
+        bar_phase: Some(bar_phase),
+        beats_per_bar: 3,
+        ..counted(beat_index, 120.0)
+    };
+    let mut clock = MusicalClock::default();
+    clock.set_beat(0.0, waltz(4, 1)).unwrap();
+    let edge = clock.sample_at(1.0).unwrap();
     assert_eq!(
         (
             edge.beat_position,
@@ -117,8 +146,22 @@ fn bar_fields_are_continuous_and_follow_beats_per_bar() {
             edge.bar_index,
             edge.beats_per_bar
         ),
-        (9.0, 0.0, 3, 3)
+        (3.0, 0.0, 1, 3)
     );
+}
+
+#[test]
+fn beats_per_bar_cannot_change_within_a_session() {
+    let mut clock = MusicalClock::default();
+    clock.set_beat(0.0, phased(1, 0)).unwrap();
+    let expected = clock.sample_at(0.5).unwrap();
+    let change = BeatFact {
+        beats_per_bar: 3,
+        ..phased(2, 1)
+    };
+    let error = clock.set_beat(0.5, change).unwrap_err();
+    assert!(error.to_string().contains("fixed for the session"));
+    assert_eq!(clock.sample_at(0.5).unwrap(), expected);
 }
 
 #[test]
@@ -162,13 +205,13 @@ fn sampling_cadence_cannot_change_integrated_animation_position() {
 fn measured_beat_can_correct_extrapolation_but_cannot_rewind_received_beats() {
     let mut clock = MusicalClock::default();
     clock.set_beat(0.0, counted(10, 120.0)).unwrap();
-    assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 12.0);
+    assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 2.0);
     clock.set_beat(1.0, counted(11, 120.0)).unwrap();
-    assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 11.0);
+    assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 1.0);
     for stale in [11, 10] {
         assert!(clock.set_beat(2.0, counted(stale, 120.0)).is_err());
     }
-    assert_eq!(clock.sample_at(2.0).unwrap().beat_position, 13.0);
+    assert_eq!(clock.sample_at(2.0).unwrap().beat_position, 3.0);
 }
 
 #[test]
