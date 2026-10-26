@@ -22,6 +22,7 @@ pub struct MusicalClock {
     tempo_bpm: f64,
     speed_multiplier: f64,
     last_received_beat: Option<f64>,
+    paused: bool,
 }
 
 impl Default for MusicalClock {
@@ -34,6 +35,7 @@ impl Default for MusicalClock {
             tempo_bpm: 0.0,
             speed_multiplier: 1.0,
             last_received_beat: None,
+            paused: false,
         }
     }
 }
@@ -45,8 +47,11 @@ impl MusicalClock {
             time_seconds >= self.anchor_seconds,
             "time precedes the musical clock anchor"
         );
-        let elapsed_beats =
-            (time_seconds - self.anchor_seconds) * self.tempo_bpm / SECONDS_PER_MINUTE;
+        let elapsed_beats = if self.paused {
+            0.0
+        } else {
+            (time_seconds - self.anchor_seconds) * self.tempo_bpm / SECONDS_PER_MINUTE
+        };
         let sample = ClockSample {
             beat_position: self.anchor_beat + elapsed_beats,
             elapsed_musical_beats: self.anchor_elapsed_musical_beats + elapsed_beats,
@@ -76,6 +81,12 @@ impl MusicalClock {
                 "beat anchors must not move backwards"
             );
         }
+        if self.paused {
+            // The held position must not move; after resume the next beat re-anchors
+            // phase, and since measured beats kept advancing that only moves forward.
+            self.last_received_beat = Some(beat);
+            return Ok(());
+        }
         let before = self.sample_at(time_seconds)?;
         self.anchor_seconds = time_seconds;
         self.anchor_beat = beat;
@@ -84,6 +95,21 @@ impl MusicalClock {
         self.anchor_animation_beats = before.animation_beats;
         self.tempo_bpm = bpm;
         self.last_received_beat = Some(beat);
+        Ok(())
+    }
+
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
+
+    /// Holds every musical position at `time_seconds`; resume continues from there.
+    pub fn set_paused(&mut self, time_seconds: f64, paused: bool) -> Result<()> {
+        let before = self.sample_at(time_seconds)?;
+        self.anchor_seconds = time_seconds;
+        self.anchor_beat = before.beat_position;
+        self.anchor_elapsed_musical_beats = before.elapsed_musical_beats;
+        self.anchor_animation_beats = before.animation_beats;
+        self.paused = paused;
         Ok(())
     }
 

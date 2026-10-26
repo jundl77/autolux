@@ -1011,3 +1011,203 @@ fn zero_master_fade_is_instant_and_invalid_fades_are_rejected() {
     }
     near(master_at(&mut engine, 0.0), 0.2);
 }
+
+fn paused(engine: &mut Engine, at: f64, paused: bool) {
+    engine.apply(at, &Command::SetPaused { paused }).unwrap();
+}
+
+#[test]
+fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() {
+    let mut engine = engine(&[("loop", LOOP)]);
+    select(&mut engine, 0.0, "loop", Transition::Cut);
+    paused(&mut engine, 1.0, true);
+    let held = engine.render_at(1.0).unwrap();
+    near(held.beat_position, 2.0);
+    // Beats keep arriving while paused; they must not move the held position.
+    engine
+        .apply(
+            2.0,
+            &Command::Beat {
+                position_beats: 4.0,
+                bpm: 120.0,
+            },
+        )
+        .unwrap();
+    let later = engine.render_at(3.0).unwrap();
+    near(later.beat_position, 2.0);
+    assert_eq!(
+        later.fixture_properties_before_strobe,
+        held.fixture_properties_before_strobe
+    );
+    assert_eq!(later.dmx_frames_by_universe, held.dmx_frames_by_universe);
+
+    paused(&mut engine, 3.0, false);
+    near(engine.render_at(3.5).unwrap().beat_position, 3.0);
+    // The first measured beat after resume re-anchors phase, forward only.
+    engine
+        .apply(
+            4.0,
+            &Command::Beat {
+                position_beats: 8.0,
+                bpm: 120.0,
+            },
+        )
+        .unwrap();
+    near(engine.render_at(4.0).unwrap().beat_position, 8.0);
+}
+
+#[test]
+fn pause_releases_effect_and_script_strobes_and_they_stay_released() {
+    let mut engine = engine(&[("red", RED)]);
+    select(&mut engine, 0.0, "red", Transition::Cut);
+    set_override(
+        &mut engine,
+        0.0,
+        lighting_override(
+            "accent",
+            PropertyValues {
+                strobe_hz: Some(10.0),
+                ..Default::default()
+            },
+        ),
+    );
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        10.0,
+    );
+    paused(&mut engine, 0.5, true);
+    near(
+        engine
+            .render_at(0.5)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        0.0,
+    );
+    paused(&mut engine, 1.0, false);
+    // The accent is gone; the script's own strobe returns with the show.
+    near(
+        engine
+            .render_at(1.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        2.0,
+    );
+}
+
+#[test]
+fn selection_without_a_transition_uses_the_renderer_default_crossfade() {
+    let mut engine = engine(&[("red", RED), ("blue", BLUE)]);
+    select(&mut engine, 0.0, "red", Transition::RendererDefault);
+    // Unset, the default cuts, as before the parameter existed.
+    select(&mut engine, 1.0, "blue", Transition::RendererDefault);
+    near(
+        engine
+            .render_at(1.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.8,
+    );
+    engine
+        .apply(1.0, &Command::SetDefaultCrossfadeBeats { beats: 2.0 })
+        .unwrap();
+    select(&mut engine, 1.0, "red", Transition::RendererDefault);
+    near(
+        engine
+            .render_at(1.5)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.5,
+    );
+    select(&mut engine, 2.0, "blue", Transition::Cut);
+    near(
+        engine
+            .render_at(2.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.8,
+    );
+}
+
+#[test]
+fn strobe_caps_clamp_the_rate_and_release_a_burst_until_its_strobe_stops() {
+    let mut engine = engine(&[("blue", BLUE), ("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "blue", Transition::Cut);
+    engine
+        .apply(0.0, &Command::SetStrobeMaxRateHz { hz: 4.0 })
+        .unwrap();
+    engine
+        .apply(0.0, &Command::SetStrobeMaxBurstSeconds { seconds: 1.0 })
+        .unwrap();
+    let rate = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz
+    };
+    near(rate(&mut engine, 0.0), 4.0);
+    near(rate(&mut engine, 0.9), 4.0);
+    near(rate(&mut engine, 1.0), 0.0);
+    near(rate(&mut engine, 5.0), 0.0);
+    select(&mut engine, 5.0, "constant", Transition::Cut);
+    near(rate(&mut engine, 5.0), 0.0);
+    select(&mut engine, 6.0, "blue", Transition::Cut);
+    near(rate(&mut engine, 6.0), 4.0);
+}
+
+#[test]
+fn renderer_settings_reject_values_outside_their_ranges() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    for invalid in [
+        Command::SetDefaultCrossfadeBeats { beats: -1.0 },
+        Command::SetDefaultCrossfadeBeats { beats: f64::NAN },
+        Command::SetStrobeMaxRateHz { hz: -0.1 },
+        Command::SetStrobeMaxRateHz { hz: 10.5 },
+        Command::SetStrobeMaxBurstSeconds { seconds: 0.0 },
+        Command::SetStrobeMaxBurstSeconds { seconds: 61.0 },
+        Command::SetStrobeMaxBurstSeconds {
+            seconds: f64::INFINITY,
+        },
+    ] {
+        assert!(engine.apply(0.0, &invalid).is_err(), "{invalid:?}");
+    }
+}
+
+#[test]
+fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    engine
+        .apply(0.0, &Command::SetStrobeMaxBurstSeconds { seconds: 1.0 })
+        .unwrap();
+    let mut accent = lighting_override(
+        "accent",
+        PropertyValues {
+            strobe_hz: Some(8.0),
+            ..Default::default()
+        },
+    );
+    accent.lifetime = OverrideLifetime::Seconds {
+        duration_seconds: 10.0,
+    };
+    set_override(&mut engine, 0.0, accent);
+    let rate = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz
+    };
+    near(rate(&mut engine, 0.0), 8.0);
+    near(rate(&mut engine, 1.0), 0.0);
+    near(rate(&mut engine, 5.0), 0.0);
+}

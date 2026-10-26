@@ -30,6 +30,7 @@ def _app(enable_ui: bool, event_buffer):
     app._stop_requested = False
     app.health_check = None
     app.control = MagicMock()
+    app.light_engine = MagicMock()
     return app
 
 
