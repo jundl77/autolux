@@ -1491,7 +1491,6 @@ class _Show:
         self.lighting = RecordingStarfireClient(clock=self.clock)
         self.queue = DelayedCommandQueue(14.0, clock=self.clock)
         self.chain, self.decoder = FakeChain(), FakeDecoder()
-        self.monitor_silenced = 0
         self.events = EventBuffer(window_sec=float('inf'), clock=self.clock, look_ahead_sec=14.0)
         self.events.start()
         self.light = LightEngine(
@@ -1503,16 +1502,12 @@ class _Show:
             section_chain=self.chain,
             section_decoder=self.decoder,
             clock=self.clock,
-            silence_monitor=self._silence_monitor,
         )
         self.analyser = MusicAnalyser(SAMPLE_RATE, BUFFER_SIZE, self.light, clock=self.clock)
         self.analyser._rhythm = _MetronomeRhythm()
         self.light.set_analyser(self.analyser)
         self._buffer_size = BUFFER_SIZE
         self._next_tick = 0.1
-
-    def _silence_monitor(self):
-        self.monitor_silenced += 1
 
     async def play(self, seconds: float, level: float) -> None:
         step = self._buffer_size / SAMPLE_RATE
@@ -1534,24 +1529,37 @@ def _selections(commands):
     return [(c['bank'], c['autoloop']) for c in commands if c['kind'] == 'select']
 
 
-async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_at_once():
+def _standby_selects(show, since=0):
+    return [
+        event['at_seconds']
+        for event in show.lighting.events[since:]
+        if event['command']['kind'] == 'select' and event['command']['autoloop'] == 'warm_white'
+    ]
+
+
+async def test_two_seconds_of_digital_silence_keep_the_buffered_tail_and_park_the_rig_after_it():
     show = _Show()
     await show.play(20.0, 0.2)
     assert _selections(show.commands()) == [('atmospheric', 'cold_breathe')]
     assert show.queue.pending > 0, 'beats for the buffered audio are still due'
     stopped = len(show.lighting.events)
+    silence_started = show.clock.monotonic()
 
-    await show.play(1.9, 0.0)
-    assert not show.light.standby
-    assert {'kind': 'discard_delayed_audio'} not in show.commands(stopped)
-
-    await show.play(0.2, 0.0)
+    await show.play(2.1, 0.0)
     assert show.light.standby
+    assert {'kind': 'discard_delayed_audio'} not in show.commands(stopped)
+    assert show.queue.pending > 0, 'the tail of the song still plays in the room'
+    assert _standby_selects(show, stopped) == []
+
+    await show.play(11.5, 0.0)
+    assert any(c['kind'] == 'beat' for c in show.commands(stopped)), 'the tail kept its beats'
+    assert _standby_selects(show, stopped) == []
+    await show.play(1.0, 0.0)
+    [parked_at] = _standby_selects(show, stopped)
+    assert parked_at == pytest.approx(silence_started + 14.0, abs=0.5)
     standby = show.commands(stopped)
-    assert standby.count({'kind': 'discard_delayed_audio'}) == 1
-    assert show.monitor_silenced == 1
-    assert show.queue.pending == 0, 'the delayed queue must be purged'
-    select = next(c for c in standby if c['kind'] == 'select')
+    assert {'kind': 'discard_delayed_audio'} not in standby
+    select = next(c for c in standby if c['kind'] == 'select' and c['autoloop'] == 'warm_white')
     assert (select['bank'], select['autoloop']) == ('standby', 'warm_white')
     assert select['transition'] == {
         'kind': 'crossfade',
@@ -1575,7 +1583,25 @@ async def test_a_short_dropout_keeps_the_show_and_its_buffered_audio():
     assert not show.light.standby
     assert {'kind': 'discard_delayed_audio'} not in show.commands(before)
     assert ('standby', 'warm_white') not in _selections(show.commands(before))
-    assert show.monitor_silenced == 0
+
+
+async def test_audio_returning_inside_the_delay_needs_no_rearm_and_keeps_both_tails():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    before = len(show.lighting.events)
+    await show.play(2.5, 0.0)
+    assert show.light.standby
+    await show.play(20.0, 0.2)
+    assert not show.light.standby
+    commands = show.commands(before)
+    assert {'kind': 'discard_delayed_audio'} not in commands
+    assert _selections(commands) == [('standby', 'warm_white'), ('atmospheric', 'cold_breathe')]
+    standby_at, atmospheric_at = (
+        event['at_seconds']
+        for event in show.lighting.events[before:]
+        if event['command']['kind'] == 'select'
+    )
+    assert atmospheric_at - standby_at == pytest.approx(2.5, abs=0.4), 'the gap at its real length'
 
 
 async def test_returning_signal_restarts_the_show_from_scratch_after_one_playback_delay():
@@ -1594,9 +1620,12 @@ async def test_returning_signal_restarts_the_show_from_scratch_after_one_playbac
     assert show.light._pending_intents == [] and show.light._held_intent is None
 
     await show.play(12.5, 0.2)
-    assert _selections(show.commands(parked)) == []
+    assert _selections(show.commands(parked)) == [('standby', 'warm_white')]
     await show.play(1.5, 0.2)
-    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    assert _selections(show.commands(parked)) == [
+        ('standby', 'warm_white'),
+        ('atmospheric', 'cold_breathe'),
+    ]
     await show.play(3.0, 0.2)
     assert any(c['kind'] == 'beat' for c in show.commands(parked))
     indices = [c['beat_index'] for c in show.commands() if c['kind'] == 'beat']
@@ -1611,6 +1640,8 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
     show.light.pause()
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
     await show.play(3.0, 0.0)
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS), 'the tail still plays'
+    await show.play(11.5, 0.0)
     assert masters(show.lighting)[-1] == pytest.approx(1.0)
     parked = len(show.lighting.events)
 
@@ -1634,6 +1665,7 @@ async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_clea
     assert show.light._room_quiet and show.light._source_quiet
     await show.play(2.1, 0.0)
     assert show.light.standby
+    await show.play(12.5, 0.0)
     assert masters(show.lighting)[-1] == pytest.approx(1.0)
     await show.analyser.analyse(np.full(256, 0.2, dtype=np.float32))
     assert not show.light.standby
@@ -1657,6 +1689,8 @@ async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior(
     before = show.events.snapshot()
     assert before['intent'] == 'atmospheric' and before['decoder']['posterior'] is not None
     await show.play(2.1, 0.0)
+    assert show.events.snapshot()['decoder']['posterior'] is None
+    await show.play(12.5, 0.0)
     snapshot = show.events.snapshot()
     assert snapshot['intent'] == 'standby'
     assert snapshot['decoder']['committed_label'] is None

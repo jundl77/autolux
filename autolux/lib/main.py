@@ -266,7 +266,6 @@ class AutoluxController:
             section_decoder=None if self.section is None else self.section.decoder,
             watchdog=self.drift_watchdog,
             settings=lambda: self.control.settings,
-            silence_monitor=self._monitor.silence,
             static_rig=static_rig,
         )
         self.control.publish(self.light_engine)
