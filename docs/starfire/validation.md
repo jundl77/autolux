@@ -67,7 +67,7 @@ checked full-DMX digest and behavior assertions.
 
 GDTF interpretation remains a validated subset. Complete GDTF/MVR asset
 preservation and replacing custom rig/profile JSON remain pending.
-The 64 KiB Login limit includes fixture XML and Lua sources. XML carriage
+The 4 MiB Login limit includes fixture XML and Lua sources. XML carriage
 alone is not full renderer conformance.
 
 ```powershell

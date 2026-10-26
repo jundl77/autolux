@@ -123,7 +123,9 @@ impl Default for RenderContext {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Transition {
+    /// The renderer's DEFAULT_CROSSFADE_BEATS, resolved when the command applies.
     #[default]
+    RendererDefault,
     Cut,
     Crossfade {
         duration_beats: f64,
@@ -189,6 +191,18 @@ pub enum Command {
     },
     SetBlackout {
         enabled: bool,
+    },
+    SetPaused {
+        paused: bool,
+    },
+    SetDefaultCrossfadeBeats {
+        beats: f64,
+    },
+    SetStrobeMaxRateHz {
+        hz: f64,
+    },
+    SetStrobeMaxBurstSeconds {
+        seconds: f64,
     },
     Stop,
 }

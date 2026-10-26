@@ -106,11 +106,12 @@ def _intent_at(intents: list, t: float) -> str | None:
 
 
 def _effects_match_intents(report: dict) -> bool:
-    from autolux.lib.engine.effect_definitions import LightIntent, AUTOLOOP_BY_LIGHT_INTENT
+    from autolux.lib.engine.effect_definitions import LightIntent
+    from autolux.lighting.autoloop_catalogue import discover_autoloops
 
     pools = {
-        intent.value: {f'{bank}/{autoloop}'}
-        for intent, (bank, autoloop) in AUTOLOOP_BY_LIGHT_INTENT.items()
+        intent.value: {f'{bank}/{autoloop}' for bank, autoloop in loops}
+        for intent, loops in discover_autoloops().items()
     }
     pools[LightIntent.DROP.value].add('drop_arrival')
     return all(

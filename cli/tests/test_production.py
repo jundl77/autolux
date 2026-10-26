@@ -163,7 +163,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     from cli import main, remote_runtime, windows_runtime, starfire_runtime, health_monitor
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
-    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
+    from autolux.lighting.autoloop_catalogue import required_autoloops
     from types import SimpleNamespace
     import json
 
@@ -201,7 +201,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         universes = [1] if failure == 'universe_mismatch' else [0]
         checked_autoloops = [
             {'bank': bank, 'autoloop': autoloop}
-            for bank, autoloop in AUTOLOOP_BY_LIGHT_INTENT.values()
+            for bank, autoloop in sorted(required_autoloops(args.autoloops))
         ]
         if failure == 'missing_autoloop':
             checked_autoloops.pop()

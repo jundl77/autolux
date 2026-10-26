@@ -11,8 +11,8 @@ from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
-    AUTOLOOP_BY_LIGHT_INTENT,
     BEAT_LOSS_SECONDS,
+    PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
     LightIntent,
 )
@@ -1279,7 +1279,7 @@ async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest
     clock.advance(0.2)
     await queue.drain()
     [selected] = selections(lighting)
-    assert selected['command']['autoloop'] == AUTOLOOP_BY_LIGHT_INTENT[LightIntent.DROP][1]
+    assert selected['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
     assert selected['at_seconds'] == pytest.approx(downbeat_reaches_room, abs=0.15)
 
 
@@ -1293,7 +1293,7 @@ async def test_a_held_intent_is_released_when_the_rooms_beats_stop():
     clock.advance(3.0)
     await light.on_100ms_callback()
     assert [e['command']['autoloop'] for e in selections(lighting)] == [
-        AUTOLOOP_BY_LIGHT_INTENT[LightIntent.BREAKDOWN][1]
+        PREFERRED_AUTOLOOPS[LightIntent.BREAKDOWN]
     ]
 
 
@@ -1388,10 +1388,7 @@ async def test_play_applies_the_current_intent_on_the_next_downbeat_and_restores
     await beat_at_phase(light, decoder, 2)
     assert len(selections(lighting)) == 1, 'the change waits for the downbeat'
     await beat_at_phase(light, decoder, 0)
-    assert (
-        selections(lighting)[-1]['command']['autoloop']
-        == (AUTOLOOP_BY_LIGHT_INTENT[LightIntent.DROP][1])
-    )
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
 
 
 async def test_master_scales_the_quiet_dim_and_bypasses_the_playback_delay():
@@ -1445,3 +1442,92 @@ def test_invalid_show_settings_are_refused(bad):
 
     with pytest.raises(ValueError):
         ShowSettings.from_dict(bad)
+
+
+def sent(lighting, *kinds):
+    return [
+        (e['at_seconds'], e['command']) for e in lighting.events if e['command']['kind'] in kinds
+    ]
+
+
+async def test_an_operator_master_is_sent_at_once_and_a_queued_quiet_dim_uses_it():
+    light, queue, clock, lighting = engine()
+    light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
+    await tick(light, clock, 0.1)  # the room hears this quiet 14 s from now
+    clock.advance(1.0)
+    changed_at = clock.monotonic()
+    light.set_master_level(0.5)
+    assert sent(lighting, 'set_master') == [
+        (changed_at, {'kind': 'set_master', 'intensity': 0.5, 'fade_seconds': 0.1})
+    ]
+
+    clock.advance(14.0)
+    await queue.drain()
+    at, dim = sent(lighting, 'set_master')[-1]
+    assert at > changed_at + 13.0
+    assert dim == {
+        'kind': 'set_master',
+        'intensity': pytest.approx(0.5 * QUIET_BRIGHTNESS),
+        'fade_seconds': 1.0,
+    }
+
+
+async def test_pause_and_play_reach_starfire_at_once_and_only_play_follows_the_model():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    paused_at = clock.monotonic()
+    light.pause()
+    assert sent(lighting, 'set_paused', 'set_master') == [
+        (paused_at, {'kind': 'set_paused', 'paused': True}),
+        (paused_at, {'kind': 'set_master', 'intensity': QUIET_BRIGHTNESS, 'fade_seconds': 1.0}),
+    ]
+    clock.advance(1.0)
+    await beat_at_phase(light, decoder, 0, decision='drop')
+    assert len(selections(lighting)) == 1, 'a paused show must not follow the model'
+
+    clock.advance(4.0)
+    played_at = clock.monotonic()
+    await light.resume()
+    assert sent(lighting, 'set_paused', 'set_master')[-2:] == [
+        (played_at, {'kind': 'set_paused', 'paused': False}),
+        (played_at, {'kind': 'set_master', 'intensity': 1.0, 'fade_seconds': 1.0}),
+    ]
+    await beat_at_phase(light, decoder, 0)
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+
+
+async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    light, _, clock, lighting = engine()
+    light._settings = lambda: control.settings
+    control.start(light)
+    renderer = ('set_paused', 'set_default_crossfade_beats', 'set_strobe_max_rate_hz')
+    renderer += ('set_strobe_max_burst_seconds',)
+    assert [command for _, command in sent(lighting, *renderer)] == [
+        {'kind': 'set_paused', 'paused': False},
+        {'kind': 'set_default_crossfade_beats', 'beats': 1.0},
+        {'kind': 'set_strobe_max_rate_hz', 'hz': 8.0},
+        {'kind': 'set_strobe_max_burst_seconds', 'seconds': 4.0},
+    ]
+
+    lighting.events.clear()
+    changed_at = clock.monotonic()
+    control.commands.put_nowait(
+        {
+            'action': 'settings',
+            'settings': ShowSettings(
+                crossfade_beats=4, strobe_max_rate_hz=5, strobe_max_burst_seconds=2
+            ),
+        }
+    )
+    await control.apply_pending(light)
+    assert sent(lighting, *renderer) == [
+        (changed_at, {'kind': 'set_paused', 'paused': False}),
+        (changed_at, {'kind': 'set_default_crossfade_beats', 'beats': 4.0}),
+        (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
+        (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
+    ]

@@ -109,6 +109,39 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
     }
 }
 
+fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
+    Operation::Login(wire::Login {
+        command_id: 1,
+        autoloops: (0..count)
+            .map(|index| wire::AutoloopDefinition {
+                autoloop_id: format!("atmospheric/loop_{index}"),
+                bank: "atmospheric".to_owned(),
+                lua_source: "-".repeat(source_bytes),
+            })
+            .collect(),
+        ..Default::default()
+    })
+}
+
+// Regression: a ~40-script library outgrew the old 64 KiB frame at live start.
+#[test]
+fn login_carrying_a_large_autoloop_library_round_trips() {
+    let login = login_with_sources(16, 64 * 1024);
+    let bytes = encoded(login.clone());
+    assert!(bytes.len() > 1024 * 1024);
+    assert_eq!(read_control(&mut Cursor::new(bytes)).unwrap(), Some(login));
+}
+
+#[test]
+fn login_over_the_message_limit_is_rejected_on_both_ends() {
+    let oversized = login_with_sources(MAX_MESSAGE_BYTES / (64 * 1024) + 1, 64 * 1024);
+    assert!(oversized.write(&mut Vec::new()).is_err());
+    // The length prefix alone must fail before the payload buffer is allocated.
+    let mut header = vec![wire::MessageType::Login as u8];
+    header.extend(((MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes());
+    assert!(read_control(&mut Cursor::new(header)).is_err());
+}
+
 #[test]
 fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
     let message = encoded(play("atmospheric", "cold_breathe"));
@@ -410,4 +443,81 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         }
         assert_eq!(engine.render_at(frame.time_seconds).unwrap(), frame);
     }
+}
+
+#[test]
+fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
+    use wire::{ParameterType as Kind, parameter::Value};
+    let mut engine = engine();
+    for operation in [
+        parameter(Kind::Paused, Value::Boolean(true)),
+        parameter(Kind::Paused, Value::Boolean(false)),
+        parameter(Kind::DefaultCrossfadeBeats, Value::Number(2.0)),
+        parameter(Kind::StrobeMaxRateHz, Value::Number(6.0)),
+        parameter(Kind::StrobeMaxBurstSeconds, Value::Number(3.0)),
+    ] {
+        assert_eq!(
+            read_control(&mut Cursor::new(encoded(operation.clone()))).unwrap(),
+            Some(operation.clone())
+        );
+        apply_command(&mut engine, 0.0, &operation).unwrap();
+    }
+    for invalid in [
+        parameter(Kind::Paused, Value::Number(1.0)),
+        parameter(Kind::DefaultCrossfadeBeats, Value::Boolean(true)),
+        faded(Kind::StrobeMaxRateHz, 6.0, 1.0),
+        Operation::SetParameter(wire::SetParameter {
+            command_id: 1,
+            parameter: Some(wire::Parameter {
+                r#type: Kind::Paused as i32,
+                value: Some(Value::Boolean(true)),
+                fade_seconds: 1.0,
+            }),
+        }),
+    ] {
+        assert!(apply_command(&mut engine, 0.0, &invalid).is_err());
+    }
+}
+
+#[test]
+fn an_omitted_transition_uses_the_default_and_an_empty_one_cuts() {
+    use wire::{ParameterType as Kind, parameter::Value};
+    let mut engine = engine();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(
+        &mut engine,
+        0.0,
+        &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
+    )
+    .unwrap();
+    let before = engine.render_at(0.0).unwrap();
+    let cut = Operation::PlayAutoloop(wire::PlayAutoloop {
+        command_id: 1,
+        autoloop_id: "drop/kick".into(),
+        transition: Some(wire::play_autoloop::Transition::default()),
+    });
+    let mut cutting = engine;
+    apply_command(&mut cutting, 0.0, &cut).unwrap();
+    let mut defaulted = self::engine();
+    apply_command(&mut defaulted, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(
+        &mut defaulted,
+        0.0,
+        &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
+    )
+    .unwrap();
+    apply_command(&mut defaulted, 0.0, &play("drop", "kick")).unwrap();
+    // At the first instant a crossfade still shows the outgoing look; a cut does not.
+    let faded = defaulted.render_at(0.0).unwrap();
+    assert_eq!(
+        faded.fixture_properties_before_strobe,
+        before.fixture_properties_before_strobe
+    );
+    assert_ne!(
+        cutting
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe,
+        before.fixture_properties_before_strobe
+    );
 }

@@ -141,6 +141,10 @@ def test_incomplete_and_oversized_events_are_rejected(payload):
         ('set_speed', 'multiplier', wire.ANIMATION_SPEED, 'number', 0.0),
         ('set_blackout', 'enabled', wire.OUTPUT_BLACKOUT, 'boolean', False),
         ('set_normalized_rms_level', 'level', wire.AUDIO_RMS_NORMALIZED, 'number', 0.0),
+        ('set_paused', 'paused', wire.PAUSED, 'boolean', True),
+        ('set_default_crossfade_beats', 'beats', wire.DEFAULT_CROSSFADE_BEATS, 'number', 2.0),
+        ('set_strobe_max_rate_hz', 'hz', wire.STROBE_MAX_RATE_HZ, 'number', 6.0),
+        ('set_strobe_max_burst_seconds', 'seconds', wire.STROBE_MAX_BURST_SECONDS, 'number', 3.0),
     ],
 )
 def test_controls_use_typed_parameters(kind, field, parameter, value_type, value):
@@ -668,19 +672,66 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
 
 
 def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
-    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
+    from autolux.lib.engine.effect_definitions import PREFERRED_AUTOLOOPS, LightIntent
 
     root = Path(__file__).resolve().parents[2]
     binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
-    for intent, (bank, autoloop) in AUTOLOOP_BY_LIGHT_INTENT.items():
+    for intent, autoloop in PREFERRED_AUTOLOOPS.items():
         if intent == LightIntent.DROP:
             continue
-        directory = tmp_path / bank
+        directory = tmp_path / intent.value
         directory.mkdir()
         (directory / f'{autoloop}.lua').write_text(
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
         starfire_runtime.validate_starfire(binary, root / 'rigs/room.mvr', tmp_path)
+
+
+def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    for bank, names in {
+        'atmospheric': ('cold_breathe', 'amber_drift', 'pixel_rain'),
+        'breakdown': ('wide_space',),
+        'buildup': ('ramp',),
+        'drop': ('kick', 'slam'),
+    }.items():
+        (tmp_path / bank).mkdir()
+        for name in names:
+            (tmp_path / bank / f'{name}.lua').write_text('return {}')
+    # Starfire reports only the original four, as if it skipped the new files.
+    checked = [
+        {'bank': bank, 'autoloop': name}
+        for bank, name in [
+            ('atmospheric', 'cold_breathe'),
+            ('breakdown', 'wide_space'),
+            ('buildup', 'ramp'),
+            ('drop', 'kick'),
+        ]
+    ]
+    report = json.dumps({'universes': [0], 'checked_autoloops': checked})
+    binary = tmp_path / 'starfire.exe'
+    binary.touch()
+    monkeypatch.setattr(
+        starfire_runtime.subprocess,
+        'run',
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
+        'drop/slam$',
+    ):
+        starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
+
+
+def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():
+    default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'ramp'})
+    assert not default.HasField('transition')
+    cut = protocol.build_command(
+        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}
+    )
+    assert cut.HasField('transition') and not cut.transition.HasField('crossfade_beats')

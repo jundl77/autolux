@@ -7,7 +7,9 @@ from google.protobuf.message import Message
 
 from proto.starfire import starfire_pb2 as wire
 
-MAX_MESSAGE_BYTES = 64 * 1024
+# Contract value from the frame comment in proto/starfire/starfire.proto; Login with
+# the whole Lua library sets the size, and the renderer echoes it in LoginReply.
+MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
 FRAME_HEADER = struct.Struct('!BI')
@@ -32,6 +34,18 @@ MESSAGE_TYPE_BY_CLASS = {
 }
 
 
+PARAMETERS = {
+    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
+    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
+    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
+    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
+    'set_paused': (wire.PAUSED, 'paused', 'boolean'),
+    'set_default_crossfade_beats': (wire.DEFAULT_CROSSFADE_BEATS, 'beats', 'number'),
+    'set_strobe_max_rate_hz': (wire.STROBE_MAX_RATE_HZ, 'hz', 'number'),
+    'set_strobe_max_burst_seconds': (wire.STROBE_MAX_BURST_SECONDS, 'seconds', 'number'),
+}
+
+
 def build_command(command: dict | Message) -> Message:
     """Copy a generated command, or adapt the application's replay command shape."""
     if isinstance(command, Message):
@@ -53,19 +67,15 @@ def build_command(command: dict | Message) -> Message:
                     **value,
                 )
             elif kind == 'select':
-                transition = value.pop('transition', {'kind': 'cut'})
+                # Absent, Starfire applies its DEFAULT_CROSSFADE_BEATS.
+                if 'transition' in value:
+                    value['transition'] = _transition(value['transition'])
                 message = wire.PlayAutoloop(
                     autoloop_id=f'{value.pop("bank")}/{value.pop("autoloop")}',
-                    transition=_transition(transition),
                     **value,
                 )
-            elif kind in ('set_master', 'set_speed', 'set_blackout', 'set_normalized_rms_level'):
-                parameter, field, value_type = {
-                    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
-                    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
-                    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
-                    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
-                }[kind]
+            elif kind in PARAMETERS:
+                parameter, field, value_type = PARAMETERS[kind]
                 setting = wire.Parameter(type=parameter, **{value_type: value.pop(field)})
                 if kind == 'set_master':
                     setting.fade_seconds = value.pop('fade_seconds', 0.0)

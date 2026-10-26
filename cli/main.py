@@ -27,6 +27,7 @@ async def run_cmd(args: argparse.Namespace):
     from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
     from cli.starfire import ROOT
     from autolux.lib.clients.starfire_client import StarfireClient
+    from autolux.lighting.autoloop_catalogue import discover_autoloops
     import uuid
 
     input_device_index = int(args.input_device) if args.input_device is not None else None
@@ -48,6 +49,7 @@ async def run_cmd(args: argparse.Namespace):
             ui_port=args.ui_port,
             report_path=args.report,
             fixture_setup=fixture_setup(args),
+            autoloops=discover_autoloops(args.autoloops),
         )
         global_app.health_check = renderer.check_health
         try:

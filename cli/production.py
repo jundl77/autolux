@@ -305,6 +305,7 @@ async def _run_session(args, *, checking=False):
             renderer.send_command(command)
 
         from autolux.lib.clients.starfire_client import StarfireClient
+        from autolux.lighting.autoloop_catalogue import discover_autoloops
 
         logging.getLogger(__name__).info('[prod] preparing analysis models before starting audio')
         app = main.AutoluxController(
@@ -315,6 +316,7 @@ async def _run_session(args, *, checking=False):
             report_path=args.report,
             enable_monitoring=True,
             fixture_setup=fixture_setup(args),
+            autoloops=discover_autoloops(args.autoloops),
         )
         with ExitStack() as stack:
             stack.enter_context(remote)

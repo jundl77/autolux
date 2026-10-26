@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
-    AUTOLOOP_BY_LIGHT_INTENT,
+    DEFAULT_AUTOLOOPS,
     STROBE_BURST_BEATS,
-    STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
+    AutoloopTable,
     LightIntent,
     ShowSettings,
     transition_for,
@@ -21,13 +21,13 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DROP_STROBE_HZ = STROBE_RATE_HZ
 DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 
 
-def strobe_burst_seconds(bpm: float | None, burst_seconds: float) -> float:
-    duration = min(burst_seconds, STROBE_MAX_BURST_SECONDS)
+def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
+    # Kept inside Starfire's cap so the accent ends on its own timer, not on the guard.
+    duration = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
     return duration
@@ -40,6 +40,7 @@ class EffectController:
         event_buffer: EventBuffer | None = None,
         clock: Clock = SYSTEM_CLOCK,
         settings: Callable[[], ShowSettings] = ShowSettings,
+        autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
@@ -47,16 +48,40 @@ class EffectController:
         # Read at use so a dashboard edit applies to the next change.
         self._settings = settings
         self._last_strobe_started_at: float | None = None
+        self._autoloops = autoloops
+        # Cursors live for the whole session, so every look of an intent plays
+        # once before any repeats; round-robin keeps replays deterministic.
+        self._cursors = dict.fromkeys(autoloops, 0)
+        self._entered: tuple[LightIntent, int] | None = None
+
+    def _entry_index(self, intent: LightIntent) -> int:
+        # Re-sending the current intent (resume, restart after stop) keeps its
+        # look; only a change of intent moves on to the next one.
+        if self._entered is not None and self._entered[0] == intent:
+            return self._entered[1]
+        index = self._cursors[intent] % len(self._autoloops[intent])
+        self._cursors[intent] = index + 1
+        self._entered = intent, index
+        return index
 
     async def change_effect(self, intent: LightIntent, bpm: float | None = None) -> None:
-        bank, autoloop = AUTOLOOP_BY_LIGHT_INTENT[intent]
+        loops = self._autoloops[intent]
+        index = self._entry_index(intent)
+        bank, autoloop = loops[index]
         if not self.lighting_client.select_autoloop(
-            bank, autoloop, transition=transition_for(intent, self._settings())
+            bank, autoloop, transition=transition_for(intent)
         ):
             return
         if self.event_buffer:
             self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
-        LOGGER.info('[lighting] intent=%s | autoloop=%s/%s', intent.name, bank, autoloop)
+        LOGGER.info(
+            '[lighting] intent=%s | autoloop=%s/%s (%d of %d)',
+            intent.name,
+            bank,
+            autoloop,
+            index + 1,
+            len(loops),
+        )
 
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
@@ -74,12 +99,12 @@ class EffectController:
             )
             return
         self._last_strobe_started_at = now
-        duration = strobe_burst_seconds(bpm, settings.strobe_burst_seconds)
+        duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
             {
                 'id': DROP_ACCENT_ID,
                 'target': 'all',
-                'values': {'strobe_hz': DROP_STROBE_HZ},
+                'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
                 'priority': DROP_ACCENT_PRIORITY,
                 'lifetime': {'kind': 'seconds', 'duration_seconds': duration},
             }

@@ -2,18 +2,21 @@ import argparse
 import http.client
 import json
 import logging
+import re
 import threading
 import time
 from statistics import median
 
 import dash
 import plotly.graph_objects as go
-from dash import Input, Output, dcc, html
+from dash import Input, Output, State, dcc, html
 
+from autolux.lib.engine.effect_definitions import SHOW_SETTING_RANGES
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
+    CONTROL_PATH,
     DASHBOARD_BIND_ADDRESS,
     DASHBOARD_MDNS_HOSTNAME,
     DEFAULT_DASHBOARD_PORT,
@@ -516,6 +519,163 @@ def _build_show_overview(snapshot: dict) -> list:
     ]
 
 
+SETTING_LABELS = {
+    'drop_strobe_cooldown_seconds': 'Drop strobe cooldown (s)',
+    'strobe_burst_seconds': 'Drop strobe burst (s)',
+    'crossfade_beats': 'Crossfade (beats)',
+    'quiet_brightness': 'Quiet brightness',
+    'strobe_max_rate_hz': 'Max strobe rate (Hz)',
+    'strobe_max_burst_seconds': 'Max strobe burst (s)',
+}
+STROBE_SETTINGS = (
+    'drop_strobe_cooldown_seconds',
+    'strobe_burst_seconds',
+    'strobe_max_rate_hz',
+    'strobe_max_burst_seconds',
+)
+SETTING_IDS = {f'control-{name}': name for name in SHOW_SETTING_RANGES}
+# Plain decimals only: float() would also take 'nan', 'inf', '1e3' and '1_0'.
+DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
+# A drag sends at most this often; the release always sends its final value.
+LIVE_BRIGHTNESS_INTERVAL_MS = 50
+# A snapshot from before the operator's last touch must not drag the control back.
+CONTROL_SYNC_HOLD_MS = 1000
+
+
+def decimal_text(value: float) -> str:
+    """Formatted here, not by the browser, so a European locale still shows 0.15."""
+    return f'{value:.6g}'
+
+
+def parse_decimal(name: str, raw) -> float:
+    """A typed setting as a float; a comma decimal separator is read as a dot."""
+    text = '' if raw is None else str(raw).strip().replace(',', '.')
+    if not text:
+        raise ValueError(f'{SETTING_LABELS[name]} needs a number')
+    if not DECIMAL_TEXT.fullmatch(text):
+        raise ValueError(f'{SETTING_LABELS[name]}: "{raw}" is not a number')
+    return float(text)
+
+
+def control_command(trigger, paused, level, settings) -> dict | None:
+    """The POST /control body for the control the operator touched.
+
+    Any setting input sends the whole form, so the controller validates one coherent set.
+    Raises ValueError for a setting that is not a number; ranges are the controller's to check.
+    """
+    if trigger == 'control-toggle':
+        return {'action': 'play' if paused else 'pause'}
+    if trigger in ('control-brightness', 'control-brightness-live'):
+        return {'action': 'master', 'level': level}
+    if trigger in SETTING_IDS:
+        return {
+            'action': 'settings',
+            'settings': {
+                name: parse_decimal(name, raw) for name, raw in zip(SHOW_SETTING_RANGES, settings)
+            },
+        }
+    return None
+
+
+def _setting_input(name):
+    low, high = SHOW_SETTING_RANGES[name]
+    return html.Label(
+        [
+            html.Span(SETTING_LABELS[name]),
+            # Text, not number: a number input shows and expects the locale's comma.
+            dcc.Input(
+                id=f'control-{name}',
+                type='text',
+                inputMode='decimal',
+                pattern=r'-?[0-9]*[.,]?[0-9]*',
+                debounce=0.15,
+                disabled=True,
+            ),
+            html.Span(f'{decimal_text(low)} – {decimal_text(high)}', className='control-range'),
+        ],
+        className='control-field',
+    )
+
+
+def _build_control_card() -> list:
+    return [
+        html.Div(
+            [
+                html.H2('Show control'),
+                html.P('Applies to the live show at once · settings are saved'),
+            ],
+            className='section-heading',
+        ),
+        html.Section(
+            [
+                html.Div(
+                    [
+                        html.Div('Playback', className='stat-label control-heading'),
+                        html.Button(
+                            'Pause', id='control-toggle', className='control-toggle', disabled=True
+                        ),
+                    ],
+                    className='control-group',
+                ),
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.Span('Master brightness'),
+                                html.Span('—', id='control-brightness-value'),
+                            ],
+                            className='stat-label control-heading',
+                        ),
+                        dcc.Slider(
+                            id='control-brightness',
+                            min=0,
+                            max=1,
+                            step=0.01,
+                            marks=None,
+                            # value arrives on release; drag_value carries the live drag.
+                            updatemode='mouseup',
+                            allow_direct_input=False,
+                            disabled=True,
+                        ),
+                        dcc.Store(id='control-brightness-live'),
+                    ],
+                    className='control-group',
+                ),
+                html.Div(
+                    [
+                        html.Div('Show settings', className='stat-label control-heading'),
+                        html.Div(
+                            [
+                                _setting_input(name)
+                                for name in SHOW_SETTING_RANGES
+                                if name not in STROBE_SETTINGS
+                            ],
+                            className='control-fields',
+                        ),
+                        html.Details(
+                            [
+                                html.Summary('Strobe'),
+                                html.Div(
+                                    [_setting_input(name) for name in STROBE_SETTINGS],
+                                    className='control-fields',
+                                ),
+                            ],
+                            className='control-strobe',
+                        ),
+                    ],
+                    className='control-group',
+                ),
+                html.P(id='control-status', role='status', className='control-status'),
+                dcc.Store(id='control-state'),
+                dcc.Store(id='control-synced'),
+                dcc.Store(id='control-touched'),
+            ],
+            id='show-control',
+            className='overview-panel',
+        ),
+    ]
+
+
 def _metric_card(label, value, detail):
     return html.Div(
         [
@@ -683,6 +843,33 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .command-diagnostics td { padding: 4px 0; }
 .command-diagnostics th, .command-diagnostics td { text-align: right; }
 .command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
+#show-control { display: grid; grid-template-columns: 180px minmax(240px, 1fr) minmax(0, 2fr); }
+.control-group { padding: 14px 16px 16px; min-width: 0; }
+.control-group + .control-group { border-left: 1px solid #273344; }
+.control-heading { display: flex; justify-content: space-between; align-items: baseline;
+                   min-height: 16px; margin-bottom: 12px; }
+#control-brightness-value { color: #e6edf3; font-size: 13px; font-weight: 600;
+                            font-variant-numeric: tabular-nums; }
+.control-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 180px)); gap: 12px 16px; }
+.control-field > span { display: block; color: #9baabb; font-size: 11px; margin-bottom: 5px; }
+.control-field > .control-range { color: #8293a6; font-size: 10px; margin: 4px 0 0; }
+.control-field input { width: 100%; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
+                       border-radius: 4px; padding: 7px 8px; font: inherit; font-size: 12px;
+                       font-variant-numeric: tabular-nums; }
+.control-field input:focus { outline: none; border-color: #73b6ff; }
+.control-field input:invalid { border-color: #e8b56d; }
+.control-field input:disabled { opacity: .4; }
+.control-strobe { margin-top: 14px; padding-top: 12px; border-top: 1px solid #1b2735; }
+.control-strobe summary { cursor: pointer; color: #9baabb; font-size: 10px; margin-bottom: 12px; }
+.control-strobe:not([open]) summary { margin-bottom: 0; }
+#show-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
+                       border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
+#show-control button:disabled { opacity: .4; cursor: default; }
+#show-control .control-toggle { width: 100%; padding: 12px 14px; font-size: 14px; font-weight: 600; }
+#show-control .control-toggle.playing { background: #1b3324; border-color: #3fb950; color: #aff5b4; }
+#show-control .control-toggle.paused { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
+.control-status { grid-column: 1 / -1; margin: 0; padding: 9px 16px; min-height: 34px;
+                  border-top: 1px solid #273344; color: #93a5b9; font-size: 12px; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -1032,6 +1219,31 @@ class SnapshotPoller:
         finally:
             self._lock.release()
 
+    def control(self, command: dict) -> dict:
+        """The controller's reply; a failure comes back as {'error': ...}, never raised."""
+        # Its own connection: the poll's lock skips when busy, and a command must not be dropped.
+        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        try:
+            connection.request(
+                'POST',
+                CONTROL_PATH,
+                json.dumps(command).encode(),
+                {'Content-Type': 'application/json'},
+            )
+            response = connection.getresponse()
+            body = response.read()
+        except (OSError, http.client.HTTPException):
+            return {'error': 'the show is not answering'}
+        finally:
+            connection.close()
+        try:
+            reply = json.loads(body)
+        except ValueError:
+            reply = None
+        if not isinstance(reply, dict):
+            return {'error': f'the show refused the command (HTTP {response.status})'}
+        return reply
+
 
 def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
     app = dash.Dash(
@@ -1071,6 +1283,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'fontWeight': '500',
         'flex': 'none',
     }
+    # An in-process EventBuffer (simulation, test rigs) has no controller to command.
+    can_control = callable(getattr(snapshot_source, 'control', None))
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
         build_fixture_panel(app, fixture_store)
@@ -1116,6 +1330,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                         className='overview-panel',
                     ),
                     html.Div(id='performance-metrics', className='performance-overview'),
+                    *_build_control_card(),
                     html.Div(
                         [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
                         className='section-heading',
@@ -1257,6 +1472,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             Output('telemetry-alerts', 'children'),
             Output('performance-metrics', 'children'),
             Output('renderer-metrics', 'children'),
+            Output('control-state', 'data'),
         ]
         + [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
         Input('gate', 'data'),
@@ -1268,13 +1484,21 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         snap = snapshot_source.snapshot()
         now = time.time()
         sync = metrics = decoder = commands = timeline = dash.no_update
-        notices = performance = renderer = dash.no_update
+        notices = performance = renderer = control = dash.no_update
         charts = [dash.no_update] * len(system_metrics.PANELS)
         if requested['tab'] == 'control':
             sync = _anchor(snap)
             metrics = _build_show_overview(snap)
             decoder = _build_decoder(snap)
             commands = _build_command_diagnostics(snap)
+            if can_control:
+                control = {
+                    key: snap.get(key) for key in ('paused', 'master_brightness', 'settings')
+                }
+                settings = control['settings'] or {}
+                control['settings_text'] = {
+                    name: decimal_text(value) for name, value in settings.items()
+                }
             if requested.get('timeline'):
                 timeline = _build_timeline(snap)
             if requested.get('metrics'):
@@ -1284,7 +1508,138 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             renderer = _build_renderer_overview(snap, now)
         if requested.get('metrics'):
             notices = system_metrics.build_telemetry_notices(snap, now=now)
-        return sync, metrics, decoder, commands, timeline, notices, performance, renderer, *charts
+        return (
+            sync,
+            *(metrics, decoder, commands, timeline, notices, performance, renderer, control),
+            *charts,
+        )
+
+    setting_names = json.dumps(list(SHOW_SETTING_RANGES))
+    # The controller publishes paused=None until its engine exists; nothing is sendable before.
+    app.clientside_callback(
+        '''function(state) {
+            const ready = !!state && state.paused !== null && state.paused !== undefined;
+            const mode = !ready ? '' : state.paused ? ' paused' : ' playing';
+            const settable = !ready || !state.settings;
+            return [ready && state.paused ? 'Play' : 'Pause', 'control-toggle' + mode, !ready,
+                    !ready || state.master_brightness === null,
+                    ...'''
+        + setting_names
+        + '''.map(() => settable)];
+        }''',
+        Output('control-toggle', 'children'),
+        Output('control-toggle', 'className'),
+        Output('control-toggle', 'disabled'),
+        Output('control-brightness', 'disabled'),
+        *[Output(f'control-{name}', 'disabled') for name in SHOW_SETTING_RANGES],
+        Input('control-state', 'data'),
+    )
+    # Follow the snapshot only while idle: never under a held slider or a focused
+    # input, and not just after a touch, when the snapshot may predate it.
+    app.clientside_callback(
+        '''function(state, drag, value, synced) {
+            const nu = window.dash_clientside.no_update;
+            if (!state || state.master_brightness === null || !state.settings) {
+                throw window.dash_clientside.PreventUpdate;
+            }
+            synced = synced || {};
+            const names = '''
+        + setting_names
+        + ''';
+            const text = state.settings_text || {};
+            const touched = Date.now() - (window.autoluxControlTouchedAt || 0) < '''
+        + str(CONTROL_SYNC_HOLD_MS)
+        + ''';
+            const dragging = drag !== null && drag !== undefined && drag !== value;
+            const focused = document.activeElement ? document.activeElement.id : '';
+            const next = {...synced};
+            let level = nu;
+            if (!touched && !dragging && state.master_brightness !== synced.master) {
+                level = next.master = state.master_brightness;
+            }
+            const fields = names.map((name) => {
+                if (touched || focused === 'control-' + name || text[name] === synced[name]) {
+                    return nu;
+                }
+                next[name] = text[name];
+                return text[name];
+            });
+            return [level, ...fields, next];
+        }''',
+        Output('control-brightness', 'value'),
+        *[Output(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        Output('control-synced', 'data'),
+        Input('control-state', 'data'),
+        State('control-brightness', 'drag_value'),
+        State('control-brightness', 'value'),
+        State('control-synced', 'data'),
+    )
+    app.clientside_callback(
+        # toFixed is specified to emit '.', unlike toLocaleString, so no locale shows 0,15.
+        '''function(level) {
+            window.autoluxControlTouchedAt = Date.now();
+            const label = level === null || level === undefined ? '—' : level.toFixed(2);
+            const now = Date.now();
+            if (level === null || level === undefined
+                    || now - (window.autoluxBrightnessSentAt || 0) < '''
+        + str(LIVE_BRIGHTNESS_INTERVAL_MS)
+        + ''') {
+                return [label, window.dash_clientside.no_update];
+            }
+            window.autoluxBrightnessSentAt = now;
+            return [label, level];
+        }''',
+        Output('control-brightness-value', 'children'),
+        Output('control-brightness-live', 'data'),
+        Input('control-brightness', 'drag_value'),
+    )
+    app.clientside_callback(
+        '''function() {
+            window.autoluxControlTouchedAt = Date.now();
+            return window.dash_clientside.no_update;
+        }''',
+        Output('control-touched', 'data'),
+        *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output('control-status', 'children'),
+        Input('control-toggle', 'n_clicks'),
+        Input('control-brightness', 'value'),
+        Input('control-brightness-live', 'data'),
+        *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+    def send_control(_toggle, released, live, *settings_and_state):
+        *settings, state = settings_and_state
+        state = state or {}
+        trigger = dash.ctx.triggered_id
+        level = live if trigger == 'control-brightness-live' else released
+        current = state.get('master_brightness')
+        # Syncing from the snapshot sets the controls too; echoing that back is not a change.
+        if trigger in ('control-brightness', 'control-brightness-live') and (
+            level is None or (current is not None and abs(level - current) < 0.005)
+        ):
+            raise dash.exceptions.PreventUpdate
+        try:
+            command = control_command(trigger, state.get('paused'), level, settings)
+        except ValueError as error:
+            return f'Rejected: {error}'
+        if command is None or not can_control:
+            raise dash.exceptions.PreventUpdate
+        if command['action'] == 'settings' and command['settings'] == state.get('settings'):
+            raise dash.exceptions.PreventUpdate
+        reply = snapshot_source.control(command)
+        if 'error' in reply:
+            return f'Rejected: {reply["error"]}'
+        return {
+            'pause': 'Paused.',
+            'play': 'Playing.',
+            'master': f'Master brightness {decimal_text(round(level, 2))}.',
+            'settings': 'Settings applied.',
+        }.get(reply.get('accepted'), 'Sent.')
 
     app.clientside_callback(
         ANIMATION_JS,

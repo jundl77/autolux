@@ -39,17 +39,14 @@ class StarfireClient:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})
 
     def select_autoloop(self, bank: str, autoloop: str, *, transition: dict | None = None) -> bool:
+        """Without a transition, Starfire applies its DEFAULT_CROSSFADE_BEATS."""
         identity = bank, autoloop
         if identity == self.selected_autoloop:
             return False
-        self._send_command(
-            {
-                'kind': 'select',
-                'bank': bank,
-                'autoloop': autoloop,
-                'transition': {'kind': 'cut'} if transition is None else transition,
-            }
-        )
+        command = {'kind': 'select', 'bank': bank, 'autoloop': autoloop}
+        if transition is not None:
+            command['transition'] = transition
+        self._send_command(command)
         self.selected_autoloop = identity
         return True
 
@@ -65,6 +62,16 @@ class StarfireClient:
         if fade_seconds:
             command['fade_seconds'] = fade_seconds
         self._send_command(command)
+
+    def set_paused(self, paused: bool) -> None:
+        self._send_command({'kind': 'set_paused', 'paused': paused})
+
+    def set_default_crossfade_beats(self, beats: float) -> None:
+        self._send_command({'kind': 'set_default_crossfade_beats', 'beats': beats})
+
+    def set_strobe_limits(self, max_rate_hz: float, max_burst_seconds: float) -> None:
+        self._send_command({'kind': 'set_strobe_max_rate_hz', 'hz': max_rate_hz})
+        self._send_command({'kind': 'set_strobe_max_burst_seconds', 'seconds': max_burst_seconds})
 
     def set_speed(self, multiplier: float) -> None:
         self._send_command({'kind': 'set_speed', 'multiplier': multiplier})

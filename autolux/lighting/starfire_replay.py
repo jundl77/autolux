@@ -11,15 +11,14 @@ from __future__ import annotations
 import math
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
-from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
+from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS
 
 REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
-AUTOLOOP_BY_INTENT = {
-    intent.value: autoloop for intent, autoloop in AUTOLOOP_BY_LIGHT_INTENT.items()
-}
+# Replays light each intent with its preferred look, not the live rotation.
+AUTOLOOP_BY_INTENT = {intent.value: loops[0] for intent, loops in DEFAULT_AUTOLOOPS.items()}
 
 
 def _nonnegative(value, name: str) -> float:
