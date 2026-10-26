@@ -32,7 +32,7 @@ function edit(current, action, { trigger = "fixture-grid-action", busy = "false"
 
 test("patched fixtures match the server's reading of the room rig", () => {
     const rows = model.fixtureRows(draft(), settings);
-    assert.deepEqual(plain(rows.map((row) => [row.name, row.universe, row.address])), data.patched);
+    assert.deepEqual(plain(rows.map((row) => [row.name, row.universe, row.address, row.cells])), data.patched);
     assert.deepEqual(plain(model.occupancy(rows, settings, 0).errors), []);
     assert.equal(rows.find((row) => row.name === "spot_left").channels, 12);
 });
@@ -87,7 +87,7 @@ test("library adds create spec-complete fixtures and embed their GDTF", () => {
             assert.ok(child(node, tag), tag);
         }
     }
-    assert.deepEqual(plain(created.map((node) => child(node, "FixtureIDNumeric").text)), ["16", "17"]);
+    assert.deepEqual(plain(created.map((node) => child(node, "FixtureIDNumeric").text)), ["9", "10"]);
     assert.ok(added.gdtf[spec]);
     const rows = model.fixtureRows(added, settings).filter((row) => row.spec === spec);
     assert.deepEqual(plain(rows.map((row) => row.address)), [25, 26]);

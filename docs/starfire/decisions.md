@@ -473,3 +473,15 @@ group which axes at least one member can express, and login fails if that reply
 exceeds the real-time message cap.
 A dimmerless wheel resolves to its zero-luminance slot at zero intensity or black
 colour; without such a slot it closes its continuous Shutter(n) instead.
+
+2026-10-27 cells: the addressing unit is the cell, not the fixture. A fixture contributes
+one cell per channel-owning geometry of its mode; a geometry above exactly one
+channel-owning leaf joins that leaf's cell (a mover's yoke and head), one above several
+leaves is a cell of its own (a bar's master dimmer). Cells order by first DMX offset. A
+single-cell fixture's cell keeps the fixture ID, other cells are `fixture/geometry`; a
+fixture target on a multi-cell fixture means all its cells. Groups list fixtures and expand
+to their cells. Each cell encodes its own channels from its own state; ModeMaster across
+cells is refused. The rig proto declares each fixture's cells as Autolux derives them, and
+Login fails if Starfire derives different ones. GeometryReference stays unsupported. Open:
+under a master-dimmer cell a pixel cell's own intensity does not dim it, and the master cell
+joins its fixture's group like any pixel.

@@ -246,3 +246,14 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
     assert rebuilt.read_bytes() == shipped.read_bytes()
     exported = assets.rig_definition(rebuilt).SerializeToString()
     assert exported == (folder / f'{name}.rig.pb').read_bytes()
+
+
+def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():
+    rig = assets.rig_definition(DEFAULT_RIG)
+    [bar] = [fixture for fixture in rig.fixtures if fixture.fixture_id == 'zq06017']
+    assert (bar.universe, bar.address) == (0, 97)
+    assert bar.profile_id.endswith('#24Channel')
+    assert [(cell.geometry, list(cell.offsets)) for cell in bar.cells] == [
+        (f'Beam Segment {n}', [3 * n - 2, 3 * n - 1, 3 * n]) for n in range(1, 9)
+    ]
+    assert {group.group_id: list(group.fixture_ids) for group in rig.groups}['strip'] == ['zq06017']
