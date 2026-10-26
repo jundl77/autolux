@@ -4,7 +4,7 @@ import pytest
 
 from autolux.lib import media_session
 from autolux.lib.engine.effect_definitions import LightIntent
-from autolux.lib.main import AutoluxController
+from autolux.lib.main import PAUSE_CONFIRM_SECONDS, AutoluxController
 from autolux.lib.media_session import (
     QUIET_SECONDS,
     MediaSessionListener,
@@ -16,7 +16,8 @@ from autolux.lib.media_session import (
 from autolux.tests.test_light_engine import _selections, _Show
 
 PLAYBACK_DELAY_SEC = 14.0
-GAP_SECONDS = 10 * 256 / 44100
+GAP_SECONDS = 16 * 256 / 44100
+CONFIRM_TICK_SECONDS = 8 * 256 / 44100
 
 
 class _FedShow(_Show):
@@ -30,6 +31,13 @@ class _FedShow(_Show):
         self.app.light_engine = self.light
         self.app.music_analyser = self.analyser
         self.app.event_buffer = self.events
+        self.app._clock = self.clock
+        self.app._pending_pause = None
+
+    async def play(self, seconds: float, level: float) -> None:
+        for _ in range(round(seconds / CONFIRM_TICK_SECONDS)):
+            await super().play(CONFIRM_TICK_SECONDS, level)
+            self.app._confirm_pause()
 
     def feed(self, event) -> None:
         self.app._on_media_event(event)
@@ -86,6 +94,9 @@ async def test_a_pause_stops_the_show_at_once_and_drops_the_delayed_audio(status
     assert show.queue.pending > 0
     before = len(show.lighting.events)
     show.playback(status)
+    await show.play(PAUSE_CONFIRM_SECONDS - 0.1, 0.0)
+    assert not show.light.standby, 'a pause must persist before it stops the show'
+    await show.play(0.15, 0.0)
     assert show.light.standby and show.analyser.in_standby
     commands = show.commands(before)
     assert commands.count({'kind': 'discard_delayed_audio'}) == 1
@@ -94,11 +105,35 @@ async def test_a_pause_stops_the_show_at_once_and_drops_the_delayed_audio(status
     assert ('standby', 'warm_white') in _selections(commands)
 
 
+async def test_a_pause_that_flashes_during_a_skip_only_cues_the_new_track():
+    show = _FedShow()
+    show.playback('playing')
+    await show.keep_reporting(20.0, 0.2)
+    show.light._after_silence = False
+    before = len(show.lighting.events)
+    pending = show.queue.pending
+    show.playback('paused')
+    await show.play(0.3, 0.2)
+    show.track('NUEVAYoL', 'Bad Bunny', 'DeBÍ TiRAR MáS FOToS')
+    show.playback('playing')
+    await show.play(PAUSE_CONFIRM_SECONDS + 0.5, 0.2)
+    assert not show.light.standby and not show.analyser.in_standby
+    commands = show.commands(before)
+    assert {'kind': 'discard_delayed_audio'} not in commands
+    assert ('standby', 'warm_white') not in _selections(commands)
+    assert show.monitor_silenced == 0
+    assert show.queue.pending >= pending, 'the delayed commands are kept'
+    await show.keep_reporting(PLAYBACK_DELAY_SEC, 0.2)
+    assert show.light._after_silence
+    assert show.light.room_track.title == 'NUEVAYoL'
+
+
 async def test_the_fade_after_a_pause_does_not_rearm_but_play_does():
     show = _FedShow()
     show.playback('playing')
     await show.keep_reporting(20.0, 0.2)
     show.playback('paused')
+    await show.play(PAUSE_CONFIRM_SECONDS + 0.05, 0.0)
     await show.play(0.5, 0.05)
     assert show.light.standby, 'a paused session owns the stop; the fade-out tail is not a return'
     resets = show.chain.resets
@@ -133,8 +168,9 @@ async def test_the_audio_cues_are_dormant_while_the_session_reports_and_return_a
 async def test_a_session_stopped_for_thirty_seconds_counts_as_absent():
     show = _FedShow()
     show.playback('stopped')
+    await show.play(PAUSE_CONFIRM_SECONDS + 0.05, 0.0)
     assert show.light.standby
-    await show.play(QUIET_SECONDS - 1.0, 0.0)
+    await show.play(QUIET_SECONDS - 2.0, 0.0)
     assert show.app.track_source.media_session_live
     await show.play(0.5, 0.2)
     assert show.light.standby, 'audio from elsewhere waits while the session is still live'
