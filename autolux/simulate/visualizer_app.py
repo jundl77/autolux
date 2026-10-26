@@ -1097,7 +1097,12 @@ def _register_direct_static_controls(app) -> None:
             if (!chip) {
                 return classes.map(() => window.dash_clientside.no_update);
             }
-            control.dispatch(control.build.static(chip, target), 'static-status');
+            const before = classes[ids.indexOf(chip)] || '';
+            control.dispatch(control.build.static(chip, target), 'static-status').then((reply) => {
+                if (reply && reply.error) {
+                    window.dash_clientside.set_props(chip, {className: before});
+                }
+            });
             if (chip === 'static-strobe') {
                 return ids.map((id, i) => id === chip
                     ? (classes[i] === 'active' ? '' : 'active') : classes[i] || '');
