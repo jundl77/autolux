@@ -21,16 +21,11 @@ const OUTPUT_HISTORY_FRAMES: usize = 131_072;
 const SILENCE_POSITION: u64 = u64::MAX;
 const DISCARD_FADE_FRAMES: usize = SAMPLE_RATE as usize / 100;
 const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
-/// Shared-mode WASAPI capture ring. Callbacks still fire every device period, so this adds
-/// no latency; it lets a capture thread stalled by CPU load catch up without losing audio.
-/// The default minimal ring overruns after one missed period (about 10 ms).
-const CAPTURE_DEVICE_BUFFER_FRAMES: u32 = SAMPLE_RATE / 5;
-/// This many capture discontinuities inside the window mean the input cannot keep up.
+const STALL_TOLERANT_CAPTURE_BUFFER_FRAMES: u32 = SAMPLE_RATE / 5;
 pub const CAPTURE_DISCONTINUITY_LIMIT: usize = 3;
 pub const CAPTURE_DISCONTINUITY_WINDOW: Duration = Duration::from_secs(10);
 const NANOS_PER_SECOND: f64 = 1e9;
-/// Unflagged timestamp deviations below this are scheduling jitter, not lost audio.
-const CAPTURE_TIMESTAMP_DEAD_BAND_FRAMES: u64 = SAMPLE_RATE as u64 / 200;
+const CAPTURE_JITTER_DEAD_BAND_FRAMES: u64 = SAMPLE_RATE as u64 / 200;
 
 #[derive(Clone, Debug)]
 pub struct AudioBlock {
@@ -123,7 +118,7 @@ fn stream_config() -> cpal::StreamConfig {
 
 fn capture_stream_config() -> cpal::StreamConfig {
     cpal::StreamConfig {
-        buffer_size: cpal::BufferSize::Fixed(CAPTURE_DEVICE_BUFFER_FRAMES),
+        buffer_size: cpal::BufferSize::Fixed(STALL_TOLERANT_CAPTURE_BUFFER_FRAMES),
         ..stream_config()
     }
 }
@@ -177,9 +172,6 @@ impl AudioDelay {
         })
     }
 
-    /// Silences everything already delayed; audio captured from now on emerges one
-    /// delay later. Counting frames instead of zeroing the ring keeps this O(1) in
-    /// the capture callback, and the block positions stay contiguous for RX.
     fn discard_buffered(&mut self) {
         self.discarded_frames_remaining = self.samples.len();
     }
@@ -197,7 +189,6 @@ impl AudioDelay {
         }
         let discarded = self.samples.len() - self.discarded_frames_remaining;
         self.discarded_frames_remaining -= 1;
-        // A short ramp avoids the click of cutting a waveform mid-cycle.
         let gain = 1.0 - (discarded + 1) as f32 / DISCARD_FADE_FRAMES as f32;
         input.map(|sample| sample * gain.max(0.0))
     }
@@ -221,7 +212,6 @@ struct StreamCounters {
     last_callback_micros: AtomicU64,
     device_xruns: AtomicU64,
     stream_errors: AtomicU64,
-    /// Elevated audio-thread scheduling was refused; audio continues at normal priority.
     realtime_denied: AtomicU64,
     last_error_code: AtomicU32,
     faulted: AtomicBool,
@@ -255,8 +245,6 @@ impl StreamCounters {
         })
     }
 
-    /// Playback errors and non-xrun capture errors. Capture xruns are bridged by
-    /// `CaptureAssembler`; output xruns invalidate audible timing.
     fn error(&self, error: cpal::Error) {
         let code = match error.kind() {
             cpal::ErrorKind::RealtimeDenied => {
@@ -311,13 +299,10 @@ impl StreamCounters {
 #[derive(Debug, Clone)]
 pub struct CaptureMetrics {
     pub callbacks: u64,
-    /// Frames delivered by the device, including any later dropped as repeats.
     pub device_frames: u64,
     pub queue_overflow_frames: u64,
     pub device_xruns: u64,
     pub discontinuities: u64,
-    /// Device frames lost (positive, filled with silence) or repeated (negative, dropped)
-    /// at the latest discontinuity. None until one occurs.
     pub last_gap_frames: Option<i64>,
     pub resync_silence_frames: u64,
     pub resync_dropped_frames: u64,
@@ -328,11 +313,9 @@ pub struct CaptureMetrics {
     pub faulted: bool,
 }
 
-/// Written by the capture error and data callbacks, which WASAPI runs on one thread.
 #[derive(Default)]
 struct CaptureDiscontinuities {
-    /// The endpoint flagged the next packet as discontinuous with the previous one.
-    pending: AtomicBool,
+    next_packet_follows_xrun: AtomicBool,
     total: AtomicU64,
     last_gap_frames: AtomicI64,
     silence_frames: AtomicU64,
@@ -346,11 +329,8 @@ impl CaptureDiscontinuities {
     }
 }
 
-/// Device timing of one capture callback. Device timestamps share the QPC epoch, so one
-/// (device time, `Instant`) pair per callback maps every frame onto the monotonic clock.
 #[derive(Clone, Copy)]
 struct CaptureTiming {
-    /// Device timestamp of the first frame in the packet; zero when the device gave none.
     captured_at_nanos: u128,
     callback_nanos: u128,
     callback_at: Instant,
@@ -371,16 +351,11 @@ impl CaptureTiming {
     }
 }
 
-/// Keeps the transmitted sample count equal to elapsed device time across capture overruns,
-/// so the show delay and every downstream frame position stay exact.
 struct CaptureClock {
-    /// Expected device timestamp of the next captured frame.
     next_frame_nanos: Option<u128>,
-    /// Device timestamps of the latest discontinuities, oldest overwritten first.
     recent_discontinuity_nanos: [Option<u128>; CAPTURE_DISCONTINUITY_LIMIT - 1],
     next_recent_slot: usize,
-    /// Stale frames still to drop after the device repeated audio.
-    pending_drop_frames: u64,
+    repeated_frames_to_drop: u64,
 }
 
 impl CaptureClock {
@@ -389,7 +364,7 @@ impl CaptureClock {
             next_frame_nanos: None,
             recent_discontinuity_nanos: [None; CAPTURE_DISCONTINUITY_LIMIT - 1],
             next_recent_slot: 0,
-            pending_drop_frames: 0,
+            repeated_frames_to_drop: 0,
         }
     }
 
@@ -397,15 +372,13 @@ impl CaptureClock {
         (frames as f64 * NANOS_PER_SECOND / f64::from(SAMPLE_RATE)).round() as u128
     }
 
-    /// Device frames between the expected and the actual first frame of this packet.
     fn gap_frames(&self, captured_at_nanos: u128) -> Option<i64> {
         let expected = self.next_frame_nanos?;
         let signed_nanos = captured_at_nanos as f64 - expected as f64;
         Some((signed_nanos * f64::from(SAMPLE_RATE) / NANOS_PER_SECOND).round() as i64)
     }
 
-    /// Records one discontinuity and reports whether the window limit is now reached.
-    fn repeats_too_often(&mut self, captured_at_nanos: u128) -> bool {
+    fn record_discontinuity_reaches_limit(&mut self, captured_at_nanos: u128) -> bool {
         let window = CAPTURE_DISCONTINUITY_WINDOW.as_nanos();
         let recent = self
             .recent_discontinuity_nanos
@@ -448,7 +421,10 @@ impl CaptureAssembler {
         let input = input.as_chunks::<CHANNELS>().0;
         self.device_frames
             .fetch_add(input.len() as u64, Ordering::Relaxed);
-        let flagged = self.discontinuities.pending.swap(false, Ordering::AcqRel);
+        let flagged = self
+            .discontinuities
+            .next_packet_follows_xrun
+            .swap(false, Ordering::AcqRel);
         let Ok(silence_frames) = self.resynchronize(flagged, timing, input.len()) else {
             return;
         };
@@ -458,7 +434,6 @@ impl CaptureAssembler {
                 Some(captured_at + CaptureClock::frame_nanos(input.len() as u64));
         }
 
-        // Silence covers the device time between the expected and the actual first frame.
         for index in 0..silence_frames {
             let device_nanos =
                 captured_at.saturating_sub(CaptureClock::frame_nanos(silence_frames - index));
@@ -466,8 +441,8 @@ impl CaptureAssembler {
                 return;
             }
         }
-        let dropped = self.clock.pending_drop_frames.min(input.len() as u64) as usize;
-        self.clock.pending_drop_frames -= dropped as u64;
+        let dropped = self.clock.repeated_frames_to_drop.min(input.len() as u64) as usize;
+        self.clock.repeated_frames_to_drop -= dropped as u64;
         for (index, frame) in input.iter().enumerate().skip(dropped) {
             let device_nanos = captured_at + CaptureClock::frame_nanos(index as u64);
             if !self.emit([frame[0], frame[1]], timing, device_nanos) {
@@ -476,9 +451,6 @@ impl CaptureAssembler {
         }
     }
 
-    /// Compares this packet's device timestamp with the expected one. A flagged packet, or
-    /// one off by more than the jitter dead band, is a discontinuity: returns the silence
-    /// frames that keep the timeline exact, or faults when it cannot be bridged.
     fn resynchronize(
         &mut self,
         flagged: bool,
@@ -493,30 +465,27 @@ impl CaptureAssembler {
             }
             return Ok(0);
         }
-        // The first packet has no timeline to break.
         let Some(gap_frames) = self.clock.gap_frames(captured_at) else {
             return Ok(0);
         };
-        if !flagged && gap_frames.unsigned_abs() <= CAPTURE_TIMESTAMP_DEAD_BAND_FRAMES {
+        if !flagged && gap_frames.unsigned_abs() <= CAPTURE_JITTER_DEAD_BAND_FRAMES {
             return Ok(0);
         }
         self.discontinuities
             .last_gap_frames
             .store(gap_frames, Ordering::Relaxed);
         self.discontinuities.total.fetch_add(1, Ordering::Release);
-        if self.clock.repeats_too_often(captured_at) {
+        if self.clock.record_discontinuity_reaches_limit(captured_at) {
             self.counters.fault(CAPTURE_REPEATED_DISCONTINUITY);
             return Err(());
         }
-        // Silence enters the delay ring, so the delay never limits a gap; the bounded
-        // capture queue must hold the catch-up burst. Repeats use the same ceiling.
         let queue_frames = self.queue.capacity() as u64 * BLOCK_FRAMES as u64;
         if gap_frames < 0 {
             if gap_frames.unsigned_abs() > queue_frames {
                 self.counters.fault(CAPTURE_GAP_EXCEEDS_QUEUE);
                 return Err(());
             }
-            self.clock.pending_drop_frames += gap_frames.unsigned_abs();
+            self.clock.repeated_frames_to_drop += gap_frames.unsigned_abs();
             self.discontinuities
                 .dropped_frames
                 .fetch_add(gap_frames.unsigned_abs(), Ordering::Relaxed);
@@ -535,9 +504,6 @@ impl CaptureAssembler {
         Ok(silence_frames)
     }
 
-    /// Delays one frame and queues each completed block, stamped with the monotonic time
-    /// its last frame was captured. A catch-up backlog therefore keeps the light state of
-    /// its own moment, and stamps stay monotonic across callbacks.
     fn emit(&mut self, frame: [f32; CHANNELS], timing: CaptureTiming, device_nanos: u128) -> bool {
         let frame = self.delay.frame(frame);
         let offset = usize::from(self.partial.frames) * CHANNELS;
@@ -612,10 +578,11 @@ impl CaptureStream {
                     );
                 },
                 move |error| {
-                    // WASAPI reports a capture xrun just before delivering the packet after it.
                     if error.kind() == cpal::ErrorKind::Xrun {
                         errors.device_xruns.fetch_add(1, Ordering::Relaxed);
-                        flagged.pending.store(true, Ordering::Release);
+                        flagged
+                            .next_packet_follows_xrun
+                            .store(true, Ordering::Release);
                     } else {
                         errors.error(error);
                     }
@@ -639,7 +606,6 @@ impl CaptureStream {
         self.queue.pop()
     }
 
-    /// The capture callback applies this before its next frame.
     pub fn discard_delayed_audio(&self) {
         self.discard_requested.store(true, Ordering::Release);
     }

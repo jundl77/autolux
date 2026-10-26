@@ -46,11 +46,9 @@ fn assembler(capacity: usize) -> CaptureAssembler {
 }
 
 const PACKET_FRAMES: u64 = 441;
-/// Device timestamps are nonzero in practice; zero means the device supplied none.
 const DEVICE_EPOCH_NANOS: u128 = 1_000_000_000;
 
 impl CaptureAssembler {
-    /// Delivers `input` as if the callback ran the moment its last frame was captured.
     fn capture_at(&mut self, input: &[f32], first_frame_nanos: u128) {
         let frames = (input.len() / CHANNELS) as u64;
         let captured_at_nanos = DEVICE_EPOCH_NANOS + first_frame_nanos;
@@ -72,8 +70,6 @@ fn stereo_ramp(first_frame: u64, frames: u64) -> Vec<f32> {
         .collect()
 }
 
-/// Simulates a device that stamps each packet with the capture time of its first frame.
-/// Sample values carry the device frame index (plus one, so silence stays distinguishable).
 struct Device {
     next_frame: u64,
 }
@@ -85,12 +81,11 @@ impl Device {
         self.next_frame += frames;
     }
 
-    /// The endpoint drops (positive) or repeats (negative) frames and flags the next packet.
     fn discontinuity(&mut self, capture: &CaptureAssembler, gap_frames: i64) {
         self.next_frame = self.next_frame.checked_add_signed(gap_frames).unwrap();
         capture
             .discontinuities
-            .pending
+            .next_packet_follows_xrun
             .store(true, Ordering::Release);
     }
 }
@@ -101,8 +96,6 @@ fn delayed_assembler(delay_seconds: f64, capacity: usize) -> CaptureAssembler {
     capture
 }
 
-/// Drains the queue, checking the transmitted timeline stays consecutive, and returns
-/// (transmitted position, device frame index) for every non-silent frame.
 fn drain(capture: &CaptureAssembler, next_position: &mut u64) -> Vec<(u64, u64)> {
     let mut audible = Vec::new();
     while let Some(block) = capture.queue.pop() {
@@ -135,7 +128,6 @@ fn capture_overrun_is_bridged_with_silence_and_keeps_the_delay_exact() {
     assert!(!capture.counters.faulted.load(Ordering::Acquire));
     assert_eq!(capture.discontinuities.total.load(Ordering::Acquire), 1);
     assert_eq!(capture.discontinuities.last_gap_frames(), Some(3_000));
-    // Every captured frame leaves exactly one show delay after its device time.
     assert!(audible.len() as u64 > 199 * PACKET_FRAMES - delay_frames);
     for (transmitted, device_frame) in audible {
         assert_eq!(transmitted, device_frame + delay_frames);
@@ -154,7 +146,6 @@ fn timestamp_jitter_at_a_resync_stays_within_one_device_period() {
         audible.extend(drain(&capture, &mut position));
         if packet == 30 {
             device.discontinuity(&capture, 2_000);
-            // The packet after the gap carries a timestamp 3 ms late.
             let late = CaptureClock::frame_nanos(device.next_frame) + 3_000_000;
             capture.capture_at(&stereo_ramp(device.next_frame, PACKET_FRAMES), late);
             device.next_frame += PACKET_FRAMES;
@@ -229,7 +220,6 @@ fn three_discontinuities_within_ten_seconds_fault_but_spaced_ones_do_not() {
 
 #[test]
 fn a_gap_longer_than_a_short_playback_delay_is_still_bridged_exactly() {
-    // Silence enters the delay ring, so only the capture queue bounds a bridgeable gap.
     let mut capture = delayed_assembler(0.01, 1024);
     let delay_frames = capture.delay.samples.len() as u64;
     let mut device = Device { next_frame: 0 };
@@ -302,7 +292,6 @@ fn discarding_silences_the_delayed_tail_and_rebuilds_the_delay_from_new_audio() 
         }
         previous_gain = gain;
     }
-    // Audio captured after the discard plays exactly one delay later.
     for frame in 0..lag {
         let expected = [frame as f32 + 1.0, -(frame as f32 + 1.0)];
         assert_eq!(delay.frame([0.0; CHANNELS]), expected);
@@ -311,7 +300,6 @@ fn discarding_silences_the_delayed_tail_and_rebuilds_the_delay_from_new_audio() 
 
 #[test]
 fn discard_request_keeps_receiver_playout_contiguous_and_silent_without_rebuffering() {
-    // One block captured, sent and played per step keeps RX at its steady fill.
     fn step(
         capture: &mut CaptureAssembler,
         sender: &mut PlayoutSender,
@@ -355,7 +343,6 @@ fn discard_request_keeps_receiver_playout_contiguous_and_silent_without_rebuffer
     assert!(played.iter().all(|&sample| sample == 0.5));
     assert!(playout.is_primed());
 
-    // New audio (0.25) starts with the discard; the old tail (0.5) must not play.
     capture.discard_requested.store(true, Ordering::Release);
     let mut after_discard = Vec::new();
     for _ in 0..blocks_per_second {
@@ -376,7 +363,6 @@ fn discard_request_keeps_receiver_playout_contiguous_and_silent_without_rebuffer
             .position(|&sample| sample > 0.0)
             .expect("new audio must emerge one delay later");
     let delay_frames = (0.25 * f64::from(SAMPLE_RATE)).round() as usize;
-    // RX clock correction interpolates, so each edge may blur by one frame.
     let silent_frames = resumes - silence_starts;
     assert!(silent_frames.abs_diff(delay_frames - DISCARD_FADE_FRAMES + 1) <= 2);
     assert!(after_discard[resumes + 1..].iter().all(|&s| s == 0.25));
@@ -506,9 +492,7 @@ fn an_unflagged_timestamp_jump_is_bridged_but_jitter_is_ignored() {
     let mut audible = Vec::new();
     for packet in 0..100 {
         match packet {
-            // Within the dead band: scheduling jitter, no resync and no silence.
-            20 => device.next_frame += CAPTURE_TIMESTAMP_DEAD_BAND_FRAMES - 1,
-            // The xrun flag was lost, but the timestamp shows 1000 missing frames.
+            20 => device.next_frame += CAPTURE_JITTER_DEAD_BAND_FRAMES - 1,
             50 => device.next_frame += 1_000,
             _ => {}
         }
@@ -525,7 +509,7 @@ fn an_unflagged_timestamp_jump_is_bridged_but_jitter_is_ignored() {
             .load(Ordering::Relaxed),
         1_000
     );
-    let jitter = CAPTURE_TIMESTAMP_DEAD_BAND_FRAMES - 1;
+    let jitter = CAPTURE_JITTER_DEAD_BAND_FRAMES - 1;
     for (transmitted, device_frame) in audible {
         let error = (device_frame + delay_frames).abs_diff(transmitted);
         assert!(error <= jitter, "sync error {error} frames");
@@ -541,15 +525,13 @@ fn a_stall_backlog_is_stamped_at_capture_time_and_monotonically() {
     let mut stamps = Vec::new();
     for packet in 0..40_u64 {
         if packet == 20 {
-            // The endpoint dropped 3000 frames while the capture thread was stalled.
             device_nanos += CaptureClock::frame_nanos(3_000);
             capture
                 .discontinuities
-                .pending
+                .next_packet_follows_xrun
                 .store(true, Ordering::Release);
         }
         let packet_end = device_nanos + CaptureClock::frame_nanos(PACKET_FRAMES);
-        // Packets 10..30 are delivered late, as a backlog drained by one late wakeup.
         callback_nanos = callback_nanos.max(if (10..30).contains(&packet) {
             DEVICE_EPOCH_NANOS + CaptureClock::frame_nanos(30 * PACKET_FRAMES + 3_000)
         } else {
@@ -570,8 +552,6 @@ fn a_stall_backlog_is_stamped_at_capture_time_and_monotonically() {
     assert!(!capture.counters.faulted.load(Ordering::Acquire));
     let mut previous = None;
     for block in stamps {
-        // Every block is stamped when its last frame was captured: real frames follow the
-        // device clock, inserted silence fills the gap at its own device time.
         let last_frame = block.audio_frame_position + BLOCK_FRAMES as u64 - 1;
         let expected = started + Duration::from_nanos(CaptureClock::frame_nanos(last_frame) as u64);
         let error =

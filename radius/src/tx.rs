@@ -157,8 +157,6 @@ impl RadiusTx {
         }
     }
 
-    /// Silences the show-delayed audio not yet sent; RX keeps a contiguous stream,
-    /// so it plays silence without rebuffering until new capture emerges.
     pub fn discard_delayed_audio(&self) {
         self.shared
             .discard_delayed_audio
