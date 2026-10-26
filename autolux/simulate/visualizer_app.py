@@ -1090,7 +1090,8 @@ def _register_direct_static_controls(app) -> None:
         + json.dumps(list(STATIC_CHIP_IDS))
         + """;
             const target = args[ids.length];
-            const classes = args.slice(ids.length + 1);
+            const classes = args.slice(ids.length + 1, 2 * ids.length + 1);
+            const state = control.view(args[2 * ids.length + 1]) || {};
             const triggered = (window.dash_clientside.callback_context.triggered || [])
                 .map((t) => t.prop_id.split('.')[0]);
             const chip = ids.find((id) => triggered.includes(id));
@@ -1098,14 +1099,26 @@ def _register_direct_static_controls(app) -> None:
                 return classes.map(() => window.dash_clientside.no_update);
             }
             const before = classes[ids.indexOf(chip)] || '';
-            control.dispatch(control.build.static(chip, target), 'static-status').then((reply) => {
+            const strobing = before === 'active';
+            const command = control.build.static(chip, target, strobing);
+            control.dispatch(command, 'static-status').then((reply) => {
                 if (reply && reply.error) {
                     window.dash_clientside.set_props(chip, {className: before});
                 }
             });
             if (chip === 'static-strobe') {
-                return ids.map((id, i) => id === chip
-                    ? (classes[i] === 'active' ? '' : 'active') : classes[i] || '');
+                const token = window.autoluxStrobeToken = (window.autoluxStrobeToken || 0) + 1;
+                const settings = state.settings || {};
+                const burst = (settings.strobe_max_burst_seconds || 0) * (settings.intensity || 0);
+                if (!strobing && burst > 0) {
+                    // The show ends the burst on its own; the chip follows it.
+                    setTimeout(() => {
+                        if (window.autoluxStrobeToken === token) {
+                            window.dash_clientside.set_props(chip, {className: ''});
+                        }
+                    }, burst * 1000);
+                }
+                return ids.map((id, i) => id === chip ? (strobing ? '' : 'active') : classes[i] || '');
             }
             return ids.map((id, i) => id === chip ? 'active'
                 : id === 'static-strobe' ? classes[i] || '' : '');
@@ -1114,6 +1127,7 @@ def _register_direct_static_controls(app) -> None:
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
         State('static-target', 'value'),
         *[State(name, 'className') for name in STATIC_CHIP_IDS],
+        State('control-state', 'data'),
         prevent_initial_call=True,
     )
 

@@ -190,6 +190,20 @@ async def test_static_strobe_obeys_the_caps_toggles_off_and_has_no_cooldown():
     ] * 2
 
 
+async def test_an_explicit_strobe_state_repeated_by_a_retry_changes_nothing():
+    settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0, intensity=1.0)
+    light, _, clock, lighting = static_engine(settings=lambda: settings)
+    light.enter_static()
+    looks = light.static()
+    looks.strobe(False)
+    looks.strobe(True)
+    clock.advance(0.5)
+    looks.strobe(True)
+    looks.strobe(False)
+    looks.strobe(False)
+    assert [c['kind'] for c in overrides(lighting)] == ['set_override', 'clear_override']
+
+
 async def test_leaving_static_clears_every_look_and_applies_the_current_intent_on_the_downbeat():
     decoder = FakeDecoder()
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
