@@ -19,6 +19,7 @@ pub const SHOW_DELAY_SECONDS: f64 = 14.0;
 const CAPTURE_QUEUE_BLOCKS: usize = 256;
 const OUTPUT_HISTORY_FRAMES: usize = 131_072;
 const SILENCE_POSITION: u64 = u64::MAX;
+const DISCARD_FADE_FRAMES: usize = SAMPLE_RATE as usize / 100;
 const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Shared-mode WASAPI capture ring. Callbacks still fire every device period, so this adds
 /// no latency; it lets a capture thread stalled by CPU load catch up without losing audio.
@@ -159,6 +160,7 @@ pub fn check_device(device_id: &str, input: bool) -> Result<AudioDevice> {
 struct AudioDelay {
     samples: Box<[[f32; CHANNELS]]>,
     offset: usize,
+    discarded_frames_remaining: usize,
 }
 
 impl AudioDelay {
@@ -171,7 +173,15 @@ impl AudioDelay {
             samples: vec![[0.0; CHANNELS]; (seconds * f64::from(SAMPLE_RATE)).round() as usize]
                 .into_boxed_slice(),
             offset: 0,
+            discarded_frames_remaining: 0,
         })
+    }
+
+    /// Silences everything already delayed; audio captured from now on emerges one
+    /// delay later. Counting frames instead of zeroing the ring keeps this O(1) in
+    /// the capture callback, and the block positions stay contiguous for RX.
+    fn discard_buffered(&mut self) {
+        self.discarded_frames_remaining = self.samples.len();
     }
 
     fn frame(&mut self, mut input: [f32; CHANNELS]) -> [f32; CHANNELS] {
@@ -182,7 +192,14 @@ impl AudioDelay {
                 self.offset = 0;
             }
         }
-        input
+        if self.discarded_frames_remaining == 0 {
+            return input;
+        }
+        let discarded = self.samples.len() - self.discarded_frames_remaining;
+        self.discarded_frames_remaining -= 1;
+        // A short ramp avoids the click of cutting a waveform mid-cycle.
+        let gain = 1.0 - (discarded + 1) as f32 / DISCARD_FADE_FRAMES as f32;
+        input.map(|sample| sample * gain.max(0.0))
     }
 }
 
@@ -411,6 +428,7 @@ struct CaptureAssembler {
     queue_overflow_frames: Arc<AtomicU64>,
     discontinuities: Arc<CaptureDiscontinuities>,
     counters: Arc<StreamCounters>,
+    discard_requested: Arc<AtomicBool>,
 }
 
 impl CaptureAssembler {
@@ -418,6 +436,9 @@ impl CaptureAssembler {
         self.counters.callback();
         if self.counters.faulted.load(Ordering::Acquire) {
             return;
+        }
+        if self.discard_requested.swap(false, Ordering::AcqRel) {
+            self.delay.discard_buffered();
         }
         if !input.len().is_multiple_of(CHANNELS) {
             self.counters.stream_errors.fetch_add(1, Ordering::Relaxed);
@@ -549,6 +570,7 @@ pub struct CaptureStream {
     counters: Arc<StreamCounters>,
     device_frames: Arc<AtomicU64>,
     queue_overflow_frames: Arc<AtomicU64>,
+    discard_requested: Arc<AtomicBool>,
     discontinuities: Arc<CaptureDiscontinuities>,
 }
 
@@ -560,6 +582,7 @@ impl CaptureStream {
         let queue = Arc::new(ArrayQueue::new(CAPTURE_QUEUE_BLOCKS));
         let device_frames = Arc::new(AtomicU64::new(0));
         let queue_overflow_frames = Arc::new(AtomicU64::new(0));
+        let discard_requested = Arc::new(AtomicBool::new(false));
         let discontinuities = Arc::new(CaptureDiscontinuities::default());
         let mut assembler = CaptureAssembler {
             delay,
@@ -570,6 +593,7 @@ impl CaptureStream {
             queue_overflow_frames: queue_overflow_frames.clone(),
             discontinuities: discontinuities.clone(),
             counters: counters.clone(),
+            discard_requested: discard_requested.clone(),
         };
         let errors = counters.clone();
         let flagged = discontinuities.clone();
@@ -606,12 +630,18 @@ impl CaptureStream {
             counters,
             device_frames,
             queue_overflow_frames,
+            discard_requested,
             discontinuities,
         })
     }
 
     pub fn pop(&self) -> Option<AudioBlock> {
         self.queue.pop()
+    }
+
+    /// The capture callback applies this before its next frame.
+    pub fn discard_delayed_audio(&self) {
+        self.discard_requested.store(true, Ordering::Release);
     }
 
     pub fn last_error(&self) -> Option<&'static str> {

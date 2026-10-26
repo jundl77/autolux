@@ -106,7 +106,8 @@ def _intent_at(intents: list, t: float) -> str | None:
 
 
 def _effects_match_intents(report: dict) -> bool:
-    from autolux.lib.engine.effect_definitions import LightIntent
+    from autolux.lib.engine.effect_definitions import STANDBY_AUTOLOOP, LightIntent
+    from autolux.lib.engine.event_buffer import STANDBY_INTENT
     from autolux.lighting.autoloop_catalogue import discover_autoloops
 
     pools = {
@@ -114,6 +115,7 @@ def _effects_match_intents(report: dict) -> bool:
         for intent, loops in discover_autoloops().items()
     }
     pools[LightIntent.DROP.value].add('drop_arrival')
+    pools[STANDBY_INTENT] = {'/'.join(STANDBY_AUTOLOOP)}
     return all(
         effect['name'] in pools.get(_intent_at(report['intents'], effect['t']), ())
         for effect in report['effects']
@@ -159,10 +161,13 @@ def informational_digest(report: dict, streams: dict | None = None) -> dict:
 
 def degradation_digest(report: dict, streams: dict | None = None) -> dict:
     from autolux.lib.engine.effect_definitions import LightIntent
+    from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
     beats = report['beats']
     intents = report['intents']
-    classified = [e for e in intents if e['intent'] != LightIntent.ATMOSPHERIC.value]
+    # Standby, like the atmospheric floor, is no classification.
+    floors = (LightIntent.ATMOSPHERIC.value, STANDBY_INTENT)
+    classified = [e for e in intents if e['intent'] not in floors]
     return {
         'beats_detected': report['metrics']['beats_detected'],
         'beat_times_hash': _hash([round(b['t'], 4) for b in beats]),
@@ -179,7 +184,8 @@ def held_start_to_end(degradation: dict) -> bool:
     return (
         degradation['intent_blocks'] >= 1
         and degradation['classified_blocks'] <= 1
-        and len([i for i in degradation['intents_held'] if i != 'atmospheric']) <= 1
+        and len([i for i in degradation['intents_held'] if i not in ('atmospheric', 'standby')])
+        <= 1
         and degradation['effect_changes'] <= degradation['atmospheric_blocks'] + 1
     )
 

@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "duration_seconds": 40,
+  "frame_rate_hz": 40,
+  "events": [
+    {
+      "at_seconds": 0,
+      "command": {
+        "kind": "beat",
+        "position_beats": 0,
+        "bpm": 120
+      }
+    },
+    {
+      "at_seconds": 0,
+      "command": {
+        "kind": "select",
+        "bank": "standby",
+        "autoloop": "warm_white",
+        "transition": {
+          "kind": "cut"
+        }
+      }
+    },
+    {
+      "at_seconds": 10,
+      "command": {
+        "kind": "select",
+        "bank": "standby",
+        "autoloop": "warm_white",
+        "transition": {
+          "kind": "cut"
+        }
+      }
+    },
+    {
+      "at_seconds": 16,
+      "command": {
+        "kind": "set_normalized_rms_level",
+        "level": 0.9
+      }
+    },
+    {
+      "at_seconds": 24,
+      "command": {
+        "kind": "beat",
+        "position_beats": 48,
+        "bpm": 150
+      }
+    },
+    {
+      "at_seconds": 30,
+      "command": {
+        "kind": "set_normalized_rms_level",
+        "level": 0
+      }
+    }
+  ]
+}

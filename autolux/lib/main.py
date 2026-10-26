@@ -196,6 +196,7 @@ class AutoluxController:
             section_decoder=None if self.section is None else self.section.decoder,
             watchdog=self.drift_watchdog,
             settings=lambda: self.control.settings,
+            silence_monitor=self._monitor.silence,
         )
         self.control.publish(self.light_engine)
 
@@ -205,6 +206,7 @@ class AutoluxController:
             self.light_engine,
             note_clicks=debug_mode,
             watchdog=self.drift_watchdog,
+            settings=lambda: self.control.settings,
         )
         self.light_engine.set_analyser(self.music_analyser)
 

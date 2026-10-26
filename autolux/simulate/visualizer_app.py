@@ -87,6 +87,10 @@ INTENT_CONFIG = {
         'primary': '#b71c1c',
         'label': 'DROP',
     },
+    'standby': {
+        'primary': '#8d6e63',
+        'label': 'STANDBY',
+    },
 }
 
 _DEFAULT_CONFIG = {
@@ -524,6 +528,7 @@ SETTING_LABELS = {
     'strobe_burst_seconds': 'Drop strobe burst (s)',
     'crossfade_beats': 'Crossfade (beats)',
     'quiet_brightness': 'Quiet brightness',
+    'digital_silence_seconds': 'Standby after silence (s)',
     'strobe_max_rate_hz': 'Max strobe rate (Hz)',
     'strobe_max_burst_seconds': 'Max strobe burst (s)',
 }

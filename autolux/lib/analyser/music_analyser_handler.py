@@ -12,6 +12,14 @@ class IMusicAnalyserHandler(ABC):
         pass
 
     @abstractmethod
+    def on_digital_silence(self):
+        """The input held exact zeros long enough to mean the source stopped."""
+
+    @abstractmethod
+    def on_signal_return(self):
+        """Signal after digital silence; analysis has restarted from scratch."""
+
+    @abstractmethod
     async def on_cycle(self):
         pass
 
