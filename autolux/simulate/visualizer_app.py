@@ -915,13 +915,11 @@ STATIC_SELECTED_TAB_STYLE = {
 }
 
 
-def static_control_command(trigger, target, colour, dimmer, blackout) -> dict | None:
+def static_control_command(trigger, target, colour, dimmer) -> dict | None:
     if trigger in STATIC_PRESET_IDS:
         return {'action': 'static', 'kind': 'preset', 'preset': STATIC_PRESET_IDS[trigger]}
     if trigger in STATIC_BUTTONS:
         return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
-    if trigger == 'static-blackout':
-        return {'action': 'static', 'kind': 'blackout', 'enabled': not blackout}
     if trigger == 'static-colour':
         text = (colour or '').strip()
         if not HEX_COLOUR_TEXT.fullmatch(text):
@@ -980,7 +978,6 @@ def _build_static_panel():
             html.Div(
                 [
                     html.Button('Blacklight', id='static-blacklight', title='UV ignores master'),
-                    html.Button('Blackout', id='static-blackout'),
                     html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
                 ],
                 className='control-row',
@@ -1007,11 +1004,9 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
             const statics = ready ? state.static : {targets: ['all'], blacklight: false};
             const options = statics.targets.map((target) =>
                 ({label: target === 'all' ? 'All' : target, value: target}));
-            const blackout = !!statics.blackout;
-            return [options, blackout ? 'active' : '', !statics.blacklight];
+            return [options, !statics.blacklight];
         }''',
         Output('static-target', 'options'),
-        Output('static-blackout', 'className'),
         Output('static-blacklight', 'disabled'),
         Input('control-state', 'data'),
     )
@@ -1054,7 +1049,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         Output('control-state', 'data', allow_duplicate=True),
         Input('control-mode', 'value'),
         *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
-        *[Input(name, 'n_clicks') for name in (*STATIC_BUTTONS, 'static-blackout')],
+        *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
         Input('static-colour', 'value'),
         Input('static-dimmer', 'value'),
         Input('static-dimmer-live', 'data'),
@@ -1080,9 +1075,8 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
                 raise dash.exceptions.PreventUpdate
             if trigger == 'static-colour' and not colour:
                 raise dash.exceptions.PreventUpdate
-            blackout = (state.get('static') or {}).get('blackout', False)
             try:
-                command = static_control_command(trigger, target, colour, dimmer, blackout)
+                command = static_control_command(trigger, target, colour, dimmer)
             except ValueError as error:
                 return f'Rejected: {error}', dash.no_update
             if command is None:

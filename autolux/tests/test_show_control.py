@@ -235,13 +235,12 @@ def static_show():
 
 
 @pytest.mark.parametrize(
-    ('trigger', 'colour', 'dimmer', 'blackout', 'expected'),
+    ('trigger', 'colour', 'dimmer', 'expected'),
     [
         (
             'static-preset-warm',
             None,
             None,
-            False,
             {'action': 'static', 'kind': 'preset', 'preset': 'warm'},
         ),
         # Off must not carry the picker's colour.
@@ -249,23 +248,14 @@ def static_show():
             'static-preset-off',
             '#ffffff',
             1.0,
-            False,
             {'action': 'static', 'kind': 'preset', 'preset': 'off'},
         ),
-        ('static-blacklight', None, None, False, {'action': 'static', 'kind': 'blacklight'}),
-        ('static-strobe', None, None, False, {'action': 'static', 'kind': 'strobe'}),
-        (
-            'static-blackout',
-            None,
-            None,
-            True,
-            {'action': 'static', 'kind': 'blackout', 'enabled': False},
-        ),
+        ('static-blacklight', None, None, {'action': 'static', 'kind': 'blacklight'}),
+        ('static-strobe', None, None, {'action': 'static', 'kind': 'strobe'}),
         (
             'static-colour',
             ' FF8000',
             None,
-            False,
             {
                 'action': 'static',
                 'kind': 'look',
@@ -278,16 +268,15 @@ def static_show():
             'static-dimmer-live',
             None,
             0.35,
-            False,
             {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.35},
         ),
     ],
 )
 def test_each_static_control_reaches_the_controller_queue_as_parsed(
-    static_show, trigger, colour, dimmer, blackout, expected
+    static_show, trigger, colour, dimmer, expected
 ):
     poller, commands = static_show
-    command = static_control_command(trigger, 'wash', colour, dimmer, blackout)
+    command = static_control_command(trigger, 'wash', colour, dimmer)
     assert poller.control(command) == {'accepted': expected['action']}
     assert commands.get_nowait() == expected
 
@@ -341,7 +330,7 @@ def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
 
 def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
     with pytest.raises(ValueError, match='is not a #rrggbb colour'):
-        static_control_command('static-colour', 'all', '#12345', None, False)
+        static_control_command('static-colour', 'all', '#12345', None)
 
 
 def _run_callback(app, output, values, triggered):
