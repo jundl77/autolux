@@ -1,11 +1,7 @@
--- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 8-beat loop
 -- energy: 3
 -- family: warm
 -- movement: sweep
--- wash: primary, a kick envelope on every beat whose depth grows with the ramp.
--- strip: secondary, odd and even pixels trading beats in step with the movers.
--- movers: cold, mirrored, tilting up on beats 1/3 and down on 2/4, travel growing with the ramp.
--- Palette slots: primary, secondary, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128
@@ -26,7 +22,6 @@ return {
         local depth = sf.lerp(0.15, 0.9, ramp)
         local kick = sf.on_beat(beat, KICK_WIDTH_BEATS)
         local wash = sf.lerp(0.35, WASH_PEAK, drive) * (1 - depth * (1 - kick)) * gain
-        -- +1 on beats 1 and 3, -1 on 2 and 4; a triangle glides between so the heads never snap.
         local stroke = sf.osc.triangle(beat, 2, 1, -1)
         local travel = sf.lerp(START_TRAVEL, END_TRAVEL, ramp) * sf.lerp(0.5, 1, energy)
         local up_beat = math.floor(beat) % 2 == 0

@@ -23,7 +23,6 @@ LOGGER = logging.getLogger(__name__)
 # simulate/runner.py uses the same delay for replay.
 PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
-# Beside the Config page's saved rig; the rig file itself is Starfire's schema.
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16
 
@@ -47,7 +46,6 @@ def save_show_settings(path: Path, settings: ShowSettings) -> None:
         config = {}
     config['settings'] = settings.to_dict()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Replace atomically so a crash mid-write cannot leave a file that blocks startup.
     with tempfile.NamedTemporaryFile(
         'w', encoding='utf-8', dir=path.parent, prefix='.show-', suffix='.json', delete=False
     ) as staged:
@@ -61,8 +59,6 @@ def save_show_settings(path: Path, settings: ShowSettings) -> None:
 
 
 class ShowControl:
-    """Operator commands from the dashboard, applied on the audio loop that owns the engine."""
-
     def __init__(self, config_path: Path, event_buffer=None):
         self.config_path = Path(config_path)
         self.settings = load_show_settings(self.config_path)
@@ -88,7 +84,6 @@ class ShowControl:
                 try:
                     save_show_settings(self.config_path, command['settings'])
                 except OSError:
-                    # Unsaved settings would silently revert on restart.
                     LOGGER.exception('[main] show settings were not saved; keeping the old ones')
                     continue
                 self.settings = command['settings']
@@ -98,7 +93,6 @@ class ShowControl:
             self.publish(light_engine)
 
     def start(self, light_engine) -> None:
-        # Starfire starts from its own defaults; a restart must restore the saved show.
         light_engine.send_renderer_settings()
 
     def publish(self, light_engine) -> None:

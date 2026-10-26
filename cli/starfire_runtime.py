@@ -102,7 +102,6 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
     try:
         read_autoloop_meta(autoloops)
     except AutoloopMetaError as error:
-        # Starfire renders these loops fine; Autolux could not choose between them.
         raise RuntimeError(f'Autolux cannot select from these autoloops: {error}') from None
     if expected_universe is not None:
         universes = report.get('universes')

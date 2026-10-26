@@ -1,12 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: cold
 -- movement: sweep
--- wash: off.
--- strip: one cold glow entering at pixel 1 and leaving past pixel 8 once per loop; it is
--- off-strip at the wrap, so the restart is invisible.
--- movers: cold, slow opposing horizontal sweep (mirrored: they part and meet).
--- Palette slots: cold, black.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local GLOW_LEVEL = 0.3
@@ -25,7 +20,6 @@ return {
             sf.dimmer(sf.group("wash"), 0),
             sf.colour(sf.group("strip"), palette.cold),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                -- Runs from one pixel before the strip to one past it.
                 local position = beat / LOOP_BEATS * (count + 1) - 1
                 local glow = math.max(0, 1 - math.abs(position - (index - 1)))
                 return sf.dimmer(pixel, GLOW_LEVEL * glow * level)

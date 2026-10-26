@@ -1,11 +1,7 @@
--- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 8-beat loop
 -- energy: 3
 -- family: warm
 -- movement: sweep
--- wash: primary, a pulse on every beat whose depth grows with the ramp.
--- strip: secondary, a dim bed that brightens with the ramp.
--- movers: cold, mirrored sweep; its period halves by ramp thirds, 8 then 4 then 2 beats.
--- Palette slots: primary, secondary, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128
@@ -13,7 +9,6 @@ local RAMP_SHARE = 0.85
 local WASH_PEAK = 0.9
 local CENTRE_PAN, TILT, SWING = 0.5, 0.55, 0.18
 
--- Whole laps per loop, so the sweep never jumps at the loop wrap.
 local function laps_for(ramp)
     if ramp < 1 / 3 then return 1 end
     if ramp < 2 / 3 then return 2 end

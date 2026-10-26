@@ -130,7 +130,6 @@ class SectionDecoder:
 
     @property
     def beat_phase(self) -> int | None:
-        """Bar position of the latest pushed beat; 0 is the downbeat."""
         if self._phase is not None:
             return self._phase_prev
         if self._last_beat_sec is None:

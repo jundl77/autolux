@@ -18,7 +18,6 @@ REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
-# Replays light each intent with its preferred look, not the live rotation.
 AUTOLOOP_BY_INTENT = {intent.value: loops[0] for intent, loops in DEFAULT_AUTOLOOPS.items()}
 
 
@@ -87,8 +86,6 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
             events.append(
                 {
                     'at_seconds': at,
-                    # Reports do not record the tracker's bar phase, so Starfire
-                    # counts beats plainly from the first one.
                     'command': {
                         'kind': 'beat',
                         'beat_index': beat_index,

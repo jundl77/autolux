@@ -1,10 +1,3 @@
-"""Declarative MVR 1.6 (DIN SPEC 15801) node schema, value kinds and GDTF edit rules.
-
-One description drives save validation and the Config editor, so both stay spec-complete.
-Allowed counts are the spec tables' "Allowed Count"; '1' is mandatory. Tables 19-34 list
-FixtureID and FixtureIDNumeric as mandatory; MVR 1.6 forbids them on multipatch children.
-"""
-
 import math
 import re
 from dataclasses import asdict, dataclass
@@ -31,15 +24,15 @@ class Attribute:
     required: bool = False
     default: str | None = None
     values: tuple[str, ...] = ()
-    target: tuple[str, ...] = ()  # Node tags a UUID reference must resolve to.
+    target: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Child:
     tag: str
     count: str
-    kind: str | None = None  # Value kind of a text-only child; None for structured nodes.
-    node: str | None = None  # Schema key when one tag has context-dependent content.
+    kind: str | None = None
+    node: str | None = None
     values: tuple[str, ...] = ()
     target: tuple[str, ...] = ()
 
@@ -53,11 +46,11 @@ class Node:
     tag: str
     attributes: tuple[Attribute, ...] = ()
     children: tuple[Child, ...] = ()
-    text: str | None = None  # Value kind of the node's own text.
+    text: str | None = None
     values: tuple[str, ...] = ()
-    any_content: bool = False  # Provider data: preserved verbatim, never validated.
-    extension: bool = False  # Autolux UserData, not part of the MVR tables.
-    key: str | None = None  # Schema key when the XML tag is context-dependent.
+    any_content: bool = False
+    extension: bool = False
+    key: str | None = None
 
 
 def _identity(*extra: Attribute) -> tuple[Attribute, ...]:
@@ -367,7 +360,6 @@ NODES: dict[str, Node] = {
                 Child('rz', OPTIONAL, 'float'),
             ),
         ),
-        # Movement limits have no MVR node; provider UserData is the standard extension point.
         Node(
             'Data',
             (
@@ -391,7 +383,6 @@ NODES: dict[str, Node] = {
     )
 }
 
-# Fields users correct in GDTF descriptions; everything else is read-only (GDTF 1.2 tables 56-61).
 GDTF_EDITABLE = {
     'DMXMode': {'Name': 'name', 'Description': 'string'},
     'ChannelFunction': {
@@ -421,9 +412,7 @@ NIL_UUID = '00000000-0000-0000-0000-000000000000'
 IPV4 = re.compile(r'((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)')
 IPV6 = re.compile(r'[0-9A-Fa-f:]{2,39}')
 DMX_VALUE = re.compile(r'\d+/[1-4]s?')
-# FAT32/NTFS reserved characters plus folders: MVR resources live at the archive root.
 FILENAME = re.compile(r'[^<>:"/\\|?*\x00-\x1f]+')
-# GDTF Annex C: ASCII characters allowed in Name values; everything above 127 is allowed.
 GDTF_NAME = re.compile(r'''[ "#%'()*+\-/0-9:;<=>@A-Z_`a-z\u0080-\U0010ffff]+''')
 MATRIX_ROW = re.compile(r'\{([^{}]*)\}')
 MAX_DMX_ADDRESS = 32768 * 512
@@ -446,7 +435,6 @@ def parse_matrix(text: str) -> list[float] | None:
 
 
 def dmx_address(text: str) -> tuple[int, int] | None:
-    """Return (zero-based universe, one-based address) for absolute or Universe.Address text."""
     if INTEGER.fullmatch(text):
         absolute = int(text)
         if not 1 <= absolute <= MAX_DMX_ADDRESS:
@@ -463,7 +451,6 @@ def dmx_address(text: str) -> tuple[int, int] | None:
 
 
 def value_error(kind: str, text: str, values: tuple[str, ...] = ()) -> str | None:
-    """Describe why text is not a valid value of kind, or None when it is."""
     checks = {
         'string': lambda: True,
         'integer': lambda: INTEGER.fullmatch(text) is not None,
@@ -503,7 +490,6 @@ def value_error(kind: str, text: str, values: tuple[str, ...] = ()) -> str | Non
 
 
 def describe() -> dict:
-    """The schema as JSON for the browser editor."""
     return {
         'nodes': {
             key: {
@@ -519,7 +505,6 @@ def describe() -> dict:
 
 
 def child_schema(parent_key: str, tag: str, attributes: dict | None = None) -> str | None:
-    """Schema key of a child element, honouring context-dependent tags."""
     node = NODES.get(parent_key)
     if node is None:
         return None

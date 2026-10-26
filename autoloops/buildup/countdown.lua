@@ -1,13 +1,8 @@
--- 16-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 16-beat loop
 -- energy: 2
 -- family: warm
 -- movement: sweep
--- wash: secondary, an accent flash on each bar's one whose depth grows with the ramp.
--- strip: cold, counts down 8 to 1 lit pixels, one fewer every half bar across the 4-bar phrase.
--- movers: primary, mirrored, still, closing toward centre with the ramp.
--- Palette slots: primary, secondary, accent, cold.
 local palette = sf.palette("techno")
--- Loops are capped at 16 beats, so the count of 8 runs at half-bar steps over 4 bars.
 local LOOP_BEATS = 16
 local RAMP_BEATS = 128
 local RAMP_SHARE = 0.85

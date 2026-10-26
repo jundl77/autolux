@@ -1,6 +1,3 @@
-//! MVR rig files mapped onto the Login rig definition, so files and Login share one validator.
-//! Spec conformance is checked by Autolux before saving; this reader extracts the patch.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 
@@ -165,7 +162,6 @@ fn read_entry(archive: &[u8], name: &str, limit: usize, label: &str) -> Result<V
     Ok(content)
 }
 
-/// Return (zero-based Art-Net universe, one-based address) from absolute or "u.a" text.
 pub fn parse_address(text: &str) -> Result<(u32, u32)> {
     let text = text.trim();
     let invalid = || format!("invalid MVR DMX address {text:?}");
@@ -194,7 +190,6 @@ pub fn parse_address(text: &str) -> Result<(u32, u32)> {
     Ok((universe, address))
 }
 
-/// MVR Matrix text as twelve numbers: X, Y and Z axes, then position in millimetres.
 pub fn parse_matrix(text: &str) -> Result<Vec<f64>> {
     let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
     if compact.is_empty() {
@@ -266,7 +261,6 @@ fn invert_flag(fixture: &Element, name: &str) -> Result<bool> {
     }
 }
 
-/// Express a child placement in its parent's space: R = Rp * Rc, o = Rp * oc + op.
 pub fn multiply(
     parent: &[f64; MATRIX_VALUES],
     child: &[f64; MATRIX_VALUES],
@@ -329,8 +323,6 @@ fn add_to_group(rig: &mut wire::RigDefinition, class: &str, name: &str) {
     }
 }
 
-/// Read an MVR archive into the Login rig. Every Fixture with a GDTFSpec and an Address is
-/// patched wherever it is nested, with its matrix composed into scene space.
 pub fn rig_definition(archive: &[u8]) -> Result<wire::RigDefinition> {
     let xml = String::from_utf8(read_entry(
         archive,
@@ -377,7 +369,7 @@ pub fn rig_definition(archive: &[u8]) -> Result<wire::RigDefinition> {
             .flat_map(|addresses| addresses.children("Address"))
             .collect();
         if spec.is_empty() || addresses.is_empty() {
-            continue; // Unpatched planning objects have nothing to render.
+            continue;
         }
         let name = node.attribute("name");
         let identity = node.attribute("uuid").to_ascii_uppercase();
@@ -419,7 +411,6 @@ pub fn rig_definition(archive: &[u8]) -> Result<wire::RigDefinition> {
                     .copied()
                     .unwrap_or((0.0, 1.0));
                 let inverted = invert_flag(node, flag)?;
-                // Canonical form shared with cli/starfire_assets.py: defaults are omitted.
                 Ok(((minimum, maximum) != (0.0, 1.0) || inverted).then_some(
                     wire::fixture::MovementRange {
                         minimum: Some(minimum),

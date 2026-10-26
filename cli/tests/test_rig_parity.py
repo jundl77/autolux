@@ -1,5 +1,3 @@
-"""Autolux's Login rig and Starfire's own MVR reader must build the same RigDefinition."""
-
 import os
 import subprocess
 from pathlib import Path
@@ -45,7 +43,6 @@ def binary():
         ('room', lambda: (ROOT / 'rigs/room.mvr').read_bytes()),
         ('generic', lambda: (ROOT / 'rigs/generic.mvr').read_bytes()),
         ('sample', sample_archive),
-        # Explicit default limits, inversion only and a standing head keep one canonical form.
         (
             'movement',
             lambda: edited_sample(
@@ -77,7 +74,6 @@ def test_python_login_rig_equals_the_native_reader(tmp_path, name, content):
 
 def test_render_rules_reject_in_both_readers_with_one_wording(tmp_path):
     path = tmp_path / 'steep.mvr'
-    # Rx(75): the tilt-home approximation is refused on both sides.
     path.write_bytes(
         edited_sample(
             '{1,0,0}{0,1,0}{0,0,1}{500,0,0}',

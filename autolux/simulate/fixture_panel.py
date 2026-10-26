@@ -1,5 +1,3 @@
-"""Fixture library, DMX universe map and MVR rig editor for the Config tab."""
-
 import dash
 from dash import ClientsideFunction, Input, Output, State, dcc, html
 
@@ -91,7 +89,6 @@ def _number(identifier, value=None, minimum=1, maximum=DMX_UNIVERSE_SIZE):
 
 
 def browser_library(library: dict) -> dict:
-    """Library entries the browser needs: names, mode footprints and the GDTF tree to embed."""
     return {
         spec: {
             'name': entry['name'],
@@ -190,7 +187,6 @@ def build_fixture_panel(app, store):
                                 className='patch-heading patch-info-heading',
                             ),
                             html.P(id='fixture-detail-summary', className='patch-muted'),
-                            # Browser-owned DOM, generated from the MVR schema in fixture_patch.js.
                             html.Div(id='mvr-node-editor', className='mvr-editor'),
                             html.Div(
                                 [html.Button('Remove', id='fixture-remove')],
@@ -270,7 +266,6 @@ def build_fixture_panel(app, store):
                             ),
                             html.Div(
                                 [
-                                    # Both are browser-owned DOM drawn from the draft document.
                                     html.Div(id='mvr-plan'),
                                     html.Div(id='mvr-tree'),
                                 ],

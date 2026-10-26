@@ -1,12 +1,7 @@
--- 8-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- 8-beat loop
 -- energy: 3
 -- family: warm
 -- movement: still
--- wash: primary, all four hit together on every beat with a short decay over an
--- RMS-scaled floor: one solid wall of light per kick.
--- strip: steady secondary at half level, the warm horizon behind the wall.
--- movers: primary, held static in a wide mirrored V.
--- Palette slots: primary, secondary.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS = 0.3

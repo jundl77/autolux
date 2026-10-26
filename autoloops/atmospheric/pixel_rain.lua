@@ -1,11 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: cold
 -- movement: sweep
--- wash: cold, near-black at 0.1.
--- strip: cold drop trickling down from pixel 8 to pixel 1, one step per beat, two passes
--- per loop; the head and the pixel it just left are lit.
--- movers: cold, small slow mirrored figure-eight. Palette slots: cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local WASH_LEVEL = 0.1
@@ -20,7 +16,6 @@ return {
         local energy = ctx.normalized_rms_level or 0.6
         local level = sf.loudness_gain(ctx.normalized_rms_level)
         local reach = sf.lerp(0.5, 1, energy)
-        -- Offset 0.25 turns the sines into sin(t) and sin(2t): a figure-eight.
         local pan = PAN_SWING * reach * sf.osc.sine(beat, LOOP_BEATS, -1, 1, 0.25)
         local tilt = CENTRE_TILT + TILT_SWING * reach * sf.osc.sine(beat, LOOP_BEATS / 2, -1, 1, 0.25)
         return sf.scene {
@@ -28,7 +23,6 @@ return {
             sf.dimmer(sf.group("wash"), WASH_LEVEL * level),
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local head = count - math.floor(beat) % count
-                -- Wraps, so the last drop's tail at pixel 1 overlaps the new head at pixel 8.
                 local tail = head % count + 1
                 local lit = index == head and HEAD_LEVEL or index == tail and TAIL_LEVEL or 0
                 return sf.dimmer(pixel, lit * level)

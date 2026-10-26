@@ -15,10 +15,6 @@
     let requestId = 0;
     let keyCounter = 0;
 
-    // ------------------------------------------------------------ document tree
-    // The draft is {scene, gdtf}: generic XML trees {key, tag, attributes, text, children}.
-    // Edits stay in this browser; only Save and Reload contact the server.
-
     function* walk(node, parent = null) {
         yield [node, parent];
         for (const child of node.children) yield* walk(child, node);
@@ -64,8 +60,6 @@
         return `${text.slice(0, 8)}-${text.slice(8, 12)}-${text.slice(12, 16)}-${text.slice(16, 20)}-${text.slice(20)}`;
     }
 
-    // ------------------------------------------------------------ schema (mvr_schema.py)
-
     function childDefinition(settings, parentKey, tag) {
         return settings.schema.nodes[parentKey]?.children.find((child) => child.tag === tag);
     }
@@ -77,7 +71,6 @@
         return definition.key;
     }
 
-    // Schema key of each node on a path; null marks value elements and unknown nodes.
     function schemaKeys(path, settings) {
         const keys = ["GeneralSceneDescription"];
         for (let index = 1; index < path.length; index++) {
@@ -107,7 +100,6 @@
         return "";
     }
 
-    // A new node carries every attribute and child its schema marks mandatory.
     function template(settings, key, tag) {
         const schema = settings.schema.nodes[key];
         const node = element(tag);
@@ -126,8 +118,6 @@
         }
         return node;
     }
-
-    // ------------------------------------------------------------ matrices (mvr.py)
 
     function finiteNumbers(text, count) {
         const parts = text.split(",");
@@ -170,7 +160,6 @@
         return wrapped + 0;
     }
 
-    // R = Rz(yaw) * Rx(pitch) * Ry(roll); yaw is the pan home offset Starfire applies.
     function rotationDegrees(matrix) {
         const axes = [0, 3, 6].map((start) => {
             const axis = matrix.slice(start, start + 3);
@@ -196,7 +185,6 @@
         ];
     }
 
-    // Mirrors mvr.home_orientation and Starfire: downward local Z reverses pan and tilt.
     function homeOrientation(matrix) {
         const rotation = rotationDegrees(matrix);
         if (!rotation) return "Matrix has no plain rotation.";
@@ -233,7 +221,6 @@
         return values.map((value) => Number(value.toFixed(MATRIX_DECIMALS)) + 0);
     }
 
-    // Zero-based universe and one-based address, from absolute or Universe.Address text.
     function dmxAddress(text) {
         text = (text || "").trim();
         if (/^-?\d+$/.test(text)) {
@@ -250,13 +237,10 @@
 
     const absoluteAddress = (universe, address) => String(universe * DMX_UNIVERSE_SIZE + address);
 
-    // ------------------------------------------------------------ patched fixtures
-
     function gdtfTree(draft, settings, spec) {
         return draft.gdtf[spec] || settings.library[spec]?.tree || null;
     }
 
-    // Starfire's footprint: the highest offset of any channel on DMX break 1.
     function modeChannels(tree, mode) {
         if (!tree) return null;
         for (const [node] of walk(tree)) {
@@ -328,7 +312,6 @@
         });
     }
 
-    // Mirrors fixture_setup.channel_occupancy: what Starfire could not patch.
     function occupancy(rows, settings, universe) {
         const occupied = Array.from({ length: settings.channelCount }, () => []);
         const errors = [],
@@ -395,8 +378,6 @@
         }
         throw new Error(`No room for ${count} consecutive channels in universe ${universe + 1}.`);
     }
-
-    // ------------------------------------------------------------ edits
 
     function firstLayerChildren(draft, settings) {
         const scene = childOf(draft.scene, "Scene");
@@ -529,7 +510,6 @@
         }
     }
 
-    // Saved drafts get fresh keys; keep the selection on the same object.
     function remapSelection(previous, next, key) {
         if (!key) return null;
         const path = pathTo(previous.scene, key);
@@ -677,7 +657,6 @@
         }
     };
 
-    // Exposed for the Node integrity tests; the dashboard uses the callbacks above.
     ds.fixture_patch_model = {
         parseMatrix,
         formatMatrix,
@@ -697,8 +676,6 @@
     function sendAction(action) {
         window.dash_clientside.set_props("fixture-grid-action", { data: { ...action, request_id: ++requestId } });
     }
-
-    // ------------------------------------------------------------ browser-owned views
 
     function h(tag, attributes = {}, ...children) {
         const node = document.createElement(tag);
@@ -804,7 +781,6 @@
             if (settings.schema.nodes[key]?.any_content) return;
             for (const child of node.children) {
                 const definition = key && childDefinition(settings, key, child.tag);
-                // Value fields are edited in the inspector; unknown nodes stay visible to remove.
                 if (definition?.kind) continue;
                 visit(child, definition ? childKey(settings, key, child, definition) : null, depth + 1);
             }
@@ -1010,8 +986,6 @@
         container.replaceChildren(...parts);
     }
 
-    // ------------------------------------------------------------ DMX map drag and drop
-
     function geometry(grid) {
         const rect = grid.getBoundingClientRect();
         const cell = grid.querySelector(".patch-channel").getBoundingClientRect();
@@ -1187,7 +1161,6 @@
         true
     );
 
-    // Browser-owned editor inputs report committed values; Dash state changes only via actions.
     document.addEventListener("change", (event) => {
         if (event.target.closest('#config-panel[aria-busy="true"]')) return;
         const edit = event.target.closest("#config-panel [data-mvr-edit]");

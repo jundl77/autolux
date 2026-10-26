@@ -1,5 +1,3 @@
-"""Rig persistence must never publish unvalidated, nonconforming or stale edits."""
-
 import copy
 import hashlib
 from concurrent.futures import ThreadPoolExecutor

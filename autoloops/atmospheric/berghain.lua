@@ -1,10 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: cold
 -- movement: sweep
--- wash: cold monochrome, steady at 0.12.
--- strip: dark, only the outer pixels 1 and 8 faintly lit.
--- movers: slow mirrored vertical scan, pan fixed. Palette slots: cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local WASH_LEVEL = 0.12

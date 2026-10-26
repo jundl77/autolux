@@ -36,8 +36,7 @@ Class member order is MVR document order. Multipatch fixtures render as separate
 - identity = the GDTF default (hanging) orientation = offset 0, not reversed.
 
 Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180, not
-reversed. This is how the room spots are entered, reproducing the previous 180° offset;
-every golden DMX digest is unchanged. Standing on the floor: `Rx(180)` =
+reversed. This is how the room spots are entered. Standing on the floor: `Rx(180)` =
 `{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` (Config: pitch 0, roll 180, yaw 180 as decomposed) →
 yaw 180 and reversed. The inspector shows the derived home under each Matrix.
 
@@ -95,9 +94,9 @@ The library types follow DIN SPEC 15800 Annex B: standard features (Dimmer.Dimme
 Position.PanTilt, Color.RGB/Color.Color, Beam.Beam, Gobo.Gobo, Control.Control only for
 control channels), ColorAdd_* in ColorComponent, Pan/Tilt on `Axis` geometries (Base ›
 Yoke › Head › Beam), light on a `Beam` geometry, upper-case FixtureTypeID, primitive
-`Models` and an sRGB `PhysicalDescriptions`. Former held channels carry their real
-attributes (Shutter1, Gobo1, PositionMSpeed, Function, PositionEffect(Rate), ColorAdd_UV,
-ColorMacro1(Rate)) with unchanged defaults, so DMX output is unchanged.
+`Models` and an sRGB `PhysicalDescriptions`. Channels Autolux holds at a default carry their
+real attributes (Shutter1, Gobo1, PositionMSpeed, Function, PositionEffect(Rate), ColorAdd_UV,
+ColorMacro1(Rate)).
 
 Every GDTF node and attribute is shown per fixture, read-only, except:
 DMXMode `Name`/`Description`; ChannelFunction `Name`, `DMXFrom`, `Default`,

@@ -11,9 +11,6 @@ use crate::model::{
     Transition,
 };
 
-/// Contract value from the frame comment in `proto/starfire/starfire.proto`. Login
-/// carries the rig and whole Lua library, so it sets the size; the bound still caps
-/// the payload buffer allocated from an untrusted length prefix.
 pub const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_ERROR_BYTES: usize = 1024;
 pub const FRAME_HEADER_BYTES: usize = 5;
@@ -175,7 +172,6 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
     match command {
         ClientMessage::Login(_) => bail!("login is handled by the process host"),
         ClientMessage::Heartbeat(_) => Ok(()),
-        // Audio transport only; the live host forwards it to its Radius output.
         ClientMessage::DiscardDelayedAudio(_) => Ok(()),
         ClientMessage::UpdateBeat(value) => engine.apply(
             at_seconds,
@@ -194,7 +190,6 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 );
                 return engine.apply(at_seconds, &Command::Stop);
             }
-            // A present Transition without crossfade_beats is an explicit cut.
             let transition = match &value.transition {
                 None => Transition::RendererDefault,
                 Some(value) => value

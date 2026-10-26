@@ -14,7 +14,6 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixt
     crypto: globalThis.crypto
 });
 const model = ds.fixture_patch_model;
-// The model runs in its own realm; compare plain data rather than prototypes.
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const { settings } = data;
 const UUID = /^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
@@ -45,7 +44,6 @@ test("matrix composition and decomposition agree with the server byte for byte",
         const browser = model.rotationDegrees(model.composeMatrix([0, 0, 0], rotation));
         browser.forEach((value, index) => assert.ok(Math.abs(value - decomposed[index]) < 1e-6, `${rotation}`));
     }
-    // atan2(-0, -1) is -180; the canonical half turn must stay +180 for Starfire's DMX.
     assert.deepEqual(plain(model.rotationDegrees([-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0])), [180, 0, 0]);
     assert.equal(model.rotationDegrees([1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]), null);
     assert.equal(model.parseMatrix("{1,0,0}{0,1,0}{0,0,1}"), null);

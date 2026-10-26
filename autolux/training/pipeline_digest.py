@@ -165,7 +165,6 @@ def degradation_digest(report: dict, streams: dict | None = None) -> dict:
 
     beats = report['beats']
     intents = report['intents']
-    # Standby, like the atmospheric floor, is no classification.
     floors = (LightIntent.ATMOSPHERIC.value, STANDBY_INTENT)
     classified = [e for e in intents if e['intent'] not in floors]
     return {

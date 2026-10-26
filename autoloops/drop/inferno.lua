@@ -1,12 +1,7 @@
--- 8-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- 8-beat loop
 -- energy: 2
 -- family: accent
 -- movement: snap
--- wash: accent, kick hit on every beat over a glowing floor (0.25 before loudness gain),
--- so the room never drops out of red.
--- strip: primary pulse on every "and", white sparks between the red kicks.
--- movers: accent, snap between two mirrored positions on beat 1 and beat 3.
--- Palette slots: accent, primary.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local HALF_BAR_BEATS = 2
@@ -14,8 +9,7 @@ local KICK_WIDTH_BEATS, SPARK_WIDTH_BEATS = 0.4, 0.3
 local OFFBEAT_SHIFT_BEATS = 0.5
 local WASH_FLOOR, WASH_PEAK, STRIP_PEAK, MOVER_LEVEL = 0.25, 0.9, 0.8, 0.9
 local CENTRE_PAN = 0.5
--- Pan is the offset from centre; movers mirror it left/right.
-local POSITIONS = { { pan = 0.16, tilt = 0.52 }, { pan = 0.04, tilt = 0.72 } }
+local POSITIONS = { { pan_offset = 0.16, tilt = 0.52 }, { pan_offset = 0.04, tilt = 0.72 } }
 
 return {
     render = function(ctx)
@@ -34,7 +28,7 @@ return {
             sf.colour(sf.group("movers"), palette.accent),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * gain),
             sf.each(sf.group("movers"), function(mover, index)
-                local pan = CENTRE_PAN + sf.side(index) * position.pan * reach
+                local pan = CENTRE_PAN + sf.side(index) * position.pan_offset * reach
                 return sf.pan_tilt(mover, pan, position.tilt)
             end)
         }

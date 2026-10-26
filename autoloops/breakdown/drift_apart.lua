@@ -1,12 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: cold
 -- movement: sweep
--- wash: faint cold.
--- strip: off.
--- movers: cold, start together at centre and drift apart (mirrored) for 14 beats, then
--- ease back to centre over the last 2 so each phrase starts together.
--- Palette slots: cold, black.
 local palette = sf.palette("techno")
 local LOOP_BARS = 4
 local DRIFT_SHARE = 14 / 16

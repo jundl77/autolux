@@ -945,7 +945,6 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
 }
 
 fn master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
-    // CONSTANT renders dimmer 0.5, so output intensity is half the master level.
     engine
         .render_at(time_seconds)
         .unwrap()
@@ -1029,7 +1028,6 @@ fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() 
     paused(&mut engine, 1.0, true);
     let held = engine.render_at(1.0).unwrap();
     near(held.beat_position, 2.0);
-    // Beats keep arriving while paused; they must not move the held position.
     engine
         .apply(
             2.0,
@@ -1051,7 +1049,6 @@ fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() 
 
     paused(&mut engine, 3.0, false);
     near(engine.render_at(3.5).unwrap().beat_position, 3.0);
-    // The first measured beat after resume re-anchors phase, forward only.
     engine
         .apply(
             4.0,
@@ -1099,7 +1096,6 @@ fn pause_releases_effect_and_script_strobes_and_they_stay_released() {
         0.0,
     );
     paused(&mut engine, 1.0, false);
-    // The accent is gone; the script's own strobe returns with the show.
     near(
         engine
             .render_at(1.0)
@@ -1114,7 +1110,6 @@ fn pause_releases_effect_and_script_strobes_and_they_stay_released() {
 fn selection_without_a_transition_uses_the_renderer_default_crossfade() {
     let mut engine = engine(&[("red", RED), ("blue", BLUE)]);
     select(&mut engine, 0.0, "red", Transition::RendererDefault);
-    // Unset, the default cuts, as before the parameter existed.
     select(&mut engine, 1.0, "blue", Transition::RendererDefault);
     near(
         engine

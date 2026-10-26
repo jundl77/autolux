@@ -1,10 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: accent
 -- movement: still
--- wash: sunset, colour swings secondary -> accent and back across the phrase at a low level.
--- strip: a slow secondary horizon line, drifting from the centre out to the ends and back.
--- movers: secondary, wide and still. Palette slots: secondary, accent.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local WASH_LEVEL = 0.16
@@ -22,9 +19,8 @@ return {
             sf.dimmer(sf.group("wash"), WASH_LEVEL * level),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                -- Distance from the centre, 0..1; the horizon is a soft band at distance `dusk`.
-                local distance = math.abs(2 * (index - 1) / (count - 1) - 1)
-                local band = math.max(0, 1 - 3 * math.abs(distance - dusk))
+                local from_centre = math.abs(2 * (index - 1) / (count - 1) - 1)
+                local band = math.max(0, 1 - 3 * math.abs(from_centre - dusk))
                 return sf.dimmer(pixel, HORIZON_LEVEL * band * level)
             end),
             sf.colour(sf.group("movers"), palette.secondary),

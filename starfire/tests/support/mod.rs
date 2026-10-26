@@ -1,6 +1,3 @@
-//! Rig builders for tests: a compact fixture list becomes a Login rig or an MVR archive.
-//! Shape: {"fixtures":[{"id","profile","universe","address","pan"?,"tilt"?,"matrix"?}],
-//! "groups"?:{"name":[ids]}} with profile IDs from rigs/profiles.json.
 #![allow(dead_code)]
 
 use std::io::{Cursor, Write};
@@ -109,7 +106,6 @@ pub fn zipped(entries: &[(&str, &[u8])]) -> Vec<u8> {
     package.finish().unwrap().into_inner()
 }
 
-/// The room rig's scene XML and its other entries, for tests that edit one node.
 pub fn room_entries() -> (String, Vec<(String, Vec<u8>)>) {
     let mut package =
         zip::ZipArchive::new(Cursor::new(std::fs::read(rigs().join("room.mvr")).unwrap())).unwrap();
@@ -128,7 +124,6 @@ pub fn room_entries() -> (String, Vec<(String, Vec<u8>)>) {
     (scene, others)
 }
 
-/// The room rig with its scene XML replaced, keeping the embedded GDTF files.
 pub fn room_with_scene(scene_xml: &str) -> Vec<u8> {
     let (_, others) = room_entries();
     let mut entries: Vec<(&str, &[u8])> =
@@ -141,7 +136,6 @@ pub fn room_with_scene(scene_xml: &str) -> Vec<u8> {
     zipped(&entries)
 }
 
-/// An MVR archive with every catalogue profile embedded as `<profile>.gdtf`.
 pub fn archive(scene_xml: &str) -> Vec<u8> {
     let catalogue: Value = serde_json::from_str(PROFILES).unwrap();
     let packages: Vec<(String, Vec<u8>)> = catalogue["profiles"]
@@ -166,7 +160,6 @@ pub fn archive(scene_xml: &str) -> Vec<u8> {
     zipped(&entries)
 }
 
-/// The fixture list as an MVR scene; groups become classes, members in fixture order.
 pub fn scene_xml(spec: &Value) -> String {
     let groups = spec
         .get("groups")

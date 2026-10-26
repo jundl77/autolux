@@ -1,11 +1,7 @@
--- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 8-beat loop
 -- energy: 3
 -- family: cold
 -- movement: sweep
--- wash: cold, steady, rising with the ramp; no pulse, the strip carries the tension.
--- strip: primary scattered flicker on a grid that densifies by ramp thirds (1, 1/2, 1/4 beat).
--- movers: cold, mirrored, still, closing toward centre with the ramp.
--- Palette slots: primary, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128
@@ -13,7 +9,6 @@ local RAMP_SHARE = 0.85
 local WASH_PEAK = 0.9
 local CENTRE_PAN, TILT = 0.5, 0.6
 local START_OFFSET, END_OFFSET = 0.2, 0.02
--- 3 of 8 pixels per pulse; stride 3 is coprime with 8, so every pixel takes its turn.
 local LIT_PER_PULSE, SCATTER_STRIDE = 3, 3
 
 local function period_for(ramp)
@@ -30,7 +25,6 @@ return {
         local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local period = period_for(ramp)
-        -- Width tracks the period so a denser grid reads as faster, not as a steady glow.
         local pulse = sf.on_beat(beat, period * 0.6, period)
         local pulse_index = math.floor(beat / period)
         local offset = sf.lerp(START_OFFSET, END_OFFSET, ramp) * sf.lerp(0.5, 1, energy)

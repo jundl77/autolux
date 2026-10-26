@@ -74,7 +74,6 @@ enum Action {
     /// Validate a fixture patch without emitting DMX.
     Rig {
         input: PathBuf,
-        /// Also write the RigDefinition protobuf this rig loads as, for Login parity checks.
         #[arg(long)]
         definition: Option<PathBuf>,
     },

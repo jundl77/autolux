@@ -17,7 +17,6 @@ use crate::fixtures::{FixtureRig, MAX_FIXTURES};
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::protocol::wire;
 
-// Per-AutoloopDefinition cap from `proto/starfire/starfire.proto`.
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_CATALOGUE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_AUTOLOOPS: usize = 256;

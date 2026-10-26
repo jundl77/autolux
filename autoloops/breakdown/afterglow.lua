@@ -1,11 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: accent
 -- movement: still
--- wash: accent, ignites over the first half beat of the phrase, then fades out across
--- the rest of the 16 beats.
--- strip: all pixels mirror the wash envelope at a low level.
--- movers: accent, dim, still at centre. Palette slots: accent.
 local palette = sf.palette("techno")
 local LOOP_BARS = 4
 local IGNITE_SHARE = 1 / 32

@@ -10,7 +10,6 @@ from autolux.lib.telemetry_history import TelemetryHistory
 
 CLASSIFIER_TRIGGER = 'classifier'
 SILENCE_TRIGGER = 'silence'
-# Not a LightIntent: the rig is parked because the source stopped.
 STANDBY_INTENT = 'standby'
 
 STOP_PERSISTENCE_SEC = 2.0
@@ -39,7 +38,6 @@ class EventBuffer:
         self._sound_events: list[dict] = []
         self._decoder_state: dict = {}
         self._shed_state: dict = {}
-        # Absent until a controller publishes, so a viewer never shows guessed controls.
         self._control_state: dict = {'paused': None, 'master_brightness': None, 'settings': None}
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()

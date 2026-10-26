@@ -1,5 +1,3 @@
-//! Fixture-independent values shared by scripts, playback and output encoding.
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -7,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub const DMX_CHANNELS: usize = 512;
 pub const DEFAULT_FRAME_RATE_HZ: u32 = 40;
 pub const MAX_FRAME_RATE_HZ: u32 = 100;
-// Four output samples per cycle at the default render cadence.
 pub const MAX_STROBE_HZ: f64 = DEFAULT_FRAME_RATE_HZ as f64 / 4.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,7 +44,6 @@ pub struct PropertyValues {
     pub attributes: BTreeMap<String, AttributeValue>,
 }
 
-/// A physical value or a named GDTF channel-set preset.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AttributeValue {
@@ -101,15 +97,12 @@ pub type FixtureStates = BTreeMap<String, FixtureState>;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderContext {
     pub time_seconds: f64,
-    /// Bar-aligned grid: `floor(beat_position) % beats_per_bar` is the beat in bar.
     pub beat_position: f64,
-    /// Continuous position inside the current bar, `0 <= bar_phase < beats_per_bar`.
     pub bar_phase: f64,
     pub bar_index: u64,
     pub beats_per_bar: u32,
     pub autoloop_elapsed_beats: f64,
     pub autoloop_speed_scaled_elapsed_beats: f64,
-    /// Measured RMS mapped to 0..1, independent of operator brightness.
     pub normalized_rms_level: Option<f64>,
 }
 
@@ -131,7 +124,6 @@ impl Default for RenderContext {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Transition {
-    /// The renderer's DEFAULT_CROSSFADE_BEATS, resolved when the command applies.
     #[default]
     RendererDefault,
     Cut,
@@ -170,7 +162,6 @@ pub struct LightingOverride {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
-    /// Facts about one detected beat; the clock builds the bar-aligned grid.
     Beat {
         beat_index: u64,
         #[serde(default)]

@@ -6,9 +6,8 @@ import "proto/starfire/rig.proto";
 
 // CLIENT = Autolux coordinator; SERVER = its owned Starfire process.
 // Frame: one byte MessageType, four-byte big-endian payload length, then the
-// standalone Protobuf message (at most 4 MiB, sized for Login: rig, GDTF profiles and
-// the whole Lua library; each AutoloopDefinition.lua_source is at most 64 KiB).
-// Larger declared lengths are rejected before allocation. No message envelope.
+// standalone Protobuf message (at most 4 MiB; each AutoloopDefinition.lua_source at
+// most 64 KiB). No message envelope.
 // Login comes first. Commands apply in order at render boundaries after login.
 // A successful Login binds the connection to its nonzero run_id; it cannot be replaced.
 // Later commands and heartbeats implicitly belong to that run.
@@ -44,14 +43,9 @@ enum ParameterType {
   ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
   OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
   AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
-  // Boolean; freezes musical, animation and script time so the current frame holds,
-  // and releases strobes. Overrides timed in seconds keep expiring on wall time; beat
-  // lifetimes hold. UpdateBeat is ignored while paused; resume continues from the
-  // held position and the next UpdateBeat re-anchors phase, which only moves forward.
   PAUSED = 5;
-  DEFAULT_CROSSFADE_BEATS = 6;  // Number, 0..1024; PlayAutoloop without a transition. 0 cuts.
-  STROBE_MAX_RATE_HZ = 7;       // Number, 0..10; caps every strobe, effect or script.
-  // Number, >0..60; a fixture strobing longer than this is released until its strobe stops.
+  DEFAULT_CROSSFADE_BEATS = 6;
+  STROBE_MAX_RATE_HZ = 7;
   STROBE_MAX_BURST_SECONDS = 8;
 }
 
@@ -107,7 +101,6 @@ message ErrorReply {
 message PlayAutoloop {
   uint64 command_id = 1;
   string autoloop_id = 2;
-  // Omitted uses DEFAULT_CROSSFADE_BEATS (cut until set); idle accepts no transition.
   Transition transition = 4;
 
   message Transition {
@@ -157,23 +150,17 @@ message UnsetActiveEffect {
 }
 
 // [CLIENT -> SERVER]
-// The source stopped: silence the capture already held for the playback delay.
-// The receiver keeps a contiguous stream and plays silence; capture taken after
-// this command is audible one playback delay later. No effect on lighting or
-// on an Art-Net output.
 message DiscardDelayedAudio {
   uint64 command_id = 1;
 }
 
 // [CLIENT -> SERVER]
-// Facts about one detected beat. Starfire owns the bar-aligned musical grid built from
-// them and interpolates between beats at tempo, independently of animation speed.
 message UpdateBeat {
   uint64 command_id = 1;
   double tempo_bpm = 3;
-  uint64 beat_index = 4;          // Detected beats this session; increases, gaps allowed.
-  optional uint32 bar_phase = 5;  // Tracker's beat in bar, 0 = downbeat; absent if unknown.
-  uint32 beats_per_bar = 6;       // 1..16, fixed per session; bar_phase is below it.
+  uint64 beat_index = 4;
+  optional uint32 bar_phase = 5;
+  uint32 beats_per_bar = 6;
 }
 
 // [CLIENT -> SERVER]
@@ -214,7 +201,5 @@ message Parameter {
     double number = 2;
     bool boolean = 3;
   }
-  // OUTPUT_BRIGHTNESS only: linear ease from the current level over wall-clock seconds,
-  // not beats, so fades also complete in silence. 0 is instant; must be finite and >= 0.
   double fade_seconds = 4;
 }

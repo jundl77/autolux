@@ -40,7 +40,6 @@ function sf.rgb(red, green, blue)
     return { red = red, green = green, blue = blue }
 end
 
--- Blend between two palette slots, so crossfades stay inside the palette.
 function sf.mix(first, last, amount)
     return sf.rgb(sf.lerp(first.red, last.red, amount), sf.lerp(first.green, last.green, amount),
         sf.lerp(first.blue, last.blue, amount))
@@ -66,44 +65,36 @@ end
 
 local BEATS_PER_BAR = 4
 
--- Grid helpers take `ctx` (preferred: Starfire's bar fields from the tracker's phase)
--- or a beat count, which they read as 4/4 with beat 0 on "the one". Starfire anchors
--- ctx.beat_position so both agree, but a loop-local count (beat % 16) has no bar size.
-function sf.beat_in_bar(beats)
-    if type(beats) == "table" then return beats.bar_phase end
-    return beats % BEATS_PER_BAR
+function sf.beat_in_bar(ctx_or_beats)
+    if type(ctx_or_beats) == "table" then return ctx_or_beats.bar_phase end
+    return ctx_or_beats % BEATS_PER_BAR
 end
 
-function sf.bar(beats)
-    if type(beats) == "table" then return beats.bar_index end
-    return math.floor(beats / BEATS_PER_BAR)
+function sf.bar(ctx_or_beats)
+    if type(ctx_or_beats) == "table" then return ctx_or_beats.bar_index end
+    return math.floor(ctx_or_beats / BEATS_PER_BAR)
 end
 
-function sf.phrase_phase(beats, bars)
+function sf.phrase_phase(ctx_or_beats, bars)
     assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
-    if type(beats) == "table" then
-        return ((beats.bar_index % bars) + beats.bar_phase / beats.beats_per_bar) / bars % 1
+    if type(ctx_or_beats) == "table" then
+        return ((ctx_or_beats.bar_index % bars) + ctx_or_beats.bar_phase / ctx_or_beats.beats_per_bar) / bars % 1
     end
-    return (beats / (bars * BEATS_PER_BAR)) % 1
+    return (ctx_or_beats / (bars * BEATS_PER_BAR)) % 1
 end
 
--- Kick envelope: 1 on each grid edge (every `period` beats, default 1), squared decay
--- to 0 after `width` beats. A period of 0.5 gives eighth notes.
-function sf.on_beat(beats, width, period)
+function sf.on_beat(ctx_or_beats, width, period)
     assert(finite(width) and width > 0, "beat envelope width must be positive and finite")
     period = period or 1
     assert(finite(period) and period > 0, "beat envelope period must be positive and finite")
-    if type(beats) == "table" then beats = beats.beat_position end
-    local remaining = math.max(0, 1 - (beats % period) / width)
+    if type(ctx_or_beats) == "table" then ctx_or_beats = ctx_or_beats.beat_position end
+    local remaining = math.max(0, 1 - (ctx_or_beats % period) / width)
     return remaining * remaining
 end
 
--- Mirror sign for paired fixtures: odd members (left) -1, even members (right) +1.
-function sf.side(index) return index % 2 == 1 and -1 or 1 end
+local LEFT, RIGHT = -1, 1
+function sf.side(index) return index % 2 == 1 and LEFT or RIGHT end
 
--- RMS is normalised over -48..-12 dBFS, so a quiet room or a stopped track reads ~0.
--- The 0.08 floor keeps the rig barely alive instead of black; full level from rms 0.8.
--- nil means no measurement yet, treated as a typical 0.6.
 local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
 
 function sf.loudness_gain(rms)
@@ -111,20 +102,19 @@ function sf.loudness_gain(rms)
     return sf.lerp(LOUDNESS_FLOOR, 1, math.min(1, math.max(0, rms / LOUDNESS_FULL_RMS)))
 end
 
--- Loops use palette slots only, so a genre swap is a one-word change per loop.
 local PALETTES = {
     techno = {
-        primary = sf.rgb(1, 0.82, 0.6), -- warm white
-        secondary = sf.rgb(1, 0.55, 0.1), -- amber
-        accent = sf.rgb(0.75, 0, 0.02), -- deep red
-        cold = sf.rgb(0.75, 0.85, 1), -- cool white
+        primary = sf.rgb(1, 0.82, 0.6),
+        secondary = sf.rgb(1, 0.55, 0.1),
+        accent = sf.rgb(0.75, 0, 0.02),
+        cold = sf.rgb(0.75, 0.85, 1),
         black = sf.rgb(0, 0, 0)
     },
     house = {
-        primary = sf.rgb(1, 0.82, 0.6), -- warm white
-        secondary = sf.rgb(1, 0, 0.7), -- magenta
-        accent = sf.rgb(1, 0.4, 0), -- orange
-        cold = sf.rgb(0, 0.85, 1), -- cyan
+        primary = sf.rgb(1, 0.82, 0.6),
+        secondary = sf.rgb(1, 0, 0.7),
+        accent = sf.rgb(1, 0.4, 0),
+        cold = sf.rgb(0, 0.85, 1),
         black = sf.rgb(0, 0, 0)
     }
 }

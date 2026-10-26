@@ -32,7 +32,6 @@ DROP_ACCENT_ID = 'drop_arrival'
 
 
 def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
-    # Kept inside Starfire's cap so the accent ends on its own timer, not on the guard.
     duration = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
@@ -53,17 +52,12 @@ class EffectController:
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
         self.clock = clock
-        # Read at use so a dashboard edit applies to the next change.
         self._settings = settings
         self._last_strobe_started_at: float | None = None
-        # Seeded per session: the same seed and the same run of sections pick
-        # the same looks.
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
 
     def _entry_choice(self, context: SelectionContext) -> tuple[AutoloopChoice, bool]:
-        # Re-sending the current intent (resume, restart after stop) keeps its
-        # look; a change of intent or a new track chooses again.
         if (
             self._entered is not None
             and self._entered[0] == context.intent
@@ -80,7 +74,6 @@ class EffectController:
         *,
         cut: bool = False,
     ) -> bool:
-        """True when a look was sent; nothing is remembered for one that was not."""
         context = context or SelectionContext(intent)
         choice, fresh = self._entry_choice(context)
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
@@ -119,8 +112,6 @@ class EffectController:
     def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
         bank, autoloop = STANDBY_AUTOLOOP
-        # Starfire fades in beats on its last tempo; without one, or with its clock
-        # frozen by pause, a fade would never end.
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
             if bpm and bpm > 0 and not renderer_paused

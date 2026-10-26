@@ -1,5 +1,3 @@
-"""Validated, atomic MVR rig storage for the dashboard and the renderer login."""
-
 import hashlib
 import os
 import tempfile
@@ -15,13 +13,10 @@ DMX_UNIVERSE_SIZE = mvr.DMX_UNIVERSE_SIZE
 MAX_ARTNET_UNIVERSE = 32767
 MAX_FIXTURES = 512
 MAX_NAME_BYTES = 128
-# Starfire (starfire/src/mvr.rs, fixtures.rs) is authoritative for render rules; these
-# pre-checks use its wording so the dashboard and `starfire rig` report the same rule.
 ONE_ADDRESS_RULE = 'Starfire renders one Address on break 0 per fixture'
 
 
 def rig_modes(scene: mvr.Scene) -> dict[str, dict]:
-    """DMX modes of every GDTF the scene embeds, keyed by GDTFSpec file name."""
     return {
         spec: mvr.gdtf_modes(mvr.gdtf_description(scene, spec), spec)
         for spec in sorted(mvr.referenced_specs(scene.root))
@@ -32,7 +27,6 @@ def rig_modes(scene: mvr.Scene) -> dict[str, dict]:
 def channel_occupancy(
     fixtures: list[dict], modes: dict, universe: int
 ) -> tuple[list[list[int]], list[str]]:
-    """Map each channel to its fixtures and list what Starfire could not patch."""
     occupied = [[] for _ in range(DMX_UNIVERSE_SIZE)]
     errors = []
     if not 1 <= len(fixtures) <= MAX_FIXTURES:
@@ -87,7 +81,6 @@ def channel_occupancy(
 
 
 def require_renderable(scene: mvr.Scene) -> list[dict]:
-    """Spec conformance first, then the patch rules Starfire adds; returns patched fixtures."""
     require_valid(scene)
     fixtures = mvr.patched_fixtures(scene)
     _, errors = channel_occupancy(fixtures, rig_modes(scene), 0)
@@ -121,7 +114,6 @@ class FixtureStore:
             return mvr.draft(mvr.read(content)), _revision(content)
 
     def save(self, edited: dict, expected_revision: str) -> tuple[dict, str]:
-        """Publish a draft only if it conforms, Starfire accepts it and nobody saved first."""
         library = self.library()
         with self._lock:
             before = read_bounded(self.rig_path, mvr.MAX_MVR_BYTES)

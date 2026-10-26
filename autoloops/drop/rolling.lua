@@ -1,12 +1,7 @@
--- 16-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- 16-beat loop
 -- energy: 2
 -- family: accent
 -- movement: snap
--- wash: accent, kick hit on every beat over an RMS-scaled floor.
--- strip: primary head running along the strip one pixel per 8th note (one lap per bar)
--- with a fading two-pixel tail, the rolling bassline under the kick.
--- movers: primary, alternate between two mirrored positions every two bars.
--- Palette slots: accent, primary.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local HOLD_BEATS = 8
@@ -16,8 +11,7 @@ local FLOOR_QUIET, FLOOR_LOUD = 0.05, 0.25
 local WASH_PEAK, HEAD_LEVEL, MOVER_LEVEL = 0.9, 0.9, 0.85
 local TAIL = { [0] = 1, [1] = 0.45, [2] = 0.15 }
 local CENTRE_PAN = 0.5
--- Pan is the offset from centre; movers mirror it left/right.
-local POSITIONS = { { pan = 0.18, tilt = 0.55 }, { pan = 0.06, tilt = 0.68 } }
+local POSITIONS = { { pan_offset = 0.18, tilt = 0.55 }, { pan_offset = 0.06, tilt = 0.68 } }
 
 return {
     render = function(ctx)
@@ -40,7 +34,7 @@ return {
             sf.colour(sf.group("movers"), palette.primary),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * gain),
             sf.each(sf.group("movers"), function(mover, index)
-                local pan = CENTRE_PAN + sf.side(index) * position.pan * reach
+                local pan = CENTRE_PAN + sf.side(index) * position.pan_offset * reach
                 return sf.pan_tilt(mover, pan, position.tilt)
             end)
         }

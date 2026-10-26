@@ -2,23 +2,21 @@ syntax = "proto3";
 
 package autolux.starfire;
 
-// Autolux owns and sends the complete patch and the profiles it uses,
-// read from an MVR rig (docs/starfire/rig-mvr.md).
+// Autolux owns and sends the complete patch and the profiles it uses.
 message RigDefinition {
   repeated Fixture fixtures = 1;
-  repeated FixtureGroup groups = 2;  // MVR classes; members in document order.
+  repeated FixtureGroup groups = 2;
   repeated FixtureProfile profiles = 3;
 }
 
 message Fixture {
-  string fixture_id = 1;  // MVR Fixture name.
+  string fixture_id = 1;
   string profile_id = 2;
-  uint32 universe = 3;     // Art-Net universe, starting at zero.
-  uint32 address = 4;      // DMX address, starting at one.
-  MovementRange pan = 5;   // inverted is MVR DMXInvertPan.
-  MovementRange tilt = 6;  // inverted is MVR DMXInvertTilt.
-  // MVR Matrix: local X, Y and Z axes in scene space, then position in millimetres.
-  // Empty means identity. Starfire derives the pan/tilt home from its rotation.
+  uint32 universe = 3;  // Art-Net universe, starting at zero.
+  uint32 address = 4;   // DMX address, starting at one.
+  MovementRange pan = 5;
+  MovementRange tilt = 6;
+  // MVR Matrix: X, Y, Z axes then position in mm; empty is identity.
   repeated double matrix = 9;
 
   message MovementRange {

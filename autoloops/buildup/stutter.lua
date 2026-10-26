@@ -1,12 +1,7 @@
--- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 8-beat loop
 -- energy: 3
 -- family: warm
 -- movement: sweep
--- Pulse grid densifies with the ramp: the one only, then every beat, then eighth notes.
--- wash: secondary pulses on that grid over a dim floor.
--- strip: primary flicker on the same grid, odd and even pixels trading each pulse.
--- movers: cold, mirrored sweep tightening toward centre.
--- Palette slots: primary, secondary, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128
@@ -15,8 +10,7 @@ local WASH_FLOOR, WASH_PEAK = 0.06, 0.9
 local CENTRE_PAN, TILT = 0.5, 0.6
 local START_SWING, END_SWING = 0.2, 0.03
 
--- Pulse period and envelope width in beats for this stage of the ramp.
-local function grid(ramp)
+local function pulse_period_and_width(ramp)
     if ramp < 0.33 then return 4, 0.4 end
     if ramp < 0.66 then return 1, 0.4 end
     return 0.5, 0.25
@@ -29,7 +23,7 @@ return {
         local energy = ctx.normalized_rms_level or 0.6
         local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local period, width = grid(ramp)
+        local period, width = pulse_period_and_width(ramp)
         local pulse = sf.on_beat(beat, width, period)
         local pulse_index = math.floor(beat / period)
         local peak = sf.lerp(0.4, WASH_PEAK, drive)

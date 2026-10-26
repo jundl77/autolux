@@ -36,7 +36,6 @@ class MusicAnalyser:
         settings: Callable[[], ShowSettings] = ShowSettings,
     ):
         self._clock: Clock = clock
-        # Read at use so a dashboard edit applies to the next silence.
         self._settings = settings
         self.sample_rate: int = sample_rate
         self.buffer_size: int = buffer_size
@@ -55,7 +54,6 @@ class MusicAnalyser:
         self._beats_since_log: int = 0
         self._last_beat_activation: float = 0.0
         self._audio_started = False
-        # Counted in samples, not clock time, so a stalled loop cannot fake a stop.
         self._digital_silence_samples: int = 0
         self.in_standby: bool = False
         self._reset_state()
@@ -171,7 +169,6 @@ class MusicAnalyser:
         return audio_signal
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
-        """True while standing by; analysis then holds still until signal returns."""
         if np.any(audio_signal):
             self._digital_silence_samples = 0
             if self.in_standby:
@@ -194,7 +191,6 @@ class MusicAnalyser:
         logging.info('[rhythm] signal returned — analysis restarts from scratch')
         self.in_standby = False
         self._reset_state()
-        # This buffer becomes the first one, exactly as at process start.
         self._audio_started = False
         self.handler.on_signal_return()
 

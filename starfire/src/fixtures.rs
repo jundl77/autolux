@@ -17,7 +17,6 @@ pub const MAX_FIXTURES: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MATRIX_VALUES: usize = 12;
-// Axes this far from orthonormal are shear or mirroring, which has no pan/tilt meaning.
 const ORTHONORMAL_TOLERANCE: f64 = 1e-3;
 const GIMBAL_TOLERANCE: f64 = 1e-9;
 const FULL_TURN_DEGREES: f64 = 360.0;
@@ -79,20 +78,13 @@ impl MovementRange {
     }
 }
 
-/// Pan/tilt home derived from an MVR Matrix, relative to the GDTF default (hanging) orientation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HomeOrientation {
     pub pan_offset_degrees: f64,
     pub tilt_offset_degrees: f64,
-    /// Local Z points down (e.g. a floor-standing head, Rx(180)): pan and tilt turn
-    /// the other way, as with MVR DMXInvertPan/DMXInvertTilt.
     pub reversed: bool,
 }
 
-/// R = Rz(yaw) * Rx(pitch) * Ry(roll): pan home = yaw about Z, canonical in (-180, 180]
-/// so one orientation always selects the same DMX. Tilt home = pitch is exact only at
-/// pan home (a tilted base couples pan into tilt), so pitch beyond 60 degrees is refused.
-/// Roll only matters through the Z axis direction, which reverses both movements.
 pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
     if matrix.is_empty() {
         return Ok(HomeOrientation {
@@ -211,7 +203,6 @@ impl FixtureRig {
         Self::from_parts(fixtures, groups, profiles)
     }
 
-    /// Load an MVR rig; its GDTF files travel inside the archive.
     pub fn load(path: &Path) -> Result<Self> {
         Self::from_mvr(&read_bounded(path, mvr::MAX_MVR_BYTES)?)
     }
@@ -435,15 +426,12 @@ impl FixtureRig {
     }
 }
 
-// The rig declares where each head's home is, so autoloops can address
-// normalised directions without knowing how a fixture was hung.
 fn offset_pan(position: f64, offset_degrees: f64, from: f64, to: f64) -> f64 {
     if offset_degrees == 0.0 || from == to {
         return position;
     }
     let (low, high) = (from.min(to), from.max(to));
     let mut degrees = from + position * (to - from) + offset_degrees;
-    // Whole turns preserve beam direction; modulo travel would not on a 540-degree head.
     if degrees > high {
         degrees -= FULL_TURN_DEGREES * ((degrees - high) / FULL_TURN_DEGREES).ceil();
     }
@@ -541,7 +529,6 @@ mod tests {
             assert!((pan - expected).abs() < 1e-9, "{yaw} -> {pan}");
             assert!(tilt.abs() < 1e-9 && !reversed);
         }
-        // atan2(-0.0, -1) is -180, which would select different DMX than +180.
         let exact = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 5.0, 6.0, 7.0];
         assert_eq!(home(&exact), (180.0, 0.0, false));
         assert_eq!(home(&[]), (0.0, 0.0, false));
@@ -549,7 +536,6 @@ mod tests {
 
     #[test]
     fn hanging_half_turn_and_standing_head_differ_only_in_direction() {
-        // Rz(180): hung on the truss, turned around. Rx(180): standing on the floor.
         let hanging = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
         let standing = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0];
         assert_eq!(home(&hanging), (180.0, 0.0, false));
@@ -558,7 +544,6 @@ mod tests {
 
     #[test]
     fn matrix_pitch_is_the_tilt_offset_up_to_sixty_degrees() {
-        // Rz(30) * Rx(20) * Ry(-40), as written by Autolux.
         let matrix = [
             0.773_337, 0.192_63, 0.604_023, -0.469_846, 0.813_798, 0.342_02, -0.425_669,
             -0.548_295, 0.719_846, 0.0, 0.0, 0.0,
@@ -594,12 +579,10 @@ mod tests {
 
     #[test]
     fn pan_offset_wraps_by_whole_turns_to_keep_beam_direction() {
-        // 420 + 180 = 600 points like 240; 600 mod 540 = 60 would face the opposite way.
         let wrapped = degrees(offset_pan(420.0 / 540.0, 180.0, 0.0, 540.0), 540.0);
         assert!((wrapped - 240.0).abs() < 1e-9);
         let below = degrees(offset_pan(0.0, -90.0, 0.0, 540.0), 540.0);
         assert!((below - 270.0).abs() < 1e-9);
-        // Short travel holds at the end stop when no whole turn reaches it.
         assert_eq!(offset_pan(0.5, 180.0, 0.0, 270.0), 1.0);
     }
 

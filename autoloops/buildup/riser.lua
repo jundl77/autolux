@@ -1,11 +1,7 @@
--- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 8-beat loop
 -- energy: 2
 -- family: cold
 -- movement: sweep
--- wash: secondary, with an accent flash on each bar's one whose depth grows with the ramp.
--- strip: primary, fills from both ends toward the centre as the ramp grows.
--- movers: cold, mirrored, converging from wide to centre with the ramp.
--- Palette slots: primary, secondary, accent, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128
@@ -33,7 +29,6 @@ return {
             sf.dimmer(sf.group("wash"), wash),
             sf.colour(sf.group("strip"), palette.primary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                -- Pixels lit per end, fractional so the fill creeps rather than steps.
                 local fill = sf.lerp(1, count / 2, ramp)
                 local from_end = math.min(index - 1, count - index)
                 local lit = math.max(0, math.min(1, fill - from_end))

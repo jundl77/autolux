@@ -65,7 +65,6 @@ def snapshot_port(ui_port: int) -> int:
 
 
 def parse_control_command(payload) -> dict:
-    """Validate here so the operator sees a rejection instead of a silent drop."""
     from autolux.lib.engine.effect_definitions import ShowSettings
 
     if not isinstance(payload, dict):
@@ -132,7 +131,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(400, {'error': str(error)})
             return
         try:
-            # The audio loop owns the engine, so this thread only hands the command over.
             commands.put_nowait(command)
         except queue.Full:
             self._reply(503, {'error': 'the show is busy; try again'})

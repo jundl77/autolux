@@ -1,5 +1,3 @@
-"""Load the MVR rig and Lua source into a renderer login."""
-
 import re
 from pathlib import Path
 
@@ -13,7 +11,6 @@ from cli.starfire_protocol import (
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
-# Per-AutoloopDefinition cap from proto/starfire/starfire.proto.
 MAX_SCRIPT_BYTES = 64 * 1024
 MAX_SCRIPT_CATALOGUE_BYTES = 4 * 1024 * 1024
 MAX_SCRIPTS = 256
@@ -37,7 +34,6 @@ def _movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
 
 
 def rig_definition(path: Path) -> rig_wire.RigDefinition:
-    """The Login rig Starfire's own MVR reader would build from the same file."""
     scene, fixtures = load_rig(path)
     rig = rig_wire.RigDefinition()
     profiles = set()

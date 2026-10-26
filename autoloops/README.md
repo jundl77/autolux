@@ -23,9 +23,9 @@ deliberately static: no beat or loudness response, movers parked dark, warm whit
 - **No strobe.** Autolux adds the drop strobe itself.
 - **Living room.** Slow symmetric mover sweeps (mirror with `sf.side(index)`, centre pan 0.5),
   nothing frantic, wash peaks at or below 0.9. Groups: `movers` (2), `wash` (4), `strip` (8).
-- **Small.** At most ~80 lines. The header comment's first line is `-- <8|16>-beat loop...`
-  (the tests read the loop length from it), then the metadata block, then one line per group,
-  then `Palette slots: ...`.
+- **Small.** At most ~80 lines. The first line is `-- 8-beat loop` or `-- 16-beat loop`
+  (the tests read the loop length from it), then the metadata block. No other comments:
+  encode intent in names.
 
 ## Metadata
 
@@ -47,9 +47,10 @@ missing key or an unknown value.
 
 ## Adding a loop
 
-1. Drop the file into its bank directory. The tests in `starfire/tests/autoloop_replay.rs`
-   discover it, replay it (the bank default `tests/replays/<bank>.json`, unless
-   `tests/replays/<bank>/<loop>.json` exists) and run the per-bank semantic checks.
-2. Run `cargo test -p starfire --test autoloop_replay`; it fails only for the missing golden.
-3. Record it with `STARFIRE_WRITE_GOLDEN=1 cargo test -p starfire --test autoloop_replay`.
-   This writes `tests/golden/<bank>/<loop>.sha256` and never overwrites an existing golden.
+Drop the file into its bank directory and run `cargo test -p starfire --test autoloop_replay`.
+The tests discover it, replay it (the bank default `tests/replays/<bank>.json`, unless
+`tests/replays/<bank>/<loop>.json` exists) and run the per-bank semantic checks.
+
+Golden DMX digests guard the renderer pipeline, one loop per bank
+(`tests/golden/<bank>/<loop>.sha256`); new loops need no golden. After an intended render
+change, re-record the existing goldens with `STARFIRE_WRITE_GOLDEN=1`.

@@ -1,17 +1,13 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 2
 -- family: warm
 -- movement: still
--- wash: primary around 0.2, slow breathe with its own phase per wash so the room never pulses as one.
--- strip: amber ember flicker from two slow sines per pixel at different periods.
--- movers: primary, low and close, parked mirrored. Palette slots: primary, secondary.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local WASH_LOW, WASH_HIGH = 0.14, 0.26
 local EMBER_LOW, EMBER_HIGH = 0.04, 0.24
 local MOVER_LEVEL = 0.22
 local CENTRE_PAN, PARK_PAN, TILT = 0.5, 0.1, 0.68
--- Both periods divide 16, so the flicker repeats exactly with the loop.
 local EMBER_SLOW, EMBER_FAST = LOOP_BEATS / 2, LOOP_BEATS / 3
 
 return {
@@ -26,7 +22,6 @@ return {
             end),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index)
-                -- Unrelated offsets per pixel keep neighbours out of step.
                 local ember = 0.6 * sf.osc.sine(beat, EMBER_SLOW, 0, 1, index * 0.37)
                     + 0.4 * sf.osc.sine(beat, EMBER_FAST, 0, 1, index * 0.61)
                 return sf.dimmer(pixel, sf.lerp(EMBER_LOW, EMBER_HIGH, ember) * level)

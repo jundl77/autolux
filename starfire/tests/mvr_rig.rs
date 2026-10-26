@@ -1,5 +1,3 @@
-//! MVR scenes must patch every addressed Fixture with its scene-space orientation.
-
 mod support;
 
 use starfire::fixtures::FixtureRig;
@@ -58,7 +56,6 @@ fn fixtures_nested_in_groups_take_their_parents_rotation() {
         rig.resolve(&Target::Group("movers".into())).unwrap(),
         ["inner"]
     );
-    // A half-turned parent and a half-turned fixture aim the same way, so DMX matches.
     assert_eq!(pan_dmx(&rig, "inner", 0), pan_dmx(&rig, "direct", 12));
     let definition = rig_definition(&support::archive(&nested)).unwrap();
     assert_eq!(&definition.fixtures[0].matrix[9..], &[0.0, 2000.0, 3000.0]);

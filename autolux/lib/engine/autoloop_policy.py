@@ -1,5 +1,3 @@
-"""Choose the autoloop for an intent from the metadata each loop declares about itself."""
-
 from __future__ import annotations
 
 import random
@@ -16,8 +14,7 @@ from autolux.lib.engine.effect_definitions import (
 )
 
 RISING, FLAT, FALLING = 'rising', 'flat', 'falling'
-LOUDNESS_TREND_BEATS = 32  # eight bars
-# On the 0..1 normalized level (36 dB wide), so about 2 dB between the halves.
+LOUDNESS_TREND_BEATS = 32
 LOUDNESS_TREND_STEP = 0.05
 
 LONG_BUILD_BARS = 32
@@ -28,12 +25,8 @@ FAMILY_WEIGHT = 3.0
 
 @dataclass(frozen=True)
 class SelectionContext:
-    """What the engine knows about the music when an intent enters the room."""
-
     intent: LightIntent
-    # Since the last drop ended; None before the first drop.
     seconds_since_drop: float | None = None
-    # Bars of breakdown and buildup played back to back up to this entry.
     build_bars: float = 0.0
     loudness: str = FLAT
     new_track: bool = False
@@ -48,12 +41,6 @@ class AutoloopChoice:
     track_family: str
 
 
-# Tier rules, first match wins. Energy is about contrast over a set, not the
-# level of one section: a maximal drop only lands after a long build (or a long
-# wait since the last drop) and never twice running, so the next one still has
-# headroom; a buildup is lit for the drop it promises; a breakdown after a
-# maximal drop goes calm so the room hears the contrast; an intro or outro
-# stays calm unless the music is already getting louder.
 TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
     (LightIntent.DROP, 'maximal_drop_last', (2,), 'no maximal drop twice running'),
     (LightIntent.DROP, 'long_build', (3,), 'long build or long since the last drop'),
@@ -69,7 +56,6 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
 
 
 def loudness_trend(levels: Sequence[float]) -> str:
-    """Compare the newer half of the last eight bars of beat levels with the older half."""
     levels = list(levels)[-LOUDNESS_TREND_BEATS:]
     if len(levels) < LOUDNESS_TREND_BEATS:
         return FLAT
@@ -83,10 +69,6 @@ def loudness_trend(levels: Sequence[float]) -> str:
 
 
 class AutoloopPolicy:
-    """Plans a choice without side effects except drawing from its seeded random
-    source; `record` commits one that actually reached the rig. Ages count
-    selections, not seconds, so a seed and a section sequence fix the looks."""
-
     def __init__(self, autoloops: AutoloopTable, meta: AutoloopMetaTable, rng: random.Random):
         missing = sorted(
             f'{bank}/{name}'
@@ -100,7 +82,6 @@ class AutoloopPolicy:
         self._meta = meta
         self._rng = rng
         self._selections: Counter[LightIntent] = Counter()
-        # The intent's selection count when each loop last played.
         self._last_used: dict[tuple[str, str], int] = {}
         self._last_by_intent: dict[LightIntent, tuple[str, str]] = {}
         self._last_drop_energy: int | None = None
@@ -138,8 +119,6 @@ class AutoloopPolicy:
             self._last_drop_energy = choice.meta.energy
 
     def _next_track_family(self) -> str:
-        # A set often stays in one colour world across a mix; the coin keeps it
-        # from locking there for the whole night, and a re-roll is a real change.
         previous = self._track_family
         if previous is not None and self._rng.random() < FOLLOW_FAMILY_CHANCE:
             return previous
@@ -168,11 +147,9 @@ class AutoloopPolicy:
         return [loop for loop in loops if distance(loop) == nearest], nearest == 0
 
     def _narrowed(self, candidates, intent: LightIntent, movement) -> list[tuple[str, str]]:
-        # Each filter only applies while something is left to choose from.
         last = self._last_by_intent.get(intent)
         filters = [lambda loop: loop != last]
         if intent != LightIntent.DROP and movement == 'still':
-            # A parked rig that suddenly jumps reads as a glitch, except on a drop.
             filters.append(lambda loop: self._meta[loop].movement != 'snap')
         for keep in filters:
             kept = [loop for loop in candidates if keep(loop)]
@@ -180,8 +157,6 @@ class AutoloopPolicy:
         return candidates
 
     def _weighted_pick(self, candidates, intent: LightIntent, family) -> tuple[str, str]:
-        # Unplayed loops go first, so a tier is exhausted before anything repeats;
-        # after that, the more selections a loop has sat out, the likelier it returns.
         unused = [loop for loop in candidates if loop not in self._last_used]
         pool = unused or candidates
         count = self._selections[intent]

@@ -67,7 +67,6 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         };
     }
     let frame = &rig.encode(&states).unwrap()[&0];
-    // The room rig turns spot pan home by 180 degrees: 0.25 -> 315 of 540.
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
@@ -184,7 +183,6 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
     for pan in [0.0, 0.25, 0.5, 1.0] {
         let mut states = unrotated.empty_states();
         states.get_mut("test").unwrap().pan = pan;
-        // Position alone never changes DMX; only orientation does.
         assert_eq!(
             moved.encode(&states).unwrap(),
             unrotated.encode(&states).unwrap()
@@ -208,7 +206,6 @@ fn standing_head_reverses_movement_like_dmx_inversion_and_hanging_does_not() {
     let standing = spot(STANDING, false);
     let hanging_inverted = spot(HALF_TURN, true);
     let hanging = spot(HALF_TURN, false);
-    // DMXInvert on a standing head cancels the reversal again.
     let standing_inverted = spot(STANDING, true);
     for (pan, tilt) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
         let mut states = standing.empty_states();

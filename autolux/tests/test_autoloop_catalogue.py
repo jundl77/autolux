@@ -24,7 +24,6 @@ def test_discovery_puts_the_preferred_look_first_then_the_rest_alphabetically(tm
         (bank / (name if '.' in name else f'{name}.lua')).write_text('return {}')
     table = discover_autoloops(tmp_path)
     assert table[LightIntent.DROP] == (('drop', 'kick'), ('drop', 'chase'), ('drop', 'slam'))
-    # An empty bank still lists its preferred look so readiness can name it missing.
     assert table[LightIntent.BUILDUP] == (('buildup', 'ramp'),)
 
 
@@ -48,11 +47,9 @@ def test_the_header_block_after_the_loop_length_line_is_the_metadata():
     ('header', 'message'),
     [
         (HEADER.replace('-- family: warm\n', ''), 'missing family'),
-        # A key after the group lines is not part of the header block.
         (HEADER.replace('-- energy: 2\n', '') + '-- wash: x\n-- energy: 2\n', 'missing energy'),
         (HEADER.replace('energy: 2', 'enrgy: 2'), 'missing energy'),
         (HEADER.replace('energy: 2', 'energy: 4'), "energy '4' is not one of 1, 2, 3"),
-        # Exact spelling only, as the Starfire test reads it.
         (HEADER.replace('energy: 2', 'energy: 03'), "energy '03'"),
         (HEADER.replace('energy: 2', 'energy: 2 '), "energy '2 '"),
         (HEADER.replace('energy: 2', 'energy: high'), "energy 'high' is not one of"),
@@ -83,7 +80,6 @@ def test_reading_the_library_reports_every_bad_loop_at_once(tmp_path):
 
 def test_every_shipped_loop_declares_metadata_and_the_defaults_match_their_files():
     meta = read_autoloop_meta()
-    # Standby is required but never selected, so it carries no selection metadata.
     assert set(meta) == required_autoloops() - {STANDBY_AUTOLOOP}
     for loop, declared in DEFAULT_AUTOLOOP_META.items():
         assert meta[loop] == declared

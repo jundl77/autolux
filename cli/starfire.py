@@ -29,7 +29,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 def saved_rig() -> Path:
-    """The Config-saved rig, else the shipped room rig; a pre-MVR patch is never ignored."""
     if DEFAULT_FIXTURE_STORE.is_file():
         return DEFAULT_FIXTURE_STORE
     if LEGACY_FIXTURE_STORE.is_file():
@@ -217,7 +216,7 @@ def run_ui(args: argparse.Namespace) -> None:
     profiles = getattr(args, 'profiles', PROFILE_CATALOGUE).resolve()
     if not patch.exists():
         if patch == DEFAULT_FIXTURE_STORE:
-            saved_rig()  # Refuses to shadow an unconverted pre-MVR patch.
+            saved_rig()
         _validate_patch(binary, DEFAULT_RIG)
         patch.parent.mkdir(parents=True, exist_ok=True)
         try:

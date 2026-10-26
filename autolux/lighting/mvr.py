@@ -1,9 +1,3 @@
-"""MVR rigs: GeneralSceneDescription.xml plus the GDTF files it references, in one zip.
-
-The editable model is a generic tree of the XML, so every MVR 1.6 node survives and
-mvr_schema validates it. Orientation and break conventions: docs/starfire/rig-mvr.md.
-"""
-
 import copy
 import io
 import math
@@ -42,13 +36,8 @@ REVISION_TEXT = 'Edited in Autolux Config'
 
 @dataclass
 class Scene:
-    """A parsed MVR archive: scene tree plus every other entry, byte for byte."""
-
     root: ElementTree.Element
     entries: dict[str, tuple[zipfile.ZipInfo, bytes]] = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------- archive and XML
 
 
 def _guard_xml(content: bytes, label: str) -> ElementTree.Element:
@@ -69,7 +58,6 @@ def _guard_xml(content: bytes, label: str) -> ElementTree.Element:
 
 
 def _archive(content: bytes, label: str) -> dict[str, tuple[zipfile.ZipInfo, bytes]]:
-    """Read every entry without extracting; reject unsafe, encrypted or case-clashing names."""
     if len(content) > MAX_MVR_BYTES:
         raise ValueError(f'{label} exceeds its size limit')
     try:
@@ -77,7 +65,6 @@ def _archive(content: bytes, label: str) -> dict[str, tuple[zipfile.ZipInfo, byt
             members = package.infolist()
             if len(members) > MAX_ARCHIVE_ENTRIES:
                 raise ValueError(f'{label} contains too many entries')
-            # zipfile stops at each declared size, so this bounds decompression.
             if sum(member.file_size for member in members) > MAX_MVR_BYTES:
                 raise ValueError(f'{label} expands beyond its size limit')
             entries, folded = {}, set()
@@ -134,14 +121,12 @@ def _xml_bytes(root: ElementTree.Element) -> bytes:
 
 
 def write(scene: Scene) -> bytes:
-    """Serialise deterministically: pretty XML, fixed timestamps, other entries untouched."""
     xml = _xml_bytes(scene.root)
     if len(xml) > MAX_SCENE_BYTES:
         raise ValueError('MVR scene exceeds its size limit')
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr(_info(SCENE_ENTRY), xml)
-        # Normalised headers and name order make unchanged content byte-identical.
         for name in sorted(scene.entries):
             package.writestr(_info(name), scene.entries[name][1])
     return output.getvalue()
@@ -160,7 +145,6 @@ def new_scene() -> Scene:
     layer = ElementTree.SubElement(
         layers, 'Layer', uuid=stable_uuid('layer', DEFAULT_LAYER), name=DEFAULT_LAYER
     )
-    # MVR 1.6 Table 17 allows 0..1; always writing it keeps older 1.x readers happy.
     ElementTree.SubElement(layer, 'ChildList')
     return Scene(root)
 
@@ -170,11 +154,7 @@ def new_uuid() -> str:
 
 
 def stable_uuid(*parts: str) -> str:
-    """Deterministic IDs keep converted rigs diff-able across reruns."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, 'autolux-mvr:' + '/'.join(parts))).upper()
-
-
-# ---------------------------------------------------------------- GDTF packages
 
 
 def gdtf_package(description: str, other: dict | None = None) -> bytes:
@@ -207,7 +187,6 @@ def embed_gdtf(scene: Scene, spec: str, description: str, other: dict | None = N
 
 
 def gdtf_spec_name(manufacturer: str, fixture_type: str) -> str:
-    """GDTF names archives <Manufacturer>@<FixtureTypeName>; MVR forbids reserved characters."""
     name = f'{manufacturer}@{fixture_type}{GDTF_SUFFIX}'
     return ''.join(
         '_' if character in '<>:"/\\|?*' or ord(character) < 32 else character for character in name
@@ -222,7 +201,6 @@ def gdtf_root(description: str, label: str) -> ElementTree.Element:
 
 
 def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
-    """DMX modes with Starfire's footprint rule: highest break-1 offset, and the breaks used."""
     modes = {}
     for mode in gdtf_root(description, label).iter('DMXMode'):
         offsets, breaks, attributes = [], set(), set()
@@ -252,7 +230,6 @@ def _without_keys(tree):
 
 
 def _gdtf_edit_errors(original: dict, edited: dict, label: str) -> list[str]:
-    """Only GDTF_EDITABLE attributes may change; structure and other values stay as shipped."""
     errors = []
 
     def walk(before, after, path):
@@ -284,7 +261,6 @@ def _gdtf_edit_errors(original: dict, edited: dict, label: str) -> list[str]:
 
 
 def _with_revision(root: ElementTree.Element) -> ElementTree.Element:
-    # MVR 1.6: a changed GDTF shall carry a revision reflecting the change.
     fixture_type = root.find('FixtureType')
     revisions = fixture_type.find('Revisions')
     if revisions is None:
@@ -302,11 +278,7 @@ def _with_revision(root: ElementTree.Element) -> ElementTree.Element:
     return root
 
 
-# ---------------------------------------------------------------- generic tree
-
-
 def to_tree(element: ElementTree.Element, prefix: str = 'n') -> dict:
-    """XML as JSON nodes {tag, attributes, text, children, key}; keys are draft-local IDs."""
     counter = iter(range(MAX_XML_NODES + 1))
 
     def convert(node):
@@ -341,7 +313,6 @@ def _nodes(tree: dict):
 
 
 def draft(scene: Scene) -> dict:
-    """The editable model: the scene tree and each referenced GDTF description tree."""
     gdtf = {}
     for spec in sorted(referenced_specs(scene.root)):
         if spec in scene.entries:
@@ -356,7 +327,6 @@ def referenced_specs(root: ElementTree.Element) -> set[str]:
 
 
 def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
-    """Build the archive a draft describes; unchanged GDTF packages are kept byte for byte."""
     root = from_tree(edited['scene'])
     root.set('verMajor', str(schema.MVR_VERSION[0]))
     root.set('verMinor', str(schema.MVR_VERSION[1]))
@@ -398,9 +368,6 @@ def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
     return result
 
 
-# ---------------------------------------------------------------- matrices
-
-
 def _number(value: float) -> str:
     text = f'{round(value, MATRIX_DECIMALS):.{MATRIX_DECIMALS}f}'.rstrip('0').rstrip('.')
     return '0' if text in ('-0', '') else text
@@ -414,7 +381,6 @@ def format_matrix(matrix) -> str:
 
 
 def parse_matrix(text: str | None) -> list[float]:
-    """MVR Matrix: local X, Y, Z axes in parent space, then position in millimetres."""
     if text is None or not text.strip():
         return list(IDENTITY_MATRIX)
     values = schema.parse_matrix(text)
@@ -424,7 +390,6 @@ def parse_matrix(text: str | None) -> list[float]:
 
 
 def multiply(parent, child) -> list[float]:
-    """Child placement expressed in the parent's space: R = Rp*Rc, o = Rp*oc + op."""
 
     def apply(vector):
         return [sum(parent[3 * axis + row] * vector[axis] for axis in range(3)) for row in range(3)]
@@ -457,7 +422,6 @@ def _axes(matrix):
 
 
 def canonical_degrees(angle: float) -> float:
-    """Wrap to (-180, 180]; +180 is canonical because -180 would select other DMX."""
     wrapped = math.remainder(angle, FULL_TURN_DEGREES)
     if wrapped <= -HALF_TURN_DEGREES:
         wrapped += FULL_TURN_DEGREES
@@ -465,7 +429,6 @@ def canonical_degrees(angle: float) -> float:
 
 
 def rotation_degrees(matrix) -> tuple[float, float, float]:
-    """Decompose R = Rz(yaw) * Rx(pitch) * Ry(roll); yaw is the pan home offset."""
     u, v, w = _axes(matrix)
     pitch = math.degrees(math.asin(max(-1.0, min(1.0, v[2]))))
     if abs(v[2]) > 1 - GIMBAL_TOLERANCE:
@@ -477,11 +440,6 @@ def rotation_degrees(matrix) -> tuple[float, float, float]:
 
 
 def home_orientation(matrix) -> dict:
-    """Starfire's pan/tilt home for a scene-space Matrix (starfire/src/fixtures.rs).
-
-    Tilt home = pitch is exact only at pan home, so pitch beyond MAX_PITCH_DEGREES is
-    refused. A downward local Z (a standing head, Rx(180)) reverses both movements.
-    """
     yaw, pitch, _ = rotation_degrees(matrix)
     if abs(pitch) > MAX_PITCH_DEGREES:
         raise ValueError(
@@ -496,7 +454,6 @@ def home_orientation(matrix) -> dict:
 
 
 def compose_matrix(position_mm, rotation) -> list[float]:
-    """Inverse of rotation_degrees plus the position row, rounded for stable files."""
     yaw, pitch, roll = (math.radians(value) for value in rotation)
     cy, sy = math.cos(yaw), math.sin(yaw)
     cp, sp = math.cos(pitch), math.sin(pitch)
@@ -518,16 +475,12 @@ def compose_matrix(position_mm, rotation) -> list[float]:
     return [round(float(value), MATRIX_DECIMALS) + 0.0 for value in values]
 
 
-# ---------------------------------------------------------------- scene objects
-
-
 def _children(node, tag):
     children = node.find('ChildList')
     return [] if children is None else [child for child in children if child.tag == tag]
 
 
 def placed_objects(root: ElementTree.Element):
-    """Yield (element, scene-space matrix) for every object, composing parent matrices."""
 
     def walk(node, matrix):
         children = node.find('ChildList')
@@ -561,7 +514,6 @@ def movement_limits(root: ElementTree.Element) -> dict[tuple[str, str], tuple[fl
 
 
 def patched_fixtures(scene: Scene) -> list[dict]:
-    """Fixtures Starfire renders: every Fixture with a GDTFSpec and at least one Address."""
     root = scene.root
     classes, limits, fixtures = class_names(root), movement_limits(root), []
     for node, matrix in placed_objects(root):
@@ -602,7 +554,6 @@ def patched_fixtures(scene: Scene) -> list[dict]:
 
 
 def groups(fixtures) -> dict[str, list[str]]:
-    """Classes become Starfire groups; member order is MVR document order."""
     result = {}
     for fixture in fixtures:
         if fixture['class']:
@@ -623,7 +574,6 @@ def add_fixture(
     matrix=IDENTITY_MATRIX,
     identity: str | None = None,
 ) -> ElementTree.Element:
-    """Append a spec-complete Fixture to the first layer, creating its Class if needed."""
     root = scene.root
     children = root.find('Scene/Layers/Layer/ChildList')
     if children is None:

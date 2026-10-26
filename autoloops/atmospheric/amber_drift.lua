@@ -1,11 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: warm
 -- movement: still
--- wash: low level, colour crossfades secondary -> primary -> secondary across the phrase.
--- strip: one secondary glow drifting end to end and back, crossfading between pixels.
--- movers: primary, parked wide and mirrored, tiny slow tilt breathe.
--- Palette slots: primary, secondary.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local WASH_LOW, WASH_HIGH = 0.1, 0.18
@@ -25,7 +21,6 @@ return {
             sf.dimmer(sf.group("wash"), sf.osc.sine(beat, LOOP_BEATS, WASH_LOW, WASH_HIGH) * level),
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                -- Triangle travel turns around at the ends instead of jumping back.
                 local position = sf.osc.triangle(beat, LOOP_BEATS, 0, count - 1)
                 local glow = math.max(0, 1 - math.abs(position - (index - 1)))
                 return sf.dimmer(pixel, GLOW_LEVEL * glow * level)

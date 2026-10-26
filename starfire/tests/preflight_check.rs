@@ -28,7 +28,6 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["universes"], serde_json::json!([0]));
-    // Counted from disk, so adding a loop never needs an edit here.
     let shipped = AutoloopCatalog::load(&root.join("../autoloops"))
         .unwrap()
         .list()
@@ -44,7 +43,6 @@ fn preflight_rejects_a_valid_patch_missing_a_autoloop_group() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
     let (scene, _) = support::room_entries();
-    // Renaming the class leaves every pixel patched but no "strip" group.
     let path = directory.path().join("missing-strip.mvr");
     fs::write(
         &path,

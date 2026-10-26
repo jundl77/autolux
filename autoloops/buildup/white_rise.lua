@@ -1,12 +1,7 @@
--- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- 8-beat loop
 -- energy: 2
 -- family: cold
 -- movement: sweep
--- All groups shift from secondary to cold with the ramp: amber drains into white.
--- wash: per-beat pulse whose depth grows with the ramp.
--- strip: same pulse, half a beat late, so the strip answers the wash.
--- movers: mirrored, converging from wide to centre.
--- Palette slots: secondary, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128

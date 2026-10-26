@@ -25,7 +25,6 @@ DROP, BUILDUP, BREAKDOWN, ATMOSPHERIC = (
 
 
 def library(spec):
-    """{intent: [(name, energy, family, movement), ...]} -> (table, meta)."""
     table = {intent: () for intent in LightIntent}
     meta = {}
     for intent, loops in spec.items():
@@ -39,7 +38,6 @@ def library(spec):
     return table, meta
 
 
-# Two loops per tier everywhere, so every tier rule has a real choice.
 TIERED = library(
     {
         intent: [
@@ -55,7 +53,6 @@ def policy(lib=TIERED, seed=0):
 
 
 def pick(chooser, intent, **facts):
-    """Choose and commit, as the controller does once the look is sent."""
     context = SelectionContext(intent, **facts)
     choice = chooser.choose(context)
     chooser.record(context, choice)
@@ -63,10 +60,9 @@ def pick(chooser, intent, **facts):
 
 
 def drop_with_energy(chooser, energy):
-    """Make the policy remember a drop of this energy, via a forced drop."""
     facts = {'seconds_since_drop': None} if energy == 3 else {'seconds_since_drop': 10.0}
     if energy == 2:
-        pick(chooser, DROP)  # first drop is maximal; the next cannot be
+        pick(chooser, DROP)
     assert pick(chooser, DROP, **facts).meta.energy == energy
 
 
@@ -114,8 +110,6 @@ def test_a_long_rested_loop_is_likelier_to_return_than_a_recent_one():
     for seed in range(200):
         chooser = policy(lib, seed)
         order = [pick(chooser, DROP, seconds_since_drop=1.0).autoloop for _ in range(4)]
-        # The last one is excluded; of the rest, the oldest has sat out three selections,
-        # the newest one.
         nxt = pick(chooser, DROP, seconds_since_drop=1.0).autoloop
         returns[order.index(nxt)] += 1
     assert returns[3] == 0
@@ -135,9 +129,8 @@ def test_the_track_family_is_preferred_without_excluding_others():
     for seed in range(300):
         chooser = policy(lib, seed)
         choice = pick(chooser, ATMOSPHERIC, new_track=True)
-        if chooser.track_family != 'accent':  # no accent loop here to prefer
+        if chooser.track_family != 'accent':
             matches[choice.meta.family == chooser.track_family] += 1
-    # x3 weight: three in four entries take the track's family, the rest still play.
     assert matches[True] > 2.5 * matches[False] > 0
 
 
@@ -149,7 +142,6 @@ def test_a_new_track_follows_the_previous_family_half_the_time():
         before = chooser.track_family
         pick(chooser, ATMOSPHERIC, new_track=True)
         followed += chooser.track_family == before
-    # Half follow; a re-roll always moves to one of the other two families.
     assert 0.42 < followed / 400 < 0.58
 
 
@@ -203,7 +195,7 @@ def test_a_loop_without_metadata_is_refused():
         ([0.5] * LOUDNESS_TREND_BEATS, FLAT),
         ([0.3] * 16 + [0.5] * 16, RISING),
         ([0.6] * 16 + [0.4] * 16, FALLING),
-        ([0.1] * 16 + [0.9] * 15, FLAT),  # under eight bars is no trend yet
+        ([0.1] * 16 + [0.9] * 15, FLAT),
     ],
 )
 def test_loudness_trend_compares_the_halves_of_eight_bars(levels, trend):

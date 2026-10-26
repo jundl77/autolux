@@ -1,5 +1,3 @@
-"""MVR archives, spec validation and orientation must preserve every rig fact."""
-
 import copy
 import io
 import zipfile
@@ -59,9 +57,6 @@ def comparable(draft):
     return stripped
 
 
-# ------------------------------------------------------------------ orientation
-
-
 @pytest.mark.parametrize(
     'yaw,expected',
     [(0, 0), (180, 180), (-180, 180), (-90, -90), (270, -90), (540, 180), (-450, -90)],
@@ -72,7 +67,6 @@ def test_matrix_yaw_is_the_pan_offset_and_wraps_to_one_canonical_turn(yaw, expec
 
 
 def test_exact_half_turn_matrix_selects_positive_180_not_minus_180():
-    # atan2(-0.0, -1) is -180; that would pick different DMX on a 540-degree head.
     assert mvr.rotation_degrees([-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]) == (180.0, 0.0, 0.0)
 
 
@@ -84,8 +78,8 @@ def test_yaw_pitch_roll_round_trip_through_the_matrix(rotation):
 
 
 def test_hanging_half_turn_and_standing_head_differ_only_in_direction():
-    hanging = [-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]  # Rz(180)
-    standing = [1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0]  # Rx(180)
+    hanging = [-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]
+    standing = [1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0]
     assert mvr.home_orientation(hanging) == {
         'pan_offset_degrees': 180.0,
         'tilt_offset_degrees': 0.0,
@@ -130,12 +124,8 @@ def test_matrices_without_a_rotation_are_rejected(matrix):
 def test_nested_objects_compose_parent_matrices_into_scene_space():
     fixtures = {f['name']: f for f in mvr.patched_fixtures(mvr.read(sample_archive()))}
     placed = fixtures['Dim 1']['matrix']
-    # The layer lifts by 1000 mm; the group turns 90 degrees and sits at y=2000.
     assert placed[9:] == pytest.approx([0, 2500, 1000])
     assert mvr.rotation_degrees(placed)[0] == pytest.approx(90)
-
-
-# ------------------------------------------------------------------ addresses
 
 
 @pytest.mark.parametrize(
@@ -155,9 +145,6 @@ def test_absolute_and_dotted_addresses_resolve_to_artnet_universe_and_address(te
 @pytest.mark.parametrize('text', ['0', '-4', '1.0', '1.513', '0.1', '32769.1', 'x', '', '1.2.3'])
 def test_out_of_range_addresses_are_rejected(text):
     assert dmx_address(text) is None
-
-
-# ------------------------------------------------------------------ round trips
 
 
 def test_room_rig_round_trips_to_an_identical_model_and_identical_bytes():
@@ -199,8 +186,6 @@ def test_room_rig_is_spec_conforming_and_renderable():
     assert len(fixtures) == 14
     assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
 
-
-# ------------------------------------------------------------------ validation
 
 FIXTURE_UUID = 'uuid="44444444-0000-4000-8000-000000000001" name="Dim 1"'
 WASH_CLASSING = (
@@ -302,9 +287,6 @@ def test_unsafe_archives_are_rejected():
                 package.writestr(name, b'')
         with pytest.raises(ValueError, match='unsafe or duplicate'):
             mvr.read(output.getvalue())
-
-
-# ------------------------------------------------------------------ GDTF editing
 
 
 def channel_function(draft):

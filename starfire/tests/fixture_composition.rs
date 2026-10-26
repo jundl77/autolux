@@ -76,7 +76,6 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
             }
         );
     }
-    // The room rig turns spot pan home by 180 degrees: 0.25 -> 315 of 540.
     for start in [0, 12] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 12],

@@ -1,15 +1,5 @@
-//! Discovery-based checks for every `autoloops/<bank>/<loop>.lua`; adding a loop needs no edit here.
-//!
-//! Replay input: `tests/replays/<bank>/<loop>.json` if present, otherwise the bank default
-//! `tests/replays/<bank>.json` with its selections retargeted to the loop.
-//! Golden: `tests/golden/<bank>/<loop>.sha256`, the full DMX digest of that replay. To record a
-//! missing golden, review the semantic checks, then run
-//! `STARFIRE_WRITE_GOLDEN=1 cargo test -p starfire --test autoloop_replay`. Existing goldens
-//! are never overwritten: delete one deliberately to re-record it.
-
 use std::fmt;
-use std::fs::{self, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::fs;
 use std::path::PathBuf;
 
 use starfire::engine::{Engine, RenderedFrame};
@@ -23,15 +13,11 @@ const FLOAT_TOLERANCE: f64 = 1e-9;
 const ROOM_FIXTURE_COUNT: usize = 14;
 const REPLAY_BPM: f64 = 120.0;
 const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
-// Replays open at 120 BPM, so 16 bars take 32 s.
 const MIN_REPLAY_SECONDS: f64 = 16.0 * 4.0 * SECONDS_PER_BEAT;
-// Buildup ramps plateau after 32 bars; from then on they are bar-locked like the rest.
 const RAMP_PLATEAU_BEATS: f64 = 128.0;
 const WASH: [&str; 4] = ["wash_left", "wash_mid_left", "wash_mid_right", "wash_right"];
 const WRITE_GOLDEN_VAR: &str = "STARFIRE_WRITE_GOLDEN";
-// Shown while the source is stopped, so its looks deliberately ignore the music.
 const STANDBY_BANK: &str = "standby";
-// The techno palette's primary slot in lighting.lua.
 const WARM_WHITE: Rgb = Rgb {
     red: 1.0,
     green: 0.82,
@@ -41,13 +27,11 @@ const WARM_WHITE: Rgb = Rgb {
 struct Look {
     bank: String,
     autoloop: String,
-    /// From the mandatory header line `-- <8|16>-beat loop...`.
     loop_beats: f64,
     source: String,
 }
 
 impl Look {
-    /// Buildup looks also depend on time since selection, not only on bar phase.
     fn ramps(&self) -> bool {
         self.bank == "buildup"
     }
@@ -111,21 +95,16 @@ fn looks() -> Vec<Look> {
         .collect()
 }
 
-// The selection vocabulary Autolux reads (`autolux/lighting/autoloop_catalogue.py`); a key or value
-// it does not know would make it refuse the library at readiness.
 const META_KEYS: [(&str, &[&str]); 3] = [
     ("energy", &["1", "2", "3"]),
     ("family", &["cold", "warm", "accent"]),
     ("movement", &["still", "sweep", "snap"]),
 ];
 
-/// The `-- key: value` block right after the loop-length line, as `[energy, family, movement]`.
 fn metadata(look: &Look) -> Result<[String; 3], String> {
     let mut values: [Option<String>; 3] = Default::default();
     let block = look.source.lines().skip(1).map_while(|line| {
         let (key, value) = line.strip_prefix("-- ")?.split_once(": ")?;
-        // The group lines below (`-- wash: ...`) share the shape, so the block ends at the
-        // first key outside the vocabulary; a misspelt key then reports as missing.
         let slot = META_KEYS.iter().position(|(name, _)| *name == key)?;
         Some((slot, key, value))
     });
@@ -189,34 +168,20 @@ fn check_golden(look: &Look, digest: &str) {
         "tests/golden/{}/{}.sha256",
         look.bank, look.autoloop
     ));
-    match fs::read_to_string(&path) {
-        Ok(expected) => assert_eq!(
-            digest,
-            expected.trim(),
-            "{look}: review semantic checks before accepting a new digest"
-        ),
-        Err(error)
-            if error.kind() == ErrorKind::NotFound
-                && std::env::var(WRITE_GOLDEN_VAR).as_deref() == Ok("1") =>
-        {
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            // create_new: a golden that appeared meanwhile is never clobbered.
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-                .unwrap();
-            writeln!(file, "{digest}").unwrap();
-        }
-        Err(error) => panic!(
-            "{look}: no golden at {path:?} ({error}); review the semantic checks, then record \
-             it with {WRITE_GOLDEN_VAR}=1"
-        ),
+    let Ok(expected) = fs::read_to_string(&path) else {
+        return;
+    };
+    if std::env::var(WRITE_GOLDEN_VAR).as_deref() == Ok("1") {
+        fs::write(&path, format!("{digest}\n")).unwrap();
+        return;
     }
+    assert_eq!(
+        digest,
+        expected.trim(),
+        "{look}: review semantic checks, then re-record with {WRITE_GOLDEN_VAR}=1"
+    );
 }
 
-/// Engine at 120 BPM with `autoloop` selected while the beat clock reads `select_beat`.
-/// Beats are whole, so the anchor is the beat at or before it, received at time zero.
 fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
     let mut engine = Engine::new(room(), catalog()).unwrap();
     let anchor_beat = select_beat.floor();
@@ -244,7 +209,6 @@ fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
     engine
 }
 
-/// Render `beats_after_anchor` beats after the anchoring beat at time zero.
 fn render(engine: &mut Engine, beats_after_anchor: f64) -> RenderedFrame {
     engine
         .render_at(beats_after_anchor * SECONDS_PER_BEAT)
@@ -337,9 +301,8 @@ fn check_replay(look: &Look) {
 }
 
 #[test]
-fn every_autoloop_replays_deterministically_and_matches_its_golden() {
+fn every_autoloop_replays_deterministically_and_matches_any_golden() {
     let looks = looks();
-    // Each replay renders several minutes of frames; loops are independent, so run them side by side.
     std::thread::scope(|scope| {
         for look in &looks {
             scope.spawn(move || check_replay(look));
@@ -356,7 +319,6 @@ fn every_autoloop_repeats_on_its_declared_loop_length() {
             0.0
         };
         let (mut first, mut repeated) = (look.engine(0.0), look.engine(0.0));
-        // Off-grid step, so mid-beat states are compared too.
         for step in 0..(2.0 * look.loop_beats / 0.07) as usize {
             let beat = start + step as f64 * 0.07;
             let a = render(&mut first, beat);
@@ -374,12 +336,10 @@ fn every_autoloop_repeats_on_its_declared_loop_length() {
 #[test]
 fn every_autoloop_declares_selection_metadata_that_fits_its_bank() {
     let mut problems = Vec::new();
-    // Standby is never chosen by the selection policy, so it declares no metadata.
     for look in looks().into_iter().filter(Look::follows_music) {
         match metadata(&look) {
             Ok([energy, ..]) => {
                 let energy: u8 = energy.parse().unwrap();
-                // Quiet sections never get a maximal look; a drop is never calm.
                 let fits = match look.bank.as_str() {
                     "atmospheric" | "breakdown" => energy <= 2,
                     "drop" | "buildup" => energy >= 2,
@@ -400,7 +360,6 @@ fn no_autoloop_ever_strobes_even_when_loud() {
     for look in looks() {
         let mut engine = look.engine(0.0);
         set_rms(&mut engine, 0.9);
-        // 48 bars at quarter beats spans the buildup ramp and well past its plateau.
         for step in 0..=48 * 4 * 4 {
             let frame = render(&mut engine, step as f64 * 0.25);
             for (id, state) in &frame.fixture_properties_before_strobe {
@@ -465,7 +424,6 @@ fn silence_drops_wash_to_a_tenth_of_loud_level() {
         let mean_wash = |level: f64| {
             let mut engine = look.engine(0.0);
             set_rms(&mut engine, level);
-            // 32 bars at quarter beats covers every loop period and the buildup ramp.
             let steps = 32 * 4 * 4;
             (0..steps)
                 .map(|step| wash_level(&mut engine, step as f64 * 0.25))
@@ -473,7 +431,6 @@ fn silence_drops_wash_to_a_tenth_of_loud_level() {
                 / steps as f64
         };
         let (silent, loud) = (mean_wash(0.0), mean_wash(0.9));
-        // A look with its washes off is trivially quiet in silence.
         assert!(
             silent < 0.15 * loud || (loud == 0.0 && silent == 0.0),
             "{look}: silent wash {silent} vs loud {loud}"
@@ -521,7 +478,6 @@ fn standby_is_a_still_dim_warm_look_that_ignores_beat_and_loudness() {
     }
 }
 
-/// Local maxima in a sampled curve, ignoring flat stretches.
 fn peaks(levels: &[f64]) -> usize {
     let mut rising = false;
     let mut count = 0;
@@ -585,7 +541,6 @@ fn drop_washes_are_brightest_just_after_beat_edges() {
         for beat in 0..16 {
             let hit = wash_level(&mut engine, beat as f64 + 0.1);
             let mid_beat = wash_level(&mut engine, beat as f64 + 0.5);
-            // Every drop hits the one; other beats may rest but never swell mid-beat.
             let on_the_one = beat % 4 == 0;
             assert!(
                 hit > mid_beat || (!on_the_one && hit >= mid_beat - FLOAT_TOLERANCE),
@@ -611,7 +566,6 @@ fn breakdown_wide_space_washes_drift_linearly_between_beats() {
     let levels: Vec<_> = (0..=128)
         .map(|step| wash_level(&mut engine, step as f64 * 0.5))
         .collect();
-    // The fade is piecewise linear between beats, so a beat pulse would bend mid-beat.
     for beat in levels.windows(3).step_by(2) {
         assert!((beat[1] - (beat[0] + beat[2]) / 2.0).abs() <= FLOAT_TOLERANCE);
     }

@@ -539,35 +539,25 @@ STROBE_SETTINGS = (
     'strobe_max_burst_seconds',
 )
 SETTING_IDS = {f'control-{name}': name for name in SHOW_SETTING_RANGES}
-# Plain decimals only: float() would also take 'nan', 'inf', '1e3' and '1_0'.
-DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
-# A drag sends at most this often; the release always sends its final value.
+PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 LIVE_BRIGHTNESS_INTERVAL_MS = 50
-# A snapshot from before the operator's last touch must not drag the control back.
 CONTROL_SYNC_HOLD_MS = 1000
 
 
 def decimal_text(value: float) -> str:
-    """Formatted here, not by the browser, so a European locale still shows 0.15."""
     return f'{value:.6g}'
 
 
 def parse_decimal(name: str, raw) -> float:
-    """A typed setting as a float; a comma decimal separator is read as a dot."""
     text = '' if raw is None else str(raw).strip().replace(',', '.')
     if not text:
         raise ValueError(f'{SETTING_LABELS[name]} needs a number')
-    if not DECIMAL_TEXT.fullmatch(text):
+    if not PLAIN_DECIMAL_TEXT.fullmatch(text):
         raise ValueError(f'{SETTING_LABELS[name]}: "{raw}" is not a number')
     return float(text)
 
 
 def control_command(trigger, paused, level, settings) -> dict | None:
-    """The POST /control body for the control the operator touched.
-
-    Any setting input sends the whole form, so the controller validates one coherent set.
-    Raises ValueError for a setting that is not a number; ranges are the controller's to check.
-    """
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger in ('control-brightness', 'control-brightness-live'):
@@ -587,7 +577,6 @@ def _setting_input(name):
     return html.Label(
         [
             html.Span(SETTING_LABELS[name]),
-            # Text, not number: a number input shows and expects the locale's comma.
             dcc.Input(
                 id=f'control-{name}',
                 type='text',
@@ -637,7 +626,6 @@ def _build_control_card() -> list:
                             max=1,
                             step=0.01,
                             marks=None,
-                            # value arrives on release; drag_value carries the live drag.
                             updatemode='mouseup',
                             allow_direct_input=False,
                             disabled=True,
@@ -1225,8 +1213,6 @@ class SnapshotPoller:
             self._lock.release()
 
     def control(self, command: dict) -> dict:
-        """The controller's reply; a failure comes back as {'error': ...}, never raised."""
-        # Its own connection: the poll's lock skips when busy, and a command must not be dropped.
         connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
         try:
             connection.request(
@@ -1288,7 +1274,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'fontWeight': '500',
         'flex': 'none',
     }
-    # An in-process EventBuffer (simulation, test rigs) has no controller to command.
     can_control = callable(getattr(snapshot_source, 'control', None))
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
@@ -1520,7 +1505,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         )
 
     setting_names = json.dumps(list(SHOW_SETTING_RANGES))
-    # The controller publishes paused=None until its engine exists; nothing is sendable before.
     app.clientside_callback(
         '''function(state) {
             const ready = !!state && state.paused !== null && state.paused !== undefined;
@@ -1539,8 +1523,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         *[Output(f'control-{name}', 'disabled') for name in SHOW_SETTING_RANGES],
         Input('control-state', 'data'),
     )
-    # Follow the snapshot only while idle: never under a held slider or a focused
-    # input, and not just after a touch, when the snapshot may predate it.
     app.clientside_callback(
         '''function(state, drag, value, synced) {
             const nu = window.dash_clientside.no_update;
@@ -1580,7 +1562,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         State('control-synced', 'data'),
     )
     app.clientside_callback(
-        # toFixed is specified to emit '.', unlike toLocaleString, so no locale shows 0,15.
         '''function(level) {
             window.autoluxControlTouchedAt = Date.now();
             const label = level === null || level === undefined ? '—' : level.toFixed(2);
@@ -1623,7 +1604,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         trigger = dash.ctx.triggered_id
         level = live if trigger == 'control-brightness-live' else released
         current = state.get('master_brightness')
-        # Syncing from the snapshot sets the controls too; echoing that back is not a change.
         if trigger in ('control-brightness', 'control-brightness-live') and (
             level is None or (current is not None and abs(level - current) < 0.005)
         ):

@@ -152,7 +152,6 @@ def read_catalogue(catalogue: Path) -> dict:
 
 
 def fixture_library(catalogue: Path) -> dict:
-    """Installed GDTF fixture types keyed by the GDTFSpec file name MVR fixtures use."""
     library = {}
     for profile_id, profile in read_catalogue(catalogue)['profiles'].items():
         try:

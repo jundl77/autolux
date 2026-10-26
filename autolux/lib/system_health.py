@@ -39,7 +39,6 @@ def health_summary(snapshot, *, now=None):
         f"{int(recent.get('overruns', 0))} overruns · {int(recent.get('lost_frames', 0))} lost frames"
     )
     if recent.get('resyncs'):
-        # A resync re-anchored the timeline after lost audio; it did not drift.
         audio_detail += f" · {int(recent['resyncs'])} capture resyncs"
         gap = tx.get('capture_last_gap_seconds')
         if finite(gap):

@@ -261,9 +261,9 @@ async def test_startup_wait_is_excluded_from_song_time_without_changing_song_bou
 @pytest.mark.parametrize(
     ('gap_level', 'gap_sec', 'standby'),
     [
-        (0.0, 1.5, False),  # a gapless player's track change
-        (0.0, 2.1, True),  # stop pressed
-        (1e-6, 5.0, False),  # quiet but live input stays on the quiet-dimming path
+        (0.0, 1.5, False),
+        (0.0, 2.1, True),
+        (1e-6, 5.0, False),
     ],
 )
 async def test_only_two_seconds_of_exact_zeros_mean_the_source_stopped(gap_level, gap_sec, standby):

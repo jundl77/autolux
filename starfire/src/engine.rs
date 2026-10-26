@@ -105,7 +105,6 @@ pub struct Engine {
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
-    // Scripts see this time while paused, so a script reading seconds also holds.
     paused_at_seconds: Option<f64>,
     default_crossfade_beats: f64,
     strobe_max_rate_hz: f64,
@@ -133,7 +132,6 @@ impl Engine {
             script_error: None,
             last_output_states,
             paused_at_seconds: None,
-            // Cut until set, matching the protocol before this parameter existed.
             default_crossfade_beats: 0.0,
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
@@ -352,11 +350,14 @@ impl Engine {
         self.clock.set_paused(seconds, paused)?;
         self.paused_at_seconds = paused.then_some(seconds);
         if paused {
-            // Released, not held: a strobe must not resume with the show.
-            self.overrides
-                .retain(|_, active| active.value.values.strobe_hz.is_none_or(|rate| rate <= 0.0));
+            self.release_strobe_overrides_instead_of_holding_them();
         }
         Ok(())
+    }
+
+    fn release_strobe_overrides_instead_of_holding_them(&mut self) {
+        self.overrides
+            .retain(|_, active| active.value.values.strobe_hz.is_none_or(|rate| rate <= 0.0));
     }
 
     fn resolve_transition(&self, transition: &Transition) -> Transition {
@@ -371,7 +372,6 @@ impl Engine {
         }
     }
 
-    /// Safety caps over every strobe source; the controller's own limits are not trusted.
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
         for (id, state) in states.iter_mut() {
@@ -628,8 +628,6 @@ fn validate_identifier(value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Master brightness eased over wall-clock seconds rather than beats, so an
-/// operator fade still completes during silence when the beat clock is idle.
 #[derive(Clone, Copy, Debug)]
 struct MasterFade {
     from: f64,
@@ -657,7 +655,6 @@ impl MasterFade {
         self.from + (self.to - self.from) * progress
     }
 
-    /// Starts from the currently visible level so a re-target mid-fade never jumps.
     fn retarget(&mut self, time_seconds: f64, to: f64, duration_seconds: f64) {
         *self = Self {
             from: self.level_at(time_seconds),

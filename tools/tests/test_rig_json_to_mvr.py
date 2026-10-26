@@ -8,7 +8,6 @@ from tools.rig_json_to_mvr import ROOT, convert
 LIBRARY = fixture_library(ROOT / 'rigs/profiles.json')
 SPOT = 'chauvet_intimidator_spot_110_12ch'
 WASH = 'fun_generation_separ_quad_uv_8ch'
-# The room rig as committed in JSON before the MVR migration.
 LEGACY_ROOM = {
     'schema_version': 1,
     'fixtures': [

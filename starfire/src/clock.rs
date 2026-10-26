@@ -1,5 +1,3 @@
-//! Musical time is derived from supplied beat facts; sampling never advances it.
-
 use anyhow::{Context, Result, ensure};
 
 const SECONDS_PER_MINUTE: f64 = 60.0;
@@ -7,26 +5,21 @@ pub const MAX_TEMPO_BPM: f64 = 1_000.0;
 pub const MAX_SPEED_MULTIPLIER: f64 = 8.0;
 pub const MAX_BEATS_PER_BAR: u32 = 16;
 const DEFAULT_BEATS_PER_BAR: u32 = 4;
-// Grid beats stay exact in the f64 position sent to scripts.
-const MAX_GRID_BEAT: u64 = 1 << 53;
+const MAX_F64_EXACT_GRID_BEAT: u64 = 1 << 53;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClockSample {
-    /// Bar-aligned grid: `floor(beat_position) % beats_per_bar` is the beat in bar.
     pub beat_position: f64,
     pub elapsed_musical_beats: f64,
     pub animation_beats: f64,
-    /// Continuous position inside the current bar, `0 <= bar_phase < beats_per_bar`.
     pub bar_phase: f64,
     pub bar_index: u64,
     pub beats_per_bar: u32,
 }
 
-/// One detected beat as reported by the controller's tracker.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BeatFact {
     pub beat_index: u64,
-    /// Committed beat in bar, 0 = downbeat; `None` while the tracker has no phase.
     pub bar_phase: Option<u32>,
     pub beats_per_bar: u32,
     pub bpm: f64,
@@ -90,10 +83,12 @@ impl MusicalClock {
         );
         let beats_per_bar = f64::from(self.beats_per_bar);
         let bar_phase = beat_position.rem_euclid(beats_per_bar);
-        // The subtraction is an exact multiple of the bar length, so the bar index
-        // cannot disagree with bar_phase at a bar edge the way a plain division can.
-        let bar_index = ((beat_position - bar_phase) / beats_per_bar).round();
-        ensure!(bar_index <= MAX_GRID_BEAT as f64, "musical clock overflow");
+        let bar_start_beat = beat_position - bar_phase;
+        let bar_index = (bar_start_beat / beats_per_bar).round();
+        ensure!(
+            bar_index <= MAX_F64_EXACT_GRID_BEAT as f64,
+            "musical clock overflow"
+        );
         Ok(ClockSample {
             beat_position,
             elapsed_musical_beats,
@@ -104,18 +99,6 @@ impl MusicalClock {
         })
     }
 
-    /// Anchor the grid at a detected beat so `floor(position) % beats_per_bar` equals
-    /// its bar phase.
-    ///
-    /// The grid advances by the beat-index delta, then a phase correction moves it
-    /// forward to the next beat with the reported phase, never back: loops are pure
-    /// functions of the position, so rewinding would replay or reverse their motion.
-    /// A beat without a phase keeps plain counting, which preserves the last alignment.
-    ///
-    /// The first beat anchors at its bar phase, not its index: a loop selected before
-    /// it, or a renderer restarted mid-session, must not see elapsed beats jump by the
-    /// session's beat count. The index only measures gaps after that.
-    /// Beats per bar is fixed for the session; changing it would move bar_index back.
     pub fn set_beat(&mut self, time_seconds: f64, beat: BeatFact) -> Result<()> {
         ensure!(
             beat.bpm.is_finite() && beat.bpm > 0.0 && beat.bpm <= MAX_TEMPO_BPM,
@@ -148,22 +131,18 @@ impl MusicalClock {
             None => 0,
         };
         let grid_beat = match beat.bar_phase {
-            Some(phase) => {
-                let length = u64::from(beat.beats_per_bar);
-                counted
-                    .checked_add((u64::from(phase) + length - counted % length) % length)
-                    .context("musical clock overflow")?
-            }
+            Some(phase) => advance_forward_to_bar_phase(counted, phase, beat.beats_per_bar)?,
             None => counted,
         };
-        ensure!(grid_beat <= MAX_GRID_BEAT, "musical clock overflow");
+        ensure!(
+            grid_beat <= MAX_F64_EXACT_GRID_BEAT,
+            "musical clock overflow"
+        );
         let received = ReceivedBeat {
             beat_index: beat.beat_index,
             grid_beat,
         };
         if self.paused {
-            // The held position must not move. Beats keep the grid counting, so the
-            // first beat after resume re-anchors forward to the true musical position.
             self.beats_per_bar = beat.beats_per_bar;
             self.last_received = Some(received);
             return Ok(());
@@ -184,7 +163,6 @@ impl MusicalClock {
         self.paused
     }
 
-    /// Holds every musical position at `time_seconds`; resume continues from there.
     pub fn set_paused(&mut self, time_seconds: f64, paused: bool) -> Result<()> {
         let before = self.sample_at(time_seconds)?;
         self.anchor_seconds = time_seconds;
@@ -208,6 +186,13 @@ impl MusicalClock {
         self.speed_multiplier = multiplier;
         Ok(())
     }
+}
+
+fn advance_forward_to_bar_phase(grid_beat: u64, phase: u32, beats_per_bar: u32) -> Result<u64> {
+    let length = u64::from(beats_per_bar);
+    grid_beat
+        .checked_add((u64::from(phase) + length - grid_beat % length) % length)
+        .context("musical clock overflow")
 }
 
 pub(crate) fn validate_time(time_seconds: f64) -> Result<()> {

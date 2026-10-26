@@ -1,6 +1,4 @@
--- 16-beat loop, static: shown while the source is stopped, so nothing follows beat or loudness.
--- wash: warm white at a low steady level. strip: faint warm glow.
--- movers: parked dark at centre, so resuming starts without a swing. Palette slots: primary.
+-- 16-beat loop
 local palette = sf.palette("techno")
 local WASH_LEVEL = 0.12
 local STRIP_LEVEL = 0.04

@@ -1,10 +1,7 @@
--- 16-beat loop, no beat pulses or strobe.
+-- 16-beat loop
 -- energy: 1
 -- family: cold
 -- movement: sweep
--- wash: faint secondary, steady.
--- strip: cold wave travelling from pixel 1 to pixel 8 once per loop, with a soft trailing tail.
--- movers: cold, slow mirrored pan sway. Palette slots: secondary, cold.
 local palette = sf.palette("techno")
 local LOOP_BEATS = 16
 local WASH_LEVEL = 0.08
@@ -24,7 +21,6 @@ return {
             sf.dimmer(sf.group("wash"), WASH_LEVEL * level),
             sf.colour(sf.group("strip"), palette.cold),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                -- The crest starts and ends beyond the strip, so it enters and leaves dark instead of wrapping.
                 local crest = sf.lerp(-WAVE_WIDTH, count - 1 + WAVE_WIDTH, beat / LOOP_BEATS)
                 local behind = crest - (index - 1)
                 local wave = behind >= 0 and math.max(0, 1 - behind / WAVE_WIDTH)

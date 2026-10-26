@@ -1,5 +1,3 @@
-"""Check a whole MVR archive against the MVR 1.6 tables and the GDTF files it references."""
-
 from xml.etree import ElementTree
 
 from autolux.lighting import mvr
@@ -68,7 +66,6 @@ def _structure(element, key, path, errors, identities, references, files):
     multipatch = bool(element.get('multipatch'))
     for definition in node.children:
         count = counts.get(definition.tag, 0)
-        # MVR 1.6 forbids FixtureID/CustomId on multipatch children; they inherit the parent's.
         exempt = multipatch and definition.tag in ('FixtureID', 'FixtureIDNumeric')
         if definition.count == schema.ONE and count != 1 and not exempt:
             errors.append(f'{label}: needs exactly one {definition.tag}')
@@ -109,7 +106,6 @@ def _patch(scene, element, label, errors, modes_cache):
     if len(breaks) != len(set(breaks)):
         errors.append(f'{label}: Address break values must be unique')
     for value in breaks:
-        # MVR break n addresses GDTF DMXBreak n + 1 (GDTF breaks start at 1).
         if value.lstrip('-').isdigit() and str(int(value) + 1) not in modes[mode]['breaks']:
             errors.append(
                 f'{label}: break {value} has no DMXBreak {int(value) + 1} in mode {mode!r}'
@@ -117,7 +113,6 @@ def _patch(scene, element, label, errors, modes_cache):
 
 
 def validate(scene: mvr.Scene) -> list[str]:
-    """Every spec rule this module checks; an empty list means the archive may be written."""
     root = scene.root
     errors, identities, references, files = [], [], [], []
     if root.tag != 'GeneralSceneDescription':
@@ -143,14 +138,14 @@ def validate(scene: mvr.Scene) -> list[str]:
     try:
         placed = [element for element, _ in mvr.placed_objects(root)]
     except ValueError:
-        placed = []  # A malformed Matrix is already reported above.
+        placed = []
     for element in placed:
         _patch(scene, element, _label(element, ''), errors, modes)
     for node in root.iter('Movement'):
         try:
             low, high = float(node.get('minimum', '0')), float(node.get('maximum', '1'))
         except ValueError:
-            continue  # Reported as a value error above.
+            continue
         if not 0 <= low <= high <= 1:
             errors.append(
                 f'Autolux Movement {node.get("fixture")}: limits must satisfy 0 <= min <= max <= 1'

@@ -33,7 +33,6 @@ class StarfireClient:
         self.selected_autoloop: tuple[str, str] | None = None
 
     def beat(self, beat_index: int, bar_phase: int | None, beats_per_bar: int, bpm: float) -> None:
-        """Report a detected beat; Starfire builds the bar-aligned grid from these facts."""
         self._send_command(
             {
                 'kind': 'beat',
@@ -48,7 +47,6 @@ class StarfireClient:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})
 
     def select_autoloop(self, bank: str, autoloop: str, *, transition: dict | None = None) -> bool:
-        """Without a transition, Starfire applies its DEFAULT_CROSSFADE_BEATS."""
         identity = bank, autoloop
         if identity == self.selected_autoloop:
             return False
@@ -67,7 +65,6 @@ class StarfireClient:
 
     def set_master(self, intensity: float, fade_seconds: float = 0.0) -> None:
         command = {'kind': 'set_master', 'intensity': intensity}
-        # Omitted when instant so recorded command streams stay unchanged.
         if fade_seconds:
             command['fade_seconds'] = fade_seconds
         self._send_command(command)
@@ -89,7 +86,6 @@ class StarfireClient:
         self._send_command({'kind': 'set_blackout', 'enabled': enabled})
 
     def discard_delayed_audio(self) -> None:
-        """Silence the room now instead of after the show-delayed tail plays out."""
         self._send_command({'kind': 'discard_delayed_audio'})
 
     def stop(self) -> None:

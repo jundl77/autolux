@@ -20,7 +20,6 @@ from tools.rig_json_to_mvr import convert
 
 
 def edited_room(path: Path, old: str, new: str) -> Path:
-    """The room rig with one scene text replacement; GDTF entries stay embedded."""
     scene = mvr.read(DEFAULT_RIG.read_bytes())
     xml = mvr._xml_bytes(scene.root).decode('utf-8')
     assert old in xml
@@ -727,7 +726,6 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
         (tmp_path / bank).mkdir()
         for name in names:
             (tmp_path / bank / f'{name}.lua').write_text('return {}')
-    # Starfire reports only the original four, as if it skipped the new files.
     checked = [
         {'bank': bank, 'autoloop': name}
         for bank, name in [
@@ -747,7 +745,6 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     )
     with pytest.raises(
         RuntimeError,
-        # Standby sits outside the rotation but readiness still requires it.
         match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
         'drop/slam, standby/warm_white$',
     ):
@@ -769,7 +766,6 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         (tmp_path / bank).mkdir()
         source = header.replace('family: warm', 'family: neon') if bank == 'drop' else header
         (tmp_path / bank / f'{name}.lua').write_text(source)
-    # Starfire renders every loop; only Autolux's selection metadata is wrong.
     checked = [{'bank': bank, 'autoloop': name} for bank, name in loops]
     report = json.dumps({'universes': [0], 'checked_autoloops': checked})
     binary = tmp_path / 'starfire.exe'

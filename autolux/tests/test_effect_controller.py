@@ -63,7 +63,6 @@ async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, record
     recorded_lighting.stop()
     await effect_controller.change_effect(LightIntent.DROP)
     kinds = [event['command']['kind'] for event in recorded_lighting.events]
-    # Stopping does not reset the strobe cooldown, so the resumed drop only cuts.
     assert kinds == ['select', 'set_override', 'stop', 'select']
 
 
@@ -107,7 +106,6 @@ async def test_drop_strobe_respects_cooldown_but_the_drop_still_cuts(recorded_li
     assert select['transition'] == {'kind': 'cut'}
     assert 'drop strobe suppressed' in caplog.text
 
-    # Cooldown counts from the first burst, not from the suppressed drop.
     third = await _drop_after(controller, recorded_lighting, clock, 61 - 30)
     assert [e['command']['kind'] for e in third] == ['select', 'set_override']
     assert STROBE_COOLDOWN_SECONDS == 60
@@ -182,7 +180,6 @@ async def test_repeating_the_current_intent_keeps_its_look(recorded_lighting):
     controller = rotating(recorded_lighting)
     for _ in range(3):
         await controller.change_effect(LightIntent.ATMOSPHERIC)
-    # A stop (silence, pause) followed by the same intent resumes the same look.
     recorded_lighting.stop()
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     await controller.change_effect(LightIntent.BREAKDOWN)
@@ -233,7 +230,6 @@ async def test_a_look_that_was_not_sent_is_not_remembered(recorded_lighting):
     controller = rotating(recorded_lighting)
     recorded_lighting.select_autoloop = lambda *_, **__: False
     assert not await controller.change_effect(LightIntent.ATMOSPHERIC)
-    # No track was started and nothing counts as played or entered.
     assert controller._policy.track_family is None
     assert controller._entered is None
 
@@ -250,21 +246,20 @@ async def test_a_realistic_set_gets_tiers_that_follow_the_music(recorded_lightin
         autoloop_meta=meta,
         seed=7,
     )
-    bar = 1.875  # 128 BPM, so 90 s is 48 bars
-    # (intent, bars it lasts, build bars at entry, expected energies)
+    bar = 1.875
     set_list = [
         (LightIntent.ATMOSPHERIC, 32, 0, {1}),
-        (LightIntent.BUILDUP, 16, 0, {3}),  # no drop yet: the first one is maximal
+        (LightIntent.BUILDUP, 16, 0, {3}),
         (LightIntent.DROP, 32, 16, {3}),
-        (LightIntent.BREAKDOWN, 16, 0, {1}),  # calm after a maximal drop
+        (LightIntent.BREAKDOWN, 16, 0, {1}),
         (LightIntent.BUILDUP, 8, 16, {2}),
-        (LightIntent.DROP, 32, 24, {2}),  # never maximal twice running
+        (LightIntent.DROP, 32, 24, {2}),
         (LightIntent.BREAKDOWN, 8, 0, {1, 2}),
         (LightIntent.BUILDUP, 8, 8, {2}),
-        (LightIntent.DROP, 16, 16, {2}),  # short build, 30 s since the last drop
+        (LightIntent.DROP, 16, 16, {2}),
         (LightIntent.BREAKDOWN, 24, 0, {1, 2}),
         (LightIntent.BUILDUP, 8, 24, {2}),
-        (LightIntent.DROP, 16, 32, {3}),  # 32-bar build earns it, though only 60 s passed
+        (LightIntent.DROP, 16, 32, {3}),
         (LightIntent.ATMOSPHERIC, 16, 0, {1}),
     ]
     left_drop_at = None

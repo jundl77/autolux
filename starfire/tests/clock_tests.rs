@@ -62,8 +62,6 @@ fn a_renderer_restarted_mid_session_does_not_jump_by_the_session_beat_count() {
 #[test]
 fn phase_correction_moves_the_grid_forward_to_the_reported_beat_in_bar() {
     let mut clock = MusicalClock::default();
-    // The tracker skips phase 2 (a forward correction), then pulls the bar back a beat;
-    // both land on the next matching beat. These are the positions Autolux used to send.
     let phases = [1, 2, 3, 0, 1, 3, 0, 1, 0];
     let mut positions = Vec::new();
     for (index, phase) in (1..).zip(phases) {
@@ -77,7 +75,6 @@ fn phase_correction_moves_the_grid_forward_to_the_reported_beat_in_bar() {
 #[test]
 fn every_received_beat_lands_on_its_phase_and_the_grid_never_moves_back() {
     let mut clock = MusicalClock::default();
-    // Deterministic mix of tracker corrections, unknown phases and dropped beats.
     let mut state: u64 = 0x2545_f491_4f6c_dd1d;
     let (mut index, mut previous) = (0_u64, None::<f64>);
     for step in 0..2_000_u32 {
@@ -116,7 +113,6 @@ fn unknown_phase_counts_beats_and_keeps_the_last_alignment() {
     assert_eq!(clock.sample_at(0.5).unwrap().beat_position, 1.0);
     clock.set_beat(1.0, phased(7, 0)).unwrap();
     assert_eq!(clock.sample_at(1.0).unwrap().beat_position, 4.0);
-    // Three beats later (two dropped in transit) without a phase: still bar-aligned.
     clock.set_beat(2.0, counted(10, 120.0)).unwrap();
     assert_eq!(clock.sample_at(2.0).unwrap().beat_position, 7.0);
 }

@@ -28,7 +28,7 @@ class FakeAnalyser:
         self.playing = True
         self.since_beat = 0.0
         self.bpm = 128.0
-        self.rms = 0.1  # about -20 dBFS: comfortably loud
+        self.rms = 0.1
 
     def is_song_playing(self):
         return self.playing
@@ -99,7 +99,6 @@ class FakeDecoder:
     class params:
         lag_bars = 2
 
-    # None is a grid with no bar phase; tests set 0..3 before a beat to place it.
     beat_phase = None
 
     def __init__(self, script=None):
@@ -1246,8 +1245,6 @@ def sent_beats(lighting):
 async def test_beats_carry_the_trackers_phase_and_count_and_leave_the_grid_to_starfire():
     decoder = FakeDecoder()
     light, _, _, lighting = engine(decoder=decoder, queue=False)
-    # Corrections and unknown phases pass through untouched; Starfire aligns its grid.
-    # The analyser's own beat number restarts per song, so it is not the index.
     phases = [1, 2, 3, 0, 1, 3, 0, None, 0]
     for phase in phases:
         await beat_at_phase(light, decoder, phase)
@@ -1261,7 +1258,6 @@ async def test_beats_carry_the_trackers_phase_and_count_and_leave_the_grid_to_st
 async def test_an_unpublished_beat_leaves_an_index_gap_and_the_next_beat_keeps_its_phase():
     decoder = FakeDecoder()
     light, _, _, lighting = engine(decoder=decoder, queue=False)
-    # No tempo measured yet: the beat is detected and counted but not published.
     light.analyser.bpm = 0.0
     await beat_at_phase(light, decoder, 3)
     light.analyser.bpm = 120.0
@@ -1324,9 +1320,8 @@ async def tick(light, clock, sec: float) -> None:
 
 
 async def test_a_quiet_passage_dims_the_rig_once_and_recovers_once():
-    """Live rig: a fade-out to near silence kept the loops at full output."""
     light, _, clock, lighting = engine(queue=False)
-    light.analyser.rms = 0.003  # about -50 dBFS
+    light.analyser.rms = 0.003
     await tick(light, clock, 1.5)
     assert masters(lighting) == [], 'a short dip is not a quiet passage'
     await tick(light, clock, 3.0)
@@ -1460,8 +1455,6 @@ def test_invalid_show_settings_are_refused(bad):
 
 
 class _MetronomeRhythm:
-    """A beat every half second (120 BPM), so standby tests run without madmom."""
-
     def __init__(self):
         from autolux.lib.analyser.madmom_rhythm import RhythmEvents
 
@@ -1480,8 +1473,6 @@ class _MetronomeRhythm:
 
 
 class _Show:
-    """The production loop on a virtual clock: engine, analyser, queue, timers."""
-
     def __init__(self):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.audio_config import BUFFER_SIZE
@@ -1554,7 +1545,6 @@ async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_
     assert show.queue.pending == 0, 'the delayed queue must be purged'
     select = next(c for c in standby if c['kind'] == 'select')
     assert (select['bank'], select['autoloop']) == ('standby', 'warm_white')
-    # One second at the established 120 BPM; Starfire fades in beats.
     assert select['transition'] == {
         'kind': 'crossfade',
         'duration_beats': pytest.approx(2.0, rel=0.01),
@@ -1595,7 +1585,6 @@ async def test_returning_signal_restarts_the_show_from_scratch_after_one_playbac
     assert show.light.audio_sec <= 1.0, 'the chain clock counts only the returning audio'
     assert show.light._pending_intents == [] and show.light._held_intent is None
 
-    # The room hears nothing new for one playback delay, so standby holds.
     await show.play(12.5, 0.2)
     assert _selections(show.commands(parked)) == []
     await show.play(1.5, 0.2)
@@ -1614,13 +1603,11 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
     show.light.pause()
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
     await show.play(3.0, 0.0)
-    # Standby carries its own low level; pause must not dim it towards dark.
     assert masters(show.lighting)[-1] == pytest.approx(1.0)
     parked = len(show.lighting.events)
 
     entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
     assert entered['autoloop'] == 'warm_white'
-    # PAUSED freezes Starfire's beat clock, so a fade in beats would never move.
     assert entered['transition'] == {'kind': 'cut'}
 
     await show.play(15.5, 0.2)
@@ -1634,14 +1621,12 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_cleared():
     show = _Show()
     await show.play(20.0, 0.2)
-    await show.play(20.0, 1e-4)  # live but quiet: the ordinary quiet dim
+    await show.play(20.0, 1e-4)
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
     assert show.light._room_quiet and show.light._source_quiet
     await show.play(2.1, 0.0)
     assert show.light.standby
     assert masters(show.lighting)[-1] == pytest.approx(1.0)
-    # Checked at the return itself: the next 100 ms tick judges the still-starting
-    # source quiet again, exactly as at launch.
     await show.analyser.analyse(np.full(256, 0.2, dtype=np.float32))
     assert not show.light.standby
     assert show.light._quiet_since is None
@@ -1654,7 +1639,6 @@ async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior(
     fake_reset = show.decoder.reset
 
     def reset(**kwargs):
-        # The real decoder drops its observations on reset.
         fake_reset(**kwargs)
         show.decoder.recent_observations.clear()
 
@@ -1716,10 +1700,8 @@ async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tr
     assert buildup.build_bars == pytest.approx(8)
     assert drop.build_bars == pytest.approx(32)
     assert drop.seconds_since_drop is None
-    # The drop's own outro is the same track; the intro after it starts the next.
     assert not outro.new_track and outro.build_bars == 0
     assert next_intro.new_track
-    # Counted from when the first drop ended, not from when it began.
     assert outro.seconds_since_drop == 0
     assert second_drop.seconds_since_drop == pytest.approx(24 * bar)
     assert second_drop.build_bars == pytest.approx(16)
@@ -1739,7 +1721,7 @@ def sent(lighting, *kinds):
 async def test_an_operator_master_is_sent_at_once_and_a_queued_quiet_dim_uses_it():
     light, queue, clock, lighting = engine()
     light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
-    await tick(light, clock, 0.1)  # the room hears this quiet 14 s from now
+    await tick(light, clock, 0.1)
     clock.advance(1.0)
     changed_at = clock.monotonic()
     light.set_master_level(0.5)

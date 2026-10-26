@@ -32,7 +32,6 @@ def test_fixture_draft_integrity(tmp_path):
             'columns': MAP_COLUMNS,
             'colors': FIXTURE_COLORS,
         },
-        # The browser composes matrices the server later parses; both must agree exactly.
         'parity': [
             {
                 'rotation': list(rotation),

@@ -109,7 +109,6 @@ impl LiveOutput {
     }
 
     fn discard_delayed_audio(&self) {
-        // Art-Net carries no audio, so there is nothing delayed to discard.
         if let Self::Radius { transmitter, .. } = self {
             transmitter.discard_delayed_audio();
         }
