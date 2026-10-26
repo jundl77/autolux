@@ -11,10 +11,11 @@ use crossbeam_queue::ArrayQueue;
 use std::{
     collections::VecDeque,
     net::TcpStream,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc::{SyncSender, sync_channel},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -26,6 +27,7 @@ const MAX_AUDIO_BLOCKS_PER_TICK: usize = 128;
 const CALLBACK_STALE_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_LIGHT_UPDATES: usize = 512;
 const HEALTH_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(30);
+const REPORT_QUEUE: usize = 4;
 
 struct TimedLight {
     at: Instant,
@@ -64,18 +66,100 @@ pub struct TxSnapshot {
     pub receiver_age_seconds: Option<f64>,
 }
 
-fn write_health(path: &Path, run_id: u64, snapshot: &TxSnapshot) -> Result<()> {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
+fn write_health(path: &Path, run_id: u64, report: &HealthReport) -> Result<()> {
+    let timestamp = report.at.duration_since(UNIX_EPOCH)?.as_secs_f64();
     let bytes = serde_json::to_vec(&serde_json::json!({
         "run_id": run_id,
         "timestamp": timestamp,
-        "tx": snapshot.tx,
-        "rx": snapshot.rx,
-        "rx_age_seconds": snapshot.receiver_age_seconds,
+        "tx": report.snapshot.tx,
+        "rx": report.snapshot.rx,
+        "rx_age_seconds": report.snapshot.receiver_age_seconds,
+        "reports_dropped_total": report.dropped_reports,
     }))?;
     // Readers retain the previous valid report during a partial read. Direct writes
     // remain possible when a Windows reader forbids file replacement.
     std::fs::write(path, bytes).context("write Radius transport health")
+}
+
+struct HealthReport {
+    // Stamped by the tx thread, so a lagging writer shows up as report age.
+    at: SystemTime,
+    snapshot: TxSnapshot,
+    dropped_reports: u64,
+}
+
+enum Report {
+    Health(Box<HealthReport>),
+    Log(String),
+}
+
+/// The thread that drains the 500 ms capture queue must never touch the disk: under
+/// disk pressure the health JSON write was measured blocking ~550 ms, and stderr is a
+/// file too. Reports that find the writer busy are dropped and counted, never waited on.
+struct Reporter {
+    queue: Option<SyncSender<Report>>,
+    worker: Option<JoinHandle<()>>,
+    dropped: u64,
+}
+
+impl Reporter {
+    fn spawn(mut write: impl FnMut(Report) + Send + 'static) -> Result<Self> {
+        let (queue, reports) = sync_channel(REPORT_QUEUE);
+        let worker = thread::Builder::new()
+            .name("radius-tx-report".into())
+            .spawn(move || reports.into_iter().for_each(&mut write))?;
+        Ok(Self {
+            queue: Some(queue),
+            worker: Some(worker),
+            dropped: 0,
+        })
+    }
+
+    fn submit(&mut self, report: Report) {
+        if let Some(queue) = &self.queue
+            && queue.try_send(report).is_err()
+        {
+            self.dropped += 1;
+        }
+    }
+
+    fn health(&mut self, snapshot: TxSnapshot) {
+        let dropped_reports = self.dropped;
+        self.submit(Report::Health(Box::new(HealthReport {
+            at: SystemTime::now(),
+            snapshot,
+            dropped_reports,
+        })));
+    }
+
+    fn log(&mut self, line: String) {
+        self.submit(Report::Log(line));
+    }
+}
+
+impl Drop for Reporter {
+    fn drop(&mut self) {
+        drop(self.queue.take());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn report_writer(run_id: u64, health_file: Option<PathBuf>) -> impl FnMut(Report) + Send {
+    let mut health_error_at: Option<Instant> = None;
+    move |report| match report {
+        Report::Log(line) => eprintln!("{line}"),
+        Report::Health(report) => {
+            if let Some(path) = &health_file
+                && let Err(error) = write_health(path, run_id, &report)
+                && health_error_at.is_none_or(|at| at.elapsed() >= HEALTH_ERROR_LOG_INTERVAL)
+            {
+                eprintln!("Radius telemetry unavailable: {error:#}");
+                health_error_at = Some(Instant::now());
+            }
+        }
+    }
 }
 
 fn gap_seconds(frames: i64) -> f64 {
@@ -230,7 +314,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut transmitted_light = None;
     let mut timeline = LightTimeline::new();
     let mut light_at = None;
-    let mut health_error_at: Option<Instant> = None;
+    let mut reporter = Reporter::spawn(report_writer(config.run_id, config.health_file.clone()))?;
     let mut reported_discontinuities = 0;
 
     while !shared.stop.load(Ordering::Acquire) {
@@ -318,11 +402,11 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             {
                 let bridge =
                     ["filled with silence", "of repeated audio dropped"][usize::from(gap < 0)];
-                eprintln!(
+                reporter.log(format!(
                     "Radius capture resynchronized after a device discontinuity: {:.1} ms {bridge} ({} total)",
                     gap_seconds(gap).abs() * 1000.0,
                     stats.discontinuities
-                );
+                ));
                 reported_discontinuities = stats.discontinuities;
             }
             ensure!(
@@ -400,12 +484,8 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 rx: receiver_metrics,
                 receiver_age_seconds: receiver_metrics_at.map(|at| at.elapsed().as_secs_f64()),
             };
-            if let Some(path) = &config.health_file
-                && let Err(error) = write_health(path, config.run_id, &snapshot)
-                && health_error_at.is_none_or(|at| at.elapsed() >= HEALTH_ERROR_LOG_INTERVAL)
-            {
-                eprintln!("Radius telemetry unavailable: {error:#}");
-                health_error_at = Some(Instant::now());
+            if config.health_file.is_some() {
+                reporter.health(snapshot.clone());
             }
             *shared.metrics.lock().unwrap() = snapshot;
             last_metrics = Instant::now();
@@ -460,7 +540,12 @@ mod tests {
     fn health_updates_preserve_uint64_values_while_reader_prevents_replacement() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("transport-health.json");
-        write_health(&path, 1, &TxSnapshot::default()).unwrap();
+        let report = |snapshot| HealthReport {
+            at: SystemTime::now(),
+            snapshot,
+            dropped_reports: 3,
+        };
+        write_health(&path, 1, &report(TxSnapshot::default())).unwrap();
         #[cfg(windows)]
         let _reader = {
             use std::os::windows::fs::OpenOptionsExt;
@@ -487,7 +572,7 @@ mod tests {
             }),
             receiver_age_seconds: Some(0.25),
         };
-        write_health(&path, u64::MAX, &snapshot).unwrap();
+        write_health(&path, u64::MAX, &report(snapshot)).unwrap();
         let report: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(report["run_id"].as_u64(), Some(u64::MAX));
@@ -496,5 +581,73 @@ mod tests {
         assert_eq!(report["rx"]["dmx_frames_total"].as_u64(), Some(u64::MAX));
         assert_eq!(report["rx_age_seconds"].as_f64(), Some(0.25));
         assert!(report["timestamp"].as_f64().unwrap() > 0.0);
+        assert_eq!(report["reports_dropped_total"].as_u64(), Some(3));
+    }
+
+    #[test]
+    fn stalled_report_writer_never_stalls_the_capture_drain() {
+        use crate::audio::AudioBlock;
+        const BLOCK_PERIOD: Duration = Duration::from_micros(
+            1_000_000 * protocol::BLOCK_FRAMES as u64 / protocol::SAMPLE_RATE as u64,
+        );
+        let capacity = (protocol::SAMPLE_RATE as usize / 2).div_ceil(protocol::BLOCK_FRAMES);
+        let capture = Arc::new(ArrayQueue::<AudioBlock>::new(capacity));
+        let stop = Arc::new(AtomicBool::new(false));
+        let producer = {
+            let (capture, stop) = (capture.clone(), stop.clone());
+            thread::spawn(move || {
+                let mut overflowed = 0;
+                while !stop.load(Ordering::Acquire) {
+                    overflowed += usize::from(capture.push(AudioBlock::default()).is_err());
+                    thread::sleep(BLOCK_PERIOD);
+                }
+                overflowed
+            })
+        };
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let mut reporter = {
+            let written = written.clone();
+            let mut stalled = false;
+            Reporter::spawn(move |report| {
+                if !std::mem::replace(&mut stalled, true) {
+                    thread::sleep(Duration::from_secs(2));
+                }
+                if let Report::Health(report) = report {
+                    written.lock().unwrap().push(report.dropped_reports);
+                }
+            })
+            .unwrap()
+        };
+        let started = Instant::now();
+        let mut drained = 0;
+        let mut slowest_submit = Duration::ZERO;
+        while started.elapsed() < Duration::from_millis(2500) {
+            while capture.pop().is_some() {
+                drained += 1;
+            }
+            let submitted = Instant::now();
+            reporter.health(TxSnapshot::default());
+            reporter.log("discontinuity".into());
+            slowest_submit = slowest_submit.max(submitted.elapsed());
+            thread::sleep(Duration::from_millis(10));
+        }
+        stop.store(true, Ordering::Release);
+        assert_eq!(producer.join().unwrap(), 0, "capture queue overflowed");
+        assert!(drained > 0);
+        assert!(
+            slowest_submit < Duration::from_millis(50),
+            "{slowest_submit:?}"
+        );
+        assert!(
+            reporter.dropped > 100,
+            "{} reports dropped",
+            reporter.dropped
+        );
+        thread::sleep(Duration::from_millis(50));
+        let dropped = reporter.dropped;
+        reporter.health(TxSnapshot::default());
+        drop(reporter);
+        // Drops are visible in the health file once the writer recovers.
+        assert_eq!(written.lock().unwrap().last(), Some(&dropped));
     }
 }
