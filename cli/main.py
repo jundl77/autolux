@@ -25,7 +25,7 @@ async def run_cmd(args: argparse.Namespace):
         debug_mode = False
 
     from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
-    from cli.starfire import PROFILE_CATALOGUE, ROOT
+    from cli.starfire import ROOT
     from autolux.lib.clients.starfire_client import StarfireClient
     import uuid
 
@@ -38,7 +38,6 @@ async def run_cmd(args: argparse.Namespace):
         args.artnet,
         ROOT / '.live' / 'starfire' / f'live-{uuid.uuid4().hex}',
         run_id=secrets.randbits(64) or 1,
-        profiles=getattr(args, 'profiles', PROFILE_CATALOGUE),
     ) as renderer:
         global_app = AutoluxController(
             lighting_client=StarfireClient(renderer.send_command),

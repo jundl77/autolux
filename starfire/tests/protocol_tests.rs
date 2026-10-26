@@ -64,7 +64,7 @@ fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation 
 
 fn engine() -> Engine {
     Engine::new(
-        FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
+        FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap(),
         AutoloopCatalog::load(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
         )
@@ -385,7 +385,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+    let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
     let catalog = AutoloopCatalog::load(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
     )

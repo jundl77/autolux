@@ -1,193 +1,222 @@
-"""Fixture patch persistence must never publish unvalidated or stale edits."""
+"""Rig persistence must never publish unvalidated, nonconforming or stale edits."""
 
+import copy
 import hashlib
-import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
-from autolux.lighting.fixture_setup import (
-    FixtureStore,
-    channel_occupancy,
-)
+from autolux.lighting import mvr
+from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy
 
-PROFILES = {'rgb': {'channels': 3}, 'moving_head': {'channels': 12}}
+ROOT = Path(__file__).resolve().parents[2]
+CATALOGUE = ROOT / 'rigs/profiles.json'
+MODES = {'rgb.gdtf': {'3ch': {'channels': 3}}, 'mover.gdtf': {'12ch': {'channels': 12}}}
 
 
-def fixture_row(name='left', address=1, universe=0, profile='rgb'):
-    return {'id': name, 'profile': profile, 'universe': universe, 'address': address}
+def fixture(name='left', address=1, universe=0, spec='rgb.gdtf', mode='3ch', breaks=(0,)):
+    return {
+        'name': name,
+        'gdtf_spec': spec,
+        'gdtf_mode': mode,
+        'universe': universe,
+        'address': address,
+        'addresses': [(index, universe, address) for index in breaks],
+    }
 
 
 def test_patch_occupancy_retains_both_owners_of_conflicting_channels():
-    rows = [fixture_row(address=1), fixture_row('right', address=3)]
-    occupied, errors = channel_occupancy(rows, PROFILES, 0)
+    occupied, errors = channel_occupancy([fixture(), fixture('right', 3)], MODES, 0)
     assert len(occupied) == 512
     assert occupied[:5] == [[0], [0], [0, 1], [1], [1]]
     assert errors == ['right overlaps left in universe 1.']
 
 
 def test_last_channel_can_be_allocated_without_clipping_or_wrapping():
-    profiles = {'large': {'channels': 509}, **PROFILES}
-    rows = [fixture_row(profile='large')]
-    rows.append(fixture_row('last', 510))
-    assert channel_occupancy(rows, profiles, 0)[0][-1] == [1]
-    rows[-1]['address'] = 511
-    occupied, errors = channel_occupancy(rows, profiles, 0)
+    modes = {**MODES, 'large.gdtf': {'big': {'channels': 509}}}
+    rows = [fixture(spec='large.gdtf', mode='big'), fixture('last', 510)]
+    assert channel_occupancy(rows, modes, 0)[0][-1] == [1]
+    rows[-1] = fixture('last', 511)
+    occupied, errors = channel_occupancy(rows, modes, 0)
     assert 'do not fit' in errors[0]
     assert occupied[509:] == [[], [], []]
 
 
 @pytest.mark.parametrize(
-    'field,value',
+    'changes,message',
     [
-        ('address', 0),
-        ('address', 513),
-        ('address', True),
-        ('address', 1.5),
-        ('universe', -1),
-        ('universe', 32768),
-        ('universe', False),
-        ('profile', 'missing'),
-        ('id', ''),
+        ({'gdtf_mode': '4ch'}, "GDTF mode '4ch' is not in rgb.gdtf"),
+        ({'name': ''}, 'unique, short fixture name'),
+        ({'addresses': [(1, 0, 1)]}, 'one Address on break 0'),
+        ({'addresses': [(0, 0, 1), (1, 0, 9)]}, 'one Address on break 0'),
     ],
 )
-def test_invalid_patch_is_rejected_before_persistence(field, value):
-    row = fixture_row()
-    row[field] = value
-    assert channel_occupancy([row], PROFILES, 0)[1]
+def test_patches_starfire_cannot_render_are_rejected(changes, message):
+    errors = channel_occupancy([{**fixture(), **changes}], MODES, 0)[1]
+    assert any(message in error for error in errors), errors
 
 
 def test_identical_addresses_in_distinct_universes_are_independent():
-    rows = [fixture_row(), fixture_row('other', universe=1)]
-    assert not channel_occupancy(rows, PROFILES, 0)[1]
+    assert not channel_occupancy([fixture(), fixture('other', universe=1)], MODES, 0)[1]
 
 
 @pytest.fixture
-def patch_file(tmp_path):
-    path = tmp_path / 'rig.json'
-    path.write_text(
-        json.dumps(
-            {
-                'schema_version': 1,
-                'fixtures': [
-                    {'id': 'left', 'profile': 'generic_rgb', 'universe': 0, 'address': 1},
-                    {'id': 'right', 'profile': 'generic_rgb', 'universe': 0, 'address': 4},
-                ],
-                'groups': {'wash': ['right', 'left']},
-            }
-        ),
-        encoding='utf-8',
-    )
+def rig_file(tmp_path):
+    path = tmp_path / 'rig.mvr'
+    path.write_bytes((ROOT / 'rigs/room.mvr').read_bytes())
     return path
 
 
 def store_for(path, validate):
-    return FixtureStore(path, path.parent / 'profiles.json', validate)
+    return FixtureStore(path, CATALOGUE, validate)
 
 
-def test_save_validates_staged_content_before_atomic_replace(patch_file):
-    before = patch_file.read_bytes()
+def fixture_node(draft, name):
+    return next(
+        node
+        for node in mvr._nodes(draft['scene'])
+        if node['tag'] == 'Fixture' and node['attributes'].get('name') == name
+    )
+
+
+def address_node(draft, name):
+    fixture_entry = fixture_node(draft, name)
+    addresses = next(child for child in fixture_entry['children'] if child['tag'] == 'Addresses')
+    return addresses['children'][0]
+
+
+def test_unchanged_draft_saves_byte_identical_and_reloads_identical(rig_file):
+    before = rig_file.read_bytes()
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    saved, saved_revision = store.save(draft, revision)
+    assert rig_file.read_bytes() == before
+    assert saved_revision == revision
+    assert mvr._without_keys(saved) == mvr._without_keys(draft)
+
+
+def test_save_validates_staged_content_before_atomic_replace(rig_file):
+    before = rig_file.read_bytes()
     seen = []
 
     def validate(staged):
-        assert staged != patch_file
-        assert staged.parent == patch_file.parent
-        assert patch_file.read_bytes() == before
-        seen.append(json.loads(staged.read_bytes()))
+        assert staged != rig_file
+        assert staged.parent == rig_file.parent
+        assert rig_file.read_bytes() == before
+        seen.append(mvr.patched_fixtures(mvr.read(staged.read_bytes())))
 
-    store = store_for(patch_file, validate)
-    patch, revision = store.load()
-    patch['fixtures'][0]['address'] = 20
-    saved_revision = store.save(patch, revision)
-
-    assert seen == [patch]
-    assert store.load() == (patch, saved_revision)
-    assert saved_revision == hashlib.sha256(patch_file.read_bytes()).hexdigest()
+    store = store_for(rig_file, validate)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    reloaded, saved_revision = store.save(draft, revision)
+    assert [f['address'] for f in seen[0] if f['name'] == 'wash_right'] == [200]
+    assert store.load() == (reloaded, saved_revision)
+    assert saved_revision == hashlib.sha256(rig_file.read_bytes()).hexdigest()
     assert saved_revision != revision
-    assert json.loads(patch_file.read_bytes())['groups']['wash'] == ['right', 'left']
-    assert list(patch_file.parent.glob('.rig-*.json')) == []
+    assert address_node(reloaded, 'wash_right')['text'] == '200'
+    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
 
 
 @pytest.mark.parametrize('error_type', [ValueError, TimeoutError, OSError])
-def test_rejected_or_interrupted_validation_preserves_saved_patch(patch_file, error_type):
-    before = patch_file.read_bytes()
+def test_rejected_or_interrupted_validation_preserves_saved_rig(rig_file, error_type):
+    before = rig_file.read_bytes()
 
     def reject(_staged):
         raise error_type('validation failed')
 
-    store = store_for(patch_file, reject)
-    patch, revision = store.load()
-    patch['fixtures'][0]['address'] = 0
+    store = store_for(rig_file, reject)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
     with pytest.raises(error_type, match='validation failed'):
-        store.save(patch, revision)
-    assert patch_file.read_bytes() == before
-    assert list(patch_file.parent.glob('.rig-*.json')) == []
+        store.save(draft, revision)
+    assert rig_file.read_bytes() == before
+    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
 
 
-def test_stale_browser_revision_is_rejected_before_validation(patch_file):
+@pytest.mark.parametrize(
+    'edit,message',
+    [
+        (lambda draft: address_node(draft, 'spot_left').update(text='0'), 'absolute address'),
+        (lambda draft: address_node(draft, 'spot_left').update(text='14'), 'overlaps'),
+        (
+            lambda draft: fixture_node(draft, 'spot_left')['attributes'].update(uuid='nope'),
+            'non-nil UUID',
+        ),
+        (
+            lambda draft: fixture_node(draft, 'spot_left')['children'].append(
+                {'tag': 'Sparkle', 'attributes': {}, 'text': '', 'children': []}
+            ),
+            'Sparkle is not allowed',
+        ),
+        (lambda draft: draft['scene'].update(tag='Scene'), 'GeneralSceneDescription'),
+    ],
+)
+def test_nonconforming_drafts_never_reach_validator_or_disk(rig_file, edit, message):
+    before = rig_file.read_bytes()
     calls = []
-    store = store_for(patch_file, calls.append)
-    patch, revision = store.load()
-    patch['fixtures'][0]['address'] = 10
-    store.save(patch, revision)
-    saved = patch_file.read_bytes()
-    patch['fixtures'][0]['address'] = 20
+    store = store_for(rig_file, calls.append)
+    draft, revision = store.load()
+    edit(draft)
+    with pytest.raises(ValueError, match=message):
+        store.save(draft, revision)
+    assert not calls
+    assert rig_file.read_bytes() == before
+
+
+def test_stale_browser_revision_is_rejected_before_validation(rig_file):
+    calls = []
+    store = store_for(rig_file, calls.append)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    store.save(copy.deepcopy(draft), revision)
+    saved = rig_file.read_bytes()
+    address_node(draft, 'wash_right')['text'] = '300'
     with pytest.raises(ValueError, match='changed'):
-        store.save(patch, revision)
+        store.save(draft, revision)
     assert len(calls) == 1
-    assert patch_file.read_bytes() == saved
+    assert rig_file.read_bytes() == saved
 
 
-def test_external_edit_during_validation_is_not_overwritten(patch_file):
-    external = b'{"externally_changed": true}\n'
+def test_external_edit_during_validation_is_not_overwritten(rig_file):
+    external = b'externally changed'
 
     def validate(_staged):
-        patch_file.write_bytes(external)
+        rig_file.write_bytes(external)
 
-    store = store_for(patch_file, validate)
-    patch, revision = store.load()
+    store = store_for(rig_file, validate)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
     with pytest.raises(ValueError, match='during validation'):
-        store.save(patch, revision)
-    assert patch_file.read_bytes() == external
-    assert list(patch_file.parent.glob('.rig-*.json')) == []
+        store.save(draft, revision)
+    assert rig_file.read_bytes() == external
+    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
 
 
-def test_failed_replace_preserves_saved_data_and_cleans_temporary_file(patch_file, monkeypatch):
-    before = patch_file.read_bytes()
-    store = store_for(patch_file, lambda _staged: None)
-    patch, revision = store.load()
+def test_failed_replace_preserves_saved_data_and_cleans_temporary_file(rig_file, monkeypatch):
+    before = rig_file.read_bytes()
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
 
     def denied(_source, _destination):
         raise PermissionError('file locked')
 
     monkeypatch.setattr('autolux.lighting.fixture_setup.os.replace', denied)
     with pytest.raises(PermissionError, match='file locked'):
-        store.save(patch, revision)
-    assert patch_file.read_bytes() == before
-    assert list(patch_file.parent.glob('.rig-*.json')) == []
+        store.save(draft, revision)
+    assert rig_file.read_bytes() == before
+    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
 
 
-@pytest.mark.parametrize('value', [float('nan'), float('inf'), -float('inf')])
-def test_nonfinite_values_never_reach_validator_or_disk(patch_file, value):
-    before = patch_file.read_bytes()
-    calls = []
-    store = store_for(patch_file, calls.append)
-    patch, revision = store.load()
-    patch['fixtures'][0]['pan'] = {'min': value, 'max': 1}
-    with pytest.raises(ValueError):
-        store.save(patch, revision)
-    assert not calls
-    assert patch_file.read_bytes() == before
-
-
-def test_concurrent_saves_from_one_revision_allow_only_one_winner(patch_file):
+def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
     validations = []
-    store = store_for(patch_file, validations.append)
-    patch, revision = store.load()
+    store = store_for(rig_file, validations.append)
+    draft, revision = store.load()
 
     def save(address):
-        candidate = json.loads(json.dumps(patch))
-        candidate['fixtures'][0]['address'] = address
+        candidate = copy.deepcopy(draft)
+        address_node(candidate, 'wash_right')['text'] = str(address)
         try:
             store.save(candidate, revision)
             return address
@@ -195,92 +224,20 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(patch_file):
             return None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(save, [10, 20]))
+        results = list(pool.map(save, [200, 300]))
     winners = [address for address in results if address is not None]
     assert len(winners) == 1
     assert len(validations) == 1
-    assert store.load()[0]['fixtures'][0]['address'] == winners[0]
+    assert address_node(store.load()[0], 'wash_right')['text'] == str(winners[0])
 
 
-def test_renaming_fixture_preserves_group_order_used_by_autoloop_spread(patch_file):
-    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
-
-    store = store_for(patch_file, lambda _staged: None)
-    original, revision = store.load()
-    rows = fixture_rows(original)
-    rows[1]['id'] = 'rear'
-    renamed = fixture_patch(rows, original)
-    store.save(renamed, revision)
-    assert store.load()[0]['groups']['wash'] == ['rear', 'left']
-    assert [fixture['id'] for fixture in renamed['fixtures']] == ['left', 'rear']
-    assert all('_original_id' not in fixture for fixture in renamed['fixtures'])
-
-
-def test_swapping_fixture_names_preserves_physical_group_order(patch_file):
-    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
-
-    store = store_for(patch_file, lambda _staged: None)
-    original, _revision = store.load()
-    rows = fixture_rows(original)
-    rows[0]['id'], rows[1]['id'] = rows[1]['id'], rows[0]['id']
-    assert fixture_patch(rows, original)['groups']['wash'] == ['left', 'right']
-
-
-def test_copied_row_identity_cannot_silently_reorder_a_group(patch_file):
-    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
-
-    original, _revision = store_for(patch_file, lambda _staged: None).load()
-    rows = fixture_rows(original)
-    rows.append({**rows[1], 'id': 'clone'})
-    with pytest.raises(ValueError, match='duplicated'):
-        fixture_patch(rows, original)
-
-
-def test_reusing_removed_fixture_name_does_not_duplicate_group_members(patch_file):
-    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
-
-    original, _revision = store_for(patch_file, lambda _staged: None).load()
-    rows = fixture_rows(original)[:1]
-    rows[0]['id'] = 'right'
-    saved = fixture_patch(rows, original)
-    assert saved['groups']['wash'] == ['right']
-    assert len(saved['fixtures']) == 1
-
-
-def test_orientation_offsets_round_trip_through_dashboard_save(patch_file):
-    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
-
-    seen = []
-    store = store_for(patch_file, lambda staged: seen.append(json.loads(staged.read_bytes())))
-    original, revision = store.load()
-    rows = fixture_rows(original)
-    assert [row['pan_offset_degrees'] for row in rows] == [0, 0]
-    rows[0].update(pan_offset_degrees=180, tilt_offset_degrees=-22.5)
-    store.save(fixture_patch(rows, original), revision)
-    saved, _ = store.load()
-    assert seen == [saved]
-    assert saved['fixtures'][0]['pan_offset_degrees'] == 180
-    assert saved['fixtures'][0]['tilt_offset_degrees'] == -22.5
-    assert 'pan_offset_degrees' not in saved['fixtures'][1]
-    reloaded = fixture_rows(saved)[0]
-    assert (reloaded['pan_offset_degrees'], reloaded['tilt_offset_degrees']) == (180, -22.5)
-
-
-@pytest.mark.parametrize(
-    'field,value',
-    [
-        ('pan_offset_degrees', 540.5),
-        ('tilt_offset_degrees', -271),
-        ('pan_offset_degrees', float('nan')),
-        ('pan_offset_degrees', '180'),
-        ('tilt_offset_degrees', True),
-    ],
-)
-def test_invalid_orientation_offset_is_rejected_before_persistence(patch_file, field, value):
-    from autolux.lighting.fixture_setup import fixture_patch, fixture_rows
-
-    original, _revision = store_for(patch_file, lambda _staged: None).load()
-    rows = fixture_rows(original)
-    rows[0][field] = value
-    with pytest.raises(ValueError, match='offset'):
-        fixture_patch(rows, original)
+def test_class_order_follows_document_order_after_moving_a_fixture(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    children = next(node for node in mvr._nodes(draft['scene']) if node['tag'] == 'ChildList')
+    spots = [node for node in children['children'] if node['attributes']['name'].startswith('spot')]
+    first, second = (children['children'].index(spot) for spot in spots)
+    children['children'][first], children['children'][second] = spots[1], spots[0]
+    store.save(draft, revision)
+    fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
+    assert mvr.groups(fixtures)['movers'] == ['spot_right', 'spot_left']

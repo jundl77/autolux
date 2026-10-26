@@ -10,9 +10,23 @@ from pathlib import Path
 
 import pytest
 
+from autolux.lighting import mvr
+from autolux.lighting.gdtf import fixture_library
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
+from cli.starfire import DEFAULT_RIG, PROFILE_CATALOGUE
 from proto.starfire import starfire_pb2 as wire
+from tools.rig_json_to_mvr import convert
+
+
+def edited_room(path: Path, old: str, new: str) -> Path:
+    """The room rig with one scene text replacement; GDTF entries stay embedded."""
+    scene = mvr.read(DEFAULT_RIG.read_bytes())
+    xml = mvr._xml_bytes(scene.root).decode('utf-8')
+    assert old in xml
+    scene.root = mvr._guard_xml(xml.replace(old, new, 1).encode('utf-8'), path.name)
+    path.write_bytes(mvr.write(scene))
+    return path
 
 
 def test_control_adapter_preserves_zero_values_and_named_targets():
@@ -273,14 +287,16 @@ with open(recording, 'w') as output:
 
 
 def _fake_runtime(tmp_path, mode='normal', **kwargs):
-    rig = tmp_path / 'rig.json'
-    rig.write_text(
-        json.dumps(
+    rig = tmp_path / 'rig.mvr'
+    rig.write_bytes(
+        convert(
             {
                 'schema_version': 1,
                 'fixtures': [{'id': 'lamp', 'profile': 'generic_rgb', 'universe': 0, 'address': 1}],
                 'groups': {'wash': ['lamp']},
-            }
+            },
+            fixture_library(PROFILE_CATALOGUE),
+            'runtime-test',
         )
     )
     scripts = tmp_path / 'scripts'
@@ -570,7 +586,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         receiver.settimeout(3)
         runtime = starfire_runtime.StarfireRuntime(
             binary,
-            root / 'rigs/room.json',
+            root / 'rigs/room.mvr',
             root / 'autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
@@ -628,16 +644,15 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     binary = root / 'target/debug/starfire.exe'
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native fixture validation')
-    patch = json.loads((root / 'rigs/room.json').read_text())
-    patch['fixtures'][0]['universe'] = 1
-    rig = tmp_path / 'multi-universe.json'
-    rig.write_text(json.dumps(patch))
+    rig = edited_room(
+        tmp_path / 'multi-universe.mvr', '<Address break="0">1<', '<Address break="0">513<'
+    )
     autoloops = root / 'autoloops'
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
     starfire_runtime.validate_starfire(
-        binary, root / 'rigs/room.json', autoloops, expected_universe=0
+        binary, root / 'rigs/room.mvr', autoloops, expected_universe=0
     )
 
 
@@ -646,10 +661,7 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
     binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
-    patch = json.loads((root / 'rigs/room.json').read_text())
-    del patch['groups']['strip']
-    rig = tmp_path / 'missing-strip.json'
-    rig.write_text(json.dumps(patch))
+    rig = edited_room(tmp_path / 'missing-strip.mvr', 'name="strip"', 'name="pixels"')
     with pytest.raises(RuntimeError, match=r'Starfire validation failed:.*autoloop ') as error:
         starfire_runtime.validate_starfire(binary, rig, root / 'autoloops')
     assert 'strip' in str(error.value)
@@ -671,4 +683,4 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
-        starfire_runtime.validate_starfire(binary, root / 'rigs/room.json', tmp_path)
+        starfire_runtime.validate_starfire(binary, root / 'rigs/room.mvr', tmp_path)

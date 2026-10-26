@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
@@ -8,7 +10,6 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_starfire"))
         .args(["check", "--rig"])
         .arg(rig)
-        .args(["--profiles", "../rigs/profiles.json"])
         .arg("--autoloops")
         .arg(autoloops)
         .output()
@@ -18,7 +19,7 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
 #[test]
 fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = check(&root.join("../rigs/room.json"), &root.join("../autoloops"));
+    let output = check(&root.join("../rigs/room.mvr"), &root.join("../autoloops"));
     assert!(
         output.status.success(),
         "{}",
@@ -33,10 +34,14 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
 fn preflight_rejects_a_valid_patch_missing_a_autoloop_group() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
-    let mut rig: Value = serde_json::from_str(include_str!("../../rigs/room.json")).unwrap();
-    rig["groups"].as_object_mut().unwrap().remove("strip");
-    let path = directory.path().join("missing-strip.json");
-    fs::write(&path, serde_json::to_vec(&rig).unwrap()).unwrap();
+    let (scene, _) = support::room_entries();
+    // Renaming the class leaves every pixel patched but no "strip" group.
+    let path = directory.path().join("missing-strip.mvr");
+    fs::write(
+        &path,
+        support::room_with_scene(&scene.replace("name=\"strip\"", "name=\"pixels\"")),
+    )
+    .unwrap();
 
     let output = check(&path, &root.join("../autoloops"));
     let error = String::from_utf8_lossy(&output.stderr);
@@ -62,7 +67,7 @@ fn preflight_executes_render_callbacks_in_every_autoloop() {
     )
     .unwrap();
 
-    let output = check(&root.join("../rigs/room.json"), directory.path());
+    let output = check(&root.join("../rigs/room.mvr"), directory.path());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(error.contains("test/z_failure"), "{error}");

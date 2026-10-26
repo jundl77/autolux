@@ -6,52 +6,36 @@ use std::io::Read;
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
-use serde::Deserialize;
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::GdtfProfile;
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
+use crate::mvr;
 use crate::protocol::wire;
 
-const RIG_SCHEMA_VERSION: u32 = 1;
-const PROFILE_SCHEMA_VERSION: u32 = 1;
-const PROFILE_CATALOGUE: &str = include_str!("../../rigs/profiles.json");
-pub const MAX_RIG_INPUT_BYTES: usize = 1024 * 1024;
 pub const MAX_FIXTURES: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
 const MAX_IDENTIFIER_BYTES: usize = 128;
-const MAX_PAN_OFFSET_DEGREES: f64 = 540.0;
-const MAX_TILT_OFFSET_DEGREES: f64 = 270.0;
+const MATRIX_VALUES: usize = 12;
+// Axes this far from orthonormal are shear or mirroring, which has no pan/tilt meaning.
+const ORTHONORMAL_TOLERANCE: f64 = 1e-3;
+const GIMBAL_TOLERANCE: f64 = 1e-9;
 const FULL_TURN_DEGREES: f64 = 360.0;
+const HALF_TURN_DEGREES: f64 = 180.0;
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RigDefinition {
-    schema_version: u32,
-    fixtures: Vec<FixturePatch>,
-    #[serde(default)]
-    groups: BTreeMap<String, Vec<String>>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug)]
 struct FixturePatch {
     id: String,
     profile: String,
     universe: u16,
     address: usize,
-    #[serde(default)]
     pan: MovementRange,
-    #[serde(default)]
     tilt: MovementRange,
-    #[serde(default)]
     pan_offset_degrees: f64,
-    #[serde(default)]
     tilt_offset_degrees: f64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Debug)]
 struct MovementRange {
     min: f64,
     max: f64,
@@ -94,18 +78,56 @@ impl MovementRange {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProfileCatalogue {
-    schema_version: u32,
-    profiles: BTreeMap<String, ProfileDefinition>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProfileDefinition {
-    gdtf_xml: String,
-    dmx_mode: String,
+/// Home direction offsets in degrees from an MVR Matrix, relative to the GDTF
+/// default orientation: (pan = yaw about Z, tilt = pitch about the yawed X axis).
+/// R = Rz(yaw) * Rx(pitch) * Ry(roll); roll has no pan/tilt meaning and is ignored.
+/// Yaw is canonical in (-180, 180] so one orientation always selects the same DMX.
+pub fn home_offsets(matrix: &[f64]) -> Result<(f64, f64)> {
+    if matrix.is_empty() {
+        return Ok((0.0, 0.0));
+    }
+    ensure!(
+        matrix.len() == MATRIX_VALUES && matrix.iter().all(|value| value.is_finite()),
+        "MVR Matrix must contain twelve finite numbers"
+    );
+    let mut axes = [[0.0; 3]; 3];
+    for (axis, values) in axes.iter_mut().zip(matrix.as_chunks::<3>().0) {
+        let length = values.iter().map(|value| value * value).sum::<f64>().sqrt();
+        ensure!(
+            length > ORTHONORMAL_TOLERANCE,
+            "MVR Matrix axes must be nonzero"
+        );
+        for (target, value) in axis.iter_mut().zip(values) {
+            *target = value / length;
+        }
+    }
+    let [u, v, w] = axes;
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    ensure!(
+        dot(u, v).abs().max(dot(v, w).abs()).max(dot(u, w).abs()) <= ORTHONORMAL_TOLERANCE
+            && dot(cross, w) >= 1.0 - ORTHONORMAL_TOLERANCE,
+        "MVR Matrix rotation must be orthogonal and unmirrored"
+    );
+    let pitch = v[2].clamp(-1.0, 1.0).asin().to_degrees();
+    let yaw = if v[2].abs() > 1.0 - GIMBAL_TOLERANCE {
+        u[1].atan2(u[0])
+    } else {
+        (-v[0]).atan2(v[1])
+    }
+    .to_degrees();
+    let mut yaw = yaw % FULL_TURN_DEGREES;
+    if yaw > HALF_TURN_DEGREES {
+        yaw -= FULL_TURN_DEGREES;
+    }
+    if yaw <= -HALF_TURN_DEGREES {
+        yaw += FULL_TURN_DEGREES;
+    }
+    Ok((yaw + 0.0, pitch + 0.0))
 }
 
 /// An immutable, validated patch with fixture data separate from autoloop logic.
@@ -122,6 +144,8 @@ impl FixtureRig {
             .fixtures
             .iter()
             .map(|fixture| -> Result<_> {
+                let (pan_offset_degrees, tilt_offset_degrees) = home_offsets(&fixture.matrix)
+                    .with_context(|| format!("fixture {}", fixture.fixture_id))?;
                 Ok(FixturePatch {
                     id: fixture.fixture_id.clone(),
                     profile: fixture.profile_id.clone(),
@@ -130,8 +154,8 @@ impl FixtureRig {
                     address: fixture.address as usize,
                     pan: MovementRange::from_wire(&fixture.pan),
                     tilt: MovementRange::from_wire(&fixture.tilt),
-                    pan_offset_degrees: fixture.pan_offset_degrees,
-                    tilt_offset_degrees: fixture.tilt_offset_degrees,
+                    pan_offset_degrees,
+                    tilt_offset_degrees,
                 })
             })
             .collect::<Result<_>>()?;
@@ -160,54 +184,13 @@ impl FixtureRig {
         Self::from_parts(fixtures, groups, profiles)
     }
 
+    /// Load an MVR rig; its GDTF files travel inside the archive.
     pub fn load(path: &Path) -> Result<Self> {
-        Self::from_json(&read_rig_file(path)?)
+        Self::from_mvr(&read_bounded(path, mvr::MAX_MVR_BYTES)?)
     }
 
-    pub fn load_with_profiles(path: &Path, profiles: &Path) -> Result<Self> {
-        Self::from_json_with_profiles(&read_rig_file(path)?, &read_rig_file(profiles)?)
-    }
-
-    pub fn from_json(json: &str) -> Result<Self> {
-        Self::from_json_with_profiles(json, PROFILE_CATALOGUE)
-    }
-
-    pub fn from_json_with_profiles(json: &str, profiles_json: &str) -> Result<Self> {
-        ensure!(
-            json.len() <= MAX_RIG_INPUT_BYTES,
-            "fixture rig exceeds input byte limit"
-        );
-        ensure!(
-            profiles_json.len() <= MAX_RIG_INPUT_BYTES,
-            "profile catalogue exceeds input byte limit"
-        );
-        let definition: RigDefinition = serde_json::from_str(json).context("parse fixture rig")?;
-        ensure!(
-            definition.schema_version == RIG_SCHEMA_VERSION,
-            "unsupported rig schema version"
-        );
-        let catalogue: ProfileCatalogue =
-            serde_json::from_str(profiles_json).context("parse GDTF profile catalogue")?;
-        ensure!(
-            catalogue.schema_version == PROFILE_SCHEMA_VERSION,
-            "unsupported fixture profile version"
-        );
-        let used_profiles: BTreeSet<_> = definition
-            .fixtures
-            .iter()
-            .map(|fixture| fixture.profile.as_str())
-            .collect();
-        let profiles = catalogue
-            .profiles
-            .into_iter()
-            .filter(|(id, _)| used_profiles.contains(id.as_str()))
-            .map(|(id, profile)| {
-                let compiled = GdtfProfile::from_xml(&profile.gdtf_xml, &profile.dmx_mode)
-                    .with_context(|| format!("profile {id}"))?;
-                Ok((id, compiled))
-            })
-            .collect::<Result<_>>()?;
-        Self::from_parts(definition.fixtures, definition.groups, profiles)
+    pub fn from_mvr(archive: &[u8]) -> Result<Self> {
+        Self::from_wire(&mvr::rig_definition(archive)?)
     }
 
     fn from_parts(
@@ -277,31 +260,6 @@ impl FixtureRig {
                 .tilt
                 .validate()
                 .with_context(|| format!("fixture {} tilt bounds", patch.id))?;
-            for (axis, attribute, offset, limit) in [
-                (
-                    "pan",
-                    "Pan",
-                    patch.pan_offset_degrees,
-                    MAX_PAN_OFFSET_DEGREES,
-                ),
-                (
-                    "tilt",
-                    "Tilt",
-                    patch.tilt_offset_degrees,
-                    MAX_TILT_OFFSET_DEGREES,
-                ),
-            ] {
-                ensure!(
-                    offset.is_finite() && offset.abs() <= limit,
-                    "fixture {} {axis} offset must be finite and within +/-{limit} degrees",
-                    patch.id
-                );
-                ensure!(
-                    offset == 0.0 || profile.movement_range(attribute).is_some(),
-                    "fixture {} has a {axis} offset but its profile has no continuous {attribute}",
-                    patch.id
-                );
-            }
         }
         for (group, members) in &groups {
             validate_identifier(group)?;
@@ -510,23 +468,70 @@ fn validate_colour(colour: Rgb) -> Result<()> {
     unit_interval("blue", colour.blue)
 }
 
-fn read_rig_file(path: &Path) -> Result<String> {
-    let mut json = String::new();
+fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+    let mut content = Vec::new();
     File::open(path)
         .with_context(|| format!("open fixture data {}", path.display()))?
-        .take((MAX_RIG_INPUT_BYTES + 1) as u64)
-        .read_to_string(&mut json)
+        .take((limit + 1) as u64)
+        .read_to_end(&mut content)
         .with_context(|| format!("read fixture data {}", path.display()))?;
     ensure!(
-        json.len() <= MAX_RIG_INPUT_BYTES,
+        content.len() <= limit,
         "fixture data exceeds input byte limit"
     );
-    Ok(json)
+    Ok(content)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{offset_pan, offset_tilt};
+    use super::{home_offsets, offset_pan, offset_tilt};
+
+    fn yawed(degrees: f64) -> Vec<f64> {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        vec![cos, sin, 0.0, -sin, cos, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+    }
+
+    #[test]
+    fn matrix_yaw_is_the_pan_offset_in_one_canonical_turn() {
+        for (yaw, expected) in [
+            (0.0, 0.0),
+            (180.0, 180.0),
+            (-180.0, 180.0),
+            (-90.0, -90.0),
+            (270.0, -90.0),
+            (540.0, 180.0),
+        ] {
+            let (pan, tilt) = home_offsets(&yawed(yaw)).unwrap();
+            assert!((pan - expected).abs() < 1e-9, "{yaw} -> {pan}");
+            assert!(tilt.abs() < 1e-9);
+        }
+        // atan2(-0.0, -1) is -180, which would select different DMX than +180.
+        let exact = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 5.0, 6.0, 7.0];
+        assert_eq!(home_offsets(&exact).unwrap(), (180.0, 0.0));
+        assert_eq!(home_offsets(&[]).unwrap(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn matrix_pitch_is_the_tilt_offset_and_roll_is_ignored() {
+        // Rz(30) * Rx(20) * Ry(-40), as written by Autolux.
+        let matrix = [
+            0.773_337, 0.192_63, 0.604_023, -0.469_846, 0.813_798, 0.342_02, -0.425_669,
+            -0.548_295, 0.719_846, 0.0, 0.0, 0.0,
+        ];
+        let (pan, tilt) = home_offsets(&matrix).unwrap();
+        assert!((pan - 30.0).abs() < 1e-3 && (tilt - 20.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn shear_mirror_and_partial_matrices_are_rejected() {
+        let mut mirrored = yawed(0.0);
+        mirrored[0] = -1.0;
+        let mut sheared = yawed(0.0);
+        sheared[3] = 1.0;
+        for matrix in [mirrored, sheared, vec![1.0; 9], vec![f64::NAN; 12]] {
+            assert!(home_offsets(&matrix).is_err(), "{matrix:?}");
+        }
+    }
 
     fn degrees(position: f64, travel: f64) -> f64 {
         position * travel

@@ -1,7 +1,6 @@
 """Imported standard fixture modes must work through the actual renderer login."""
 
 import argparse
-import json
 import os
 import socket
 import time
@@ -10,9 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from autolux.lighting.gdtf import fixture_library
 from cli import starfire
 from cli.starfire_assets import load_login
 from cli.starfire_runtime import StarfireRuntime
+from tools.rig_json_to_mvr import convert
 
 ROOT = Path(__file__).parents[2]
 BINARY = ROOT / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
@@ -39,16 +40,16 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
             mode=mode,
         )
     )
-    rig = tmp_path / 'rig.json'
-    rig.write_text(
-        json.dumps(
+    rig = tmp_path / 'rig.mvr'
+    rig.write_bytes(
+        convert(
             {
                 'schema_version': 1,
                 'fixtures': [{'id': 'lamp', 'profile': 'imported', 'universe': 0, 'address': 1}],
-                'groups': {},
-            }
-        ),
-        encoding='utf-8',
+            },
+            fixture_library(profiles),
+            'import-test',
+        )
     )
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'test'
@@ -61,10 +62,10 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
         receiver.bind(('127.0.0.1', 0))
         receiver.settimeout(TEST_TIMEOUT_SECONDS)
         destination = f'127.0.0.1:{receiver.getsockname()[1]}'
-        login = load_login(rig, autoloops, destination, run_id=1, profiles=profiles)
+        login = load_login(rig, autoloops, destination, run_id=1)
         assert login.rig.profiles[0].gdtf_xml.encode('utf-8') == xml
         with StarfireRuntime(
-            BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1, profiles=profiles
+            BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1
         ) as runtime:
             runtime.send_command({'kind': 'select', 'bank': 'test', 'autoloop': 'dimmer'})
             deadline = time.monotonic() + TEST_TIMEOUT_SECONDS

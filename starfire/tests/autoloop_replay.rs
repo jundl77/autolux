@@ -51,7 +51,7 @@ fn root() -> PathBuf {
 }
 
 fn room() -> FixtureRig {
-    FixtureRig::load(&root().join("../rigs/room.json")).unwrap()
+    FixtureRig::load(&root().join("../rigs/room.mvr")).unwrap()
 }
 
 fn catalog() -> AutoloopCatalog {
@@ -412,7 +412,7 @@ fn every_registered_autoloop_has_an_executable_replay_and_expected_dmx() {
 #[test]
 fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
     let catalog = catalog();
-    let rig = FixtureRig::load(&root().join("../rigs/generic.json")).unwrap();
+    let rig = FixtureRig::load(&root().join("../rigs/generic.mvr")).unwrap();
     for entry in catalog.list() {
         let mut replay =
             Replay::load(&root().join(format!("tests/replays/{}.json", entry.bank))).unwrap();
