@@ -1,3 +1,4 @@
+import asyncio
 import http.client
 import json
 import queue
@@ -61,6 +62,40 @@ def test_a_control_post_returns_once_the_engine_has_taken_it_well_inside_50_ms(b
     assert sorted(rounds)[len(rounds) // 2] < 0.05, rounds
 
 
+def test_the_frame_cadence_drain_applies_a_post_before_the_reply_well_inside_50_ms(tmp_path):
+    from types import SimpleNamespace
+
+    from autolux.lib.main import AutoluxController, ShowControl
+
+    class Engine:
+        level = None
+
+        def set_master_level(self, level):
+            self.level = level
+
+    control = ShowControl(tmp_path / 'show.json')
+    show = SimpleNamespace(control=control, light_engine=Engine())
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    drain = asyncio.run_coroutine_threadsafe(AutoluxController._drain_operator_commands(show), loop)
+    server = SnapshotServer(EventBuffer(), 0, control.commands, handoff_timeout=0.25)
+    server.start()
+    try:
+        connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+        rounds = []
+        for level in (0.1, 0.2, 0.3, 0.4, 0.5):
+            started = time.perf_counter()
+            reply, _ = _request(connection, 'POST', {'action': 'master', 'level': level}, JSON)
+            rounds.append(time.perf_counter() - started)
+            assert reply.status == 202
+            assert show.light_engine.level == level, 'replied before the engine applied it'
+    finally:
+        server.stop()
+        drain.cancel()
+        loop.call_soon_threadsafe(loop.stop)
+    assert sorted(rounds)[len(rounds) // 2] < 0.05, rounds
+
+
 def test_a_stalled_engine_is_reported_instead_of_claiming_the_command_applied(bridge):
     connection, _ = bridge
     reply, body = _request(connection, 'POST', {'action': 'pause'}, JSON)
@@ -86,6 +121,32 @@ def test_the_dashboard_page_may_post_cross_origin_and_other_sites_may_not(bridge
     plain = {'Content-Type': 'text/plain'}
     assert _request(connection, 'POST', {'action': 'pause'}, plain)[0].status == 415
     assert commands.empty()
+
+
+@pytest.mark.parametrize(
+    ('body', 'content_type', 'status'),
+    [
+        ({'action': 'dance'}, 'application/json', 400),
+        ({'action': 'pause', 'pad': 'x' * 5000}, 'application/json', 413),
+        ({'action': 'pause'}, 'text/plain', 415),
+        ({'action': 'pause'}, 'application/json', 504),
+    ],
+)
+def test_the_dashboard_page_can_read_every_refusal(bridge, body, content_type, status):
+    connection, _ = bridge
+    headers = {'Content-Type': content_type, 'Origin': DASHBOARD}
+    reply, _ = _request(connection, 'POST', body, headers)
+    assert reply.status == status
+    assert reply.getheader('Access-Control-Allow-Origin') == DASHBOARD
+
+
+def test_a_foreign_origin_gets_no_cors_grant_on_its_refusal(bridge):
+    connection, _ = bridge
+    reply, _ = _request(
+        connection, 'POST', {'action': 'pause'}, {**JSON, 'Origin': 'http://evil.example'}
+    )
+    assert reply.status == 403
+    assert reply.getheader('Access-Control-Allow-Origin') is None
 
 
 def test_an_oversized_control_body_is_refused_before_parsing(bridge):
