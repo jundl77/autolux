@@ -307,7 +307,7 @@ impl Engine {
 
         if self.script_error.is_none() {
             self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states);
-            let master = self.master.level_at(time_seconds);
+            let master = perceptual_to_linear_master(self.master.level_at(time_seconds));
             for state in states.values_mut() {
                 state.intensity = state.intensity.clamp(0.0, 1.0) * master;
                 state.attribute_brightness = master;
@@ -626,6 +626,10 @@ fn validate_identifier(value: &str) -> Result<()> {
         "invalid identifier length"
     );
     Ok(())
+}
+
+pub fn perceptual_to_linear_master(perceptual: f64) -> f64 {
+    perceptual * perceptual
 }
 
 #[derive(Clone, Copy, Debug)]

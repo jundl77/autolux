@@ -407,7 +407,7 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
         Event::LoginReply(_)
     ));
     renderer.send(play("energy"));
-    renderer.wait_for_red(77);
+    renderer.wait_for_red(46);
     let metrics = renderer.metrics();
     assert!(
         metrics.elapsed_seconds < 1.0,
@@ -497,7 +497,7 @@ fn semantic_rejections_preserve_scene_and_metrics_track_silent_command_bursts() 
         renderer.events.recv_timeout(SILENT_CHECK_TIMEOUT).is_err(),
         "successful commands must not produce replies"
     );
-    renderer.wait_for_red(102);
+    renderer.wait_for_red(82);
     assert!(renderer.metrics().runtime_error.is_empty());
 }
 

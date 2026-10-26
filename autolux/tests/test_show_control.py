@@ -7,9 +7,11 @@ from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.ui_bridge import SnapshotServer
 from autolux.simulate.visualizer_app import (
+    ControlExpectations,
     SnapshotPoller,
     control_command,
     decimal_text,
+    expected_control_values,
     setting_text,
 )
 
@@ -134,3 +136,27 @@ def test_next_autoloop_without_a_playing_section_is_refused_and_queues_nothing(
         server.stop()
     assert reply == {'error': reason}
     assert commands.empty()
+
+
+def test_an_expected_control_value_outlasts_one_stale_snapshot_until_confirmed_or_timed_out():
+    now = [0.0]
+    expectations = ControlExpectations(hold_seconds=2.0, clock=lambda: now[0])
+    expectations.expect(paused=True, master_brightness=0.4)
+    stale = {'paused': False, 'master_brightness': 1.0}
+    assert expectations.apply(stale) == {'paused': True, 'master_brightness': 0.4}
+    assert expectations.apply({'paused': True, 'master_brightness': 1.0})['paused'] is True
+    assert expectations.apply(stale)['paused'] is False, 'a confirmed value follows the show again'
+    now[0] = 2.0
+    assert expectations.apply(stale)['master_brightness'] == 1.0, 'an unconfirmed value expires'
+
+
+def test_each_accepted_command_names_the_value_the_show_should_report():
+    settings = {'crossfade_beats': 2.0}
+    assert expected_control_values({'action': 'pause'}, {'accepted': 'pause'}) == {'paused': True}
+    assert expected_control_values({'action': 'master', 'level': 0.3}, {'accepted': 'master'}) == {
+        'master_brightness': 0.3
+    }
+    assert expected_control_values(
+        {'action': 'settings', 'settings': settings}, {'accepted': 'settings'}
+    ) == {'settings': settings}
+    assert expected_control_values({'action': 'next_autoloop'}, {'accepted': 'next_autoloop'}) == {}

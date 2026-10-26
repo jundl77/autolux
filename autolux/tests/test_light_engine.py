@@ -1409,7 +1409,7 @@ async def test_master_scales_the_quiet_dim_and_bypasses_the_playback_delay():
     await tick(light, clock, 0.1)
     clock.advance(14.0)
     await queue.drain()
-    assert masters(lighting) == [0.5, pytest.approx(0.075)]
+    assert masters(lighting) == [0.5, pytest.approx(0.5 * QUIET_BRIGHTNESS)]
     light.set_master_level(0.5)
     assert len(masters(lighting)) == 2, 'an unchanged level is not resent'
 

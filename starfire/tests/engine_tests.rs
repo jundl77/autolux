@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 
-use starfire::engine::Engine;
+use starfire::engine::{Engine, perceptual_to_linear_master};
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
@@ -301,7 +301,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.005,
+        0.0025,
     );
     engine
         .apply(
@@ -317,7 +317,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.5,
+        0.25,
     );
     engine
         .apply(0.0, &Command::SetBlackout { enabled: true })
@@ -337,7 +337,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.5,
+        0.25,
     );
 }
 
@@ -862,7 +862,7 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.4,
+        0.2,
     );
     for level in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
         assert!(
@@ -877,7 +877,7 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.4,
+        0.2,
     );
     engine
         .apply(0.75, &Command::SetNormalizedRmsLevel { level: 0.0 })
@@ -944,7 +944,7 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
     );
 }
 
-fn master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
+fn linear_master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
     engine
         .render_at(time_seconds)
         .unwrap()
@@ -953,8 +953,43 @@ fn master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
         / 0.5
 }
 
+fn perceptual_master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
+    linear_master_at(engine, time_seconds).sqrt()
+}
+
+fn set_master_instantly(engine: &mut Engine, intensity: f64) {
+    engine
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity,
+                fade_seconds: 0.0,
+            },
+        )
+        .unwrap();
+}
+
 #[test]
-fn master_fades_linearly_over_wall_time() {
+fn half_perceptual_master_drives_quarter_linear_output() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    set_master_instantly(&mut engine, 0.5);
+    near(linear_master_at(&mut engine, 0.0), 0.25);
+    assert_eq!(perceptual_to_linear_master(0.5), 0.25);
+}
+
+#[test]
+fn full_master_leaves_output_unchanged() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    set_master_instantly(&mut engine, 1.0);
+    near(linear_master_at(&mut engine, 0.0), 1.0);
+    assert_eq!(perceptual_to_linear_master(1.0), 1.0);
+    assert_eq!(perceptual_to_linear_master(0.0), 0.0);
+}
+
+#[test]
+fn master_fades_evenly_in_perceptual_space_over_wall_time() {
     let mut engine = engine(&[("constant", CONSTANT)]);
     select(&mut engine, 0.0, "constant", Transition::Cut);
     engine
@@ -966,10 +1001,11 @@ fn master_fades_linearly_over_wall_time() {
             },
         )
         .unwrap();
-    near(master_at(&mut engine, 0.0), 1.0);
-    near(master_at(&mut engine, 0.5), 0.575);
-    near(master_at(&mut engine, 1.0), 0.15);
-    near(master_at(&mut engine, 3.0), 0.15);
+    near(perceptual_master_at(&mut engine, 0.0), 1.0);
+    near(perceptual_master_at(&mut engine, 0.5), 0.575);
+    near(linear_master_at(&mut engine, 0.5), 0.575 * 0.575);
+    near(perceptual_master_at(&mut engine, 1.0), 0.15);
+    near(perceptual_master_at(&mut engine, 3.0), 0.15);
 }
 
 #[test]
@@ -982,9 +1018,9 @@ fn master_retarget_mid_fade_starts_from_the_visible_level() {
     };
     engine.apply(0.0, &fade(0.0)).unwrap();
     engine.apply(0.5, &fade(1.0)).unwrap();
-    near(master_at(&mut engine, 0.5), 0.5);
-    near(master_at(&mut engine, 1.0), 0.75);
-    near(master_at(&mut engine, 1.5), 1.0);
+    near(perceptual_master_at(&mut engine, 0.5), 0.5);
+    near(perceptual_master_at(&mut engine, 1.0), 0.75);
+    near(perceptual_master_at(&mut engine, 1.5), 1.0);
 }
 
 #[test]
@@ -1000,7 +1036,7 @@ fn zero_master_fade_is_instant_and_invalid_fades_are_rejected() {
             },
         )
         .unwrap();
-    near(master_at(&mut engine, 0.0), 0.2);
+    near(perceptual_master_at(&mut engine, 0.0), 0.2);
     for fade_seconds in [-1.0, f64::NAN, f64::INFINITY] {
         assert!(
             engine
@@ -1014,7 +1050,7 @@ fn zero_master_fade_is_instant_and_invalid_fades_are_rejected() {
                 .is_err()
         );
     }
-    near(master_at(&mut engine, 0.0), 0.2);
+    near(perceptual_master_at(&mut engine, 0.0), 0.2);
 }
 
 fn paused(engine: &mut Engine, at: f64, paused: bool) {

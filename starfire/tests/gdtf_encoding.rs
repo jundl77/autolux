@@ -598,7 +598,7 @@ fn explicit_dimmer_values_respect_master_and_blackout() {
         .unwrap();
     assert_eq!(
         engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],
-        128
+        64
     );
     engine
         .apply(0.1, &Command::SetBlackout { enabled: true })
@@ -662,8 +662,8 @@ fn white_only_emitters_follow_intensity_without_applying_colour_brightness_twice
 #[test]
 fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults() {
     for (attribute, default, dark, dimmed) in [
-        ("ColorAdd_A", "255/1", 0, 64),
-        ("ColorSub_UV", "0/1", 255, 192),
+        ("ColorAdd_A", "255/1", 0, 32),
+        ("ColorSub_UV", "0/1", 255, 223),
     ] {
         let channels = channel(
             attribute,

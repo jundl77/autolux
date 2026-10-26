@@ -66,7 +66,7 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
     for state in frame.fixture_properties_before_strobe.values() {
-        assert_eq!(state.intensity, 0.4);
+        assert_eq!(state.intensity, 0.2);
         assert_eq!(
             state.colour,
             Rgb {
@@ -79,13 +79,13 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
     for start in [0, 12] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 12],
-            &[149, 85, 191, 255, 0, 111, 7, 102, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 111, 7, 51, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 8],
-            &[0, 0, 255, 0, 102, 0, 0, 0]
+            &[0, 0, 255, 0, 51, 0, 0, 0]
         );
     }
 }

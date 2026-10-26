@@ -574,6 +574,42 @@ SETTING_IDS = {f'control-{name}': name for name in SHOW_SETTING_RANGES}
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 LIVE_BRIGHTNESS_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
+CONTROL_EXPECT_SECONDS = 2.0
+
+
+class ControlExpectations:
+    def __init__(self, hold_seconds: float = CONTROL_EXPECT_SECONDS, clock=time.monotonic):
+        self._hold_seconds = hold_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._expected: dict[str, tuple[object, float]] = {}
+
+    def expect(self, **values) -> None:
+        now = self._clock()
+        with self._lock:
+            self._expected.update({key: (value, now) for key, value in values.items()})
+
+    def apply(self, snapshot: dict) -> dict:
+        now = self._clock()
+        held = {}
+        with self._lock:
+            for key, (value, at) in list(self._expected.items()):
+                if snapshot.get(key) == value or now - at >= self._hold_seconds:
+                    del self._expected[key]
+                else:
+                    held[key] = value
+        return {**snapshot, **held}
+
+
+def expected_control_values(command: dict, reply: dict) -> dict:
+    action = reply.get('accepted')
+    if action in ('pause', 'play'):
+        return {'paused': action == 'pause'}
+    if action == 'master':
+        return {'master_brightness': command['level']}
+    if action == 'settings':
+        return {'settings': command['settings']}
+    return {}
 
 
 def decimal_text(value: float) -> str:
@@ -664,7 +700,7 @@ def _build_control_card() -> list:
                     [
                         html.Div(
                             [
-                                html.Span('Master'),
+                                html.Span('Master brightness'),
                                 html.Span('—', id='control-brightness-value'),
                             ],
                             className='stat-label control-heading',
@@ -1565,6 +1601,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Input('dashboard-tab', 'value'),
     )
 
+    expectations = ControlExpectations()
+
     @app.callback(
         [
             Output('sync', 'data'),
@@ -1585,7 +1623,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     def refresh(requested):
         if not requested or requested.get('tab') not in ('control', 'telemetry'):
             raise dash.exceptions.PreventUpdate
-        snap = snapshot_source.snapshot()
+        snap = expectations.apply(snapshot_source.snapshot())
         now = time.time()
         sync = metrics = show_timing = decoder = commands = timeline = dash.no_update
         notices = performance = renderer = control = charts = dash.no_update
@@ -1750,8 +1788,10 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         reply = snapshot_source.control(command)
         if 'error' in reply:
             return f'Rejected: {reply["error"]}', dash.no_update
-        if reply.get('accepted') in ('pause', 'play'):
-            return '', {**state, 'paused': reply['accepted'] == 'pause'}
+        expected = expected_control_values(command, reply)
+        expectations.expect(**expected)
+        if 'paused' in expected:
+            return '', {**state, 'paused': expected['paused']}
         return '', dash.no_update
 
     app.clientside_callback(
