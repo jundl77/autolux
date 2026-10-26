@@ -97,6 +97,7 @@ class EffectController:
         self._pinned_palette: str | None = None
         self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'))
         self._special: Special | None = None
+        self._special_on = False
         self._capabilities: SpecialCapabilities | None = None
         self._publish_palette()
         self.special_capabilities()
@@ -174,6 +175,7 @@ class EffectController:
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
         ):
+            self._restore_special()
             return False
         self._publish_palette()
         if fresh:
@@ -181,7 +183,10 @@ class EffectController:
             self._entered = intent, choice
         self._announce('[lighting]', intent, choice, palette)
 
-        self._enter_special(intent, bpm)
+        if fresh:
+            self._enter_special(intent, bpm)
+        else:
+            self._restore_special()
         return True
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
@@ -230,7 +235,7 @@ class EffectController:
 
     def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
-        self._release_special()
+        self._forget_special()
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
@@ -263,7 +268,7 @@ class EffectController:
         if choice.intense:
             self._last_intense_at = now
         if choice.special is None:
-            self._release_special()
+            self._forget_special()
         else:
             self._special_policy.record(choice.special)
             self._fire_special(choice.special)
@@ -275,6 +280,7 @@ class EffectController:
             SPECIAL_ID, special.group, special.wire(), priority=SPECIAL_PRIORITY
         )
         self._special = special
+        self._special_on = True
         if self.event_buffer:
             self.event_buffer.set_special(special.name, special.group)
         LOGGER.info(
@@ -287,8 +293,8 @@ class EffectController:
             special.pulse_beats,
         )
 
-    def _release_special(self) -> None:
-        if self._special is None:
+    def release_special(self) -> None:
+        if not self._special_on:
             return
         self.lighting_client.clear_override(SPECIAL_ID)
         LOGGER.info(
@@ -296,9 +302,17 @@ class EffectController:
             self._special.name,
             self._special.release_beats,
         )
-        self._special = None
+        self._special_on = False
         if self.event_buffer:
             self.event_buffer.set_special(None)
+
+    def _forget_special(self) -> None:
+        self.release_special()
+        self._special = None
+
+    def _restore_special(self) -> None:
+        if self._special is not None and not self._special_on:
+            self._fire_special(self._special)
 
     def _strobe(self, special: Special, bpm: float | None, settings: ShowSettings) -> None:
         duration = strobe_burst_seconds(bpm, settings)
@@ -307,7 +321,7 @@ class EffectController:
         )
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)
-            if self._special is None:
+            if not self._special_on:
                 self.event_buffer.set_special(
                     special.name, special.group, duration_seconds=duration
                 )

@@ -408,7 +408,9 @@ DRIFT = Special(
 )
 
 
-def with_specials(specials, groups=(FX_GROUP,), settings=FULL_INTENSITY, event_buffer=None):
+def with_specials(
+    specials, groups=(FX_GROUP,), settings=FULL_INTENSITY, event_buffer=None, **options
+):
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=groups)
     controller = EffectController(
@@ -417,6 +419,7 @@ def with_specials(specials, groups=(FX_GROUP,), settings=FULL_INTENSITY, event_b
         clock=clock,
         settings=lambda: settings,
         specials=specials,
+        **options,
     )
     return controller, lighting, clock
 
@@ -542,3 +545,54 @@ async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups(
     assert buffer.snapshot()['special'] == {'name': 'drift', 'group': 'fx'}
     await controller.change_effect(LightIntent.BREAKDOWN)
     assert buffer.snapshot()['special'] is None
+
+
+async def test_a_new_drop_replaces_the_drop_special_under_the_same_id():
+    calm = Special('glow', (LightIntent.DROP,), 'fx', colour_slot='cold', energy=0.3)
+    controller, lighting, _ = with_specials([calm], autoloops=ROTATION, autoloop_meta=ROTATION_META)
+    await controller.change_effect(LightIntent.DROP)
+    start = len(lighting.events)
+    await controller.change_effect(
+        LightIntent.DROP, context=SelectionContext(LightIntent.DROP, new_track=True)
+    )
+    [replacement] = accents(lighting, start)
+    assert (replacement['kind'], replacement['value']['id']) == ('set_override', SPECIAL_ID)
+
+
+async def test_an_intense_special_blocks_a_later_drop_burst_through_the_same_timestamp(caplog):
+    surge = Special(
+        'surge', (LightIntent.BUILDUP,), 'fx', colour_slot='primary', energy=0.6, speed=0.9
+    )
+    controller, lighting, clock = with_specials([surge, DROP_STROBE])
+    await controller.change_effect(LightIntent.BUILDUP)
+    clock.advance(10)
+    start = len(lighting.events)
+    with caplog.at_level(logging.INFO):
+        await controller.change_effect(LightIntent.DROP)
+    assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
+    assert 'intense special suppressed | cooldown 50s of 60s left' in caplog.text
+
+
+async def test_a_held_intent_resends_a_released_special_without_choosing_or_charging_again():
+    controller, lighting, clock = with_specials([SPIN, DROP_STROBE])
+    await controller.change_effect(LightIntent.DROP)
+    controller.release_special()
+    lighting.selected_autoloop = None
+    clock.advance(90)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    [resent] = accents(lighting, start)
+    assert resent['value']['id'] == SPECIAL_ID
+    assert controller._last_intense_at == 0
+
+
+async def test_skipping_the_loop_keeps_the_running_special():
+    buffer = EventBuffer(clock=VirtualClock())
+    controller, lighting, _ = with_specials(
+        [DRIFT], event_buffer=buffer, autoloops=ROTATION, autoloop_meta=ROTATION_META
+    )
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    start = len(lighting.events)
+    controller.skip_autoloop(SelectionContext(LightIntent.ATMOSPHERIC))
+    assert accents(lighting, start) == []
+    assert buffer.snapshot()['special'] == {'name': 'drift', 'group': 'fx'}

@@ -9,7 +9,7 @@ from autolux.lib.clock import Clock
 from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY, strobe_override
 from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
-from autolux.lighting.palettes import SLOTS
+from autolux.lighting.special_catalogue import special_values
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,22 +71,15 @@ class StaticLooks:
         speed: float,
         pulse_beats: int | None = None,
     ) -> None:
-        if colour_slot not in SLOTS:
-            raise ValueError(f'colour slot {colour_slot!r} is not one of {", ".join(SLOTS)}')
-        if not (0.0 <= energy <= 1.0 and 0.0 <= speed <= 1.0):
-            raise ValueError('special energy and speed must be within 0..1')
-        if pulse_beats is not None and pulse_beats < 1:
-            raise ValueError('a special pulse must be at least one beat')
-        special = Special(
-            'static',
-            (),
-            group,
-            colour_slot=colour_slot,
-            energy=energy,
-            speed=speed,
-            pulse_beats=pulse_beats,
-            release_beats=STATIC_SPECIAL_RELEASE_BEATS,
-        )
+        values = {
+            'colour_slot': colour_slot,
+            'energy': energy,
+            'speed': speed,
+            'pulse_beats': pulse_beats,
+            'attack_beats': 0.0,
+            'release_beats': STATIC_SPECIAL_RELEASE_BEATS,
+        }
+        special = Special('static', (), group, **special_values(values))
         if not self.special_capabilities().allows(special):
             raise ValueError(f'{group!r} cannot render this special')
         self._special = special
@@ -192,9 +185,6 @@ class StaticLooks:
             'targets': list(self.rig.targets),
             'blacklight': bool(self.rig.uv_groups),
             'blackout': self.blackout,
-            'special_groups': {
-                name: sorted(axes) for name, axes in self.special_capabilities().groups.items()
-            },
             'special': None
             if self._special is None
             else {

@@ -72,18 +72,21 @@ def parse_special(data, stem: str) -> Special:
     }
     if shape is STROBE_KEYS:
         return Special(**common, strobe_hz=_number(data, 'strobe_hz', 0.0, STARFIRE_MAX_STROBE_HZ))
+    return Special(**common, **special_values(data))
+
+
+def special_values(data: dict) -> dict:
     if data['colour_slot'] not in SLOTS:
         raise SpecialError(f'colour_slot {data["colour_slot"]!r} is not one of {", ".join(SLOTS)}')
-    return Special(
-        **common,
-        colour_slot=data['colour_slot'],
-        energy=_number(data, 'energy', 0.0, 1.0),
-        speed=_number(data, 'speed', 0.0, 1.0),
-        pulse_beats=_optional(data, 'pulse_beats', _pulse),
-        attack_beats=_number(data, 'attack_beats', 0.0, math.inf),
-        release_beats=_number(data, 'release_beats', 0.0, math.inf),
-        pattern=_optional(data, 'pattern', lambda data, key: _number(data, key, 0.0, 1.0)),
-    )
+    return {
+        'colour_slot': data['colour_slot'],
+        'energy': _number(data, 'energy', 0.0, 1.0),
+        'speed': _number(data, 'speed', 0.0, 1.0),
+        'pulse_beats': _optional(data, 'pulse_beats', _pulse),
+        'attack_beats': _number(data, 'attack_beats', 0.0, math.inf),
+        'release_beats': _number(data, 'release_beats', 0.0, math.inf),
+        'pattern': _optional(data, 'pattern', lambda data, key: _number(data, key, 0.0, 1.0)),
+    }
 
 
 def discover_specials(directory: Path = SPECIAL_DIRECTORY) -> tuple[Special, ...]:

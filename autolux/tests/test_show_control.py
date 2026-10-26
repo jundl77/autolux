@@ -10,7 +10,6 @@ from autolux.simulate.visualizer_app import (
     SETTINGS_GROUPS,
     ControlExpectations,
     SnapshotPoller,
-    _build_show_overview,
     control_command,
     decimal_text,
     expected_control_values,
@@ -372,34 +371,9 @@ def test_the_static_special_control_reaches_the_controller_queue_as_parsed(stati
     assert commands.get_nowait() == {'action': 'static', 'kind': 'special_clear'}
 
 
-@pytest.mark.parametrize(
-    ('change', 'reason'),
-    [
-        ({'group': ''}, 'needs a group'),
-        ({'colour_slot': 'pink'}, 'colour slot must be one of'),
-        ({'energy': 2}, 'special energy must be within 0..1'),
-        ({'speed': None}, 'special speed must be within 0..1'),
-        ({'pulse_beats': 0}, 'a special pulse must be a whole number'),
-    ],
-)
-def test_malformed_static_specials_return_the_reason(static_show, change, reason):
-    poller, commands = static_show
-    payload = static_special_command('fx', 'cold', 0.5, 0.5, None) | change
-    assert reason in poller.control(payload)['error']
-    assert commands.empty()
-
-
 def test_a_special_without_a_group_never_reaches_the_controller():
     with pytest.raises(ValueError, match='choose a group'):
         static_special_command(None, 'cold', 0.5, 0.5, None)
-
-
-def test_the_status_strip_names_the_active_special_and_its_group():
-    cards = _build_show_overview({'special': {'name': 'cold_spin', 'group': 'fx'}})
-    labels = [card.children[0].children for card in cards]
-    assert labels.index('Special') == labels.index('Autoloop') + 1
-    name, group = cards[labels.index('Special')].children[1].children
-    assert (name.children, group.children) == ('Cold Spin', 'fx')
 
 
 def test_the_config_area_lists_each_special_capable_group_with_its_axes():

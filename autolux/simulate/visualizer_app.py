@@ -517,7 +517,6 @@ def _build_show_overview(snapshot: dict) -> list:
     effect_name = effect.get('name', '—')
     autoloop_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
     reason = (effect.get('selection') or {}).get('reason')
-    special = snapshot.get('special') or {}
     palette = snapshot.get('palette') or {}
     palette_name = palette.get('name') or '—'
     palette_text = f'{palette_name} (pinned)' if palette.get('pinned') else palette_name
@@ -543,19 +542,8 @@ def _build_show_overview(snapshot: dict) -> list:
                 html.Span(_selection_tags(effect), className='stat-tags'),
             ],
         ),
-        _build_stat_card(
-            'Special',
-            [
-                html.Span(_display_name(special['name']) if special else '—', id='special-name'),
-                html.Span(special.get('group', ''), className='stat-tags'),
-            ],
-        ),
         _build_stat_card('Palette', html.Span(palette_text, id='palette-name')),
     ]
-
-
-def _display_name(name: str) -> str:
-    return name.replace('_', ' ').title()
 
 
 def special_groups_view(groups: dict) -> list:
@@ -1285,7 +1273,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
             const options = statics.targets.map((target) =>
                 ({label: target === 'all' ? 'All' : target, value: target}));
             const blackout = !!statics.blackout;
-            const groups = Object.keys(statics.special_groups || {}).sort()
+            const groups = Object.keys((ready && state.special_groups) || {}).sort()
                 .map((name) => ({label: name, value: name}));
             const special = ready && state.special;
             return [mode, options, blackout ? 'static-blackout-on' : '',
@@ -1528,8 +1516,7 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
 .status-strip { font-variant-numeric: tabular-nums; }
 .show-overview { display: grid;
-                 grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr)
-                                        minmax(0, 1.2fr) minmax(0, 1fr); }
+                 grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr); }
 .show-stat { padding: 12px 16px; min-width: 0; border-right: 1px solid #1b2735; }
 .show-stat:last-child { border-right: 0; }
 .stat-label { font-size: 10px; color: #9baabb; margin-bottom: 6px; }
@@ -2321,6 +2308,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                         'mode',
                         'static',
                         'special',
+                        'special_groups',
                     )
                 }
                 settings = control['settings'] or {}

@@ -145,26 +145,10 @@ def _static_command(payload: dict) -> dict:
 
 
 def _static_special(payload: dict) -> dict:
-    from autolux.lighting.palettes import SLOTS
-
-    group, slot, pulse = (
-        payload.get('group'),
-        payload.get('colour_slot'),
-        payload.get('pulse_beats'),
-    )
-    if not isinstance(group, str) or not group:
-        raise ValueError('a special needs a group')
-    if slot not in SLOTS:
-        raise ValueError(f'colour slot must be one of {", ".join(SLOTS)}')
-    levels = {}
-    for name in ('energy', 'speed'):
-        value = payload.get(name)
-        if type(value) not in (int, float) or not 0.0 <= value <= 1.0:
-            raise ValueError(f'special {name} must be within 0..1')
-        levels[name] = float(value)
-    if pulse is not None and (type(pulse) is not int or pulse < 1):
-        raise ValueError('a special pulse must be a whole number of beats, at least 1')
-    return {'group': group, 'colour_slot': slot, **levels, 'pulse_beats': pulse}
+    return {
+        name: payload.get(name)
+        for name in ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
+    }
 
 
 def command_refusal(

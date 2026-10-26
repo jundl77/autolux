@@ -11,6 +11,7 @@ from autolux.lib.engine.effect_definitions import (
     LightIntent,
     ShowSettings,
 )
+from autolux.lib.engine.special_policy import Special
 from autolux.lib.engine.static_mode import (
     STATIC_GROUP_PRIORITY,
     STATIC_PRIORITY,
@@ -222,7 +223,6 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         'targets': ['all', 'fx', 'movers', 'strip', 'wash'],
         'blacklight': True,
         'blackout': True,
-        'special_groups': {},
         'special': None,
         'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
@@ -346,7 +346,6 @@ def test_a_static_special_is_the_same_dict_at_the_static_priority():
         'speed': 0.4,
         'pulse_beats': None,
     }
-    assert looks.state()['special_groups'] == {'fx': ['colour', 'speed']}
 
 
 @pytest.mark.parametrize(
@@ -354,7 +353,7 @@ def test_a_static_special_is_the_same_dict_at_the_static_priority():
     [
         (('wash', 'cold', 0.5, 0.5), "'wash' cannot render this special"),
         (('fx', 'cold', 0.5, 0.5, 1), "'fx' cannot render this special"),
-        (('fx', 'pink', 0.5, 0.5), "colour slot 'pink'"),
+        (('fx', 'pink', 0.5, 0.5), "colour_slot 'pink'"),
         (('fx', 'cold', 1.5, 0.5), 'within 0..1'),
     ],
 )
@@ -373,3 +372,27 @@ def test_clearing_static_releases_the_special_and_resend_restores_it():
     looks.clear()
     assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': STATIC_SPECIAL_ID}
     assert looks.state()['special'] is None
+
+
+async def test_static_releases_the_auto_special_and_auto_brings_it_back():
+    decoder = FakeDecoder()
+    light, _, clock, _ = static_engine(decoder=decoder, queue=False)
+    lighting = RecordingStarfireClient(clock=clock, groups=[FX_GROUP])
+    drift = Special(
+        'drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='secondary', energy=0.2, speed=0.1
+    )
+    controller = EffectController(lighting, clock=clock, specials=[drift])
+    light.lighting_client = lighting
+    light.effect_controller = controller
+    light.static_looks = StaticLooks(lighting, ROOM, clock, ShowSettings)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    assert [c['value']['id'] for c in overrides(lighting)] == ['special']
+
+    lighting.events.clear()
+    light.enter_static()
+    assert overrides(lighting) == [{'kind': 'clear_override', 'id': 'special'}]
+
+    lighting.events.clear()
+    await light.leave_static()
+    await beat_at_phase(light, decoder, 0)
+    assert [c['value']['id'] for c in overrides(lighting)] == ['special']
