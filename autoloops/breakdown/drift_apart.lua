@@ -1,7 +1,7 @@
 -- 16-beat loop
 -- energy: 1
--- family: cold
 -- movement: sweep
+-- texture: beam
 local palette = sf.palette()
 local LOOP_BARS = 4
 local DRIFT_SHARE = 14 / 16

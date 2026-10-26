@@ -214,13 +214,14 @@ def test_a_settings_change_keeps_the_intensity_the_fader_set(show):
     assert commands.get_nowait()['settings'].intensity == 0.4
 
 
-def test_a_settings_change_keeps_the_warmth_the_panel_no_longer_shows(show):
+def test_a_settings_change_from_an_old_panel_still_carrying_warmth_is_accepted(show):
     poller, commands = show
     command = control_command(
-        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3', '3'), warmth=-0.5
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3', '3')
     )
+    command['settings']['palette_temperature_bias'] = -0.5
     assert poller.control(command) == {'accepted': 'settings'}
-    assert commands.get_nowait()['settings'].palette_temperature_bias == -0.5
+    assert 'palette_temperature_bias' not in commands.get_nowait()['settings'].to_dict()
 
 
 @pytest.mark.parametrize('level', [1.2, -0.1, '0.5', None])

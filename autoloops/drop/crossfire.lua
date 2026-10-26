@@ -1,7 +1,7 @@
 -- 8-beat loop
 -- energy: 3
--- family: cold
 -- movement: snap
+-- texture: beam
 local palette = sf.palette()
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS = 0.4

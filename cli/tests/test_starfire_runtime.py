@@ -788,7 +788,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
 def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    header = '-- 8-beat loop.\n-- energy: 2\n-- movement: snap\n-- texture: wash\nreturn {}\n'
     loops = [
         ('atmospheric', 'cold_breathe'),
         ('breakdown', 'wide_space'),
@@ -798,7 +798,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
     ]
     for bank, name in loops:
         (tmp_path / bank).mkdir()
-        source = header.replace('family: warm', 'family: neon') if bank == 'drop' else header
+        source = header.replace('texture: wash', 'texture: neon') if bank == 'drop' else header
         (tmp_path / bank / f'{name}.lua').write_text(source)
     checked = [{'bank': bank, 'autoloop': name} for bank, name in loops]
     report = json.dumps({'universes': [0], 'checked_autoloops': checked})
@@ -809,14 +809,14 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         'run',
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
-    with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
+    with pytest.raises(RuntimeError, match="cannot select.*drop/kick: texture 'neon'"):
         starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
 
 
 def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplog):
     from types import SimpleNamespace
 
-    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    header = '-- 8-beat loop.\n-- energy: 2\n-- movement: snap\n-- texture: wash\nreturn {}\n'
     loops = [
         ('atmospheric', 'cold_breathe'),
         ('breakdown', 'wide_space'),

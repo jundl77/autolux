@@ -46,6 +46,11 @@ class FakeAnalyser:
     def get_rms_energy(self):
         return self.rms
 
+    def get_spectral_balance(self):
+        from autolux.lib.analyser.music_analyser import SpectralBalance
+
+        return SpectralBalance(centroid_hz=2000.0, bass_over_treble_db=15.0)
+
     def get_song_current_duration(self):
         import datetime
 
@@ -898,7 +903,7 @@ async def test_boundary_scores_never_replace_a_held_sections_loop(score):
         ('breakdown', 'bridge', 'cooldown'),
     ],
 )
-async def test_same_family_sections_preserve_the_autoloop_but_commit_their_boundaries(
+async def test_same_intent_sections_preserve_the_autoloop_but_commit_their_boundaries(
     queued, labels
 ):
     decoder = FakeDecoder()
@@ -914,7 +919,7 @@ async def test_same_family_sections_preserve_the_autoloop_but_commit_their_bound
     assert selections(lighting)[0]['command']['bank'] == light.current_intent.value
 
 
-async def test_a_same_family_section_change_waits_for_room_playback():
+async def test_a_same_intent_section_change_waits_for_room_playback():
     decoder, chain = FakeDecoder(), FakeChain()
     light, queue, clock, lighting = engine(decoder=decoder, chain=chain)
     await held(light, decoder, chain, clock, queue, label='intro')
@@ -1886,25 +1891,6 @@ async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pi
         'name': f'{track_palette}_breakdown',
         'pinned': False,
     }
-
-
-async def test_palette_warmth_is_saved_and_range_checked(tmp_path):
-    from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.lib.main import ShowControl, load_show_settings
-
-    path = tmp_path / 'show.json'
-    control = ShowControl(path)
-    control.commands.put_nowait(
-        {'action': 'settings', 'settings': ShowSettings(palette_temperature_bias=-1.0)}
-    )
-    light, _, _, _ = engine(queue=False)
-    light._settings = lambda: control.settings
-    await control.apply_pending(light)
-    control.save_settings()
-    assert load_show_settings(path).palette_temperature_bias == -1.0
-    assert ShowControl(path).settings.palette_temperature_bias == -1.0
-    with pytest.raises(ValueError, match='palette_temperature_bias must be within -1..1'):
-        ShowSettings(palette_temperature_bias=1.5)
 
 
 async def test_the_intensity_fader_applies_at_once_and_survives_a_restart(tmp_path):

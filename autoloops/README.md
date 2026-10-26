@@ -36,15 +36,18 @@ missing key or an unknown value.
 
 ```
 -- energy: 2
--- family: warm
 -- movement: sweep
+-- texture: wash
 ```
+
+The metadata is structure only; colour identity belongs to the palette Autolux picks per track.
 
 - `energy`: baseline intensity. `1` calm, `2` driving, `3` maximal. Atmospheric and breakdown
   stay at or below 2; drops are 2 or 3; a buildup's energy is the drop it leads into.
-- `family`: dominant colour character. `cold` (cool white), `warm` (warm white/amber), `accent` (red).
 - `movement`: mover vocabulary. `still` (parked or barely drifting), `sweep` (continuous motion),
   `snap` (jumps between positions).
+- `texture`: which roles carry the look. `wash` (the wash group), `beam` (the movers),
+  `pixel` (patterns along the strip), `mixed` (no single role leads).
 
 ## Adding a loop
 

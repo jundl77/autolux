@@ -52,7 +52,7 @@ def parse_autoloop_meta(source: str) -> AutoloopMeta:
         raise AutoloopMetaError(
             f'missing {", ".join(missing)} in the header block after the loop-length line'
         )
-    return AutoloopMeta(int(values['energy']), values['family'], values['movement'])
+    return AutoloopMeta(int(values['energy']), values['movement'], values['texture'])
 
 
 def read_autoloop_meta(directory: Path = AUTOLOOP_DIRECTORY) -> AutoloopMetaTable:

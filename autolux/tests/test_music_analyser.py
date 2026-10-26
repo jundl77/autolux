@@ -17,6 +17,9 @@ class _StubHandler:
     def on_signal_return(self):
         pass
 
+    def on_digital_gap(self, started_sec, seconds):
+        pass
+
     async def on_cycle(self):
         pass
 

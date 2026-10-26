@@ -488,7 +488,7 @@ def _build_legend() -> list:
 def _selection_tags(effect: dict) -> str:
     selection = effect.get('selection') or {}
     tags = [f'E{selection["energy"]}'] if 'energy' in selection else []
-    tags += [selection[key] for key in ('family', 'movement') if selection.get(key)]
+    tags += [selection[key] for key in ('movement', 'texture') if selection.get(key)]
     return ' · '.join(tags)
 
 
@@ -555,7 +555,6 @@ SETTING_DISPLAY = {
     'digital_silence_seconds': ('Standby after silence', 's'),
     'strobe_max_rate_hz': ('Max strobe rate', 'Hz'),
     'strobe_max_burst_seconds': ('Max strobe burst', 's'),
-    'palette_temperature_bias': ('Palette warmth (cold −1 … warm +1)', ''),
     'intensity': ('Intensity', '%'),
 }
 SETTING_LABELS = {
@@ -563,9 +562,7 @@ SETTING_LABELS = {
     for name, (label, unit) in SETTING_DISPLAY.items()
 }
 PERCENT_SETTINGS = frozenset(name for name, (_, unit) in SETTING_DISPLAY.items() if unit == '%')
-FORM_SETTINGS = tuple(
-    name for name in SHOW_SETTING_RANGES if name not in ('intensity', 'palette_temperature_bias')
-)
+FORM_SETTINGS = tuple(name for name in SHOW_SETTING_RANGES if name != 'intensity')
 SETTINGS_ORDER = (
     'crossfade_beats',
     'quiet_brightness',
@@ -579,7 +576,6 @@ SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
 INTENSITY_LEVELS = (('calm', 0.3), ('measured', 0.7), ('wild', 1.0))
-WARMTH = 'palette_temperature_bias'
 PALETTE_SWATCH_SLOTS = ('primary', 'secondary', 'accent', 'cold')
 ACCENT = '#73b6ff'
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
@@ -649,7 +645,7 @@ def parse_decimal(name: str, raw) -> float:
 
 
 def control_command(
-    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY, warmth=None
+    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY
 ) -> dict | None:
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
@@ -667,7 +663,6 @@ def control_command(
             'settings': {
                 **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
                 'intensity': intensity,
-                **({WARMTH: warmth} if warmth is not None else {}),
             },
         }
     return None
@@ -2298,7 +2293,6 @@ def build_app(
                 settings,
                 palette=palette,
                 intensity=intensity,
-                warmth=(state.get('settings') or {}).get(WARMTH),
             )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update
