@@ -951,6 +951,272 @@ def _build_control_card() -> list:
     ]
 
 
+STATIC_PRESETS = {
+    'white': 'White',
+    'warm': 'Warm',
+    'red': 'Red',
+    'blue': 'Blue',
+    'uv': 'UV',
+    'blackout': 'Blackout',
+    'off': 'Off',
+}
+STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
+STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
+STATIC_DIMMER_IDS = ('static-dimmer', 'static-dimmer-live')
+HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
+STATIC_TAB_STYLE = {
+    'backgroundColor': 'transparent',
+    'color': '#8293a6',
+    'border': '0',
+    'borderBottom': '2px solid transparent',
+    'padding': '8px 18px',
+    'fontSize': '12px',
+    'fontWeight': '600',
+    'flex': 'none',
+}
+STATIC_SELECTED_TAB_STYLE = {
+    **STATIC_TAB_STYLE,
+    'color': '#e6edf3',
+    'borderBottomColor': '#73b6ff',
+}
+STATIC_CSS = '''
+.mode-tabs { gap: 4px; border-bottom: 1px solid #273344; }
+#static-control { display: grid; gap: 14px; padding: 14px 16px 16px; }
+#static-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
+                         border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
+#static-control button:disabled { opacity: .4; cursor: default; }
+.static-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.static-look { display: grid; grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1.5fr);
+               gap: 16px; align-items: center; }
+.static-target label { margin-right: 12px; color: #9baabb; font-size: 12px; }
+#static-colour { width: 100%; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
+                 border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px; }
+#static-colour:invalid { border-color: #e8b56d; }
+#static-dimmer-value { color: #e6edf3; font-size: 14px; font-weight: 600;
+                       font-variant-numeric: tabular-nums; }
+#static-control .static-blackout-on { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
+#static-control .static-auto { margin-left: auto; }
+@media (max-width: 720px) { .static-look { grid-template-columns: 1fr; } }
+'''
+
+
+def static_control_command(trigger, target, colour, dimmer, blackout) -> dict | None:
+    if trigger in STATIC_PRESET_IDS:
+        return {'action': 'static', 'kind': 'preset', 'preset': STATIC_PRESET_IDS[trigger]}
+    if trigger in STATIC_BUTTONS:
+        return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
+    if trigger == 'static-blackout':
+        return {'action': 'static', 'kind': 'blackout', 'enabled': not blackout}
+    if trigger == 'static-auto':
+        return {'action': 'mode', 'mode': 'auto'}
+    if trigger == 'static-colour':
+        text = (colour or '').strip()
+        if not HEX_COLOUR_TEXT.fullmatch(text):
+            raise ValueError(f'"{colour}" is not a #rrggbb colour')
+        return {
+            'action': 'static',
+            'kind': 'look',
+            'target': target,
+            'colour': '#' + text.lstrip('#').lower(),
+        }
+    if trigger in STATIC_DIMMER_IDS:
+        return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': dimmer}
+    return None
+
+
+def _build_static_panel():
+    return html.Section(
+        [
+            html.Div(
+                [
+                    html.Button(label, id=f'static-preset-{name}')
+                    for name, label in STATIC_PRESETS.items()
+                ],
+                className='static-row',
+            ),
+            html.Div(
+                [
+                    dcc.RadioItems(
+                        id='static-target',
+                        options=[{'label': 'All', 'value': 'all'}],
+                        value='all',
+                        inline=True,
+                        className='static-target',
+                    ),
+                    dcc.Input(
+                        id='static-colour',
+                        type='text',
+                        placeholder='#ffffff',
+                        pattern=r'#?[0-9a-fA-F]{6}',
+                        debounce=0.3,
+                    ),
+                    html.Div(
+                        [
+                            html.Div(
+                                [html.Span('Dimmer'), html.Span('—', id='static-dimmer-value')],
+                                className='stat-label control-heading',
+                            ),
+                            dcc.Slider(
+                                id='static-dimmer',
+                                min=0,
+                                max=1,
+                                step=0.01,
+                                value=1,
+                                marks=None,
+                                updatemode='mouseup',
+                                allow_direct_input=False,
+                            ),
+                            html.Div(
+                                [html.Span('0%'), html.Span('100%')], className='control-scale'
+                            ),
+                            dcc.Store(id='static-dimmer-live'),
+                        ],
+                        className='control-master',
+                    ),
+                ],
+                className='static-look',
+            ),
+            html.Div(
+                [
+                    html.Button('Blacklight', id='static-blacklight'),
+                    html.Span('UV ignores master', className='control-unit'),
+                    html.Button('Blackout', id='static-blackout'),
+                    html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
+                    html.Button('Back to Auto', id='static-auto', className='static-auto'),
+                ],
+                className='static-row',
+            ),
+            html.P(id='static-status', role='status', className='control-status'),
+        ],
+        id='static-control',
+        className='overview-panel',
+    )
+
+
+def _with_static_mode(card: list) -> list:
+    heading, auto = card
+    return [
+        heading,
+        dcc.Tabs(
+            id='control-mode',
+            value='auto',
+            className='mode-tabs',
+            children=[
+                dcc.Tab(
+                    label=label,
+                    value=label.lower(),
+                    style=STATIC_TAB_STYLE,
+                    selected_style=STATIC_SELECTED_TAB_STYLE,
+                )
+                for label in ('Auto', 'Static')
+            ],
+        ),
+        html.Div(auto, id='auto-mode-panel'),
+        html.Div(_build_static_panel(), id='static-mode-panel', style={'display': 'none'}),
+    ]
+
+
+def _register_static_callbacks(app, snapshot_source, expectations, can_control) -> None:
+    app.clientside_callback(
+        '''function(mode) {
+            return [{display: mode === 'static' ? 'none' : 'block'},
+                    {display: mode === 'static' ? 'block' : 'none'}];
+        }''',
+        Output('auto-mode-panel', 'style'),
+        Output('static-mode-panel', 'style'),
+        Input('control-mode', 'value'),
+    )
+    app.clientside_callback(
+        '''function(state) {
+            const ready = !!state && !!state.mode && !!state.static;
+            const mode = ready ? state.mode : window.dash_clientside.no_update;
+            const statics = ready ? state.static : {targets: ['all'], blacklight: false};
+            const options = statics.targets.map((target) =>
+                ({label: target === 'all' ? 'All' : target, value: target}));
+            const blackout = !!statics.blackout;
+            return [mode, options, blackout ? 'static-blackout-on' : '',
+                    blackout ? 'Blackout on' : 'Blackout', !statics.blacklight];
+        }''',
+        Output('control-mode', 'value'),
+        Output('static-target', 'options'),
+        Output('static-blackout', 'className'),
+        Output('static-blackout', 'children'),
+        Output('static-blacklight', 'disabled'),
+        Input('control-state', 'data'),
+    )
+    app.clientside_callback(
+        '''function(level) {
+            const label = level === null || level === undefined
+                ? '—' : Math.round(level * 100) + '%';
+            const now = Date.now();
+            if (level === null || level === undefined
+                    || now - (window.autoluxStaticDimmerSentAt || 0) < '''
+        + str(LIVE_FADER_INTERVAL_MS)
+        + ''') {
+                return [label, window.dash_clientside.no_update];
+            }
+            window.autoluxStaticDimmerSentAt = now;
+            return [label, level];
+        }''',
+        Output('static-dimmer-value', 'children'),
+        Output('static-dimmer-live', 'data'),
+        Input('static-dimmer', 'drag_value'),
+    )
+    sent_dimmer = {}
+
+    @app.callback(
+        Output('static-status', 'children'),
+        Output('control-mode', 'value', allow_duplicate=True),
+        Input('control-mode', 'value'),
+        *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
+        *[Input(name, 'n_clicks') for name in (*STATIC_BUTTONS, 'static-blackout')],
+        Input('static-auto', 'n_clicks'),
+        Input('static-colour', 'value'),
+        Input('static-dimmer', 'value'),
+        Input('static-dimmer-live', 'data'),
+        State('static-target', 'value'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+    def send_static(mode, *values):
+        *_, colour, released, live, target, state = values
+        state = state or {}
+        trigger = dash.ctx.triggered_id
+        if not can_control:
+            raise dash.exceptions.PreventUpdate
+        if trigger == 'control-mode':
+            if mode == state.get('mode'):
+                raise dash.exceptions.PreventUpdate
+            command = {'action': 'mode', 'mode': mode}
+        else:
+            dimmer = live if trigger == 'static-dimmer-live' else released
+            if trigger in STATIC_DIMMER_IDS and (
+                dimmer is None or sent_dimmer.get(target) == dimmer
+            ):
+                raise dash.exceptions.PreventUpdate
+            if trigger == 'static-colour' and not colour:
+                raise dash.exceptions.PreventUpdate
+            blackout = (state.get('static') or {}).get('blackout', False)
+            try:
+                command = static_control_command(trigger, target, colour, dimmer, blackout)
+            except ValueError as error:
+                return f'Rejected: {error}', dash.no_update
+            if command is None:
+                raise dash.exceptions.PreventUpdate
+        reply = snapshot_source.control(command)
+        if 'error' in reply:
+            return f'Rejected: {reply["error"]}', dash.no_update
+        if command.get('kind') == 'look' and 'dimmer' in command:
+            sent_dimmer[target] = command['dimmer']
+        if command['action'] == 'mode':
+            sent_dimmer.clear()
+            expectations.expect(mode=command['mode'])
+            return '', command['mode']
+        if command.get('kind') == 'preset':
+            sent_dimmer.clear()
+        return '', dash.no_update
+
+
 def _metric_card(label, value, detail):
     return html.Div(
         [
@@ -1585,7 +1851,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>')
+    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + STATIC_CSS + '</style>')
     from flask import request
     from prometheus_client import make_wsgi_app
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
@@ -1670,7 +1936,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                         ],
                         className='overview-panel status-strip',
                     ),
-                    *_build_control_card(),
+                    *_with_static_mode(_build_control_card()),
                     html.Div(
                         [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
                         className='section-heading',
@@ -1860,7 +2126,15 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             if can_control:
                 control = {
                     key: snap.get(key)
-                    for key in ('paused', 'master_brightness', 'settings', 'intent', 'palette')
+                    for key in (
+                        'paused',
+                        'master_brightness',
+                        'settings',
+                        'intent',
+                        'palette',
+                        'mode',
+                        'static',
+                    )
                 }
                 settings = control['settings'] or {}
                 control['settings_text'] = {
@@ -2068,6 +2342,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         return '', dash.no_update
 
     _register_settings_drawer(app)
+    _register_static_callbacks(app, snapshot_source, expectations, can_control)
 
     app.clientside_callback(
         ANIMATION_JS,

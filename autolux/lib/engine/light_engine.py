@@ -32,6 +32,7 @@ from autolux.lib.engine.event_buffer import (
     STOP_PERSISTENCE_SEC,
 )
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
+from autolux.lib.engine.static_mode import StaticLooks, StaticRig
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -65,6 +66,7 @@ class LightEngine(IMusicAnalyserHandler):
         clock: Clock = SYSTEM_CLOCK,
         settings: Callable[[], ShowSettings] = ShowSettings,
         silence_monitor: Callable[[], None] | None = None,
+        static_rig: StaticRig = StaticRig(),
     ):
         self.lighting_client = lighting_client
         self._silence_monitor = silence_monitor
@@ -112,6 +114,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._build_started_at: float | None = None
         self._last_drop_at: float | None = None
         self._after_silence = True
+        self._static_mode = False
+        self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
         self._log_chain_latency()
 
     def set_analyser(self, analyser: MusicAnalyser):
@@ -128,6 +132,10 @@ class LightEngine(IMusicAnalyserHandler):
     @property
     def paused(self) -> bool:
         return self._paused
+
+    @property
+    def mode(self) -> str:
+        return 'static' if self._static_mode else 'auto'
 
     @property
     def master_level(self) -> float:
@@ -153,14 +161,51 @@ class LightEngine(IMusicAnalyserHandler):
         self._paused = False
         self.lighting_client.set_paused(False)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
-        if self._current_intent is not None and self._room_playing:
-            self._held_intent = self._current_intent
-            if self._room_beat_phase is None:
-                await self._switch_held_intent()
+        await self._rejoin_current_intent()
+
+    async def _rejoin_current_intent(self) -> None:
+        if self._holding() or self._current_intent is None or not self._room_playing:
+            return
+        self._held_intent = self._current_intent
+        if self._room_beat_phase is None:
+            await self._switch_held_intent()
+
+    def _holding(self) -> bool:
+        return self._paused or self._static_mode
+
+    def _holding_the_look(self) -> bool:
+        return self._static_mode or (self._paused and not self._showing_standby)
+
+    def enter_static(self) -> None:
+        if self._static_mode:
+            return
+        LOGGER.info('[engine] static mode')
+        self._static_mode = True
+        self._held_intent = None
+        self._send_brightness(OPERATOR_FADE_SECONDS)
+
+    async def leave_static(self) -> None:
+        if not self._static_mode:
+            return
+        LOGGER.info('[engine] auto mode')
+        self.static_looks.clear()
+        self._static_mode = False
+        self._send_brightness(OPERATOR_FADE_SECONDS)
+        await self._rejoin_current_intent()
+
+    def static(self) -> StaticLooks:
+        if not self._static_mode:
+            raise ValueError('the show is in auto mode')
+        return self.static_looks
+
+    def static_look(self, target: str, colour=None, dimmer=None, uv=None) -> None:
+        self.static().look(target, colour=colour, dimmer=dimmer, uv=uv)
 
     def next_autoloop(self) -> None:
         if self._paused:
             raise ValueError('the show is paused')
+        if self._static_mode:
+            raise ValueError('the show is in static mode')
         intent = self._entered_intent
         if intent is None or self._showing_standby:
             raise ValueError('no section is playing yet')
@@ -190,7 +235,8 @@ class LightEngine(IMusicAnalyserHandler):
         self.lighting_client.set_intensity(self._settings().intensity)
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
-        dimmed = (self._room_quiet or self._paused) and not self._showing_standby
+        quiet = self._room_quiet and not self._static_mode
+        dimmed = (quiet or self._paused) and not self._showing_standby
         brightness = self._master_level * (self._settings().quiet_brightness if dimmed else 1.0)
         if brightness == self._sent_brightness:
             return
@@ -297,6 +343,8 @@ class LightEngine(IMusicAnalyserHandler):
         self.effect_controller.enter_standby(
             self._published_bpm.get('last'), renderer_paused=self._paused
         )
+        if self._static_mode:
+            self.static_looks.resend()
 
     def on_signal_return(self):
         LOGGER.info('[engine] signal returned — the show restarts from scratch')
@@ -324,12 +372,14 @@ class LightEngine(IMusicAnalyserHandler):
     def _show_sound_start(self) -> None:
         self._room_playing = True
         self._startup_baseline_pending = True
-        self.lighting_client.set_blackout(False)
+        self.lighting_client.set_blackout(self.static_looks.blackout)
 
     def _show_sound_stop(self) -> None:
         self._forget_room_look()
         self._showing_standby = False
         self.lighting_client.stop()
+        if self._static_mode:
+            self.static_looks.resend()
 
     async def _start_room_baseline(self) -> None:
         if not self._startup_baseline_pending or not self._room_playing:
@@ -435,7 +485,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
-        if intent is None or (self._paused and not self._showing_standby):
+        if intent is None or self._holding_the_look():
             return
         label = self._section_class_at_playback
         now = self._clock.monotonic()
@@ -638,7 +688,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._current_intent = intent
         self._section_class_at_playback = section_label
         self._intent_commits += 1
-        if self._paused and not self._showing_standby:
+        if self._holding_the_look():
             return
         self._held_intent = intent
         if self._showing_standby or self._room_beat_phase in (None, 0):

@@ -3,6 +3,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
+from autolux.lib.engine.static_mode import UV_ATTRIBUTE, StaticRig
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import load_rig
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
@@ -71,6 +72,34 @@ def native_rig(path: Path):
         exported = Path(directory) / 'rig.pb'
         exported.write_bytes(rig_definition(Path(path)).SerializeToString())
         yield exported
+
+
+def static_rig(path: Path) -> StaticRig:
+    scene, fixtures = load_rig(path)
+    lit_by_uv = {}
+    for fixture in fixtures:
+        spec, mode = fixture['gdtf_spec'], fixture['gdtf_mode']
+        if (spec, mode) not in lit_by_uv:
+            root = mvr.gdtf_root(mvr.gdtf_description(scene, spec), spec)
+            lit_by_uv[spec, mode] = any(
+                logical.get('Attribute') == UV_ATTRIBUTE
+                for dmx_mode in root.iter('DMXMode')
+                if dmx_mode.get('Name') == mode
+                for logical in dmx_mode.iter('LogicalChannel')
+            )
+        fixture['uv'] = lit_by_uv[spec, mode]
+    by_name = {fixture['name']: fixture for fixture in fixtures}
+    groups = mvr.groups(fixtures)
+    return StaticRig(
+        groups=tuple(sorted(groups)),
+        uv_groups=tuple(
+            sorted(
+                group
+                for group, members in groups.items()
+                if all(by_name[name]['uv'] for name in members)
+            )
+        ),
+    )
 
 
 def _autoloop_definitions(directory):

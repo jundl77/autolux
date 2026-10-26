@@ -16,6 +16,7 @@ import time
 import uuid
 
 from cli.remote_runtime import ReceiverSpec
+from cli.starfire_assets import static_rig
 from proto.starfire import starfire_pb2 as wire
 from cli.starfire_runtime import (
     StarfireRuntime,
@@ -319,6 +320,7 @@ async def _run_session(args, *, checking=False):
             autoloops=discover_autoloops(args.autoloops),
             autoloop_meta=read_autoloop_meta(args.autoloops),
             selection_seed=tx['run_id'],
+            static_rig=static_rig(rig),
         )
         with ExitStack() as stack:
             stack.enter_context(remote)

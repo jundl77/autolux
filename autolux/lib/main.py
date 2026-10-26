@@ -17,6 +17,7 @@ from autolux.lib.engine.effect_definitions import (
     AutoloopTable,
     ShowSettings,
 )
+from autolux.lib.engine.static_mode import StaticRig
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
@@ -61,6 +62,23 @@ def save_show_settings(path: Path, settings: ShowSettings) -> None:
         raise
 
 
+def apply_static(light_engine, command: dict) -> None:
+    looks = light_engine.static()
+    kind = command['kind']
+    if kind == 'look':
+        light_engine.static_look(
+            command['target'], colour=command['colour'], dimmer=command['dimmer']
+        )
+    elif kind == 'preset':
+        looks.preset(command['preset'])
+    elif kind == 'blacklight':
+        looks.blacklight()
+    elif kind == 'blackout':
+        looks.set_blackout(command['enabled'])
+    elif kind == 'strobe':
+        looks.strobe()
+
+
 class ShowControl:
     def __init__(self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK):
         self.config_path = Path(config_path)
@@ -90,6 +108,16 @@ class ShowControl:
                     LOGGER.warning('[main] next autoloop refused: %s', error)
             elif action == 'master':
                 light_engine.set_master_level(command['level'])
+            elif action == 'mode':
+                if command['mode'] == 'static':
+                    light_engine.enter_static()
+                else:
+                    await light_engine.leave_static()
+            elif action == 'static':
+                try:
+                    apply_static(light_engine, command)
+                except ValueError as error:
+                    LOGGER.warning('[main] static command refused: %s', error)
             elif action == 'palette':
                 light_engine.effect_controller.pin_palette(
                     None if command['name'] == PALETTE_POLICY else command['name']
@@ -136,6 +164,8 @@ class ShowControl:
                 paused=light_engine.paused,
                 master_brightness=light_engine.master_level,
                 settings=self.settings.to_dict(),
+                mode=light_engine.mode,
+                static=light_engine.static_looks.state(),
             )
 
 
@@ -155,6 +185,7 @@ class AutoluxController:
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
         selection_seed: int = 0,
+        static_rig: StaticRig = StaticRig(),
     ):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.clients.pyaudio_client import PyAudioClient
@@ -226,6 +257,7 @@ class AutoluxController:
             watchdog=self.drift_watchdog,
             settings=lambda: self.control.settings,
             silence_monitor=self._monitor.silence,
+            static_rig=static_rig,
         )
         self.control.publish(self.light_engine)
 

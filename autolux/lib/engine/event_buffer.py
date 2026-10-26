@@ -38,7 +38,13 @@ class EventBuffer:
         self._sound_events: list[dict] = []
         self._decoder_state: dict = {}
         self._shed_state: dict = {}
-        self._control_state: dict = {'paused': None, 'master_brightness': None, 'settings': None}
+        self._control_state: dict = {
+            'paused': None,
+            'master_brightness': None,
+            'settings': None,
+            'mode': None,
+            'static': None,
+        }
         self._palette: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
@@ -145,17 +151,31 @@ class EventBuffer:
         with self._lock:
             self._shed_state = dict(state)
 
-    def set_control_state(self, *, paused: bool, master_brightness: float, settings: dict) -> None:
+    def set_control_state(
+        self,
+        *,
+        paused: bool,
+        master_brightness: float,
+        settings: dict,
+        mode: str = 'auto',
+        static: dict | None = None,
+    ) -> None:
         with self._lock:
             self._control_state = {
                 'paused': paused,
                 'master_brightness': master_brightness,
                 'settings': dict(settings),
+                'mode': mode,
+                'static': copy.deepcopy(static),
             }
 
-    def operator_state(self) -> tuple[str | None, bool | None]:
+    def operator_state(self) -> tuple[str | None, bool | None, str | None]:
         with self._lock:
-            return self._current_intent, self._control_state['paused']
+            return (
+                self._current_intent,
+                self._control_state['paused'],
+                self._control_state['mode'],
+            )
 
     def set_palette(self, name: str, *, pinned: bool) -> None:
         with self._lock:

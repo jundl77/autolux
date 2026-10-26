@@ -190,3 +190,37 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
     parameter, selection = commands
     assert (parameter.parameter.type, parameter.parameter.text) == (wire.PALETTE, 'ice')
     assert (selection.autoloop_id, selection.palette) == ('drop/kick', 'ice_breakdown')
+
+
+def test_static_looks_for_the_room_rig_build_small_wire_accents():
+    from autolux.lib.clock import VirtualClock
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.engine.static_mode import StaticLooks, StaticRig
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
+
+    rig = assets.static_rig(DEFAULT_RIG)
+    assert rig == StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
+    lighting = RecordingStarfireClient()
+    looks = StaticLooks(lighting, rig, VirtualClock(), ShowSettings)
+    looks.preset('uv')
+    looks.look('fx', colour=(1.0, 0.5, 0.0), dimmer=0.25)
+    looks.strobe()
+    messages = []
+    for event in lighting.events:
+        message = protocol.build_command(event['command'])
+        message.command_id = 1
+        protocol.encode_command(message)
+        messages.append(message)
+    wash = next(m for m in messages if m.effect_id == 'static_wash')
+    assert (wash.group, wash.intensity, wash.attributes['ColorAdd_UV'].number) == (
+        'wash',
+        1.0,
+        255.0,
+    )
+    assert (wash.colour.red, wash.colour.green, wash.colour.blue) == (0.0, 0.0, 0.0)
+    assert {m.effect_id for m in messages} == {
+        'static_all',
+        'static_wash',
+        'static_fx',
+        'static_strobe',
+    }

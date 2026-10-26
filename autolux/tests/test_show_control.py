@@ -15,6 +15,7 @@ from autolux.simulate.visualizer_app import (
     expected_control_values,
     setting_text,
     settings_group_summary,
+    static_control_command,
 )
 
 
@@ -231,3 +232,119 @@ def test_an_intensity_outside_zero_to_one_is_refused_and_queues_nothing(show, le
     reply = poller.control({'action': 'intensity', 'level': level})
     assert reply == {'error': 'intensity must be within 0..1'}
     assert commands.empty()
+
+
+@pytest.fixture
+def static_show():
+    commands = queue.Queue(maxsize=4)
+    buffer = EventBuffer()
+    buffer.set_control_state(paused=False, master_brightness=1.0, settings={}, mode='static')
+    server = SnapshotServer(buffer, 0, commands)
+    server.start()
+    try:
+        yield SnapshotPoller(port=server.port), commands
+    finally:
+        server.stop()
+
+
+@pytest.mark.parametrize(
+    ('trigger', 'colour', 'dimmer', 'blackout', 'expected'),
+    [
+        (
+            'static-preset-warm',
+            None,
+            None,
+            False,
+            {'action': 'static', 'kind': 'preset', 'preset': 'warm'},
+        ),
+        ('static-blacklight', None, None, False, {'action': 'static', 'kind': 'blacklight'}),
+        ('static-strobe', None, None, False, {'action': 'static', 'kind': 'strobe'}),
+        (
+            'static-blackout',
+            None,
+            None,
+            True,
+            {'action': 'static', 'kind': 'blackout', 'enabled': False},
+        ),
+        (
+            'static-colour',
+            ' FF8000',
+            None,
+            False,
+            {
+                'action': 'static',
+                'kind': 'look',
+                'target': 'wash',
+                'colour': (1.0, 0.501961, 0.0),
+                'dimmer': None,
+            },
+        ),
+        (
+            'static-dimmer-live',
+            None,
+            0.35,
+            False,
+            {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.35},
+        ),
+        ('static-auto', None, None, False, {'action': 'mode', 'mode': 'auto'}),
+    ],
+)
+def test_each_static_control_reaches_the_controller_queue_as_parsed(
+    static_show, trigger, colour, dimmer, blackout, expected
+):
+    poller, commands = static_show
+    command = static_control_command(trigger, 'wash', colour, dimmer, blackout)
+    assert poller.control(command) == {'accepted': expected['action']}
+    assert commands.get_nowait() == expected
+
+
+@pytest.mark.parametrize(
+    ('payload', 'reason'),
+    [
+        ({'action': 'mode', 'mode': 'manual'}, 'mode must be auto or static'),
+        ({'action': 'static', 'kind': 'look', 'target': 'wash'}, 'needs a colour or a dimmer'),
+        (
+            {'action': 'static', 'kind': 'look', 'target': 'wash', 'dimmer': 1.5},
+            'within 0..1',
+        ),
+        (
+            {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': 'red'},
+            'colour must be #rrggbb',
+        ),
+        ({'action': 'static', 'kind': 'preset', 'preset': 'party'}, 'unknown static preset'),
+        ({'action': 'static', 'kind': 'blackout', 'enabled': 1}, 'true or false'),
+    ],
+)
+def test_malformed_mode_and_static_commands_return_the_reason_and_queue_nothing(
+    static_show, payload, reason
+):
+    poller, commands = static_show
+    assert reason in poller.control(payload)['error']
+    assert commands.empty()
+
+
+def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
+    buffer = EventBuffer()
+    buffer.set_intent('breakdown')
+    commands = queue.Queue()
+    server = SnapshotServer(buffer, 0, commands)
+    server.start()
+    try:
+        poller = SnapshotPoller(port=server.port)
+        buffer.set_control_state(paused=False, master_brightness=1.0, settings={})
+        refused = poller.control({'action': 'static', 'kind': 'strobe'})
+        buffer.set_control_state(paused=False, master_brightness=1.0, settings={}, mode='static')
+        skipped = poller.control({'action': 'next_autoloop'})
+        entered = poller.control({'action': 'mode', 'mode': 'static'})
+    finally:
+        server.stop()
+    assert refused == {'error': 'the show is in auto mode'}
+    assert skipped == {'error': 'the show is in static mode'}
+    assert entered == {'accepted': 'mode'}
+    assert commands.get_nowait() == {'action': 'mode', 'mode': 'static'}
+    assert commands.empty()
+
+
+def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
+    with pytest.raises(ValueError, match='is not a #rrggbb colour'):
+        static_control_command('static-colour', 'all', '#12345', None, False)
