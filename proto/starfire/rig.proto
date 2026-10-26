@@ -11,9 +11,6 @@ message RigDefinition {
 }
 
 message Fixture {
-  reserved 7, 8;
-  reserved "pan_offset_degrees", "tilt_offset_degrees";
-
   string fixture_id = 1;  // MVR Fixture name.
   string profile_id = 2;
   uint32 universe = 3;     // Art-Net universe, starting at zero.

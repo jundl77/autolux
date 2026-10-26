@@ -169,7 +169,6 @@ message DiscardDelayedAudio {
 // Facts about one detected beat. Starfire owns the bar-aligned musical grid built from
 // them and interpolates between beats at tempo, independently of animation speed.
 message UpdateBeat {
-  reserved 2;  // Was position_beats, when the client owned the grid.
   uint64 command_id = 1;
   double tempo_bpm = 3;
   uint64 beat_index = 4;          // Detected beats this session; increases, gaps allowed.
