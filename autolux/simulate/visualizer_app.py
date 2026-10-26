@@ -6,7 +6,6 @@ import re
 import threading
 import time
 from statistics import median
-from typing import NamedTuple
 
 import dash
 import plotly.graph_objects as go
@@ -474,21 +473,15 @@ def _build_decoder(snapshot: dict) -> list:
     ]
 
 
+def _dot(colour: str):
+    return html.Span(className='dot', style={'background': colour})
+
+
 def _build_legend() -> list:
     return [
-        html.Span(
-            f'■ {cfg["label"]}',
-            style={'color': cfg['primary'], 'marginRight': '14px', 'fontSize': '12px'},
-        )
+        html.Span([_dot(cfg['primary']), cfg['label'].capitalize()])
         for cfg in INTENT_CONFIG.values()
     ]
-
-
-def _build_stat_card(label, value):
-    return html.Div(
-        [html.Div(label, className='stat-label'), html.Div(value, className='stat-value')],
-        className='show-stat',
-    )
 
 
 def _selection_tags(effect: dict) -> str:
@@ -498,56 +491,48 @@ def _selection_tags(effect: dict) -> str:
     return ' · '.join(tags)
 
 
-def _build_show_overview(snapshot: dict) -> list:
-    bpm = _room_bpm(snapshot)
+HEALTH_COLORS = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}
+
+
+def _health(snapshot: dict) -> str:
     health = health_summary(snapshot)['state']
     timing = (snapshot.get('timing_stats') or {}).get('by_label') or {}
     if health == 'healthy' and any(
         stream['mean_error_ms'] > TIMING_TOLERANCE_SEC * 1000 for stream in timing.values()
     ):
-        health = 'degraded'
-    health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
-    return [
-        _build_stat_card(
-            'Health',
-            html.Span(f'● {health.title()}', id='health-indicator', style={'color': health_color}),
-        ),
-        _build_stat_card(
-            'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
-        ),
-    ]
+        return 'degraded'
+    return health
 
 
-def _autoloop_name(effect: dict) -> str:
-    return effect.get('name', '—').rsplit('/', 1)[-1].replace('_', ' ').title()
-
-
-def _build_auto_status(snapshot: dict) -> list:
+def _build_show_status(snapshot: dict) -> list:
+    cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
-    effect_name = effect.get('name', '—')
-    reason = (effect.get('selection') or {}).get('reason')
+    name = effect.get('name')
+    detail = ' · '.join(
+        part
+        for part in (name, _selection_tags(effect), (effect.get('selection') or {}).get('reason'))
+        if part
+    )
     palette = snapshot.get('palette') or {}
     palette_name = palette.get('name') or '—'
+    bpm = _room_bpm(snapshot)
+    health = _health(snapshot)
     items = [
-        ('section', _intent_config(snapshot.get('intent'))['label']),
-        ('autoloop', _autoloop_name(effect) if effect else '—'),
-        ('palette', f'{palette_name} (pinned)' if palette.get('pinned') else palette_name),
-        ('selection', _selection_tags(effect) or '—'),
+        html.Span([_dot(cfg['primary']), cfg['label'].capitalize()]),
+        html.Span(name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—', title=detail),
+        html.Span(f'{palette_name} (pinned)' if palette.get('pinned') else palette_name),
+        html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM'),
+        html.Span([_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'),
     ]
     special = snapshot.get('special')
     if special:
-        items.append(('fx', special.get('name', '—') if isinstance(special, dict) else special))
+        items.append(
+            html.Span(f'fx {special.get("name", "—") if isinstance(special, dict) else special}')
+        )
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
-        items.append(('strobe', f'cooldown {cooldown:.0f} s' if cooldown > 0 else 'ready'))
-    titles = {'autoloop': f'{effect_name} · {reason}' if reason else effect_name}
-    return [
-        html.Span(
-            [html.Span(label, className='stat-label'), html.Span(str(value))],
-            title=titles.get(label),
-        )
-        for label, value in items
-    ]
+        items.append(html.Span(f'strobe in {cooldown:.0f} s' if cooldown > 0 else 'strobe ready'))
+    return items
 
 
 def _build_show_timing(snapshot: dict) -> list:
@@ -577,46 +562,25 @@ SETTING_LABELS = {
     for name, (label, unit) in SETTING_DISPLAY.items()
 }
 PERCENT_SETTINGS = frozenset(name for name, (_, unit) in SETTING_DISPLAY.items() if unit == '%')
-CROSSFADE_SETTINGS = ('crossfade_beats', 'quiet_brightness')
-STANDBY_SETTINGS = ('digital_silence_seconds',)
-STROBE_SETTINGS = (
+FORM_SETTINGS = tuple(
+    name for name in SHOW_SETTING_RANGES if name not in ('intensity', 'palette_temperature_bias')
+)
+SETTINGS_ORDER = (
+    'crossfade_beats',
+    'quiet_brightness',
+    'digital_silence_seconds',
     'strobe_max_rate_hz',
     'strobe_max_burst_seconds',
     'strobe_burst_seconds',
     'drop_strobe_cooldown_seconds',
 )
-SETTING_SUMMARY = {
-    'crossfade_beats': '{} beats',
-    'quiet_brightness': 'quiet {} %',
-    'digital_silence_seconds': 'standby {} s',
-    'strobe_max_rate_hz': '{} Hz',
-    'strobe_max_burst_seconds': 'burst {} s',
-    'strobe_burst_seconds': 'drop burst {} s',
-    'drop_strobe_cooldown_seconds': 'cooldown {} s',
-}
-
-
-class SettingsGroup(NamedTuple):
-    key: str
-    title: str
-    names: tuple[str, ...]
-    default_open: bool
-    marker: str | None = None
-
-
-SETTINGS_GROUPS = (
-    SettingsGroup('transitions', 'Crossfade & quiet brightness', CROSSFADE_SETTINGS, False),
-    SettingsGroup('standby', 'Silence standby', STANDBY_SETTINGS, False),
-    SettingsGroup('strobe', 'Strobe limits', STROBE_SETTINGS, False, 'Intense effects'),
-)
-SETTINGS_GROUPS_STORAGE_KEY = 'autolux.settings-groups'
-FORM_SETTINGS = tuple(name for name in SHOW_SETTING_RANGES if name != 'intensity')
 SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
 INTENSITY_LEVELS = (('calm', 0.3), ('measured', 0.7), ('wild', 1.0))
 WARMTH = 'palette_temperature_bias'
 PALETTE_SWATCH_SLOTS = ('primary', 'secondary', 'accent', 'cold')
+ACCENT = '#73b6ff'
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 NEEDS_A_NUMBER = '{label} needs a number'
 NOT_A_NUMBER = '{label}: "{raw}" is not a number'
@@ -680,7 +644,7 @@ def parse_decimal(name: str, raw) -> float:
 
 
 def control_command(
-    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY
+    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY, warmth=None
 ) -> dict | None:
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
@@ -698,19 +662,10 @@ def control_command(
             'settings': {
                 **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
                 'intensity': intensity,
+                **({WARMTH: warmth} if warmth is not None else {}),
             },
         }
     return None
-
-
-def settings_group_summary(names, settings) -> str:
-    settings = settings or {}
-    return ' · '.join(
-        SETTING_SUMMARY[name].format(
-            '—' if settings.get(name) is None else setting_text(name, settings[name])
-        )
-        for name in names
-    )
 
 
 def setting_range_text(name: str) -> str:
@@ -735,12 +690,8 @@ def _setting_input(name):
                     ),
                     html.Span(unit, className='setting-unit'),
                 ],
+                title=f'{setting_range_text(name)} {unit}'.strip(),
                 className='setting-value',
-            ),
-            html.Span(
-                setting_range_text(name),
-                title=f'Allowed {setting_range_text(name)} {unit}',
-                className='setting-range',
             ),
             html.Span(id=f'control-{name}-error', role='alert', className='setting-error'),
         ],
@@ -748,84 +699,18 @@ def _setting_input(name):
     )
 
 
-def _settings_group(group: SettingsGroup, rows: list):
-    header = [html.Span(group.title, className='settings-group-title')]
-    if group.marker:
-        header.append(html.Span(group.marker, className='settings-group-marker'))
-    header.append(html.Span(id=f'settings-summary-{group.key}', className='settings-group-summary'))
+def _build_settings():
     return html.Details(
         [
-            html.Summary(header, className='settings-group-header'),
-            html.Div(rows, className='settings-group-body'),
-        ],
-        id=f'settings-group-{group.key}',
-        open=group.default_open,
-        className=f'settings-group settings-group-{group.key}',
-        **{'data-settings-group': group.key},
-    )
-
-
-def _build_settings_drawer():
-    return html.Div(
-        [
-            html.Div('Show settings', className='stat-label control-heading'),
-            *[
-                _settings_group(
-                    group, [_setting_input(name) for name in group.names if name in FORM_SETTINGS]
-                )
-                for group in SETTINGS_GROUPS
-            ],
+            html.Summary('Settings', className='settings-toggle'),
+            html.Div([_setting_input(name) for name in SETTINGS_ORDER], className='settings-form'),
         ],
         id='settings-drawer',
-        className='control-group settings-drawer',
+        className='settings',
     )
 
 
 def _register_settings_drawer(app) -> None:
-    app.clientside_callback(
-        '''function() {
-            const key = '''
-        + json.dumps(SETTINGS_GROUPS_STORAGE_KEY)
-        + ''';
-            const read = () => {
-                try {
-                    return JSON.parse(window.localStorage.getItem(key) || '{}') || {};
-                } catch (error) {
-                    return {};
-                }
-            };
-            if (!window.autoluxSettingsGroupsWatched) {
-                window.autoluxSettingsGroupsWatched = true;
-                document.addEventListener('toggle', (event) => {
-                    const group = event.target.dataset && event.target.dataset.settingsGroup;
-                    if (!group) {
-                        return;
-                    }
-                    try {
-                        const saved = read();
-                        saved[group] = event.target.open;
-                        window.localStorage.setItem(key, JSON.stringify(saved));
-                    } catch (error) {}
-                }, true);
-            }
-            const saved = read();
-            return '''
-        + json.dumps([[group.key, group.default_open] for group in SETTINGS_GROUPS])
-        + '''.map(([group, open]) => typeof saved[group] === 'boolean' ? saved[group] : open);
-        }''',
-        *[Output(f'settings-group-{group.key}', 'open') for group in SETTINGS_GROUPS],
-        Input('settings-drawer', 'id'),
-    )
-
-    @app.callback(
-        *[Output(f'settings-summary-{group.key}', 'children') for group in SETTINGS_GROUPS],
-        Input('control-state', 'data'),
-    )
-    def summarize_settings(state):
-        if not state or not state.get('settings'):
-            raise dash.exceptions.PreventUpdate
-        return [settings_group_summary(group.names, state['settings']) for group in SETTINGS_GROUPS]
-
     limits = [
         [
             setting_text(name, low),
@@ -872,21 +757,14 @@ def _rgb_css(rgb) -> str:
 
 
 def _palette_options() -> list:
-    def card(name, colours):
+    def option(name, colours):
         return html.Span(
-            [
-                html.Span(
-                    [html.Span(style={'background': colour}) for colour in colours],
-                    className='palette-swatches',
-                ),
-                html.Span(name, className='palette-card-name'),
-            ],
-            className='palette-card',
+            [*(_dot(colour) for colour in colours), html.Span(name)], className='palette-option'
         )
 
-    return [{'label': card('auto', []), 'value': PALETTE_POLICY}] + [
+    return [{'label': option('auto', ['transparent'] * 4), 'value': PALETTE_POLICY}] + [
         {
-            'label': card(
+            'label': option(
                 palette.name, [_rgb_css(getattr(palette, s)) for s in PALETTE_SWATCH_SLOTS]
             ),
             'value': palette.name,
@@ -895,123 +773,56 @@ def _palette_options() -> list:
     ]
 
 
-def _build_control_header():
-    return html.Div(
-        [
-            html.Button('Pause ❚❚', id='control-toggle', className='control-toggle', disabled=True),
-            html.Span(id='control-playback', className='control-playback'),
-            html.Div(
-                [
-                    html.Span('Master', className='control-label'),
-                    dcc.Slider(
-                        id='control-brightness',
-                        min=0,
-                        max=1,
-                        step=0.01,
-                        marks=None,
-                        updatemode='mouseup',
-                        allow_direct_input=False,
-                        disabled=True,
-                    ),
-                    html.Span('—', id='control-brightness-value'),
-                    dcc.Store(id='control-brightness-live'),
-                ],
-                className='control-master',
-            ),
-        ],
-        className='control-header',
-    )
-
-
-def _build_auto_panel():
-    low, high = SHOW_SETTING_RANGES[WARMTH]
+def _fader(slider_id: str, value_id: str, **slider):
     return [
-        html.Div(id='control-auto-status', className='control-auto-status'),
         html.Div(
-            [
-                html.Button(
-                    'Next autoloop ⏭',
-                    id='control-next',
-                    className='control-next',
-                    title='Jump to the next autoloop for this section',
-                    disabled=True,
-                ),
-                html.Div(
-                    [
-                        html.Span('Intensity', className='control-label'),
-                        html.Fieldset(
-                            dcc.RadioItems(
-                                id='control-intensity',
-                                options=[
-                                    {'label': word, 'value': level}
-                                    for word, level in INTENSITY_LEVELS
-                                ],
-                                inline=True,
-                                className='segmented',
-                            ),
-                            id='control-intensity-set',
-                            disabled=True,
-                        ),
-                        html.Span(id='control-intensity-value', className='control-off-preset'),
-                    ],
-                    className='control-intensity',
-                ),
-            ],
-            className='control-row',
+            dcc.Slider(
+                id=slider_id,
+                min=0,
+                max=1,
+                step=0.01,
+                marks=None,
+                updatemode='mouseup',
+                allow_direct_input=False,
+                **slider,
+            ),
+            className='fader-track',
         ),
-        html.Div(
-            [
-                html.Span('Palette', className='control-label'),
-                html.Fieldset(
-                    dcc.RadioItems(
-                        id='control-palette',
-                        options=_palette_options(),
-                        inline=True,
-                        className='palette-cards',
-                    ),
-                    id='control-palette-set',
-                    disabled=True,
-                ),
-                html.Div(
-                    [
-                        html.Label(
-                            'Warmth', htmlFor=f'control-{WARMTH}', className='control-label'
-                        ),
-                        html.Span('cold', className='control-unit'),
-                        dcc.Slider(
-                            id=f'control-{WARMTH}',
-                            min=low,
-                            max=high,
-                            step=0.05,
-                            marks=None,
-                            updatemode='mouseup',
-                            allow_direct_input=False,
-                            disabled=True,
-                        ),
-                        html.Span('warm', className='control-unit'),
-                        html.Span('—', id=f'control-{WARMTH}-value'),
-                        html.Span(
-                            id=f'control-{WARMTH}-error', role='alert', className='setting-error'
-                        ),
-                    ],
-                    className='control-warmth',
-                ),
-            ],
-            className='control-palettes',
-        ),
-        _build_settings_drawer(),
+        html.Span('—', id=value_id, className='fader-value'),
     ]
 
 
 def _build_control_card() -> list:
     return [
-        html.Div(
-            [html.H2('Show control'), html.P('Applies to the live show at once')],
-            className='section-heading',
-        ),
+        html.Div('Show control', className='section-label'),
         html.Section(
             [
-                _build_control_header(),
+                html.Div(id='show-status', className='show-status'),
+                html.Div(
+                    [
+                        html.Button(
+                            '\u23f8\ufe0e',
+                            id='control-toggle',
+                            className='icon-button',
+                            title='Play / pause',
+                            disabled=True,
+                        ),
+                        html.Button(
+                            '\u23ed\ufe0e',
+                            id='control-next',
+                            className='icon-button',
+                            title='Next autoloop',
+                            disabled=True,
+                        ),
+                        html.Span('Master', className='control-label'),
+                        html.Div(
+                            _fader('control-brightness', 'control-brightness-value', disabled=True),
+                            className='fader',
+                        ),
+                        dcc.Store(id='control-brightness-live'),
+                    ],
+                    className='control-row control-transport',
+                ),
                 dcc.Tabs(
                     id='control-mode',
                     value='auto',
@@ -1026,7 +837,41 @@ def _build_control_card() -> list:
                         for mode in ('auto', 'static')
                     ],
                 ),
-                html.Div(_build_auto_panel(), id='auto-mode-panel'),
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.Span('Intensity', className='control-label'),
+                                html.Fieldset(
+                                    dcc.RadioItems(
+                                        id='control-intensity',
+                                        options=[
+                                            {'label': word, 'value': level}
+                                            for word, level in INTENSITY_LEVELS
+                                        ],
+                                        inline=True,
+                                        className='segmented',
+                                    ),
+                                    id='control-intensity-set',
+                                    disabled=True,
+                                ),
+                                html.Span(id='control-intensity-value', className='fader-value'),
+                                html.Span('Palette', className='control-label'),
+                                dcc.Dropdown(
+                                    id='control-palette',
+                                    options=_palette_options(),
+                                    clearable=False,
+                                    searchable=False,
+                                    disabled=True,
+                                    className='palette-select',
+                                ),
+                            ],
+                            className='control-row',
+                        ),
+                        _build_settings(),
+                    ],
+                    id='auto-mode-panel',
+                ),
                 html.Div(_build_static_panel(), id='static-mode-panel', style={'display': 'none'}),
                 html.P(id='control-status', role='status', className='control-status'),
                 dcc.Store(id='control-state'),
@@ -1035,7 +880,6 @@ def _build_control_card() -> list:
                 dcc.Store(id='control-mode-synced'),
             ],
             id='show-control',
-            className='overview-panel',
         ),
     ]
 
@@ -1058,15 +902,16 @@ STATIC_TAB_STYLE = {
     'color': '#8293a6',
     'border': '0',
     'borderBottom': '2px solid transparent',
-    'padding': '8px 18px',
-    'fontSize': '12px',
-    'fontWeight': '600',
+    'padding': '0 16px',
+    'lineHeight': '40px',
+    'fontSize': '11px',
+    'letterSpacing': '.08em',
     'flex': 'none',
 }
 STATIC_SELECTED_TAB_STYLE = {
     **STATIC_TAB_STYLE,
     'color': '#e6edf3',
-    'borderBottomColor': '#73b6ff',
+    'borderBottomColor': ACCENT,
 }
 
 
@@ -1097,20 +942,10 @@ def _build_static_panel():
         [
             html.Div(
                 [
-                    html.Button(label, id=f'static-preset-{name}')
-                    for name, label in STATIC_PRESETS.items()
-                ],
-                className='static-row',
-            ),
-            html.Div(
-                [
-                    dcc.RadioItems(
-                        id='static-target',
-                        options=[{'label': 'All', 'value': 'all'}],
-                        value='all',
-                        inline=True,
-                        className='static-target',
-                    ),
+                    *[
+                        html.Button(label, id=f'static-preset-{name}')
+                        for name, label in STATIC_PRESETS.items()
+                    ],
                     dcc.Input(
                         id='static-colour',
                         type='color',
@@ -1120,40 +955,35 @@ def _build_static_panel():
                         persistence=True,
                         persistence_type='local',
                     ),
-                    html.Div(
-                        [
-                            html.Div(
-                                [html.Span('Level'), html.Span('—', id='static-dimmer-value')],
-                                className='stat-label control-heading',
-                            ),
-                            dcc.Slider(
-                                id='static-dimmer',
-                                min=0,
-                                max=1,
-                                step=0.01,
-                                value=1,
-                                marks=None,
-                                updatemode='mouseup',
-                                allow_direct_input=False,
-                            ),
-                            html.Div(
-                                [html.Span('0%'), html.Span('100%')], className='control-scale'
-                            ),
-                            dcc.Store(id='static-dimmer-live'),
-                        ],
-                        className='control-master',
-                    ),
                 ],
-                className='static-look',
+                className='control-row',
             ),
             html.Div(
                 [
-                    html.Button('Blacklight', id='static-blacklight'),
-                    html.Span('UV ignores master', className='control-unit'),
+                    html.Span('Target', className='control-label'),
+                    dcc.RadioItems(
+                        id='static-target',
+                        options=[{'label': 'All', 'value': 'all'}],
+                        value='all',
+                        inline=True,
+                        className='segmented',
+                    ),
+                    html.Span('Level', className='control-label'),
+                    html.Div(
+                        _fader('static-dimmer', 'static-dimmer-value', value=1),
+                        className='fader fader-short',
+                    ),
+                    dcc.Store(id='static-dimmer-live'),
+                ],
+                className='control-row',
+            ),
+            html.Div(
+                [
+                    html.Button('Blacklight', id='static-blacklight', title='UV ignores master'),
                     html.Button('Blackout', id='static-blackout'),
                     html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
                 ],
-                className='static-row',
+                className='control-row',
             ),
             html.P(id='static-status', role='status', className='control-status'),
         ],
@@ -1178,21 +1008,19 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
             const options = statics.targets.map((target) =>
                 ({label: target === 'all' ? 'All' : target, value: target}));
             const blackout = !!statics.blackout;
-            return [options, blackout ? 'static-blackout-on' : '',
-                    blackout ? 'Blackout on' : 'Blackout', !statics.blacklight];
+            return [options, blackout ? 'active' : '', !statics.blacklight];
         }''',
         Output('static-target', 'options'),
         Output('static-blackout', 'className'),
-        Output('static-blackout', 'children'),
         Output('static-blacklight', 'disabled'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(
-        '''function(level) {
+        '''function(level, committed) {
             const label = level === null || level === undefined
                 ? '—' : Math.round(level * 100) + '%';
             const now = Date.now();
-            if (level === null || level === undefined
+            if (level === null || level === undefined || level === committed
                     || now - (window.autoluxStaticDimmerSentAt || 0) < '''
         + str(LIVE_FADER_INTERVAL_MS)
         + ''') {
@@ -1204,6 +1032,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         Output('static-dimmer-value', 'children'),
         Output('static-dimmer-live', 'data'),
         Input('static-dimmer', 'drag_value'),
+        State('static-dimmer', 'value'),
     )
     sent_dimmer = {}
 
@@ -1410,18 +1239,12 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 .subtitle, .section-heading p { color: #9baabb; font-size: 12px; margin: 0; }
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
-.overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
-.status-strip { font-variant-numeric: tabular-nums; }
-.show-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.show-stat { padding: 12px 16px; min-width: 0; border-right: 1px solid #1b2735; }
-.show-stat:last-child { border-right: 0; }
 .stat-label { font-size: 10px; color: #9baabb; margin-bottom: 6px; }
 .stat-value { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 600;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stat-tags { color: #8293a6; font-size: 11px; font-weight: 500; }
 .status-secondary { display: flex; justify-content: space-between; align-items: baseline;
-                    flex-wrap: wrap; gap: 8px 24px; padding: 9px 16px;
-                    border-top: 1px solid #1b2735; color: #9baabb; font-size: 12px; }
+                    flex-wrap: wrap; gap: 8px 24px; padding: 8px 0;
+                    border-bottom: 1px solid #1b2735; color: #9baabb; font-size: 12px; }
 .show-timing span:nth-child(even) { color: #e6edf3; font-weight: 600; }
 .status-metrics { display: flex; flex-wrap: wrap; gap: 6px 22px; }
 .status-metric { display: inline-flex; align-items: baseline; gap: 7px; cursor: help; }
@@ -1434,9 +1257,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .performance-stat .stat-value { font-size: 20px; }
 .metric-detail { margin-top: 5px; color: #8293a6; font-size: 11px; }
 .show-panel { border: 1px solid #273344; border-radius: 8px; overflow: hidden; background: #0d1117; }
-.show-panel .section-heading { margin: 0; padding: 14px 18px 6px; }
-.legend { padding: 12px 18px 0; }
-.legend > span { display: inline-block; white-space: nowrap; filter: brightness(1.7); }
 .charts-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .chart-panel { min-width: 0; background: #111923; border: 1px solid #273344; border-radius: 8px; overflow: hidden; }
 .chart-panel h3 { margin: 16px 16px 7px; font-size: 13px; font-weight: 600; }
@@ -1909,27 +1729,16 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             html.Div(id='telemetry-alerts'),
             html.Section(
                 [
-                    html.Section(
-                        [
-                            html.Div(id='metrics', className='show-overview'),
-                            html.Div(
-                                [
-                                    html.Div(id='show-timing', className='show-timing'),
-                                    html.Div(id='performance-metrics', className='status-metrics'),
-                                ],
-                                className='status-secondary',
-                            ),
-                        ],
-                        className='overview-panel status-strip',
-                    ),
                     *_build_control_card(),
                     html.Div(
-                        [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
-                        className='section-heading',
+                        [
+                            html.Span('Show timeline', className='section-label'),
+                            html.Div(_build_legend(), className='legend'),
+                        ],
+                        className='section-row',
                     ),
                     html.Section(
                         [
-                            html.Div(_build_legend(), className='legend'),
                             html.Div(
                                 [
                                     html.Div(
@@ -2002,6 +1811,13 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             ),
             html.Section(
                 [
+                    html.Div(
+                        [
+                            html.Div(id='show-timing', className='show-timing'),
+                            html.Div(id='performance-metrics', className='status-metrics'),
+                        ],
+                        className='status-secondary',
+                    ),
                     html.Div(
                         [html.H2('Starfire'), html.P('Measured rendering performance')],
                         className='section-heading',
@@ -2080,8 +1896,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     @app.callback(
         [
             Output('sync', 'data'),
-            Output('metrics', 'children'),
-            Output('control-auto-status', 'children'),
+            Output('show-status', 'children'),
             Output('show-timing', 'children'),
             Output('decoder', 'children'),
             Output('command-diagnostics', 'children'),
@@ -2100,15 +1915,14 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             raise dash.exceptions.PreventUpdate
         snap = expectations.apply(snapshot_source.snapshot())
         now = time.time()
-        sync = metrics = auto_status = show_timing = decoder = commands = dash.no_update
+        sync = status = show_timing = decoder = commands = dash.no_update
         timeline = dash.no_update
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
         due = requested.get('metrics')
         if on_control or due:
             sync = _anchor(snap)
-            metrics = _build_show_overview(snap)
-            auto_status = _build_auto_status(snap)
+            status = _build_show_status(snap)
             show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
             commands = _build_command_diagnostics(snap)
@@ -2139,8 +1953,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         return (
             sync,
             *(
-                metrics,
-                auto_status,
+                status,
                 show_timing,
                 decoder,
                 commands,
@@ -2157,21 +1970,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     app.clientside_callback(
         '''function(state) {
             const ready = !!state && state.paused !== null && state.paused !== undefined;
-            const mode = !ready ? '' : state.paused ? ' paused' : ' playing';
             const settable = !ready || !state.settings;
             const skippable = ready && !state.paused && !!state.intent
                 && state.intent !== 'standby';
-            return [ready && state.paused ? 'Play ▶' : 'Pause ❚❚', 'control-toggle' + mode, !ready,
-                    !ready ? '' : state.paused ? 'PAUSED' : 'PLAYING',
+            return [ready && state.paused ? '\u25b6\ufe0e' : '\u23f8\ufe0e', !ready,
                     !skippable, !ready || state.master_brightness === null, settable,
                     ...'''
         + setting_names
         + '''.map(() => settable)];
         }''',
         Output('control-toggle', 'children'),
-        Output('control-toggle', 'className'),
         Output('control-toggle', 'disabled'),
-        Output('control-playback', 'children'),
         Output('control-next', 'disabled'),
         Output('control-brightness', 'disabled'),
         Output('control-intensity-set', 'disabled'),
@@ -2204,14 +2013,11 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 intensity = next.intensity = state.settings.intensity;
             }
             const fields = names.map((name) => {
-                const shown = name === '''
-        + json.dumps(WARMTH)
-        + ''' ? state.settings[name] : text[name];
-                if (touched || focused === 'control-' + name || shown === synced[name]) {
+                if (touched || focused === 'control-' + name || text[name] === synced[name]) {
                     return nu;
                 }
-                next[name] = shown;
-                return shown;
+                next[name] = text[name];
+                return text[name];
             });
             return [level, intensity, ...fields, next];
         }''',
@@ -2255,26 +2061,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Input('control-intensity', 'value'),
     )
     app.clientside_callback(
-        '''function(drag, value) {
-            const level = drag === null || drag === undefined ? value : drag;
-            return level === null || level === undefined || level === ''
-                ? '—' : String(Number(Number(level).toFixed(2)));
-        }''',
-        Output(f'control-{WARMTH}-value', 'children'),
-        Input(f'control-{WARMTH}', 'drag_value'),
-        Input(f'control-{WARMTH}', 'value'),
-    )
-    app.clientside_callback(
-        '''function() {
-            window.autoluxControlTouchedAt = Date.now();
-            return window.dash_clientside.no_update;
-        }''',
-        Output('control-touched', 'data'),
-        *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
-        prevent_initial_call=True,
-    )
-
-    app.clientside_callback(
         '''function(state) {
             const palette = state && state.palette;
             if (!palette) {
@@ -2285,7 +2071,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         + ''', false];
         }''',
         Output('control-palette', 'value'),
-        Output('control-palette-set', 'disabled'),
+        Output('control-palette', 'disabled'),
         Input('control-state', 'data'),
     )
 
@@ -2327,7 +2113,13 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             raise dash.exceptions.PreventUpdate
         try:
             command = control_command(
-                trigger, state.get('paused'), level, settings, palette=palette, intensity=intensity
+                trigger,
+                state.get('paused'),
+                level,
+                settings,
+                palette=palette,
+                intensity=intensity,
+                warmth=(state.get('settings') or {}).get(WARMTH),
             )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update

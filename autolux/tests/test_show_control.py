@@ -10,7 +10,6 @@ from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.visualizer_app import (
     INTENSITY_LEVELS,
     PALETTE_POLICY,
-    SETTINGS_GROUPS,
     ControlExpectations,
     SnapshotPoller,
     build_app,
@@ -18,7 +17,6 @@ from autolux.simulate.visualizer_app import (
     decimal_text,
     expected_control_values,
     setting_text,
-    settings_group_summary,
     static_control_command,
 )
 
@@ -102,30 +100,6 @@ def test_text_that_is_not_a_plain_decimal_never_reaches_the_controller(raw, reas
 def test_settings_fill_with_a_dot_decimal_whatever_the_locale():
     assert [decimal_text(v) for v in (0.15, 60.0, 0.125, 4.0)] == ['0.15', '60', '0.125', '4']
     assert setting_text('quiet_brightness', 0.155) == '15.5'
-
-
-def test_each_collapsed_settings_group_summarises_its_live_values():
-    settings = {
-        'crossfade_beats': 1.0,
-        'quiet_brightness': 0.15,
-        'digital_silence_seconds': 2.0,
-        'strobe_max_rate_hz': 8.0,
-        'strobe_max_burst_seconds': 4.0,
-        'strobe_burst_seconds': 1.0,
-        'drop_strobe_cooldown_seconds': 60.0,
-        'palette_temperature_bias': -0.5,
-        'intensity': 0.7,
-    }
-    assert {
-        group.key: settings_group_summary(group.names, settings) for group in SETTINGS_GROUPS
-    } == {
-        'transitions': '1 beats · quiet 15 %',
-        'standby': 'standby 2 s',
-        'strobe': '8 Hz · burst 4 s · drop burst 1 s · cooldown 60 s',
-    }
-    assert settings_group_summary(SETTINGS_GROUPS[2].names, {}) == (
-        '— Hz · burst — s · drop burst — s · cooldown — s'
-    )
 
 
 def test_a_busy_show_is_reported_instead_of_raising(show):
@@ -228,6 +202,15 @@ def test_a_settings_change_keeps_the_intensity_the_fader_set(show):
     )
     assert poller.control(command) == {'accepted': 'settings'}
     assert commands.get_nowait()['settings'].intensity == 0.4
+
+
+def test_a_settings_change_keeps_the_warmth_the_panel_no_longer_shows(show):
+    poller, commands = show
+    command = control_command(
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3', '3'), warmth=-0.5
+    )
+    assert poller.control(command) == {'accepted': 'settings'}
+    assert commands.get_nowait()['settings'].palette_temperature_bias == -0.5
 
 
 @pytest.mark.parametrize('level', [1.2, -0.1, '0.5', None])
@@ -442,11 +425,11 @@ def test_each_intensity_segment_sends_its_mapped_level(show):
     assert commands.empty()
 
 
-def test_a_palette_card_click_sends_the_dropdown_palette_command(show):
+def test_a_palette_pick_sends_the_palette_command(show):
     poller, commands = show
     app = build_app(poller)
-    cards = [o['value'] for o in app.layout['control-palette'].options]
-    assert cards == [PALETTE_POLICY, *PALETTE_NAMES]
+    choices = [o['value'] for o in app.layout['control-palette'].options]
+    assert choices == [PALETTE_POLICY, *PALETTE_NAMES]
     _send_control(app, 'control-palette.value', 'ice', {'palette': {'name': 'techno'}})
     assert commands.get_nowait() == control_command(
         'control-palette', False, None, (), palette='ice'
