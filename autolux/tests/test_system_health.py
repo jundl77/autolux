@@ -162,10 +162,10 @@ def test_queue_drops_and_latency_recovery_explain_the_audio_warning():
 def test_capture_resync_is_reported_as_a_glitch_with_its_measured_gap():
     state = healthy()
     state['recent'] = {'overruns': 1, 'resyncs': 1}
-    state['tx']['capture_last_gap_seconds'] = 0.0125
+    state['tx'] |= {'capture_last_gap_seconds': 0.0125, 'capture_priority_denied': 2}
     audio = health_summary({'system': state})['cards'][2]
     assert audio[1] == 'Glitches'
-    assert '1 overruns · 0 lost frames · 1 capture resyncs (last gap 12 ms)' in audio[2]
+    assert audio[2].endswith('1 overruns · 0 lost frames · 1 capture resyncs (last gap 12 ms)')
     assert not audio[3]
     state['tx']['capture_last_gap_seconds'] = None
     assert 'last gap' not in health_summary({'system': state})['cards'][2][2]
