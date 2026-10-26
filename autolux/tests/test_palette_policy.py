@@ -23,6 +23,8 @@ from autolux.lighting.palettes import (
     PALETTES,
     Mood,
     Palette,
+    colour_temperature,
+    luminance,
     palette_table,
 )
 
@@ -30,8 +32,11 @@ SAME_FAMILY_HUE_DEGREES = 45.0
 CHROMATIC_SATURATION = 0.3
 HARD_COLD_DARK = Mood(temperature=-1.0, weight=-1.0, drive=1.0)
 WARM_BRIGHT_LAID_BACK = Mood(temperature=1.0, weight=1.0, drive=-1.0)
-TECHNO_LIKE = {'techno', 'uv', 'mono_cold'}
+HARD_WARM_BRIGHT = Mood(temperature=1.0, weight=1.0, drive=1.0)
+COLD_DARK_HARD_PALETTES = {'uv', 'mono_cold', 'ice'}
 SUNSET_LIKE = {'sunset', 'house', 'mono_warm', 'ember'}
+TECHNO_LIKE = {'techno', 'acid', 'house'}
+CLEAR_LUMINANCE_GAP = 0.1
 
 
 def by_name(name):
@@ -50,6 +55,21 @@ def test_every_palette_declares_a_mood_on_all_three_axes():
     assert len({palette.mood for palette in PALETTES}) == len(PALETTES)
 
 
+def test_temperature_comes_from_the_colours_so_amber_techno_is_warm():
+    for palette in PALETTES:
+        assert palette.mood.temperature == colour_temperature(palette.slots())
+    temperature = {palette.name: palette.mood.temperature for palette in PALETTES}
+    assert temperature['techno'] > 0.9 and temperature['ember'] > 0.9
+    assert temperature['ice'] < -0.9 and temperature['mono_cold'] < -0.9
+    assert colour_temperature(by_name('ice').slots() | {'primary': (1.0, 1.0, 1.0)}) < -0.9
+
+
+def test_hand_set_weight_follows_the_colours_luminance():
+    for brighter, dimmer in itertools.permutations(PALETTES, 2):
+        if luminance(brighter.slots()) - luminance(dimmer.slots()) > CLEAR_LUMINANCE_GAP:
+            assert brighter.mood.weight > dimmer.mood.weight, (brighter.name, dimmer.name)
+
+
 @pytest.mark.parametrize('axes', [(1.1, 0.0, 0.0), (0.0, -1.5, 0.0), (0.0, 0.0, 2.0)])
 def test_a_mood_outside_the_axes_is_rejected(axes):
     with pytest.raises(ValueError, match='within -1..1'):
@@ -57,9 +77,9 @@ def test_a_mood_outside_the_axes_is_rejected(axes):
 
 
 @pytest.mark.parametrize('seed', range(20))
-def test_a_hard_cold_dark_track_picks_a_techno_like_palette(seed):
-    assert picks(seed, [HARD_COLD_DARK]) == [picks(seed, [HARD_COLD_DARK])[0]]
-    assert picks(seed, [HARD_COLD_DARK])[0] in TECHNO_LIKE
+def test_a_track_picks_palettes_of_its_own_mood(seed):
+    assert picks(seed, [HARD_COLD_DARK])[0] in COLD_DARK_HARD_PALETTES
+    assert picks(seed, [HARD_WARM_BRIGHT])[0] in TECHNO_LIKE
     assert picks(seed, [WARM_BRIGHT_LAID_BACK])[0] in SUNSET_LIKE
 
 
@@ -156,11 +176,11 @@ def hue_distance(first, second):
 @pytest.mark.parametrize('base', PALETTES, ids=lambda palette: palette.name)
 def test_each_breakdown_variant_keeps_its_palette_identity(base):
     breakdown = by_name(f'{base.name}_breakdown')
-    assert (breakdown.mood, breakdown.secondary, breakdown.cold, breakdown.black) == (
-        base.mood,
+    assert (breakdown.weight, breakdown.drive, breakdown.secondary, breakdown.cold) == (
+        base.weight,
+        base.drive,
         base.secondary,
         base.cold,
-        base.black,
     )
     _, base_saturation, base_value = hsv(base.primary)
     _, saturation, value = hsv(breakdown.primary)
@@ -177,8 +197,9 @@ def test_each_breakdown_variant_keeps_its_palette_identity(base):
 @pytest.mark.parametrize('base', PALETTES, ids=lambda palette: palette.name)
 def test_each_drop_variant_pushes_the_accent_and_keeps_everything_else(base):
     drop = by_name(f'{base.name}_drop')
-    assert (drop.mood, drop.primary, drop.secondary, drop.cold, drop.black) == (
-        base.mood,
+    assert (drop.weight, drop.drive, drop.primary, drop.secondary, drop.cold, drop.black) == (
+        base.weight,
+        base.drive,
         base.primary,
         base.secondary,
         base.cold,
@@ -203,12 +224,19 @@ def test_the_login_table_starts_with_the_default_and_groups_each_palette_with_it
 
 @pytest.mark.parametrize(
     'change',
-    [{'name': 'Ice'}, {'mood': 'cold'}, {'accent': (1.2, 0.0, 0.0)}, {'cold': (1.0, 1.0)}],
+    [
+        {'name': 'Ice'},
+        {'weight': 1.5},
+        {'drive': -2.0},
+        {'accent': (1.2, 0.0, 0.0)},
+        {'cold': (1.0, 1.0)},
+    ],
 )
 def test_invalid_palettes_are_rejected(change):
     fields = {
         'name': 'ice',
-        'mood': Mood(-1.0, 0.4, 0.0),
+        'weight': 0.4,
+        'drive': 0.0,
         'primary': (0.0, 0.0, 1.0),
         'secondary': (0.0, 1.0, 1.0),
         'accent': (1.0, 1.0, 1.0),

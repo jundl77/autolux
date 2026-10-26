@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import colorsys
+import math
 import re
 from dataclasses import dataclass, replace
 
@@ -10,16 +12,20 @@ BREAKDOWN_SUFFIX = '_breakdown'
 DROP_SUFFIX = '_drop'
 PALETTE_NAME = re.compile(r'[a-z0-9_]{1,64}')
 BLACK: Rgb = (0.0, 0.0, 0.0)
+COLOUR_SHARES = (('primary', 0.5), ('secondary', 0.3), ('accent', 0.2))
+WARMEST_HUE_DEGREES = 30.0
 
 
 @dataclass(frozen=True)
 class Mood:
     """Where a palette sits, and where a measured track sits; each axis spans -1..1.
 
-    temperature: cold -1 .. warm +1. A palette's colour cast; a track's bass-over-treble balance.
-    weight: dark -1 .. bright +1. How much light a palette gives; a track's loudness and
-        spectral brightness.
-    drive: laid-back -1 .. hard +1. How pushed a palette feels; a track's tempo and energy.
+    temperature: cold -1 .. warm +1. A palette's colour cast, derived from its colours by
+        colour_temperature; a track's bass-over-treble balance.
+    weight: dark -1 .. bright +1. How much light a palette gives, hand-set and kept in the
+        order of its colours' luminance; a track's loudness and spectral brightness.
+    drive: laid-back -1 .. hard +1. How pushed a palette feels, hand-set; a track's tempo
+        and energy.
     """
 
     temperature: float
@@ -35,10 +41,30 @@ class Mood:
         return self.temperature, self.weight, self.drive
 
 
+def colour_temperature(colours: dict[str, Rgb]) -> float:
+    """Hue warmth (cos of the distance from orange, 30 deg) averaged by slot share x chroma."""
+    warmth = weights = 0.0
+    for slot, share in COLOUR_SHARES:
+        hue, saturation, value = colorsys.rgb_to_hsv(*colours[slot])
+        weight = share * saturation * value
+        warmth += weight * math.cos(math.radians(hue * 360.0 - WARMEST_HUE_DEGREES))
+        weights += weight
+    return round(warmth / weights, 2) if weights else 0.0
+
+
+def luminance(colours: dict[str, Rgb]) -> float:
+    return sum(
+        share * (0.2126 * red + 0.7152 * green + 0.0722 * blue)
+        for slot, share in COLOUR_SHARES
+        for red, green, blue in [colours[slot]]
+    )
+
+
 @dataclass(frozen=True)
 class Palette:
     name: str
-    mood: Mood
+    weight: float
+    drive: float
     primary: Rgb
     secondary: Rgb
     accent: Rgb
@@ -48,12 +74,15 @@ class Palette:
     def __post_init__(self):
         if PALETTE_NAME.fullmatch(self.name) is None:
             raise ValueError(f'palette name {self.name!r} must be lowercase letters, digits or _')
-        if not isinstance(self.mood, Mood):
-            raise ValueError(f'palette {self.name} needs a Mood')
         for slot in SLOTS:
             colour = getattr(self, slot)
             if len(colour) != 3 or not all(0.0 <= channel <= 1.0 for channel in colour):
                 raise ValueError(f'palette {self.name} {slot} must be three channels in 0..1')
+        self.mood
+
+    @property
+    def mood(self) -> Mood:
+        return Mood(colour_temperature(self.slots()), self.weight, self.drive)
 
     def slots(self) -> dict[str, Rgb]:
         return {slot: getattr(self, slot) for slot in SLOTS}
@@ -62,7 +91,8 @@ class Palette:
 PALETTES: tuple[Palette, ...] = (
     Palette(
         'techno',
-        Mood(temperature=-0.4, weight=-0.7, drive=0.9),
+        weight=0.2,
+        drive=0.9,
         primary=(1.0, 0.82, 0.6),
         secondary=(1.0, 0.55, 0.1),
         accent=(0.75, 0.0, 0.02),
@@ -70,7 +100,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'house',
-        Mood(temperature=0.3, weight=0.5, drive=0.4),
+        weight=0.3,
+        drive=0.4,
         primary=(1.0, 0.82, 0.6),
         secondary=(1.0, 0.0, 0.7),
         accent=(1.0, 0.4, 0.0),
@@ -78,7 +109,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'ice',
-        Mood(temperature=-1.0, weight=0.4, drive=0.0),
+        weight=0.4,
+        drive=0.0,
         primary=(0.25, 0.5, 1.0),
         secondary=(0.0, 0.85, 1.0),
         accent=(1.0, 1.0, 1.0),
@@ -86,7 +118,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'acid',
-        Mood(temperature=0.0, weight=0.7, drive=0.8),
+        weight=0.7,
+        drive=0.8,
         primary=(0.6, 1.0, 0.0),
         secondary=(1.0, 0.0, 0.75),
         accent=(1.0, 1.0, 1.0),
@@ -94,7 +127,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'sunset',
-        Mood(temperature=0.9, weight=0.6, drive=-0.8),
+        weight=-0.3,
+        drive=-0.8,
         primary=(1.0, 0.45, 0.1),
         secondary=(0.55, 0.1, 1.0),
         accent=(1.0, 0.3, 0.6),
@@ -102,7 +136,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'uv',
-        Mood(temperature=-0.6, weight=-0.8, drive=0.3),
+        weight=-0.8,
+        drive=0.3,
         primary=(0.5, 0.0, 1.0),
         secondary=(0.9, 0.9, 1.0),
         accent=(0.15, 0.1, 1.0),
@@ -110,7 +145,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'ember',
-        Mood(temperature=1.0, weight=-0.5, drive=-0.2),
+        weight=-0.6,
+        drive=-0.2,
         primary=(1.0, 0.15, 0.02),
         secondary=(1.0, 0.5, 0.0),
         accent=(0.6, 0.4, 0.0),
@@ -118,7 +154,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'mono_cold',
-        Mood(temperature=-0.7, weight=0.0, drive=0.5),
+        weight=0.6,
+        drive=0.5,
         primary=(0.9, 0.95, 1.0),
         secondary=(0.6, 0.65, 0.7),
         accent=(0.35, 0.38, 0.42),
@@ -126,7 +163,8 @@ PALETTES: tuple[Palette, ...] = (
     ),
     Palette(
         'mono_warm',
-        Mood(temperature=0.6, weight=-0.1, drive=-0.6),
+        weight=0.5,
+        drive=-0.6,
         primary=(1.0, 0.82, 0.6),
         secondary=(1.0, 0.7, 0.45),
         accent=(0.6, 0.45, 0.3),
