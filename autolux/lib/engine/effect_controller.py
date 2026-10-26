@@ -38,6 +38,18 @@ def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
     return duration
 
 
+def strobe_override(
+    override_id: str, priority: int, duration_seconds: float, settings: ShowSettings
+) -> dict:
+    return {
+        'id': override_id,
+        'target': 'all',
+        'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
+        'priority': priority,
+        'lifetime': {'kind': 'seconds', 'duration_seconds': duration_seconds},
+    }
+
+
 class EffectController:
     def __init__(
         self,
@@ -151,13 +163,7 @@ class EffectController:
         self._last_strobe_started_at = now
         duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
-            {
-                'id': DROP_ACCENT_ID,
-                'target': 'all',
-                'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
-                'priority': DROP_ACCENT_PRIORITY,
-                'lifetime': {'kind': 'seconds', 'duration_seconds': duration},
-            }
+            strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings)
         )
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)

@@ -6,12 +6,13 @@ from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import Clock
-from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
-from autolux.lib.engine.effect_definitions import STROBE_RATE_HZ, ShowSettings
+from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY, strobe_override
+from autolux.lib.engine.effect_definitions import ShowSettings
 
 LOGGER = logging.getLogger(__name__)
 
 STATIC_PRIORITY = DROP_ACCENT_PRIORITY + 1000
+STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
 STATIC_STROBE_ID = 'static_strobe'
 ALL_FIXTURES = 'all'
@@ -66,11 +67,17 @@ class StaticLooks:
             raise ValueError('a static dimmer must be within 0..1')
         if uv is not None and target not in self.rig.uv_groups:
             raise ValueError(f'{target!r} has no UV channel')
-        if colour is not None and uv is None:
-            for name in self._looks if target == ALL_FIXTURES else (target,):
-                if self._looks.get(name, {}).pop('uv', None) is not None:
+        if colour is not None and target == ALL_FIXTURES:
+            for name, other in self._looks.items():
+                if name != ALL_FIXTURES and ('colour' in other or 'uv' in other):
+                    other.pop('colour', None)
+                    other.pop('uv', None)
                     self._send(name)
         look = self._looks.setdefault(target, {})
+        if colour is not None and uv is None:
+            look.pop('uv', None)
+        if colour is not None and dimmer is None:
+            dimmer = look.get('dimmer', 1.0)
         for key, value in (('colour', colour), ('dimmer', dimmer), ('uv', uv)):
             if value is not None:
                 look[key] = value
@@ -111,13 +118,7 @@ class StaticLooks:
         duration = settings.strobe_max_burst_seconds
         self._strobe_until = now + duration
         self._lighting.set_override(
-            {
-                'id': STATIC_STROBE_ID,
-                'target': ALL_FIXTURES,
-                'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
-                'priority': STATIC_PRIORITY,
-                'lifetime': {'kind': 'seconds', 'duration_seconds': duration},
-            }
+            strobe_override(STATIC_STROBE_ID, STATIC_PRIORITY, duration, settings)
         )
 
     def resend(self) -> None:
@@ -164,6 +165,6 @@ class StaticLooks:
                 'id': STATIC_LOOK_PREFIX + target,
                 'target': ALL_FIXTURES if target == ALL_FIXTURES else {'group': target},
                 'values': values,
-                'priority': STATIC_PRIORITY,
+                'priority': STATIC_PRIORITY if target == ALL_FIXTURES else STATIC_GROUP_PRIORITY,
             }
         )

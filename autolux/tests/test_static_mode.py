@@ -1,12 +1,21 @@
 import pytest
 
-from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
+from autolux.lib.engine.effect_controller import (
+    DROP_ACCENT_ID,
+    DROP_ACCENT_PRIORITY,
+    EffectController,
+)
 from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
     LightIntent,
     ShowSettings,
 )
-from autolux.lib.engine.static_mode import STATIC_PRIORITY, StaticLooks, StaticRig
+from autolux.lib.engine.static_mode import (
+    STATIC_GROUP_PRIORITY,
+    STATIC_PRIORITY,
+    StaticLooks,
+    StaticRig,
+)
 from autolux.tests.test_light_engine import FakeDecoder, beat_at_phase, engine, selections, sent
 
 ROOM = StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
@@ -59,7 +68,7 @@ async def test_a_static_look_reaches_starfire_at_once_above_automatic_accents():
                 'id': 'static_wash',
                 'target': {'group': 'wash'},
                 'values': {'colour': {'red': 1.0, 'green': 0.0, 'blue': 0.0}, 'intensity': 0.2},
-                'priority': STATIC_PRIORITY,
+                'priority': STATIC_GROUP_PRIORITY,
             },
         },
     )
@@ -209,7 +218,7 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         'targets': ['all', 'fx', 'movers', 'strip', 'wash'],
         'blacklight': True,
         'blackout': True,
-        'looks': {'wash': {'colour': '#ff8000', 'dimmer': None, 'uv': False}},
+        'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
 
     control.commands.put_nowait({'action': 'mode', 'mode': 'auto'})
@@ -221,3 +230,73 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         False,
     )
     assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': 'static_wash'}
+
+
+async def test_a_group_look_outranks_all_and_a_colour_on_all_takes_the_groups_colour_back():
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    light.static().blacklight()
+    light.static_look('all', dimmer=0.3)
+    wash, everything = overrides(lighting)[-2:]
+    assert (wash['value']['priority'], everything['value']['priority']) == (
+        STATIC_GROUP_PRIORITY,
+        STATIC_PRIORITY,
+    )
+    assert STATIC_GROUP_PRIORITY > STATIC_PRIORITY
+    light.static_look('all', colour=(1.0, 1.0, 1.0))
+    wash, everything = overrides(lighting)[-2:]
+    assert wash['value'] == {
+        'id': 'static_wash',
+        'target': {'group': 'wash'},
+        'values': {'intensity': 1.0},
+        'priority': STATIC_GROUP_PRIORITY,
+    }
+    assert everything['value']['values'] == {
+        'colour': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+        'intensity': 0.3,
+    }
+
+
+async def test_a_colour_look_carries_a_visible_dimmer_under_a_dark_loop():
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    light.static_look('fx', colour=(0.0, 1.0, 0.0))
+    assert overrides(lighting)[-1]['value']['values']['intensity'] == 1.0
+    light.static_look('fx', dimmer=0.4)
+    light.static_look('fx', colour=(0.0, 0.0, 1.0))
+    assert overrides(lighting)[-1]['value']['values']['intensity'] == 0.4
+
+
+async def test_the_drop_accent_and_the_static_strobe_share_one_capped_shape():
+    settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0)
+    light, _, _, lighting = static_engine(settings=lambda: settings)
+    controller = EffectController(lighting, settings=lambda: settings)
+    await controller.change_effect(LightIntent.DROP, 120.0)
+    light.enter_static()
+    light.static().strobe()
+    drop, operator = (c['value'] for c in overrides(lighting))
+    assert drop['id'] == DROP_ACCENT_ID
+    assert (drop['priority'], operator['priority']) == (DROP_ACCENT_PRIORITY, STATIC_PRIORITY)
+    assert drop['values'] == operator['values'] == {'strobe_hz': 5.0}
+    assert drop['target'] == operator['target'] == 'all'
+
+
+async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
+    decoder = FakeDecoder()
+    light, _, _, lighting = static_engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    light.enter_static()
+    light.static_look('all', colour=(1.0, 0.0, 0.0))
+    lighting.events.clear()
+
+    light.on_digital_silence()
+    assert light.mode == 'static'
+    assert overrides(lighting)[-1]['value']['id'] == 'static_all'
+    light.on_signal_return()
+    light.on_sound_start()
+    await beat_at_phase(light, decoder, 0, decision='drop')
+    standby = [s['command']['autoloop'] for s in selections(lighting)]
+    assert PREFERRED_AUTOLOOPS[LightIntent.DROP] not in standby, 'static holds through standby'
+    await light.leave_static()
+    await beat_at_phase(light, decoder, 0)
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]

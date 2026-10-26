@@ -224,12 +224,36 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
                     },
                     intensity_multiplier: None,
                     lifetime: OverrideLifetime::UntilCleared,
-                    priority: 1000,
+                    priority: 1101,
                 },
             },
         )
         .unwrap();
-    let lit = engine.render_at(0.25).unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::SetOverride {
+                value: LightingOverride {
+                    id: "drop_arrival".into(),
+                    target: Target::Group("wash".into()),
+                    values: PropertyValues {
+                        intensity: Some(0.5),
+                        colour: Some(Rgb {
+                            red: 1.0,
+                            green: 0.0,
+                            blue: 0.0,
+                        }),
+                        strobe_hz: Some(2.0),
+                        ..PropertyValues::default()
+                    },
+                    intensity_multiplier: None,
+                    lifetime: OverrideLifetime::UntilCleared,
+                    priority: 100,
+                },
+            },
+        )
+        .unwrap();
+    let lit = engine.render_at(0.5).unwrap();
     for start in [64, 72, 80, 88] {
         assert_eq!(
             &lit.dmx_frames_by_universe[&0][start..start + 8],
@@ -241,9 +265,9 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
         &before.dmx_frames_by_universe[&0][..24]
     );
     engine
-        .apply(0.25, &Command::SetBlackout { enabled: true })
+        .apply(0.5, &Command::SetBlackout { enabled: true })
         .unwrap();
-    let dark = engine.render_at(0.5).unwrap();
+    let dark = engine.render_at(1.0).unwrap();
     for start in [64, 72, 80, 88] {
         assert_eq!(
             &dark.dmx_frames_by_universe[&0][start..start + 8],

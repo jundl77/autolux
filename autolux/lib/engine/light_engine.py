@@ -173,6 +173,9 @@ class LightEngine(IMusicAnalyserHandler):
     def _holding(self) -> bool:
         return self._paused or self._static_mode
 
+    def _holding_the_look(self) -> bool:
+        return self._static_mode or (self._paused and not self._showing_standby)
+
     def enter_static(self) -> None:
         if self._static_mode:
             return
@@ -336,6 +339,8 @@ class LightEngine(IMusicAnalyserHandler):
         self.effect_controller.enter_standby(
             self._published_bpm.get('last'), renderer_paused=self._paused
         )
+        if self._static_mode:
+            self.static_looks.resend()
 
     def on_signal_return(self):
         LOGGER.info('[engine] signal returned — the show restarts from scratch')
@@ -476,7 +481,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
-        if intent is None or (self._holding() and not self._showing_standby):
+        if intent is None or self._holding_the_look():
             return
         label = self._section_class_at_playback
         now = self._clock.monotonic()
@@ -679,7 +684,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._current_intent = intent
         self._section_class_at_playback = section_label
         self._intent_commits += 1
-        if self._holding() and not self._showing_standby:
+        if self._holding_the_look():
             return
         self._held_intent = intent
         if self._showing_standby or self._room_beat_phase in (None, 0):

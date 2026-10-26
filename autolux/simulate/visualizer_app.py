@@ -884,6 +884,7 @@ def _build_static_panel():
             html.Div(
                 [
                     html.Button('Blacklight', id='static-blacklight'),
+                    html.Span('UV ignores master', className='control-unit'),
                     html.Button('Blackout', id='static-blackout'),
                     html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
                     html.Button('Back to Auto', id='static-auto', className='static-auto'),
