@@ -68,17 +68,17 @@ def test_an_empty_capture_summarises_to_nothing_rather_than_raising():
     assert buckets([], []) == []
 
 
-def test_soak_run_reaches_renderer_with_selected_autoloops_and_profiles(tmp_path, monkeypatch):
+def test_soak_run_reaches_renderer_with_selected_autoloops_and_rig(tmp_path, monkeypatch):
     import soak_nn
 
     from cli import starfire_runtime
 
     autoloops = tmp_path / 'custom-autoloops'
-    profiles = tmp_path / 'custom-profiles.json'
+    rig = tmp_path / 'custom.mvr'
     captured = {}
 
     def renderer_boundary(binary, rig, selected_autoloops, artnet, run_dir, **kwargs):
-        captured.update(autoloops=selected_autoloops, **kwargs)
+        captured.update(autoloops=selected_autoloops, rig=rig, **kwargs)
         raise RuntimeError('renderer boundary reached')
 
     # Stop before acquiring audio, GPU, subprocess or lighting resources.
@@ -96,11 +96,11 @@ def test_soak_run_reaches_renderer_with_selected_autoloops_and_profiles(tmp_path
                 '0',
                 '--autoloops',
                 str(autoloops),
-                '--profiles',
-                str(profiles),
+                '--rig',
+                str(rig),
             ]
         )
 
     assert captured['autoloops'] == autoloops
-    assert captured['profiles'] == profiles
+    assert captured['rig'] == rig
     assert 0 < captured['run_id'] < 1 << 64

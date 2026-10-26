@@ -36,15 +36,17 @@ Keep models and music under `autolux/training/data/raveform/`, or set
 
 Route music to **CABLE Input**; analysis and Radius both capture **CABLE Output**.
 The receiver needs speakers, the Enttec USB device and key-based Windows SSH.
-See [receiver setup](cli/README.md). Fixture patches and profiles live in `rigs/`;
-named Lua autoloops live in `autoloops/`. Saved fixture edits apply on
-the next session.
+See [receiver setup](cli/README.md). The rig is `rigs/room.mvr` (MVR with
+embedded GDTF, see [rig-mvr](docs/starfire/rig-mvr.md)); the fixture library is
+`rigs/profiles.json`; named Lua autoloops live in `autoloops/`. Saved fixture
+edits apply on the next session.
 
-The dashboard's **Config** tab provides a fixture library and 512-channel DMX map.
-Drag fixtures to free addresses; click a fixture to edit its details, groups and
-movement limits. Universes are displayed from 1. Draft edits run locally; only
-Save and Reload contact the server. Save validates the complete patch and checks
-for concurrent changes before replacing it; edits apply on the next session.
+The dashboard's **Config** tab provides a fixture library, a 512-channel DMX map
+and an MVR rig view: a top-down plan and the full scene tree. Drag fixtures to
+free addresses; click any object to edit every MVR field and the correctable GDTF
+fields. Universes are displayed from 1. Draft edits run locally; only Save and
+Reload contact the server. Save checks MVR conformance, renderer acceptance and
+concurrent changes before replacing the rig; edits apply on the next session.
 
 ## Run
 

@@ -211,7 +211,7 @@ def gdtf_spec_name(manufacturer: str, fixture_type: str) -> str:
     )
 
 
-def _gdtf_root(description: str, label: str) -> ElementTree.Element:
+def gdtf_root(description: str, label: str) -> ElementTree.Element:
     root = _guard_xml(description.encode('utf-8'), label)
     if root.tag != 'GDTF' or len(root.findall('FixtureType')) != 1:
         raise ValueError(f'{label}: must contain one GDTF FixtureType')
@@ -221,7 +221,7 @@ def _gdtf_root(description: str, label: str) -> ElementTree.Element:
 def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
     """DMX modes with Starfire's footprint rule: highest break-1 offset, and the breaks used."""
     modes = {}
-    for mode in _gdtf_root(description, label).iter('DMXMode'):
+    for mode in gdtf_root(description, label).iter('DMXMode'):
         offsets, breaks, attributes = [], set(), set()
         for channel in mode.iter('DMXChannel'):
             dmx_break = channel.get('DMXBreak', '1')
@@ -342,7 +342,7 @@ def draft(scene: Scene) -> dict:
     gdtf = {}
     for spec in sorted(referenced_specs(scene.root)):
         if spec in scene.entries:
-            gdtf[spec] = to_tree(_gdtf_root(gdtf_description(scene, spec), spec), f'g{len(gdtf)}-')
+            gdtf[spec] = to_tree(gdtf_root(gdtf_description(scene, spec), spec), f'g{len(gdtf)}-')
     return {'scene': to_tree(scene.root, 's'), 'gdtf': gdtf}
 
 
@@ -378,7 +378,7 @@ def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
             errors.append(f'GDTFSpec {spec} is neither in the MVR archive nor installed')
             continue
         tree = edited.get('gdtf', {}).get(spec)
-        before = _without_keys(to_tree(_gdtf_root(original, spec)))
+        before = _without_keys(to_tree(gdtf_root(original, spec)))
         if tree is None or _without_keys(tree) == before:
             if spec in scene.entries:
                 result.entries[spec] = scene.entries[spec]
