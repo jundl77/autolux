@@ -232,7 +232,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut light_at = None;
     let mut health_error_at: Option<Instant> = None;
     let mut reported_discontinuities = 0;
-    let mut reported_priority_denied = false;
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -312,7 +311,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             let stats = capture.metrics();
             ensure!(
                 !stats.faulted,
-                "{}",
                 capture_failure(capture.last_error(), &stats)
             );
             if stats.discontinuities != reported_discontinuities
@@ -326,12 +324,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                     stats.discontinuities
                 );
                 reported_discontinuities = stats.discontinuities;
-            }
-            if stats.capture_priority_denied != 0 && !reported_priority_denied {
-                eprintln!(
-                    "Radius capture runs without realtime scheduling; overruns are more likely under load"
-                );
-                reported_priority_denied = true;
             }
             ensure!(
                 capture_started.elapsed() < CALLBACK_STALE_TIMEOUT

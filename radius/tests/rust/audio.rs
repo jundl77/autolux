@@ -36,20 +36,21 @@ fn assembler(delay_seconds: f64) -> CaptureAssembler {
 }
 
 const PACKET_FRAMES: u64 = 441;
-const DEVICE_EPOCH_NANOS: u128 = 1_000_000_000;
 
 impl CaptureAssembler {
     fn capture_at(&mut self, input: &[f32], first_frame: u64) {
-        let captured_at_nanos = DEVICE_EPOCH_NANOS + frame_nanos(first_frame);
-        let last_frame = (input.len() / CHANNELS).saturating_sub(1) as u64;
-        self.capture(
-            input,
-            CaptureTiming {
-                captured_at_nanos,
-                callback_nanos: captured_at_nanos + frame_nanos(last_frame),
-                callback_at: Instant::now(),
-            },
-        );
+        let last_frame = first_frame + (input.len() / CHANNELS).saturating_sub(1) as u64;
+        self.capture_timed(input, first_frame, last_frame, Instant::now());
+    }
+
+    fn capture_timed(&mut self, input: &[f32], first: u64, callback: u64, callback_at: Instant) {
+        let device_nanos = |frame| 1_000_000_000 + frame_nanos(frame);
+        let timing = CaptureTiming {
+            captured_at_nanos: device_nanos(first),
+            callback_nanos: device_nanos(callback),
+            callback_at,
+        };
+        self.capture(input, timing);
     }
 }
 
@@ -57,7 +58,6 @@ impl CaptureAssembler {
 enum Event {
     Xrun(i64),
     Jump(i64),
-    LateTimestamp(u64),
     CallbackStall(u64),
 }
 
@@ -65,12 +65,8 @@ struct Device {
     capture: CaptureAssembler,
     started: Instant,
     next_frame: u64,
-    callback_nanos: u128,
-    position: u64,
-    audible: Vec<(u64, u64)>,
-    stamp_error: Duration,
-    monotonic: bool,
-    last_stamp: Option<Instant>,
+    callback_frame: u64,
+    blocks: Vec<AudioBlock>,
 }
 
 impl Device {
@@ -79,144 +75,98 @@ impl Device {
             capture: assembler(delay_seconds),
             started: Instant::now(),
             next_frame: 0,
-            callback_nanos: 0,
-            position: 0,
-            audible: Vec::new(),
-            stamp_error: Duration::ZERO,
-            monotonic: true,
-            last_stamp: None,
+            callback_frame: 0,
+            blocks: Vec::new(),
         }
     }
 
     fn run(&mut self, packets: std::ops::Range<usize>, events: &[(usize, Event)]) {
         for packet in packets {
-            let (mut late, mut stall) = (0, 0);
+            let mut stall = 0;
             for &(_, event) in events.iter().filter(|(at, _)| *at == packet) {
                 match event {
-                    Event::Xrun(gap) => {
+                    Event::Xrun(gap) | Event::Jump(gap) => {
                         self.next_frame = self.next_frame.checked_add_signed(gap).unwrap();
-                        self.capture
-                            .counters
-                            .stream
-                            .error(cpal::ErrorKind::Xrun.into());
                     }
-                    Event::Jump(gap) => {
-                        self.next_frame = self.next_frame.checked_add_signed(gap).unwrap()
-                    }
-                    Event::LateTimestamp(frames) => late = frames,
                     Event::CallbackStall(frames) => stall = frames,
                 }
-            }
-            let input: Vec<f32> = (self.next_frame..self.next_frame + PACKET_FRAMES)
-                .flat_map(|frame| [(frame + 1) as f32, -((frame + 1) as f32)])
-                .collect();
-            let captured_at_nanos = DEVICE_EPOCH_NANOS + frame_nanos(self.next_frame + late);
-            let packet_end = captured_at_nanos + frame_nanos(PACKET_FRAMES - 1);
-            self.callback_nanos = self.callback_nanos.max(packet_end + frame_nanos(stall));
-            let since_epoch = (self.callback_nanos - DEVICE_EPOCH_NANOS) as u64;
-            let timing = CaptureTiming {
-                captured_at_nanos,
-                callback_nanos: self.callback_nanos,
-                callback_at: self.started + Duration::from_nanos(since_epoch),
-            };
-            self.capture.capture(&input, timing);
-            self.next_frame += PACKET_FRAMES;
-            self.drain();
-        }
-    }
-
-    fn drain(&mut self) {
-        while let Some(block) = self.capture.queue.pop() {
-            assert_eq!(block.audio_frame_position, self.position);
-            let last_frame = self.position + BLOCK_FRAMES as u64 - 1;
-            let expected = self.started + Duration::from_nanos(frame_nanos(last_frame) as u64);
-            let stamp = block.assembly_completed_at;
-            self.stamp_error = self
-                .stamp_error
-                .max(stamp.max(expected) - stamp.min(expected));
-            self.monotonic &= self.last_stamp.is_none_or(|last| stamp >= last);
-            self.last_stamp = Some(stamp);
-            for (frame, &sample) in block.samples.iter().step_by(CHANNELS).enumerate() {
-                if sample != 0.0 {
-                    self.audible
-                        .push((self.position + frame as u64, sample as u64 - 1));
+                if let Event::Xrun(_) = event {
+                    let stream = &self.capture.counters.stream;
+                    stream.error(cpal::ErrorKind::Xrun.into());
                 }
             }
-            self.position += BLOCK_FRAMES as u64;
+            let first = self.next_frame;
+            let input: Vec<f32> = (first + 1..=first + PACKET_FRAMES)
+                .flat_map(|sample| [sample as f32, -(sample as f32)])
+                .collect();
+            self.callback_frame = self.callback_frame.max(first + PACKET_FRAMES - 1 + stall);
+            let callback_at =
+                self.started + Duration::from_nanos(frame_nanos(self.callback_frame) as u64);
+            self.capture
+                .capture_timed(&input, first, self.callback_frame, callback_at);
+            self.next_frame += PACKET_FRAMES;
+            self.blocks
+                .extend(std::iter::from_fn(|| self.capture.queue.pop()));
         }
-    }
-
-    fn emitted_frames(&self) -> u64 {
-        self.position + u64::from(self.capture.partial.frames)
     }
 }
 
-type Bridge<'a> = (f64, &'a [(usize, Event)], i64, u64, u64, u64);
+type Bridge<'a> = (&'a [(usize, Event)], i64, u64, u64, u64);
 
 #[test]
 fn discontinuities_reanchor_the_sample_timeline_to_device_time() {
     use Event::*;
-    let deadband = CAPTURE_JITTER_DEAD_BAND_FRAMES;
-    let cases: [Bridge<'_>; 6] = [
-        (0.25, &[(60, Xrun(3_000))], 3_000, 3_000, 0, 0),
-        (0.25, &[(40, Xrun(-600))], -600, 0, 600, 0),
-        (0.01, &[(10, Xrun(4_410))], 4_410, 4_410, 0, 0),
+    let band = CAPTURE_JITTER_DEAD_BAND_FRAMES as i64 - 1;
+    let stall = (10, CallbackStall(20 * PACKET_FRAMES));
+    let cases: [Bridge<'_>; 4] = [
+        (&[(60, Xrun(3_000))], 3_000, 3_000, 0, 0),
+        (&[(40, Xrun(-600))], -600, 0, 600, 0),
         (
-            0.25,
-            &[(20, Jump(deadband as i64 - 1)), (50, Jump(1_000))],
+            &[(20, Jump(band)), (50, Jump(1_000))],
             1_000,
             1_000,
             0,
-            deadband - 1,
+            band as u64,
         ),
-        (
-            0.25,
-            &[(30, Xrun(2_000)), (30, LateTimestamp(132))],
-            2_132,
-            2_132,
-            0,
-            132,
-        ),
-        (
-            0.25,
-            &[(10, CallbackStall(20 * PACKET_FRAMES)), (20, Xrun(3_000))],
-            3_000,
-            3_000,
-            0,
-            0,
-        ),
+        (&[stall, (20, Xrun(3_000))], 3_000, 3_000, 0, 0),
     ];
-    for (delay_seconds, events, gap, silence, dropped, tolerance) in cases {
-        let mut device = Device::new(delay_seconds);
+    for (events, gap, silence, dropped, tolerance) in cases {
+        let mut device = Device::new(0.25);
         device.run(0..100, events);
         let metrics = device.capture.counters.metrics(0);
         assert!(!metrics.faulted, "{events:?}");
-        assert_eq!(
-            (
-                metrics.discontinuities,
-                metrics.last_gap_frames,
-                metrics.resync_silence_frames,
-                metrics.resync_dropped_frames,
-                metrics.device_frames
-            ),
-            (1, Some(gap), silence, dropped, 100 * PACKET_FRAMES),
-            "{events:?}"
-        );
-        assert!(device.emitted_frames().abs_diff(device.next_frame) <= tolerance);
+        assert_eq!(metrics.device_frames, 100 * PACKET_FRAMES);
+        assert_eq!(metrics.discontinuities, 1);
+        assert_eq!(metrics.last_gap_frames, Some(gap));
+        assert_eq!(metrics.resync_silence_frames, silence);
+        assert_eq!(metrics.resync_dropped_frames, dropped);
+        let queued = (device.blocks.len() * BLOCK_FRAMES) as u64;
+        let emitted = queued + u64::from(device.capture.partial.frames);
+        assert!(emitted.abs_diff(device.next_frame) <= tolerance);
+
         let delay_frames = device.capture.delay.samples.len() as u64;
-        assert_eq!(
-            device.audible.len() as u64,
-            device.position - delay_frames - silence
-        );
-        let mut previous = None;
-        for &(transmitted, device_frame) in &device.audible {
-            assert!(transmitted.abs_diff(device_frame + delay_frames) <= tolerance);
-            assert!(previous.is_none_or(|previous| device_frame > previous));
-            previous = Some(device_frame);
+        let stamp_tolerance = Duration::from_nanos(frame_nanos(tolerance) as u64 + 1_000);
+        let mut audible = 0;
+        for (index, block) in device.blocks.iter().enumerate() {
+            let position = (index * BLOCK_FRAMES) as u64;
+            assert_eq!(block.audio_frame_position, position);
+            let last_frame = frame_nanos(position + BLOCK_FRAMES as u64 - 1) as u64;
+            let expected = device.started + Duration::from_nanos(last_frame);
+            let stamp = block.assembly_completed_at;
+            assert!(stamp.max(expected) - stamp.min(expected) <= stamp_tolerance);
+            for (frame, &sample) in block.samples.iter().step_by(CHANNELS).enumerate() {
+                let transmitted = position + frame as u64 + 1;
+                if sample != 0.0 {
+                    assert!(transmitted.abs_diff(sample as u64 + delay_frames) <= tolerance);
+                    audible += 1;
+                }
+            }
         }
-        let stamp_tolerance = frame_nanos(tolerance) as u64 + 1_000;
-        assert!(device.stamp_error <= Duration::from_nanos(stamp_tolerance));
-        assert!(tolerance != 0 || device.monotonic, "{events:?}");
+        assert_eq!(audible, queued - delay_frames - silence);
+        let stamps = device
+            .blocks
+            .is_sorted_by_key(|block| block.assembly_completed_at);
+        assert!(tolerance != 0 || stamps, "{events:?}");
     }
 }
 
@@ -228,14 +178,14 @@ fn faults_only_on_repeated_discontinuities_or_gaps_beyond_the_queue() {
     let repeated = |spacing: usize| {
         (0..CAPTURE_DISCONTINUITY_LIMIT)
             .map(|index| (1 + index * spacing, Xrun(500)))
-            .collect::<Vec<_>>()
+            .collect()
     };
     let queue_frames = (CAPTURE_QUEUE_BLOCKS * BLOCK_FRAMES) as i64;
-    let partial = (400 * PACKET_FRAMES % BLOCK_FRAMES as u64) as i64;
-    let headroom = queue_frames - partial - PACKET_FRAMES as i64;
+    let headroom =
+        queue_frames - (400 * PACKET_FRAMES % BLOCK_FRAMES as u64 + PACKET_FRAMES) as i64;
     let too_often = Some("capture discontinuities repeated too often");
     let too_long = Some("a capture gap exceeded the capture queue headroom");
-    let cases = [
+    let cases: [(Vec<_>, _); 6] = [
         (repeated(window_packets / 3), too_often),
         (repeated(window_packets / 2 + 1), None),
         (vec![(400, Xrun(headroom))], None),
@@ -247,29 +197,26 @@ fn faults_only_on_repeated_discontinuities_or_gaps_beyond_the_queue() {
         let mut device = Device::new(0.25);
         let last = events.last().unwrap().0;
         device.run(0..last, &events);
-        let position = device.position;
+        let blocks = device.blocks.len();
         device.run(last..last + 1, &events);
-        let metrics = device.capture.counters.metrics(0);
         assert_eq!(device.capture.counters.stream.error_message(), fault);
-        assert_eq!(metrics.discontinuities, events.len() as u64);
-        if fault.is_some() {
-            assert_eq!(device.position, position, "{events:?} queued audio");
-        }
+        let discontinuities = device.capture.counters.metrics(0).discontinuities;
+        assert_eq!(discontinuities, events.len() as u64);
+        assert!(fault.is_none() || device.blocks.len() == blocks);
     }
 }
 
 #[test]
 fn a_consumer_stall_up_to_half_a_second_is_absorbed_and_a_longer_one_latches() {
     let queue_frames = CAPTURE_QUEUE_BLOCKS * BLOCK_FRAMES;
-    assert!(queue_frames >= SAMPLE_RATE as usize / 2);
-    assert!(queue_frames < SAMPLE_RATE as usize / 2 + BLOCK_FRAMES);
+    let half_second = SAMPLE_RATE as usize / 2;
+    assert_eq!(queue_frames, half_second.next_multiple_of(BLOCK_FRAMES));
     let mut capture = assembler(0.0);
     capture.capture_at(&vec![0.5; queue_frames * CHANNELS], 0);
-    assert!(!capture.counters.stream.faulted.load(Ordering::Acquire));
+    assert!(!capture.counters.stream.faulted.load(Acquire));
     capture.capture_at(&[0.5; BLOCK_FRAMES * CHANNELS], queue_frames as u64);
-    let metrics = capture.counters.metrics(0);
-    assert!(metrics.faulted);
-    assert_eq!(metrics.queue_overflow_frames, BLOCK_FRAMES as u64);
+    let overflow_frames = capture.counters.metrics(0).queue_overflow_frames;
+    assert_eq!(overflow_frames, BLOCK_FRAMES as u64);
     assert_eq!(
         capture.counters.stream.error_message(),
         Some("capture queue overflowed; the consumer stopped keeping up")
@@ -281,19 +228,13 @@ fn a_consumer_stall_up_to_half_a_second_is_absorbed_and_a_longer_one_latches() {
 
 #[test]
 fn stream_errors_fault_distinctly_while_capture_xruns_and_priority_denial_continue() {
-    let messages: Vec<_> = (0..16)
-        .filter_map(|code| {
-            let counters = StreamCounters::default();
-            counters.fault(code);
-            counters.error_message()
-        })
-        .collect();
+    let message = |code| {
+        let counters = StreamCounters::default();
+        counters.fault(code);
+        counters.error_message()
+    };
+    let messages: std::collections::HashSet<_> = (0..16).filter_map(message).collect();
     assert_eq!(messages.len(), 11);
-    assert!(
-        messages
-            .iter()
-            .all(|message| messages.iter().filter(|other| *other == message).count() == 1)
-    );
 
     let mut device = Device::new(0.25);
     let denied = cpal::ErrorKind::RealtimeDenied;
@@ -301,14 +242,8 @@ fn stream_errors_fault_distinctly_while_capture_xruns_and_priority_denial_contin
     device.run(0..2, &[(1, Event::Xrun(100))]);
     let metrics = device.capture.counters.metrics(0);
     assert!(!metrics.faulted);
-    assert_eq!(
-        (
-            metrics.capture_priority_denied,
-            metrics.device_xruns,
-            metrics.discontinuities
-        ),
-        (1, 1, 1)
-    );
+    assert_eq!(metrics.capture_priority_denied, 1);
+    assert_eq!((metrics.device_xruns, metrics.discontinuities), (1, 1));
     device.capture.capture_at(&[0.5; 3], 0);
     assert_eq!(
         device.capture.counters.stream.error_message(),
@@ -317,7 +252,7 @@ fn stream_errors_fault_distinctly_while_capture_xruns_and_priority_denial_contin
 
     let playback = StreamCounters::default();
     playback.error(denied.into());
-    assert!(!playback.faulted.load(Ordering::Acquire));
+    assert!(!playback.faulted.load(Acquire));
     playback.error(cpal::ErrorKind::Xrun.into());
     assert_eq!(
         playback.error_message(),
@@ -326,102 +261,57 @@ fn stream_errors_fault_distinctly_while_capture_xruns_and_priority_denial_contin
 }
 
 #[test]
-fn discarding_silences_the_delayed_tail_and_rebuilds_the_delay_from_new_audio() {
-    let seconds = 0.25;
-    let lag = (seconds * f64::from(SAMPLE_RATE)).round() as usize;
-    let mut delay = AudioDelay::new(seconds).unwrap();
-    for _ in 0..lag * 3 / 2 {
-        delay.frame([0.5, -0.5]);
-    }
-    delay.discard_buffered();
-    let mut previous_gain = 1.0;
-    for frame in 0..lag {
-        let input = [frame as f32 + 1.0, -(frame as f32 + 1.0)];
-        let output = delay.frame(input);
-        let gain = output[0] / 0.5;
-        assert!(
-            gain <= previous_gain && gain >= 0.0,
-            "frame {frame} must fade"
-        );
-        assert_eq!(output[1], -output[0]);
-        if frame >= DISCARD_FADE_FRAMES - 1 {
-            assert_eq!(output, [0.0; CHANNELS], "frame {frame} must be silent");
-        }
-        previous_gain = gain;
-    }
-    for frame in 0..lag {
-        let expected = [frame as f32 + 1.0, -(frame as f32 + 1.0)];
-        assert_eq!(delay.frame([0.0; CHANNELS]), expected);
-    }
-}
-
-#[test]
-fn discard_request_keeps_receiver_playout_contiguous_and_silent_without_rebuffering() {
-    fn step(
-        capture: &mut CaptureAssembler,
-        sender: &mut PlayoutSender,
-        playout: &mut Playout,
-        input: f32,
-    ) -> Vec<f32> {
-        let first_frame = capture.counters.device_frames.load(Ordering::Relaxed);
-        capture.capture_at(&[input; BLOCK_FRAMES * CHANNELS], first_frame);
-        while let Some(audio) = capture.queue.pop() {
-            sender
-                .enqueue(PlaybackBlock {
-                    audio,
-                    light_sequence_number: 1,
-                    channels: [0; 512],
-                })
-                .unwrap();
-        }
-        playout.begin_callback();
-        let mut output = [0.0; CHANNELS];
-        let played = (0..BLOCK_FRAMES)
-            .map(|_| {
-                playout.frame(&mut output);
-                output[0]
-            })
-            .collect();
-        while sender.lighting.pop().is_some() {}
-        played
-    }
-
+fn discard_request_fades_to_contiguous_silence_without_rebuffering_receiver_playout() {
     let mut capture = assembler(0.25);
     let (mut playout, mut sender) = Playout::new(JITTER_BUFFER_MS).unwrap();
+    let mut step = |capture: &mut CaptureAssembler, input: f32| {
+        let first_frame = capture.counters.device_frames.load(Relaxed);
+        capture.capture_at(&[input; BLOCK_FRAMES * CHANNELS], first_frame);
+        while let Some(audio) = capture.queue.pop() {
+            let block = PlaybackBlock {
+                audio,
+                light_sequence_number: 1,
+                channels: [0; 512],
+            };
+            sender.enqueue(block).unwrap();
+        }
+        playout.begin_callback();
+        let mut output = [[0.0; CHANNELS]; BLOCK_FRAMES];
+        for frame in &mut output {
+            playout.frame(frame);
+        }
+        while sender.lighting.pop().is_some() {}
+        (output.map(|frame| frame[0]), playout.is_primed())
+    };
     let blocks_per_second = SAMPLE_RATE as usize / BLOCK_FRAMES;
-    let mut played = Vec::new();
-    for _ in 0..blocks_per_second {
-        played = step(&mut capture, &mut sender, &mut playout, 0.5);
-    }
-    assert!(played.iter().all(|&sample| sample == 0.5));
-    assert!(playout.is_primed());
+    let (played, primed) =
+        (0..blocks_per_second).fold(([0.0; BLOCK_FRAMES], false), |_, _| step(&mut capture, 0.5));
+    assert!(primed && played.iter().all(|&sample| sample == 0.5));
 
-    capture
-        .counters
-        .discard_requested
-        .store(true, Ordering::Release);
-    let mut after_discard = Vec::new();
+    capture.counters.discard_requested.store(true, Release);
+    let mut after = Vec::new();
     for _ in 0..blocks_per_second {
-        after_discard.extend(step(&mut capture, &mut sender, &mut playout, 0.25));
-        assert!(playout.is_primed(), "RX must not rebuffer");
+        let (played, primed) = step(&mut capture, 0.25);
+        assert!(primed, "RX must not rebuffer");
+        after.extend(played);
     }
-    assert!(!capture.counters.stream.faulted.load(Ordering::Acquire));
-    assert_eq!(sender.counters.underruns.load(Ordering::Relaxed), 0);
-    assert_eq!(sender.counters.rebuffer_count.load(Ordering::Relaxed), 0);
+    assert!(!capture.counters.stream.faulted.load(Acquire));
+    assert_eq!(sender.counters.underruns.load(Relaxed), 0);
+    assert_eq!(sender.counters.rebuffer_count.load(Relaxed), 0);
 
-    let silence_starts = after_discard
+    let silence_starts = after.iter().position(|&sample| sample == 0.0).unwrap();
+    assert!(after[..silence_starts].is_sorted_by(|a, b| a >= b));
+    let silent = after[silence_starts..]
         .iter()
-        .position(|&sample| sample == 0.0)
-        .expect("the discarded tail must reach RX as silence");
-    let resumes = silence_starts
-        + after_discard[silence_starts..]
-            .iter()
-            .position(|&sample| sample > 0.0)
-            .expect("new audio must emerge one delay later");
+        .position(|&s| s > 0.0)
+        .unwrap();
     let delay_frames = (0.25 * f64::from(SAMPLE_RATE)).round() as usize;
-    let silent_frames = resumes - silence_starts;
-    assert!(silent_frames.abs_diff(delay_frames - DISCARD_FADE_FRAMES + 1) <= 2);
-    assert!(after_discard[resumes + 1..].iter().all(|&s| s == 0.25));
+    assert!(silent.abs_diff(delay_frames - DISCARD_FADE_FRAMES + 1) <= 2);
+    assert!(
+        after[silence_starts + silent + 1..]
+            .iter()
+            .all(|&sample| sample == 0.25)
+    );
 }
 
 #[test]

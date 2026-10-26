@@ -2,7 +2,8 @@
 //! CPAL and Windows schedule the callback threads; worker CPU affinity does not control them.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
@@ -108,18 +109,14 @@ fn select_device(device_id: &str, input: bool) -> Result<cpal::Device> {
     Ok(device)
 }
 
-fn stream_config() -> cpal::StreamConfig {
+fn stream_config(input: bool) -> cpal::StreamConfig {
     cpal::StreamConfig {
         channels: CHANNELS as u16,
         sample_rate: SAMPLE_RATE,
-        buffer_size: cpal::BufferSize::Default,
-    }
-}
-
-fn capture_stream_config() -> cpal::StreamConfig {
-    cpal::StreamConfig {
-        buffer_size: cpal::BufferSize::Fixed(STALL_TOLERANT_CAPTURE_BUFFER_FRAMES),
-        ..stream_config()
+        buffer_size: match input {
+            true => cpal::BufferSize::Fixed(STALL_TOLERANT_CAPTURE_BUFFER_FRAMES),
+            false => cpal::BufferSize::Default,
+        },
     }
 }
 
@@ -130,14 +127,14 @@ pub fn check_device(device_id: &str, input: bool) -> Result<AudioDevice> {
     let description = device.description()?;
     let _stream = if input {
         device.build_input_stream::<f32, _, _>(
-            capture_stream_config(),
+            stream_config(true),
             |_, _| {},
             |_| {},
             Some(STREAM_OPEN_TIMEOUT),
         )
     } else {
         device.build_output_stream::<f32, _, _>(
-            stream_config(),
+            stream_config(false),
             |output, _| output.fill(0.0),
             |_| {},
             Some(STREAM_OPEN_TIMEOUT),
@@ -206,8 +203,17 @@ const PARTIAL_FRAME: u32 = 11;
 const PLAYBACK_XRUN: u32 = 12;
 const CAPTURE_GAP_UNMEASURED: u32 = 13;
 
+struct Epoch(Instant);
+
+impl Default for Epoch {
+    fn default() -> Self {
+        Self(Instant::now())
+    }
+}
+
+#[derive(Default)]
 struct StreamCounters {
-    epoch: Instant,
+    epoch: Epoch,
     callbacks: AtomicU64,
     last_callback_micros: AtomicU64,
     device_xruns: AtomicU64,
@@ -219,34 +225,17 @@ struct StreamCounters {
     xrun_pending: AtomicBool,
 }
 
-impl Default for StreamCounters {
-    fn default() -> Self {
-        Self {
-            epoch: Instant::now(),
-            callbacks: AtomicU64::new(0),
-            last_callback_micros: AtomicU64::new(0),
-            device_xruns: AtomicU64::new(0),
-            stream_errors: AtomicU64::new(0),
-            priority_denied: AtomicU64::new(0),
-            last_error_code: AtomicU32::new(0),
-            faulted: AtomicBool::new(false),
-            bridges_xruns: false,
-            xrun_pending: AtomicBool::new(false),
-        }
-    }
-}
-
 impl StreamCounters {
     fn callback(&self) {
         self.last_callback_micros
-            .store(self.epoch.elapsed().as_micros() as u64, Ordering::Relaxed);
-        self.callbacks.fetch_add(1, Ordering::Release);
+            .store(self.epoch.0.elapsed().as_micros() as u64, Relaxed);
+        self.callbacks.fetch_add(1, Release);
     }
 
     fn callback_age(&self) -> Option<Duration> {
-        (self.callbacks.load(Ordering::Acquire) != 0).then(|| {
-            self.epoch.elapsed().saturating_sub(Duration::from_micros(
-                self.last_callback_micros.load(Ordering::Relaxed),
+        (self.callbacks.load(Acquire) != 0).then(|| {
+            self.epoch.0.elapsed().saturating_sub(Duration::from_micros(
+                self.last_callback_micros.load(Relaxed),
             ))
         })
     }
@@ -254,19 +243,19 @@ impl StreamCounters {
     fn error(&self, error: cpal::Error) {
         let code = match error.kind() {
             cpal::ErrorKind::RealtimeDenied => {
-                self.priority_denied.fetch_add(1, Ordering::Relaxed);
+                self.priority_denied.fetch_add(1, Relaxed);
                 return;
             }
             cpal::ErrorKind::Xrun => {
-                self.device_xruns.fetch_add(1, Ordering::Relaxed);
+                self.device_xruns.fetch_add(1, Relaxed);
                 if self.bridges_xruns {
-                    self.xrun_pending.store(true, Ordering::Release);
+                    self.xrun_pending.store(true, Release);
                     return;
                 }
                 PLAYBACK_XRUN
             }
             kind => {
-                self.stream_errors.fetch_add(1, Ordering::Relaxed);
+                self.stream_errors.fetch_add(1, Relaxed);
                 match kind {
                     cpal::ErrorKind::DeviceNotAvailable => ENDPOINT_DISCONNECTED,
                     cpal::ErrorKind::StreamInvalidated => STREAM_INVALIDATED,
@@ -280,12 +269,12 @@ impl StreamCounters {
     }
 
     fn fault(&self, code: u32) {
-        self.last_error_code.store(code, Ordering::Relaxed);
-        self.faulted.store(true, Ordering::Release);
+        self.last_error_code.store(code, Relaxed);
+        self.faulted.store(true, Release);
     }
 
     fn error_message(&self) -> Option<&'static str> {
-        match self.last_error_code.load(Ordering::Relaxed) {
+        match self.last_error_code.load(Relaxed) {
             ENDPOINT_DISCONNECTED => Some("audio endpoint disconnected"),
             STREAM_INVALIDATED => Some("audio stream invalidated"),
             ENDPOINT_CHANGED => Some("audio endpoint changed"),
@@ -337,22 +326,21 @@ struct CaptureCounters {
 
 impl CaptureCounters {
     fn metrics(&self, queued_frames: usize) -> CaptureMetrics {
-        let discontinuities = self.discontinuities.load(Ordering::Acquire);
+        let discontinuities = self.discontinuities.load(Acquire);
         CaptureMetrics {
-            callbacks: self.stream.callbacks.load(Ordering::Acquire),
-            device_frames: self.device_frames.load(Ordering::Relaxed),
-            queue_overflow_frames: self.queue_overflow_frames.load(Ordering::Relaxed),
-            device_xruns: self.stream.device_xruns.load(Ordering::Relaxed),
+            callbacks: self.stream.callbacks.load(Acquire),
+            device_frames: self.device_frames.load(Relaxed),
+            queue_overflow_frames: self.queue_overflow_frames.load(Relaxed),
+            device_xruns: self.stream.device_xruns.load(Relaxed),
             discontinuities,
-            last_gap_frames: (discontinuities != 0)
-                .then(|| self.last_gap_frames.load(Ordering::Relaxed)),
-            resync_silence_frames: self.silence_frames.load(Ordering::Relaxed),
-            resync_dropped_frames: self.dropped_frames.load(Ordering::Relaxed),
-            stream_errors: self.stream.stream_errors.load(Ordering::Relaxed),
-            capture_priority_denied: self.stream.priority_denied.load(Ordering::Relaxed),
+            last_gap_frames: (discontinuities != 0).then(|| self.last_gap_frames.load(Relaxed)),
+            resync_silence_frames: self.silence_frames.load(Relaxed),
+            resync_dropped_frames: self.dropped_frames.load(Relaxed),
+            stream_errors: self.stream.stream_errors.load(Relaxed),
+            capture_priority_denied: self.stream.priority_denied.load(Relaxed),
             last_callback_age: self.stream.callback_age(),
             queued_frames,
-            faulted: self.stream.faulted.load(Ordering::Acquire),
+            faulted: self.stream.faulted.load(Acquire),
         }
     }
 }
@@ -373,15 +361,15 @@ impl CaptureTiming {
         if self.captured_at_nanos == 0 {
             return self.callback_at;
         }
-        let offset = |nanos: u128| Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX));
-        if device_nanos <= self.callback_nanos {
-            self.callback_at
-                .checked_sub(offset(self.callback_nanos - device_nanos))
-        } else {
-            self.callback_at
-                .checked_add(offset(device_nanos - self.callback_nanos))
-        }
-        .unwrap_or(self.callback_at)
+        let after = |a: u128, b: u128| {
+            Duration::from_nanos(u64::try_from(a.saturating_sub(b)).unwrap_or(u64::MAX))
+        };
+        let before = self
+            .callback_at
+            .checked_sub(after(self.callback_nanos, device_nanos));
+        before
+            .and_then(|at| at.checked_add(after(device_nanos, self.callback_nanos)))
+            .unwrap_or(self.callback_at)
     }
 }
 
@@ -393,23 +381,18 @@ struct CaptureTimeline {
 }
 
 impl CaptureTimeline {
-    fn gap_frames(
-        &mut self,
-        captured_at: u128,
-        frames: usize,
-        flagged: bool,
-    ) -> Result<Option<i64>, u32> {
-        if captured_at == 0 {
+    fn gap_frames(&mut self, at: u128, frames: usize, flagged: bool) -> Result<Option<i64>, u32> {
+        if at == 0 {
             return match flagged && self.next_frame_nanos.is_some() {
                 true => Err(CAPTURE_GAP_UNMEASURED),
                 false => Ok(None),
             };
         }
-        let next = captured_at + frame_nanos(frames as u64);
+        let next = at + frame_nanos(frames as u64);
         let Some(expected) = self.next_frame_nanos.replace(next) else {
             return Ok(None);
         };
-        let gap_nanos = captured_at as f64 - expected as f64;
+        let gap_nanos = at as f64 - expected as f64;
         let gap = (gap_nanos * f64::from(SAMPLE_RATE) / NANOS_PER_SECOND).round() as i64;
         Ok((flagged || gap.unsigned_abs() > CAPTURE_JITTER_DEAD_BAND_FRAMES).then_some(gap))
     }
@@ -461,14 +444,10 @@ impl CaptureAssembler {
 
     fn capture(&mut self, input: &[f32], timing: CaptureTiming) {
         self.counters.stream.callback();
-        if self.counters.stream.faulted.load(Ordering::Acquire) {
+        if self.counters.stream.faulted.load(Acquire) {
             return;
         }
-        if self
-            .counters
-            .discard_requested
-            .swap(false, Ordering::AcqRel)
-        {
+        if self.counters.discard_requested.swap(false, AcqRel) {
             self.delay.discard_buffered();
         }
         if let Err(code) = self.assemble(input, timing) {
@@ -478,48 +457,40 @@ impl CaptureAssembler {
 
     fn assemble(&mut self, input: &[f32], timing: CaptureTiming) -> Result<(), u32> {
         if !input.len().is_multiple_of(CHANNELS) {
-            self.counters
-                .stream
-                .stream_errors
-                .fetch_add(1, Ordering::Relaxed);
+            self.counters.stream.stream_errors.fetch_add(1, Relaxed);
             return Err(PARTIAL_FRAME);
         }
         let input = input.as_chunks::<CHANNELS>().0;
         self.counters
             .device_frames
-            .fetch_add(input.len() as u64, Ordering::Relaxed);
+            .fetch_add(input.len() as u64, Relaxed);
         let at = timing.captured_at_nanos;
         let silence = self.resynchronize(at, input.len())?;
         let skipped = self.timeline.skip_repeated(input.len());
-        let silence_frames = (0..silence).map(|index| {
+        let silent = |index| {
             (
                 [0.0; CHANNELS],
                 at.saturating_sub(frame_nanos(silence - index)),
             )
-        });
+        };
         let audio_frames = input
             .iter()
             .enumerate()
             .skip(skipped)
             .map(|(index, &frame)| (frame, at + frame_nanos(index as u64)));
-        silence_frames
+        (0..silence)
+            .map(silent)
             .chain(audio_frames)
             .try_for_each(|(frame, device_nanos)| self.emit(frame, timing, device_nanos))
     }
 
     fn resynchronize(&mut self, captured_at: u128, frames: usize) -> Result<u64, u32> {
-        let flagged = self
-            .counters
-            .stream
-            .xrun_pending
-            .swap(false, Ordering::AcqRel);
+        let flagged = self.counters.stream.xrun_pending.swap(false, AcqRel);
         let Some(gap) = self.timeline.gap_frames(captured_at, frames, flagged)? else {
             return Ok(0);
         };
-        self.counters.last_gap_frames.store(gap, Ordering::Relaxed);
-        self.counters
-            .discontinuities
-            .fetch_add(1, Ordering::Release);
+        self.counters.last_gap_frames.store(gap, Relaxed);
+        self.counters.discontinuities.fetch_add(1, Release);
         if self.timeline.repeats_too_often(captured_at) {
             return Err(CAPTURE_REPEATED_DISCONTINUITY);
         }
@@ -535,19 +506,12 @@ impl CaptureAssembler {
         if needed > headroom {
             return Err(CAPTURE_GAP_EXCEEDS_QUEUE);
         }
-        counter.fetch_add(gap.unsigned_abs(), Ordering::Relaxed);
-        if gap < 0 {
-            self.timeline.repeated_frames += gap.unsigned_abs();
-        }
+        counter.fetch_add(gap.unsigned_abs(), Relaxed);
+        self.timeline.repeated_frames += gap.min(0).unsigned_abs();
         Ok(gap.max(0) as u64)
     }
 
-    fn emit(
-        &mut self,
-        frame: [f32; CHANNELS],
-        timing: CaptureTiming,
-        device_nanos: u128,
-    ) -> Result<(), u32> {
+    fn emit(&mut self, frame: [f32; CHANNELS], timing: CaptureTiming, at: u128) -> Result<(), u32> {
         let frame = self.delay.frame(frame);
         let offset = usize::from(self.partial.frames) * CHANNELS;
         self.partial.samples[offset..offset + CHANNELS].copy_from_slice(&frame);
@@ -558,11 +522,11 @@ impl CaptureAssembler {
         let next_position = self.partial.audio_frame_position + BLOCK_FRAMES as u64;
         let mut block = std::mem::take(&mut self.partial);
         self.partial.audio_frame_position = next_position;
-        block.assembly_completed_at = timing.instant(device_nanos);
+        block.assembly_completed_at = timing.instant(at);
         self.queue.push(block).map_err(|_| {
             self.counters
                 .queue_overflow_frames
-                .fetch_add(BLOCK_FRAMES as u64, Ordering::Relaxed);
+                .fetch_add(BLOCK_FRAMES as u64, Relaxed);
             CAPTURE_QUEUE_OVERFLOW
         })
     }
@@ -582,7 +546,7 @@ impl CaptureStream {
         let errors = counters.clone();
         let stream = device
             .build_input_stream::<f32, _, _>(
-                capture_stream_config(),
+                stream_config(true),
                 move |input, info| {
                     let timestamp = info.timestamp();
                     assembler.capture(
@@ -611,9 +575,7 @@ impl CaptureStream {
     }
 
     pub fn discard_delayed_audio(&self) {
-        self.counters
-            .discard_requested
-            .store(true, Ordering::Release);
+        self.counters.discard_requested.store(true, Release);
     }
 
     pub fn last_error(&self) -> Option<&'static str> {
@@ -645,40 +607,40 @@ pub struct AudibleClock {
 
 impl AudibleClock {
     fn publish(&self, audio_frame_position: Option<u64>, device_latency_frames: u64) {
-        self.sequence.fetch_add(1, Ordering::SeqCst);
+        self.sequence.fetch_add(1, SeqCst);
         if let Some(position) = audio_frame_position {
-            self.audio_frame_position.store(position, Ordering::SeqCst);
+            self.audio_frame_position.store(position, SeqCst);
         }
         self.position_valid
-            .store(audio_frame_position.is_some(), Ordering::SeqCst);
+            .store(audio_frame_position.is_some(), SeqCst);
         self.device_latency_frames
-            .store(device_latency_frames, Ordering::SeqCst);
-        self.sequence.fetch_add(1, Ordering::SeqCst);
+            .store(device_latency_frames, SeqCst);
+        self.sequence.fetch_add(1, SeqCst);
     }
 
     pub fn snapshot(&self) -> AudibleSnapshot {
         // A stalled writer must never hold the DMX worker in a spin loop.
         for _ in 0..3 {
-            let before = self.sequence.load(Ordering::SeqCst);
+            let before = self.sequence.load(SeqCst);
             if before & 1 != 0 {
                 continue;
             }
             let snapshot = AudibleSnapshot {
-                audio_frame_position: self.audio_frame_position.load(Ordering::SeqCst),
-                position_valid: self.position_valid.load(Ordering::SeqCst)
-                    && !self.counters.faulted.load(Ordering::Acquire),
+                audio_frame_position: self.audio_frame_position.load(SeqCst),
+                position_valid: self.position_valid.load(SeqCst)
+                    && !self.counters.faulted.load(Acquire),
                 callback_age: self.counters.callback_age(),
-                device_latency_frames: self.device_latency_frames.load(Ordering::SeqCst),
+                device_latency_frames: self.device_latency_frames.load(SeqCst),
             };
-            if before == self.sequence.load(Ordering::SeqCst) {
+            if before == self.sequence.load(SeqCst) {
                 return snapshot;
             }
         }
         AudibleSnapshot {
-            audio_frame_position: self.audio_frame_position.load(Ordering::Acquire),
+            audio_frame_position: self.audio_frame_position.load(Acquire),
             position_valid: false,
             callback_age: self.counters.callback_age(),
-            device_latency_frames: self.device_latency_frames.load(Ordering::Acquire),
+            device_latency_frames: self.device_latency_frames.load(Acquire),
         }
     }
 }
@@ -755,11 +717,11 @@ impl PlaybackStream {
         let mut history = OutputHistory::new();
         let stream = device
             .build_output_stream::<f32, _, _>(
-                stream_config(),
+                stream_config(false),
                 move |output, info| {
                     callback_counters.callback();
-                    if callback_counters.faulted.load(Ordering::Acquire) {
-                        playout.counters.faulted.store(true, Ordering::Release);
+                    if callback_counters.faulted.load(Acquire) {
+                        playout.counters.faulted.store(true, Release);
                     }
                     let timestamp = info.timestamp();
                     let pending_frames = (timestamp
@@ -775,7 +737,7 @@ impl PlaybackStream {
                     }
                     let audible = history.audible_position(callback_start_frame, pending_frames);
                     callback_clock.publish(
-                        if playout.counters.faulted.load(Ordering::Acquire) {
+                        if playout.counters.faulted.load(Acquire) {
                             None
                         } else {
                             audible
@@ -797,7 +759,7 @@ impl PlaybackStream {
     }
 
     pub fn enqueue(&mut self, block: PlaybackBlock) -> Result<(), EnqueueError> {
-        if self.counters.faulted.load(Ordering::Acquire) {
+        if self.counters.faulted.load(Acquire) {
             return Err(EnqueueError::Faulted);
         }
         self.sender.enqueue(block)
@@ -822,19 +784,18 @@ impl PlaybackStream {
     pub fn metrics(&self) -> PlaybackMetrics {
         let playout = &self.sender.counters;
         PlaybackMetrics {
-            callbacks: self.counters.callbacks.load(Ordering::Acquire),
-            stream_errors: self.counters.stream_errors.load(Ordering::Relaxed),
-            device_xruns: self.counters.device_xruns.load(Ordering::Relaxed),
-            queue_overflow_frames: playout.queue_overflow_frames.load(Ordering::Relaxed),
-            underruns: playout.underruns.load(Ordering::Relaxed),
-            rebuffer_count: playout.rebuffer_count.load(Ordering::Relaxed),
-            buffered_frames: playout.buffered_frames.load(Ordering::Relaxed),
-            drift_ppm: playout.drift_ppm.load(Ordering::Relaxed),
-            lighting_overflows: playout.lighting_overflows.load(Ordering::Relaxed),
-            priority_denied: self.counters.priority_denied.load(Ordering::Relaxed),
+            callbacks: self.counters.callbacks.load(Acquire),
+            stream_errors: self.counters.stream_errors.load(Relaxed),
+            device_xruns: self.counters.device_xruns.load(Relaxed),
+            queue_overflow_frames: playout.queue_overflow_frames.load(Relaxed),
+            underruns: playout.underruns.load(Relaxed),
+            rebuffer_count: playout.rebuffer_count.load(Relaxed),
+            buffered_frames: playout.buffered_frames.load(Relaxed),
+            drift_ppm: playout.drift_ppm.load(Relaxed),
+            lighting_overflows: playout.lighting_overflows.load(Relaxed),
+            priority_denied: self.counters.priority_denied.load(Relaxed),
             last_callback_age: self.counters.callback_age(),
-            faulted: self.counters.faulted.load(Ordering::Acquire)
-                || playout.faulted.load(Ordering::Acquire),
+            faulted: self.counters.faulted.load(Acquire) || playout.faulted.load(Acquire),
         }
     }
 }
