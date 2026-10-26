@@ -175,5 +175,5 @@ def test_a_replay_embeds_the_login_palette_table_and_names_each_selection_palett
     assert [palette['name'] for palette in replay['palettes']] == [
         palette.name for palette in palette_table()
     ]
-    assert replay['palettes'][0]['secondary'] == {'red': 1.0, 'green': 0.55, 'blue': 0.1}
+    assert replay['palettes'][0]['secondary'] == {'red': 1.0, 'green': 140 / 255, 'blue': 26 / 255}
     assert {event['command']['palette'] for event in selections(replay)} == {DEFAULT_PALETTE}

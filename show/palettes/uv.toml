@@ -1,0 +1,19 @@
+number = 6
+
+[slots]
+primary = "#8000ff"
+secondary = "#e6e6ff"
+accent = "#261aff"
+cold = "#b299ff"
+black = "#000000"
+
+[mood]
+weight = -0.8
+drive = 0.3
+
+[breakdown]
+primary = "#a673ff"
+accent = "#5959f2"
+
+[drop]
+accent = "#0d00ff"

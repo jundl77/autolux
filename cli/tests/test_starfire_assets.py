@@ -172,10 +172,11 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
     login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
     techno = login.palettes[0]
+    # show/palettes/techno.toml: secondary = "#ff8c1a".
     assert (techno.secondary.red, techno.secondary.green, techno.secondary.blue) == (
         1.0,
-        0.55,
-        0.1,
+        140 / 255,
+        26 / 255,
     )
     commands = [
         protocol.build_command({'kind': 'set_palette', 'name': 'ice'}),

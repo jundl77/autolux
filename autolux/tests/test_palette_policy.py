@@ -416,3 +416,73 @@ async def test_a_silence_restart_discards_the_window():
     assert not light._track_mood.measuring
     light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, 0)
     assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
+
+
+PALETTE_TOML = '''number = 1
+
+[slots]
+primary = "#ffd199"
+secondary = "#ff8c1a"
+accent = "#bf0005"
+cold = "#bfd9ff"
+black = "#000000"
+
+[mood]
+weight = 0.2
+drive = 0.9
+
+[breakdown]
+accent = "#b2264c"
+
+[drop]
+accent = "#ff0008"
+'''
+
+
+def test_the_shipped_palette_files_load_in_console_number_order():
+    from autolux.lighting.palettes import PALETTE_DIRECTORY
+
+    on_disk = {path.stem for path in PALETTE_DIRECTORY.glob('*.toml')}
+    assert {palette.name for palette in PALETTES} == on_disk
+    assert PALETTES[0].name == DEFAULT_PALETTE == 'techno'
+    assert by_name('techno').secondary == (1.0, 140 / 255, 26 / 255)
+
+
+def test_a_palette_file_derives_its_temperature_and_generates_its_variants(tmp_path):
+    from autolux.lighting.palettes import load_palettes
+
+    (tmp_path / 'glow.toml').write_text(PALETTE_TOML)
+    [palette], [breakdown], [drop] = load_palettes(tmp_path)
+    assert palette.mood.temperature == colour_temperature(palette.slots())
+    assert breakdown.name == 'glow_breakdown' and drop.name == 'glow_drop'
+    assert breakdown.accent == (178 / 255, 38 / 255, 76 / 255)
+    assert breakdown.primary == palette.primary
+    assert drop.accent == (1.0, 0.0, 8 / 255)
+
+
+@pytest.mark.parametrize(
+    ('edit', 'message'),
+    [
+        (('"#ff8c1a"', '"orange"'), "slots.secondary 'orange' must be a #rrggbb colour"),
+        (('drive = 0.9', 'drive = 0.9\ntemperature = 0.5'), 'temperature comes from the colours'),
+        (('drive = 0.9', 'drive = 1.5'), 'mood.drive 1.5 must be a number within -1..1'),
+        (('black = "#000000"\n', ''), 'missing slots.black'),
+        (('[drop]', '[drop]\nmagenta = "#ff00ff"'), 'unknown drop.magenta'),
+        (('number = 1', 'number = 0'), 'number 0 must be a whole number'),
+    ],
+)
+def test_a_bad_palette_file_is_named_with_the_key_and_the_rule(tmp_path, edit, message):
+    from autolux.lighting.palettes import PaletteError, load_palettes
+
+    (tmp_path / 'glow.toml').write_text(PALETTE_TOML.replace(*edit))
+    with pytest.raises(PaletteError, match=f'glow.toml: .*{message}'):
+        load_palettes(tmp_path)
+
+
+def test_two_palettes_cannot_share_a_console_number(tmp_path):
+    from autolux.lighting.palettes import PaletteError, load_palettes
+
+    (tmp_path / 'one.toml').write_text(PALETTE_TOML)
+    (tmp_path / 'two.toml').write_text(PALETTE_TOML)
+    with pytest.raises(PaletteError, match='two palettes share a number'):
+        load_palettes(tmp_path)
