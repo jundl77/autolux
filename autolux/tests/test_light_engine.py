@@ -1416,13 +1416,13 @@ async def test_master_scales_the_quiet_dim_and_bypasses_the_playback_delay():
 
 async def test_show_control_settings_survive_a_restart_and_apply_without_one(tmp_path):
     from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.lib.main import ShowControl, load_show_settings
+    from autolux.lib.main import SETTINGS_SAVE_SETTLE_SECONDS, ShowControl, load_show_settings
 
     path = tmp_path / 'show.json'
     path.write_text('{"keep": "me"}')
-    control = ShowControl(path)
+    light, _, clock, lighting = engine(queue=False)
+    control = ShowControl(path, clock=clock)
     assert control.settings == ShowSettings()
-    light, _, _, lighting = engine(queue=False)
     light._settings = lambda: control.settings
     light.pause()
 
@@ -1431,6 +1431,8 @@ async def test_show_control_settings_survive_a_restart_and_apply_without_one(tmp
     )
     await control.apply_pending(light)
     assert masters(lighting)[-1] == pytest.approx(0.3)
+    clock.advance(SETTINGS_SAVE_SETTLE_SECONDS)
+    await control.apply_pending(light)
     assert load_show_settings(path) == ShowSettings(quiet_brightness=0.3)
     assert ShowControl(path).settings == control.settings
     assert '"keep": "me"' in path.read_text()
@@ -1842,9 +1844,9 @@ async def test_the_intensity_fader_applies_at_once_and_survives_a_restart(tmp_pa
     from autolux.lib.main import ShowControl, load_show_settings
 
     path = tmp_path / 'show.json'
-    control = ShowControl(path)
-    control.settings = ShowSettings(crossfade_beats=4)
     light, _, clock, lighting = engine()
+    control = ShowControl(path, clock=clock)
+    control.settings = ShowSettings(crossfade_beats=4)
     light._settings = lambda: control.settings
     changed_at = clock.monotonic()
     control.commands.put_nowait({'action': 'intensity', 'level': 0.25})
@@ -1852,5 +1854,38 @@ async def test_the_intensity_fader_applies_at_once_and_survives_a_restart(tmp_pa
     assert sent(lighting, 'set_intensity') == [
         (changed_at, {'kind': 'set_intensity', 'level': 0.25})
     ]
+    control.save_settings()
     assert load_show_settings(path) == ShowSettings(crossfade_beats=4, intensity=0.25)
     assert ShowControl(path).settings.intensity == 0.25
+
+
+async def test_a_fader_drag_updates_live_but_writes_the_show_file_once_it_settles(
+    tmp_path, monkeypatch, caplog
+):
+    from autolux.lib import main
+
+    writes = []
+    save = main.save_show_settings
+    monkeypatch.setattr(
+        main,
+        'save_show_settings',
+        lambda path, settings: writes.append(settings) or save(path, settings),
+    )
+    light, _, clock, lighting = engine()
+    control = main.ShowControl(tmp_path / 'show.json', clock=clock)
+    light._settings = lambda: control.settings
+    levels = [round(0.2 + step * 0.02, 2) for step in range(30)]
+    with caplog.at_level(logging.INFO):
+        for level in levels:
+            control.commands.put_nowait({'action': 'intensity', 'level': level})
+            await control.apply_pending(light)
+            clock.advance(1.0 / len(levels))
+        assert [command['level'] for _, command in sent(lighting, 'set_intensity')] == levels
+        assert {event['command']['kind'] for event in lighting.events} == {'set_intensity'}
+        assert writes == []
+        clock.advance(main.SETTINGS_SAVE_SETTLE_SECONDS)
+        await control.apply_pending(light)
+        await control.apply_pending(light)
+    assert [settings.intensity for settings in writes] == [levels[-1]]
+    assert caplog.text.count('show settings') == 1
+    assert main.load_show_settings(tmp_path / 'show.json').intensity == levels[-1]

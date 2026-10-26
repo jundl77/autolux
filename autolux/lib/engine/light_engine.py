@@ -184,7 +184,10 @@ class LightEngine(IMusicAnalyserHandler):
         self.lighting_client.set_strobe_limits(
             settings.strobe_max_rate_hz, settings.strobe_max_burst_seconds
         )
-        self.lighting_client.set_intensity(settings.intensity)
+        self.send_intensity()
+
+    def send_intensity(self) -> None:
+        self.lighting_client.set_intensity(self._settings().intensity)
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
         dimmed = (self._room_quiet or self._paused) and not self._showing_standby
