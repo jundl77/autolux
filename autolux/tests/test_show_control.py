@@ -258,6 +258,14 @@ def static_show():
             False,
             {'action': 'static', 'kind': 'preset', 'preset': 'warm'},
         ),
+        # Off must not carry the picker's colour.
+        (
+            'static-preset-off',
+            '#ffffff',
+            1.0,
+            False,
+            {'action': 'static', 'kind': 'preset', 'preset': 'off'},
+        ),
         ('static-blacklight', None, None, False, {'action': 'static', 'kind': 'blacklight'}),
         ('static-strobe', None, None, False, {'action': 'static', 'kind': 'strobe'}),
         (

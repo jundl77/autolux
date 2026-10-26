@@ -14,6 +14,7 @@ from dash import Input, Output, State, dcc, html
 
 from autolux.lib.engine.effect_definitions import DEFAULT_INTENSITY, SHOW_SETTING_RANGES
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
+from autolux.lib.engine.static_mode import PRESET_COLOURS, colour_hex
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
@@ -1042,8 +1043,11 @@ def _build_static_panel():
                     dcc.Input(
                         id='static-colour',
                         type='color',
-                        value='#ffffff',
+                        value=colour_hex(PRESET_COLOURS['warm']),
                         debounce=0.3,
+                        # Restoring the last chosen colour sends nothing: the callback skips initial calls.
+                        persistence=True,
+                        persistence_type='local',
                     ),
                     html.Div(
                         [
