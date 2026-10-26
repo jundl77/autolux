@@ -989,13 +989,11 @@ STATIC_CSS = '''
 .static-look { display: grid; grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1.5fr);
                gap: 16px; align-items: center; }
 .static-target label { margin-right: 12px; color: #9baabb; font-size: 12px; }
-#static-colour { width: 100%; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
-                 border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px; }
-#static-colour:invalid { border-color: #e8b56d; }
+#static-colour { width: 100%; height: 36px; background: #0b121c; border: 1px solid #344256;
+                 border-radius: 4px; padding: 2px; cursor: pointer; }
 #static-dimmer-value { color: #e6edf3; font-size: 14px; font-weight: 600;
                        font-variant-numeric: tabular-nums; }
 #static-control .static-blackout-on { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
-#static-control .static-auto { margin-left: auto; }
 @media (max-width: 720px) { .static-look { grid-template-columns: 1fr; } }
 '''
 
@@ -1007,8 +1005,6 @@ def static_control_command(trigger, target, colour, dimmer, blackout) -> dict | 
         return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
     if trigger == 'static-blackout':
         return {'action': 'static', 'kind': 'blackout', 'enabled': not blackout}
-    if trigger == 'static-auto':
-        return {'action': 'mode', 'mode': 'auto'}
     if trigger == 'static-colour':
         text = (colour or '').strip()
         if not HEX_COLOUR_TEXT.fullmatch(text):
@@ -1045,9 +1041,8 @@ def _build_static_panel():
                     ),
                     dcc.Input(
                         id='static-colour',
-                        type='text',
-                        placeholder='#ffffff',
-                        pattern=r'#?[0-9a-fA-F]{6}',
+                        type='color',
+                        value='#ffffff',
                         debounce=0.3,
                     ),
                     html.Div(
@@ -1082,7 +1077,6 @@ def _build_static_panel():
                     html.Span('UV ignores master', className='control-unit'),
                     html.Button('Blackout', id='static-blackout'),
                     html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
-                    html.Button('Back to Auto', id='static-auto', className='static-auto'),
                 ],
                 className='static-row',
             ),
@@ -1113,6 +1107,7 @@ def _with_static_mode(card: list) -> list:
         ),
         html.Div(auto, id='auto-mode-panel'),
         html.Div(_build_static_panel(), id='static-mode-panel', style={'display': 'none'}),
+        dcc.Store(id='control-mode-synced'),
     ]
 
 
@@ -1129,15 +1124,13 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
     app.clientside_callback(
         '''function(state) {
             const ready = !!state && !!state.mode && !!state.static;
-            const mode = ready ? state.mode : window.dash_clientside.no_update;
             const statics = ready ? state.static : {targets: ['all'], blacklight: false};
             const options = statics.targets.map((target) =>
                 ({label: target === 'all' ? 'All' : target, value: target}));
             const blackout = !!statics.blackout;
-            return [mode, options, blackout ? 'static-blackout-on' : '',
+            return [options, blackout ? 'static-blackout-on' : '',
                     blackout ? 'Blackout on' : 'Blackout', !statics.blacklight];
         }''',
-        Output('control-mode', 'value'),
         Output('static-target', 'options'),
         Output('static-blackout', 'className'),
         Output('static-blackout', 'children'),
@@ -1165,12 +1158,24 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
     sent_dimmer = {}
 
     @app.callback(
+        Output('control-mode', 'value'),
+        Output('control-mode-synced', 'data'),
+        Input('control-state', 'data'),
+        State('control-mode-synced', 'data'),
+        prevent_initial_call=True,
+    )
+    def show_mode_on_load(state, synced):
+        mode = (state or {}).get('mode')
+        if synced or mode is None:
+            raise dash.exceptions.PreventUpdate
+        return mode, True
+
+    @app.callback(
         Output('static-status', 'children'),
-        Output('control-mode', 'value', allow_duplicate=True),
+        Output('control-state', 'data', allow_duplicate=True),
         Input('control-mode', 'value'),
         *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
         *[Input(name, 'n_clicks') for name in (*STATIC_BUTTONS, 'static-blackout')],
-        Input('static-auto', 'n_clicks'),
         Input('static-colour', 'value'),
         Input('static-dimmer', 'value'),
         Input('static-dimmer-live', 'data'),
@@ -1211,7 +1216,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         if command['action'] == 'mode':
             sent_dimmer.clear()
             expectations.expect(mode=command['mode'])
-            return '', command['mode']
+            return '', {**state, 'mode': command['mode']}
         if command.get('kind') == 'preset':
             sent_dimmer.clear()
         return '', dash.no_update

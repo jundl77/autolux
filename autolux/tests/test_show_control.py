@@ -10,6 +10,7 @@ from autolux.simulate.visualizer_app import (
     SETTINGS_GROUPS,
     ControlExpectations,
     SnapshotPoller,
+    build_app,
     control_command,
     decimal_text,
     expected_control_values,
@@ -286,7 +287,6 @@ def static_show():
             False,
             {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.35},
         ),
-        ('static-auto', None, None, False, {'action': 'mode', 'mode': 'auto'}),
     ],
 )
 def test_each_static_control_reaches_the_controller_queue_as_parsed(
@@ -348,3 +348,64 @@ def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
 def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
     with pytest.raises(ValueError, match='is not a #rrggbb colour'):
         static_control_command('static-colour', 'all', '#12345', None, False)
+
+
+def _run_callback(app, output, values, triggered):
+    callback = app.callback_map[output]
+    inputs, state = (
+        [
+            {'id': item['id'], 'property': item['property'], 'value': values.get(item['id'])}
+            for item in callback[kind]
+        ]
+        for kind in ('inputs', 'state')
+    )
+    outputs = [
+        {'id': part.split('.')[0], 'property': part.split('.')[1].split('@')[0]}
+        for part in output.strip('.').split('...')
+    ]
+    return app.server.test_client().post(
+        '/_dash-update-component',
+        json={
+            'output': output,
+            'outputs': outputs,
+            'inputs': inputs,
+            'state': state,
+            'changedPropIds': [triggered],
+        },
+    )
+
+
+def test_a_snapshot_sets_the_mode_tab_once_and_never_overwrites_a_click(show):
+    poller, _ = show
+    app = build_app(poller)
+    writers = [key for key in app.callback_map if 'control-mode.value' in key]
+    assert writers == ['..control-mode.value...control-mode-synced.data..']
+
+    first = _run_callback(
+        app, writers[0], {'control-state': {'mode': 'static'}}, 'control-state.data'
+    )
+    assert first.get_json()['response']['control-mode']['value'] == 'static'
+
+    stale = _run_callback(
+        app,
+        writers[0],
+        {'control-state': {'mode': 'auto'}, 'control-mode-synced': True},
+        'control-state.data',
+    )
+    assert stale.status_code == 204
+
+
+@pytest.mark.parametrize(('shown', 'picked'), [('auto', 'static'), ('static', 'auto')])
+def test_picking_a_mode_tab_sends_that_mode_and_shows_it_at_once(show, shown, picked):
+    poller, commands = show
+    app = build_app(poller)
+    output = next(key for key in app.callback_map if key.startswith('..static-status.children'))
+    state = {'mode': shown, 'static': {'targets': ['all'], 'blackout': False}}
+    response = _run_callback(
+        app,
+        output,
+        {'control-mode': picked, 'static-target': 'all', 'control-state': state},
+        'control-mode.value',
+    )
+    assert commands.get_nowait() == {'action': 'mode', 'mode': picked}
+    assert response.get_json()['response']['control-state']['data']['mode'] == picked

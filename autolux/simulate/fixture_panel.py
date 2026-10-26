@@ -283,7 +283,7 @@ def build_fixture_panel(app, store):
                 id='fixture-workspace',
                 className='patch-workspace',
             ),
-            html.P('Changes are saved for the next session.', id='fixture-status', role='status'),
+            html.P(id='fixture-status', role='status'),
             dcc.Store(id='fixture-draft', data=draft),
             dcc.Store(id='fixture-selection', data=None),
             dcc.Store(id='fixture-grid-action'),
