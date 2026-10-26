@@ -6,6 +6,8 @@
 - The FixtureType `Manufacturer` and `Name` (and `LongName`, if present) inside the archive
   match the file name; the newest `Revision` `Text` is the revision segment.
 - A FixtureType's `FixtureTypeID` GUID never changes across revisions or renames.
+- A GDTF Share profile is adopted only when its modes match the patch; otherwise its physical
+  data (beam, flux, power, weight, dimensions) is merged into ours.
 - `rig/library/` holds only real fixture types the venue owns. Synthetic profiles use the
   manufacturer `Generic` and live with the sample rig's test data
   (`autolux/tests/data/generic_rig/`), never in `rig/library/`.
