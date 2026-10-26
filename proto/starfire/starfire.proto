@@ -6,8 +6,10 @@ import "proto/starfire/rig.proto";
 
 // CLIENT = Autolux coordinator; SERVER = its owned Starfire process.
 // Frame: one byte MessageType, four-byte big-endian payload length, then the
-// standalone Protobuf message (at most 4 MiB; each AutoloopDefinition.lua_source at
-// most 64 KiB). No message envelope.
+// standalone Protobuf message. No message envelope. Payload caps by MessageType:
+// LOGIN carries the session assets and may use 4 MiB (each
+// AutoloopDefinition.lua_source at most 64 KiB); every other type is real-time
+// and is capped at 4 KiB. Receivers check the cap before reading the payload.
 // Login comes first. Commands apply in order at render boundaries after login.
 // A successful Login binds the connection to its nonzero run_id; it cannot be replaced.
 // Later commands and heartbeats implicitly belong to that run.
@@ -83,7 +85,7 @@ message Login {
 message LoginReply {
   uint64 command_id = 1;
   uint32 frame_rate_hz = 3;
-  uint32 max_message_bytes = 4;
+  uint32 max_message_bytes = 4;  // Cap for every type except LOGIN.
   uint32 protocol_major = 5;
   uint32 protocol_minor = 6;  // Negotiated minimum of client and server minor versions.
   fixed64 run_id = 7;

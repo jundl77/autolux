@@ -67,7 +67,8 @@ session and attempts darkness while preserving movement positions.
 
 Commands and replies are standalone messages. Each frame contains a one-byte
 `MessageType`, a four-byte big-endian payload length, then the generated Protobuf
-payload, bounded to 4 MiB. There are no Render envelopes or custom serializers.
+payload. Login, which carries the session assets, is bounded to 4 MiB; every
+other message is real-time and bounded to 4 KiB. There are no Render envelopes or custom serializers.
 Wrong directions, unknown types, oversized and truncated frames are rejected.
 
 Commands have positive increasing IDs and apply in order at render boundaries.
