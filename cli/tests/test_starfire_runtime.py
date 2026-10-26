@@ -146,6 +146,42 @@ def test_incomplete_and_oversized_events_are_rejected(payload):
     assert protocol.read_event(io.BytesIO()) is None
 
 
+def _padded(message_class, size):
+    unknown_field = wire.AutoloopDefinition(lua_source='-' * size).SerializeToString()
+    message = message_class.FromString(b'z' + unknown_field[1:])
+    message.command_id = 1
+    return message
+
+
+def _round_trip(message):
+    message_type, length = protocol.FRAME_HEADER.unpack_from(
+        frame := protocol.encode_command(message)
+    )
+    assert length == len(frame) - protocol.FRAME_HEADER.size
+    return protocol.COMMAND_MESSAGES[message_type].FromString(frame[protocol.FRAME_HEADER.size :])
+
+
+@pytest.mark.parametrize(
+    'message_class,size,accepted',
+    [
+        (wire.SetParameter, 5 * 1024, False),
+        (wire.PlayAutoloop, 3 * 1024, True),
+        (wire.Login, 1024 * 1024, True),
+        (wire.Login, protocol.MAX_LOGIN_BYTES + 100 * 1024, False),
+    ],
+)
+def test_only_login_may_use_the_large_message_limit(message_class, size, accepted):
+    message = _padded(message_class, size)
+    if accepted:
+        assert _round_trip(message) == message
+    else:
+        with pytest.raises(
+            ValueError,
+            match=rf'{wire.MessageType.Name(protocol.MESSAGE_TYPE_BY_CLASS[message_class])} payload of \d+ bytes exceeds',
+        ):
+            protocol.encode_command(message)
+
+
 @pytest.mark.parametrize(
     'kind,field,parameter,value_type,value',
     [
@@ -396,7 +432,7 @@ def test_shutdown_discards_a_full_queue_and_closes_the_pipe_normally(tmp_path):
 
 
 @pytest.mark.parametrize(
-    'mode,reason', [('stall', 'startup deadline'), ('malformed', 'event size')]
+    'mode,reason', [('stall', 'startup deadline'), ('malformed', 'METRICS payload of')]
 )
 def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason):
     runtime = _fake_runtime(tmp_path, mode, startup_timeout=0.5, stop_timeout=0.1)

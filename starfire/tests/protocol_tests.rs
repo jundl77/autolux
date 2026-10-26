@@ -7,8 +7,8 @@ use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Target, TimedCommand, Transition,
 };
 use starfire::protocol::{
-    ClientMessage as Operation, MAX_MESSAGE_BYTES, ServerMessage, apply_command, read_control,
-    read_event, wire,
+    ClientMessage as Operation, MAX_LOGIN_BYTES, MAX_MESSAGE_BYTES, ServerMessage, apply_command,
+    read_control, read_event, wire,
 };
 use starfire::replay::{Replay, render_replay};
 use starfire::script::AutoloopCatalog;
@@ -143,21 +143,47 @@ fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
     })
 }
 
+fn header(kind: wire::MessageType, length: usize) -> Vec<u8> {
+    let mut bytes = vec![kind as u8];
+    bytes.extend((length as u32).to_be_bytes());
+    bytes
+}
+
 #[test]
-fn login_carrying_a_large_autoloop_library_round_trips() {
+fn only_login_may_use_the_large_message_limit() {
     let login = login_with_sources(16, 64 * 1024);
     let bytes = encoded(login.clone());
     assert!(bytes.len() > 1024 * 1024);
     assert_eq!(read_control(&mut Cursor::new(bytes)).unwrap(), Some(login));
-}
 
-#[test]
-fn login_over_the_message_limit_is_rejected_on_both_ends() {
-    let oversized = login_with_sources(MAX_MESSAGE_BYTES / (64 * 1024) + 1, 64 * 1024);
-    assert!(oversized.write(&mut Vec::new()).is_err());
-    let mut header = vec![wire::MessageType::Login as u8];
-    header.extend(((MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes());
-    assert!(read_control(&mut Cursor::new(header)).is_err());
+    let oversized = login_with_sources(66, 64 * 1024);
+    let error = oversized.write(&mut Vec::new()).unwrap_err();
+    assert!(error.to_string().starts_with("Login payload of"));
+    let error = read_control(&mut Cursor::new(header(
+        wire::MessageType::Login,
+        MAX_LOGIN_BYTES + 100 * 1024,
+    )))
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Login payload of {} bytes exceeds the {MAX_LOGIN_BYTES}-byte limit",
+            MAX_LOGIN_BYTES + 100 * 1024
+        )
+    );
+
+    let play = play("atmospheric", &"x".repeat(3 * 1024));
+    let bytes = encoded(play.clone());
+    assert!(bytes.len() > 3 * 1024);
+    assert_eq!(read_control(&mut Cursor::new(bytes)).unwrap(), Some(play));
+
+    let mut parameter = header(wire::MessageType::SetParameter, 5 * 1024);
+    parameter.extend(vec![0; 5 * 1024]);
+    let error = read_control(&mut Cursor::new(parameter)).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("SetParameter payload of 5120 bytes exceeds the {MAX_MESSAGE_BYTES}-byte limit")
+    );
 }
 
 #[test]

@@ -112,7 +112,7 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
         path.relative_to(DEFAULT_AUTOLOOPS).with_suffix('').as_posix()
         for path in DEFAULT_AUTOLOOPS.glob('*/*.lua')
     }
-    assert login.ByteSize() + protocol.COMMAND_ID_MAX_ENCODED_BYTES <= protocol.MAX_MESSAGE_BYTES
+    assert login.ByteSize() + protocol.COMMAND_ID_MAX_ENCODED_BYTES <= protocol.MAX_LOGIN_BYTES
 
 
 @pytest.mark.parametrize(
@@ -162,9 +162,11 @@ def test_single_autoloop_over_its_cap_is_rejected(login_assets):
 
 def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_assets, monkeypatch):
     rig, autoloops = login_assets
-    monkeypatch.setattr(assets, 'MAX_MESSAGE_BYTES', 64 * 1024)
+    monkeypatch.setattr(protocol, 'MAX_LOGIN_BYTES', 64 * 1024)
     _fill_bank(autoloops, 40, 3 * 1024)
-    with pytest.raises(ValueError, match=r'renderer message limit: \d+ > 65536 bytes'):
+    with pytest.raises(
+        ValueError, match=r'LOGIN payload of \d+ bytes exceeds the 65536-byte limit'
+    ):
         assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 

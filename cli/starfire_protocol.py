@@ -7,7 +7,8 @@ from google.protobuf.message import Message
 
 from proto.starfire import starfire_pb2 as wire
 
-MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+MAX_LOGIN_BYTES = 4 * 1024 * 1024
+MAX_MESSAGE_BYTES = 4 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
 FRAME_HEADER = struct.Struct('!BI')
@@ -31,6 +32,15 @@ EVENT_MESSAGES = {
 MESSAGE_TYPE_BY_CLASS = {
     message: message_type for message_type, message in (COMMAND_MESSAGES | EVENT_MESSAGES).items()
 }
+
+
+def check_payload_size(message_type: int, length: int):
+    limit = MAX_LOGIN_BYTES if message_type == wire.LOGIN else MAX_MESSAGE_BYTES
+    if length > limit:
+        name = wire.MessageType.Name(message_type)
+        raise ValueError(
+            f'Starfire {name} payload of {length} bytes exceeds the {limit}-byte limit'
+        )
 
 
 PARAMETERS = {
@@ -166,9 +176,9 @@ def encode_command(message: Message) -> bytes:
     if not isinstance(message, wire.Heartbeat) and not 0 < message.command_id <= MAX_COMMAND_ID:
         raise ValueError('Starfire command ID must be positive')
     payload = message.SerializeToString()
-    if len(payload) > MAX_MESSAGE_BYTES:
-        raise ValueError('Starfire command exceeds the message limit')
-    return FRAME_HEADER.pack(MESSAGE_TYPE_BY_CLASS[type(message)], len(payload)) + payload
+    message_type = MESSAGE_TYPE_BY_CLASS[type(message)]
+    check_payload_size(message_type, len(payload))
+    return FRAME_HEADER.pack(message_type, len(payload)) + payload
 
 
 def read_event(stream) -> Message | None:
@@ -178,8 +188,7 @@ def read_event(stream) -> Message | None:
     message_type, length = FRAME_HEADER.unpack(prefix)
     if message_type not in EVENT_MESSAGES:
         raise ValueError(f'Unexpected Starfire server message type: {message_type}')
-    if length > MAX_MESSAGE_BYTES:
-        raise ValueError(f'Invalid Starfire event size: {length}')
+    check_payload_size(message_type, length)
     return EVENT_MESSAGES[message_type].FromString(_read_exact(stream, length))
 
 

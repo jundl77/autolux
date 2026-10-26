@@ -11,12 +11,29 @@ use crate::model::{
     Transition,
 };
 
-pub const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_LOGIN_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_MESSAGE_BYTES: usize = 4 * 1024;
 pub const MAX_ERROR_BYTES: usize = 1024;
 pub const FRAME_HEADER_BYTES: usize = 5;
 
 pub mod wire {
     include!(concat!(env!("OUT_DIR"), "/autolux.starfire.rs"));
+}
+
+pub fn max_payload_bytes(kind: wire::MessageType) -> usize {
+    match kind {
+        wire::MessageType::Login => MAX_LOGIN_BYTES,
+        _ => MAX_MESSAGE_BYTES,
+    }
+}
+
+fn check_payload_size(kind: wire::MessageType, length: usize) -> Result<()> {
+    let limit = max_payload_bytes(kind);
+    ensure!(
+        length <= limit,
+        "{kind:?} payload of {length} bytes exceeds the {limit}-byte limit"
+    );
+    Ok(())
 }
 
 // These enums dispatch in-process only. The frame carries the generated message
@@ -42,7 +59,7 @@ macro_rules! messages {
                 let (kind, payload) = match self {
                     $(Self::$variant(value) => (wire::MessageType::$variant, value.encode_to_vec())),+
                 };
-                ensure!(payload.len() <= MAX_MESSAGE_BYTES, "message exceeds byte limit");
+                check_payload_size(kind, payload.len())?;
                 output.write_all(&[u8::try_from(kind as i32)?])?;
                 output.write_all(&(payload.len() as u32).to_be_bytes())?;
                 output.write_all(&payload)?;
@@ -136,7 +153,7 @@ fn read_frame(
     let kind = wire::MessageType::try_from(i32::from(header[0])).context("unknown message type")?;
     ensure!(accepts(kind), "message type is invalid in this direction");
     let length = u32::from_be_bytes(header[1..].try_into()?) as usize;
-    ensure!(length <= MAX_MESSAGE_BYTES, "invalid message length");
+    check_payload_size(kind, length)?;
     let mut payload = vec![0; length];
     input
         .read_exact(&mut payload)

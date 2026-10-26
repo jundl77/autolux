@@ -29,7 +29,9 @@ from cli.starfire_assets import load_login
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
+    MESSAGE_TYPE_BY_CLASS,
     build_command,
+    check_payload_size,
     encode_command,
     read_event,
 )
@@ -218,8 +220,9 @@ class StarfireRuntime:
         ):
             raise ValueError(f'Unknown Starfire autoloop: {message.autoloop_id}')
         # Leave room for the writer-assigned uint64 ID, including its field tag.
-        if message.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES > MAX_MESSAGE_BYTES:
-            raise ValueError('Starfire command exceeds the message limit')
+        check_payload_size(
+            MESSAGE_TYPE_BY_CLASS[type(message)], message.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES
+        )
         try:
             self._outgoing.put_nowait(message)
         except queue.Full as error:
