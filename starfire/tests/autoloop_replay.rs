@@ -14,7 +14,7 @@ use starfire::script::AutoloopCatalog;
 const FLOAT_TOLERANCE: f64 = 1e-9;
 const GOLDEN_INTENSITY: f64 = 1.0;
 const SOFT_INTENSITY: f64 = 0.3;
-const ROOM_FIXTURE_COUNT: usize = 15;
+const ROOM_CELL_COUNT: usize = 15;
 const REPLAY_BPM: f64 = 120.0;
 const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
 const MIN_REPLAY_SECONDS: f64 = 16.0 * 4.0 * SECONDS_PER_BEAT;
@@ -270,7 +270,7 @@ fn check_replay(look: &Look) {
         );
         assert_eq!(
             frame.fixture_properties_before_strobe.len(),
-            ROOM_FIXTURE_COUNT
+            ROOM_CELL_COUNT
         );
         for (id, state) in &frame.fixture_properties_before_strobe {
             assert!(state.strobe_hz == 0.0, "{look} strobes {id}");
@@ -663,7 +663,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     "#,
     );
     assert_eq!(
-        frame.fixture_properties_before_strobe["zq06017_pixel_1"].colour,
+        frame.fixture_properties_before_strobe["zq06017/Beam Segment 1"].colour,
         Rgb {
             red: 0.0,
             green: 0.85,
