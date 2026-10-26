@@ -395,7 +395,6 @@ SPIN = Special(
     speed=0.8,
     pulse_beats=1,
     release_beats=4,
-    scaling=('energy', 'speed'),
 )
 DRIFT = Special(
     'drift',
@@ -406,7 +405,6 @@ DRIFT = Special(
     speed=0.1,
     attack_beats=32,
     release_beats=32,
-    scaling=('energy', 'speed'),
 )
 
 
@@ -431,7 +429,7 @@ def accents(lighting, start=0):
     ]
 
 
-async def test_a_special_is_sent_in_the_wire_vocabulary_scaled_by_intensity():
+async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
     controller, lighting, _ = with_specials([DRIFT], settings=ShowSettings(intensity=0.5))
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     assert accents(lighting) == [
@@ -442,8 +440,8 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_scaled_by_intensity():
                 'target': {'group': 'fx'},
                 'special': {
                     'colour_slot': 'secondary',
-                    'energy': 0.1,
-                    'speed': 0.05,
+                    'energy': 0.2,
+                    'speed': 0.1,
                     'pulse_beats': None,
                     'attack_beats': 32.0,
                     'release_beats': 32.0,

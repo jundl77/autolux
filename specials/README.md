@@ -17,8 +17,7 @@ names a rig group (an MVR class such as `fx`), and any fixture patched into that
   "energy": 0.2,
   "speed": 0.1,
   "attack_beats": 32,
-  "release_beats": 32,
-  "scaling": ["energy", "speed"]
+  "release_beats": 32
 }
 ```
 
@@ -26,17 +25,19 @@ names a rig group (an MVR class such as `fx`), and any fixture patched into that
 - `intents`: the intents it can start with, from `atmospheric`, `breakdown`, `buildup`, `drop`.
 - `group`: the rig group it plays on, or `all` for the whole rig.
 - `colour_slot`: a slot of the active palette (`primary`, `secondary`, `accent`, `cold`, `black`).
-  Starfire resolves it, so a special follows the palette like the loops do.
+  Starfire resolves it, so a special follows the palette like the loops do. Starfire ignores an
+  unknown slot, so the catalogue rejects one at load, naming the file.
 - `energy`, `speed`: 0..1. Energy is how much light; speed is how fast the group moves over the
   physical range its profile declares (rotation, scan, motion).
 - `pulse_beats` (optional): step or burst on the beat grid every N beats; absent means continuous.
 - `attack_beats`, `release_beats`: ease-in when it starts and ease-out when Autolux clears or
   replaces it. Autolux never cuts a special; Starfire runs the release.
 - `pattern` (optional): 0..1, a figure, gobo or clip index where the profile has one.
-- `scaling` (optional): which of `energy`, `speed` the intensity macro scales.
 
-A strobe row has `name`, `intents`, `group`, `strobe_hz` and optional `scaling: ["strobe_hz"]`
-instead, and goes out as the capped strobe accent; its length follows the strobe burst settings.
+Values are sent as written. Starfire applies the intensity macro: it scales speed and gates and
+caps pulse; energy is not scaled. Autolux only gates which specials may fire (below).
+
+A strobe row has `name`, `intents`, `group` and `strobe_hz` instead, and goes out as the capped strobe accent; its length follows the strobe burst settings.
 A strobe row is never selected: it fires on every eligible entry of its intents, alongside the
 selected special. `strobe_burst` is the drop burst.
 

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from autolux.lib.engine.effect_definitions import STARFIRE_MAX_STROBE_HZ, LightIntent
-from autolux.lib.engine.special_policy import SCALABLE, Special
+from autolux.lib.engine.special_policy import Special
 from autolux.lighting.palettes import SLOTS
 
 SPECIAL_DIRECTORY = Path(__file__).resolve().parents[2] / 'specials'
@@ -13,7 +13,7 @@ SPECIAL_KEYS = frozenset(
     {'name', 'intents', 'group', 'colour_slot', 'energy', 'speed', 'attack_beats', 'release_beats'}
 )
 STROBE_KEYS = frozenset({'name', 'intents', 'group', 'strobe_hz'})
-OPTIONAL_KEYS = {SPECIAL_KEYS: {'pulse_beats', 'pattern', 'scaling'}, STROBE_KEYS: {'scaling'}}
+OPTIONAL_KEYS = {SPECIAL_KEYS: {'pulse_beats', 'pattern'}, STROBE_KEYS: set()}
 
 
 class SpecialError(ValueError):
@@ -50,19 +50,6 @@ def _intents(values) -> tuple[LightIntent, ...]:
     return tuple(LightIntent(value) for value in values)
 
 
-def _scaling(data: dict) -> tuple[str, ...]:
-    values = data.get('scaling', [])
-    if not isinstance(values, list):
-        raise SpecialError('scaling must be a list')
-    for value in values:
-        if value not in SCALABLE or value not in data:
-            present = [name for name in SCALABLE if name in data]
-            raise SpecialError(f'scaling {value!r} is not one of {", ".join(present)}')
-    if len(set(values)) != len(values):
-        raise SpecialError('scaling lists a value twice')
-    return tuple(values)
-
-
 def parse_special(data, stem: str) -> Special:
     if not isinstance(data, dict):
         raise SpecialError('a special must be a JSON object')
@@ -82,7 +69,6 @@ def parse_special(data, stem: str) -> Special:
         'name': stem,
         'intents': _intents(data['intents']),
         'group': group,
-        'scaling': _scaling(data),
     }
     if shape is STROBE_KEYS:
         return Special(**common, strobe_hz=_number(data, 'strobe_hz', 0.0, STARFIRE_MAX_STROBE_HZ))

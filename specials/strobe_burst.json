@@ -4,8 +4,5 @@
     "drop"
   ],
   "group": "all",
-  "strobe_hz": 8.0,
-  "scaling": [
-    "strobe_hz"
-  ]
+  "strobe_hz": 8.0
 }

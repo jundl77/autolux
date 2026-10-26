@@ -9,9 +9,5 @@
   "speed": 0.8,
   "pulse_beats": 1,
   "attack_beats": 0,
-  "release_beats": 4,
-  "scaling": [
-    "energy",
-    "speed"
-  ]
+  "release_beats": 4
 }

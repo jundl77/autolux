@@ -41,7 +41,7 @@ def test_only_drop_rows_are_intense_in_the_shipped_set():
 
 
 def test_a_row_parses_into_the_wire_vocabulary():
-    special = parse_special(ROW | {'pulse_beats': 2, 'pattern': 0.5, 'scaling': ['energy']}, 'glow')
+    special = parse_special(ROW | {'pulse_beats': 2, 'pattern': 0.5}, 'glow')
     assert special.wire() == {
         'colour_slot': 'secondary',
         'energy': 0.2,
@@ -51,8 +51,6 @@ def test_a_row_parses_into_the_wire_vocabulary():
         'release_beats': 32.0,
         'pattern': 0.5,
     }
-    assert special.scaled(0.5).energy == pytest.approx(0.1)
-    assert special.scaled(0.5).speed == 0.1
 
 
 @pytest.mark.parametrize(
@@ -86,8 +84,7 @@ def test_intense_is_derived_from_pulse_or_speed(speed, pulse, intense):
         ({'pulse_beats': 1.5}, 'pulse_beats 1.5'),
         ({'pattern': 2}, 'pattern 2 must be a number within 0..1'),
         ({'attack_beats': -1}, 'attack_beats -1'),
-        ({'scaling': ['strobe_hz']}, "scaling 'strobe_hz' is not one of energy, speed"),
-        ({'scaling': 'energy'}, 'scaling must be a list'),
+        ({'scaling': ['energy']}, 'unknown scaling'),
     ],
 )
 def test_invalid_rows_name_the_field_and_the_rule(change, message):
@@ -116,8 +113,11 @@ def test_discovery_reports_every_bad_file_by_name(tmp_path):
     (tmp_path / 'glow.json').write_text(json.dumps(ROW))
     (tmp_path / 'broken.json').write_text('{')
     (tmp_path / 'loud.json').write_text(json.dumps(ROW | {'name': 'loud', 'energy': 2}))
+    pink = ROW | {'name': 'pink', 'colour_slot': 'magenta'}
+    (tmp_path / 'pink.json').write_text(json.dumps(pink))
     with pytest.raises(SpecialError) as error:
         discover_specials(tmp_path)
     assert 'broken.json: not JSON' in str(error.value)
     assert 'loud.json: energy 2 must be a number within 0..1' in str(error.value)
+    assert "pink.json: colour_slot 'magenta' is not one of primary" in str(error.value)
     assert 'glow.json' not in str(error.value)

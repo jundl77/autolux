@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import random
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import WHOLE_RIG
 from autolux.lib.engine.effect_definitions import STROBE_RATE_HZ, LightIntent
 
 INTENSE_SPEED = 0.6
 AXES = ('colour', 'speed', 'pulse', 'pattern')
-SCALABLE = ('energy', 'speed', 'strobe_hz')
 
 
 @dataclass(frozen=True)
@@ -24,7 +23,6 @@ class Special:
     attack_beats: float = 0.0
     release_beats: float = 0.0
     pattern: float | None = None
-    scaling: tuple[str, ...] = ()
     strobe_hz: float | None = None
 
     @property
@@ -44,9 +42,6 @@ class Special:
             'pattern': self.pattern is not None,
         }
         return frozenset(axis for axis, used in present.items() if used)
-
-    def scaled(self, intensity: float) -> Special:
-        return replace(self, **{name: getattr(self, name) * intensity for name in self.scaling})
 
     def wire(self) -> dict:
         return {
@@ -92,9 +87,7 @@ class SpecialChoice:
         return bool(self.strobes) or (self.special is not None and self.special.intense)
 
 
-DROP_STROBE = Special(
-    'strobe_burst', (LightIntent.DROP,), WHOLE_RIG, strobe_hz=STROBE_RATE_HZ, scaling=('strobe_hz',)
-)
+DROP_STROBE = Special('strobe_burst', (LightIntent.DROP,), WHOLE_RIG, strobe_hz=STROBE_RATE_HZ)
 DEFAULT_SPECIALS = (DROP_STROBE,)
 
 

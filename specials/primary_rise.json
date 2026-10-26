@@ -8,9 +8,5 @@
   "energy": 0.5,
   "speed": 0.4,
   "attack_beats": 128,
-  "release_beats": 4,
-  "scaling": [
-    "energy",
-    "speed"
-  ]
+  "release_beats": 4
 }

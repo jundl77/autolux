@@ -50,8 +50,7 @@ def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
 
 
 def strobe_rate_hz(settings: ShowSettings, special: Special = DROP_STROBE) -> float:
-    scale = settings.intensity if 'strobe_hz' in special.scaling else 1.0
-    return min(special.strobe_hz, settings.strobe_max_rate_hz) * scale
+    return min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
@@ -267,7 +266,7 @@ class EffectController:
             self._release_special()
         else:
             self._special_policy.record(choice.special)
-            self._fire_special(choice.special.scaled(settings.intensity))
+            self._fire_special(choice.special)
         for strobe in choice.strobes:
             self._strobe(strobe, bpm, settings)
 
