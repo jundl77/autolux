@@ -25,7 +25,7 @@ from cli.starfire import (
     ROOT,
     saved_rig,
 )
-from cli.starfire_assets import load_login
+from cli.starfire_assets import load_login, native_rig
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
@@ -73,22 +73,23 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
     if not binary.is_file():
         raise RuntimeError(f'Starfire binary is missing: {binary}. Run build-starfire.ps1.')
     build_command({'kind': 'heartbeat'})
-    result = subprocess.run(
-        [
-            str(binary),
-            'check',
-            '--rig',
-            str(Path(rig).resolve()),
-            '--autoloops',
-            str(Path(autoloops).resolve()),
-        ],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=STARTUP_TIMEOUT_SECONDS,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-    )
+    with native_rig(rig) as exported:
+        result = subprocess.run(
+            [
+                str(binary),
+                'check',
+                '--rig',
+                str(exported),
+                '--autoloops',
+                str(Path(autoloops).resolve()),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=STARTUP_TIMEOUT_SECONDS,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
     if result.returncode:
         raise RuntimeError(f'Starfire validation failed: {result.stderr.strip()}')
     report = json.loads(result.stdout)

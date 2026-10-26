@@ -846,27 +846,3 @@ fn unrelated_cells_keep_independent_brightness_and_blackout() {
         [0, 255, 255, 255, 0, 0, 0]
     );
 }
-
-#[test]
-fn unreferenced_gdtf_files_in_the_archive_do_not_block_an_independent_rig() {
-    let used = description(&channel("Fog1", "Base", "1", &function("Fog1", "")));
-    let scene = r#"<GeneralSceneDescription verMajor="1" verMinor="6"><Scene><Layers>
-        <Layer uuid="00000000-0000-4000-A000-000000000001"><ChildList>
-        <Fixture name="fog" uuid="00000000-0000-4000-9000-000000000001">
-        <GDTFSpec>used.gdtf</GDTFSpec><GDTFMode>Control</GDTFMode>
-        <Addresses><Address>1</Address></Addresses></Fixture>
-        </ChildList></Layer></Layers></Scene></GeneralSceneDescription>"#;
-    let archive = support::zipped(&[
-        ("GeneralSceneDescription.xml", scene.as_bytes()),
-        (
-            "used.gdtf",
-            &support::zipped(&[("description.xml", used.as_bytes())]),
-        ),
-        (
-            "unused.gdtf",
-            &support::zipped(&[("description.xml", b"invalid until selected")]),
-        ),
-    ]);
-    let parsed = FixtureRig::from_mvr(&archive).unwrap();
-    assert_eq!(parsed.fixture_ids(), ["fog"]);
-}

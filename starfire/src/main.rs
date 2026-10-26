@@ -8,18 +8,16 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
-use prost::Message;
 use serde_json::json;
 
 use starfire::artnet::ArtNetOutput;
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
-use starfire::mvr;
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::AutoloopCatalog;
 
-const DEFAULT_RIG: &str = "rigs/room.mvr";
+const DEFAULT_RIG: &str = "rigs/room.rig.pb";
 const DEFAULT_AUTOLOOPS: &str = "autoloops";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
@@ -72,11 +70,7 @@ enum Action {
         autoloops: PathBuf,
     },
     /// Validate a fixture patch without emitting DMX.
-    Rig {
-        input: PathBuf,
-        #[arg(long)]
-        definition: Option<PathBuf>,
-    },
+    Rig { input: PathBuf },
 }
 
 fn main() -> std::process::ExitCode {
@@ -137,14 +131,8 @@ fn run(arguments: Arguments) -> Result<()> {
                 serde_json::to_string_pretty(&AutoloopCatalog::load(&autoloops)?.list())?
             );
         }
-        Action::Rig { input, definition } => {
+        Action::Rig { input } => {
             let rig = FixtureRig::load(&input)?;
-            if let Some(path) = definition {
-                let archive = std::fs::read(&input)
-                    .with_context(|| format!("read rig {}", input.display()))?;
-                std::fs::write(&path, mvr::rig_definition(&archive)?.encode_to_vec())
-                    .with_context(|| format!("write rig definition {}", path.display()))?;
-            }
             let universes = rig
                 .encode(&rig.empty_states())?
                 .into_keys()
@@ -360,7 +348,7 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
+        let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();

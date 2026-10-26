@@ -39,7 +39,7 @@ fn replay(duration_seconds: f64) -> Replay {
 fn render(input: &Replay) -> starfire::replay::ReplayResult {
     render_replay(
         input,
-        FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap(),
+        FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
         AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops")).unwrap(),
     )
     .unwrap()
@@ -120,7 +120,7 @@ fn replay_memory_budget_is_checked_before_rendering() {
     input.frame_rate_hz = 50;
     input.duration_seconds -= 0.02;
     assert!(input.validate().is_ok());
-    let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let catalogue =
         AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops")).unwrap();
     assert!(
@@ -138,7 +138,12 @@ fn cli(input: &Path) -> Process {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .args(["replay"])
         .arg(input)
-        .args(["--rig", "../rigs/room.mvr", "--autoloops", "../autoloops"]);
+        .args([
+            "--rig",
+            "../rigs/room.rig.pb",
+            "--autoloops",
+            "../autoloops",
+        ]);
     command
 }
 
@@ -203,10 +208,10 @@ fn native_cli_rejects_unpaced_network_output_without_sending() {
 fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
     let directory = tempfile::tempdir().unwrap();
     let input = directory.path().join("replay.json");
-    let rig = directory.path().join("rig.mvr");
+    let rig = directory.path().join("rig.pb");
     let shared = directory.path().join("capture");
     let source = serde_json::to_vec(&replay(0.0)).unwrap();
-    let patch = include_bytes!("../../rigs/room.mvr");
+    let patch = include_bytes!("../../rigs/room.rig.pb");
     fs::write(&input, &source).unwrap();
     fs::write(&rig, patch).unwrap();
     for destination in [&input, &rig, &shared] {
