@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: cold, steady at 0.15. strip: off.
 -- movers: cold, small slow mirrored circular orbit (sine pan, cosine tilt) once per loop.
 -- Palette slots: cold, black.

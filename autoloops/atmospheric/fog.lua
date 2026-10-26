@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: cold, each wash breathing 0.05..0.25 one bar behind its neighbour, so light rolls across the room.
 -- strip: cold haze following the wash above it. movers: cold, very slow opposing tilt drift.
 -- Palette slots: cold.

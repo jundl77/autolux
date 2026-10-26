@@ -27,18 +27,20 @@ async def run_cmd(args: argparse.Namespace):
     from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
     from cli.starfire import PROFILE_CATALOGUE, ROOT
     from autolux.lib.clients.starfire_client import StarfireClient
-    from autolux.lighting.autoloop_catalogue import discover_autoloops
+    from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
     import uuid
 
     input_device_index = int(args.input_device) if args.input_device is not None else None
     output_device_index = int(args.output_device) if args.output_device is not None else None
+    # The run id also seeds loop selection, so a run's choices can be replayed.
+    run_id = secrets.randbits(64) or 1
     with StarfireRuntime(
         args.starfire_binary,
         selected_rig(args.rig),
         args.autoloops,
         args.artnet,
         ROOT / '.live' / 'starfire' / f'live-{uuid.uuid4().hex}',
-        run_id=secrets.randbits(64) or 1,
+        run_id=run_id,
         profiles=getattr(args, 'profiles', PROFILE_CATALOGUE),
     ) as renderer:
         global_app = AutoluxController(
@@ -51,6 +53,8 @@ async def run_cmd(args: argparse.Namespace):
             report_path=args.report,
             fixture_setup=fixture_setup(args),
             autoloops=discover_autoloops(args.autoloops),
+            autoloop_meta=read_autoloop_meta(args.autoloops),
+            selection_seed=run_id,
         )
         global_app.health_check = renderer.check_health
         try:

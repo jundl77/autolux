@@ -15,6 +15,7 @@ from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
     LightIntent,
+    intent_for_class,
 )
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
@@ -1657,6 +1658,63 @@ async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior(
     assert snapshot['decoder']['posterior'] is None
     assert snapshot['intents'][-1]['trigger'] == SILENCE_TRIGGER
     assert 'standby/warm_white' in [e['name'] for e in snapshot['effects']]
+
+
+class SelectionSpy(EffectController):
+    def __init__(self, lighting):
+        super().__init__(lighting)
+        self.contexts = []
+
+    async def change_effect(self, intent, bpm=None, context=None, *, cut=False):
+        self.contexts.append(context)
+        return await super().change_effect(intent, bpm, context, cut=cut)
+
+
+async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tracks():
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock)
+    spy = SelectionSpy(lighting)
+    light = LightEngine(lighting, spy, None, clock=clock)
+    light.set_analyser(FakeAnalyser())
+    light._source_playing = light._room_playing = True
+    light._room_start_monotonic_seconds = clock.monotonic()
+    bar = 4 * 60.0 / 128.0
+
+    async def section(label, bars, rms=0.1):
+        await light._commit_intent(intent_for_class(label), 0.0, section_label=label)
+        light.analyser.rms = rms
+        for _ in range(bars * 4):
+            await light.on_beat(1, 128.0, False)
+            clock.advance(bar / 4)
+
+    await section('intro', 4, rms=0.01)
+    await section('altintro', 4)
+    await section('breakdown', 8)
+    await section('buildup', 24)
+    await section('drop', 16)
+    await section('outro', 4)
+    await section('intro', 4)
+    await section('breakdown', 8)
+    await section('buildup', 8)
+    await section('drop', 4)
+    intro, altintro, breakdown, buildup, drop, outro, next_intro, *_, second_drop = spy.contexts
+    assert intro.new_track and not altintro.new_track and not breakdown.new_track
+    assert breakdown.loudness == 'rising' and drop.loudness == 'flat'
+    assert buildup.build_bars == pytest.approx(8)
+    assert drop.build_bars == pytest.approx(32)
+    assert drop.seconds_since_drop is None
+    # The drop's own outro is the same track; the intro after it starts the next.
+    assert not outro.new_track and outro.build_bars == 0
+    assert next_intro.new_track
+    # Counted from when the first drop ended, not from when it began.
+    assert outro.seconds_since_drop == 0
+    assert second_drop.seconds_since_drop == pytest.approx(24 * bar)
+    assert second_drop.build_bars == pytest.approx(16)
+
+    light._show_sound_stop()
+    light._room_playing = True
+    await section('drop', 1)
+    assert spy.contexts[-1].new_track
 
 
 def sent(lighting, *kinds):

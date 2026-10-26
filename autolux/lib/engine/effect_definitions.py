@@ -1,4 +1,5 @@
 import math
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
 
@@ -23,9 +24,10 @@ SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'altoutro': LightIntent.ATMOSPHERIC,
 }
 
-# Each intent's bank (named after the intent) is discovered from disk, so new
-# looks join the rotation without code changes. The audited originals open
-# their bank so a fresh show starts on the known-good set.
+# Each intent's bank (named after the intent) is discovered from disk, and the
+# selection policy chooses among all of it by the metadata each loop declares.
+# The audited originals are the one fixed look per intent when no catalogue is
+# loaded, and readiness requires them on disk.
 PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
     LightIntent.ATMOSPHERIC: 'cold_breathe',
     LightIntent.BREAKDOWN: 'wide_space',
@@ -44,6 +46,41 @@ STANDBY_CROSSFADE_SECONDS = 1.0
 # one fixed look, which keeps recorded command streams stable.
 DEFAULT_AUTOLOOPS: AutoloopTable = {
     intent: ((intent.value, autoloop),) for intent, autoloop in PREFERRED_AUTOLOOPS.items()
+}
+
+# The header vocabulary of `autoloops/README.md`, as the strings a header spells.
+AUTOLOOP_META_VALUES: dict[str, tuple[str, ...]] = {
+    'energy': ('1', '2', '3'),
+    'family': ('cold', 'warm', 'accent'),
+    'movement': ('still', 'sweep', 'snap'),
+}
+FAMILIES = AUTOLOOP_META_VALUES['family']
+
+
+@dataclass(frozen=True)
+class AutoloopMeta:
+    energy: int
+    family: str
+    movement: str
+
+    def __post_init__(self):
+        if type(self.energy) is not int:
+            raise ValueError(f'energy {self.energy!r} must be an integer')
+        for name, allowed in AUTOLOOP_META_VALUES.items():
+            if str(getattr(self, name)) not in allowed:
+                raise ValueError(
+                    f'{name} {getattr(self, name)!r} is not one of {", ".join(allowed)}'
+                )
+
+
+AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
+
+# The headers of DEFAULT_AUTOLOOPS' files; a test keeps them equal.
+DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
+    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'cold', 'sweep'),
+    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
+    ('buildup', 'ramp'): AutoloopMeta(2, 'warm', 'sweep'),
+    ('drop', 'kick'): AutoloopMeta(3, 'warm', 'snap'),
 }
 
 

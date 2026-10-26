@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: cold
+-- movement: sweep
 -- wash: cold, near-black at 0.1.
 -- strip: cold drop trickling down from pixel 8 to pixel 1, one step per beat, two passes
 -- per loop; the head and the pixel it just left are lit.

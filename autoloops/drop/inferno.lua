@@ -1,4 +1,7 @@
 -- 8-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- energy: 2
+-- family: accent
+-- movement: snap
 -- wash: accent, kick hit on every beat over a glowing floor (0.25 before loudness gain),
 -- so the room never drops out of red.
 -- strip: primary pulse on every "and", white sparks between the red kicks.

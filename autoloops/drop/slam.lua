@@ -1,4 +1,7 @@
 -- 8-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- energy: 3
+-- family: warm
+-- movement: snap
 -- wash: primary hit on the one with a full-beat decay, accent hit on beat 3 with a
 -- half-beat decay, over an RMS-scaled floor; beats 2 and 4 rest.
 -- strip: primary, odd and even pixels trading every bar.
