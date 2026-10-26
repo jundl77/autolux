@@ -88,6 +88,32 @@ def test_the_dashboard_page_may_post_cross_origin_and_other_sites_may_not(bridge
     assert commands.empty()
 
 
+@pytest.mark.parametrize(
+    ('body', 'content_type', 'status'),
+    [
+        ({'action': 'dance'}, 'application/json', 400),
+        ({'action': 'pause', 'pad': 'x' * 5000}, 'application/json', 413),
+        ({'action': 'pause'}, 'text/plain', 415),
+        ({'action': 'pause'}, 'application/json', 504),
+    ],
+)
+def test_the_dashboard_page_can_read_every_refusal(bridge, body, content_type, status):
+    connection, _ = bridge
+    headers = {'Content-Type': content_type, 'Origin': DASHBOARD}
+    reply, _ = _request(connection, 'POST', body, headers)
+    assert reply.status == status
+    assert reply.getheader('Access-Control-Allow-Origin') == DASHBOARD
+
+
+def test_a_foreign_origin_gets_no_cors_grant_on_its_refusal(bridge):
+    connection, _ = bridge
+    reply, _ = _request(
+        connection, 'POST', {'action': 'pause'}, {**JSON, 'Origin': 'http://evil.example'}
+    )
+    assert reply.status == 403
+    assert reply.getheader('Access-Control-Allow-Origin') is None
+
+
 def test_an_oversized_control_body_is_refused_before_parsing(bridge):
     connection, commands = bridge
     reply, _ = _request(connection, 'POST', {'action': 'pause', 'pad': 'x' * 5000}, JSON)
