@@ -616,7 +616,7 @@ globalThis.fetch = (url, options) => {
         return Promise.reject(new TypeError('no CORS yet'));
     }
     return new Promise((resolve) => pending.push(
-        () => resolve({json: () => ({accepted: 'master'})})));
+        () => resolve({ok: true, status: 202, json: async () => ({accepted: 'master'})})));
 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 (async () => {
@@ -637,6 +637,34 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
         ['/control-relay', 0.1],
         ['/control-relay', 0.3],
     ]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_a_refused_or_stalled_command_reverts_its_hold_and_is_never_relayed():
+    result = _run_control_js(
+        """
+window.autoluxControlConfig = {direct: true, bridgePort: 8766};
+globalThis.location = {protocol: 'http:', hostname: 'autolux.local'};
+const urls = [];
+const answers = [
+    {ok: false, status: 409, json: async () => ({error: 'the show is paused'})},
+    {ok: false, status: 504, json: async () => { throw new SyntaxError('empty'); }},
+];
+globalThis.fetch = async (url) => { urls.push(url); return answers.shift(); };
+(async () => {
+    control.hold({paused: true});
+    const refused = await control.dispatch(control.build.toggle(false), null, ['paused']);
+    const stalled = await control.dispatch(control.build.next(), null);
+    console.log(JSON.stringify({refused, stalled, urls, shown: control.view({paused: false})}));
+})();
+"""
+    )
+    assert result == {
+        'refused': {'error': 'the show is paused'},
+        'stalled': {'error': 'the show answered 504'},
+        'urls': ['http://autolux.local:8766/control'] * 2,
+        'shown': {'paused': False},
+    }
 
 
 def test_the_relay_forwards_a_browser_command_and_refuses_what_the_show_refuses(show):

@@ -42,29 +42,45 @@
         static: staticCommand,
     };
 
-    async function post(url, command) {
-        const response = await fetch(url, {
+    function post(url, command) {
+        return fetch(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(command),
         });
-        return response.json();
+    }
+
+    // Any non-2xx answer is a refusal (4xx) or a stalled engine (504); either way not applied.
+    async function readReply(response) {
+        let reply = {};
+        try {
+            reply = await response.json();
+        } catch (error) {}
+        if (!response.ok && !(reply && reply.error)) {
+            reply = {error: 'the show answered ' + response.status};
+        }
+        return reply;
     }
 
     async function send(command) {
         const {direct, bridgePort} = config();
         if (direct && bridgePort && Date.now() - directDownAt >= RETRY_DIRECT_MS) {
+            let response = null;
             try {
-                return await post(
+                response = await post(
                     location.protocol + '//' + location.hostname + ':' + bridgePort + '/control',
                     command
                 );
             } catch (error) {
-                // A JSON POST needs a CORS preflight, so a bridge without CORS never ran it.
+                // Only a network or CORS failure lands here; a JSON POST is preflighted, so the
+                // bridge never ran it and the relay may send it instead.
                 directDownAt = Date.now();
             }
+            if (response) {
+                return readReply(response);
+            }
         }
-        return post('/control-relay', command);
+        return readReply(await post(config().relayPath || '/control-relay', command));
     }
 
     function setStatus(statusId, text) {
