@@ -1442,3 +1442,147 @@ def test_invalid_show_settings_are_refused(bad):
 
     with pytest.raises(ValueError):
         ShowSettings.from_dict(bad)
+
+
+class _MetronomeRhythm:
+    """A beat every half second (120 BPM), so standby tests run without madmom."""
+
+    def __init__(self):
+        from autolux.lib.analyser.madmom_rhythm import RhythmEvents
+
+        self._events = RhythmEvents
+        self.pending_latency_sec = 0.0
+        self.samples = 0
+
+    def reset(self):
+        self.samples = 0
+
+    def process(self, buffer):
+        half_second = SAMPLE_RATE // 2
+        before, self.samples = self.samples, self.samples + len(buffer)
+        on_beat = self.samples // half_second > before // half_second
+        return self._events(beats=[self.samples / SAMPLE_RATE] if on_beat else [])
+
+
+class _Show:
+    """The production loop on a virtual clock: engine, analyser, queue, timers."""
+
+    def __init__(self):
+        from autolux.lib.analyser.music_analyser import MusicAnalyser
+        from autolux.lib.audio_config import BUFFER_SIZE
+
+        self.clock = VirtualClock()
+        self.lighting = RecordingStarfireClient(clock=self.clock)
+        self.queue = DelayedCommandQueue(14.0, clock=self.clock)
+        self.chain, self.decoder = FakeChain(), FakeDecoder()
+        self.monitor_silenced = 0
+        self.light = LightEngine(
+            self.lighting,
+            EffectController(self.lighting, clock=self.clock),
+            self.queue,
+            playback_delay_sec=14.0,
+            section_chain=self.chain,
+            section_decoder=self.decoder,
+            clock=self.clock,
+            silence_monitor=self._silence_monitor,
+        )
+        self.analyser = MusicAnalyser(SAMPLE_RATE, BUFFER_SIZE, self.light, clock=self.clock)
+        self.analyser._rhythm = _MetronomeRhythm()
+        self.light.set_analyser(self.analyser)
+        self._buffer_size = BUFFER_SIZE
+        self._next_tick = 0.1
+
+    def _silence_monitor(self):
+        self.monitor_silenced += 1
+
+    async def play(self, seconds: float, level: float) -> None:
+        step = self._buffer_size / SAMPLE_RATE
+        for _ in range(round(seconds / step)):
+            buffer = np.full(self._buffer_size, level, dtype=np.float32)
+            self.clock.advance(step)
+            await self.light.on_audio(buffer)
+            await self.analyser.analyse(buffer)
+            await self.queue.drain()
+            if self.clock.monotonic() >= self._next_tick:
+                self._next_tick += 0.1
+                await self.light.on_100ms_callback()
+
+    def commands(self, since: int = 0) -> list[dict]:
+        return [event['command'] for event in self.lighting.events[since:]]
+
+
+def _selections(commands):
+    return [(c['bank'], c['autoloop']) for c in commands if c['kind'] == 'select']
+
+
+async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_at_once():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    assert _selections(show.commands()) == [('atmospheric', 'cold_breathe')]
+    assert show.queue.pending > 0, 'beats for the buffered audio are still due'
+    stopped = len(show.lighting.events)
+
+    await show.play(1.9, 0.0)
+    assert not show.light.standby
+    assert {'kind': 'discard_delayed_audio'} not in show.commands(stopped)
+
+    await show.play(0.2, 0.0)
+    assert show.light.standby
+    standby = show.commands(stopped)
+    assert standby.count({'kind': 'discard_delayed_audio'}) == 1
+    assert show.monitor_silenced == 1
+    assert show.queue.pending == 0, 'the delayed queue must be purged'
+    select = next(c for c in standby if c['kind'] == 'select')
+    assert (select['bank'], select['autoloop']) == ('standby', 'warm_white')
+    # One second at the established 120 BPM; Starfire fades in beats.
+    assert select['transition'] == {
+        'kind': 'crossfade',
+        'duration_beats': pytest.approx(2.0, rel=0.01),
+    }
+    assert {'kind': 'clear_override', 'id': 'drop_arrival'} in standby
+
+    parked = len(show.lighting.events)
+    chain_samples = show.chain.samples
+    await show.play(20.0, 0.0)
+    assert show.commands(parked) == [], 'nothing delayed may reach the parked rig'
+    assert show.chain.samples == chain_samples, 'model decisions must hold while silent'
+
+
+async def test_a_short_dropout_keeps_the_show_and_its_buffered_audio():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    before = len(show.lighting.events)
+    await show.play(1.5, 0.0)
+    await show.play(5.0, 0.2)
+    assert not show.light.standby
+    assert {'kind': 'discard_delayed_audio'} not in show.commands(before)
+    assert ('standby', 'warm_white') not in _selections(show.commands(before))
+    assert show.monitor_silenced == 0
+
+
+async def test_returning_signal_restarts_the_show_from_scratch_after_one_playback_delay():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    await show.play(3.0, 0.0)
+    assert show.light.standby
+    chain_resets, decoder_resets = show.chain.resets, show.decoder.resets
+    parked = len(show.lighting.events)
+
+    await show.play(1.0, 0.2)
+    assert not show.light.standby
+    assert show.chain.resets > chain_resets and show.decoder.resets > decoder_resets
+    assert show.analyser.beat_count <= 2, 'the beat stream restarted with the signal'
+    assert show.light.audio_sec <= 1.0, 'the chain clock counts only the returning audio'
+    assert show.light._pending_intents == [] and show.light._held_intent is None
+
+    # The room hears nothing new for one playback delay, so standby holds.
+    await show.play(12.5, 0.2)
+    assert _selections(show.commands(parked)) == []
+    await show.play(1.5, 0.2)
+    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    await show.play(3.0, 0.2)
+    assert any(c['kind'] == 'beat' for c in show.commands(parked))
+    positions = [c['position_beats'] for c in show.commands() if c['kind'] == 'beat']
+    assert positions == sorted(set(positions)), (
+        "Starfire's beat clock never moves backwards across the restart"
+    )

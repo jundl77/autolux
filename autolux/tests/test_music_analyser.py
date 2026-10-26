@@ -11,6 +11,12 @@ class _StubHandler:
     def on_sound_stop(self):
         pass
 
+    def on_digital_silence(self):
+        pass
+
+    def on_signal_return(self):
+        pass
+
     async def on_cycle(self):
         pass
 
@@ -250,6 +256,40 @@ async def test_startup_wait_is_excluded_from_song_time_without_changing_song_bou
     events, durations, _ = delayed
     assert [kind for _, kind in events] == ['start', 'stop', 'start']
     assert max(durations) < datetime.timedelta(seconds=2)
+
+
+@pytest.mark.parametrize(
+    ('gap_level', 'gap_sec', 'standby'),
+    [
+        (0.0, 1.5, False),  # a gapless player's track change
+        (0.0, 2.1, True),  # stop pressed
+        (1e-6, 5.0, False),  # quiet but live input stays on the quiet-dimming path
+    ],
+)
+async def test_only_two_seconds_of_exact_zeros_mean_the_source_stopped(gap_level, gap_sec, standby):
+    class _Recorder(_StubHandler):
+        def __init__(self):
+            self.events: list[str] = []
+
+        def on_digital_silence(self):
+            self.events.append('silence')
+
+        def on_signal_return(self):
+            self.events.append('return')
+
+    clock = VirtualClock()
+    handler = _Recorder()
+    analyser = _make_analyser(clock, handler)
+    analyser._rhythm = _FakeRhythm()
+    step = analyser.buffer_size / analyser.sample_rate
+    for level, seconds in ((0.2, 1.0), (gap_level, gap_sec), (0.2, 1.0)):
+        for _ in range(round(seconds / step)):
+            clock.advance(step)
+            await analyser.analyse(np.full(256, level, dtype=np.float32))
+    assert handler.events == (['silence', 'return'] if standby else [])
+    assert not analyser.in_standby
+    if standby:
+        assert analyser._rhythm.resets >= 2, 'the beat tracker restarts with the signal'
 
 
 async def test_the_note_event_follows_the_beat_stream():

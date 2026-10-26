@@ -21,6 +21,11 @@ _SILENCE_RMS = 1.5e-4
 
 _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
 
+# Exact zeros mean the source stopped (a player's stop or pause), not a quiet
+# passage; any dither or noise keeps the show running. Long enough to ride over
+# a gapless player's track change, which can emit a short run of zeros.
+DIGITAL_SILENCE_STANDBY_SEC = 2.0
+
 
 class MusicAnalyser:
     def __init__(
@@ -50,6 +55,9 @@ class MusicAnalyser:
         self._beats_since_log: int = 0
         self._last_beat_activation: float = 0.0
         self._audio_started = False
+        # Counted in samples, not clock time, so a stalled loop cannot fake a stop.
+        self._digital_silence_samples: int = 0
+        self.in_standby: bool = False
         self._reset_state()
 
     def _roll_song_clock(self) -> None:
@@ -128,6 +136,9 @@ class MusicAnalyser:
         return sum(self._rms_window) / len(self._rms_window)
 
     async def analyse(self, audio_signal: np.ndarray) -> np.ndarray:
+        if self._track_digital_silence(audio_signal):
+            self._drift.observe()
+            return audio_signal
         now = self._clock.now()
         if not self._audio_started:
             # The first buffer covers audio captured before this callback.
@@ -158,6 +169,33 @@ class MusicAnalyser:
 
         await self.handler.on_cycle()
         return audio_signal
+
+    def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
+        """True while standing by; analysis then holds still until signal returns."""
+        if np.any(audio_signal):
+            self._digital_silence_samples = 0
+            if self.in_standby:
+                self._leave_standby()
+            return False
+        self._digital_silence_samples += len(audio_signal)
+        threshold = DIGITAL_SILENCE_STANDBY_SEC * self.sample_rate
+        if not self.in_standby and self._digital_silence_samples >= threshold:
+            self._enter_standby()
+        return self.in_standby
+
+    def _enter_standby(self) -> None:
+        logging.info(f'[rhythm] {DIGITAL_SILENCE_STANDBY_SEC:.1f}s of digital silence — standby')
+        self.in_standby = True
+        self._on_sound_stop()
+        self.handler.on_digital_silence()
+
+    def _leave_standby(self) -> None:
+        logging.info('[rhythm] signal returned — analysis restarts from scratch')
+        self.in_standby = False
+        self._reset_state()
+        # This buffer becomes the first one, exactly as at process start.
+        self._audio_started = False
+        self.handler.on_signal_return()
 
     def _log_rhythm_state(self, now: datetime.datetime) -> None:
         if now < self._rhythm_log_at:

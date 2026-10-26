@@ -8,6 +8,8 @@ from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOPS,
+    STANDBY_AUTOLOOP,
+    STANDBY_CROSSFADE_SECONDS,
     STROBE_BURST_BEATS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
@@ -86,6 +88,21 @@ class EffectController:
 
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
+
+    def enter_standby(self, bpm: float | None) -> None:
+        self.lighting_client.clear_override(DROP_ACCENT_ID)
+        bank, autoloop = STANDBY_AUTOLOOP
+        # Starfire fades in beats on its last tempo; without one a fade would never end.
+        transition = (
+            {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
+            if bpm and bpm > 0
+            else {'kind': 'cut'}
+        )
+        if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
+            return
+        if self.event_buffer:
+            self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
+        LOGGER.info('[lighting] standby | autoloop=%s/%s', bank, autoloop)
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
         settings = self._settings()
