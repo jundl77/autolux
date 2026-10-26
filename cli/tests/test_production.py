@@ -272,6 +272,10 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         def snapshot(self):
             return None
 
+    class LightEngine:
+        def note_capture_discontinuities(self, total):
+            events.append('capture_count')
+
     class App:
         def __init__(self, *_, **kwargs):
             assert not any(name in events for name in ('rx_start', 'starfire_start'))
@@ -279,6 +283,8 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
                 raise RuntimeError('model initialization failed')
             self.lighting_client = kwargs['lighting_client']
             self.event_buffer = EventBuffer()
+            # A constructed AutoluxController always owns its engine; the health check relies on it.
+            self.light_engine = LightEngine()
             events.append('app_initialized')
 
         def _shut_down(self):
@@ -327,6 +333,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     if 'starfire_stop' in events:
         assert events.index('starfire_stop') < events.index('rx_stop')
     if 'app_run' in events:
+        assert 'capture_count' in events
         assert events.index('app_stop') < events.index('starfire_stop')
         assert events.count('stop') == 1
     else:
