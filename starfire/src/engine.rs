@@ -785,7 +785,7 @@ impl Engine {
                     continue;
                 };
                 if let Some(value) = value {
-                    apply_properties(&self.rig, id, state, &value.values);
+                    overlay_properties(&self.rig, id, state, &value.values);
                     if let Some(multiplier) = value.intensity_multiplier {
                         state.intensity *= multiplier;
                     }
@@ -996,11 +996,28 @@ fn validate_properties(values: &PropertyValues) -> Result<()> {
     Ok(())
 }
 
-fn apply_properties(rig: &FixtureRig, id: &str, state: &mut FixtureState, values: &PropertyValues) {
+/// Between layers the later one owns every channel it addresses.
+fn overlay_properties(
+    rig: &FixtureRig,
+    id: &str,
+    state: &mut FixtureState,
+    values: &PropertyValues,
+) {
     match rig.profile(id) {
         Some(profile) => profile.overlay_attributes(&mut state.attributes, &values.attributes),
         None => state.attributes.extend(values.attributes.clone()),
     }
+    apply_scalar_properties(state, values);
+}
+
+/// Within one look two keys on a channel must both survive so the encoder reports the
+/// authoring conflict instead of silently picking one.
+fn apply_properties(state: &mut FixtureState, values: &PropertyValues) {
+    state.attributes.extend(values.attributes.clone());
+    apply_scalar_properties(state, values);
+}
+
+fn apply_scalar_properties(state: &mut FixtureState, values: &PropertyValues) {
     if let Some(value) = values.intensity {
         state.intensity = value;
     }
@@ -1027,7 +1044,7 @@ fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureSta
             let state = states
                 .get_mut(&id)
                 .context("resolved fixture is absent from the rig")?;
-            apply_properties(rig, &id, state, &effect.values);
+            apply_properties(state, &effect.values);
         }
     }
     Ok(states)

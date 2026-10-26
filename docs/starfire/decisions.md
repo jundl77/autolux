@@ -462,7 +462,9 @@ phase per frame, so intensity changes bend it without jumping; only pulse stops 
 the strobe gate. Whether a special is intense stays Autolux policy. An unknown colour
 slot leaves colour to the look. A group absent from the rig renders nothing. When two
 attribute keys address one DMX channel, the later (higher-priority) layer wins and the
-earlier key is dropped for that channel; this is not an error. LoginReply reports per
+earlier key is dropped for that channel; this is not an error. The rule holds between
+layers only: two such keys inside one look stay a conflicting-GDTF-values fault, because
+that is a script authoring error. LoginReply reports per
 group which axes at least one member can express, and login fails if that reply
 exceeds the real-time message cap.
 A dimmerless wheel resolves to its zero-luminance slot at zero intensity or black
