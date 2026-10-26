@@ -6,6 +6,7 @@ pub mod gdtf;
 pub mod live;
 pub mod model;
 pub mod mvr;
+pub mod palette;
 pub mod protocol;
 pub mod replay;
 pub mod script;

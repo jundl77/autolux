@@ -103,6 +103,7 @@ fn run(arguments: Arguments) -> Result<()> {
                         bank: autoloop.bank.clone(),
                         autoloop: autoloop.autoloop.clone(),
                         transition: Transition::Cut,
+                        palette: None,
                     },
                 )?;
                 let frame = engine.render_at(0.0).with_context(|| {

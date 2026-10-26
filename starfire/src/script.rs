@@ -15,6 +15,7 @@ use serde::Serialize;
 
 use crate::fixtures::{FixtureRig, MAX_FIXTURES};
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
+use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
@@ -38,6 +39,7 @@ pub struct AutoloopInfo {
 pub struct AutoloopCatalog {
     sources: BTreeMap<(String, String), String>,
     identities: BTreeMap<String, (String, String)>,
+    palettes: PaletteTable,
 }
 
 impl AutoloopCatalog {
@@ -116,6 +118,7 @@ impl AutoloopCatalog {
         Ok(Self {
             sources,
             identities,
+            palettes: PaletteTable::builtin(),
         })
     }
 
@@ -159,7 +162,17 @@ impl AutoloopCatalog {
         Ok(Self {
             sources,
             identities,
+            palettes: PaletteTable::builtin(),
         })
+    }
+
+    pub fn with_palettes(mut self, palettes: &[wire::Palette]) -> Result<Self> {
+        self.palettes = PaletteTable::from_definitions(palettes)?;
+        Ok(self)
+    }
+
+    pub fn palettes(&self) -> &PaletteTable {
+        &self.palettes
     }
 
     pub fn resolve(&self, autoloop_id: &str) -> Result<&(String, String)> {
@@ -183,7 +196,7 @@ impl AutoloopCatalog {
             .sources
             .get(&(bank.to_owned(), autoloop.to_owned()))
             .with_context(|| format!("unknown autoloop {bank}/{autoloop}"))?;
-        LuaAutoloop::new(bank, autoloop, source, rig)
+        LuaAutoloop::new(bank, autoloop, source, rig, &self.palettes)
     }
 }
 
@@ -208,10 +221,17 @@ pub struct LuaAutoloop {
     instruction_budget: Arc<AtomicU32>,
     rig: FixtureRig,
     identity: String,
+    active_palette_slots: Vec<Table>,
 }
 
 impl LuaAutoloop {
-    fn new(bank: &str, autoloop: &str, source: &str, rig: &FixtureRig) -> Result<Self> {
+    fn new(
+        bank: &str,
+        autoloop: &str,
+        source: &str,
+        rig: &FixtureRig,
+        palettes: &PaletteTable,
+    ) -> Result<Self> {
         ensure!(
             rig.fixture_ids().len() <= MAX_FIXTURES,
             "Lua fixture target limit exceeded"
@@ -274,11 +294,25 @@ impl LuaAutoloop {
             string.set(name, Value::Nil)?;
         }
 
-        let api: Table = lua
+        let (api, named_palettes, active_palette): (Table, Table, Table) = lua
             .load(LIGHTING_API)
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
+        for (name, slots) in palettes.iter() {
+            named_palettes.set(name, lua.to_value(slots)?)?;
+        }
+        let initial_slots = palettes.slots(palettes.initial())?;
+        let mut active_palette_slots = Vec::new();
+        for (slot, colour) in initial_slots.named_slots() {
+            let table: Table = lua
+                .to_value(&colour)?
+                .as_table()
+                .cloned()
+                .context("palette slot is a table")?;
+            active_palette.set(slot, &table)?;
+            active_palette_slots.push(table);
+        }
         let targets = rig.clone();
         api.set(
             "members",
@@ -311,10 +345,15 @@ impl LuaAutoloop {
             instruction_budget,
             rig: rig.clone(),
             identity,
+            active_palette_slots,
         })
     }
 
-    pub fn render(&mut self, context: &RenderContext) -> Result<Vec<Effect>> {
+    pub fn render(
+        &mut self,
+        context: &RenderContext,
+        palette: &PaletteSlots,
+    ) -> Result<Vec<Effect>> {
         ensure!(
             context
                 .normalized_rms_level
@@ -332,6 +371,11 @@ impl LuaAutoloop {
                 value.is_finite() && value >= 0.0,
                 "render context must contain finite nonnegative time"
             );
+        }
+        for (table, (_, colour)) in self.active_palette_slots.iter().zip(palette.named_slots()) {
+            table.set("red", colour.red)?;
+            table.set("green", colour.green)?;
+            table.set("blue", colour.blue)?;
         }
         self.instruction_budget
             .store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);

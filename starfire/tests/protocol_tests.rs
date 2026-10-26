@@ -37,6 +37,11 @@ fn play(bank: &str, autoloop: &str) -> Operation {
             format!("{bank}/{autoloop}")
         },
         transition: None,
+        palette: if autoloop.is_empty() {
+            String::new()
+        } else {
+            "techno".into()
+        },
     })
 }
 
@@ -139,6 +144,16 @@ fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
                 lua_source: "-".repeat(source_bytes),
             })
             .collect(),
+        palettes: vec![wire::Palette {
+            name: "techno".into(),
+            primary: Some(wire::RgbColor {
+                red: 1.0,
+                green: 0.82,
+                blue: 0.6,
+            }),
+            black: Some(wire::RgbColor::default()),
+            ..Default::default()
+        }],
         ..Default::default()
     })
 }
@@ -253,6 +268,20 @@ fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
             transition: Some(wire::play_autoloop::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
+            palette: "techno".into(),
+            ..Default::default()
+        }),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            autoloop_id: "drop/kick".into(),
+            ..Default::default()
+        }),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            autoloop_id: "drop/kick".into(),
+            palette: "neon".into(),
+            ..Default::default()
+        }),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            palette: "techno".into(),
             ..Default::default()
         }),
     ] {
@@ -346,6 +375,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                 bank: "atmospheric".into(),
                 autoloop: "cold_breathe".into(),
                 transition: Transition::Cut,
+                palette: None,
             },
         ),
         (
@@ -376,6 +406,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                 transition: Some(wire::play_autoloop::Transition {
                     crossfade_beats: Some(2.0),
                 }),
+                palette: "house".into(),
                 ..Default::default()
             }),
             Command::Select {
@@ -384,6 +415,14 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                 transition: Transition::Crossfade {
                     duration_beats: 2.0,
                 },
+                palette: Some("house".into()),
+            },
+        ),
+        (
+            0.9,
+            parameter(Kind::Palette, Value::Text("techno".into())),
+            Command::SetPalette {
+                name: "techno".into(),
             },
         ),
         (
@@ -476,6 +515,7 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
         parameter(Kind::DefaultCrossfadeBeats, Value::Number(2.0)),
         parameter(Kind::StrobeMaxRateHz, Value::Number(6.0)),
         parameter(Kind::StrobeMaxBurstSeconds, Value::Number(3.0)),
+        parameter(Kind::Palette, Value::Text("house".into())),
     ] {
         assert_eq!(
             read_control(&mut Cursor::new(encoded(operation.clone()))).unwrap(),
@@ -486,6 +526,8 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
     for invalid in [
         parameter(Kind::Paused, Value::Number(1.0)),
         parameter(Kind::DefaultCrossfadeBeats, Value::Boolean(true)),
+        parameter(Kind::Palette, Value::Number(1.0)),
+        parameter(Kind::Palette, Value::Text("neon".into())),
         faded(Kind::StrobeMaxRateHz, 6.0, 1.0),
         Operation::SetParameter(wire::SetParameter {
             command_id: 1,
@@ -498,6 +540,7 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
     ] {
         assert!(apply_command(&mut engine, 0.0, &invalid).is_err());
     }
+    assert_eq!(engine.active_palette(), "house");
 }
 
 #[test]
@@ -516,6 +559,7 @@ fn an_omitted_transition_uses_the_default_and_an_empty_one_cuts() {
         command_id: 1,
         autoloop_id: "drop/kick".into(),
         transition: Some(wire::play_autoloop::Transition::default()),
+        palette: "techno".into(),
     });
     let mut cutting = engine;
     apply_command(&mut cutting, 0.0, &cut).unwrap();

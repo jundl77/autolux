@@ -2,7 +2,7 @@
 -- energy: 1
 -- family: accent
 -- movement: still
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local DROP_BEATS = 2
 local SCATTER = { 3, 6, 1, 8, 4, 7, 2, 5 }

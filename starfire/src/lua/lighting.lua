@@ -102,25 +102,11 @@ function sf.loudness_gain(rms)
     return sf.lerp(LOUDNESS_FLOOR, 1, math.min(1, math.max(0, rms / LOUDNESS_FULL_RMS)))
 end
 
-local PALETTES = {
-    techno = {
-        primary = sf.rgb(1, 0.82, 0.6),
-        secondary = sf.rgb(1, 0.55, 0.1),
-        accent = sf.rgb(0.75, 0, 0.02),
-        cold = sf.rgb(0.75, 0.85, 1),
-        black = sf.rgb(0, 0, 0)
-    },
-    house = {
-        primary = sf.rgb(1, 0.82, 0.6),
-        secondary = sf.rgb(1, 0, 0.7),
-        accent = sf.rgb(1, 0.4, 0),
-        cold = sf.rgb(0, 0.85, 1),
-        black = sf.rgb(0, 0, 0)
-    }
-}
+local named_palettes, active_palette = {}, {}
 
 function sf.palette(name)
-    local palette = PALETTES[name]
+    if name == nil then return active_palette end
+    local palette = named_palettes[name]
     assert(palette ~= nil, "unknown palette")
     return palette
 end
@@ -178,4 +164,4 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
-return sf
+return sf, named_palettes, active_palette

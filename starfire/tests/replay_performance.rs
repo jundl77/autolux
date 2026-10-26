@@ -75,6 +75,7 @@ fn mixed_show() -> Replay {
                         duration_beats: 4.0,
                     }
                 },
+                palette: None,
             },
         );
     }

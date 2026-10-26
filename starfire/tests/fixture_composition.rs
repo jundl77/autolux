@@ -33,6 +33,7 @@ fn steady_room() -> Engine {
                 bank: "test".into(),
                 autoloop: "steady".into(),
                 transition: Transition::Cut,
+                palette: None,
             },
         )
         .unwrap();

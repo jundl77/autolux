@@ -23,11 +23,28 @@ struct Renderer {
     runtime: tempfile::TempDir,
 }
 
+fn techno_palette() -> wire::Palette {
+    let rgb = |red, green, blue| Some(wire::RgbColor { red, green, blue });
+    wire::Palette {
+        name: "techno".into(),
+        primary: rgb(1.0, 0.82, 0.6),
+        secondary: rgb(1.0, 0.55, 0.1),
+        accent: rgb(0.75, 0.0, 0.02),
+        cold: rgb(0.75, 0.85, 1.0),
+        black: rgb(0.0, 0.0, 0.0),
+    }
+}
+
 fn play(name: &str) -> Operation {
     Operation::PlayAutoloop(wire::PlayAutoloop {
         command_id: 1,
         autoloop_id: name.into(),
         transition: None,
+        palette: if name.is_empty() {
+            String::new()
+        } else {
+            "techno".into()
+        },
     })
 }
 
@@ -96,6 +113,7 @@ impl Renderer {
             output: Some(wire::login::Output::ArtnetDestination(socket.local_addr().unwrap().to_string())),
             parameters: vec![],
             render_core: None,
+            palettes: vec![techno_palette()],
         };
         Self {
             child,

@@ -30,6 +30,7 @@ fn replay(duration_seconds: f64) -> Replay {
                     bank: "atmospheric".into(),
                     autoloop: "cold_breathe".into(),
                     transition: Transition::Cut,
+                    palette: None,
                 },
             },
         ],

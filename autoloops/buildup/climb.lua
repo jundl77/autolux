@@ -2,7 +2,7 @@
 -- energy: 2
 -- family: warm
 -- movement: sweep
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 8
 local RAMP_BEATS = 128
 local RAMP_SHARE = 0.85

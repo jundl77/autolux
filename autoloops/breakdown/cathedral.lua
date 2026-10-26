@@ -2,7 +2,7 @@
 -- energy: 1
 -- family: cold
 -- movement: sweep
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local PIXEL_LOW, PIXEL_HIGH = 0.03, 0.3
 local CENTRE_PIXELS = { [4] = true, [5] = true }

@@ -38,6 +38,7 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) 
                 bank: "test".into(),
                 autoloop: "fault".into(),
                 transition: Transition::Cut,
+                palette: None,
             },
         }],
     };

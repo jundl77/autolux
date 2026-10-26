@@ -161,7 +161,8 @@ impl LiveSession {
             radius::config::pin_worker(i32::try_from(core).context("invalid render CPU index")?)?;
         }
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
-        let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
+        let catalog =
+            AutoloopCatalog::from_definitions(&login.autoloops)?.with_palettes(&login.palettes)?;
         let autoloops = catalog.list();
         let mut probe = Engine::new(rig.clone(), catalog.clone())?;
         for parameter in &login.parameters {
@@ -174,6 +175,7 @@ impl LiveSession {
                     bank: autoloop.bank,
                     autoloop: autoloop.autoloop,
                     transition: Transition::Cut,
+                    palette: None,
                 },
             )?;
             let frame = probe.render_at(0.0)?;
@@ -564,6 +566,14 @@ mod tests {
                         .into(),
             }],
             output: Some(wire::login::Output::ArtnetDestination(listener.local_addr().unwrap().to_string())),
+            palettes: vec![wire::Palette {
+                name: "techno".into(),
+                primary: Some(wire::RgbColor::default()),
+                secondary: Some(wire::RgbColor::default()),
+                accent: Some(wire::RgbColor::default()),
+                cold: Some(wire::RgbColor::default()),
+                black: Some(wire::RgbColor::default()),
+            }],
             ..Default::default()
         };
         let mut session = LiveSession::login(&login).unwrap();
@@ -584,6 +594,7 @@ mod tests {
                     bank: "test".into(),
                     autoloop: "steady".into(),
                     transition: crate::model::Transition::Cut,
+                    palette: None,
                 },
             )
             .unwrap();

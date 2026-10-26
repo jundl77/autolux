@@ -2,7 +2,7 @@
 -- energy: 2
 -- family: warm
 -- movement: still
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local WASH_LOW, WASH_HIGH = 0.14, 0.26
 local EMBER_LOW, EMBER_HIGH = 0.04, 0.24

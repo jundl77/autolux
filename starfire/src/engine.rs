@@ -11,6 +11,7 @@ use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
     OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
 };
+use crate::palette::PaletteSlots;
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
 
@@ -49,24 +50,28 @@ impl ActiveAutoloop {
         seconds: f64,
         time: ClockSample,
         normalized_rms_level: Option<f64>,
+        palette: &PaletteSlots,
     ) -> Result<Vec<Effect>> {
-        self.script.render(&RenderContext {
-            time_seconds: seconds,
-            beat_position: time.beat_position,
-            bar_phase: time.bar_phase,
-            bar_index: time.bar_index,
-            beats_per_bar: time.beats_per_bar,
-            autoloop_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
-            autoloop_speed_scaled_elapsed_beats: (time.animation_beats
-                - self.start_animation_beats)
-                .max(0.0),
-            normalized_rms_level,
-        })
+        self.script.render(
+            &RenderContext {
+                time_seconds: seconds,
+                beat_position: time.beat_position,
+                bar_phase: time.bar_phase,
+                bar_index: time.bar_index,
+                beats_per_bar: time.beats_per_bar,
+                autoloop_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
+                autoloop_speed_scaled_elapsed_beats: (time.animation_beats
+                    - self.start_animation_beats)
+                    .max(0.0),
+                normalized_rms_level,
+            },
+            palette,
+        )
     }
 }
 
 enum FadeSource {
-    Running(ActiveAutoloop),
+    Running(Box<ActiveAutoloop>),
     Frozen(FixtureStates),
 }
 
@@ -110,6 +115,7 @@ pub struct Engine {
     strobe_max_rate_hz: f64,
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
+    palette: ActivePalette,
 }
 
 impl Engine {
@@ -117,6 +123,11 @@ impl Engine {
         let last_output_states = rig.empty_states();
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
+        let initial_palette = catalog.palettes().initial().to_owned();
+        let palette = ActivePalette::steady(
+            &initial_palette,
+            catalog.palettes().slots(&initial_palette)?,
+        );
         Ok(Self {
             rig,
             catalog,
@@ -136,6 +147,7 @@ impl Engine {
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
+            palette,
         })
     }
 
@@ -163,11 +175,18 @@ impl Engine {
                 bank,
                 autoloop,
                 transition,
+                palette,
             } => {
                 validate_identifier(bank)?;
                 validate_identifier(autoloop)?;
                 let transition = &self.resolve_transition(transition);
                 validate_transition(transition, time.elapsed_musical_beats)?;
+                let palette = palette
+                    .as_deref()
+                    .map(|name| {
+                        Ok::<_, anyhow::Error>((name, self.catalog.palettes().slots(name)?))
+                    })
+                    .transpose()?;
                 if !self
                     .active
                     .as_ref()
@@ -175,6 +194,23 @@ impl Engine {
                 {
                     self.select(at_seconds, time, bank, autoloop, transition)?;
                 }
+                if let Some((name, slots)) = palette {
+                    let duration_beats = match transition {
+                        Transition::Crossfade { duration_beats } => *duration_beats,
+                        Transition::Cut | Transition::RendererDefault => 0.0,
+                    };
+                    self.palette
+                        .retarget(time.elapsed_musical_beats, name, slots, duration_beats);
+                }
+            }
+            Command::SetPalette { name } => {
+                let slots = self.catalog.palettes().slots(name)?;
+                self.palette.retarget(
+                    time.elapsed_musical_beats,
+                    name,
+                    slots,
+                    self.default_crossfade_beats,
+                );
             }
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
             Command::ClearOverride { id } => {
@@ -237,6 +273,7 @@ impl Engine {
         at_seconds: f64,
         autoloop_id: &str,
         transition: Transition,
+        palette: &str,
     ) -> Result<()> {
         let (bank, autoloop) = self.catalog.resolve(autoloop_id)?.clone();
         self.apply(
@@ -245,8 +282,13 @@ impl Engine {
                 bank,
                 autoloop,
                 transition,
+                palette: Some(palette.to_owned()),
             },
         )
+    }
+
+    pub fn active_palette(&self) -> &str {
+        self.palette.name()
     }
 
     pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
@@ -284,6 +326,9 @@ impl Engine {
             }
             (Ok(ParameterType::StrobeMaxBurstSeconds), Some(Value::Number(value))) => {
                 Command::SetStrobeMaxBurstSeconds { seconds: *value }
+            }
+            (Ok(ParameterType::Palette), Some(Value::Text(name))) => {
+                Command::SetPalette { name: name.clone() }
             }
             _ => anyhow::bail!("unknown parameter type or incompatible value"),
         };
@@ -442,7 +487,7 @@ impl Engine {
                 } else if self.script_error.is_some() {
                     FadeSource::Frozen(self.dark_states())
                 } else if let Some(previous) = previous {
-                    FadeSource::Running(previous)
+                    FadeSource::Running(Box::new(previous))
                 } else {
                     FadeSource::Frozen(self.dark_states())
                 };
@@ -473,11 +518,12 @@ impl Engine {
             self.fade = None;
         }
         let seconds = self.paused_at_seconds.unwrap_or(seconds);
+        let palette = self.palette.slots_at(time.elapsed_musical_beats);
         let Some(active) = &mut self.active else {
             return Ok(self.dark_states());
         };
         let effects = active
-            .render(seconds, time, self.normalized_rms_level)
+            .render(seconds, time, self.normalized_rms_level, &palette)
             .with_context(|| format!("autoloop {}/{} failed", active.bank, active.name))?;
         let destination = states_for_effects(&self.rig, &effects)?;
         let Some(fade) = &mut self.fade else {
@@ -486,7 +532,8 @@ impl Engine {
         let source = match &mut fade.source {
             FadeSource::Frozen(states) => states.clone(),
             FadeSource::Running(previous) => {
-                let effects = previous.render(seconds, time, self.normalized_rms_level)?;
+                let effects =
+                    previous.render(seconds, time, self.normalized_rms_level, &palette)?;
                 states_for_effects(&self.rig, &effects)?
             }
         };
@@ -626,6 +673,57 @@ fn validate_identifier(value: &str) -> Result<()> {
         "invalid identifier length"
     );
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct ActivePalette {
+    name: String,
+    from: PaletteSlots,
+    to: PaletteSlots,
+    start_beat: f64,
+    duration_beats: f64,
+}
+
+impl ActivePalette {
+    fn steady(name: &str, slots: PaletteSlots) -> Self {
+        Self {
+            name: name.to_owned(),
+            from: slots,
+            to: slots,
+            start_beat: 0.0,
+            duration_beats: 0.0,
+        }
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn slots_at(&self, beat: f64) -> PaletteSlots {
+        let progress = if self.duration_beats > 0.0 {
+            (beat - self.start_beat) / self.duration_beats
+        } else {
+            1.0
+        };
+        if progress >= 1.0 {
+            self.to
+        } else {
+            self.from.blend(&self.to, progress.max(0.0))
+        }
+    }
+
+    fn retarget(&mut self, beat: f64, name: &str, slots: PaletteSlots, duration_beats: f64) {
+        if name == self.name {
+            return;
+        }
+        *self = Self {
+            name: name.to_owned(),
+            from: self.slots_at(beat),
+            to: slots,
+            start_beat: beat,
+            duration_beats,
+        };
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

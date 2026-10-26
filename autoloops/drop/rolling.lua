@@ -2,7 +2,7 @@
 -- energy: 2
 -- family: accent
 -- movement: snap
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local HOLD_BEATS = 8
 local STEPS_PER_BEAT = 2

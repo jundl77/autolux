@@ -2,7 +2,7 @@
 -- energy: 1
 -- family: cold
 -- movement: sweep
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local WASH_LEVEL = 0.08
 local WAVE_LEVEL, WAVE_WIDTH = 0.3, 2.5
