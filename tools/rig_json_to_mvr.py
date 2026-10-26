@@ -1,6 +1,6 @@
 """Convert a schema-1 Autolux rig JSON into a spec-conforming MVR 1.6 rig.
 
-    uv run python tools/rig_json_to_mvr.py rigs/room.json rigs/room.mvr
+    uv run python -m tools.rig_json_to_mvr old-rig.json rigs/room.mvr
 
 Groups become MVR classes, the pan/tilt offsets become the Matrix yaw/pitch
 (docs/starfire/rig-mvr.md) and each used profile is embedded as a .gdtf file.

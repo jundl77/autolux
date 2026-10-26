@@ -35,7 +35,7 @@ def saved_rig() -> Path:
     if LEGACY_FIXTURE_STORE.is_file():
         raise RuntimeError(
             f'{LEGACY_FIXTURE_STORE} is a pre-MVR fixture patch. Convert it with '
-            f'"uv run python tools/rig_json_to_mvr.py {LEGACY_FIXTURE_STORE} '
+            f'"uv run python -m tools.rig_json_to_mvr {LEGACY_FIXTURE_STORE} '
             f'{DEFAULT_FIXTURE_STORE}" or delete it to use the room rig.'
         )
     return DEFAULT_RIG

@@ -33,6 +33,7 @@ ORTHONORMAL_TOLERANCE = 1e-3
 GIMBAL_TOLERANCE = 1e-9
 FULL_TURN_DEGREES = 360.0
 HALF_TURN_DEGREES = 180.0
+MAX_PITCH_DEGREES = 60.0
 IDENTITY_MATRIX = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
 MOVEMENT_AXES = ('pan', 'tilt')
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
@@ -156,9 +157,11 @@ def new_scene() -> Scene:
     )
     scene = ElementTree.SubElement(root, 'Scene')
     layers = ElementTree.SubElement(scene, 'Layers')
-    ElementTree.SubElement(
+    layer = ElementTree.SubElement(
         layers, 'Layer', uuid=stable_uuid('layer', DEFAULT_LAYER), name=DEFAULT_LAYER
     )
+    # MVR 1.6 Table 17 allows 0..1; always writing it keeps older 1.x readers happy.
+    ElementTree.SubElement(layer, 'ChildList')
     return Scene(root)
 
 
@@ -471,6 +474,25 @@ def rotation_degrees(matrix) -> tuple[float, float, float]:
         yaw = math.degrees(math.atan2(-v[0], v[1]))
         roll = math.degrees(math.atan2(-u[2], w[2]))
     return canonical_degrees(yaw), pitch + 0.0, canonical_degrees(roll)
+
+
+def home_orientation(matrix) -> dict:
+    """Starfire's pan/tilt home for a scene-space Matrix (starfire/src/fixtures.rs).
+
+    Tilt home = pitch is exact only at pan home, so pitch beyond MAX_PITCH_DEGREES is
+    refused. A downward local Z (a standing head, Rx(180)) reverses both movements.
+    """
+    yaw, pitch, _ = rotation_degrees(matrix)
+    if abs(pitch) > MAX_PITCH_DEGREES:
+        raise ValueError(
+            f'fixture pitch {pitch:.1f} exceeds +/-{MAX_PITCH_DEGREES:g} degrees; the tilt home '
+            'is only approximated for near-level bases'
+        )
+    return {
+        'pan_offset_degrees': yaw,
+        'tilt_offset_degrees': pitch,
+        'reversed': _axes(matrix)[2][2] < 0,
+    }
 
 
 def compose_matrix(position_mm, rotation) -> list[float]:

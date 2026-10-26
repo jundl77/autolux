@@ -18,11 +18,11 @@ FIXTURE_CSS = '''
 .patch-workspace {display:grid;grid-template-columns:230px minmax(480px,1fr);gap:16px;align-items:start;}
 .patch-card {background:#121a24;border:1px solid #273345;border-radius:6px;padding:16px;min-width:0;}
 .patch-card h3 {margin:0 0 14px;font-size:13px;font-weight:600;}
-.patch-workspace.has-selection {grid-template-columns:230px minmax(480px,1fr) 340px;}
+.patch-workspace.has-selection {grid-template-columns:230px minmax(480px,1fr) 300px;}
 .patch-library {grid-column:1;grid-row:1;}
 .patch-map-card {grid-column:2;grid-row:1;}
 .mvr-card {grid-column:2;grid-row:2;}
-#fixture-info {grid-column:3;grid-row:1 / span 2;max-height:calc(100vh - 140px);overflow:auto;}
+#fixture-info {grid-column:3;grid-row:1;}
 .patch-universe-heading {display:flex;align-items:center;gap:14px;}
 .patch-universe-heading h3,.patch-info-heading h3 {margin:0;}
 .patch-info-heading {margin-bottom:14px;}
@@ -37,7 +37,8 @@ FIXTURE_CSS = '''
 #config-panel .patch-block:active {cursor:grabbing;}
 .patch-field {display:block;margin:0 0 12px;min-width:0;}
 .patch-field>span {display:block;color:#94a6b9;font-size:11px;margin-bottom:5px;}
-.patch-field input,#config-panel .mvr-editor input,#config-panel .mvr-editor select {box-sizing:border-box;width:100%;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:6px 8px;font:inherit;font-size:12px;}
+.patch-field input {box-sizing:border-box;width:100%;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:8px;font:inherit;font-size:12px;}
+#config-panel .mvr-editor input,#config-panel .mvr-editor select {box-sizing:border-box;width:100%;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:6px 8px;font:inherit;font-size:12px;}
 .patch-pair {display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 #config-panel .Select-control,#config-panel .Select-menu-outer {background:#0b121c;border-color:#344256;}
 #config-panel .Select-value-label,#config-panel .Select-input input {color:#e6edf3!important;}
@@ -48,7 +49,7 @@ FIXTURE_CSS = '''
 #config-panel .patch-primary {background:#284d71;border-color:#4a7fab;}
 .patch-actions {display:flex;gap:8px;}
 .patch-muted,#fixture-status {font-size:12px;color:#93a5b9;line-height:1.6;}
-#fixture-status {margin:12px 0;min-height:19px;white-space:pre-line;}
+#fixture-status {margin:12px 0;min-height:19px;}
 .patch-profile-info {min-height:65px;margin:12px 0 18px;font-size:12px;color:#93a5b9;line-height:1.7;}
 .patch-map {display:grid;grid-template-columns:repeat(var(--dmx-columns),minmax(0,1fr));grid-auto-rows:29px;gap:2px;margin-top:12px;}
 .patch-channel {background:#192432;color:#65798f;font-size:9px;display:flex;align-items:center;justify-content:center;border-radius:2px;}
@@ -68,10 +69,10 @@ FIXTURE_CSS = '''
 #mvr-tree .mvr-tag,.mvr-editor .mvr-tag {color:#7fa7cf;}
 .mvr-editor {font-size:12px;}
 .mvr-editor h4 {margin:16px 0 8px;font-size:12px;color:#c9d7e6;font-weight:600;}
-.mvr-editor .mvr-row {display:grid;grid-template-columns:118px minmax(0,1fr) auto;gap:6px;align-items:center;margin-bottom:6px;}
+.mvr-editor .mvr-row {display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:6px;align-items:center;margin-bottom:6px;}
 .mvr-editor .mvr-row label {color:#94a6b9;font-size:11px;overflow:hidden;text-overflow:ellipsis;}
 .mvr-editor .mvr-row.invalid input,.mvr-editor .mvr-row.invalid select {border-color:#e69478;}
-.mvr-editor .mvr-helper {display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 8px 124px;}
+.mvr-editor .mvr-helper {display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 8px;}
 .mvr-editor .mvr-adders {display:flex;flex-wrap:wrap;gap:4px;margin:6px 0;}
 #config-panel .mvr-editor button.mvr-small {padding:2px 7px;font-size:11px;}
 .mvr-editor details {margin-left:10px;}

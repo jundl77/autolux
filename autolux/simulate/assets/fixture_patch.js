@@ -5,6 +5,7 @@
     const MATRIX_DECIMALS = 6;
     const ORTHONORMAL_TOLERANCE = 1e-3;
     const GIMBAL_TOLERANCE = 1e-9;
+    const MAX_PITCH_DEGREES = 60;
     const DMX_UNIVERSE_SIZE = 512;
     const MAX_DMX_ADDRESS = 32768 * DMX_UNIVERSE_SIZE;
     const PLAN_MIN_SPAN_MM = 2000;
@@ -195,6 +196,17 @@
         ];
     }
 
+    // Mirrors mvr.home_orientation and Starfire: downward local Z reverses pan and tilt.
+    function homeOrientation(matrix) {
+        const rotation = rotationDegrees(matrix);
+        if (!rotation) return "Matrix has no plain rotation.";
+        if (Math.abs(rotation[1]) > MAX_PITCH_DEGREES) {
+            return `Pitch ${rotation[1].toFixed(1)}° exceeds ±${MAX_PITCH_DEGREES}°; save will be refused.`;
+        }
+        const length = Math.hypot(matrix[6], matrix[7], matrix[8]);
+        return { pan: rotation[0], tilt: rotation[1], reversed: matrix[8] / length < 0 };
+    }
+
     function composeMatrix(position, rotation) {
         const [yaw, pitch, roll] = rotation.map((value) => (value * Math.PI) / 180);
         const [cy, sy, cp, sp, cr, sr] = [
@@ -330,6 +342,11 @@
             names.add(row.name);
             if (row.breaks.length !== 1 || Number(row.breaks[0]) !== 0) {
                 errors.push(`${label}: Starfire renders one Address on break 0 per fixture.`);
+                return;
+            }
+            const home = homeOrientation(row.matrix);
+            if (typeof home === "string") {
+                errors.push(`${label}: ${home}`);
                 return;
             }
             if (row.universe === null) {
@@ -666,6 +683,7 @@
         formatMatrix,
         composeMatrix,
         rotationDegrees,
+        homeOrientation,
         multiply,
         dmxAddress,
         fixtureRows,
@@ -835,12 +853,25 @@
         if (!matrix || !rotation) return h("div", { className: "patch-muted", text: "Matrix has no plain rotation; edit the raw value." });
         const values = [...matrix.slice(9), ...rotation].map((value) => formatNumber(value));
         const labels = ["x mm", "y mm", "z mm", "yaw °", "pitch °", "roll °"];
+        const home = homeOrientation(matrix);
         return h(
             "div",
-            { className: "mvr-helper", "data-mvr-matrix": node.key },
-            values.map((value, index) =>
-                h("input", { type: "number", step: "any", value, title: labels[index], placeholder: labels[index] })
-            )
+            {},
+            h(
+                "div",
+                { className: "mvr-helper", "data-mvr-matrix": node.key },
+                values.map((value, index) =>
+                    h("input", { type: "number", step: "any", value, title: labels[index], placeholder: labels[index] })
+                )
+            ),
+            h("div", {
+                className: "patch-muted",
+                text:
+                    typeof home === "string"
+                        ? home
+                        : `Starfire home: pan ${formatNumber(home.pan)}°, tilt ${formatNumber(home.tilt)}°` +
+                          (home.reversed ? " · standing: pan/tilt reversed" : " · hanging")
+            })
         );
     }
 

@@ -51,6 +51,18 @@ test("matrix composition and decomposition agree with the server byte for byte",
     assert.equal(model.parseMatrix("{1,0,0}{0,1,0}{0,0,1}"), null);
 });
 
+test("the inspector's home matches Starfire for hanging, standing and steep fixtures", () => {
+    assert.deepEqual(plain(model.homeOrientation([-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0])), { pan: 180, tilt: 0, reversed: false });
+    assert.deepEqual(plain(model.homeOrientation([1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0])), { pan: 180, tilt: 0, reversed: true });
+    const steep = model.composeMatrix([0, 0, 0], [0, 61, 0]);
+    assert.equal(typeof model.homeOrientation(steep), "string");
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const [tilted] = edit(current, { action: "set-matrix", key: spot.key, position: [0, 0, 0], rotation: [0, 61, 0] });
+    const errors = model.occupancy(model.fixtureRows(tilted, settings), settings, 0).errors;
+    assert.ok(errors.some((error) => error.includes("exceeds ±60°")), errors.join());
+});
+
 test("dragging a block rewrites the break-0 address and refuses overlaps or stale drags", () => {
     const current = draft();
     const wash = fixtureNode(current, "wash_right");

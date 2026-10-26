@@ -5,7 +5,7 @@ plus every `.gdtf` (DIN SPEC 15800, `description.xml` inside) its fixtures refer
 at the archive root, STORE or DEFLATE. GDTF files are named
 `<Manufacturer>@<FixtureType>.gdtf`. `rigs/profiles.json` is only the fixture *library*:
 Config embeds a library GDTF into the MVR when a fixture first uses it.
-`tools/rig_json_to_mvr.py` converts legacy JSON rigs.
+`uv run python -m tools.rig_json_to_mvr old.json new.mvr` converts legacy JSON rigs.
 
 ## Contract
 
@@ -29,13 +29,29 @@ Class member order is MVR document order. Multipatch fixtures render as separate
 
 - pan home offset = scene-space **yaw**, canonical in (-180°, 180°] (+180, never -180,
   so one orientation always gives the same DMX on 540° heads);
-- tilt home offset = **pitch**; roll is shown and stored but not rendered;
-- identity = the GDTF default orientation = pan/tilt offset 0. The room spots are
-  `{-1,0,0}{0,-1,0}{0,0,1}{…}`, i.e. yaw 180, reproducing the previous 180° offset;
-  the four golden DMX digests are unchanged.
+- tilt home offset = **pitch**. This is an approximation: it is exact only at pan home,
+  because a tilted base couples pan into tilt. |pitch| > 60° is refused;
+- a local Z axis pointing down **reverses** pan and tilt (as DMXInvertPan/Tilt would;
+  setting those flags too cancels it again); roll otherwise does not render;
+- identity = the GDTF default (hanging) orientation = offset 0, not reversed.
+
+Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180, not
+reversed. This is how the room spots are entered, reproducing the previous 180° offset;
+every golden DMX digest is unchanged. Standing on the floor: `Rx(180)` =
+`{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` (Config: pitch 0, roll 180, yaw 180 as decomposed) →
+yaw 180 and reversed. The inspector shows the derived home under each Matrix.
 
 Sheared, mirrored or degenerate matrices are rejected. The Config plan is a top view
 (+Y up); each arrow is the object's local Y axis.
+
+## Authority
+
+Autolux (`mvr_validation.py`) is authoritative for MVR conformance. Starfire
+(`mvr.rs`, `fixtures.rs`) is authoritative for render rules: one break-0 Address, pitch
+limit, orthonormal matrices, footprint, overlaps and GDTF mode support. Autolux mirrors
+those rules with the same wording for early dashboard errors, and every save also runs
+`starfire rig`. `cli/tests/test_rig_parity.py` checks that both readers build the same
+`RigDefinition` from the room, generic and sample rigs (`starfire rig --definition`).
 
 ## Validation on save
 
@@ -65,12 +81,23 @@ names, overlaps, footprint), then `starfire rig`.
 | GroupObject, FocusPoint, Truss, Support, SceneObject, VideoScreen (Sources/Source), Projector (Projections/Projection), Geometries, Geometry3D, Symbol | yes | yes | Matrix composed for children |
 | Any element or attribute outside the tables | read | shown, removable | save refused |
 
-Comments, whitespace and attribute order are not preserved; unchanged archives re-save
+Layer › ChildList is 0..1 in the published 1.6 tables (tag `1.6-mvr`); Autolux accepts
+that but always writes one. The third-party test sample is synthetic
+(`autolux/tests/data/mvr/sample_scene.xml`): the spec repository ships GDTF snippets but no
+exported `.mvr`. Comments, whitespace and attribute order are not preserved; unchanged archives re-save
 byte-identically. Child order is not validated (the spec examples vary); new children are
 inserted in table order. Network attributes follow Table 52 (`ipv4`, `dhcp`, …), not the
 differently cased example.
 
 ## GDTF support
+
+The library types follow DIN SPEC 15800 Annex B: standard features (Dimmer.Dimmer,
+Position.PanTilt, Color.RGB/Color.Color, Beam.Beam, Gobo.Gobo, Control.Control only for
+control channels), ColorAdd_* in ColorComponent, Pan/Tilt on `Axis` geometries (Base ›
+Yoke › Head › Beam), light on a `Beam` geometry, upper-case FixtureTypeID, primitive
+`Models` and an sRGB `PhysicalDescriptions`. Former held channels carry their real
+attributes (Shutter1, Gobo1, PositionMSpeed, Function, PositionEffect(Rate), ColorAdd_UV,
+ColorMacro1(Rate)) with unchanged defaults, so DMX output is unchanged.
 
 Every GDTF node and attribute is shown per fixture, read-only, except:
 DMXMode `Name`/`Description`; ChannelFunction `Name`, `DMXFrom`, `Default`,

@@ -83,6 +83,31 @@ def test_yaw_pitch_roll_round_trip_through_the_matrix(rotation):
     assert matrix[9:] == [1, 2, 3]
 
 
+def test_hanging_half_turn_and_standing_head_differ_only_in_direction():
+    hanging = [-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]  # Rz(180)
+    standing = [1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0]  # Rx(180)
+    assert mvr.home_orientation(hanging) == {
+        'pan_offset_degrees': 180.0,
+        'tilt_offset_degrees': 0.0,
+        'reversed': False,
+    }
+    assert mvr.home_orientation(standing) == {
+        'pan_offset_degrees': 180.0,
+        'tilt_offset_degrees': 0.0,
+        'reversed': True,
+    }
+
+
+@pytest.mark.parametrize('pitch,accepted', [(60, True), (-60, True), (60.5, False), (-75, False)])
+def test_tilt_home_is_limited_to_near_level_bases(pitch, accepted):
+    matrix = mvr.compose_matrix([0, 0, 0], [0, pitch, 0])
+    if accepted:
+        assert mvr.home_orientation(matrix)['tilt_offset_degrees'] == pytest.approx(pitch)
+    else:
+        with pytest.raises(ValueError, match='exceeds'):
+            mvr.home_orientation(matrix)
+
+
 def test_gimbal_lock_keeps_the_heading_in_yaw():
     assert mvr.rotation_degrees(mvr.compose_matrix([0, 0, 0], [60, 90, 0])) == pytest.approx(
         (60, 90, 0), abs=1e-4

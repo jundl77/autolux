@@ -43,7 +43,7 @@ validates and stores a GDTF mode in the `rigs/profiles.json` library. Config lis
 imported profiles for patching and embeds the GDTF in the MVR when a fixture uses it.
 Imports replace the selected profile ID atomically; no native rebuild is needed.
 Unsupported modes are rejected before saving. A pre-MVR `.live/starfire/rig.json`
-is refused with a conversion hint: `uv run python tools/rig_json_to_mvr.py`.
+is refused with a conversion hint: `uv run python -m tools.rig_json_to_mvr`.
 
 The dashboard has Control for the timeline and essential performance, Telemetry
 for detailed graphs, and Config for fixture setup. Renderer FPS is measured from

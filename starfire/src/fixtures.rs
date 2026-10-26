@@ -22,6 +22,7 @@ const ORTHONORMAL_TOLERANCE: f64 = 1e-3;
 const GIMBAL_TOLERANCE: f64 = 1e-9;
 const FULL_TURN_DEGREES: f64 = 360.0;
 const HALF_TURN_DEGREES: f64 = 180.0;
+const MAX_PITCH_DEGREES: f64 = 60.0;
 
 #[derive(Clone, Debug)]
 struct FixturePatch {
@@ -78,13 +79,27 @@ impl MovementRange {
     }
 }
 
-/// Home direction offsets in degrees from an MVR Matrix, relative to the GDTF
-/// default orientation: (pan = yaw about Z, tilt = pitch about the yawed X axis).
-/// R = Rz(yaw) * Rx(pitch) * Ry(roll); roll has no pan/tilt meaning and is ignored.
-/// Yaw is canonical in (-180, 180] so one orientation always selects the same DMX.
-pub fn home_offsets(matrix: &[f64]) -> Result<(f64, f64)> {
+/// Pan/tilt home derived from an MVR Matrix, relative to the GDTF default (hanging) orientation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HomeOrientation {
+    pub pan_offset_degrees: f64,
+    pub tilt_offset_degrees: f64,
+    /// Local Z points down (e.g. a floor-standing head, Rx(180)): pan and tilt turn
+    /// the other way, as with MVR DMXInvertPan/DMXInvertTilt.
+    pub reversed: bool,
+}
+
+/// R = Rz(yaw) * Rx(pitch) * Ry(roll): pan home = yaw about Z, canonical in (-180, 180]
+/// so one orientation always selects the same DMX. Tilt home = pitch is exact only at
+/// pan home (a tilted base couples pan into tilt), so pitch beyond 60 degrees is refused.
+/// Roll only matters through the Z axis direction, which reverses both movements.
+pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
     if matrix.is_empty() {
-        return Ok((0.0, 0.0));
+        return Ok(HomeOrientation {
+            pan_offset_degrees: 0.0,
+            tilt_offset_degrees: 0.0,
+            reversed: false,
+        });
     }
     ensure!(
         matrix.len() == MATRIX_VALUES && matrix.iter().all(|value| value.is_finite()),
@@ -114,6 +129,10 @@ pub fn home_offsets(matrix: &[f64]) -> Result<(f64, f64)> {
         "MVR Matrix rotation must be orthogonal and unmirrored"
     );
     let pitch = v[2].clamp(-1.0, 1.0).asin().to_degrees();
+    ensure!(
+        pitch.abs() <= MAX_PITCH_DEGREES,
+        "fixture pitch {pitch:.1} exceeds +/-{MAX_PITCH_DEGREES} degrees; the tilt home is only approximated for near-level bases"
+    );
     let yaw = if v[2].abs() > 1.0 - GIMBAL_TOLERANCE {
         u[1].atan2(u[0])
     } else {
@@ -127,7 +146,11 @@ pub fn home_offsets(matrix: &[f64]) -> Result<(f64, f64)> {
     if yaw <= -HALF_TURN_DEGREES {
         yaw += FULL_TURN_DEGREES;
     }
-    Ok((yaw + 0.0, pitch + 0.0))
+    Ok(HomeOrientation {
+        pan_offset_degrees: yaw + 0.0,
+        tilt_offset_degrees: pitch + 0.0,
+        reversed: w[2] < 0.0,
+    })
 }
 
 /// An immutable, validated patch with fixture data separate from autoloop logic.
@@ -144,18 +167,22 @@ impl FixtureRig {
             .fixtures
             .iter()
             .map(|fixture| -> Result<_> {
-                let (pan_offset_degrees, tilt_offset_degrees) = home_offsets(&fixture.matrix)
+                let home = home_orientation(&fixture.matrix)
                     .with_context(|| format!("fixture {}", fixture.fixture_id))?;
+                let mut pan = MovementRange::from_wire(&fixture.pan);
+                let mut tilt = MovementRange::from_wire(&fixture.tilt);
+                pan.inverted ^= home.reversed;
+                tilt.inverted ^= home.reversed;
                 Ok(FixturePatch {
                     id: fixture.fixture_id.clone(),
                     profile: fixture.profile_id.clone(),
                     universe: u16::try_from(fixture.universe)
                         .context("fixture universe exceeds range")?,
                     address: fixture.address as usize,
-                    pan: MovementRange::from_wire(&fixture.pan),
-                    tilt: MovementRange::from_wire(&fixture.tilt),
-                    pan_offset_degrees,
-                    tilt_offset_degrees,
+                    pan,
+                    tilt,
+                    pan_offset_degrees: home.pan_offset_degrees,
+                    tilt_offset_degrees: home.tilt_offset_degrees,
                 })
             })
             .collect::<Result<_>>()?;
@@ -484,11 +511,20 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{home_offsets, offset_pan, offset_tilt};
+    use super::{HomeOrientation, home_orientation, offset_pan, offset_tilt};
 
     fn yawed(degrees: f64) -> Vec<f64> {
         let (sin, cos) = degrees.to_radians().sin_cos();
         vec![cos, sin, 0.0, -sin, cos, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+    }
+
+    fn home(matrix: &[f64]) -> (f64, f64, bool) {
+        let HomeOrientation {
+            pan_offset_degrees,
+            tilt_offset_degrees,
+            reversed,
+        } = home_orientation(matrix).unwrap();
+        (pan_offset_degrees, tilt_offset_degrees, reversed)
     }
 
     #[test]
@@ -501,25 +537,38 @@ mod tests {
             (270.0, -90.0),
             (540.0, 180.0),
         ] {
-            let (pan, tilt) = home_offsets(&yawed(yaw)).unwrap();
+            let (pan, tilt, reversed) = home(&yawed(yaw));
             assert!((pan - expected).abs() < 1e-9, "{yaw} -> {pan}");
-            assert!(tilt.abs() < 1e-9);
+            assert!(tilt.abs() < 1e-9 && !reversed);
         }
         // atan2(-0.0, -1) is -180, which would select different DMX than +180.
         let exact = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 5.0, 6.0, 7.0];
-        assert_eq!(home_offsets(&exact).unwrap(), (180.0, 0.0));
-        assert_eq!(home_offsets(&[]).unwrap(), (0.0, 0.0));
+        assert_eq!(home(&exact), (180.0, 0.0, false));
+        assert_eq!(home(&[]), (0.0, 0.0, false));
     }
 
     #[test]
-    fn matrix_pitch_is_the_tilt_offset_and_roll_is_ignored() {
+    fn hanging_half_turn_and_standing_head_differ_only_in_direction() {
+        // Rz(180): hung on the truss, turned around. Rx(180): standing on the floor.
+        let hanging = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        let standing = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0];
+        assert_eq!(home(&hanging), (180.0, 0.0, false));
+        assert_eq!(home(&standing), (180.0, 0.0, true));
+    }
+
+    #[test]
+    fn matrix_pitch_is_the_tilt_offset_up_to_sixty_degrees() {
         // Rz(30) * Rx(20) * Ry(-40), as written by Autolux.
         let matrix = [
             0.773_337, 0.192_63, 0.604_023, -0.469_846, 0.813_798, 0.342_02, -0.425_669,
             -0.548_295, 0.719_846, 0.0, 0.0, 0.0,
         ];
-        let (pan, tilt) = home_offsets(&matrix).unwrap();
-        assert!((pan - 30.0).abs() < 1e-3 && (tilt - 20.0).abs() < 1e-3);
+        let (pan, tilt, reversed) = home(&matrix);
+        assert!((pan - 30.0).abs() < 1e-3 && (tilt - 20.0).abs() < 1e-3 && !reversed);
+        let (sin, cos) = 61.0_f64.to_radians().sin_cos();
+        let steep = [1.0, 0.0, 0.0, 0.0, cos, sin, 0.0, -sin, cos, 0.0, 0.0, 0.0];
+        let error = home_orientation(&steep).unwrap_err().to_string();
+        assert!(error.contains("exceeds +/-60 degrees"), "{error}");
     }
 
     #[test]
@@ -529,7 +578,7 @@ mod tests {
         let mut sheared = yawed(0.0);
         sheared[3] = 1.0;
         for matrix in [mirrored, sheared, vec![1.0; 9], vec![f64::NAN; 12]] {
-            assert!(home_offsets(&matrix).is_err(), "{matrix:?}");
+            assert!(home_orientation(&matrix).is_err(), "{matrix:?}");
         }
     }
 

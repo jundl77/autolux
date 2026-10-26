@@ -23,6 +23,7 @@ def fixture(name='left', address=1, universe=0, spec='rgb.gdtf', mode='3ch', bre
         'universe': universe,
         'address': address,
         'addresses': [(index, universe, address) for index in breaks],
+        'matrix': list(mvr.IDENTITY_MATRIX),
     }
 
 
@@ -50,6 +51,7 @@ def test_last_channel_can_be_allocated_without_clipping_or_wrapping():
         ({'name': ''}, 'unique, short fixture name'),
         ({'addresses': [(1, 0, 1)]}, 'one Address on break 0'),
         ({'addresses': [(0, 0, 1), (1, 0, 9)]}, 'one Address on break 0'),
+        ({'matrix': mvr.compose_matrix([0, 0, 0], [0, 61, 0])}, 'exceeds +/-60 degrees'),
     ],
 )
 def test_patches_starfire_cannot_render_are_rejected(changes, message):

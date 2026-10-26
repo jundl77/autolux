@@ -414,15 +414,19 @@ pub fn rig_definition(archive: &[u8]) -> Result<wire::RigDefinition> {
                 add_to_group(&mut rig, class, name);
             }
             let range = |axis: &str, flag: &str| -> Result<Option<wire::fixture::MovementRange>> {
-                let bounds = limits.get(&(identity.clone(), axis.to_string()));
+                let (minimum, maximum) = limits
+                    .get(&(identity.clone(), axis.to_string()))
+                    .copied()
+                    .unwrap_or((0.0, 1.0));
                 let inverted = invert_flag(node, flag)?;
-                Ok(
-                    (bounds.is_some() || inverted).then(|| wire::fixture::MovementRange {
-                        minimum: bounds.map(|bounds| bounds.0),
-                        maximum: bounds.map(|bounds| bounds.1),
+                // Canonical form shared with cli/starfire_assets.py: defaults are omitted.
+                Ok(((minimum, maximum) != (0.0, 1.0) || inverted).then_some(
+                    wire::fixture::MovementRange {
+                        minimum: Some(minimum),
+                        maximum: Some(maximum),
                         inverted,
-                    }),
-                )
+                    },
+                ))
             };
             Ok(wire::Fixture {
                 fixture_id: name.into(),

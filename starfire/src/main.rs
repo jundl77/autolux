@@ -8,12 +8,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
+use prost::Message;
 use serde_json::json;
 
 use starfire::artnet::ArtNetOutput;
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
+use starfire::mvr;
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::AutoloopCatalog;
 
@@ -70,7 +72,12 @@ enum Action {
         autoloops: PathBuf,
     },
     /// Validate a fixture patch without emitting DMX.
-    Rig { input: PathBuf },
+    Rig {
+        input: PathBuf,
+        /// Also write the RigDefinition protobuf this rig loads as, for Login parity checks.
+        #[arg(long)]
+        definition: Option<PathBuf>,
+    },
 }
 
 fn main() -> std::process::ExitCode {
@@ -131,8 +138,14 @@ fn run(arguments: Arguments) -> Result<()> {
                 serde_json::to_string_pretty(&AutoloopCatalog::load(&autoloops)?.list())?
             );
         }
-        Action::Rig { input } => {
+        Action::Rig { input, definition } => {
             let rig = FixtureRig::load(&input)?;
+            if let Some(path) = definition {
+                let archive = std::fs::read(&input)
+                    .with_context(|| format!("read rig {}", input.display()))?;
+                std::fs::write(&path, mvr::rig_definition(&archive)?.encode_to_vec())
+                    .with_context(|| format!("write rig definition {}", path.display()))?;
+            }
             let universes = rig
                 .encode(&rig.empty_states())?
                 .into_keys()

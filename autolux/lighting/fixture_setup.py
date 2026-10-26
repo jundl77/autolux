@@ -15,6 +15,9 @@ DMX_UNIVERSE_SIZE = mvr.DMX_UNIVERSE_SIZE
 MAX_ARTNET_UNIVERSE = 32767
 MAX_FIXTURES = 512
 MAX_NAME_BYTES = 128
+# Starfire (starfire/src/mvr.rs, fixtures.rs) is authoritative for render rules; these
+# pre-checks use its wording so the dashboard and `starfire rig` report the same rule.
+ONE_ADDRESS_RULE = 'Starfire renders one Address on break 0 per fixture'
 
 
 def rig_modes(scene: mvr.Scene) -> dict[str, dict]:
@@ -49,7 +52,12 @@ def channel_occupancy(
         else:
             names.add(name)
         if [entry[0] for entry in fixture['addresses']] != [0]:
-            errors.append(f'{label}: Starfire renders one Address on break 0 per fixture.')
+            errors.append(f'{label}: {ONE_ADDRESS_RULE}.')
+            continue
+        try:
+            mvr.home_orientation(fixture['matrix'])
+        except (KeyError, ValueError) as error:
+            errors.append(f'{label}: {error}.')
             continue
         target, start = fixture['universe'], fixture['address']
         if not 0 <= target <= MAX_ARTNET_UNIVERSE:

@@ -196,6 +196,31 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
 }
 
 #[test]
+fn standing_head_reverses_movement_like_dmx_inversion_and_hanging_does_not() {
+    const STANDING: [f64; 12] = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0];
+    let spot = |matrix: [f64; 12], inverted: bool| {
+        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+        patch["matrix"] = json!(matrix);
+        patch["pan"] = json!({"inverted": inverted});
+        patch["tilt"] = json!({"inverted": inverted});
+        rig(json!([patch]))
+    };
+    let standing = spot(STANDING, false);
+    let hanging_inverted = spot(HALF_TURN, true);
+    let hanging = spot(HALF_TURN, false);
+    // DMXInvert on a standing head cancels the reversal again.
+    let standing_inverted = spot(STANDING, true);
+    for (pan, tilt) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
+        let mut states = standing.empty_states();
+        let state = states.get_mut("test").unwrap();
+        (state.pan, state.tilt) = (pan, tilt);
+        let encode = |rig: &FixtureRig| rig.encode(&states).unwrap()[&0][..4].to_vec();
+        assert_eq!(encode(&standing), encode(&hanging_inverted));
+        assert_eq!(encode(&standing_inverted), encode(&hanging));
+    }
+}
+
+#[test]
 fn rotated_fixed_fixtures_are_accepted_and_non_rotations_rejected() {
     let mut wash = fixture("generic_rgb", 1);
     wash["matrix"] = json!(HALF_TURN);
