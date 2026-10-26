@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import random
 from collections.abc import Callable
@@ -7,7 +8,12 @@ from typing import TYPE_CHECKING
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
-from autolux.lib.engine.autoloop_policy import AutoloopChoice, AutoloopPolicy, SelectionContext
+from autolux.lib.engine.autoloop_policy import (
+    AutoloopChoice,
+    AutoloopPolicy,
+    SelectionContext,
+    max_energy_for_intensity,
+)
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
@@ -32,6 +38,7 @@ LOGGER = logging.getLogger(__name__)
 
 DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
+OPERATOR_FADE_SECONDS = 0.1
 
 
 def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
@@ -47,6 +54,13 @@ def strobe_rate_hz(settings: ShowSettings) -> float:
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
     return settings.drop_strobe_cooldown_seconds / settings.intensity
+
+
+def operator_transition(bpm: float | None) -> dict:
+    # Starfire fades autoloops in beats; without a tempo there is no beat to fade over.
+    if bpm and bpm > 0:
+        return {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * OPERATOR_FADE_SECONDS}
+    return {'kind': 'cut'}
 
 
 def strobe_override(
@@ -157,6 +171,36 @@ class EffectController:
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
         return True
+
+    def cap_energy(self, context: SelectionContext, bpm: float | None) -> AutoloopChoice | None:
+        """Swap the running loop for a calmer one; a raised cap waits for the next entry."""
+        if self._entered is None or self._entered[0] != context.intent:
+            return None
+        current = self._entered[1]
+        if self.lighting_client.selected_autoloop != (current.bank, current.autoloop):
+            return None  # Standby or another look is showing; the next entry obeys the cap.
+        intensity = self._settings().intensity
+        max_energy = max_energy_for_intensity(intensity)
+        if current.meta.energy <= max_energy:
+            return None
+        try:
+            choice = self._policy.choose(
+                context, exclude=(current.bank, current.autoloop), intensity=intensity
+            )
+        except ValueError:
+            return None
+        if choice.meta.energy >= current.meta.energy:
+            return None
+        choice = dataclasses.replace(choice, reason=f'intensity cap; {choice.reason}')
+        self.lighting_client.select_autoloop(
+            choice.bank, choice.autoloop, transition=operator_transition(bpm)
+        )
+        # Not recorded: an operator swap must not spend the loop's turn in the rotation.
+        self._entered = context.intent, choice
+        self._announce(
+            '[lighting] intensity cap |', context.intent, choice, self.lighting_client.palette
+        )
+        return choice
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
         choice = self._policy.choose(
