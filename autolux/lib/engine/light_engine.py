@@ -158,6 +158,15 @@ class LightEngine(IMusicAnalyserHandler):
             if self._room_beat_phase is None:
                 await self._switch_held_intent()
 
+    def next_autoloop(self) -> None:
+        if self._paused:
+            raise ValueError('the show is paused')
+        intent = self._entered_intent
+        if intent is None or self._showing_standby:
+            raise ValueError('no section is playing yet')
+        context = self._selection_context(intent, self._entered_label, self._clock.monotonic())
+        self.effect_controller.skip_autoloop(context)
+
     def set_master_level(self, level: float) -> None:
         if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
             raise ValueError('master brightness must be within 0..1')

@@ -14,6 +14,7 @@
     let suppressedClick = null;
     let requestId = 0;
     let keyCounter = 0;
+    const drawn = new WeakMap();
 
     function* walk(node, parent = null) {
         yield [node, parent];
@@ -592,19 +593,33 @@
             const rows = fixtureRows(draft, settings);
             const path = selection ? pathTo(draft.scene, selection) : null;
             if (typeof document.getElementById === "function") {
-                drawPlan(document.getElementById("mvr-plan"), draft, settings, selection);
-                drawTree(document.getElementById("mvr-tree"), draft, settings, selection);
-                drawEditor(document.getElementById("mvr-node-editor"), draft, settings, path);
+                const scene = JSON.stringify(draft.scene);
+                for (const [id, draw] of [["mvr-plan", drawPlan], ["mvr-tree", drawTree]]) {
+                    const container = document.getElementById(id);
+                    if (!container) continue;
+                    if (drawn.get(container) !== scene) {
+                        draw(container, draft, settings);
+                        drawn.set(container, scene);
+                    }
+                    markSelected(container, selection);
+                }
+                const editor = document.getElementById("mvr-node-editor");
+                if (editor) {
+                    const sameNode = drawn.get(editor) === selection;
+                    drawn.set(editor, selection);
+                    keepingState(editor, sameNode, () => drawEditor(editor, draft, settings, path));
+                }
             }
             const objects = placedObjects(draft, settings).length;
             const summary = `${rows.length} patched fixtures · ${objects} scene objects · ${Object.keys(draft.gdtf).length} GDTF files`;
-            if (!path) return [{ display: "none" }, "patch-workspace", "", true, summary];
+            const layout = [{ display: "block" }, "patch-workspace has-selection"];
+            if (!path) return [...layout, "Select a fixture in the map, plan or tree.", true, summary];
             const node = path.at(-1);
             const row = rows.find((entry) => entry.key === node.key);
             const detail = row
                 ? `${row.channels ?? "?"} channels · ${row.address ?? "?"}–${(row.address ?? 0) + (row.channels ?? 1) - 1} · ${row.spec}`
                 : `${node.tag}${node.attributes.name ? ` · ${node.attributes.name}` : ""}`;
-            return [{ display: "block" }, "patch-workspace has-selection", detail, path.length === 1, summary];
+            return [...layout, detail, path.length === 1, summary];
         },
 
         editPatch(_add, _remove, _close, action, response, settings, busy, draft, revision, selection, profile, quantity, universe, address) {
@@ -696,8 +711,24 @@
         return node;
     }
 
-    function drawPlan(container, draft, settings, selection) {
-        if (!container) return;
+    function markSelected(container, selection) {
+        for (const node of container.querySelectorAll("[data-node-key]")) {
+            node.classList.toggle("selected", node.getAttribute("data-node-key") === selection);
+        }
+    }
+
+    function keepingState(container, sameNode, draw) {
+        if (!sameNode) return draw();
+        const open = [...container.querySelectorAll("details")].map((details) => details.open);
+        const focused = [...container.querySelectorAll("input, select")].indexOf(document.activeElement);
+        draw();
+        container.querySelectorAll("details").forEach((details, index) => {
+            if (index < open.length) details.open = open[index];
+        });
+        if (focused >= 0) container.querySelectorAll("input, select")[focused]?.focus({ preventScroll: true });
+    }
+
+    function drawPlan(container, draft, settings) {
         const objects = placedObjects(draft, settings);
         const classes = classNames(draft);
         const xs = objects.map(({ matrix }) => matrix[9]),
@@ -718,8 +749,6 @@
         for (const { node, matrix } of objects) {
             const [x, y] = [matrix[9], -matrix[10]];
             const group = svg("g", { class: "mvr-object", "data-node-key": node.key });
-            const selected = node.key === selection;
-            const stroke = selected ? "#ffffff" : "#0b121c";
             if (node.tag === "Fixture") {
                 const className = classes[textOf(node, "Classing").toUpperCase()] || "";
                 const colour = className
@@ -735,7 +764,7 @@
                         stroke: colour,
                         "stroke-width": radius * 0.35
                     }),
-                    svg("circle", { cx: x, cy: y, r: radius, fill: colour, stroke, "stroke-width": radius * 0.25 })
+                    svg("circle", { cx: x, cy: y, r: radius, fill: colour, stroke: "#0b121c", "stroke-width": radius * 0.25 })
                 );
             } else {
                 group.append(
@@ -745,7 +774,7 @@
                         width: radius * 1.6,
                         height: radius * 1.6,
                         fill: node.tag === "GroupObject" ? "none" : "#455468",
-                        stroke: selected ? "#ffffff" : "#6d7f95",
+                        stroke: "#6d7f95",
                         "stroke-width": radius * 0.2
                     })
                 );
@@ -763,15 +792,14 @@
         return [h("span", { className: "mvr-tag", text: node.tag }), name ? ` ${name}` : ""];
     }
 
-    function drawTree(container, draft, settings, selection) {
-        if (!container) return;
+    function drawTree(container, draft, settings) {
         const rows = [];
         const visit = (node, key, depth) => {
             rows.push(
                 h(
                     "div",
                     {
-                        className: "mvr-tree-row" + (node.key === selection ? " selected" : ""),
+                        className: "mvr-tree-row",
                         "data-node-key": node.key,
                         style: `padding-left:${depth * 12 + 4}px`
                     },

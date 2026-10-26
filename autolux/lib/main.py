@@ -78,6 +78,11 @@ class ShowControl:
                 light_engine.pause()
             elif action == 'play':
                 await light_engine.resume()
+            elif action == 'next_autoloop':
+                try:
+                    light_engine.next_autoloop()
+                except ValueError as error:
+                    LOGGER.warning('[main] next autoloop refused: %s', error)
             elif action == 'master':
                 light_engine.set_master_level(command['level'])
             elif action == 'settings':

@@ -92,12 +92,17 @@ class AutoloopPolicy:
     def track_family(self) -> str | None:
         return self._track_family
 
-    def choose(self, context: SelectionContext) -> AutoloopChoice:
+    def choose(
+        self, context: SelectionContext, exclude: tuple[str, str] | None = None
+    ) -> AutoloopChoice:
+        loops = [loop for loop in self._autoloops[context.intent] if loop != exclude]
+        if not loops:
+            raise ValueError(f'{context.intent.name} has no other autoloop')
         new_track = context.new_track or self._track_family is None
         family = self._next_track_family() if new_track else self._track_family
         movement = None if new_track else self._track_movement
         tiers, reason = self._tiers(context)
-        candidates, exact = self._nearest_tier(self._autoloops[context.intent], tiers)
+        candidates, exact = self._nearest_tier(loops, tiers)
         if not exact:
             energies = sorted({self._meta[loop].energy for loop in candidates})
             reason = (

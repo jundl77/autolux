@@ -164,3 +164,15 @@ test("busy saves freeze edits and responses keep the selection on the same objec
         delete ds.callback_context.triggered;
     }
 });
+
+test("selecting a node changes only the inspector, never the rig layout", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const idle = ds.fixture_patch.renderRig(null, current, settings);
+    const picked = ds.fixture_patch.renderRig(spot.key, current, settings);
+    assert.deepEqual(plain(picked.slice(0, 2)), plain(idle.slice(0, 2)));
+    assert.equal(picked.at(-1), idle.at(-1));
+    assert.equal(idle[3], true);
+    assert.equal(picked[3], false);
+    assert.match(picked[2], /channels/);
+});

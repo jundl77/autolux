@@ -13,6 +13,7 @@ from autolux.lib.engine.effect_definitions import (
     AutoloopMeta,
     LightIntent,
 )
+from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
 
 async def test_applied_lighting_change_has_one_useful_info_line(effect_controller, caplog):
@@ -276,3 +277,35 @@ async def test_a_realistic_set_gets_tiers_that_follow_the_music(recorded_lightin
     assert len(energies) == len(set_list)
     for energy, (intent, *_, expected) in zip(energies, set_list, strict=True):
         assert energy in expected, (intent, energy)
+
+
+TWO_BREAKDOWN_LOOPS = {
+    LightIntent.BREAKDOWN: (('breakdown', 'wide_space'), ('breakdown', 'deep_space'))
+}
+TWO_BREAKDOWN_META = {
+    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
+    ('breakdown', 'deep_space'): AutoloopMeta(1, 'cold', 'sweep'),
+}
+
+
+async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_crossfade(caplog):
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock)
+    controller = EffectController(
+        lighting, clock=clock, autoloops=TWO_BREAKDOWN_LOOPS, autoloop_meta=TWO_BREAKDOWN_META
+    )
+    await controller.change_effect(LightIntent.BREAKDOWN)
+    playing = lighting.selected_autoloop
+    clock.advance(5.0)
+    with caplog.at_level(logging.INFO):
+        choice = controller.skip_autoloop(SelectionContext(LightIntent.BREAKDOWN))
+    select = lighting.events[-1]
+    assert (choice.bank, choice.autoloop) != playing
+    assert select == {
+        'at_seconds': clock.monotonic(),
+        'command': {'kind': 'select', 'bank': choice.bank, 'autoloop': choice.autoloop},
+    }
+    assert f'[lighting] next autoloop | intent=BREAKDOWN | autoloop={choice.bank}/' in caplog.text
+    assert f'reason={choice.reason}' in caplog.text
+    await controller.change_effect(LightIntent.BREAKDOWN)
+    assert lighting.events[-1] is select, 're-entering the same section keeps the skipped loop'

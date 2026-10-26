@@ -20,7 +20,7 @@ FIXTURE_CSS = '''
 .patch-library {grid-column:1;grid-row:1;}
 .patch-map-card {grid-column:2;grid-row:1;}
 .mvr-card {grid-column:2;grid-row:2;}
-#fixture-info {grid-column:3;grid-row:1;}
+#fixture-info {grid-column:3;grid-row:1 / span 2;align-self:stretch;contain:size;overflow:auto;}
 .patch-universe-heading {display:flex;align-items:center;gap:14px;}
 .patch-universe-heading h3,.patch-info-heading h3 {margin:0;}
 .patch-info-heading {margin-bottom:14px;}
@@ -59,6 +59,7 @@ FIXTURE_CSS = '''
 .mvr-layout {display:grid;grid-template-columns:minmax(0,3fr) minmax(220px,2fr);gap:14px;}
 #mvr-plan svg {width:100%;height:340px;background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .mvr-object {cursor:pointer;}
+#mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
 #mvr-plan text {fill:#a9bbcf;font-size:10px;pointer-events:none;}
 #mvr-tree {max-height:340px;overflow:auto;font-size:12px;border:1px solid #273345;border-radius:4px;padding:6px;background:#0b121c;}
 #mvr-tree .mvr-tree-row,.mvr-editor .mvr-link {cursor:pointer;color:#c9d7e6;padding:2px 4px;border-radius:3px;white-space:nowrap;}

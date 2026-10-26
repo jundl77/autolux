@@ -70,7 +70,7 @@ def parse_control_command(payload) -> dict:
     if not isinstance(payload, dict):
         raise TypeError('a control command must be an object')
     action = payload.get('action')
-    if action in ('pause', 'play'):
+    if action in ('pause', 'play', 'next_autoloop'):
         return {'action': action}
     if action == 'master':
         level = payload.get('level')
@@ -80,6 +80,18 @@ def parse_control_command(payload) -> dict:
     if action == 'settings':
         return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
     raise ValueError(f'unknown control action {action!r}')
+
+
+def command_refusal(command: dict, intent: str | None, paused: bool | None) -> str | None:
+    from autolux.lib.engine.event_buffer import STANDBY_INTENT
+
+    if command['action'] != 'next_autoloop':
+        return None
+    if paused:
+        return 'the show is paused'
+    if intent in (None, STANDBY_INTENT):
+        return 'no section is playing yet'
+    return None
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -129,6 +141,10 @@ class _Handler(BaseHTTPRequestHandler):
             command = parse_control_command(json.loads(self.rfile.read(length)))
         except (ValueError, TypeError) as error:
             self._reply(400, {'error': str(error)})
+            return
+        refusal = command_refusal(command, *self.server.event_buffer.operator_state())
+        if refusal:
+            self._reply(409, {'error': refusal})
             return
         try:
             commands.put_nowait(command)

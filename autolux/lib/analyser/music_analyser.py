@@ -21,6 +21,12 @@ _ENERGY_WINDOW_BUFFERS = 26
 # Swept to reproduce the committed sound-start/stop instants on the golden fixtures.
 _SILENCE_RMS = 1.5e-4
 
+# A stopped player is not exact zeros on the MME capture path: it delivers 16-bit
+# samples (1 LSB = 3e-5) with conversion noise of a few LSB. 1e-4 (-80 dBFS)
+# clears that yet sits below any audible quiet passage, unlike _SILENCE_RMS,
+# which judges a song's end from mean energy.
+_DIGITAL_SILENCE_PEAK = 1e-4
+
 _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
 
 
@@ -169,7 +175,7 @@ class MusicAnalyser:
         return audio_signal
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
-        if np.any(audio_signal):
+        if np.max(np.abs(audio_signal), initial=0.0) >= _DIGITAL_SILENCE_PEAK:
             self._digital_silence_samples = 0
             if self.in_standby:
                 self._leave_standby()

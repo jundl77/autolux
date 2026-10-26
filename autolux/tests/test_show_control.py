@@ -6,13 +6,20 @@ import pytest
 from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.ui_bridge import SnapshotServer
-from autolux.simulate.visualizer_app import SnapshotPoller, control_command, decimal_text
+from autolux.simulate.visualizer_app import (
+    SnapshotPoller,
+    control_command,
+    decimal_text,
+    setting_text,
+)
 
 
 @pytest.fixture
 def show():
     commands = queue.Queue(maxsize=2)
-    server = SnapshotServer(EventBuffer(), 0, commands)
+    buffer = EventBuffer()
+    buffer.set_intent('breakdown')
+    server = SnapshotServer(buffer, 0, commands)
     server.start()
     try:
         yield SnapshotPoller(port=server.port), commands
@@ -26,11 +33,12 @@ def show():
         ('control-toggle', False, None, (), {'action': 'pause'}),
         ('control-toggle', True, None, (), {'action': 'play'}),
         ('control-brightness', False, 0.42, (), {'action': 'master', 'level': 0.42}),
+        ('control-next', False, None, (), {'action': 'next_autoloop'}),
         (
             'control-crossfade_beats',
             False,
             None,
-            (30, 0.5, 2, 0.2, 6, 3),
+            (30, 0.5, 2, 20, 6, 3),
             {'action': 'settings', 'settings': ShowSettings(30.0, 0.5, 2.0, 0.2, 6.0, 3.0)},
         ),
     ],
@@ -47,8 +55,8 @@ def test_each_dashboard_control_reaches_the_controller_queue_as_sent(
 @pytest.mark.parametrize(
     ('settings', 'reason'),
     [
-        (('30', '0', '2', '0.2', '6', '3'), 'strobe_burst_seconds must be within 0.1..60'),
-        (('30', '0.5', '20', '0.2', '6', '3'), 'crossfade_beats must be within 0.25..16'),
+        (('30', '0', '2', '20', '6', '3'), 'strobe_burst_seconds must be within 0.1..60'),
+        (('30', '0.5', '20', '20', '6', '3'), 'crossfade_beats must be within 0.25..16'),
     ],
 )
 def test_rejected_settings_return_the_reason_and_queue_nothing(show, settings, reason):
@@ -61,10 +69,10 @@ def test_rejected_settings_return_the_reason_and_queue_nothing(show, settings, r
 def test_a_comma_decimal_is_sent_as_the_same_number(show):
     poller, commands = show
     command = control_command(
-        'control-crossfade_beats', False, None, ('30', '0,5', '2', ' 0,15 ', '6', '3')
+        'control-crossfade_beats', False, None, ('30', '0,5', '2', ' 15,5 ', '6', '3')
     )
     assert poller.control(command) == {'accepted': 'settings'}
-    assert commands.get_nowait()['settings'] == ShowSettings(30.0, 0.5, 2.0, 0.15, 6.0, 3.0)
+    assert commands.get_nowait()['settings'] == ShowSettings(30.0, 0.5, 2.0, 0.155, 6.0, 3.0)
 
 
 @pytest.mark.parametrize(
@@ -78,11 +86,12 @@ def test_a_comma_decimal_is_sent_as_the_same_number(show):
 )
 def test_text_that_is_not_a_plain_decimal_never_reaches_the_controller(raw, reason):
     with pytest.raises(ValueError, match=re.escape(reason)):
-        control_command('control-crossfade_beats', False, None, ('30', '0.5', raw, '0.2', '6', '3'))
+        control_command('control-crossfade_beats', False, None, ('30', '0.5', raw, '20', '6', '3'))
 
 
 def test_settings_fill_with_a_dot_decimal_whatever_the_locale():
     assert [decimal_text(v) for v in (0.15, 60.0, 0.125, 4.0)] == ['0.15', '60', '0.125', '4']
+    assert setting_text('quiet_brightness', 0.155) == '15.5'
 
 
 def test_a_busy_show_is_reported_instead_of_raising(show):
@@ -99,3 +108,29 @@ def test_an_unreachable_show_is_reported_instead_of_raising():
     server.stop()
     reply = SnapshotPoller(port=port, timeout=0.5).control({'action': 'pause'})
     assert reply == {'error': 'the show is not answering'}
+
+
+@pytest.mark.parametrize(
+    ('intent', 'paused', 'reason'),
+    [
+        (None, False, 'no section is playing yet'),
+        ('standby', False, 'no section is playing yet'),
+        ('breakdown', True, 'the show is paused'),
+    ],
+)
+def test_next_autoloop_without_a_playing_section_is_refused_and_queues_nothing(
+    intent, paused, reason
+):
+    buffer = EventBuffer()
+    if intent:
+        buffer.set_intent(intent)
+    buffer.set_control_state(paused=paused, master_brightness=1.0, settings={})
+    commands = queue.Queue()
+    server = SnapshotServer(buffer, 0, commands)
+    server.start()
+    try:
+        reply = SnapshotPoller(port=server.port).control({'action': 'next_autoloop'})
+    finally:
+        server.stop()
+    assert reply == {'error': reason}
+    assert commands.empty()

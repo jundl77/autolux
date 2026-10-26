@@ -1621,7 +1621,7 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_cleared():
     show = _Show()
     await show.play(20.0, 0.2)
-    await show.play(20.0, 1e-4)
+    await show.play(20.0, 1e-3)
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
     assert show.light._room_quiet and show.light._source_quiet
     await show.play(2.1, 0.0)
@@ -1799,3 +1799,37 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
         (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
         (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
     ]
+
+
+async def test_next_autoloop_bypasses_the_playback_delay():
+    from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOP_META, DEFAULT_AUTOLOOPS
+
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    breakdown = DEFAULT_AUTOLOOPS[LightIntent.BREAKDOWN][0]
+    light.effect_controller = EffectController(
+        lighting,
+        autoloops={**DEFAULT_AUTOLOOPS, LightIntent.BREAKDOWN: (breakdown, ('breakdown', 'deep'))},
+        autoloop_meta={
+            **DEFAULT_AUTOLOOP_META,
+            ('breakdown', 'deep'): DEFAULT_AUTOLOOP_META[breakdown],
+        },
+    )
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    before = selections(lighting)[-1]['command']['autoloop']
+    clock.advance(3.0)
+    light.next_autoloop()
+    after = selections(lighting)[-1]
+    assert after['at_seconds'] == clock.monotonic()
+    assert after['command']['autoloop'] != before
+
+
+@pytest.mark.parametrize(
+    ('paused', 'reason'), [(False, 'no section is playing yet'), (True, 'the show is paused')]
+)
+async def test_next_autoloop_is_refused_without_a_playing_section(paused, reason):
+    light, *_ = engine(queue=False)
+    if paused:
+        light.pause()
+    with pytest.raises(ValueError, match=reason):
+        light.next_autoloop()

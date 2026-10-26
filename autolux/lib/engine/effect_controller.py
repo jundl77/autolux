@@ -76,13 +76,29 @@ class EffectController:
     ) -> bool:
         context = context or SelectionContext(intent)
         choice, fresh = self._entry_choice(context)
-        bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
+        bank, autoloop = choice.bank, choice.autoloop
         transition = {'kind': 'cut'} if cut else transition_for(intent)
         if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
             return False
         if fresh:
             self._policy.record(context, choice)
             self._entered = intent, choice
+        self._announce('[lighting]', intent, choice)
+
+        if intent == LightIntent.DROP:
+            self._strobe_unless_cooling_down(bpm)
+        return True
+
+    def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
+        choice = self._policy.choose(context, exclude=self.lighting_client.selected_autoloop)
+        self.lighting_client.select_autoloop(choice.bank, choice.autoloop)
+        self._policy.record(context, choice)
+        self._entered = context.intent, choice
+        self._announce('[lighting] next autoloop |', context.intent, choice)
+        return choice
+
+    def _announce(self, prefix: str, intent: LightIntent, choice: AutoloopChoice) -> None:
+        bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         if self.event_buffer:
             self.event_buffer.add_effect(
                 f'{bank}/{autoloop}',
@@ -95,7 +111,8 @@ class EffectController:
                 },
             )
         LOGGER.info(
-            '[lighting] intent=%s | autoloop=%s/%s | energy=%d family=%s movement=%s | reason=%s',
+            '%s intent=%s | autoloop=%s/%s | energy=%d family=%s movement=%s | reason=%s',
+            prefix,
             intent.name,
             bank,
             autoloop,
@@ -104,10 +121,6 @@ class EffectController:
             meta.movement,
             choice.reason,
         )
-
-        if intent == LightIntent.DROP:
-            self._strobe_unless_cooling_down(bpm)
-        return True
 
     def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)

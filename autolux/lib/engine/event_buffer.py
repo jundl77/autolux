@@ -152,6 +152,10 @@ class EventBuffer:
                 'settings': dict(settings),
             }
 
+    def operator_state(self) -> tuple[str | None, bool | None]:
+        with self._lock:
+            return self._current_intent, self._control_state['paused']
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)

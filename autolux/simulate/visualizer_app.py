@@ -166,7 +166,7 @@ def _heard_beats(snapshot: dict) -> list:
 
 def _clock_text(seconds: float) -> str:
     minutes, secs = divmod(int(seconds), 60)
-    return f'{minutes}min {secs}sec' if minutes else f'{secs}sec'
+    return f'{minutes}:{secs:02d}'
 
 
 def _last_heard(snapshot: dict) -> dict | None:
@@ -487,13 +487,22 @@ def _build_stat_card(label, value):
     )
 
 
+def _selection_tags(effect: dict) -> str:
+    selection = effect.get('selection') or {}
+    tags = [f'E{selection["energy"]}'] if 'energy' in selection else []
+    tags += [selection[key] for key in ('family', 'movement') if selection.get(key)]
+    return ' · '.join(tags)
+
+
 def _build_show_overview(snapshot: dict) -> list:
     bpm = _room_bpm(snapshot)
-    song, room = _song_and_room(snapshot)
-    song_text = '—' if song is None else _clock_text(song)
-    room_text = '—' if room is None else _clock_text(room)
     cfg = _intent_config(snapshot.get('intent'))
-    playing = _room_is_playing(snapshot)
+    if snapshot.get('paused'):
+        playback, playback_color = 'PAUSED', WARN_COLOR
+    elif _room_is_playing(snapshot):
+        playback, playback_color = 'PLAYING', OK_COLOR
+    else:
+        playback, playback_color = 'IDLE', MUTED
     health = health_summary(snapshot)['state']
     timing = (snapshot.get('timing_stats') or {}).get('by_label') or {}
     if health == 'healthy' and any(
@@ -504,34 +513,57 @@ def _build_show_overview(snapshot: dict) -> list:
     effect = snapshot.get('current_effect') or {}
     effect_name = effect.get('name', '—')
     autoloop_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
+    reason = (effect.get('selection') or {}).get('reason')
     return [
         _build_stat_card(
             'Health',
             html.Span(f'● {health.title()}', id='health-indicator', style={'color': health_color}),
         ),
         _build_stat_card(
-            'Playback', html.Span('PLAYING' if playing else 'PAUSED', style={'color': MUTED})
+            'Playback',
+            html.Span(playback, id='playback-state', style={'color': playback_color}),
         ),
         _build_stat_card(
             'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
         ),
         _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
-        _build_stat_card('Autoloop', html.Span(autoloop_name, title=effect_name)),
-        _build_stat_card('Room position', html.Span(room_text, id='room-clock')),
-        _build_stat_card('Source position', html.Span(song_text, id='song-clock')),
-        _build_stat_card('Show delay', html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s')),
+        _build_stat_card(
+            'Autoloop',
+            [
+                html.Span(
+                    autoloop_name, title=f'{effect_name} · {reason}' if reason else effect_name
+                ),
+                html.Span(_selection_tags(effect), className='stat-tags'),
+            ],
+        ),
     ]
 
 
-SETTING_LABELS = {
-    'drop_strobe_cooldown_seconds': 'Drop strobe cooldown (s)',
-    'strobe_burst_seconds': 'Drop strobe burst (s)',
-    'crossfade_beats': 'Crossfade (beats)',
-    'quiet_brightness': 'Quiet brightness',
-    'digital_silence_seconds': 'Standby after silence (s)',
-    'strobe_max_rate_hz': 'Max strobe rate (Hz)',
-    'strobe_max_burst_seconds': 'Max strobe burst (s)',
+def _build_show_timing(snapshot: dict) -> list:
+    song, room = _song_and_room(snapshot)
+    return [
+        html.Span('Room '),
+        html.Span('—' if room is None else _clock_text(room), id='room-clock'),
+        html.Span(' · Source '),
+        html.Span('—' if song is None else _clock_text(song), id='song-clock'),
+        html.Span(f' · delay {snapshot.get("look_ahead_sec", 0):g} s'),
+    ]
+
+
+SETTING_DISPLAY = {
+    'drop_strobe_cooldown_seconds': ('Drop strobe cooldown', 's'),
+    'strobe_burst_seconds': ('Drop strobe burst', 's'),
+    'crossfade_beats': ('Crossfade', 'beats'),
+    'quiet_brightness': ('Quiet brightness', '%'),
+    'digital_silence_seconds': ('Standby after silence', 's'),
+    'strobe_max_rate_hz': ('Max strobe rate', 'Hz'),
+    'strobe_max_burst_seconds': ('Max strobe burst', 's'),
 }
+SETTING_LABELS = {
+    name: f'{label} ({unit})' if unit != '%' else label
+    for name, (label, unit) in SETTING_DISPLAY.items()
+}
+PERCENT_SETTINGS = frozenset(name for name, (_, unit) in SETTING_DISPLAY.items() if unit == '%')
 STROBE_SETTINGS = (
     'drop_strobe_cooldown_seconds',
     'strobe_burst_seconds',
@@ -548,18 +580,24 @@ def decimal_text(value: float) -> str:
     return f'{value:.6g}'
 
 
+def setting_text(name: str, value: float) -> str:
+    return decimal_text(value * 100 if name in PERCENT_SETTINGS else value)
+
+
 def parse_decimal(name: str, raw) -> float:
     text = '' if raw is None else str(raw).strip().replace(',', '.')
     if not text:
         raise ValueError(f'{SETTING_LABELS[name]} needs a number')
     if not PLAIN_DECIMAL_TEXT.fullmatch(text):
         raise ValueError(f'{SETTING_LABELS[name]}: "{raw}" is not a number')
-    return float(text)
+    return round(float(text) / 100, 6) if name in PERCENT_SETTINGS else float(text)
 
 
 def control_command(trigger, paused, level, settings) -> dict | None:
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
+    if trigger == 'control-next':
+        return {'action': 'next_autoloop'}
     if trigger in ('control-brightness', 'control-brightness-live'):
         return {'action': 'master', 'level': level}
     if trigger in SETTING_IDS:
@@ -573,10 +611,11 @@ def control_command(trigger, paused, level, settings) -> dict | None:
 
 
 def _setting_input(name):
+    label, unit = SETTING_DISPLAY[name]
     low, high = SHOW_SETTING_RANGES[name]
     return html.Label(
         [
-            html.Span(SETTING_LABELS[name]),
+            html.Span(label, className='control-name'),
             dcc.Input(
                 id=f'control-{name}',
                 type='text',
@@ -585,7 +624,11 @@ def _setting_input(name):
                 debounce=0.15,
                 disabled=True,
             ),
-            html.Span(f'{decimal_text(low)} – {decimal_text(high)}', className='control-range'),
+            html.Span(unit, className='control-unit'),
+            html.Span(
+                f'{setting_text(name, low)} – {setting_text(name, high)}',
+                className='control-range',
+            ),
         ],
         className='control-field',
     )
@@ -604,18 +647,24 @@ def _build_control_card() -> list:
             [
                 html.Div(
                     [
-                        html.Div('Playback', className='stat-label control-heading'),
                         html.Button(
                             'Pause', id='control-toggle', className='control-toggle', disabled=True
                         ),
+                        html.Button(
+                            'Next autoloop ⏭',
+                            id='control-next',
+                            className='control-next',
+                            title='Jump to the next autoloop for this section',
+                            disabled=True,
+                        ),
                     ],
-                    className='control-group',
+                    className='control-transport',
                 ),
                 html.Div(
                     [
                         html.Div(
                             [
-                                html.Span('Master brightness'),
+                                html.Span('Master'),
                                 html.Span('—', id='control-brightness-value'),
                             ],
                             className='stat-label control-heading',
@@ -630,9 +679,10 @@ def _build_control_card() -> list:
                             allow_direct_input=False,
                             disabled=True,
                         ),
+                        html.Div([html.Span('0%'), html.Span('100%')], className='control-scale'),
                         dcc.Store(id='control-brightness-live'),
                     ],
-                    className='control-group',
+                    className='control-group control-master',
                 ),
                 html.Div(
                     [
@@ -645,18 +695,19 @@ def _build_control_card() -> list:
                             ],
                             className='control-fields',
                         ),
-                        html.Details(
-                            [
-                                html.Summary('Strobe'),
-                                html.Div(
-                                    [_setting_input(name) for name in STROBE_SETTINGS],
-                                    className='control-fields',
-                                ),
-                            ],
-                            className='control-strobe',
-                        ),
                     ],
                     className='control-group',
+                ),
+                html.Details(
+                    [
+                        html.Summary('Strobe · intense effects', className='stat-label'),
+                        html.Div(
+                            [_setting_input(name) for name in STROBE_SETTINGS],
+                            className='control-fields',
+                        ),
+                    ],
+                    open=True,
+                    className='control-group control-strobe',
                 ),
                 html.P(id='control-status', role='status', className='control-status'),
                 dcc.Store(id='control-state'),
@@ -691,6 +742,14 @@ def _metric_text(value, unit='', precision=0):
     return f'{value:.{precision}f}{unit}' if finite(value) else '—'
 
 
+def _status_metric(label, value, detail):
+    return html.Span(
+        [html.Span(label, className='stat-label'), html.Span(value, className='status-value')],
+        title=detail,
+        className='status-metric',
+    )
+
+
 def _build_performance_overview(snapshot, now):
     sample = _latest_telemetry(snapshot, now)
     recent = (snapshot.get('system') or {}).get('recent') or {}
@@ -701,23 +760,25 @@ def _build_performance_overview(snapshot, now):
     )
     target = _metric_text(sample.get('target_ms'), ' ms')
     return [
-        _metric_card(
-            'Receiver buffer',
+        _status_metric(
+            'Buffer',
             _metric_text(sample.get('buffer_ms'), ' ms'),
-            f'Target {target} · network jitter reserve',
+            f'Receiver buffer · target {target} · network jitter reserve',
         ),
-        _metric_card(
-            'Audio interruptions', _metric_text(interruptions), 'Underruns + overruns · last 10 s'
+        _status_metric(
+            'Interruptions',
+            _metric_text(interruptions),
+            'Audio underruns + overruns · last 10 s',
         ),
-        _metric_card(
-            'DMX queue lateness',
+        _status_metric(
+            'DMX late',
             _metric_text(sample.get('dmx_lateness_ms'), ' ms', 1),
-            'Scheduled frame lateness before USB output',
+            'DMX queue lateness · scheduled frame lateness before USB output',
         ),
-        _metric_card(
-            'Renderer FPS',
+        _status_metric(
+            'FPS',
             _metric_text(sample.get('starfire_measured_render_frames_per_second'), precision=1),
-            'Measured Starfire render rate',
+            'Renderer FPS · measured Starfire render rate',
         ),
     ]
 
@@ -798,21 +859,30 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
-.show-overview { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); }
-.show-stat { padding: 14px 16px;
-             min-width: 0; font-variant-numeric: tabular-nums; }
+.status-strip { font-variant-numeric: tabular-nums; }
+.show-overview { display: grid;
+                 grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr); }
+.show-stat { padding: 12px 16px; min-width: 0; border-right: 1px solid #1b2735; }
 .show-stat:last-child { border-right: 0; }
-.stat-label { font-size: 10px; color: #9baabb; margin-bottom: 8px; }
-.stat-value { display: flex; gap: 14px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.stat-label { font-size: 10px; color: #9baabb; margin-bottom: 6px; }
+.stat-value { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 600;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-tags { color: #8293a6; font-size: 11px; font-weight: 500; }
+.show-stat:nth-child(4) .stat-value span { filter: brightness(1.7); }
+.status-secondary { display: flex; justify-content: space-between; align-items: baseline;
+                    flex-wrap: wrap; gap: 8px 24px; padding: 9px 16px;
+                    border-top: 1px solid #1b2735; color: #9baabb; font-size: 12px; }
+.show-timing span:nth-child(even) { color: #e6edf3; font-weight: 600; }
+.status-metrics { display: flex; flex-wrap: wrap; gap: 6px 22px; }
+.status-metric { display: inline-flex; align-items: baseline; gap: 7px; cursor: help; }
+.status-metric .stat-label { margin: 0; }
+.status-value { color: #e6edf3; font-weight: 600; }
 .performance-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
                         gap: 20px; padding: 16px 4px 2px; }
 .performance-stat { min-width: 0; font-variant-numeric: tabular-nums; }
 .performance-stat .stat-label { margin-bottom: 5px; }
 .performance-stat .stat-value { font-size: 20px; }
 .metric-detail { margin-top: 5px; color: #8293a6; font-size: 11px; }
-.show-stat:nth-child(4) .stat-value { font-size: 15px; }
-.show-stat:nth-child(4) .stat-value span { filter: brightness(1.7); }
-.show-stat:nth-child(5) .stat-value { font-size: 15px; }
 .show-panel { border: 1px solid #273344; border-radius: 8px; overflow: hidden; background: #0d1117; }
 .show-panel .section-heading { margin: 0; padding: 14px 18px 6px; }
 .legend { padding: 12px 18px 0; }
@@ -836,33 +906,46 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .command-diagnostics td { padding: 4px 0; }
 .command-diagnostics th, .command-diagnostics td { text-align: right; }
 .command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
-#show-control { display: grid; grid-template-columns: 180px minmax(240px, 1fr) minmax(0, 2fr); }
+#show-control { display: grid;
+                grid-template-columns: minmax(220px, 1fr) minmax(0, 1.5fr) minmax(0, 1.5fr); }
+.control-transport { grid-column: 1 / -1; display: flex; gap: 10px; padding: 12px 16px;
+                     border-bottom: 1px solid #273344; }
 .control-group { padding: 14px 16px 16px; min-width: 0; }
 .control-group + .control-group { border-left: 1px solid #273344; }
 .control-heading { display: flex; justify-content: space-between; align-items: baseline;
                    min-height: 16px; margin-bottom: 12px; }
-#control-brightness-value { color: #e6edf3; font-size: 13px; font-weight: 600;
-                            font-variant-numeric: tabular-nums; }
-.control-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 180px)); gap: 12px 16px; }
-.control-field > span { display: block; color: #9baabb; font-size: 11px; margin-bottom: 5px; }
-.control-field > .control-range { color: #8293a6; font-size: 10px; margin: 4px 0 0; }
+#control-brightness-value { color: #e6edf3; font-size: 18px; font-weight: 600;
+                            text-align: right; font-variant-numeric: tabular-nums; }
+.control-master .dash-slider-track { height: 10px; background: #1e2c3d; border-radius: 3px; }
+.control-master .dash-slider-range { background: #73b6ff; border-radius: 3px; }
+.control-scale { display: flex; justify-content: space-between; margin-top: 8px;
+                 color: #8293a6; font-size: 10px; }
+.control-fields { display: grid; gap: 10px; }
+.control-field { display: grid; grid-template-columns: minmax(0, 1fr) 76px 34px;
+                 column-gap: 8px; align-items: center; }
+.control-name { color: #9baabb; font-size: 12px; }
+.control-unit { color: #8293a6; font-size: 11px; }
+.control-range { grid-column: 1; color: #8293a6; font-size: 10px; }
 .control-field input { width: 100%; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
-                       border-radius: 4px; padding: 7px 8px; font: inherit; font-size: 12px;
-                       font-variant-numeric: tabular-nums; }
+                       border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px;
+                       text-align: right; font-variant-numeric: tabular-nums; }
 .control-field input:focus { outline: none; border-color: #73b6ff; }
 .control-field input:invalid { border-color: #e8b56d; }
 .control-field input:disabled { opacity: .4; }
-.control-strobe { margin-top: 14px; padding-top: 12px; border-top: 1px solid #1b2735; }
-.control-strobe summary { cursor: pointer; color: #9baabb; font-size: 10px; margin-bottom: 12px; }
+.control-strobe { box-shadow: inset 3px 0 0 #f0883e; }
+.control-strobe summary { cursor: pointer; color: #f0883e; margin-bottom: 12px; }
 .control-strobe:not([open]) summary { margin-bottom: 0; }
 #show-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
                        border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
 #show-control button:disabled { opacity: .4; cursor: default; }
-#show-control .control-toggle { width: 100%; padding: 12px 14px; font-size: 14px; font-weight: 600; }
+#show-control .control-toggle { flex: 0 0 180px; padding: 12px 14px; font-size: 14px;
+                                font-weight: 600; }
 #show-control .control-toggle.playing { background: #1b3324; border-color: #3fb950; color: #aff5b4; }
 #show-control .control-toggle.paused { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
-.control-status { grid-column: 1 / -1; margin: 0; padding: 9px 16px; min-height: 34px;
-                  border-top: 1px solid #273344; color: #93a5b9; font-size: 12px; }
+#show-control .control-next { padding: 12px 16px; font-size: 13px; font-weight: 600; }
+.control-status { grid-column: 1 / -1; margin: 0; padding: 9px 16px;
+                  border-top: 1px solid #273344; color: #ff7b72; font-size: 12px; }
+.control-status:empty { display: none; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -927,7 +1010,7 @@ function(sync, selected) {
     const clock = (s) => {
         const t = Math.max(0, Math.floor(s));
         const m = Math.floor(t / 60);
-        return m ? m + 'min ' + (t % 60) + 'sec' : t + 'sec';
+        return m + ':' + String(t % 60).padStart(2, '0');
     };
 
     const tick = (id, prefix, base, drift) => {
@@ -1240,6 +1323,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     app = dash.Dash(
         __name__,
         title=TITLE,
+        update_title=None,
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
@@ -1316,10 +1400,18 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             html.Section(
                 [
                     html.Section(
-                        html.Div(id='metrics', className='show-overview'),
-                        className='overview-panel',
+                        [
+                            html.Div(id='metrics', className='show-overview'),
+                            html.Div(
+                                [
+                                    html.Div(id='show-timing', className='show-timing'),
+                                    html.Div(id='performance-metrics', className='status-metrics'),
+                                ],
+                                className='status-secondary',
+                            ),
+                        ],
+                        className='overview-panel status-strip',
                     ),
-                    html.Div(id='performance-metrics', className='performance-overview'),
                     *_build_control_card(),
                     html.Div(
                         [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
@@ -1427,6 +1519,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             dcc.Interval(id='tick', interval=REFRESH_MS),
             dcc.Store(id='gate'),
             dcc.Store(id='sync'),
+            dcc.Store(id='timeline-data'),
+            dcc.Store(id='telemetry-figures'),
             dcc.Store(id='anim'),
         ],
         className='dashboard',
@@ -1446,6 +1540,25 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     )
 
     app.clientside_callback(
+        '''function(figure, selected) {
+            if (selected !== 'control' || !figure) throw window.dash_clientside.PreventUpdate;
+            return figure;
+        }''',
+        Output('timeline', 'figure'),
+        Input('timeline-data', 'data'),
+        Input('dashboard-tab', 'value'),
+    )
+    app.clientside_callback(
+        '''function(figures, selected) {
+            if (selected !== 'telemetry' || !figures) throw window.dash_clientside.PreventUpdate;
+            return figures;
+        }''',
+        [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
+        Input('telemetry-figures', 'data'),
+        Input('dashboard-tab', 'value'),
+    )
+
+    app.clientside_callback(
         GATE_JS,
         Output('gate', 'data'),
         Input('tick', 'n_intervals'),
@@ -1456,15 +1569,16 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         [
             Output('sync', 'data'),
             Output('metrics', 'children'),
+            Output('show-timing', 'children'),
             Output('decoder', 'children'),
             Output('command-diagnostics', 'children'),
-            Output('timeline', 'figure'),
+            Output('timeline-data', 'data'),
             Output('telemetry-alerts', 'children'),
             Output('performance-metrics', 'children'),
             Output('renderer-metrics', 'children'),
             Output('control-state', 'data'),
-        ]
-        + [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
+            Output('telemetry-figures', 'data'),
+        ],
         Input('gate', 'data'),
         prevent_initial_call=True,
     )
@@ -1473,35 +1587,46 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             raise dash.exceptions.PreventUpdate
         snap = snapshot_source.snapshot()
         now = time.time()
-        sync = metrics = decoder = commands = timeline = dash.no_update
-        notices = performance = renderer = control = dash.no_update
-        charts = [dash.no_update] * len(system_metrics.PANELS)
-        if requested['tab'] == 'control':
+        sync = metrics = show_timing = decoder = commands = timeline = dash.no_update
+        notices = performance = renderer = control = charts = dash.no_update
+        on_control = requested['tab'] == 'control'
+        due = requested.get('metrics')
+        if on_control or due:
             sync = _anchor(snap)
             metrics = _build_show_overview(snap)
+            show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
             commands = _build_command_diagnostics(snap)
             if can_control:
                 control = {
-                    key: snap.get(key) for key in ('paused', 'master_brightness', 'settings')
+                    key: snap.get(key)
+                    for key in ('paused', 'master_brightness', 'settings', 'intent')
                 }
                 settings = control['settings'] or {}
                 control['settings_text'] = {
-                    name: decimal_text(value) for name, value in settings.items()
+                    name: setting_text(name, value) for name, value in settings.items()
                 }
-            if requested.get('timeline'):
+            if requested.get('timeline') or not on_control:
                 timeline = _build_timeline(snap)
-            if requested.get('metrics'):
-                performance = _build_performance_overview(snap, now)
-        else:
+        if due:
+            performance = _build_performance_overview(snap, now)
             charts = system_metrics.build_system_health_charts(snap, now=now)
             renderer = _build_renderer_overview(snap, now)
-        if requested.get('metrics'):
             notices = system_metrics.build_telemetry_notices(snap, now=now)
         return (
             sync,
-            *(metrics, decoder, commands, timeline, notices, performance, renderer, control),
-            *charts,
+            *(
+                metrics,
+                show_timing,
+                decoder,
+                commands,
+                timeline,
+                notices,
+                performance,
+                renderer,
+                control,
+                charts,
+            ),
         )
 
     setting_names = json.dumps(list(SHOW_SETTING_RANGES))
@@ -1510,8 +1635,10 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             const ready = !!state && state.paused !== null && state.paused !== undefined;
             const mode = !ready ? '' : state.paused ? ' paused' : ' playing';
             const settable = !ready || !state.settings;
-            return [ready && state.paused ? 'Play' : 'Pause', 'control-toggle' + mode, !ready,
-                    !ready || state.master_brightness === null,
+            const skippable = ready && !state.paused && !!state.intent
+                && state.intent !== 'standby';
+            return [ready && state.paused ? 'Play ▶' : 'Pause ❚❚', 'control-toggle' + mode, !ready,
+                    !skippable, !ready || state.master_brightness === null,
                     ...'''
         + setting_names
         + '''.map(() => settable)];
@@ -1519,6 +1646,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('control-toggle', 'children'),
         Output('control-toggle', 'className'),
         Output('control-toggle', 'disabled'),
+        Output('control-next', 'disabled'),
         Output('control-brightness', 'disabled'),
         *[Output(f'control-{name}', 'disabled') for name in SHOW_SETTING_RANGES],
         Input('control-state', 'data'),
@@ -1564,7 +1692,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     app.clientside_callback(
         '''function(level) {
             window.autoluxControlTouchedAt = Date.now();
-            const label = level === null || level === undefined ? '—' : level.toFixed(2);
+            const label = level === null || level === undefined
+                ? '—' : Math.round(level * 100) + '%';
             const now = Date.now();
             if (level === null || level === undefined
                     || now - (window.autoluxBrightnessSentAt || 0) < '''
@@ -1591,14 +1720,16 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     @app.callback(
         Output('control-status', 'children'),
+        Output('control-state', 'data', allow_duplicate=True),
         Input('control-toggle', 'n_clicks'),
+        Input('control-next', 'n_clicks'),
         Input('control-brightness', 'value'),
         Input('control-brightness-live', 'data'),
         *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_control(_toggle, released, live, *settings_and_state):
+    def send_control(_toggle, _next, released, live, *settings_and_state):
         *settings, state = settings_and_state
         state = state or {}
         trigger = dash.ctx.triggered_id
@@ -1611,20 +1742,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         try:
             command = control_command(trigger, state.get('paused'), level, settings)
         except ValueError as error:
-            return f'Rejected: {error}'
+            return f'Rejected: {error}', dash.no_update
         if command is None or not can_control:
             raise dash.exceptions.PreventUpdate
         if command['action'] == 'settings' and command['settings'] == state.get('settings'):
             raise dash.exceptions.PreventUpdate
         reply = snapshot_source.control(command)
         if 'error' in reply:
-            return f'Rejected: {reply["error"]}'
-        return {
-            'pause': 'Paused.',
-            'play': 'Playing.',
-            'master': f'Master brightness {decimal_text(round(level, 2))}.',
-            'settings': 'Settings applied.',
-        }.get(reply.get('accepted'), 'Sent.')
+            return f'Rejected: {reply["error"]}', dash.no_update
+        if reply.get('accepted') in ('pause', 'play'):
+            return '', {**state, 'paused': reply['accepted'] == 'pause'}
+        return '', dash.no_update
 
     app.clientside_callback(
         ANIMATION_JS,

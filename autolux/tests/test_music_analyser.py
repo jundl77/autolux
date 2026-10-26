@@ -258,15 +258,26 @@ async def test_startup_wait_is_excluded_from_song_time_without_changing_song_bou
     assert max(durations) < datetime.timedelta(seconds=2)
 
 
+def _silence_gap(kind: str, frames: int, rng: np.random.Generator) -> np.ndarray:
+    if kind == 'zeros':
+        return np.zeros(frames, dtype=np.float32)
+    level = {'noise_1e-6': 1e-6, 'noise_-60dBFS': 1e-3}[kind]
+    return (level * rng.standard_normal(frames)).astype(np.float32)
+
+
 @pytest.mark.parametrize(
-    ('gap_level', 'gap_sec', 'standby'),
+    ('gaps', 'standby'),
     [
-        (0.0, 1.5, False),
-        (0.0, 2.1, True),
-        (1e-6, 5.0, False),
+        ([('zeros', 2.1)], True),
+        ([('noise_1e-6', 2.5)], True),
+        ([('zeros', 1.5)], False),
+        ([('noise_1e-6', 1.5)], False),
+        ([('noise_-60dBFS', 5.0)], False),
+        # One audible buffer between two short gaps restarts the count.
+        ([('noise_1e-6', 1.5), ('music', 0.01), ('noise_1e-6', 1.5)], False),
     ],
 )
-async def test_only_two_seconds_of_exact_zeros_mean_the_source_stopped(gap_level, gap_sec, standby):
+async def test_two_seconds_below_the_digital_silence_floor_mean_the_source_stopped(gaps, standby):
     class _Recorder(_StubHandler):
         def __init__(self):
             self.events: list[str] = []
@@ -281,11 +292,16 @@ async def test_only_two_seconds_of_exact_zeros_mean_the_source_stopped(gap_level
     handler = _Recorder()
     analyser = _make_analyser(clock, handler)
     analyser._rhythm = _FakeRhythm()
+    rng = np.random.default_rng(0)
     step = analyser.buffer_size / analyser.sample_rate
-    for level, seconds in ((0.2, 1.0), (gap_level, gap_sec), (0.2, 1.0)):
-        for _ in range(round(seconds / step)):
+    for kind, seconds in [('music', 1.0), *gaps, ('music', 1.0)]:
+        for _ in range(max(1, round(seconds / step))):
             clock.advance(step)
-            await analyser.analyse(np.full(256, level, dtype=np.float32))
+            if kind == 'music':
+                buffer = np.full(256, 0.2, dtype=np.float32)
+            else:
+                buffer = _silence_gap(kind, 256, rng)
+            await analyser.analyse(buffer)
     assert handler.events == (['silence', 'return'] if standby else [])
     assert not analyser.in_standby
     if standby:
