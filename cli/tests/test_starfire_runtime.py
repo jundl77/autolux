@@ -182,6 +182,16 @@ def test_master_fade_maps_to_brightness_parameter():
         protocol.build_command({'kind': 'set_speed', 'multiplier': 1.0, 'fade_seconds': 1.0})
 
 
+@pytest.mark.parametrize('bar_phase', [0, 3, None])
+def test_beat_facts_survive_the_wire_and_keep_downbeat_distinct_from_unknown(bar_phase):
+    command = protocol.build_command(
+        {'kind': 'beat', 'beat_index': 41, 'bar_phase': bar_phase, 'beats_per_bar': 4, 'bpm': 128.0}
+    )
+    decoded = wire.UpdateBeat.FromString(command.SerializeToString())
+    assert (decoded.beat_index, decoded.beats_per_bar, decoded.tempo_bpm) == (41, 4, 128.0)
+    assert (decoded.bar_phase if decoded.HasField('bar_phase') else None) == bar_phase
+
+
 def test_typed_commands_are_copied_before_queueing():
     command = wire.SetParameter(
         command_id=93,
@@ -611,7 +621,9 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             initial_parameters=[wire.Parameter(type=wire.OUTPUT_BRIGHTNESS, number=0.5)],
         )
         with runtime:
-            runtime.send_command({'kind': 'beat', 'position_beats': 0.0, 'bpm': 120.0})
+            runtime.send_command(
+                {'kind': 'beat', 'beat_index': 0, 'bar_phase': 0, 'beats_per_bar': 4, 'bpm': 120.0}
+            )
             runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
             runtime.send_command({'kind': 'set_normalized_rms_level', 'level': 0.8})
             runtime.send_command(

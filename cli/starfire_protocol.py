@@ -62,11 +62,15 @@ def build_command(command: dict | Message) -> Message:
             value = dict(command)
             kind = value.pop('kind')
             if kind == 'beat':
+                bar_phase = value.pop('bar_phase', None)
                 message = wire.UpdateBeat(
-                    position_beats=value.pop('position_beats'),
+                    beat_index=value.pop('beat_index'),
+                    beats_per_bar=value.pop('beats_per_bar'),
                     tempo_bpm=value.pop('bpm'),
                     **value,
                 )
+                if bar_phase is not None:
+                    message.bar_phase = bar_phase
             elif kind == 'select':
                 # Absent, Starfire applies its DEFAULT_CROSSFADE_BEATS.
                 if 'transition' in value:

@@ -101,7 +101,12 @@ pub type FixtureStates = BTreeMap<String, FixtureState>;
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderContext {
     pub time_seconds: f64,
+    /// Bar-aligned grid: `floor(beat_position) % beats_per_bar` is the beat in bar.
     pub beat_position: f64,
+    /// Continuous position inside the current bar, `0 <= bar_phase < beats_per_bar`.
+    pub bar_phase: f64,
+    pub bar_index: u64,
+    pub beats_per_bar: u32,
     pub autoloop_elapsed_beats: f64,
     pub autoloop_speed_scaled_elapsed_beats: f64,
     /// Measured RMS mapped to 0..1, independent of operator brightness.
@@ -113,6 +118,9 @@ impl Default for RenderContext {
         Self {
             time_seconds: 0.0,
             beat_position: 0.0,
+            bar_phase: 0.0,
+            bar_index: 0,
+            beats_per_bar: 4,
             autoloop_elapsed_beats: 0.0,
             autoloop_speed_scaled_elapsed_beats: 0.0,
             normalized_rms_level: None,
@@ -162,8 +170,12 @@ pub struct LightingOverride {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    /// Facts about one detected beat; the clock builds the bar-aligned grid.
     Beat {
-        position_beats: f64,
+        beat_index: u64,
+        #[serde(default)]
+        bar_phase: Option<u32>,
+        beats_per_bar: u32,
         bpm: f64,
     },
     Select {

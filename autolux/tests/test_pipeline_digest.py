@@ -135,7 +135,7 @@ def test_autoloop_must_belong_to_committed_intent(name):
 
 def test_non_effect_commands_do_not_add_reported_effects():
     events = _streams(
-        _event(kind='beat', position_beats=1, bpm=128),
+        _event(kind='beat', beat_index=1, bar_phase=0, beats_per_bar=4, bpm=128),
         _event(kind='set_normalized_rms_level', level=0.6),
         _event(kind='stop'),
     )

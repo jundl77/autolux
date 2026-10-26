@@ -7,7 +7,9 @@
       "at_seconds": 0,
       "command": {
         "kind": "beat",
-        "position_beats": 0,
+        "beat_index": 0,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -44,7 +46,9 @@
       "at_seconds": 24,
       "command": {
         "kind": "beat",
-        "position_beats": 48,
+        "beat_index": 48,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 150
       }
     },

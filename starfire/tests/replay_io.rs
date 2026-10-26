@@ -18,7 +18,9 @@ fn replay(duration_seconds: f64) -> Replay {
             TimedCommand {
                 at_seconds: 0.0,
                 command: Command::Beat {
-                    position_beats: 0.0,
+                    beat_index: 0,
+                    bar_phase: None,
+                    beats_per_bar: 4,
                     bpm: 120.0,
                 },
             },

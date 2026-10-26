@@ -7,7 +7,9 @@
       "at_seconds": 0,
       "command": {
         "kind": "beat",
-        "position_beats": 0,
+        "beat_index": 0,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -37,7 +39,9 @@
       "at_seconds": 16,
       "command": {
         "kind": "beat",
-        "position_beats": 32,
+        "beat_index": 32,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -45,7 +49,9 @@
       "at_seconds": 32,
       "command": {
         "kind": "beat",
-        "position_beats": 64,
+        "beat_index": 64,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -53,7 +59,9 @@
       "at_seconds": 48,
       "command": {
         "kind": "beat",
-        "position_beats": 96,
+        "beat_index": 96,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -61,7 +69,9 @@
       "at_seconds": 64,
       "command": {
         "kind": "beat",
-        "position_beats": 128,
+        "beat_index": 128,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 150
       }
     },
@@ -69,7 +79,9 @@
       "at_seconds": 80,
       "command": {
         "kind": "beat",
-        "position_beats": 168,
+        "beat_index": 168,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 150
       }
     }

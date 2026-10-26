@@ -42,7 +42,9 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
         .apply(
             0.0,
             &Command::Beat {
-                position_beats: 0.0,
+                beat_index: 0,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: 120.0,
             },
         )
@@ -909,7 +911,9 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
         .apply(
             1.0,
             &Command::Beat {
-                position_beats: 100.0,
+                beat_index: 100,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: 60.0,
             },
         )
@@ -1030,7 +1034,9 @@ fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() 
         .apply(
             2.0,
             &Command::Beat {
-                position_beats: 4.0,
+                beat_index: 4,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: 120.0,
             },
         )
@@ -1050,7 +1056,9 @@ fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() 
         .apply(
             4.0,
             &Command::Beat {
-                position_beats: 8.0,
+                beat_index: 8,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: 120.0,
             },
         )

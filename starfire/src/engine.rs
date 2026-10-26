@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::clock::{ClockSample, MusicalClock, validate_time};
+use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::fixtures::FixtureRig;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
@@ -53,6 +53,9 @@ impl ActiveAutoloop {
         self.script.render(&RenderContext {
             time_seconds: seconds,
             beat_position: time.beat_position,
+            bar_phase: time.bar_phase,
+            bar_index: time.bar_index,
+            beats_per_bar: time.beats_per_bar,
             autoloop_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
             autoloop_speed_scaled_elapsed_beats: (time.animation_beats
                 - self.start_animation_beats)
@@ -143,11 +146,20 @@ impl Engine {
         let time = self.clock.sample_at(at_seconds)?;
         match command {
             Command::Beat {
-                position_beats,
+                beat_index,
+                bar_phase,
+                beats_per_bar,
                 bpm,
             } => {
-                self.clock
-                    .set_beat_anchor(at_seconds, *position_beats, *bpm)?;
+                self.clock.set_beat(
+                    at_seconds,
+                    BeatFact {
+                        beat_index: *beat_index,
+                        bar_phase: *bar_phase,
+                        beats_per_bar: *beats_per_bar,
+                        bpm: *bpm,
+                    },
+                )?;
             }
             Command::Select {
                 bank,
