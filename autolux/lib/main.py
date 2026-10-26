@@ -96,46 +96,11 @@ class ShowControl:
             except queue.Empty:
                 break
             applied = True
-            action = command['action']
-            if action == 'pause':
-                light_engine.pause()
-            elif action == 'play':
-                await light_engine.resume()
-            elif action == 'next_autoloop':
-                try:
-                    light_engine.next_autoloop()
-                except ValueError as error:
-                    LOGGER.warning('[main] next autoloop refused: %s', error)
-            elif action == 'master':
-                light_engine.set_master_level(command['level'])
-            elif action == 'mode':
-                if command['mode'] == 'static':
-                    light_engine.enter_static()
-                else:
-                    await light_engine.leave_static()
-            elif action == 'static':
-                try:
-                    apply_static(light_engine, command)
-                except ValueError as error:
-                    LOGGER.warning('[main] static command refused: %s', error)
-            elif action == 'palette':
-                light_engine.effect_controller.pin_palette(
-                    None if command['name'] == PALETTE_POLICY else command['name']
-                )
-            elif action in ('settings', 'intensity'):
-                settings = (
-                    command['settings']
-                    if action == 'settings'
-                    else dataclasses.replace(self.settings, intensity=command['level'])
-                )
-                if settings == self.settings:
-                    continue
-                self.settings = settings
-                if action == 'intensity':
-                    light_engine.send_intensity()
-                else:
-                    light_engine.settings_changed()
-                self._unsaved_change_at = self._clock.monotonic()
+            try:
+                await self._apply(light_engine, command)
+            finally:
+                # Releases the bridge request waiting for this hand-off.
+                self.commands.task_done()
         if applied:
             self.publish(light_engine)
         if (
@@ -143,6 +108,48 @@ class ShowControl:
             and self._clock.monotonic() - self._unsaved_change_at >= SETTINGS_SAVE_SETTLE_SECONDS
         ):
             self.save_settings()
+
+    async def _apply(self, light_engine, command: dict) -> None:
+        action = command['action']
+        if action == 'pause':
+            light_engine.pause()
+        elif action == 'play':
+            await light_engine.resume()
+        elif action == 'next_autoloop':
+            try:
+                light_engine.next_autoloop()
+            except ValueError as error:
+                LOGGER.warning('[main] next autoloop refused: %s', error)
+        elif action == 'master':
+            light_engine.set_master_level(command['level'])
+        elif action == 'mode':
+            if command['mode'] == 'static':
+                light_engine.enter_static()
+            else:
+                await light_engine.leave_static()
+        elif action == 'static':
+            try:
+                apply_static(light_engine, command)
+            except ValueError as error:
+                LOGGER.warning('[main] static command refused: %s', error)
+        elif action == 'palette':
+            light_engine.effect_controller.pin_palette(
+                None if command['name'] == PALETTE_POLICY else command['name']
+            )
+        elif action in ('settings', 'intensity'):
+            settings = (
+                command['settings']
+                if action == 'settings'
+                else dataclasses.replace(self.settings, intensity=command['level'])
+            )
+            if settings == self.settings:
+                return
+            self.settings = settings
+            if action == 'intensity':
+                light_engine.send_intensity()
+            else:
+                light_engine.settings_changed()
+            self._unsaved_change_at = self._clock.monotonic()
 
     def save_settings(self) -> None:
         if self._unsaved_change_at is None:
@@ -312,6 +319,8 @@ class AutoluxController:
         while self.is_running:
             now = datetime.datetime.now()
             audio_signal = self.audio_client.read()
+            # Every audio buffer (~6 ms), not the 100 ms tick: operator actions apply on the next frame.
+            await self.control.apply_pending(self.light_engine)
             await self.light_engine.on_audio(audio_signal)
             new_audio_signal = await self.music_analyser.analyse(audio_signal)
             await self.command_queue.drain()
@@ -355,7 +364,6 @@ class AutoluxController:
     async def _do_100ms_callback(self):
         if self.health_check is not None:
             self.health_check()
-        await self.control.apply_pending(self.light_engine)
         await self.light_engine.on_100ms_callback()
 
     async def _do_1s_callback(self):
