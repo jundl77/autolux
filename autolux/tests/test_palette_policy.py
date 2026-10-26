@@ -5,16 +5,17 @@ import random
 import pytest
 
 from autolux.lib.engine.effect_definitions import LightIntent
-from autolux.lib.engine.palette_policy import FULL_BIAS_PREFERENCE, PalettePolicy
+from autolux.lib.engine.palette_policy import PalettePolicy
 from autolux.lighting.palettes import (
-    BREAKDOWN_ACCENT_SATURATION,
-    BREAKDOWN_PRIMARY_LEVEL,
+    BREAKDOWN_PALETTES,
     DEFAULT_PALETTE,
     PALETTES,
     Palette,
-    breakdown_variant,
     palette_table,
 )
+
+SAME_FAMILY_HUE_DEGREES = 45.0
+CHROMATIC_SATURATION = 0.3
 
 
 class FirstChoice(random.Random):
@@ -52,29 +53,41 @@ def test_every_section_of_a_track_shares_its_palette_and_breakdowns_use_the_vari
     assert sections == [f'{intro}_breakdown', intro, intro]
 
 
-def test_least_recently_used_palettes_weigh_more():
+def test_a_recently_used_palette_is_offered_less_than_unused_ones():
     rng = FirstChoice()
     policy = PalettePolicy(PALETTES[:4], rng)
     for _ in range(3):
         policy.palette_for(LightIntent.DROP, new_track=True, temperature_bias=0.0)
-    assert rng.offers[0] == {'techno': 1, 'house': 1, 'ice': 1, 'acid': 1}
-    assert rng.offers[1] == {'house': 2, 'ice': 2, 'acid': 2}
-    assert rng.offers[2] == {'techno': 2, 'ice': 3, 'acid': 3}
+    first, second, third = rng.offers
+    assert len(set(first.values())) == 1
+    assert 'techno' not in second and len(set(second.values())) == 1
+    assert 'house' not in third
+    assert third['techno'] < third['ice'] == third['acid']
 
 
-def test_the_temperature_bias_leans_the_pick_warm_or_cold():
+def by_temperature(offer, temperature):
+    return {
+        offer[palette.name]
+        for palette in PALETTES
+        if palette.temperature == temperature and palette.name in offer
+    }
+
+
+@pytest.mark.parametrize(
+    ('bias', 'order'),
+    [(1.0, ('warm', 'neutral', 'cold')), (-1.0, ('cold', 'neutral', 'warm'))],
+)
+def test_the_temperature_bias_orders_warm_and_cold_palettes(bias, order):
     rng = FirstChoice()
-    policy = PalettePolicy(PALETTES, rng)
-    policy.palette_for(LightIntent.DROP, new_track=True, temperature_bias=1.0)
-    policy.palette_for(LightIntent.DROP, new_track=True, temperature_bias=-0.5)
-    warm, cold = rng.offers
-    assert (warm['sunset'], warm['house'], warm['ice']) == (
-        FULL_BIAS_PREFERENCE,
-        1,
-        1 / FULL_BIAS_PREFERENCE,
+    PalettePolicy(PALETTES, rng).palette_for(
+        LightIntent.DROP, new_track=True, temperature_bias=bias
     )
-    assert cold['ice'] == pytest.approx(FULL_BIAS_PREFERENCE**0.5 * 2)
-    assert cold['sunset'] == pytest.approx(FULL_BIAS_PREFERENCE**-0.5 * 2)
+    [offer] = rng.offers
+    favoured, middle, disfavoured = (by_temperature(offer, name) for name in order)
+    assert min(favoured) > max(middle) > max(disfavoured)
+
+
+def test_a_warm_bias_picks_warm_palettes_more_often_than_a_cold_one():
     counts = {
         bias: sum(
             next(p for p in PALETTES if p.name == name).temperature == 'warm'
@@ -85,28 +98,34 @@ def test_the_temperature_bias_leans_the_pick_warm_or_cold():
     assert counts[1.0] > 2 * counts[-1.0]
 
 
-def test_the_breakdown_variant_complements_the_accent_and_dims_the_primary():
-    palette = Palette(
-        'test',
-        'warm',
-        primary=(1.0, 0.5, 0.25),
-        secondary=(0.1, 0.2, 0.3),
-        accent=(1.0, 0.0, 0.0),
-        cold=(0.7, 0.8, 0.9),
+def hsv(colour):
+    hue, saturation, value = colorsys.rgb_to_hsv(*colour)
+    return hue * 360.0, saturation, value
+
+
+def hue_distance(first, second):
+    return min(abs(first - second), 360.0 - abs(first - second))
+
+
+@pytest.mark.parametrize('base', PALETTES, ids=lambda palette: palette.name)
+def test_each_breakdown_variant_keeps_its_palette_identity(base):
+    breakdown = next(p for p in BREAKDOWN_PALETTES if p.name == f'{base.name}_breakdown')
+    assert (breakdown.temperature, breakdown.secondary, breakdown.cold, breakdown.black) == (
+        base.temperature,
+        base.secondary,
+        base.cold,
+        base.black,
     )
-    variant = breakdown_variant(palette)
-    assert variant.name == 'test_breakdown'
-    assert variant.primary == pytest.approx(
-        tuple(channel * BREAKDOWN_PRIMARY_LEVEL for channel in palette.primary)
-    )
-    hue, saturation, value = colorsys.rgb_to_hsv(*variant.accent)
-    assert (hue, saturation, value) == pytest.approx((0.5, BREAKDOWN_ACCENT_SATURATION, 1.0))
-    assert (variant.secondary, variant.cold, variant.black, variant.temperature) == (
-        palette.secondary,
-        palette.cold,
-        palette.black,
-        palette.temperature,
-    )
+    _, base_saturation, base_value = hsv(base.primary)
+    _, saturation, value = hsv(breakdown.primary)
+    assert saturation < base_saturation
+    assert value == pytest.approx(base_value)
+    base_hue, base_accent_saturation, _ = hsv(base.accent)
+    hue, accent_saturation, _ = hsv(breakdown.accent)
+    assert breakdown.accent != base.accent
+    assert accent_saturation <= max(base_accent_saturation, CHROMATIC_SATURATION)
+    if base_accent_saturation >= CHROMATIC_SATURATION:
+        assert hue_distance(hue, base_hue) <= SAME_FAMILY_HUE_DEGREES
 
 
 def test_the_login_table_starts_with_the_default_and_pairs_each_palette_with_its_variant():

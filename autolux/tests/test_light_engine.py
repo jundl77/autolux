@@ -1839,7 +1839,7 @@ async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pi
     clock.advance(14.1)
     await queue.drain()
     breakdown = [command for _, command in sent(lighting, 'select')][-1]
-    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', pinned)
+    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', f'{pinned}_breakdown')
 
     control.commands.put_nowait({'action': 'palette', 'name': 'auto'})
     await control.apply_pending(light)

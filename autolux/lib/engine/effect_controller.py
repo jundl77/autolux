@@ -21,7 +21,7 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
     transition_for,
 )
-from autolux.lib.engine.palette_policy import PalettePolicy
+from autolux.lib.engine.palette_policy import PalettePolicy, palette_variant
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Palette
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class EffectController:
         self._last_strobe_started_at: float | None = None
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
-        self._palette_policy = PalettePolicy(palettes, random.Random(seed))
+        self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
         self._publish_palette()
 
@@ -71,16 +71,19 @@ class EffectController:
         if name is not None and name not in PALETTE_NAMES:
             raise ValueError(f'unknown palette {name!r}; choose one of {", ".join(PALETTE_NAMES)}')
         self._pinned_palette = name
-        palette = name or self._policy_palette_for_current_look()
+        palette = self._palette_for_current_look()
         if palette is not None and palette != self.lighting_client.palette:
             self.lighting_client.set_palette(palette)
         self._publish_palette()
         LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
 
-    def _policy_palette_for_current_look(self) -> str | None:
+    def _palette_for_current_look(self) -> str | None:
+        intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[0]
+        if self._pinned_palette is not None:
+            return palette_variant(self._pinned_palette, intent)
         if self._entered is None or self._palette_policy.track_palette is None:
             return None
-        return self._palette_policy.variant_for(self._entered[0])
+        return self._palette_policy.variant_for(intent)
 
     def _palette_for(self, context: SelectionContext) -> str:
         policy_palette = self._palette_policy.palette_for(
@@ -88,7 +91,9 @@ class EffectController:
             new_track=context.new_track,
             temperature_bias=self._settings().palette_temperature_bias,
         )
-        return self._pinned_palette or policy_palette
+        if self._pinned_palette is None:
+            return policy_palette
+        return palette_variant(self._pinned_palette, context.intent)
 
     def _publish_palette(self) -> None:
         if self.event_buffer is not None:

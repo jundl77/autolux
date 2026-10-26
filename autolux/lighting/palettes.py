@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import colorsys
 import re
 from dataclasses import dataclass, replace
 
@@ -9,9 +8,6 @@ Rgb = tuple[float, float, float]
 TEMPERATURES = ('warm', 'neutral', 'cold')
 SLOTS = ('primary', 'secondary', 'accent', 'cold', 'black')
 BREAKDOWN_SUFFIX = '_breakdown'
-BREAKDOWN_ACCENT_SATURATION = 0.5
-BREAKDOWN_PRIMARY_LEVEL = 0.6
-HALF_TURN = 0.5
 PALETTE_NAME = re.compile(r'[a-z0-9_]{1,64}')
 BLACK: Rgb = (0.0, 0.0, 0.0)
 
@@ -38,19 +34,6 @@ class Palette:
 
     def slots(self) -> dict[str, Rgb]:
         return {slot: getattr(self, slot) for slot in SLOTS}
-
-
-def breakdown_variant(palette: Palette) -> Palette:
-    hue, saturation, value = colorsys.rgb_to_hsv(*palette.accent)
-    complement = colorsys.hsv_to_rgb(
-        (hue + HALF_TURN) % 1.0, saturation * BREAKDOWN_ACCENT_SATURATION, value
-    )
-    return replace(
-        palette,
-        name=palette.name + BREAKDOWN_SUFFIX,
-        accent=tuple(round(channel, 6) for channel in complement),
-        primary=tuple(round(channel * BREAKDOWN_PRIMARY_LEVEL, 6) for channel in palette.primary),
-    )
 
 
 PALETTES: tuple[Palette, ...] = (
@@ -131,7 +114,38 @@ DEFAULT_PALETTE = PALETTES[0].name
 PALETTE_NAMES = tuple(palette.name for palette in PALETTES)
 
 
-def palette_table(palettes: tuple[Palette, ...] = PALETTES) -> tuple[Palette, ...]:
+def _breakdown(palette: Palette, *, primary: Rgb, accent: Rgb) -> Palette:
+    return replace(palette, name=palette.name + BREAKDOWN_SUFFIX, primary=primary, accent=accent)
+
+
+_TECHNO, _HOUSE, _ICE, _ACID, _SUNSET, _UV, _EMBER, _MONO_COLD, _MONO_WARM = PALETTES
+BREAKDOWN_PALETTES: tuple[Palette, ...] = (
+    _breakdown(_TECHNO, primary=(1.0, 0.9, 0.8), accent=(0.7, 0.15, 0.3)),
+    _breakdown(_HOUSE, primary=(1.0, 0.9, 0.8), accent=(0.85, 0.5, 0.45)),
+    _breakdown(_ICE, primary=(0.55, 0.7, 1.0), accent=(0.8, 0.9, 1.0)),
+    _breakdown(_ACID, primary=(0.75, 1.0, 0.5), accent=(0.8, 0.95, 0.9)),
+    _breakdown(_SUNSET, primary=(1.0, 0.65, 0.45), accent=(0.85, 0.45, 0.75)),
+    _breakdown(_UV, primary=(0.65, 0.45, 1.0), accent=(0.35, 0.35, 0.95)),
+    _breakdown(_EMBER, primary=(1.0, 0.4, 0.3), accent=(0.55, 0.4, 0.2)),
+    _breakdown(_MONO_COLD, primary=(0.94, 0.97, 1.0), accent=(0.4, 0.44, 0.5)),
+    _breakdown(_MONO_WARM, primary=(1.0, 0.9, 0.8), accent=(0.55, 0.47, 0.4)),
+)
+
+
+def palette_table() -> tuple[Palette, ...]:
     return tuple(
-        variant for palette in palettes for variant in (palette, breakdown_variant(palette))
+        variant
+        for palette, breakdown in zip(PALETTES, BREAKDOWN_PALETTES, strict=True)
+        for variant in (palette, breakdown)
     )
+
+
+def palette_records() -> list[dict]:
+    return [
+        {'name': palette.name}
+        | {
+            slot: {'red': red, 'green': green, 'blue': blue}
+            for slot, (red, green, blue) in palette.slots().items()
+        }
+        for palette in palette_table()
+    ]

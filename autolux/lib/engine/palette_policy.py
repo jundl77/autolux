@@ -10,6 +10,10 @@ TEMPERATURE_SIGN = {'warm': 1.0, 'neutral': 0.0, 'cold': -1.0}
 FULL_BIAS_PREFERENCE = 4.0
 
 
+def palette_variant(base: str, intent: LightIntent) -> str:
+    return base + BREAKDOWN_SUFFIX if intent == LightIntent.BREAKDOWN else base
+
+
 class PalettePolicy:
     def __init__(self, palettes: Sequence[Palette], rng: random.Random):
         if len(palettes) < 2:
@@ -32,9 +36,7 @@ class PalettePolicy:
     def variant_for(self, intent: LightIntent) -> str:
         if self._track_palette is None:
             raise ValueError('no track palette has been chosen yet')
-        if intent == LightIntent.BREAKDOWN:
-            return self._track_palette + BREAKDOWN_SUFFIX
-        return self._track_palette
+        return palette_variant(self._track_palette, intent)
 
     def _start_track(self, temperature_bias: float) -> None:
         candidates = [palette for palette in self._palettes if palette.name != self._track_palette]
