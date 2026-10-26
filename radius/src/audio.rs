@@ -19,6 +19,7 @@ pub const SHOW_DELAY_SECONDS: f64 = 14.0;
 const CAPTURE_QUEUE_BLOCKS: usize = 256;
 const OUTPUT_HISTORY_FRAMES: usize = 131_072;
 const SILENCE_POSITION: u64 = u64::MAX;
+const DISCARD_FADE_FRAMES: usize = SAMPLE_RATE as usize / 100;
 const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug)]
@@ -142,6 +143,7 @@ pub fn check_device(device_id: &str, input: bool) -> Result<AudioDevice> {
 struct AudioDelay {
     samples: Box<[[f32; CHANNELS]]>,
     offset: usize,
+    discarded_frames_remaining: usize,
 }
 
 impl AudioDelay {
@@ -154,7 +156,15 @@ impl AudioDelay {
             samples: vec![[0.0; CHANNELS]; (seconds * f64::from(SAMPLE_RATE)).round() as usize]
                 .into_boxed_slice(),
             offset: 0,
+            discarded_frames_remaining: 0,
         })
+    }
+
+    /// Silences everything already delayed; audio captured from now on emerges one
+    /// delay later. Counting frames instead of zeroing the ring keeps this O(1) in
+    /// the capture callback, and the block positions stay contiguous for RX.
+    fn discard_buffered(&mut self) {
+        self.discarded_frames_remaining = self.samples.len();
     }
 
     fn frame(&mut self, mut input: [f32; CHANNELS]) -> [f32; CHANNELS] {
@@ -165,7 +175,14 @@ impl AudioDelay {
                 self.offset = 0;
             }
         }
-        input
+        if self.discarded_frames_remaining == 0 {
+            return input;
+        }
+        let discarded = self.samples.len() - self.discarded_frames_remaining;
+        self.discarded_frames_remaining -= 1;
+        // A short ramp avoids the click of cutting a waveform mid-cycle.
+        let gain = 1.0 - (discarded + 1) as f32 / DISCARD_FADE_FRAMES as f32;
+        input.map(|sample| sample * gain.max(0.0))
     }
 }
 
@@ -260,6 +277,7 @@ struct CaptureAssembler {
     captured_frames: Arc<AtomicU64>,
     queue_overflow_frames: Arc<AtomicU64>,
     counters: Arc<StreamCounters>,
+    discard_requested: Arc<AtomicBool>,
 }
 
 impl CaptureAssembler {
@@ -267,6 +285,9 @@ impl CaptureAssembler {
         self.counters.callback();
         if self.counters.faulted.load(Ordering::Acquire) {
             return;
+        }
+        if self.discard_requested.swap(false, Ordering::AcqRel) {
+            self.delay.discard_buffered();
         }
         if !input.len().is_multiple_of(CHANNELS) {
             self.counters.stream_errors.fetch_add(1, Ordering::Relaxed);
@@ -301,6 +322,7 @@ pub struct CaptureStream {
     counters: Arc<StreamCounters>,
     captured_frames: Arc<AtomicU64>,
     queue_overflow_frames: Arc<AtomicU64>,
+    discard_requested: Arc<AtomicBool>,
 }
 
 impl CaptureStream {
@@ -311,6 +333,7 @@ impl CaptureStream {
         let queue = Arc::new(ArrayQueue::new(CAPTURE_QUEUE_BLOCKS));
         let captured_frames = Arc::new(AtomicU64::new(0));
         let queue_overflow_frames = Arc::new(AtomicU64::new(0));
+        let discard_requested = Arc::new(AtomicBool::new(false));
         let mut assembler = CaptureAssembler {
             delay,
             partial: AudioBlock::default(),
@@ -318,6 +341,7 @@ impl CaptureStream {
             captured_frames: captured_frames.clone(),
             queue_overflow_frames: queue_overflow_frames.clone(),
             counters: counters.clone(),
+            discard_requested: discard_requested.clone(),
         };
         let errors = counters.clone();
         let stream = device
@@ -335,11 +359,17 @@ impl CaptureStream {
             counters,
             captured_frames,
             queue_overflow_frames,
+            discard_requested,
         })
     }
 
     pub fn pop(&self) -> Option<AudioBlock> {
         self.queue.pop()
+    }
+
+    /// The capture callback applies this before its next frame.
+    pub fn discard_delayed_audio(&self) {
+        self.discard_requested.store(true, Ordering::Release);
     }
 
     pub fn last_error(&self) -> Option<&'static str> {

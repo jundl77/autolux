@@ -81,6 +81,7 @@ struct Shared {
     ready: AtomicBool,
     light: ArrayQueue<TimedLight>,
     light_overflow: AtomicBool,
+    discard_delayed_audio: AtomicBool,
     metrics: Mutex<TxSnapshot>,
     error: Mutex<Option<String>>,
 }
@@ -98,6 +99,7 @@ impl RadiusTx {
             ready: AtomicBool::new(false),
             light: ArrayQueue::new(MAX_LIGHT_UPDATES),
             light_overflow: AtomicBool::new(false),
+            discard_delayed_audio: AtomicBool::new(false),
             metrics: Mutex::new(TxSnapshot::default()),
             error: Mutex::new(None),
         });
@@ -131,6 +133,14 @@ impl RadiusTx {
         {
             self.shared.light_overflow.store(true, Ordering::Release);
         }
+    }
+
+    /// Silences the show-delayed audio not yet sent; RX keeps a contiguous stream,
+    /// so it plays silence without rebuffering until new capture emerges.
+    pub fn discard_delayed_audio(&self) {
+        self.shared
+            .discard_delayed_audio
+            .store(true, Ordering::Release);
     }
 
     pub fn is_ready(&self) -> bool {
@@ -274,6 +284,9 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
         }
 
         if let Some(capture) = &capture {
+            if shared.discard_delayed_audio.swap(false, Ordering::AcqRel) {
+                capture.discard_delayed_audio();
+            }
             let stats = capture.metrics();
             ensure!(
                 !stats.faulted,
