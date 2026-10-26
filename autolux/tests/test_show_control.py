@@ -6,7 +6,10 @@ import pytest
 from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.ui_bridge import SnapshotServer
+from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.visualizer_app import (
+    INTENSITY_LEVELS,
+    PALETTE_POLICY,
     SETTINGS_GROUPS,
     ControlExpectations,
     SnapshotPoller,
@@ -40,7 +43,7 @@ def show():
         ('control-toggle', True, None, (), {'action': 'play'}),
         ('control-brightness', False, 0.42, (), {'action': 'master', 'level': 0.42}),
         ('control-next', False, None, (), {'action': 'next_autoloop'}),
-        ('control-intensity-live', False, 0.35, (), {'action': 'intensity', 'level': 0.35}),
+        ('control-intensity', False, 0.7, (), {'action': 'intensity', 'level': 0.7}),
         (
             'control-crossfade_beats',
             False,
@@ -116,11 +119,11 @@ def test_each_collapsed_settings_group_summarises_its_live_values():
     assert {
         group.key: settings_group_summary(group.names, settings) for group in SETTINGS_GROUPS
     } == {
-        'transitions': '1 beats · quiet 15 % · standby 2 s',
+        'transitions': '1 beats · quiet 15 %',
+        'standby': 'standby 2 s',
         'strobe': '8 Hz · burst 4 s · drop burst 1 s · cooldown 60 s',
-        'palette': 'warmth -0.5 · intensity 70 %',
     }
-    assert settings_group_summary(SETTINGS_GROUPS[1].names, {}) == (
+    assert settings_group_summary(SETTINGS_GROUPS[2].names, {}) == (
         '— Hz · burst — s · drop burst — s · cooldown — s'
     )
 
@@ -409,3 +412,34 @@ def test_picking_a_mode_tab_sends_that_mode_and_shows_it_at_once(show, shown, pi
     )
     assert commands.get_nowait() == {'action': 'mode', 'mode': picked}
     assert response.get_json()['response']['control-state']['data']['mode'] == picked
+
+
+def _send_control(app, trigger, value, state):
+    output = next(key for key in app.callback_map if key.startswith('..control-status.children'))
+    return _run_callback(
+        app, output, {trigger.split('.')[0]: value, 'control-state': state}, trigger
+    )
+
+
+def test_each_intensity_segment_sends_its_mapped_level(show):
+    poller, commands = show
+    app = build_app(poller)
+    options = app.layout['control-intensity'].options
+    assert [(o['label'], o['value']) for o in options] == list(INTENSITY_LEVELS)
+    state = {'settings': {'intensity': 0.7}}
+    for word, level in INTENSITY_LEVELS:
+        _send_control(app, 'control-intensity.value', level, state)
+        if level != 0.7:
+            assert commands.get_nowait() == {'action': 'intensity', 'level': level}, word
+    assert commands.empty()
+
+
+def test_a_palette_card_click_sends_the_dropdown_palette_command(show):
+    poller, commands = show
+    app = build_app(poller)
+    cards = [o['value'] for o in app.layout['control-palette'].options]
+    assert cards == [PALETTE_POLICY, *PALETTE_NAMES]
+    _send_control(app, 'control-palette.value', 'ice', {'palette': {'name': 'techno'}})
+    assert commands.get_nowait() == control_command(
+        'control-palette', False, None, (), palette='ice'
+    )
