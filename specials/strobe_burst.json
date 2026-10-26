@@ -1,8 +1,0 @@
-{
-  "name": "strobe_burst",
-  "intents": [
-    "drop"
-  ],
-  "group": "all",
-  "strobe_hz": 8.0
-}

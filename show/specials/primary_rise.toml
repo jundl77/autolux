@@ -1,0 +1,14 @@
+name = "primary_rise"
+intents = ["buildup"]
+group = "fx"
+
+[preset]
+colour = "primary"
+
+[effect]
+rate = 0.4
+size = 0.5
+
+[playback]
+attack_beats = 128
+release_beats = 4

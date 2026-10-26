@@ -9,3 +9,4 @@ autolux/training/eval_audio/*.mp3 binary
 # Keep calibrated program and rig hashes stable across checkouts.
 show/autoloops/**/*.lua text eol=lf
 rigs/*.json text eol=lf
+show/**/*.toml text eol=lf
