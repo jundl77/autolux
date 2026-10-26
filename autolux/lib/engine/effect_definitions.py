@@ -90,14 +90,30 @@ MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0
 MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
-# The dashboard's three intensity levels; the energy cap and strobe gate key off them so
-# each level behaves as itself, not as its neighbour.
+# The dashboard's three intensity levels. They differ in kind, not just degree: calm
+# re-maps drops and builds to quiet banks and drops strobes, wild leans on energy 3 and
+# strobes more often. Starfire's pulse/movement curve (starfire::intensity) keys off the
+# same three values.
 INTENSITY_CALM = 0.3
-INTENSITY_MEASURED = 0.7
+INTENSITY_BALANCED = 0.7
 INTENSITY_WILD = 1.0
-DEFAULT_INTENSITY = INTENSITY_MEASURED
+DEFAULT_INTENSITY = INTENSITY_BALANCED
+CALM, BALANCED, WILD = 'calm', 'balanced', 'wild'
 # Strobes (and starfire's intense-special gate) are off at or below calm.
 STROBE_GATE_INTENSITY = INTENSITY_CALM
+# Calm stretches every look change; wild snaps between them.
+CROSSFADE_SCALE = {CALM: 2.0, BALANCED: 1.0, WILD: 0.5}
+DROP_STROBE_COOLDOWN_SCALE = {CALM: 1.0, BALANCED: 1.0, WILD: 0.5}
+
+
+def intensity_level(intensity: float) -> str:
+    """Continuous intensities between calm and wild behave as balanced."""
+    if intensity <= INTENSITY_CALM:
+        return CALM
+    if intensity >= INTENSITY_WILD:
+        return WILD
+    return BALANCED
+
 
 SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'drop_strobe_cooldown_seconds': (0.0, MAX_STROBE_COOLDOWN_SECONDS),
@@ -145,6 +161,11 @@ class ShowSettings:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def live_crossfade_beats(settings: ShowSettings) -> float:
+    """The renderer's default crossfade: the saved setting scaled by the intensity level."""
+    return settings.crossfade_beats * CROSSFADE_SCALE[intensity_level(settings.intensity)]
 
 
 def transition_for(intent: LightIntent) -> dict | None:

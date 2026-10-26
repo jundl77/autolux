@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::fixtures::FixtureRig;
+use crate::intensity;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
     OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
@@ -21,10 +22,6 @@ const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
-// The dashboard's calm level (autolux INTENSITY_CALM); strobes are off at or below it.
-pub const STROBE_GATE_INTENSITY: f64 = 0.3;
-pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.1;
-pub const FASTEST_LIMITED_RANGE_PER_SECOND: f64 = 2.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -430,7 +427,7 @@ impl Engine {
 
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
-        let strobe_scale = intensity_strobe_scale(self.intensity);
+        let strobe_scale = intensity::strobe_scale(self.intensity);
         let (max_rate_hz, max_burst_seconds) = if strobe_scale > 0.0 {
             (
                 self.strobe_max_rate_hz * strobe_scale,
@@ -462,11 +459,10 @@ impl Engine {
         let Some(previous_seconds) = self.last_render_seconds else {
             return;
         };
-        if self.intensity >= 1.0 {
+        let Some(range_per_second) = intensity::movement_range_per_second(self.intensity) else {
             return;
-        }
-        let max_step =
-            intensity_movement_range_per_second(self.intensity) * (seconds - previous_seconds);
+        };
+        let max_step = range_per_second * (seconds - previous_seconds);
         for (id, state) in states.iter_mut() {
             if let Some(previous) = self.last_output_states.get(id) {
                 state.pan = step_toward(previous.pan, state.pan, max_step);
@@ -915,21 +911,6 @@ fn blend_states(
 
 fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
     from + (to - from) * amount
-}
-
-pub fn intensity_strobe_scale(intensity: f64) -> f64 {
-    if intensity <= STROBE_GATE_INTENSITY {
-        0.0
-    } else {
-        intensity
-    }
-}
-
-pub fn intensity_movement_range_per_second(intensity: f64) -> f64 {
-    // Squared so 0.3 and 0.7 read as a slow glide (0.27/s) and a brisk sweep (1.03/s);
-    // the old 1/(1-i)^2 curve let both move faster than the eye tracks.
-    SLOWEST_GLIDE_RANGE_PER_SECOND
-        + (FASTEST_LIMITED_RANGE_PER_SECOND - SLOWEST_GLIDE_RANGE_PER_SECOND) * intensity.powi(2)
 }
 
 fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {

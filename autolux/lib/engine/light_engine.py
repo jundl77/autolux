@@ -26,7 +26,9 @@ from autolux.lib.engine.effect_definitions import (
     QUIET_RMS,
     LightIntent,
     ShowSettings,
+    intensity_level,
     intent_for_class,
+    live_crossfade_beats,
 )
 from autolux.lib.engine.event_buffer import (
     SILENCE_TRIGGER,
@@ -117,6 +119,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._showing_standby = False
         self._master_level = 1.0
         self._sent_brightness = 1.0
+        self._sent_crossfade_beats: float | None = None
         self._room_levels: deque[float] = deque(maxlen=LOUDNESS_TREND_BEATS)
         self._entered_intent: LightIntent | None = None
         self._entered_label: str | None = None
@@ -242,25 +245,33 @@ class LightEngine(IMusicAnalyserHandler):
     def send_renderer_settings(self) -> None:
         settings = self._settings()
         self.lighting_client.set_paused(self._paused)
-        self.lighting_client.set_default_crossfade_beats(settings.crossfade_beats)
+        self._send_crossfade()
         self.lighting_client.set_strobe_limits(
             settings.strobe_max_rate_hz, settings.strobe_max_burst_seconds
         )
         self.send_intensity()
 
+    def _send_crossfade(self) -> None:
+        self._sent_crossfade_beats = live_crossfade_beats(self._settings())
+        self.lighting_client.set_default_crossfade_beats(self._sent_crossfade_beats)
+
     def send_intensity(self) -> None:
         level = self._settings().intensity
-        LOGGER.info('[engine] intensity %.2f sent to Starfire', level)
+        LOGGER.info('[engine] intensity %.2f (%s) sent to Starfire', level, intensity_level(level))
         self.lighting_client.set_intensity(level)
 
     def intensity_changed(self) -> None:
         self.send_intensity()
+        # The level scales the crossfade; only a level change moves it.
+        if live_crossfade_beats(self._settings()) != self._sent_crossfade_beats:
+            self._send_crossfade()
+            LOGGER.info('[engine] crossfade %g beats', self._sent_crossfade_beats)
         if self._holding() or self._showing_standby or self._entered_intent is None:
             return
         context = self._selection_context(
             self._entered_intent, self._entered_label, self._clock.monotonic()
         )
-        self.effect_controller.cap_energy(
+        self.effect_controller.apply_intensity(
             dataclasses.replace(context, new_track=False), self._published_bpm.get('last')
         )
 

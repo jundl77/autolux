@@ -1484,7 +1484,6 @@ class _Show:
     def __init__(self):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.audio_config import BUFFER_SIZE
-
         from autolux.lib.engine.event_buffer import EventBuffer
 
         self.clock = VirtualClock()
@@ -1953,7 +1952,12 @@ async def test_a_fader_drag_updates_live_but_writes_the_show_file_once_it_settle
             await control.apply_pending(light)
             clock.advance(1.0 / len(levels))
         assert [command['level'] for _, command in sent(lighting, 'set_intensity')] == levels
-        assert {event['command']['kind'] for event in lighting.events} == {'set_intensity'}
+        assert {event['command']['kind'] for event in lighting.events} == {
+            'set_intensity',
+            'set_default_crossfade_beats',
+        }
+        # The drag crosses from calm into balanced once, so the crossfade moves once.
+        assert [c['beats'] for _, c in sent(lighting, 'set_default_crossfade_beats')] == [2.0, 1.0]
         assert writes == []
         clock.advance(main.SETTINGS_SAVE_SETTLE_SECONDS)
         await control.apply_pending(light)
