@@ -739,3 +739,37 @@ def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_
             part.children for part in value if getattr(part, 'className', '') == 'status-tag'
         ] == tag
         assert not [part for part in value if 'dot-auto' in (getattr(part, 'className', '') or '')]
+
+
+@pytest.mark.parametrize('reported', ['techno', 'techno_breakdown', 'techno_drop'])
+def test_every_intent_variant_reads_as_its_base_palette_with_its_swatches(reported):
+    from autolux.lighting.palettes import PALETTES
+    from autolux.simulate.visualizer_app import PALETTE_SWATCH_SLOTS, _build_show_status, _rgb_css
+
+    snapshot = _with_base_palette({'palette': {'name': reported, 'pinned': True}})
+    assert snapshot['palette'] == {'name': 'techno', 'pinned': True}
+    techno = next(palette for palette in PALETTES if palette.name == 'techno')
+    colors = next(
+        item
+        for item in _build_show_status(snapshot, now=0.0)
+        if item.children[0].children == 'Colors'
+    )
+    value = colors.children[1].children
+    assert [p.style['background'] for p in value if getattr(p, 'className', None) == 'dot'] == [
+        _rgb_css(getattr(techno, slot)) for slot in PALETTE_SWATCH_SLOTS
+    ]
+    assert 'techno' in value
+
+
+def test_the_status_line_reads_health_track_autoloop_colors_tempo_render():
+    from autolux.simulate.visualizer_app import MEDIA_SESSION_SOURCE, _build_show_status
+
+    track = {'source': MEDIA_SESSION_SOURCE, 'title': 'Windowlicker', 'artist': 'Aphex Twin'}
+    captions = [
+        [item.children[0].children for item in _build_show_status(snapshot, now=0.0)]
+        for snapshot in ({'track': track, 'special': 'sparkle'}, {})
+    ]
+    assert captions == [
+        ['Health', 'Track', 'Autoloop', 'Colors', 'Fx', 'Tempo', 'Render'],
+        ['Health', 'Autoloop', 'Colors', 'Tempo', 'Render'],
+    ]

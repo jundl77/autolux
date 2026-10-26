@@ -39,7 +39,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.palettes import BREAKDOWN_SUFFIX, PALETTES
+from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -560,6 +560,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
         _status_item(
             'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
         ),
+        *_track_status(snapshot),
         _status_item(
             'Autoloop',
             [
@@ -569,7 +570,6 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             ],
             title=detail,
         ),
-        *_track_status(snapshot),
         _status_item(
             'Colors',
             [
@@ -833,7 +833,7 @@ def _with_base_palette(snapshot: dict) -> dict:
     # The show reports the section's variant (ice_breakdown); the dropdown and the pin speak base names.
     return {
         **snapshot,
-        'palette': {**palette, 'name': palette['name'].removesuffix(BREAKDOWN_SUFFIX)},
+        'palette': {**palette, 'name': base_palette_name(palette['name'])},
     }
 
 
