@@ -518,7 +518,3 @@ def child_schema(parent_key: str, tag: str, attributes: dict | None = None) -> s
         if child.tag == tag:
             return child.key if child.kind is None else None
     return None
-
-
-def field_children(parent_key: str) -> dict[str, Child]:
-    return {child.tag: child for child in NODES[parent_key].children}

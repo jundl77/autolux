@@ -4,12 +4,10 @@ from pathlib import Path
 import pytest
 
 from autolux.lighting import mvr
-from autolux.lighting.gdtf import fixture_library
 from cli import starfire_assets as assets
 from cli import starfire_protocol as protocol
 from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG
 from proto.starfire import starfire_pb2 as wire
-from tools.rig_json_to_mvr import convert
 
 GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').read_text(
     encoding='utf-8'
@@ -18,7 +16,7 @@ SPEC = 'Autolux@Test Dimmer.gdtf'
 
 
 @pytest.fixture
-def login_assets(tmp_path):
+def login_assets(tmp_path, write_rig):
     profiles = tmp_path / 'profiles.json'
     profiles.write_text(
         json.dumps(
@@ -29,27 +27,7 @@ def login_assets(tmp_path):
         ),
         encoding='utf-8',
     )
-    rig = tmp_path / 'rig.mvr'
-    rig.write_bytes(
-        convert(
-            {
-                'schema_version': 1,
-                'fixtures': [
-                    {
-                        'id': 'front',
-                        'profile': 'test_mover',
-                        'universe': 0,
-                        'address': 1,
-                        'pan': {'min': 0, 'inverted': True},
-                        'pan_offset_degrees': 180,
-                    }
-                ],
-                'groups': {'movers': ['front']},
-            },
-            fixture_library(profiles),
-            'login-test',
-        )
-    )
+    rig = write_rig(profiles, 'front', 'movers', (180.0, 0.0, 0.0), invert_pan=True)
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'atmospheric'
     bank.mkdir(parents=True)

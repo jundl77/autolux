@@ -11,12 +11,10 @@ from pathlib import Path
 import pytest
 
 from autolux.lighting import mvr
-from autolux.lighting.gdtf import fixture_library
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
-from cli.starfire import DEFAULT_RIG, PROFILE_CATALOGUE
+from cli.starfire import DEFAULT_RIG
 from proto.starfire import starfire_pb2 as wire
-from tools.rig_json_to_mvr import convert
 
 
 def edited_room(path: Path, old: str, new: str) -> Path:
@@ -313,24 +311,12 @@ with open(recording, 'w') as output:
 
 
 def _fake_runtime(tmp_path, mode='normal', **kwargs):
-    rig = tmp_path / 'rig.mvr'
-    rig.write_bytes(
-        convert(
-            {
-                'schema_version': 1,
-                'fixtures': [{'id': 'lamp', 'profile': 'generic_rgb', 'universe': 0, 'address': 1}],
-                'groups': {'wash': ['lamp']},
-            },
-            fixture_library(PROFILE_CATALOGUE),
-            'runtime-test',
-        )
-    )
     scripts = tmp_path / 'scripts'
     (scripts / 'drop').mkdir(parents=True)
     (scripts / 'drop/kick.lua').write_text('return {render=function(ctx) return {} end}')
     runtime = starfire_runtime.StarfireRuntime(
         sys.executable,
-        rig,
+        DEFAULT_RIG,
         scripts,
         '127.0.0.1:6454',
         tmp_path / 'run',
@@ -776,7 +762,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
     with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
-        starfire_runtime.validate_starfire(binary, 'rig.json', tmp_path)
+        starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
 
 
 def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_explicit():

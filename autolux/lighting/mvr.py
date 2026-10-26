@@ -478,11 +478,6 @@ def compose_matrix(position_mm, rotation) -> list[float]:
     return [round(float(value), MATRIX_DECIMALS) + 0.0 for value in values]
 
 
-def _children(node, tag):
-    children = node.find('ChildList')
-    return [] if children is None else [child for child in children if child.tag == tag]
-
-
 def placed_objects(root: ElementTree.Element):
 
     def walk(node, matrix):

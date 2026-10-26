@@ -183,7 +183,7 @@ def test_sample_patch_includes_nested_and_multipatch_fixtures():
 def test_room_rig_is_spec_conforming_and_renderable():
     scene, fixtures = load_rig(ROOT / 'rigs/room.mvr')
     assert validate(scene) == []
-    assert len(fixtures) == 14
+    assert len(fixtures) == 15
     assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
 
 
