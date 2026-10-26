@@ -88,6 +88,8 @@ def apply_static(light_engine, command: dict) -> None:
         looks.set_blackout(command['enabled'])
     elif kind == 'strobe':
         looks.strobe(command.get('enabled'))
+    elif kind == 'clear':
+        looks.clear()
 
 
 class ShowControl:
@@ -133,16 +135,12 @@ class ShowControl:
                 LOGGER.warning('[main] next autoloop refused: %s', error)
         elif action == 'master':
             light_engine.set_master_level(command['level'])
-        elif action == 'mode':
-            if command['mode'] == 'static':
-                light_engine.enter_static()
-            else:
-                await light_engine.leave_static()
         elif action == 'static':
             try:
                 apply_static(light_engine, command)
             except ValueError as error:
                 LOGGER.warning('[main] static command refused: %s', error)
+            await light_engine.sync_static()
         elif action == 'palette':
             light_engine.effect_controller.pin_palette(
                 None if command['name'] == PALETTE_POLICY else command['name']

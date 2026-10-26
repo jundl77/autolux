@@ -133,6 +133,13 @@
 .setting-error { grid-column: 1 / -1; color: #ff7b72; font-size: 11px; padding-bottom: 8px; }
 .setting-error:empty { display: none; }
 
+.overlay-banner { display: flex; align-items: center; gap: 16px; min-height: 32px;
+                  padding: 0 12px; border-radius: 6px; background: #2a2418; color: #e8c58f;
+                  font-size: 14px; }
+#show-control .overlay-banner button { height: 24px; padding: 0 8px; margin-left: auto;
+                                       background: transparent; color: #e8c58f;
+                                       border: 1px solid #6b5a3a; font-size: 12px; }
+
 .control-status { margin: 0; color: #ff7b72; font-size: 14px; }
 .control-status:empty { display: none; }
 

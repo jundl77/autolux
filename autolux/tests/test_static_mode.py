@@ -51,7 +51,7 @@ async def test_static_holds_the_running_loop_without_pausing_dimming_or_followin
     assert sent(lighting, 'set_paused', 'set_master', 'stop') == []
     assert [e['command']['kind'] for e in lighting.events].count('beat') == 2
     assert light.current_intent is LightIntent.DROP
-    with pytest.raises(ValueError, match='static mode'):
+    with pytest.raises(ValueError, match='static overlay is active'):
         light.next_autoloop()
 
 
@@ -104,11 +104,30 @@ async def test_looks_the_rig_cannot_render_are_refused_before_reaching_starfire(
     assert overrides(lighting) == []
 
 
-async def test_static_commands_are_refused_in_auto_mode():
-    light, _, _, lighting = static_engine()
-    with pytest.raises(ValueError, match='auto mode'):
-        light.static_look('all', dimmer=1.0)
-    assert overrides(lighting) == []
+async def test_the_overlay_state_follows_the_looks_and_runs_the_hooks_once():
+    decoder = FakeDecoder()
+    light, _, _, lighting = static_engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    assert (light.mode, light.static_looks.active) == ('auto', False)
+
+    light.static_look('wash', colour=(1.0, 0.0, 0.0))
+    await light.sync_static()
+    assert (light.mode, light.static_looks.active) == ('static', True)
+    await beat_at_phase(light, decoder, 1, decision='drop')
+    await beat_at_phase(light, decoder, 0)
+    lighting.events.clear()
+    light.static_look('strip', colour=(0.0, 0.0, 1.0))
+    await light.sync_static()
+    assert selections(lighting) == [], 'a second look must not re-run the overlay hooks'
+
+    light.static().clear()
+    await light.sync_static()
+    assert (light.mode, light.static_looks.active) == ('auto', False)
+    assert overrides(lighting)[-3:] == [
+        {'kind': 'clear_override', 'id': 'static_wash'},
+        {'kind': 'clear_override', 'id': 'static_strip'},
+        {'kind': 'clear_override', 'id': 'static_floor'},
+    ]
 
 
 async def test_the_uv_preset_darkens_everything_but_the_blacklit_washes():
@@ -247,7 +266,7 @@ async def test_a_renderer_stop_or_new_song_keeps_the_static_look_and_blackout():
     assert lighting.events[-1]['command'] == {'kind': 'set_blackout', 'enabled': True}
 
 
-async def test_show_control_switches_mode_applies_static_commands_and_publishes_them(tmp_path):
+async def test_show_control_applies_static_commands_as_an_overlay_and_clears_it(tmp_path):
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lib.main import ShowControl
 
@@ -255,7 +274,6 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
     control = ShowControl(tmp_path / 'show.json', buffer)
     light, _, _, lighting = static_engine()
     for command in (
-        {'action': 'mode', 'mode': 'static'},
         {
             'action': 'static',
             'kind': 'look',
@@ -277,7 +295,7 @@ async def test_show_control_switches_mode_applies_static_commands_and_publishes_
         'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
 
-    control.commands.put_nowait({'action': 'mode', 'mode': 'auto'})
+    control.commands.put_nowait({'action': 'static', 'kind': 'clear'})
     await control.apply_pending(light)
     snapshot = buffer.snapshot()
     assert (snapshot['mode'], snapshot['static']['looks'], snapshot['static']['blackout']) == (

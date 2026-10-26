@@ -313,7 +313,7 @@ def test_each_static_control_reaches_the_controller_queue_as_parsed(
 async def test_red_with_target_wash_lights_only_the_wash(static_show):
     poller, commands = static_show
     app = build_app(poller, direct_control=False)
-    output = next(key for key in app.callback_map if key.startswith('..static-status.children'))
+    output = 'static-status.children'
     state = {'mode': 'static', 'static': {'targets': ['all', 'wash', 'strip'], 'blackout': False}}
     _run_callback(
         app,
@@ -325,8 +325,9 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
     assert command['target'] == 'wash'
 
     light, _, _, lighting = static_engine()
-    light.enter_static()
     apply_static(light, command)
+    await light.sync_static()
+    assert light.mode == 'static'
     assert light.static_looks.state()['looks'] == {
         'wash': {'colour': '#ff0000', 'dimmer': 1.0, 'uv': False}
     }
@@ -341,7 +342,6 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
 @pytest.mark.parametrize(
     ('payload', 'reason'),
     [
-        ({'action': 'mode', 'mode': 'manual'}, 'mode must be auto or static'),
         ({'action': 'static', 'kind': 'look', 'target': 'wash'}, 'needs a colour or a dimmer'),
         (
             {'action': 'static', 'kind': 'look', 'target': 'wash', 'dimmer': 1.5},
@@ -356,7 +356,7 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
         ({'action': 'static', 'kind': 'strobe', 'enabled': 'on'}, 'true or false'),
     ],
 )
-def test_malformed_mode_and_static_commands_return_the_reason_and_queue_nothing(
+def test_malformed_static_commands_return_the_reason_and_queue_nothing(
     static_show, payload, reason
 ):
     poller, commands = static_show
@@ -364,7 +364,7 @@ def test_malformed_mode_and_static_commands_return_the_reason_and_queue_nothing(
     assert commands.empty()
 
 
-def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
+def test_static_commands_need_no_mode_and_skipping_waits_for_the_overlay_to_clear():
     buffer = EventBuffer()
     buffer.set_intent('breakdown')
     commands = queue.Queue()
@@ -373,16 +373,16 @@ def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
     try:
         poller = SnapshotPoller(port=server.port)
         buffer.set_control_state(paused=False, master_brightness=1.0, settings={})
-        refused = poller.control({'action': 'static', 'kind': 'strobe'})
+        accepted = poller.control({'action': 'static', 'kind': 'clear'})
         buffer.set_control_state(paused=False, master_brightness=1.0, settings={}, mode='static')
         skipped = poller.control({'action': 'next_autoloop'})
-        entered = poller.control({'action': 'mode', 'mode': 'static'})
+        retired = poller.control({'action': 'mode', 'mode': 'static'})
     finally:
         server.stop()
-    assert refused == {'error': 'the show is in auto mode'}
-    assert skipped == {'error': 'the show is in static mode'}
-    assert entered == {'accepted': 'mode'}
-    assert commands.get_nowait() == {'action': 'mode', 'mode': 'static'}
+    assert accepted == {'accepted': 'static'}
+    assert skipped == {'error': 'a static overlay is active'}
+    assert 'unknown control action' in retired['error']
+    assert commands.get_nowait() == {'action': 'static', 'kind': 'clear'}
     assert commands.empty()
 
 
@@ -436,20 +436,15 @@ def test_a_snapshot_sets_the_mode_tab_once_and_never_overwrites_a_click(show):
     assert stale.status_code == 204
 
 
-@pytest.mark.parametrize(('shown', 'picked'), [('auto', 'static'), ('static', 'auto')])
-def test_picking_a_mode_tab_sends_that_mode_and_shows_it_at_once(show, shown, picked):
-    poller, commands = show
-    app = build_app(poller, direct_control=False)
-    output = next(key for key in app.callback_map if key.startswith('..static-status.children'))
-    state = {'mode': shown, 'static': {'targets': ['all'], 'blackout': False}}
-    response = _run_callback(
-        app,
-        output,
-        {'control-mode': picked, 'static-target': 'all', 'control-state': state},
-        'control-mode.value',
-    )
-    assert commands.get_nowait() == {'action': 'mode', 'mode': picked}
-    assert response.get_json()['response']['control-state']['data']['mode'] == picked
+@pytest.mark.parametrize('direct', [True, False])
+def test_switching_tabs_only_changes_the_view(direct):
+    app = build_app(_Recorder(), direct_control=direct)
+    listeners = [
+        key
+        for key, callback in app.callback_map.items()
+        if any(item['id'] == 'control-mode' for item in callback['inputs'])
+    ]
+    assert listeners == ['..auto-mode-panel.style...static-mode-panel.style..']
 
 
 def _send_control(app, trigger, value, state):
@@ -579,7 +574,6 @@ OPERATOR_CASES = [
     ('control-brightness.value', 0.42, AUTO_STATE, 'all', 'build.master(0.42)'),
     ('control-brightness-live.data', 0.35, AUTO_STATE, 'all', 'build.master(0.35)'),
     ('control-intensity.value', 0.3, AUTO_STATE, 'all', 'build.intensity(0.3)'),
-    ('control-mode.value', 'static', AUTO_STATE, 'all', "build.mode('static')"),
     *[
         (f'{chip}.n_clicks', 1, STATIC_STATE, target, f"build.static('{chip}', '{target}')")
         for chip in STATIC_CHIP_IDS
@@ -593,7 +587,7 @@ def test_the_browser_helper_builds_the_payload_the_python_callback_sends():
     source = _Recorder()
     app = build_app(source, direct_control=False)
     control_output = next(k for k in app.callback_map if k.startswith('..control-status.children'))
-    static_output = next(k for k in app.callback_map if k.startswith('..static-status.children'))
+    static_output = 'static-status.children'
     for trigger, value, state, target, _ in OPERATOR_CASES:
         component = trigger.split('.')[0]
         is_static = component.startswith('static-') or component == 'control-mode'
@@ -799,3 +793,45 @@ def test_the_render_rate_is_the_measured_rate_over_the_last_three_seconds():
     assert (render_rate_text(fps), missed) == ('38.6', 3)
     assert render_window([], now=0.0) == (None, 0)
     assert render_rate_text(render_window(steady, now=200.0)[0]) == '—'
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_overlay_banner_counts_the_looks_and_a_clear_hides_it_at_once():
+    from autolux.simulate.visualizer_app import OVERLAY_BANNER_JS
+
+    overlay = {'mode': 'static', 'static': {'looks': {'wash': {}, 'strip': {}}}}
+    shown = _run_control_js(
+        f'const banner = {OVERLAY_BANNER_JS};\n'
+        f'const overlay = {json.dumps(overlay)};\n'
+        'const before = banner(overlay);\n'
+        'control.hold({mode: "auto"});\n'
+        "console.log(JSON.stringify([before, banner(overlay), banner({mode: 'auto'})]));"
+    )
+    assert shown == [
+        [{}, 'Static overlay active · 2 looks'],
+        [{'display': 'none'}, ''],
+        [{'display': 'none'}, ''],
+    ]
+
+
+@pytest.mark.parametrize('trigger', ['static-clear', 'static-banner-clear'])
+def test_both_clear_buttons_send_one_clear_all_command(static_show, trigger):
+    poller, commands = static_show
+    app = build_app(poller, direct_control=False)
+    state = {'mode': 'static', 'static': {'targets': ['all'], 'looks': {'all': {}}}}
+    _run_callback(
+        app,
+        'static-status.children',
+        {trigger: 1, 'static-target': 'all', 'control-state': state},
+        f'{trigger}.n_clicks',
+    )
+    assert commands.get_nowait() == {'action': 'static', 'kind': 'clear'}
+    assert commands.empty()
+
+
+def test_the_autoloop_item_names_the_overlay_targets_while_it_is_active():
+    from autolux.simulate.visualizer_app import _build_show_status
+
+    snapshot = {'mode': 'static', 'static': {'looks': {'wash': {}, 'strip': {}}}}
+    items = {item.children[0].children: item for item in _build_show_status(snapshot, now=0.0)}
+    assert items['Autoloop'].children[1].children == 'Static · wash, strip'

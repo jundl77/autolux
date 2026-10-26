@@ -24,6 +24,9 @@
             }
             return {action: 'static', kind: 'preset', preset: preset};
         }
+        if (trigger === 'static-clear' || trigger === 'static-banner-clear') {
+            return {action: 'static', kind: 'clear'};
+        }
         if (trigger === 'static-blacklight') {
             return {action: 'static', kind: 'blacklight'};
         }
@@ -41,7 +44,6 @@
         palette: (name) => ({action: 'palette', name: name}),
         master: (level) => ({action: 'master', level: level}),
         intensity: (level) => ({action: 'intensity', level: level}),
-        mode: (mode) => ({action: 'mode', mode: mode}),
         static: staticCommand,
     };
 

@@ -100,11 +100,6 @@ def parse_control_command(payload) -> dict:
                 f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
             )
         return {'action': action, 'name': name}
-    if action == 'mode':
-        mode = payload.get('mode')
-        if mode not in ('auto', 'static'):
-            raise ValueError('mode must be auto or static')
-        return {'action': action, 'mode': mode}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
     raise ValueError(f'unknown control action {action!r}')
@@ -114,7 +109,7 @@ def _static_command(payload: dict) -> dict:
     from autolux.lib.engine.static_mode import PRESETS
 
     kind = payload.get('kind')
-    if kind == 'blacklight':
+    if kind in ('blacklight', 'clear'):
         return {'kind': kind}
     if kind == 'strobe':
         # The page sends the state it wants, so a retried request cannot flip the strobe twice.
@@ -158,14 +153,12 @@ def command_refusal(
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
-    if command['action'] == 'static' and mode != 'static':
-        return 'the show is in auto mode'
     if command['action'] != 'next_autoloop':
         return None
     if paused:
         return 'the show is paused'
     if mode == 'static':
-        return 'the show is in static mode'
+        return 'a static overlay is active'
     if intent in (None, STANDBY_INTENT):
         return 'no section is playing yet'
     return None

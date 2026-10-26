@@ -572,6 +572,18 @@ def _track_status(snapshot: dict) -> list:
     return [_status_item('Track', value, className='status-item status-track')]
 
 
+def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
+    if snapshot.get('mode') == 'static':
+        looks = ((snapshot.get('static') or {}).get('looks') or {}).keys()
+        return _status_item('Autoloop', f'Static · {", ".join(looks) or "off"}')
+    value = [
+        _dot(cfg['primary']),
+        name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
+        html.Span(cfg['label'].lower(), className='status-tag'),
+    ]
+    return _status_item('Autoloop', value, title=detail)
+
+
 def _build_show_status(snapshot: dict, now: float) -> list:
     cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
@@ -591,15 +603,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
         ),
         *_track_status(snapshot),
-        _status_item(
-            'Autoloop',
-            [
-                _dot(cfg['primary']),
-                name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
-                html.Span(cfg['label'].lower(), className='status-tag'),
-            ],
-            title=detail,
-        ),
+        _autoloop_status(snapshot, cfg, name, detail),
         _status_item(
             'Colors',
             [
@@ -718,8 +722,6 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'settings': command['settings']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
-    if action == 'mode':
-        return {'mode': command['mode']}
     return {}
 
 
@@ -979,6 +981,7 @@ def _build_control_card() -> list:
                 ),
                 html.Div(
                     [
+                        _build_overlay_banner(),
                         html.Div(
                             [
                                 html.Span('Intensity', className='control-label'),
@@ -1037,7 +1040,12 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
-STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
+STATIC_BUTTONS = {
+    'static-blacklight': 'blacklight',
+    'static-strobe': 'strobe',
+    'static-clear': 'clear',
+    'static-banner-clear': 'clear',
+}
 HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
 STATIC_TAB_STYLE = {
     'backgroundColor': 'transparent',
@@ -1104,6 +1112,12 @@ def _build_static_panel():
                         persistence=True,
                         persistence_type='local',
                     ),
+                    html.Button(
+                        'Clear all',
+                        id='static-clear',
+                        title='Remove every static look and show the automatic show again',
+                        style={'marginLeft': 'auto'},
+                    ),
                 ],
                 className='control-row',
             ),
@@ -1133,10 +1147,33 @@ def _build_static_panel():
     )
 
 
+OVERLAY_BANNER_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    if (!state || state.mode !== 'static') {
+        return [{display: 'none'}, ''];
+    }
+    const looks = Object.keys((state.static || {}).looks || {}).length;
+    return [{}, 'Static overlay active'
+        + (looks ? ' · ' + looks + (looks === 1 ? ' look' : ' looks') : '')];
+}'''
+
+
+def _build_overlay_banner():
+    return html.Div(
+        [
+            html.Span(id='static-banner-text'),
+            html.Button('Clear', id='static-banner-clear'),
+        ],
+        id='static-banner',
+        className='overlay-banner',
+        style={'display': 'none'},
+    )
+
+
 def _register_direct_auto_controls(app) -> None:
     # Visual state flips here at click time; the bridge round trip never gates it.
     app.clientside_callback(
-        """function(toggles, nexts, palette, intensity, mode, state) {
+        """function(toggles, nexts, palette, intensity, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
             const triggered = (window.dash_clientside.callback_context.triggered || [])
@@ -1167,11 +1204,6 @@ def _register_direct_auto_controls(app) -> None:
                         && (current === undefined || Math.abs(intensity - current) >= 0.005)) {
                     control.dispatch(control.build.intensity(intensity), status);
                 }
-            } else if (triggered.includes('control-mode.value')) {
-                if (mode && mode !== shown.mode) {
-                    control.hold({mode: mode});
-                    control.dispatch(control.build.mode(mode), 'static-status', ['mode']);
-                }
             }
             return [nu, nu];
         }""",
@@ -1181,7 +1213,6 @@ def _register_direct_auto_controls(app) -> None:
         Input('control-next', 'n_clicks'),
         Input('control-palette', 'value'),
         Input('control-intensity', 'value'),
-        Input('control-mode', 'value'),
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
@@ -1209,6 +1240,11 @@ def _register_direct_static_controls(app) -> None:
             const before = classes[ids.indexOf(chip)] || '';
             const strobing = before === 'active';
             const command = control.build.static(chip, target, strobing);
+            if (command.kind === 'clear') {
+                control.hold({mode: 'auto'});
+                control.dispatch(command, 'static-status', ['mode']);
+                return ids.map(() => '');
+            }
             control.dispatch(command, 'static-status').then((reply) => {
                 if (reply && reply.error) {
                     window.dash_clientside.set_props(chip, {className: before});
@@ -1262,6 +1298,12 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         Output('static-blacklight', 'disabled'),
         Input('control-state', 'data'),
     )
+    app.clientside_callback(
+        OVERLAY_BANNER_JS,
+        Output('static-banner', 'style'),
+        Output('static-banner-text', 'children'),
+        Input('control-state', 'data'),
+    )
 
     @app.callback(
         Output('control-mode-synced', 'data'),
@@ -1282,7 +1324,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         []
         if direct
         else [
-            Input('control-mode', 'value'),
             *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
             *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
         ]
@@ -1290,7 +1331,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
 
     @app.callback(
         Output('static-status', 'children'),
-        Output('control-state', 'data', allow_duplicate=True),
         *operator_inputs,
         Input('static-colour', 'value'),
         State('static-target', 'value'),
@@ -1298,33 +1338,26 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         prevent_initial_call=True,
     )
     def send_static(*_):
-        mode = dash.ctx.inputs.get('control-mode.value')
         colour = dash.ctx.inputs['static-colour.value']
         target = dash.ctx.states['static-target.value']
         state = dash.ctx.states.get('control-state.data') or {}
         trigger = dash.ctx.triggered_id
         if not can_control:
             raise dash.exceptions.PreventUpdate
-        if trigger == 'control-mode':
-            if mode == state.get('mode'):
-                raise dash.exceptions.PreventUpdate
-            command = {'action': 'mode', 'mode': mode}
-        else:
-            if trigger == 'static-colour' and not colour:
-                raise dash.exceptions.PreventUpdate
-            try:
-                command = static_control_command(trigger, target, colour)
-            except ValueError as error:
-                return f'Rejected: {error}', dash.no_update
-            if command is None:
-                raise dash.exceptions.PreventUpdate
+        if trigger == 'static-colour' and not colour:
+            raise dash.exceptions.PreventUpdate
+        try:
+            command = static_control_command(trigger, target, colour)
+        except ValueError as error:
+            return f'Rejected: {error}'
+        if command is None:
+            raise dash.exceptions.PreventUpdate
         reply = snapshot_source.control(command)
         if 'error' in reply:
-            return f'Rejected: {reply["error"]}', dash.no_update
-        if command['action'] == 'mode':
-            expectations.expect(mode=command['mode'])
-            return '', {**state, 'mode': command['mode']}
-        return '', dash.no_update
+            return f'Rejected: {reply["error"]}'
+        if command['kind'] == 'clear' and state:
+            expectations.expect(mode='auto')
+        return ''
 
 
 def _metric_card(label, value, detail):

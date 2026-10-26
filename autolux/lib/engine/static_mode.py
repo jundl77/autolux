@@ -61,6 +61,11 @@ class StaticLooks:
         self._floor = False
         self.blackout = False
 
+    @property
+    def active(self) -> bool:
+        # A strobe burst alone ends by itself, so it does not hold the automatic show.
+        return bool(self._looks) or self._floor or self.blackout
+
     def look(self, target: str, colour=None, dimmer=None, uv=None) -> None:
         if target not in self.rig.targets:
             raise ValueError(f'unknown static target {target!r}')
