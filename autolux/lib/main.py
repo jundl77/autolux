@@ -146,7 +146,7 @@ class ShowControl:
                 return
             self.settings = settings
             if action == 'intensity':
-                light_engine.send_intensity()
+                light_engine.intensity_changed()
             else:
                 light_engine.settings_changed()
             self._unsaved_change_at = self._clock.monotonic()
