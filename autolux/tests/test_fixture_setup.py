@@ -9,7 +9,7 @@ from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy
 
 ROOT = Path(__file__).resolve().parents[2]
-LIBRARY = ROOT / 'rigs/library'
+LIBRARY = ROOT / 'rig/library'
 MODES = {'rgb.gdtf': {'3ch': {'channels': 3}}, 'mover.gdtf': {'12ch': {'channels': 12}}}
 
 
@@ -64,7 +64,7 @@ def test_identical_addresses_in_distinct_universes_are_independent():
 @pytest.fixture
 def rig_file(tmp_path):
     path = tmp_path / 'rig.mvr'
-    path.write_bytes((ROOT / 'rigs/room.mvr').read_bytes())
+    path.write_bytes((ROOT / 'rig/room.mvr').read_bytes())
     return path
 
 
@@ -246,6 +246,6 @@ def test_class_order_follows_document_order_after_moving_a_fixture(rig_file):
 def test_config_names_the_library_folder_it_lists():
     from autolux.simulate.fixture_panel import library_folder
 
-    assert library_folder(LIBRARY) == 'rigs/library'
-    listed = FixtureStore(ROOT / 'rigs/room.mvr', LIBRARY, lambda _: None).library()
+    assert library_folder(LIBRARY) == 'rig/library'
+    listed = FixtureStore(ROOT / 'rig/room.mvr', LIBRARY, lambda _: None).library()
     assert set(listed) == {path.name for path in LIBRARY.glob('*.gdtf')}

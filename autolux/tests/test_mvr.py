@@ -13,7 +13,7 @@ from autolux.lighting.mvr_validation import validate
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(__file__).parent / 'data'
-LIBRARY = fixture_library(ROOT / 'rigs/library') | fixture_library(
+LIBRARY = fixture_library(ROOT / 'rig/library') | fixture_library(
     ROOT / 'autolux/tests/data/generic_rig'
 )
 DIMMER_SPEC = 'Generic@Test Dimmer@1.0.gdtf'
@@ -136,8 +136,8 @@ def test_addresses_resolve_to_artnet_universe_and_address_within_range(text, exp
 
 
 def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
-    content = (ROOT / 'rigs/room.mvr').read_bytes()
-    scene, fixtures = load_rig(ROOT / 'rigs/room.mvr')
+    content = (ROOT / 'rig/room.mvr').read_bytes()
+    scene, fixtures = load_rig(ROOT / 'rig/room.mvr')
     assert validate(scene) == []
     assert len(fixtures) == 15
     assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
@@ -322,7 +322,7 @@ def test_gdtf_edits_are_limited_to_correctable_fields(change, message):
 
 
 def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
-    scene = mvr.read((ROOT / 'rigs/room.mvr').read_bytes())
+    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
     edited = mvr.draft(scene)
     spot = node(edited['scene'], 'Fixture', 'spot_left')
     child(spot, 'GDTFSpec')['text'] = 'Generic@Dimmer@1.0.gdtf'

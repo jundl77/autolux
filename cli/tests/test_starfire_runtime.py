@@ -725,7 +725,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         receiver.settimeout(3)
         runtime = starfire_runtime.StarfireRuntime(
             binary,
-            root / 'rigs/room.mvr',
+            root / 'rig/room.mvr',
             root / 'show/autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
@@ -795,7 +795,7 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
     starfire_runtime.validate_starfire(
-        binary, root / 'rigs/room.mvr', autoloops, expected_universe=0
+        binary, root / 'rig/room.mvr', autoloops, expected_universe=0
     )
 
 
@@ -826,7 +826,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
-        starfire_runtime.validate_starfire(binary, root / 'rigs/room.mvr', tmp_path)
+        starfire_runtime.validate_starfire(binary, root / 'rig/room.mvr', tmp_path)
 
 
 def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):

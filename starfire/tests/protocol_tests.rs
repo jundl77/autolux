@@ -71,7 +71,7 @@ fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation 
 
 fn engine() -> Engine {
     Engine::new(
-        FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
+        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
         AutoloopCatalog::load(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
         )
@@ -575,7 +575,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
     let catalog = AutoloopCatalog::load(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
     )
@@ -654,7 +654,7 @@ fn attribute_engine() -> Engine {
         lua_source,
     };
     Engine::new(
-        FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
+        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
         AutoloopCatalog::from_definitions(&[
             definition(
                 "atmospheric",

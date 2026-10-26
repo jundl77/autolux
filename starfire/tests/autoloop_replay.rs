@@ -60,7 +60,7 @@ fn root() -> PathBuf {
 }
 
 fn room() -> FixtureRig {
-    FixtureRig::load(&root().join("../rigs/room.rig.pb")).unwrap()
+    FixtureRig::load(&root().join("../rig/room.rig.pb")).unwrap()
 }
 
 fn catalog() -> AutoloopCatalog {

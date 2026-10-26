@@ -50,7 +50,7 @@ fn rgb_and_rgbw_scale_intensity_without_a_master_channel() {
 
 #[test]
 fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
-    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
     let mut states = rig.empty_states();
     for state in states.values_mut() {
         *state = FixtureState {
@@ -244,7 +244,7 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_the_fx_derby_
     const PIXEL_COUNT: usize = 8;
     const FX_DERBY_START: usize = 39;
     const FX_DERBY_CHANNELS: usize = 4;
-    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
     for (selected, id) in strip.iter().enumerate() {

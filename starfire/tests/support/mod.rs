@@ -16,12 +16,12 @@ pub fn palettes() -> PaletteTable {
     PaletteTable::new(&palette_definitions()).unwrap()
 }
 
-pub fn rigs() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs")
+pub fn rig_folder() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rig")
 }
 
 pub fn room() -> FixtureRig {
-    FixtureRig::load(&rigs().join("room.rig.pb")).unwrap()
+    FixtureRig::load(&rig_folder().join("room.rig.pb")).unwrap()
 }
 
 /// A shipped fixture type's GDTF description and mode, as the exported rigs carry them.
@@ -31,7 +31,7 @@ pub fn catalogue_profile(fixture_type: &str) -> Option<(String, String)> {
         .find(|(name, _)| *name == fixture_type)?;
     [
         sample_rig().join("generic.rig.pb"),
-        rigs().join("room.rig.pb"),
+        rig_folder().join("room.rig.pb"),
     ]
     .into_iter()
     .find_map(|file| {
@@ -138,7 +138,7 @@ pub fn rig(spec: Value) -> FixtureRig {
 
 pub fn room_definition() -> wire::RigDefinition {
     wire::RigDefinition::decode(
-        std::fs::read(rigs().join("room.rig.pb"))
+        std::fs::read(rig_folder().join("room.rig.pb"))
             .unwrap()
             .as_slice(),
     )

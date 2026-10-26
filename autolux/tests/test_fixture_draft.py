@@ -18,13 +18,13 @@ def test_fixture_draft_integrity(tmp_path):
     node = shutil.which('node')
     if node is None:
         pytest.skip('Node is required for the browser-side draft integrity checks')
-    room = mvr.read((ROOT / 'rigs/room.mvr').read_bytes())
+    room = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
     data = {
         'draft': mvr.draft(room),
         'settings': {
             # The sample rig's dimmer is a type the room does not use yet.
             'library': browser_library(
-                fixture_library(ROOT / 'rigs/library')
+                fixture_library(ROOT / 'rig/library')
                 | fixture_library(ROOT / 'autolux/tests/data/generic_rig')
             ),
             'schema': mvr_schema.describe(),

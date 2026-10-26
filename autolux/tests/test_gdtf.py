@@ -63,16 +63,16 @@ SAMPLE_RIG = Path(__file__).parent / 'data' / 'generic_rig'
 
 
 def test_each_rig_embeds_the_archives_it_names_byte_for_byte():
-    library = gdtf.fixture_library(ROOT / 'rigs/library')
+    library = gdtf.fixture_library(ROOT / 'rig/library')
     sample = library | gdtf.fixture_library(SAMPLE_RIG)
-    for rig, available in ((ROOT / 'rigs/room.mvr', library), (SAMPLE_RIG / 'generic.mvr', sample)):
+    for rig, available in ((ROOT / 'rig/room.mvr', library), (SAMPLE_RIG / 'generic.mvr', sample)):
         scene = mvr.read(rig.read_bytes())
         for spec in mvr.referenced_specs(scene.root):
             assert scene.entries[spec][1] == available[spec]['archive'], spec
 
 
 def test_archives_are_named_by_their_manufacturer_fixture_and_revision():
-    library = gdtf.fixture_library(ROOT / 'rigs/library') | gdtf.fixture_library(SAMPLE_RIG)
+    library = gdtf.fixture_library(ROOT / 'rig/library') | gdtf.fixture_library(SAMPLE_RIG)
     assert {spec: (entry['manufacturer'], entry['name']) for spec, entry in library.items()} == {
         'Chauvet DJ@Intimidator Spot 110@1.0.gdtf': ('Chauvet DJ', 'Intimidator Spot 110'),
         'Chauvet DJ@Mini Kinta IRC@1.0.gdtf': ('Chauvet DJ', 'Mini Kinta IRC'),
@@ -215,7 +215,7 @@ def test_archive_crc_damage_is_rejected(tmp_path):
 
 
 def test_metadata_reports_movement_axes():
-    library = gdtf.fixture_library(ROOT / 'rigs/library')
+    library = gdtf.fixture_library(ROOT / 'rig/library')
     movement = {
         entry['name']: gdtf.profile_metadata(entry['gdtf_xml'], entry['default_mode'])['movement']
         for entry in library.values()

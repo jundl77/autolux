@@ -40,7 +40,7 @@ Standalone Starfire can also output Art-Net.
 
 `autolux starfire import-fixture fixture.gdtf --mode "Standard"` validates the mode
 with the real renderer, then installs the archive unchanged as
-`rigs/library/Manufacturer@Fixture Name@Revision.gdtf`, the name its own FixtureType and
+`rig/library/Manufacturer@Fixture Name@Revision.gdtf`, the name its own FixtureType and
 newest Revision give it. Config lists that folder for patching
 and embeds the archive in the MVR when a fixture first uses it. An import replaces the
 same fixture type atomically; no native rebuild is needed.

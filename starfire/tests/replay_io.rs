@@ -43,7 +43,7 @@ fn replay(duration_seconds: f64) -> Replay {
 fn render(input: &Replay) -> starfire::replay::ReplayResult {
     render_replay(
         input,
-        FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
+        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
         AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
             .unwrap(),
     )
@@ -125,7 +125,7 @@ fn replay_memory_budget_is_checked_before_rendering() {
     input.frame_rate_hz = 50;
     input.duration_seconds -= 0.02;
     assert!(input.validate().is_ok());
-    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
     let catalogue =
         AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
             .unwrap();
@@ -146,7 +146,7 @@ fn cli(input: &Path) -> Process {
         .arg(input)
         .args([
             "--rig",
-            "../rigs/room.rig.pb",
+            "../rig/room.rig.pb",
             "--autoloops",
             "../show/autoloops",
         ]);
@@ -217,7 +217,7 @@ fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
     let rig = directory.path().join("rig.pb");
     let shared = directory.path().join("capture");
     let source = serde_json::to_vec(&replay(0.0)).unwrap();
-    let patch = include_bytes!("../../rigs/room.rig.pb");
+    let patch = include_bytes!("../../rig/room.rig.pb");
     fs::write(&input, &source).unwrap();
     fs::write(&rig, patch).unwrap();
     for destination in [&input, &rig, &shared] {

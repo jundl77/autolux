@@ -35,7 +35,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | U27 | Successful commands need no reply except Login. | ErrorReply identifies rejections; independent heartbeats show liveness and Metrics reports command progress. |
 | U28 | Autoloop IDs identify playback independently of banks. | Banks group supplied scripts; PlayAutoloop uses a globally unique ID only. |
 | U29 | Name the complete fixture setup RigDefinition and define it in rig.proto. | Login.rig contains fixtures, groups and their reusable DMX profiles. The name describes configuration rather than a running rig. starfire.proto imports the definition; both files share one generated contract. |
-| U30 | Store shared rig files and fixture profiles in root rigs/. | Autolux loads these assets into Login; native replay and validation use the same files. |
+| U30 | Store shared rig files and fixture profiles in root rig/. | Autolux loads these assets into Login; native replay and validation use the same files. |
 | U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in show/autoloops/. |
 | U32 | Use GDTF as the basis for generic fixture definitions and retain rig.proto. | Prefer reusable open-source GDTF schemas and parsers where suitable. GDTF describes device types; RigDefinition describes their installed instances. Profiles carry standard GDTF XML and the selected DMX mode; existing open-source parsers compile physical controls at Login. |
 | U33 | Radius follows the same protocol patterns as Starfire. | Standalone generated messages, Login/LoginReply, error-only replies, Metrics and independent heartbeats. Framing lives beside consumers. |
@@ -339,8 +339,8 @@ Starfire is the lighting backend. Its live contract is
   from the fixture Matrix, superseding the `pan_offset_degrees` fields. The
   `--profiles` catalogue is only the fixture library for import and Config; it no
   longer flows through replay, production or Login (supersedes P81's last clause).
-  2026-10-26: the library is `rigs/library/`, real GDTF 1.2 archives named by their
-  GDTFSpec, replacing `rigs/profiles.json` (XML in JSON); import installs the archive as is
+  2026-10-26: the library is `rig/library/`, real GDTF 1.2 archives named by their
+  GDTFSpec, replacing `rig/profiles.json` (XML in JSON); import installs the archive as is
   and `--library` replaces `--profiles`.
 
 ## Open questions and defaults

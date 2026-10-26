@@ -204,7 +204,7 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig = include_bytes!("../../rigs/room.rig.pb");
+    let rig = include_bytes!("../../rig/room.rig.pb");
     assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
 }
 

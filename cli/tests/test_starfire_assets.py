@@ -149,7 +149,7 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
 
 
 @pytest.mark.parametrize(
-    'rig', [ROOT / 'rigs/room.mvr', ROOT / 'autolux/tests/data/generic_rig/generic.mvr']
+    'rig', [ROOT / 'rig/room.mvr', ROOT / 'autolux/tests/data/generic_rig/generic.mvr']
 )
 def test_committed_native_rig_is_the_exported_login_rig(rig):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
@@ -227,8 +227,8 @@ SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
 @pytest.mark.parametrize(
     ('folder', 'name', 'libraries'),
     [
-        (ROOT / 'rigs', 'room', [ROOT / 'rigs/library']),
-        (SAMPLE_RIG, 'generic', [ROOT / 'rigs/library', SAMPLE_RIG]),
+        (ROOT / 'rig', 'room', [ROOT / 'rig/library']),
+        (SAMPLE_RIG, 'generic', [ROOT / 'rig/library', SAMPLE_RIG]),
     ],
 )
 def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(

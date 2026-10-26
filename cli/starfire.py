@@ -16,11 +16,11 @@ from cli.starfire_assets import native_rig, rig_definition
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
-DEFAULT_RIG = ROOT / 'rigs' / 'room.mvr'
+DEFAULT_RIG = ROOT / 'rig' / 'room.mvr'
 DEFAULT_AUTOLOOPS = ROOT / 'show' / 'autoloops'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.mvr'
 LEGACY_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
-FIXTURE_LIBRARY = ROOT / 'rigs' / 'library'
+FIXTURE_LIBRARY = ROOT / 'rig' / 'library'
 CHILD_STOP_TIMEOUT_SEC = 5.0
 PATCH_VALIDATION_TIMEOUT_SEC = 10.0
 MAX_REPORT_BYTES = 32 * 1024 * 1024

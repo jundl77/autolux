@@ -6,9 +6,9 @@
 - The FixtureType `Manufacturer` and `Name` (and `LongName`, if present) inside the archive
   match the file name; the newest `Revision` `Text` is the revision segment.
 - A FixtureType's `FixtureTypeID` GUID never changes across revisions or renames.
-- `rigs/library/` holds only real fixture types the venue owns. Synthetic profiles use the
+- `rig/library/` holds only real fixture types the venue owns. Synthetic profiles use the
   manufacturer `Generic` and live with the sample rig's test data
-  (`autolux/tests/data/generic_rig/`), never in `rigs/library/`.
+  (`autolux/tests/data/generic_rig/`), never in `rig/library/`.
 - MVR files are named after the venue or show (`room.mvr`) and embed their GDTF archives
   under those same names.
 - `*.rig.pb` is the exported Starfire rig: regenerate it with
