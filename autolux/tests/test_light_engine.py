@@ -1604,9 +1604,16 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
     assert masters(show.lighting)[-1] == pytest.approx(1.0)
     parked = len(show.lighting.events)
 
+    entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
+    assert entered['autoloop'] == 'warm_white'
+    # PAUSED freezes Starfire's beat clock, so a fade in beats would never move.
+    assert entered['transition'] == {'kind': 'cut'}
+
     await show.play(15.5, 0.2)
     assert show.light.paused
     assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    left = [c for c in show.commands(parked) if c['kind'] == 'select'][-1]
+    assert left['transition'] == {'kind': 'cut'}
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
 
 
@@ -1650,3 +1657,92 @@ async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior(
     assert snapshot['decoder']['posterior'] is None
     assert snapshot['intents'][-1]['trigger'] == SILENCE_TRIGGER
     assert 'standby/warm_white' in [e['name'] for e in snapshot['effects']]
+
+
+def sent(lighting, *kinds):
+    return [
+        (e['at_seconds'], e['command']) for e in lighting.events if e['command']['kind'] in kinds
+    ]
+
+
+async def test_an_operator_master_is_sent_at_once_and_a_queued_quiet_dim_uses_it():
+    light, queue, clock, lighting = engine()
+    light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
+    await tick(light, clock, 0.1)  # the room hears this quiet 14 s from now
+    clock.advance(1.0)
+    changed_at = clock.monotonic()
+    light.set_master_level(0.5)
+    assert sent(lighting, 'set_master') == [
+        (changed_at, {'kind': 'set_master', 'intensity': 0.5, 'fade_seconds': 0.1})
+    ]
+
+    clock.advance(14.0)
+    await queue.drain()
+    at, dim = sent(lighting, 'set_master')[-1]
+    assert at > changed_at + 13.0
+    assert dim == {
+        'kind': 'set_master',
+        'intensity': pytest.approx(0.5 * QUIET_BRIGHTNESS),
+        'fade_seconds': 1.0,
+    }
+
+
+async def test_pause_and_play_reach_starfire_at_once_and_only_play_follows_the_model():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    paused_at = clock.monotonic()
+    light.pause()
+    assert sent(lighting, 'set_paused', 'set_master') == [
+        (paused_at, {'kind': 'set_paused', 'paused': True}),
+        (paused_at, {'kind': 'set_master', 'intensity': QUIET_BRIGHTNESS, 'fade_seconds': 1.0}),
+    ]
+    clock.advance(1.0)
+    await beat_at_phase(light, decoder, 0, decision='drop')
+    assert len(selections(lighting)) == 1, 'a paused show must not follow the model'
+
+    clock.advance(4.0)
+    played_at = clock.monotonic()
+    await light.resume()
+    assert sent(lighting, 'set_paused', 'set_master')[-2:] == [
+        (played_at, {'kind': 'set_paused', 'paused': False}),
+        (played_at, {'kind': 'set_master', 'intensity': 1.0, 'fade_seconds': 1.0}),
+    ]
+    await beat_at_phase(light, decoder, 0)
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+
+
+async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    light, _, clock, lighting = engine()
+    light._settings = lambda: control.settings
+    control.start(light)
+    renderer = ('set_paused', 'set_default_crossfade_beats', 'set_strobe_max_rate_hz')
+    renderer += ('set_strobe_max_burst_seconds',)
+    assert [command for _, command in sent(lighting, *renderer)] == [
+        {'kind': 'set_paused', 'paused': False},
+        {'kind': 'set_default_crossfade_beats', 'beats': 1.0},
+        {'kind': 'set_strobe_max_rate_hz', 'hz': 8.0},
+        {'kind': 'set_strobe_max_burst_seconds', 'seconds': 4.0},
+    ]
+
+    lighting.events.clear()
+    changed_at = clock.monotonic()
+    control.commands.put_nowait(
+        {
+            'action': 'settings',
+            'settings': ShowSettings(
+                crossfade_beats=4, strobe_max_rate_hz=5, strobe_max_burst_seconds=2
+            ),
+        }
+    )
+    await control.apply_pending(light)
+    assert sent(lighting, *renderer) == [
+        (changed_at, {'kind': 'set_paused', 'paused': False}),
+        (changed_at, {'kind': 'set_default_crossfade_beats', 'beats': 4.0}),
+        (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
+        (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
+    ]

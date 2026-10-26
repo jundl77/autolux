@@ -11,7 +11,6 @@ from autolux.lib.engine.effect_definitions import (
     STANDBY_AUTOLOOP,
     STANDBY_CROSSFADE_SECONDS,
     STROBE_BURST_BEATS,
-    STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
     AutoloopTable,
     LightIntent,
@@ -24,13 +23,13 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-DROP_STROBE_HZ = STROBE_RATE_HZ
 DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 
 
-def strobe_burst_seconds(bpm: float | None, burst_seconds: float) -> float:
-    duration = min(burst_seconds, STROBE_MAX_BURST_SECONDS)
+def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
+    # Kept inside Starfire's cap so the accent ends on its own timer, not on the guard.
+    duration = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
     return duration
@@ -67,13 +66,14 @@ class EffectController:
         self._entered = intent, index
         return index
 
-    async def change_effect(self, intent: LightIntent, bpm: float | None = None) -> None:
+    async def change_effect(
+        self, intent: LightIntent, bpm: float | None = None, *, cut: bool = False
+    ) -> None:
         loops = self._autoloops[intent]
         index = self._entry_index(intent)
         bank, autoloop = loops[index]
-        if not self.lighting_client.select_autoloop(
-            bank, autoloop, transition=transition_for(intent, self._settings())
-        ):
+        transition = {'kind': 'cut'} if cut else transition_for(intent)
+        if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
             return
         if self.event_buffer:
             self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
@@ -89,13 +89,14 @@ class EffectController:
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
 
-    def enter_standby(self, bpm: float | None) -> None:
+    def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
         bank, autoloop = STANDBY_AUTOLOOP
-        # Starfire fades in beats on its last tempo; without one a fade would never end.
+        # Starfire fades in beats on its last tempo; without one, or with its clock
+        # frozen by pause, a fade would never end.
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
-            if bpm and bpm > 0
+            if bpm and bpm > 0 and not renderer_paused
             else {'kind': 'cut'}
         )
         if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
@@ -117,12 +118,12 @@ class EffectController:
             )
             return
         self._last_strobe_started_at = now
-        duration = strobe_burst_seconds(bpm, settings.strobe_burst_seconds)
+        duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
             {
                 'id': DROP_ACCENT_ID,
                 'target': 'all',
-                'values': {'strobe_hz': DROP_STROBE_HZ},
+                'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
                 'priority': DROP_ACCENT_PRIORITY,
                 'lifetime': {'kind': 'seconds', 'duration_seconds': duration},
             }

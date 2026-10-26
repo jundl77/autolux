@@ -128,4 +128,10 @@ message TxMetrics {
   double playback_delay_seconds = 11;
   optional double dmx_input_age_seconds = 12;
   uint64 network_queued_bytes = 13;
+  // Capture gaps bridged by re-anchoring the sample timeline: flagged overruns, or device
+  // timestamp jumps beyond the 5 ms jitter dead band.
+  uint64 capture_discontinuities_total = 14;
+  // Device time lost at the latest discontinuity, filled with silence; negative when
+  // stale frames were dropped. Absent until the first discontinuity.
+  optional double capture_last_gap_seconds = 15;
 }

@@ -1,11 +1,12 @@
 import queue
+import re
 
 import pytest
 
 from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.ui_bridge import SnapshotServer
-from autolux.simulate.visualizer_app import SnapshotPoller, control_command
+from autolux.simulate.visualizer_app import SnapshotPoller, control_command, decimal_text
 
 
 @pytest.fixture
@@ -26,11 +27,11 @@ def show():
         ('control-toggle', True, None, (), {'action': 'play'}),
         ('control-brightness', False, 0.42, (), {'action': 'master', 'level': 0.42}),
         (
-            'control-apply',
+            'control-crossfade_beats',
             False,
             None,
-            (30, 0.5, 2, 0.2),
-            {'action': 'settings', 'settings': ShowSettings(30.0, 0.5, 2.0, 0.2)},
+            (30, 0.5, 2, 0.2, 6, 3),
+            {'action': 'settings', 'settings': ShowSettings(30.0, 0.5, 2.0, 0.2, 6.0, 3.0)},
         ),
     ],
 )
@@ -46,16 +47,42 @@ def test_each_dashboard_control_reaches_the_controller_queue_as_sent(
 @pytest.mark.parametrize(
     ('settings', 'reason'),
     [
-        ((30, 0, 2, 0.2), 'strobe_burst_seconds must be within 0.1..4'),
-        # A browser number input reports an out-of-range entry as null.
-        ((30, 0.5, None, 0.2), 'crossfade_beats must be a number'),
+        (('30', '0', '2', '0.2', '6', '3'), 'strobe_burst_seconds must be within 0.1..60'),
+        (('30', '0.5', '20', '0.2', '6', '3'), 'crossfade_beats must be within 0.25..16'),
     ],
 )
 def test_rejected_settings_return_the_reason_and_queue_nothing(show, settings, reason):
     poller, commands = show
-    reply = poller.control(control_command('control-apply', False, None, settings))
+    reply = poller.control(control_command('control-crossfade_beats', False, None, settings))
     assert reply == {'error': reason}
     assert commands.empty()
+
+
+def test_a_comma_decimal_is_sent_as_the_same_number(show):
+    poller, commands = show
+    command = control_command(
+        'control-crossfade_beats', False, None, ('30', '0,5', '2', ' 0,15 ', '6', '3')
+    )
+    assert poller.control(command) == {'accepted': 'settings'}
+    assert commands.get_nowait()['settings'] == ShowSettings(30.0, 0.5, 2.0, 0.15, 6.0, 3.0)
+
+
+@pytest.mark.parametrize(
+    ('raw', 'reason'),
+    [
+        ('', 'Crossfade (beats) needs a number'),
+        (None, 'Crossfade (beats) needs a number'),
+        ('1,5,0', 'Crossfade (beats): "1,5,0" is not a number'),
+        ('nan', 'Crossfade (beats): "nan" is not a number'),
+    ],
+)
+def test_text_that_is_not_a_plain_decimal_never_reaches_the_controller(raw, reason):
+    with pytest.raises(ValueError, match=re.escape(reason)):
+        control_command('control-crossfade_beats', False, None, ('30', '0.5', raw, '0.2', '6', '3'))
+
+
+def test_settings_fill_with_a_dot_decimal_whatever_the_locale():
+    assert [decimal_text(v) for v in (0.15, 60.0, 0.125, 4.0)] == ['0.15', '60', '0.125', '4']
 
 
 def test_a_busy_show_is_reported_instead_of_raising(show):

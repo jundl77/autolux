@@ -18,6 +18,7 @@ const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
+const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
@@ -101,6 +102,12 @@ pub struct Engine {
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
+    // Scripts see this time while paused, so a script reading seconds also holds.
+    paused_at_seconds: Option<f64>,
+    default_crossfade_beats: f64,
+    strobe_max_rate_hz: f64,
+    strobe_max_burst_seconds: f64,
+    strobe_started_seconds: BTreeMap<String, f64>,
 }
 
 impl Engine {
@@ -122,6 +129,12 @@ impl Engine {
             blackout: false,
             script_error: None,
             last_output_states,
+            paused_at_seconds: None,
+            // Cut until set, matching the protocol before this parameter existed.
+            default_crossfade_beats: 0.0,
+            strobe_max_rate_hz: MAX_STROBE_HZ,
+            strobe_max_burst_seconds: f64::INFINITY,
+            strobe_started_seconds: BTreeMap::new(),
         })
     }
 
@@ -143,6 +156,7 @@ impl Engine {
             } => {
                 validate_identifier(bank)?;
                 validate_identifier(autoloop)?;
+                let transition = &self.resolve_transition(transition);
                 validate_transition(transition, time.elapsed_musical_beats)?;
                 if !self
                     .active
@@ -174,6 +188,28 @@ impl Engine {
             }
             Command::SetSpeed { multiplier } => self.clock.set_speed(at_seconds, *multiplier)?,
             Command::SetBlackout { enabled } => self.blackout = *enabled,
+            Command::SetPaused { paused } => self.set_paused(at_seconds, *paused)?,
+            Command::SetDefaultCrossfadeBeats { beats } => {
+                ensure!(
+                    beats.is_finite() && (0.0..=MAX_TRANSITION_BEATS).contains(beats),
+                    "default crossfade is outside the supported range"
+                );
+                self.default_crossfade_beats = *beats;
+            }
+            Command::SetStrobeMaxRateHz { hz } => {
+                ensure!(
+                    hz.is_finite() && (0.0..=MAX_STROBE_HZ).contains(hz),
+                    "strobe rate cap is outside the supported range"
+                );
+                self.strobe_max_rate_hz = *hz;
+            }
+            Command::SetStrobeMaxBurstSeconds { seconds } => {
+                ensure!(
+                    seconds.is_finite() && *seconds > 0.0 && *seconds <= MAX_STROBE_BURST_SECONDS,
+                    "strobe burst cap is outside the supported range"
+                );
+                self.strobe_max_burst_seconds = *seconds;
+            }
             Command::Stop => {
                 self.active = None;
                 self.fade = None;
@@ -227,6 +263,18 @@ impl Engine {
             (Ok(ParameterType::AudioRmsNormalized), Some(Value::Number(value))) => {
                 Command::SetNormalizedRmsLevel { level: *value }
             }
+            (Ok(ParameterType::Paused), Some(Value::Boolean(value))) => {
+                Command::SetPaused { paused: *value }
+            }
+            (Ok(ParameterType::DefaultCrossfadeBeats), Some(Value::Number(value))) => {
+                Command::SetDefaultCrossfadeBeats { beats: *value }
+            }
+            (Ok(ParameterType::StrobeMaxRateHz), Some(Value::Number(value))) => {
+                Command::SetStrobeMaxRateHz { hz: *value }
+            }
+            (Ok(ParameterType::StrobeMaxBurstSeconds), Some(Value::Number(value))) => {
+                Command::SetStrobeMaxBurstSeconds { seconds: *value }
+            }
             _ => anyhow::bail!("unknown parameter type or incompatible value"),
         };
         self.apply(seconds, &command)
@@ -255,6 +303,7 @@ impl Engine {
                 state.attribute_brightness = master;
             }
         }
+        self.limit_strobes(time_seconds, &mut states);
         if self.blackout {
             extinguish(&mut states);
         }
@@ -282,6 +331,54 @@ impl Engine {
             active_autoloop: self.active.as_ref().map(|active| active.name.clone()),
             script_error: self.script_error.clone(),
         })
+    }
+
+    fn set_paused(&mut self, seconds: f64, paused: bool) -> Result<()> {
+        if paused == self.clock.paused() {
+            return Ok(());
+        }
+        self.clock.set_paused(seconds, paused)?;
+        self.paused_at_seconds = paused.then_some(seconds);
+        if paused {
+            // Released, not held: a strobe must not resume with the show.
+            self.overrides
+                .retain(|_, active| active.value.values.strobe_hz.is_none_or(|rate| rate <= 0.0));
+        }
+        Ok(())
+    }
+
+    fn resolve_transition(&self, transition: &Transition) -> Transition {
+        match transition {
+            Transition::RendererDefault if self.default_crossfade_beats > 0.0 => {
+                Transition::Crossfade {
+                    duration_beats: self.default_crossfade_beats,
+                }
+            }
+            Transition::RendererDefault => Transition::Cut,
+            explicit => explicit.clone(),
+        }
+    }
+
+    /// Safety caps over every strobe source; the controller's own limits are not trusted.
+    fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
+        let paused = self.clock.paused();
+        for (id, state) in states.iter_mut() {
+            if paused {
+                state.strobe_hz = 0.0;
+            }
+            state.strobe_hz = state.strobe_hz.min(self.strobe_max_rate_hz);
+            if state.strobe_hz <= 0.0 {
+                self.strobe_started_seconds.remove(id);
+                continue;
+            }
+            let started = *self
+                .strobe_started_seconds
+                .entry(id.clone())
+                .or_insert(seconds);
+            if seconds - started >= self.strobe_max_burst_seconds {
+                state.strobe_hz = 0.0;
+            }
+        }
     }
 
     fn validate_time(&self, time_seconds: f64) -> Result<()> {
@@ -326,7 +423,7 @@ impl Engine {
         };
         let previous = self.active.take();
         self.fade = match transition {
-            Transition::Cut => None,
+            Transition::Cut | Transition::RendererDefault => None,
             Transition::Crossfade { duration_beats } => {
                 let source = if let Some(states) = frozen_source {
                     FadeSource::Frozen(states)
@@ -363,6 +460,7 @@ impl Engine {
         {
             self.fade = None;
         }
+        let seconds = self.paused_at_seconds.unwrap_or(seconds);
         let Some(active) = &mut self.active else {
             return Ok(self.dark_states());
         };

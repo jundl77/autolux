@@ -192,12 +192,14 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                 );
                 return engine.apply(at_seconds, &Command::Stop);
             }
-            let transition = value
-                .transition
-                .as_ref()
-                .and_then(|value| value.crossfade_beats)
-                .map(|duration_beats| Transition::Crossfade { duration_beats })
-                .unwrap_or(Transition::Cut);
+            // A present Transition without crossfade_beats is an explicit cut.
+            let transition = match &value.transition {
+                None => Transition::RendererDefault,
+                Some(value) => value
+                    .crossfade_beats
+                    .map(|duration_beats| Transition::Crossfade { duration_beats })
+                    .unwrap_or(Transition::Cut),
+            };
             engine.play_autoloop(at_seconds, &value.autoloop_id, transition)
         }
         ClientMessage::SetParameter(value) => engine.set_parameter(
