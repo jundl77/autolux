@@ -40,9 +40,6 @@ CONTROL_QUEUE_SIZE = 16
 SETTINGS_SAVE_SETTLE_SECONDS = 1.0
 # One Starfire frame at 40 Hz: draining operator commands faster cannot reach the rig sooner.
 STARFIRE_FRAME_PERIOD_SEC = 1.0 / 40.0
-# A skip, seek or playlist end can flash "paused"; a real pause still reaches the room well
-# before the 2 s of zeros would.
-PAUSE_CONFIRM_SECONDS = 0.75
 
 
 def load_show_settings(path: Path) -> ShowSettings:
@@ -258,9 +255,7 @@ class AutoluxController:
                 '(beats and silence still run)'
             )
 
-        self._clock: Clock = SYSTEM_CLOCK
         self.track_source = TrackSource()
-        self._pending_pause: Playback | None = None
         self.media_session = MediaSessionListener(self._on_media_event)
         self.control = ShowControl(show_config_path, self.event_buffer)
         self.effect_controller: EffectController = EffectController(
@@ -303,27 +298,20 @@ class AutoluxController:
 
     def _on_media_event(self, event: MediaEvent) -> None:
         self.track_source.note(event)
+        self._publish_track()
         if isinstance(event, TrackChanged):
             self.light_engine.on_media_track(event)
         elif isinstance(event, Playback):
             if event.status == 'playing':
-                self._pending_pause = None
                 self.music_analyser.leave_standby()
-            elif self._pending_pause is None:
-                self._pending_pause = event
-
-    def _confirm_pause(self) -> None:
-        pause = self._pending_pause
-        if pause is None or self._clock.monotonic() - pause.at < PAUSE_CONFIRM_SECONDS:
-            return
-        self._pending_pause = None
-        self.music_analyser.enter_standby(f'media session {pause.status}')
+            else:
+                self.music_analyser.enter_standby(f'media session {event.status}')
 
     def _publish_track(self) -> None:
         if self.event_buffer is None:
             return
         source = self.track_source.name
-        track = self.light_engine.room_track if source == MEDIA_SESSION_SOURCE else None
+        track = self.track_source.track if source == MEDIA_SESSION_SOURCE else None
         self.event_buffer.set_track(
             {
                 'title': None if track is None else track.title,
@@ -429,7 +417,6 @@ class AutoluxController:
         self.is_running = False
 
     async def _do_100ms_callback(self):
-        self._confirm_pause()
         if self.health_check is not None:
             self.health_check()
         await self.light_engine.on_100ms_callback()

@@ -10,7 +10,7 @@ deliberately static: no beat or loudness response, movers parked dark, warm whit
 Track boundaries and pauses come from the first live source, in this order. The Windows
 system media session (the `media` extra; Spotify's session is preferred, else the current
 one): a track change starts a new track when the delayed audio reaches it, and a pause or
-stop that lasts 0.75 s drops the delayed audio and shows standby at once, re-arming on play. It counts as live
+stop drops the delayed audio and shows standby at once, re-arming on play. It counts as live
 while it reported anything in the last 30 s. Otherwise the zeros in the audio: 2 s of
 digital silence is standby, a 50 ms gap is a new-track cue, and an intro after a drop or
 outro also starts a track.

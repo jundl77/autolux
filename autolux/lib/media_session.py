@@ -62,9 +62,12 @@ class TrackSource:
         self._clock = clock
         self._reported_at = float('-inf')
         self._was_live = False
+        self.track: TrackChanged | None = None
 
     def note(self, event: MediaEvent) -> None:
         self._reported_at = event.at
+        if isinstance(event, TrackChanged):
+            self.track = event
 
     @property
     def media_session_live(self) -> bool:

@@ -83,7 +83,6 @@ class LightEngine(IMusicAnalyserHandler):
     ):
         self.lighting_client = lighting_client
         self._media_session_live = media_session_live
-        self.room_track: TrackChanged | None = None
         self._silence_monitor = silence_monitor
         self._settings = settings
         self.effect_controller: EffectController = effect_controller
@@ -414,7 +413,6 @@ class LightEngine(IMusicAnalyserHandler):
                 f'[engine] media session: "{track.artist} – {track.title}" — '
                 'the next look starts a track'
             )
-            self.room_track = track
             self._after_silence = True
 
         if self.command_queue:
