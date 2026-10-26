@@ -36,7 +36,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | U28 | Autoloop IDs identify playback independently of banks. | Banks group supplied scripts; PlayAutoloop uses a globally unique ID only. |
 | U29 | Name the complete fixture setup RigDefinition and define it in rig.proto. | Login.rig contains fixtures, groups and their reusable DMX profiles. The name describes configuration rather than a running rig. starfire.proto imports the definition; both files share one generated contract. |
 | U30 | Store shared rig files and fixture profiles in root rigs/. | Autolux loads these assets into Login; native replay and validation use the same files. |
-| U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in root autoloops/. |
+| U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in show/autoloops/. |
 | U32 | Use GDTF as the basis for generic fixture definitions and retain rig.proto. | Prefer reusable open-source GDTF schemas and parsers where suitable. GDTF describes device types; RigDefinition describes their installed instances. Profiles carry standard GDTF XML and the selected DMX mode; existing open-source parsers compile physical controls at Login. |
 | U33 | Radius follows the same protocol patterns as Starfire. | Standalone generated messages, Login/LoginReply, error-only replies, Metrics and independent heartbeats. Framing lives beside consumers. |
 | U34 | Both Login messages carry protocol major/minor versions. | Major mismatch rejects before output acquisition; minor additions remain compatible and the reply returns the lower supported minor. |
@@ -46,7 +46,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | U38 | Name Radius media messages AudioFrame and LightFrame. | Their message-type values are AUDIO_FRAME and LIGHT_FRAME. |
 
 
-| U39 | Store authored autoloops in root autoloops/. | Directory paths are plural; the autoloop API concept remains singular. |
+| U39 | Store authored autoloops in show/autoloops/. | Directory paths are plural; the autoloop API concept remains singular. |
 | U40 | Use GDTF and MVR exclusively for fixture and rig assets. | Replace custom JSON fixture/patch storage; preserve standard archives and their resources. Implementation is pending. |
 | U41 | Keep the physical rig independent of scripts. | Fixture selection belongs to show programming. MVR scene organization must not require Lua-specific role names. The selection API is under discussion. |
 | U42 | Configure, save and load named fixture selections in the existing dashboard. | Store ordered, overlapping selections separately from the physical MVR scene. |

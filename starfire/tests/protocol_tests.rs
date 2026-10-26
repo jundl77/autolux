@@ -73,7 +73,7 @@ fn engine() -> Engine {
     Engine::new(
         FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
         AutoloopCatalog::load(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
         )
         .unwrap(),
         support::palettes(),
@@ -577,7 +577,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
     };
     let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let catalog = AutoloopCatalog::load(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
     )
     .unwrap();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
@@ -647,7 +647,7 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
 const ATTRIBUTE_LOOK: &str = "drop/attribute_sweep";
 
 fn attribute_engine() -> Engine {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops");
     let definition = |bank: &str, id: &str, lua_source: String| wire::AutoloopDefinition {
         autoloop_id: id.into(),
         bank: bank.into(),

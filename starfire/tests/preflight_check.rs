@@ -25,7 +25,7 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = check(
         &root.join("../rigs/room.rig.pb"),
-        &root.join("../autoloops"),
+        &root.join("../show/autoloops"),
     );
     assert!(
         output.status.success(),
@@ -34,7 +34,7 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["universes"], serde_json::json!([0]));
-    let shipped = AutoloopCatalog::load(&root.join("../autoloops"))
+    let shipped = AutoloopCatalog::load(&root.join("../show/autoloops"))
         .unwrap()
         .list()
         .len();
@@ -57,7 +57,7 @@ fn preflight_warns_about_autoloop_groups_the_rig_lacks() {
     let path = directory.path().join("missing-strip.pb");
     fs::write(&path, rig.encode_to_vec()).unwrap();
 
-    let output = check(&path, &root.join("../autoloops"));
+    let output = check(&path, &root.join("../show/autoloops"));
     let warning = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{warning}");
     assert!(

@@ -1,6 +1,6 @@
 # Autoloops
 
-One Lua file per look, `autoloops/<bank>/<loop>.lua`; banks are the intents
+One Lua file per look, `show/autoloops/<bank>/<loop>.lua`; banks are the intents
 `atmospheric`, `breakdown`, `buildup`, `drop`. The API is `starfire/src/lua/lighting.lua`.
 
 `standby/warm_white` is the exception: Autolux shows it while the input is digitally

@@ -726,7 +726,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         runtime = starfire_runtime.StarfireRuntime(
             binary,
             root / 'rigs/room.mvr',
-            root / 'autoloops',
+            root / 'show/autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
             run_id=(1 << 64) - 1,
@@ -790,7 +790,7 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     rig = edited_room(
         tmp_path / 'multi-universe.mvr', '<Address break="0">1<', '<Address break="0">513<'
     )
-    autoloops = root / 'autoloops'
+    autoloops = root / 'show/autoloops'
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
@@ -806,7 +806,7 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path, caplog
         pytest.skip('Build Starfire to exercise native autoloop validation')
     rig = edited_room(tmp_path / 'missing-strip.mvr', 'name="strip"', 'name="pixels"')
     with caplog.at_level('WARNING'):
-        starfire_runtime.validate_starfire(binary, rig, root / 'autoloops')
+        starfire_runtime.validate_starfire(binary, rig, root / 'show/autoloops')
     assert 'groups not in this rig: strip' in caplog.text
 
 

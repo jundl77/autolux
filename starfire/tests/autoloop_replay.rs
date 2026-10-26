@@ -64,7 +64,7 @@ fn room() -> FixtureRig {
 }
 
 fn catalog() -> AutoloopCatalog {
-    AutoloopCatalog::load(&root().join("../autoloops")).unwrap()
+    AutoloopCatalog::load(&root().join("../show/autoloops")).unwrap()
 }
 
 fn looks() -> Vec<Look> {
@@ -73,7 +73,7 @@ fn looks() -> Vec<Look> {
         .into_iter()
         .map(|entry| {
             let path = root().join(format!(
-                "../autoloops/{}/{}.lua",
+                "../show/autoloops/{}/{}.lua",
                 entry.bank, entry.autoloop
             ));
             let source = fs::read_to_string(path).unwrap();

@@ -9,7 +9,7 @@ from autolux.lib.engine.effect_definitions import (
     AutoloopTable,
 )
 
-AUTOLOOP_DIRECTORY = Path(__file__).resolve().parents[2] / 'autoloops'
+AUTOLOOP_DIRECTORY = Path(__file__).resolve().parents[2] / 'show' / 'autoloops'
 
 
 class AutoloopMetaError(ValueError):

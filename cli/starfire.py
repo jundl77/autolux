@@ -17,7 +17,7 @@ from cli.starfire_assets import native_rig, rig_definition
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
 DEFAULT_RIG = ROOT / 'rigs' / 'room.mvr'
-DEFAULT_AUTOLOOPS = ROOT / 'autoloops'
+DEFAULT_AUTOLOOPS = ROOT / 'show' / 'autoloops'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.mvr'
 LEGACY_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
 PROFILE_CATALOGUE = ROOT / 'rigs' / 'profiles.json'

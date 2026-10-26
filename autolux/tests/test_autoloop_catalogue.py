@@ -92,7 +92,7 @@ def test_the_python_header_keys_match_the_starfire_parity_test():
 
     from autolux.lib.engine.effect_definitions import AUTOLOOP_META_VALUES
 
-    rust = (AUTOLOOP_DIRECTORY.parent / 'starfire/tests/autoloop_replay.rs').read_text(
+    rust = (AUTOLOOP_DIRECTORY.parents[1] / 'starfire/tests/autoloop_replay.rs').read_text(
         encoding='utf-8'
     )
     block = re.search(r'const META_KEYS[^=]*= \[(.*?)\];', rust, re.S).group(1)

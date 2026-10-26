@@ -19,7 +19,7 @@ use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::{AutoloopCatalog, missing_groups_warning};
 
 const DEFAULT_RIG: &str = "rigs/room.rig.pb";
-const DEFAULT_AUTOLOOPS: &str = "autoloops";
+const DEFAULT_AUTOLOOPS: &str = "show/autoloops";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
 

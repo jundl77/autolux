@@ -48,7 +48,7 @@ fn profile(id: &str) -> wire::FixtureProfile {
 
 #[test]
 fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_phase() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops");
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops");
     let offline_catalog = AutoloopCatalog::load(&directory).unwrap();
     let scripts: Vec<_> = offline_catalog
         .list()

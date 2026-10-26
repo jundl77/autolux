@@ -175,7 +175,7 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
         .arg("--rig")
         .arg(rig_path)
         .arg("--autoloops")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"))
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
         .output()
         .unwrap();
     assert!(
