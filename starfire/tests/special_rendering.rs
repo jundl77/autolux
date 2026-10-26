@@ -191,9 +191,9 @@ fn unset(beat: f64, engine: &mut Engine) {
 #[test]
 fn capabilities_follow_each_profiles_attribute_families() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
-    let report = |name: &str, colour, speed, pulse, pattern, fixture_count| wire::GroupCapability {
+    let report = |name: &str, colour, speed, pulse, pattern, cell_count| wire::GroupCapability {
         name: name.into(),
-        fixture_count,
+        cell_count,
         colour,
         speed,
         pulse,
@@ -217,7 +217,7 @@ fn the_real_rig_reports_what_its_profiles_declare() {
         .map(|group| {
             (
                 group.name,
-                group.fixture_count,
+                group.cell_count,
                 [group.colour, group.speed, group.pulse, group.pattern],
             )
         })

@@ -112,14 +112,14 @@ def test_control_adapter_translates_a_special_one_to_one():
 def test_login_groups_become_plain_capability_records():
     reply = wire.LoginReply(
         groups=[
-            wire.GroupCapability(name='fx', fixture_count=1, colour=True, speed=True, pulse=True),
-            wire.GroupCapability(name='wash', fixture_count=4, pulse=True),
+            wire.GroupCapability(name='fx', cell_count=1, colour=True, speed=True, pulse=True),
+            wire.GroupCapability(name='wash', cell_count=4, pulse=True),
         ]
     )
     assert protocol.login_groups(reply) == [
         {
             'name': 'fx',
-            'fixture_count': 1,
+            'cell_count': 1,
             'colour': True,
             'speed': True,
             'pulse': True,
@@ -127,7 +127,7 @@ def test_login_groups_become_plain_capability_records():
         },
         {
             'name': 'wash',
-            'fixture_count': 4,
+            'cell_count': 4,
             'colour': False,
             'speed': False,
             'pulse': True,
@@ -404,7 +404,7 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
                 protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
                 protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply'),
-                groups=[wire.GroupCapability(name='fx', fixture_count=1, colour=True, pulse=True)],
+                groups=[wire.GroupCapability(name='fx', cell_count=1, colour=True, pulse=True)],
             ))
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
@@ -443,7 +443,7 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
         assert runtime.groups == [
             {
                 'name': 'fx',
-                'fixture_count': 1,
+                'cell_count': 1,
                 'colour': True,
                 'speed': False,
                 'pulse': True,

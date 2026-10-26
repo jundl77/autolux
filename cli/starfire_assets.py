@@ -40,23 +40,23 @@ def _movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
 def rig_definition(path: Path) -> rig_wire.RigDefinition:
     scene, fixtures = load_rig(path)
     rig = rig_wire.RigDefinition()
-    profiles = set()
+    cells = {}
     for fixture in fixtures:
-        profile_id = f'{fixture["gdtf_spec"]}#{fixture["gdtf_mode"]}'
-        if profile_id not in profiles:
-            profiles.add(profile_id)
-            description = mvr.gdtf_description(scene, fixture['gdtf_spec'])
+        spec, mode = fixture['gdtf_spec'], fixture['gdtf_mode']
+        profile_id = f'{spec}#{mode}'
+        if profile_id not in cells:
+            description = mvr.gdtf_description(scene, spec)
             if len(description.encode('utf-8')) > MAX_DESCRIPTION_BYTES:
                 raise ValueError('GDTF description exceeds its size limit')
-            rig.profiles.add(
-                profile_id=profile_id, gdtf_xml=description, dmx_mode=fixture['gdtf_mode']
-            )
+            cells[profile_id] = mvr.gdtf_modes(description, spec)[mode]['cells']
+            rig.profiles.add(profile_id=profile_id, gdtf_xml=description, dmx_mode=mode)
         entry = rig.fixtures.add(
             fixture_id=fixture['name'],
             profile_id=profile_id,
             universe=fixture['universe'],
             address=fixture['address'],
             matrix=fixture['matrix'],
+            cells=[rig_wire.Fixture.Cell(**cell) for cell in cells[profile_id]],
         )
         for axis in mvr.MOVEMENT_AXES:
             if (movement := _movement(fixture[axis])) is not None:

@@ -65,7 +65,7 @@ class SpecialCapabilities:
             {
                 group['name']: frozenset(axis for axis in AXES if group.get(axis))
                 for group in groups
-                if group.get('name') and (group.get('fixture_count') or 0) > 0
+                if group.get('name') and (group.get('cell_count') or 0) > 0
             }
         )
 

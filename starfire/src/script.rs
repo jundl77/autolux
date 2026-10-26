@@ -13,7 +13,7 @@ use mlua::serde::SerializeOptions;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value, VmState};
 use serde::Serialize;
 
-use crate::fixtures::{FixtureRig, MAX_FIXTURES};
+use crate::fixtures::{FixtureRig, MAX_CELLS};
 use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
@@ -255,8 +255,8 @@ impl LuaAutoloop {
         palettes: &PaletteTable,
     ) -> Result<Self> {
         ensure!(
-            rig.fixture_ids().len() <= MAX_FIXTURES,
-            "Lua fixture target limit exceeded"
+            rig.cell_ids().len() <= MAX_CELLS,
+            "Lua cell target limit exceeded"
         );
         let lua = Lua::new_with(
             StdLib::MATH | StdLib::TABLE | StdLib::STRING,
@@ -352,9 +352,9 @@ impl LuaAutoloop {
                     return lua.create_table();
                 }
                 let members = targets.resolve(&target).map_err(mlua::Error::external)?;
-                if members.len() > MAX_FIXTURES {
+                if members.len() > MAX_CELLS {
                     return Err(mlua::Error::RuntimeError(
-                        "fixture target limit exceeded".to_owned(),
+                        "cell target limit exceeded".to_owned(),
                     ));
                 }
                 lua.create_sequence_from(members)

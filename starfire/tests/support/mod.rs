@@ -101,6 +101,7 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
             pan: range("pan"),
             tilt: range("tilt"),
             matrix: matrix(fixture),
+            cells: Vec::new(),
         });
         if !rig.profiles.iter().any(|known| known.profile_id == profile)
             && let Some((gdtf_xml, dmx_mode)) = catalogue_profile(profile)

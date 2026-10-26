@@ -73,6 +73,8 @@ struct ModeCondition {
 
 #[derive(Clone, Debug)]
 struct Channel {
+    /// The channel's geometry and its ancestors, root first.
+    geometry_path: Vec<String>,
     offsets: Vec<usize>,
     default: u32,
     functions: Vec<Function>,
@@ -104,7 +106,108 @@ pub struct GdtfProfile {
     footprint: usize,
 }
 
+/// One channel-owning geometry of a mode, encoded from its own state into the shared footprint.
+#[derive(Clone, Debug)]
+pub struct GdtfCell {
+    pub geometry: String,
+    /// One-based DMX offsets of this geometry's channels within the fixture footprint, ascending.
+    pub offsets: Vec<usize>,
+    pub profile: GdtfProfile,
+}
+
 impl GdtfProfile {
+    /// The mode's cells in order of their first DMX offset; a single-geometry mode is one cell.
+    pub fn cells_from_xml(xml: &str, mode_name: &str) -> Result<Vec<GdtfCell>> {
+        Self::from_xml(xml, mode_name)?.into_cells()
+    }
+
+    // A geometry above exactly one channel-owning leaf belongs to that leaf's cell (a mover's
+    // yoke and head); one above several leaves is a cell of its own (a bar's master dimmer).
+    fn into_cells(self) -> Result<Vec<GdtfCell>> {
+        let owners: BTreeSet<&[String]> = self
+            .channels
+            .iter()
+            .map(|channel| channel.geometry_path.as_slice())
+            .collect();
+        let leaves: Vec<&[String]> = owners
+            .iter()
+            .copied()
+            .filter(|path| {
+                owners
+                    .iter()
+                    .all(|other| other == path || !other.starts_with(path))
+            })
+            .collect();
+        let cell_names: Vec<String> = self
+            .channels
+            .iter()
+            .map(|channel| {
+                let path = channel.geometry_path.as_slice();
+                let below: Vec<_> = leaves
+                    .iter()
+                    .filter(|leaf| leaf.starts_with(path))
+                    .collect();
+                let owner = if below.len() == 1 { below[0] } else { path };
+                owner.last().cloned().unwrap_or_default()
+            })
+            .collect();
+        let mut geometries: Vec<(usize, String)> = Vec::new();
+        for (channel, name) in self.channels.iter().zip(&cell_names) {
+            let first = channel.offsets.iter().copied().min().unwrap_or_default();
+            match geometries.iter_mut().find(|(_, geometry)| geometry == name) {
+                Some(entry) => entry.0 = entry.0.min(first),
+                None => geometries.push((first, name.clone())),
+            }
+        }
+        geometries.sort();
+        let offsets = |channels: &[Channel]| {
+            let mut offsets: Vec<_> = channels
+                .iter()
+                .flat_map(|channel| channel.offsets.iter().map(|offset| offset + 1))
+                .collect();
+            offsets.sort_unstable();
+            offsets
+        };
+        if geometries.len() == 1 {
+            return Ok(vec![GdtfCell {
+                geometry: geometries.remove(0).1,
+                offsets: offsets(&self.channels),
+                profile: self,
+            }]);
+        }
+        geometries
+            .into_iter()
+            .map(|(_, geometry)| {
+                let members: Vec<_> = (0..self.channels.len())
+                    .filter(|&index| cell_names[index] == geometry)
+                    .collect();
+                let mut channels = Vec::with_capacity(members.len());
+                for &index in &members {
+                    let mut channel = self.channels[index].clone();
+                    for function in &mut channel.functions {
+                        if let Some(condition) = &mut function.condition {
+                            condition.channel = members
+                                .iter()
+                                .position(|&member| member == condition.channel)
+                                .context("GDTF ModeMaster across geometries is not supported")?;
+                        }
+                    }
+                    channels.push(channel);
+                }
+                let order = dependency_order(&channels)?;
+                Ok(GdtfCell {
+                    geometry,
+                    offsets: offsets(&channels),
+                    profile: Self {
+                        channels,
+                        order,
+                        footprint: self.footprint,
+                    },
+                })
+            })
+            .collect()
+    }
+
     pub fn from_xml(xml: &str, mode_name: &str) -> Result<Self> {
         ensure!(
             xml.len() <= MAX_GDTF_XML_BYTES,
@@ -225,6 +328,7 @@ impl GdtfProfile {
                 "GDTF channel-function limit exceeded"
             );
             channels.push(Channel {
+                geometry_path: geometries[&channel.geometry.to_string()].clone(),
                 offsets: resolved_offsets,
                 default,
                 functions,
@@ -366,7 +470,6 @@ impl GdtfProfile {
             "GDTF output footprint mismatch"
         );
         self.validate_attributes(&state.attributes)?;
-        output.fill(0);
         let mut values: Vec<u32> = self
             .channels
             .iter()

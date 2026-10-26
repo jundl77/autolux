@@ -28,6 +28,28 @@ GIMBAL_TOLERANCE = 1e-9
 MAX_PITCH_DEGREES = 60.0
 IDENTITY_MATRIX = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
 MOVEMENT_AXES = ('pan', 'tilt')
+GEOMETRY_TAGS = frozenset(
+    {
+        'Geometry',
+        'Axis',
+        'FilterBeam',
+        'FilterColor',
+        'FilterGobo',
+        'FilterShaper',
+        'Beam',
+        'MediaServerLayer',
+        'MediaServerCamera',
+        'MediaServerMaster',
+        'Display',
+        'GeometryReference',
+        'Laser',
+        'WiringObject',
+        'Inventory',
+        'Structure',
+        'Support',
+        'Magnet',
+    }
+)
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 REVISION_TEXT = 'Edited in Autolux Config'
 VERSION_ATTRIBUTES = {
@@ -217,14 +239,54 @@ def gdtf_root(description: str, label: str) -> ElementTree.Element:
     return root
 
 
+def _geometry_paths(root: ElementTree.Element) -> dict[str, tuple[str, ...]]:
+    paths = {}
+    pending = [(node, ()) for node in root.findall('FixtureType/Geometries/*')]
+    while pending:
+        node, parent = pending.pop()
+        if node.tag in GEOMETRY_TAGS:
+            paths[node.get('Name', '')] = path = (*parent, node.get('Name', ''))
+            pending.extend((child, path) for child in node)
+    return paths
+
+
+def mode_cells(owned: list[tuple[tuple[str, ...], list[int]]]) -> list[dict]:
+    """Starfire's addressing cells from (geometry path, offsets) per channel, by first offset.
+
+    A geometry above exactly one channel-owning leaf belongs to that leaf's cell (a mover's yoke
+    and head); one above several leaves is a cell of its own (a bar's master dimmer).
+    """
+    owners = {path for path, _ in owned}
+    leaves = [
+        path for path in owners if not any(o != path and o[: len(path)] == path for o in owners)
+    ]
+    cells = {}
+    for path, offsets in owned:
+        below = [leaf for leaf in leaves if leaf[: len(path)] == path]
+        cells.setdefault((below[0] if len(below) == 1 else path)[-1], []).extend(offsets)
+    return [
+        {'geometry': name, 'offsets': sorted(offsets)}
+        for name, offsets in sorted(cells.items(), key=lambda item: (min(item[1]), item[0]))
+    ]
+
+
+def cell_id(fixture: str, geometry: str, cell_count: int) -> str:
+    return fixture if cell_count == 1 else f'{fixture}/{geometry}'
+
+
 def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
+    root = gdtf_root(description, label)
+    paths = _geometry_paths(root)
     modes = {}
-    for mode in gdtf_root(description, label).iter('DMXMode'):
-        offsets, breaks, attributes = [], set(), set()
+    for mode in root.iter('DMXMode'):
+        offsets, breaks, attributes, owned = [], set(), set(), []
         for channel in mode.iter('DMXChannel'):
             breaks.add(dmx_break := channel.get('DMXBreak', '1'))
             if dmx_break == '1' and (text := channel.get('Offset', 'None')) != 'None':
-                offsets.extend(map(int, text.split(',')))
+                values = list(map(int, text.split(',')))
+                offsets.extend(values)
+                geometry = channel.get('Geometry', '')
+                owned.append((paths.get(geometry, (geometry,)), values))
             attributes.update(
                 node.get('Attribute', '').lower() for node in channel.iter('LogicalChannel')
             )
@@ -232,6 +294,7 @@ def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
             'channels': max(offsets, default=0),
             'breaks': sorted(breaks),
             'movement': sorted(set(MOVEMENT_AXES) & attributes),
+            'cells': mode_cells(owned),
         }
     return modes
 

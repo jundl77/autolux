@@ -18,6 +18,16 @@ message Fixture {
   MovementRange tilt = 6;
   // MVR Matrix: X, Y, Z axes then position in mm; empty is identity.
   repeated double matrix = 9;
+  // The mode's channel-owning geometries in order of first offset; empty lets Starfire derive
+  // them, otherwise they must match the profile.
+  repeated Cell cells = 10;
+
+  // One addressable unit. A single-cell fixture's cell takes the fixture ID; otherwise the
+  // cell ID is "fixture_id/geometry".
+  message Cell {
+    string geometry = 1;
+    repeated uint32 offsets = 2;  // One-based offsets within the fixture footprint, ascending.
+  }
 
   message MovementRange {
     optional double minimum = 1;  // Default 0.
@@ -26,6 +36,7 @@ message Fixture {
   }
 }
 
+// Members are fixtures; each contributes all of its cells in offset order.
 message FixtureGroup {
   string group_id = 1;
   repeated string fixture_ids = 2;

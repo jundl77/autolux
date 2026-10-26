@@ -6,12 +6,13 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
-use crate::gdtf::GdtfProfile;
+use crate::gdtf::{GdtfCell, GdtfProfile};
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
 use crate::protocol::{MAX_LOGIN_BYTES, wire};
 use prost::Message;
 
 pub const MAX_FIXTURES: usize = 512;
+pub const MAX_CELLS: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const ORTHONORMAL_TOLERANCE: f64 = 1e-3;
@@ -31,6 +32,8 @@ struct FixturePatch {
     tilt: MovementRange,
     pan_offset_degrees: f64,
     tilt_offset_degrees: f64,
+    declared_cells: Vec<wire::fixture::Cell>,
+    cells: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -139,11 +142,22 @@ pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
     })
 }
 
+/// Cells are the addressing unit: targets, groups and states name cells, never whole fixtures.
 #[derive(Clone, Debug)]
 pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
     groups: BTreeMap<String, Vec<String>>,
-    profiles: BTreeMap<String, GdtfProfile>,
+    profiles: BTreeMap<String, Vec<GdtfCell>>,
+    cells: BTreeMap<String, (usize, usize)>,
+}
+
+/// A single-cell fixture's cell is the fixture itself; other cells are named after their geometry.
+pub fn cell_id(fixture_id: &str, geometry: &str, cell_count: usize) -> String {
+    if cell_count == 1 {
+        fixture_id.to_owned()
+    } else {
+        format!("{fixture_id}/{geometry}")
+    }
 }
 
 impl FixtureRig {
@@ -168,6 +182,8 @@ impl FixtureRig {
                     tilt,
                     pan_offset_degrees: home.pan_offset_degrees,
                     tilt_offset_degrees: home.tilt_offset_degrees,
+                    declared_cells: fixture.cells.clone(),
+                    cells: Vec::new(),
                 })
             })
             .collect::<Result<_>>()?;
@@ -183,7 +199,7 @@ impl FixtureRig {
         }
         let mut profiles = BTreeMap::new();
         for profile in &rig.profiles {
-            let converted = GdtfProfile::from_xml(&profile.gdtf_xml, &profile.dmx_mode)
+            let converted = GdtfProfile::cells_from_xml(&profile.gdtf_xml, &profile.dmx_mode)
                 .with_context(|| format!("profile {}", profile.profile_id))?;
             ensure!(
                 profiles
@@ -205,9 +221,9 @@ impl FixtureRig {
     }
 
     fn from_parts(
-        fixtures: Vec<FixturePatch>,
+        mut fixtures: Vec<FixturePatch>,
         groups: BTreeMap<String, Vec<String>>,
-        profiles: BTreeMap<String, GdtfProfile>,
+        profiles: BTreeMap<String, Vec<GdtfCell>>,
     ) -> Result<Self> {
         ensure!(
             !fixtures.is_empty() && fixtures.len() <= MAX_FIXTURES,
@@ -226,8 +242,9 @@ impl FixtureRig {
         }
 
         let mut ids = BTreeSet::new();
+        let mut cells = BTreeMap::new();
         let mut occupied = BTreeMap::<u16, BTreeSet<usize>>::new();
-        for patch in &fixtures {
+        for (index, patch) in fixtures.iter_mut().enumerate() {
             validate_identifier(&patch.id)?;
             validate_identifier(&patch.profile)?;
             ensure!(
@@ -240,9 +257,24 @@ impl FixtureRig {
                 "fixture {} has invalid universe",
                 patch.id
             );
-            let profile = profiles
+            let profile_cells = profiles
                 .get(&patch.profile)
                 .with_context(|| format!("unknown fixture profile {}", patch.profile))?;
+            let profile = &profile_cells[0].profile;
+            ensure!(
+                patch.declared_cells.is_empty() || declares(&patch.declared_cells, profile_cells),
+                "fixture {} declares cells that differ from its GDTF mode",
+                patch.id
+            );
+            for (cell, layout) in profile_cells.iter().enumerate() {
+                let id = cell_id(&patch.id, &layout.geometry, profile_cells.len());
+                validate_identifier(&id)?;
+                ensure!(
+                    cells.insert(id.clone(), (index, cell)).is_none(),
+                    "duplicate cell ID {id}"
+                );
+                patch.cells.push(id);
+            }
             ensure!(
                 (1..=DMX_CHANNELS).contains(&patch.address),
                 "fixture {} has invalid DMX address",
@@ -272,6 +304,11 @@ impl FixtureRig {
                 .validate()
                 .with_context(|| format!("fixture {} tilt bounds", patch.id))?;
         }
+        ensure!(
+            cells.len() <= MAX_CELLS,
+            "rig must contain at most {MAX_CELLS} cells"
+        );
+        let mut cell_groups = BTreeMap::new();
         for (group, members) in &groups {
             validate_identifier(group)?;
             ensure!(!members.is_empty(), "fixture group {group} is empty");
@@ -290,28 +327,39 @@ impl FixtureRig {
                     "group {group} repeats fixture {member}"
                 );
             }
+            let members = members
+                .iter()
+                .filter_map(|member| fixtures.iter().find(|fixture| fixture.id == *member))
+                .flat_map(|fixture| fixture.cells.iter().cloned())
+                .collect();
+            cell_groups.insert(group.clone(), members);
         }
         Ok(Self {
             fixtures,
-            groups,
+            groups: cell_groups,
             profiles,
+            cells,
         })
     }
 
+    /// A fixture target names one cell, or every cell of a multi-cell fixture.
     pub fn resolve(&self, target: &Target) -> Result<Vec<String>> {
         match target {
-            Target::All => Ok(self.fixture_ids()),
+            Target::All => Ok(self.cell_ids()),
             Target::Group(group) => self
                 .groups
                 .get(group)
                 .cloned()
                 .with_context(|| format!("unknown fixture group {group}")),
             Target::Fixture(id) => {
-                ensure!(
-                    self.fixtures.iter().any(|fixture| fixture.id == *id),
-                    "unknown fixture {id}"
-                );
-                Ok(vec![id.clone()])
+                if self.cells.contains_key(id) {
+                    return Ok(vec![id.clone()]);
+                }
+                self.fixtures
+                    .iter()
+                    .find(|fixture| fixture.id == *id)
+                    .map(|fixture| fixture.cells.clone())
+                    .with_context(|| format!("unknown fixture {id}"))
             }
         }
     }
@@ -322,38 +370,30 @@ impl FixtureRig {
 
     pub fn validate_attributes(
         &self,
-        fixture_id: &str,
+        cell_id: &str,
         values: &BTreeMap<String, AttributeValue>,
     ) -> Result<()> {
-        let patch = self
-            .fixtures
-            .iter()
-            .find(|fixture| fixture.id == fixture_id)
-            .context("unknown fixture")?;
-        self.profiles[&patch.profile].validate_attributes(values)
+        self.profile(cell_id)
+            .context("unknown cell")?
+            .validate_attributes(values)
     }
 
-    pub fn profile(&self, fixture_id: &str) -> Option<&GdtfProfile> {
-        self.fixtures
-            .iter()
-            .find(|fixture| fixture.id == fixture_id)
-            .map(|fixture| &self.profiles[&fixture.profile])
+    pub fn profile(&self, cell_id: &str) -> Option<&GdtfProfile> {
+        let &(fixture, cell) = self.cells.get(cell_id)?;
+        Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
     }
 
     pub fn interpolate_attribute(
         &self,
-        fixture_id: &str,
+        cell_id: &str,
         key: &str,
         from: &AttributeValue,
         to: &AttributeValue,
         amount: f64,
     ) -> AttributeValue {
-        let patch = self
-            .fixtures
-            .iter()
-            .find(|fixture| fixture.id == fixture_id)
-            .expect("validated fixture state");
-        self.profiles[&patch.profile].interpolate_attribute(key, from, to, amount)
+        self.profile(cell_id)
+            .expect("validated cell state")
+            .interpolate_attribute(key, from, to, amount)
     }
 
     pub fn fixture_ids(&self) -> Vec<String> {
@@ -363,8 +403,16 @@ impl FixtureRig {
             .collect()
     }
 
+    /// Every cell in patch order, each fixture's cells in DMX offset order.
+    pub fn cell_ids(&self) -> Vec<String> {
+        self.fixtures
+            .iter()
+            .flat_map(|fixture| fixture.cells.iter().cloned())
+            .collect()
+    }
+
     pub fn empty_states(&self) -> FixtureStates {
-        self.fixture_ids()
+        self.cell_ids()
             .into_iter()
             .map(|id| (id, FixtureState::default()))
             .collect()
@@ -373,16 +421,13 @@ impl FixtureRig {
     // Blackout zeroes intensity only; movement and device-control bytes keep their values.
     pub fn encode(&self, states: &FixtureStates) -> Result<BTreeMap<u16, Vec<u8>>> {
         ensure!(
-            states.len() == self.fixtures.len(),
-            "fixture state does not match rig"
+            states.len() == self.cells.len(),
+            "cell state does not match rig"
         );
         let mut universes = BTreeMap::new();
         for fixture in &self.fixtures {
-            let state = states
-                .get(&fixture.id)
-                .with_context(|| format!("missing fixture state {}", fixture.id))?;
-            validate_state(state).with_context(|| format!("fixture {}", fixture.id))?;
-            let profile = &self.profiles[&fixture.profile];
+            let cells = &self.profiles[&fixture.profile];
+            let profile = &cells[0].profile;
             let frame = universes
                 .entry(fixture.universe)
                 .or_insert_with(|| vec![0; DMX_CHANNELS]);
@@ -401,20 +446,38 @@ impl FixtureRig {
                     offset_tilt(position, fixture.tilt_offset_degrees, from, to)
                 })
             };
-            let mut calibrated = state.clone();
-            calibrated.pan = pan(state.pan);
-            calibrated.tilt = tilt(state.tilt);
-            profile
-                .encode_calibrated(
-                    &calibrated,
-                    &mut frame[start..start + profile.footprint()],
-                    pan,
-                    tilt,
-                )
-                .with_context(|| format!("fixture {}", fixture.id))?;
+            for (id, cell) in fixture.cells.iter().zip(cells) {
+                let state = states
+                    .get(id)
+                    .with_context(|| format!("missing cell state {id}"))?;
+                validate_state(state).with_context(|| format!("cell {id}"))?;
+                let mut calibrated = state.clone();
+                calibrated.pan = pan(state.pan);
+                calibrated.tilt = tilt(state.tilt);
+                cell.profile
+                    .encode_calibrated(
+                        &calibrated,
+                        &mut frame[start..start + profile.footprint()],
+                        pan,
+                        tilt,
+                    )
+                    .with_context(|| format!("cell {id}"))?;
+            }
         }
         Ok(universes)
     }
+}
+
+fn declares(declared: &[wire::fixture::Cell], cells: &[GdtfCell]) -> bool {
+    declared.len() == cells.len()
+        && declared.iter().zip(cells).all(|(declared, cell)| {
+            declared.geometry == cell.geometry
+                && declared
+                    .offsets
+                    .iter()
+                    .map(|&offset| offset as usize)
+                    .eq(cell.offsets.iter().copied())
+        })
 }
 
 fn offset_pan(position: f64, offset_degrees: f64, from: f64, to: f64) -> f64 {
