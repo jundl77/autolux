@@ -28,7 +28,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.palettes import PALETTES
+from autolux.lighting.palettes import BREAKDOWN_SUFFIX, PALETTES
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -750,6 +750,38 @@ def _register_settings_drawer(app) -> None:
         *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
         prevent_initial_call=True,
     )
+
+
+def _with_base_palette(snapshot: dict) -> dict:
+    palette = snapshot.get('palette') or {}
+    if not palette.get('name'):
+        return snapshot
+    # The show reports the section's variant (ice_breakdown); the dropdown and the pin speak base names.
+    return {
+        **snapshot,
+        'palette': {**palette, 'name': palette['name'].removesuffix(BREAKDOWN_SUFFIX)},
+    }
+
+
+# The dropdown is the operator's: a poll writes it only when the show reports a different pin
+# than the last poll did, so a pick survives the stale polls before its pin lands.
+PALETTE_SYNC_JS = (
+    """function(state) {
+    const nu = window.dash_clientside.no_update;
+    const palette = state && state.palette;
+    if (!palette) {
+        return [nu, true];
+    }
+    const shown = palette.pinned ? palette.name : """
+    + json.dumps(PALETTE_POLICY)
+    + """;
+    if (shown === window.autoluxPaletteSynced) {
+        return [nu, false];
+    }
+    window.autoluxPaletteSynced = shown;
+    return [shown, false];
+}"""
+)
 
 
 def _rgb_css(rgb) -> str:
@@ -1877,7 +1909,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     def refresh(requested):
         if not requested or requested.get('tab') not in ('control', 'telemetry'):
             raise dash.exceptions.PreventUpdate
-        snap = expectations.apply(snapshot_source.snapshot())
+        snap = expectations.apply(_with_base_palette(snapshot_source.snapshot()))
         now = time.time()
         sync = status = show_timing = decoder = commands = dash.no_update
         timeline = dash.no_update
@@ -2025,15 +2057,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Input('control-intensity', 'value'),
     )
     app.clientside_callback(
-        '''function(state) {
-            const palette = state && state.palette;
-            if (!palette) {
-                return [window.dash_clientside.no_update, true];
-            }
-            return [palette.pinned ? palette.name : '''
-        + json.dumps(PALETTE_POLICY)
-        + ''', false];
-        }''',
+        PALETTE_SYNC_JS,
         Output('control-palette', 'value'),
         Output('control-palette', 'disabled'),
         Input('control-state', 'data'),

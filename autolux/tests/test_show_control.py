@@ -1,5 +1,8 @@
+import json
 import queue
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -11,8 +14,10 @@ from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.visualizer_app import (
     INTENSITY_LEVELS,
     PALETTE_POLICY,
+    PALETTE_SYNC_JS,
     ControlExpectations,
     SnapshotPoller,
+    _with_base_palette,
     build_app,
     control_command,
     decimal_text,
@@ -466,3 +471,38 @@ def test_a_palette_pick_sends_the_palette_command(show):
     assert commands.get_nowait() == control_command(
         'control-palette', False, None, (), palette='ice'
     )
+
+
+NODE = shutil.which('node')
+
+
+def _run_js(function_source, calls):
+    script = (
+        "const window = {dash_clientside: {no_update: '__nu__'}};\n"
+        f'const fn = {function_source};\n'
+        f'console.log(JSON.stringify({json.dumps(calls)}.map((args) => fn(...args))));'
+    )
+    result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run the clientside callback')
+def test_a_palette_pick_survives_the_next_poll_and_sends_the_pin(show):
+    poller, commands = show
+    app = build_app(poller)
+    unpinned = {'palette': {'name': 'techno', 'pinned': False}}
+    _send_control(app, 'control-palette.value', 'ice', unpinned)
+    assert commands.get_nowait() == {'action': 'palette', 'name': 'ice'}
+
+    expectations = ControlExpectations(clock=lambda: 0.0)
+    expectations.expect(
+        **expected_control_values({'action': 'palette', 'name': 'ice'}, {'accepted': 'palette'})
+    )
+    # In a breakdown the show reports the variant; the pin must still read as confirmed.
+    landed = expectations.apply(
+        _with_base_palette({'palette': {'name': 'ice_breakdown', 'pinned': True}})
+    )
+    assert landed['palette'] == {'name': 'ice', 'pinned': True}
+
+    writes = _run_js(PALETTE_SYNC_JS, [[unpinned], [unpinned], [landed], [landed]])
+    assert [value for value, _ in writes] == [PALETTE_POLICY, '__nu__', 'ice', '__nu__']
