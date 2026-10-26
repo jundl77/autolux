@@ -85,14 +85,13 @@ def test_archives_are_named_by_their_manufacturer_fixture_and_revision():
         'Generic@Dimmer@1.0.gdtf': ('Generic', 'Dimmer'),
         'Generic@RGBW@1.0.gdtf': ('Generic', 'RGBW'),
     }
-    # The renaming kept each fixture type's identity.
+    # Renames keep each type's identity; the bar owns the RGB profile's, the sample RGB has its own.
     assert {entry['name']: entry['fixture_type_id'] for entry in library.values()} == {
         'Intimidator Spot 110': 'C4520A76-CB18-59DA-BD76-1A8D7895F792',
         'Mini Kinta IRC': '25DB1C80-423E-5249-AF69-F5327A2C525D',
         'SePar Quad LED RGB UV IR': 'D21247BD-52DC-5D43-85C4-C8FCA5E3DB64',
-        # The bar was patched with the synthetic RGB, so both keep that type's identity.
         'ZQ06017': 'EA49AFD9-9175-566F-99D8-99BE8413B9C9',
-        'RGB': 'EA49AFD9-9175-566F-99D8-99BE8413B9C9',
+        'RGB': '240E7347-9B66-54EE-BDD3-49893702DB62',
         'Dimmer': 'C0534927-F91B-58EC-A113-98381DCF491F',
         'RGBW': '3DECEF94-E414-57FC-ABA3-4132A883A51E',
     }
