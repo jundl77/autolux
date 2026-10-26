@@ -5,6 +5,7 @@ import pytest
 
 from autolux.lib.engine.effect_definitions import ShowSettings
 from autolux.lib.engine.event_buffer import EventBuffer
+from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer
 from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.visualizer_app import (
@@ -19,6 +20,7 @@ from autolux.simulate.visualizer_app import (
     setting_text,
     static_control_command,
 )
+from autolux.tests.test_static_mode import overrides, static_engine
 
 
 @pytest.fixture
@@ -235,27 +237,46 @@ def static_show():
 
 
 @pytest.mark.parametrize(
-    ('trigger', 'colour', 'dimmer', 'expected'),
+    ('trigger', 'target', 'colour', 'expected'),
     [
         (
             'static-preset-warm',
-            None,
+            'all',
             None,
             {'action': 'static', 'kind': 'preset', 'preset': 'warm'},
+        ),
+        (
+            'static-preset-warm',
+            'wash',
+            None,
+            {
+                'action': 'static',
+                'kind': 'look',
+                'target': 'wash',
+                'colour': (1.0, 0.54902, 0.2),
+                'dimmer': None,
+            },
         ),
         # Off must not carry the picker's colour.
         (
             'static-preset-off',
+            'all',
             '#ffffff',
-            1.0,
             {'action': 'static', 'kind': 'preset', 'preset': 'off'},
         ),
-        ('static-blacklight', None, None, {'action': 'static', 'kind': 'blacklight'}),
-        ('static-strobe', None, None, {'action': 'static', 'kind': 'strobe'}),
+        (
+            'static-preset-off',
+            'wash',
+            '#ffffff',
+            {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.0},
+        ),
+        ('static-preset-uv', 'wash', None, {'action': 'static', 'kind': 'preset', 'preset': 'uv'}),
+        ('static-blacklight', 'wash', None, {'action': 'static', 'kind': 'blacklight'}),
+        ('static-strobe', 'wash', None, {'action': 'static', 'kind': 'strobe'}),
         (
             'static-colour',
+            'wash',
             ' FF8000',
-            None,
             {
                 'action': 'static',
                 'kind': 'look',
@@ -264,21 +285,43 @@ def static_show():
                 'dimmer': None,
             },
         ),
-        (
-            'static-dimmer-live',
-            None,
-            0.35,
-            {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.35},
-        ),
     ],
 )
 def test_each_static_control_reaches_the_controller_queue_as_parsed(
-    static_show, trigger, colour, dimmer, expected
+    static_show, trigger, target, colour, expected
 ):
     poller, commands = static_show
-    command = static_control_command(trigger, 'wash', colour, dimmer)
+    command = static_control_command(trigger, target, colour)
     assert poller.control(command) == {'accepted': expected['action']}
     assert commands.get_nowait() == expected
+
+
+async def test_red_with_target_wash_lights_only_the_wash(static_show):
+    poller, commands = static_show
+    app = build_app(poller)
+    output = next(key for key in app.callback_map if key.startswith('..static-status.children'))
+    state = {'mode': 'static', 'static': {'targets': ['all', 'wash', 'strip'], 'blackout': False}}
+    _run_callback(
+        app,
+        output,
+        {'static-preset-red': 1, 'static-target': 'wash', 'control-state': state},
+        'static-preset-red.n_clicks',
+    )
+    command = commands.get_nowait()
+    assert command['target'] == 'wash'
+
+    light, _, _, lighting = static_engine()
+    light.enter_static()
+    apply_static(light, command)
+    assert light.static_looks.state()['looks'] == {
+        'wash': {'colour': '#ff0000', 'dimmer': 1.0, 'uv': False}
+    }
+    looks = {
+        o['value']['id']: o['value'] for o in overrides(lighting) if o['kind'] == 'set_override'
+    }
+    assert looks['static_wash']['target'] == {'group': 'wash'}
+    assert looks['static_floor']['target'] == 'all'
+    assert looks['static_floor']['values'] == {'intensity': 0.0}
 
 
 @pytest.mark.parametrize(
@@ -330,7 +373,7 @@ def test_static_commands_are_refused_in_auto_mode_and_skipping_in_static_mode():
 
 def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
     with pytest.raises(ValueError, match='is not a #rrggbb colour'):
-        static_control_command('static-colour', 'all', '#12345', None)
+        static_control_command('static-colour', 'all', '#12345')
 
 
 def _run_callback(app, output, values, triggered):

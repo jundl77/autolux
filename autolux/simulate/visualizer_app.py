@@ -13,7 +13,7 @@ from dash import Input, Output, State, dcc, html
 
 from autolux.lib.engine.effect_definitions import DEFAULT_INTENSITY, SHOW_SETTING_RANGES
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
-from autolux.lib.engine.static_mode import PRESET_COLOURS, colour_hex
+from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
@@ -814,7 +814,7 @@ def _build_control_card() -> list:
                             title='Next autoloop',
                             disabled=True,
                         ),
-                        html.Span('Master', className='control-label'),
+                        html.Span('Master brightness', className='control-label'),
                         html.Div(
                             _fader('control-brightness', 'control-brightness-value', disabled=True),
                             className='fader',
@@ -895,7 +895,6 @@ STATIC_PRESETS = {
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
 STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
-STATIC_DIMMER_IDS = ('static-dimmer', 'static-dimmer-live')
 HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
 STATIC_TAB_STYLE = {
     'backgroundColor': 'transparent',
@@ -915,9 +914,20 @@ STATIC_SELECTED_TAB_STYLE = {
 }
 
 
-def static_control_command(trigger, target, colour, dimmer) -> dict | None:
+def static_control_command(trigger, target, colour) -> dict | None:
     if trigger in STATIC_PRESET_IDS:
-        return {'action': 'static', 'kind': 'preset', 'preset': STATIC_PRESET_IDS[trigger]}
+        preset = STATIC_PRESET_IDS[trigger]
+        # Presets always light the whole rig, so a chosen group gets the chip as a look instead.
+        if target != ALL_FIXTURES and preset in PRESET_COLOURS:
+            return {
+                'action': 'static',
+                'kind': 'look',
+                'target': target,
+                'colour': colour_hex(PRESET_COLOURS[preset]),
+            }
+        if target != ALL_FIXTURES and preset == 'off':
+            return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': 0.0}
+        return {'action': 'static', 'kind': 'preset', 'preset': preset}
     if trigger in STATIC_BUTTONS:
         return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
     if trigger == 'static-colour':
@@ -930,8 +940,6 @@ def static_control_command(trigger, target, colour, dimmer) -> dict | None:
             'target': target,
             'colour': '#' + text.lstrip('#').lower(),
         }
-    if trigger in STATIC_DIMMER_IDS:
-        return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': dimmer}
     return None
 
 
@@ -966,12 +974,6 @@ def _build_static_panel():
                         inline=True,
                         className='segmented',
                     ),
-                    html.Span('Level', className='control-label'),
-                    html.Div(
-                        _fader('static-dimmer', 'static-dimmer-value', value=1),
-                        className='fader fader-short',
-                    ),
-                    dcc.Store(id='static-dimmer-live'),
                 ],
                 className='control-row',
             ),
@@ -1010,26 +1012,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         Output('static-blacklight', 'disabled'),
         Input('control-state', 'data'),
     )
-    app.clientside_callback(
-        '''function(level, committed) {
-            const label = level === null || level === undefined
-                ? '—' : Math.round(level * 100) + '%';
-            const now = Date.now();
-            if (level === null || level === undefined || level === committed
-                    || now - (window.autoluxStaticDimmerSentAt || 0) < '''
-        + str(LIVE_FADER_INTERVAL_MS)
-        + ''') {
-                return [label, window.dash_clientside.no_update];
-            }
-            window.autoluxStaticDimmerSentAt = now;
-            return [label, level];
-        }''',
-        Output('static-dimmer-value', 'children'),
-        Output('static-dimmer-live', 'data'),
-        Input('static-dimmer', 'drag_value'),
-        State('static-dimmer', 'value'),
-    )
-    sent_dimmer = {}
 
     @app.callback(
         Output('control-mode', 'value'),
@@ -1051,14 +1033,12 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
         Input('static-colour', 'value'),
-        Input('static-dimmer', 'value'),
-        Input('static-dimmer-live', 'data'),
         State('static-target', 'value'),
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
     def send_static(mode, *values):
-        *_, colour, released, live, target, state = values
+        *_, colour, target, state = values
         state = state or {}
         trigger = dash.ctx.triggered_id
         if not can_control:
@@ -1068,15 +1048,10 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
                 raise dash.exceptions.PreventUpdate
             command = {'action': 'mode', 'mode': mode}
         else:
-            dimmer = live if trigger == 'static-dimmer-live' else released
-            if trigger in STATIC_DIMMER_IDS and (
-                dimmer is None or sent_dimmer.get(target) == dimmer
-            ):
-                raise dash.exceptions.PreventUpdate
             if trigger == 'static-colour' and not colour:
                 raise dash.exceptions.PreventUpdate
             try:
-                command = static_control_command(trigger, target, colour, dimmer)
+                command = static_control_command(trigger, target, colour)
             except ValueError as error:
                 return f'Rejected: {error}', dash.no_update
             if command is None:
@@ -1084,14 +1059,9 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         reply = snapshot_source.control(command)
         if 'error' in reply:
             return f'Rejected: {reply["error"]}', dash.no_update
-        if command.get('kind') == 'look' and 'dimmer' in command:
-            sent_dimmer[target] = command['dimmer']
         if command['action'] == 'mode':
-            sent_dimmer.clear()
             expectations.expect(mode=command['mode'])
             return '', {**state, 'mode': command['mode']}
-        if command.get('kind') == 'preset':
-            sent_dimmer.clear()
         return '', dash.no_update
 
 
