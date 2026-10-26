@@ -499,13 +499,6 @@ def _selection_tags(effect: dict) -> str:
 
 def _build_show_overview(snapshot: dict) -> list:
     bpm = _room_bpm(snapshot)
-    cfg = _intent_config(snapshot.get('intent'))
-    if snapshot.get('paused'):
-        playback, playback_color = 'PAUSED', WARN_COLOR
-    elif _room_is_playing(snapshot):
-        playback, playback_color = 'PLAYING', OK_COLOR
-    else:
-        playback, playback_color = 'IDLE', MUTED
     health = health_summary(snapshot)['state']
     timing = (snapshot.get('timing_stats') or {}).get('by_label') or {}
     if health == 'healthy' and any(
@@ -513,31 +506,13 @@ def _build_show_overview(snapshot: dict) -> list:
     ):
         health = 'degraded'
     health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
-    effect = snapshot.get('current_effect') or {}
-    effect_name = effect.get('name', '—')
-    autoloop_name = _autoloop_name(effect)
-    reason = (effect.get('selection') or {}).get('reason')
     return [
         _build_stat_card(
             'Health',
             html.Span(f'● {health.title()}', id='health-indicator', style={'color': health_color}),
         ),
         _build_stat_card(
-            'Playback',
-            html.Span(playback, id='playback-state', style={'color': playback_color}),
-        ),
-        _build_stat_card(
             'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
-        ),
-        _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
-        _build_stat_card(
-            'Autoloop',
-            [
-                html.Span(
-                    autoloop_name, title=f'{effect_name} · {reason}' if reason else effect_name
-                ),
-                html.Span(_selection_tags(effect), className='stat-tags'),
-            ],
         ),
     ]
 
@@ -548,6 +523,8 @@ def _autoloop_name(effect: dict) -> str:
 
 def _build_auto_status(snapshot: dict) -> list:
     effect = snapshot.get('current_effect') or {}
+    effect_name = effect.get('name', '—')
+    reason = (effect.get('selection') or {}).get('reason')
     palette = snapshot.get('palette') or {}
     palette_name = palette.get('name') or '—'
     items = [
@@ -562,8 +539,12 @@ def _build_auto_status(snapshot: dict) -> list:
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
         items.append(('strobe', f'cooldown {cooldown:.0f} s' if cooldown > 0 else 'ready'))
+    titles = {'autoloop': f'{effect_name} · {reason}' if reason else effect_name}
     return [
-        html.Span([html.Span(label, className='stat-label'), html.Span(str(value))])
+        html.Span(
+            [html.Span(label, className='stat-label'), html.Span(str(value))],
+            title=titles.get(label),
+        )
         for label, value in items
     ]
 
@@ -1138,7 +1119,7 @@ def _build_static_panel():
                     html.Div(
                         [
                             html.Div(
-                                [html.Span('Dimmer'), html.Span('—', id='static-dimmer-value')],
+                                [html.Span('Level'), html.Span('—', id='static-dimmer-value')],
                                 className='stat-label control-heading',
                             ),
                             dcc.Slider(
@@ -1427,15 +1408,13 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
 .status-strip { font-variant-numeric: tabular-nums; }
-.show-overview { display: grid;
-                 grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr); }
+.show-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .show-stat { padding: 12px 16px; min-width: 0; border-right: 1px solid #1b2735; }
 .show-stat:last-child { border-right: 0; }
 .stat-label { font-size: 10px; color: #9baabb; margin-bottom: 6px; }
 .stat-value { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 600;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-tags { color: #8293a6; font-size: 11px; font-weight: 500; }
-.show-stat:nth-child(4) .stat-value span { filter: brightness(1.7); }
 .status-secondary { display: flex; justify-content: space-between; align-items: baseline;
                     flex-wrap: wrap; gap: 8px 24px; padding: 9px 16px;
                     border-top: 1px solid #1b2735; color: #9baabb; font-size: 12px; }
