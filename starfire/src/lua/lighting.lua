@@ -83,7 +83,8 @@ function sf.phrase_phase(ctx_or_beats, bars)
     return (ctx_or_beats / (bars * BEATS_PER_BAR)) % 1
 end
 
-local PULSE_GAIN_AT_ZERO_INTENSITY = 0.35
+-- Squared so 0.3 / 0.7 / 1.0 give clearly different pulse depths (0.23 / 0.57 / 1).
+local PULSE_GAIN_AT_ZERO_INTENSITY = 0.15
 local render_intensity = 1
 
 local function use_render_intensity(intensity)
@@ -92,7 +93,7 @@ local function use_render_intensity(intensity)
 end
 
 function sf.intensity_pulse_gain(intensity)
-    return sf.lerp(PULSE_GAIN_AT_ZERO_INTENSITY, 1, intensity)
+    return sf.lerp(PULSE_GAIN_AT_ZERO_INTENSITY, 1, intensity * intensity)
 end
 
 function sf.on_beat(ctx_or_beats, width, period)
