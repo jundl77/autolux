@@ -2,7 +2,7 @@
 -- energy: 3
 -- family: warm
 -- movement: snap
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS, GHOST_WIDTH_BEATS = 0.4, 0.3
 local GHOST_AT_IN_BAR, GHOST_OFFSET_BEATS = 3.5, 0.5

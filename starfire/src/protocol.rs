@@ -217,8 +217,14 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                     value.transition.is_none(),
                     "idle does not accept a transition"
                 );
+                ensure!(value.palette.is_empty(), "idle does not accept a palette");
                 return engine.apply(at_seconds, &Command::Stop);
             }
+            ensure!(
+                !value.palette.is_empty(),
+                "autoloop {} must name its palette",
+                value.autoloop_id
+            );
             let transition = match &value.transition {
                 None => Transition::RendererDefault,
                 Some(value) => value
@@ -226,7 +232,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                     .map(|duration_beats| Transition::Crossfade { duration_beats })
                     .unwrap_or(Transition::Cut),
             };
-            engine.play_autoloop(at_seconds, &value.autoloop_id, transition)
+            engine.play_autoloop(at_seconds, &value.autoloop_id, transition, &value.palette)
         }
         ClientMessage::SetParameter(value) => engine.set_parameter(
             at_seconds,

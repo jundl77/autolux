@@ -57,7 +57,9 @@ def test_imported_fixture_renders_from_login_without_rebuilding(
         with StarfireRuntime(
             BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1
         ) as runtime:
-            runtime.send_command({'kind': 'select', 'bank': 'test', 'autoloop': 'dimmer'})
+            runtime.send_command(
+                {'kind': 'select', 'bank': 'test', 'autoloop': 'dimmer', 'palette': 'techno'}
+            )
             deadline = time.monotonic() + TEST_TIMEOUT_SECONDS
             while time.monotonic() < deadline:
                 packet = receiver.recv(1024)

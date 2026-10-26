@@ -2,7 +2,7 @@
 -- energy: 3
 -- family: warm
 -- movement: still
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS = 0.3
 local FLOOR_QUIET, FLOOR_LOUD = 0.03, 0.15

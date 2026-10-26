@@ -16,7 +16,8 @@ deliberately static: no beat or loudness response, movers parked dark, warm whit
   `sf.phrase_phase(ctx, bars)` — which read `ctx.bar_phase` (continuous, 0..beats_per_bar),
   `ctx.bar_index` and `ctx.beats_per_bar`; the number form assumes 4/4.
   Only `buildup` may also use `ctx.autoloop_elapsed_beats`, for a ramp that plateaus at 128 beats.
-- **Palette slots only**: `sf.palette("techno")` primary/secondary/accent/cold/black
+- **Palette slots only**: `sf.palette()` primary/secondary/accent/cold/black of the active
+  palette, which Autolux chooses per track and Starfire crossfades live
   (`sf.mix` of two slots is fine). No literal colours.
 - **Loudness is amplitude only.** `sf.loudness_gain(ctx.normalized_rms_level)` and RMS reach
   scale levels and sweep size, never colour, timing or pattern.

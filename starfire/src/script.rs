@@ -15,6 +15,7 @@ use serde::Serialize;
 
 use crate::fixtures::{FixtureRig, MAX_FIXTURES};
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
+use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
@@ -186,12 +187,18 @@ impl AutoloopCatalog {
             .collect()
     }
 
-    pub fn instantiate(&self, bank: &str, autoloop: &str, rig: &FixtureRig) -> Result<LuaAutoloop> {
+    pub fn instantiate(
+        &self,
+        bank: &str,
+        autoloop: &str,
+        rig: &FixtureRig,
+        palettes: &PaletteTable,
+    ) -> Result<LuaAutoloop> {
         let source = self
             .sources
             .get(&(bank.to_owned(), autoloop.to_owned()))
             .with_context(|| format!("unknown autoloop {bank}/{autoloop}"))?;
-        LuaAutoloop::new(bank, autoloop, source, rig)
+        LuaAutoloop::new(bank, autoloop, source, rig, palettes)
     }
 }
 
@@ -234,10 +241,17 @@ pub struct LuaAutoloop {
     instruction_budget: Arc<AtomicU32>,
     rig: FixtureRig,
     identity: String,
+    active_palette_slots: Vec<Table>,
 }
 
 impl LuaAutoloop {
-    fn new(bank: &str, autoloop: &str, source: &str, rig: &FixtureRig) -> Result<Self> {
+    fn new(
+        bank: &str,
+        autoloop: &str,
+        source: &str,
+        rig: &FixtureRig,
+        palettes: &PaletteTable,
+    ) -> Result<Self> {
         ensure!(
             rig.fixture_ids().len() <= MAX_FIXTURES,
             "Lua fixture target limit exceeded"
@@ -300,11 +314,27 @@ impl LuaAutoloop {
             string.set(name, Value::Nil)?;
         }
 
-        let api: Table = lua
+        let (api, named_palettes, use_active_palette): (Table, Table, Function) = lua
             .load(LIGHTING_API)
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
+        for (name, slots) in palettes.iter() {
+            named_palettes.set(name, read_only(&lua, lua.to_value(slots)?)?)?;
+        }
+        let initial_slots = palettes.slots(palettes.initial())?;
+        let active_palette = lua.create_table()?;
+        let mut active_palette_slots = Vec::new();
+        for (slot, colour) in initial_slots.named_slots() {
+            let table: Table = lua
+                .to_value(&colour)?
+                .as_table()
+                .cloned()
+                .context("palette slot is a table")?;
+            active_palette.set(slot, &table)?;
+            active_palette_slots.push(table);
+        }
+        use_active_palette.call::<()>(read_only(&lua, Value::Table(active_palette))?)?;
         let targets = rig.clone();
         api.set(
             "members",
@@ -341,10 +371,15 @@ impl LuaAutoloop {
             instruction_budget,
             rig: rig.clone(),
             identity,
+            active_palette_slots,
         })
     }
 
-    pub fn render(&mut self, context: &RenderContext) -> Result<Vec<Effect>> {
+    pub fn render(
+        &mut self,
+        context: &RenderContext,
+        palette: &PaletteSlots,
+    ) -> Result<Vec<Effect>> {
         ensure!(
             context
                 .normalized_rms_level
@@ -362,6 +397,11 @@ impl LuaAutoloop {
                 value.is_finite() && value >= 0.0,
                 "render context must contain finite nonnegative time"
             );
+        }
+        for (table, (_, colour)) in self.active_palette_slots.iter().zip(palette.named_slots()) {
+            table.set("red", colour.red)?;
+            table.set("green", colour.green)?;
+            table.set("blue", colour.blue)?;
         }
         self.instruction_budget
             .store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
@@ -424,6 +464,23 @@ impl LuaAutoloop {
         }
         Ok(effects)
     }
+}
+
+fn read_only(lua: &Lua, value: Value) -> mlua::Result<Table> {
+    let metatable = lua.create_table()?;
+    metatable.set("__index", value)?;
+    metatable.set("__metatable", false)?;
+    metatable.set(
+        "__newindex",
+        lua.create_function(|_, _: (Value, Value, Value)| -> mlua::Result<()> {
+            Err(mlua::Error::RuntimeError(
+                "palettes are read-only".to_owned(),
+            ))
+        })?,
+    )?;
+    let proxy = lua.create_table()?;
+    proxy.set_metatable(Some(metatable))?;
+    Ok(proxy)
 }
 
 fn validate_properties(values: &PropertyValues) -> Result<()> {

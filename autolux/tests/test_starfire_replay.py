@@ -166,3 +166,14 @@ def test_missing_tempo_or_delay_and_backwards_beats_are_rejected():
     source['beats'].reverse()
     with pytest.raises(ValueError, match='ordered'):
         report_to_replay(source)
+
+
+def test_a_replay_embeds_the_login_palette_table_and_names_each_selection_palette():
+    from autolux.lighting.palettes import DEFAULT_PALETTE, palette_table
+
+    replay = report_to_replay(report())
+    assert [palette['name'] for palette in replay['palettes']] == [
+        palette.name for palette in palette_table()
+    ]
+    assert replay['palettes'][0]['secondary'] == {'red': 1.0, 'green': 0.55, 'blue': 0.1}
+    assert {event['command']['palette'] for event in selections(replay)} == {DEFAULT_PALETTE}

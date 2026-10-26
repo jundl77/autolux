@@ -219,6 +219,7 @@ async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting)
     await controller.change_effect(LightIntent.DROP)
     effect = buffer.snapshot()['current_effect']
     assert effect['name'] == 'drop/kick'
+    assert effect['selection'].pop('palette') == recorded_lighting.palette
     assert effect['selection'] == {
         'energy': 3,
         'family': 'warm',
@@ -296,6 +297,7 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
     )
     await controller.change_effect(LightIntent.BREAKDOWN)
     playing = lighting.selected_autoloop
+    palette = lighting.palette
     clock.advance(5.0)
     with caplog.at_level(logging.INFO):
         choice = controller.skip_autoloop(SelectionContext(LightIntent.BREAKDOWN))
@@ -303,7 +305,12 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
     assert (choice.bank, choice.autoloop) != playing
     assert select == {
         'at_seconds': clock.monotonic(),
-        'command': {'kind': 'select', 'bank': choice.bank, 'autoloop': choice.autoloop},
+        'command': {
+            'kind': 'select',
+            'bank': choice.bank,
+            'autoloop': choice.autoloop,
+            'palette': palette,
+        },
     }
     assert f'[lighting] next autoloop | intent=BREAKDOWN | autoloop={choice.bank}/' in caplog.text
     assert f'reason={choice.reason}' in caplog.text

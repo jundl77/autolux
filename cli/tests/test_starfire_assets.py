@@ -166,3 +166,27 @@ def test_committed_native_rig_is_the_exported_login_rig(name):
         f'Regenerate with: uv run autolux starfire export-rig rigs/{name}.mvr rigs/{name}.rig.pb'
     )
     assert rig_wire.RigDefinition.FromString(content) == login.rig
+
+
+def test_login_carries_the_palette_table_and_palette_commands_round_trip():
+    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
+    assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
+    techno = login.palettes[0]
+    assert (techno.secondary.red, techno.secondary.green, techno.secondary.blue) == (
+        1.0,
+        0.55,
+        0.1,
+    )
+    commands = [
+        protocol.build_command({'kind': 'set_palette', 'name': 'ice'}),
+        protocol.build_command(
+            {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'palette': 'ice_breakdown'}
+        ),
+    ]
+    for message in commands:
+        message.command_id = 1
+        encoded = protocol.encode_command(message)
+        assert type(message).FromString(encoded[protocol.FRAME_HEADER.size :]) == message
+    parameter, selection = commands
+    assert (parameter.parameter.type, parameter.parameter.text) == (wire.PALETTE, 'ice')
+    assert (selection.autoloop_id, selection.palette) == ('drop/kick', 'ice_breakdown')

@@ -14,6 +14,8 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
         .arg(rig)
         .arg("--autoloops")
         .arg(autoloops)
+        .arg("--palettes")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/palettes.json"))
         .output()
         .unwrap()
 }

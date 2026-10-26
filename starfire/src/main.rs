@@ -14,6 +14,7 @@ use starfire::artnet::ArtNetOutput;
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
+use starfire::palette::PaletteTable;
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::{AutoloopCatalog, missing_groups_warning};
 
@@ -37,6 +38,8 @@ enum Action {
         rig: PathBuf,
         #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
         autoloops: PathBuf,
+        #[arg(long)]
+        palettes: PathBuf,
     },
     /// Render live controls from framed protobuf on stdin; status uses stdout.
     Live,
@@ -85,7 +88,12 @@ fn main() -> std::process::ExitCode {
 
 fn run(arguments: Arguments) -> Result<()> {
     match arguments.command {
-        Action::Check { rig, autoloops } => {
+        Action::Check {
+            rig,
+            autoloops,
+            palettes,
+        } => {
+            let palettes = PaletteTable::load(&palettes)?;
             let rig = FixtureRig::load(&rig)?;
             let catalog = AutoloopCatalog::load(&autoloops)?;
             let missing_groups = catalog.groups_missing_from(&rig);
@@ -94,13 +102,14 @@ fn run(arguments: Arguments) -> Result<()> {
             }
             let autoloops = catalog.list();
             for autoloop in &autoloops {
-                let mut engine = Engine::new(rig.clone(), catalog.clone())?;
+                let mut engine = Engine::new(rig.clone(), catalog.clone(), palettes.clone())?;
                 engine.apply(
                     0.0,
                     &Command::Select {
                         bank: autoloop.bank.clone(),
                         autoloop: autoloop.autoloop.clone(),
                         transition: Transition::Cut,
+                        palette: palettes.initial().to_owned(),
                     },
                 )?;
                 let frame = engine.render_at(0.0).with_context(|| {

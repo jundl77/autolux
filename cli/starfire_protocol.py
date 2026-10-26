@@ -55,6 +55,7 @@ PARAMETERS = {
     'set_default_crossfade_beats': (wire.DEFAULT_CROSSFADE_BEATS, 'beats', 'number'),
     'set_strobe_max_rate_hz': (wire.STROBE_MAX_RATE_HZ, 'hz', 'number'),
     'set_strobe_max_burst_seconds': (wire.STROBE_MAX_BURST_SECONDS, 'seconds', 'number'),
+    'set_palette': (wire.PALETTE, 'name', 'text'),
 }
 
 

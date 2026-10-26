@@ -546,7 +546,7 @@ fn engine(channels: &str, source: &str) -> Engine {
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(rig(channels), catalog).unwrap();
+    let mut engine = Engine::new(rig(channels), catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -554,6 +554,7 @@ fn engine(channels: &str, source: &str) -> Engine {
                 bank: "test".into(),
                 autoloop: "test".into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -726,6 +727,7 @@ fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults()
                     bank: "test".into(),
                     autoloop: "test".into(),
                     transition: Transition::Cut,
+                    palette: "techno".into(),
                 },
             )
             .unwrap();
@@ -764,9 +766,9 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
             wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "broken".into(), lua_source: broken },
             wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "healthy".into(), lua_source: "return {render=function(ctx) return {sf.dimmer(sf.all(), 0.75), sf.pan_tilt(sf.all(), 0.75, 0.5)} end}".into() },
         ]).unwrap();
-        let mut engine = Engine::new(rig(&channels), catalog).unwrap();
+        let mut engine = Engine::new(rig(&channels), catalog, support::palettes()).unwrap();
         engine
-            .play_autoloop(0.0, "broken", Transition::Cut)
+            .play_autoloop(0.0, "broken", Transition::Cut, "techno")
             .unwrap();
         assert_eq!(
             &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][..2],
@@ -782,7 +784,7 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
             failed.dmx_frames_by_universe
         );
         engine
-            .play_autoloop(0.3, "healthy", Transition::Cut)
+            .play_autoloop(0.3, "healthy", Transition::Cut, "techno")
             .unwrap();
         let recovered = engine.render_at(0.3).unwrap();
         assert!(recovered.script_error.is_none());

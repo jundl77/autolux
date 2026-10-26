@@ -14,6 +14,7 @@ use crate::artnet::ArtNetOutput;
 use crate::engine::Engine;
 use crate::fixtures::FixtureRig;
 use crate::model::{Command, DEFAULT_FRAME_RATE_HZ, FixtureStates, Transition};
+use crate::palette::PaletteTable;
 use crate::protocol::{
     ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message,
     read_session_control, wire, write_event,
@@ -165,8 +166,9 @@ impl LiveSession {
         if let Some(warning) = missing_groups_warning(&catalog.groups_missing_from(&rig)) {
             eprintln!("starfire: warning: {warning}");
         }
+        let palettes = PaletteTable::from_wire(&login.palettes)?;
         let autoloops = catalog.list();
-        let mut probe = Engine::new(rig.clone(), catalog.clone())?;
+        let mut probe = Engine::new(rig.clone(), catalog.clone(), palettes.clone())?;
         for parameter in &login.parameters {
             probe.set_parameter(0.0, parameter)?;
         }
@@ -177,6 +179,7 @@ impl LiveSession {
                     bank: autoloop.bank,
                     autoloop: autoloop.autoloop,
                     transition: Transition::Cut,
+                    palette: palettes.initial().to_owned(),
                 },
             )?;
             let frame = probe.render_at(0.0)?;
@@ -186,7 +189,7 @@ impl LiveSession {
         }
         drop(probe);
         // Probing must not carry fixture positions or script state into playback.
-        let mut engine = Engine::new(rig.clone(), catalog)?;
+        let mut engine = Engine::new(rig.clone(), catalog, palettes)?;
         for parameter in &login.parameters {
             engine.set_parameter(0.0, parameter)?;
         }
@@ -579,6 +582,14 @@ mod tests {
                         .into(),
             }],
             output: Some(wire::login::Output::ArtnetDestination(listener.local_addr().unwrap().to_string())),
+            palettes: vec![wire::Palette {
+                name: "techno".into(),
+                primary: Some(wire::RgbColor::default()),
+                secondary: Some(wire::RgbColor::default()),
+                accent: Some(wire::RgbColor::default()),
+                cold: Some(wire::RgbColor::default()),
+                black: Some(wire::RgbColor::default()),
+            }],
             ..Default::default()
         };
         let mut session = LiveSession::login(&login).unwrap();
@@ -599,6 +610,7 @@ mod tests {
                     bank: "test".into(),
                     autoloop: "steady".into(),
                     transition: crate::model::Transition::Cut,
+                    palette: "techno".into(),
                 },
             )
             .unwrap();

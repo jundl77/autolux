@@ -75,6 +75,7 @@ fn mixed_show() -> Replay {
                         duration_beats: 4.0,
                     }
                 },
+                palette: "techno".into(),
             },
         );
     }
@@ -124,6 +125,7 @@ fn mixed_show() -> Replay {
         schema_version: REPLAY_SCHEMA_VERSION,
         duration_seconds: SHOW_DURATION_SECONDS,
         frame_rate_hz: FRAME_RATE_HZ,
+        palettes: support::palette_definitions(),
         events,
     }
 }

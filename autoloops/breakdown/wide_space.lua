@@ -2,7 +2,7 @@
 -- energy: 1
 -- family: accent
 -- movement: sweep
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local FADE_IN_SHARE = 0.75
 local WASH_FLOOR, WASH_PEAK = 0.02, 0.35

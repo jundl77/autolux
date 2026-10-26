@@ -2,7 +2,7 @@
 -- energy: 1
 -- family: accent
 -- movement: still
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 16
 local WASH_LEVEL = 0.16
 local HORIZON_LEVEL = 0.22

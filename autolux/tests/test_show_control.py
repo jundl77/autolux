@@ -107,12 +107,14 @@ def test_each_collapsed_settings_group_summarises_its_live_values():
         'strobe_max_burst_seconds': 4.0,
         'strobe_burst_seconds': 1.0,
         'drop_strobe_cooldown_seconds': 60.0,
+        'palette_temperature_bias': -0.5,
     }
     assert {
         group.key: settings_group_summary(group.names, settings) for group in SETTINGS_GROUPS
     } == {
         'transitions': '1 beats · quiet 15 % · standby 2 s',
         'strobe': '8 Hz · burst 4 s · drop burst 1 s · cooldown 60 s',
+        'palette': 'warmth -0.5',
     }
     assert settings_group_summary(SETTINGS_GROUPS[1].names, {}) == (
         '— Hz · burst — s · drop burst — s · cooldown — s'
@@ -183,3 +185,26 @@ def test_each_accepted_command_names_the_value_the_show_should_report():
         {'action': 'settings', 'settings': settings}, {'accepted': 'settings'}
     ) == {'settings': settings}
     assert expected_control_values({'action': 'next_autoloop'}, {'accepted': 'next_autoloop'}) == {}
+    assert expected_control_values(
+        {'action': 'palette', 'name': 'ice'}, {'accepted': 'palette'}
+    ) == {'palette': {'name': 'ice', 'pinned': True}}
+    assert (
+        expected_control_values({'action': 'palette', 'name': 'auto'}, {'accepted': 'palette'})
+        == {}
+    )
+
+
+@pytest.mark.parametrize('name', ['ice', 'auto'])
+def test_a_palette_choice_reaches_the_controller_queue(show, name):
+    poller, commands = show
+    reply = poller.control(control_command('control-palette', False, None, (), name))
+    assert reply == {'accepted': 'palette'}
+    assert commands.get_nowait() == {'action': 'palette', 'name': name}
+
+
+@pytest.mark.parametrize('name', ['neon', 'ice_breakdown', None, 3])
+def test_unknown_palettes_are_refused_before_the_controller(show, name):
+    poller, commands = show
+    reply = poller.control({'action': 'palette', 'name': name})
+    assert reply['error'].startswith("palette must be 'auto' or one of techno, house, ice")
+    assert commands.empty()

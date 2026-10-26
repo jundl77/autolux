@@ -2,7 +2,7 @@
 -- energy: 3
 -- family: cold
 -- movement: snap
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS = 0.4
 local OFFBEAT_DUTY, OFFBEAT_PHASE = 0.3, 0.5

@@ -2,7 +2,7 @@
 -- energy: 1
 -- family: cold
 -- movement: sweep
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BARS = 4
 local DRIFT_SHARE = 14 / 16
 local WASH_LEVEL = 0.08

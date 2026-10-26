@@ -2,7 +2,7 @@
 -- energy: 3
 -- family: warm
 -- movement: snap
-local palette = sf.palette("techno")
+local palette = sf.palette()
 local LOOP_BEATS = 8
 local BAR_BEATS = 4
 local STEPS_PER_BEAT = 4

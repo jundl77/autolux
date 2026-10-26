@@ -1,3 +1,5 @@
+mod support;
+
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
@@ -183,7 +185,7 @@ fn check_golden(look: &Look, digest: &str) {
 }
 
 fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
-    let mut engine = Engine::new(room(), catalog()).unwrap();
+    let mut engine = Engine::new(room(), catalog(), support::palettes()).unwrap();
     let anchor_beat = select_beat.floor();
     engine
         .apply(
@@ -203,6 +205,7 @@ fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
                 bank: bank.into(),
                 autoloop: autoloop.into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -578,7 +581,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(room(), catalog).unwrap();
+    let mut engine = Engine::new(room(), catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -586,6 +589,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
                 bank: "test".into(),
                 autoloop: autoloop_id.into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -662,4 +666,36 @@ fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
             );
         }
     }
+}
+
+#[test]
+fn one_loop_under_two_palettes_changes_only_colour() {
+    let mut techno = engine("atmospheric", "dawn", 0.0);
+    let mut house = engine("atmospheric", "dawn", 0.0);
+    house
+        .set_parameter(
+            0.0,
+            &wire::Parameter {
+                r#type: wire::ParameterType::Palette as i32,
+                value: Some(wire::parameter::Value::Text("house".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let mut recoloured = 0;
+    for step in 0..64 {
+        let beats = f64::from(step) / 4.0;
+        let warm = render(&mut techno, beats).fixture_properties_before_strobe;
+        let cool = render(&mut house, beats).fixture_properties_before_strobe;
+        for (fixture, state) in &warm {
+            let other = &cool[fixture];
+            assert_eq!(
+                (state.intensity, state.pan, state.tilt, &state.attributes),
+                (other.intensity, other.pan, other.tilt, &other.attributes),
+                "{fixture} at beat {beats}"
+            );
+            recoloured += usize::from(state.colour != other.colour);
+        }
+    }
+    assert!(recoloured > 0, "the palette must reach the rendered colour");
 }

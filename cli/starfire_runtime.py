@@ -5,6 +5,7 @@ import logging
 import os
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ from autolux.lighting.autoloop_catalogue import (
     read_autoloop_meta,
     required_autoloops,
 )
+from autolux.lighting.palettes import palette_records
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
 from cli.starfire import (
     DEFAULT_AUTOLOOPS,
@@ -75,7 +77,12 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
     if not binary.is_file():
         raise RuntimeError(f'Starfire binary is missing: {binary}. Run build-starfire.ps1.')
     build_command({'kind': 'heartbeat'})
-    with native_rig(rig) as exported:
+    with (
+        native_rig(rig) as exported,
+        tempfile.TemporaryDirectory(prefix='starfire-check-') as staging,
+    ):
+        palettes = Path(staging) / 'palettes.json'
+        palettes.write_text(json.dumps(palette_records()), encoding='utf-8')
         result = subprocess.run(
             [
                 str(binary),
@@ -84,6 +91,8 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
                 str(exported),
                 '--autoloops',
                 str(Path(autoloops).resolve()),
+                '--palettes',
+                str(palettes),
             ],
             cwd=ROOT,
             check=False,

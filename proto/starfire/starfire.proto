@@ -21,7 +21,7 @@ import "proto/starfire/rig.proto";
 // Major changes are incompatible; minor additions are compatible.
 enum ProtocolVersion {
   PROTOCOL_MINOR = 0;
-  PROTOCOL_MAJOR = 2;
+  PROTOCOL_MAJOR = 3;
 }
 
 enum MessageType {
@@ -49,6 +49,7 @@ enum ParameterType {
   DEFAULT_CROSSFADE_BEATS = 6;
   STROBE_MAX_RATE_HZ = 7;
   STROBE_MAX_BURST_SECONDS = 8;
+  PALETTE = 9;
 }
 
 // [CLIENT -> SERVER]
@@ -67,6 +68,7 @@ message Login {
   uint32 protocol_minor = 8;  // Backwards-compatible additions within this major.
   fixed64 run_id = 9;         // Shared Autolux/Radius/Starfire run; unrelated to replay seeds.
   optional uint32 render_core = 11;  // Logical CPU index; omitted leaves OS scheduling enabled.
+  repeated Palette palettes = 12;
 
   message RadiusOutput {
     string receiver_address = 1;  // IPv4:TCP port.
@@ -104,6 +106,7 @@ message PlayAutoloop {
   uint64 command_id = 1;
   string autoloop_id = 2;
   Transition transition = 4;
+  string palette = 5;
 
   message Transition {
     optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
@@ -114,12 +117,6 @@ message PlayAutoloop {
 // Replace this identified effect. Only specified properties override the baseline.
 // Higher priority wins; ties use command order. Brightness/blackout parameters apply last.
 message SetActiveEffect {
-  message RgbColor {
-    double red = 1;  // Each channel is normalized to 0..1.
-    double green = 2;
-    double blue = 3;
-  }
-
   // Physical values use GDTF units; presets name a ChannelSet.
   message AttributeValue {
     oneof value {
@@ -202,6 +199,22 @@ message Parameter {
   oneof value {
     double number = 2;
     bool boolean = 3;
+    string text = 5;
   }
   double fade_seconds = 4;
+}
+
+message RgbColor {
+  double red = 1;  // Each channel is normalized to 0..1.
+  double green = 2;
+  double blue = 3;
+}
+
+message Palette {
+  string name = 1;
+  RgbColor primary = 2;
+  RgbColor secondary = 3;
+  RgbColor accent = 4;
+  RgbColor cold = 5;
+  RgbColor black = 6;
 }

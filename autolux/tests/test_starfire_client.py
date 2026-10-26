@@ -123,8 +123,14 @@ def test_renderer_settings_and_a_default_transition_use_the_replay_command_shape
     client.set_default_crossfade_beats(2.0)
     client.set_strobe_limits(6.0, 3.0)
     assert calls == [
-        {'kind': 'select', 'bank': 'breakdown', 'autoloop': 'wide_space'},
-        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}},
+        {'kind': 'select', 'bank': 'breakdown', 'autoloop': 'wide_space', 'palette': 'techno'},
+        {
+            'kind': 'select',
+            'bank': 'drop',
+            'autoloop': 'kick',
+            'palette': 'techno',
+            'transition': {'kind': 'cut'},
+        },
         {'kind': 'set_paused', 'paused': True},
         {'kind': 'set_default_crossfade_beats', 'beats': 2.0},
         {'kind': 'set_strobe_max_rate_hz', 'hz': 6.0},

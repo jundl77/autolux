@@ -174,6 +174,7 @@ pub enum Command {
         autoloop: String,
         #[serde(default)]
         transition: Transition,
+        palette: String,
     },
     SetOverride {
         value: LightingOverride,
@@ -206,6 +207,9 @@ pub enum Command {
     },
     SetStrobeMaxBurstSeconds {
         seconds: f64,
+    },
+    SetPalette {
+        name: String,
     },
     Stop,
 }
