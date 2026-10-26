@@ -292,6 +292,32 @@ async def test_only_two_seconds_of_exact_zeros_mean_the_source_stopped(gap_level
         assert analyser._rhythm.resets >= 2, 'the beat tracker restarts with the signal'
 
 
+async def test_a_raised_silence_setting_tolerates_a_true_zero_break_read_at_use_time():
+    from autolux.lib.engine.effect_definitions import ShowSettings
+
+    class _Recorder(_StubHandler):
+        def __init__(self):
+            self.silences = 0
+
+        def on_digital_silence(self):
+            self.silences += 1
+
+    clock = VirtualClock()
+    handler = _Recorder()
+    settings = ShowSettings(digital_silence_seconds=5.0)
+    analyser = MusicAnalyser(
+        sample_rate=44100, buffer_size=256, handler=handler, clock=clock, settings=lambda: settings
+    )
+    analyser._rhythm = _FakeRhythm()
+    silent = np.zeros(256, dtype=np.float32)
+    for _ in range(round(4.0 * 44100 / 256)):
+        await analyser.analyse(silent)
+    assert handler.silences == 0
+    settings = ShowSettings(digital_silence_seconds=0.5)
+    await analyser.analyse(silent)
+    assert handler.silences == 1
+
+
 async def test_the_note_event_follows_the_beat_stream():
     class _Recorder(_StubHandler):
         def __init__(self):

@@ -63,6 +63,11 @@ STROBE_BURST_SECONDS = 1.0
 STROBE_COOLDOWN_SECONDS = 60.0
 CROSSFADE_BEATS = 1.0
 MAX_STROBE_COOLDOWN_SECONDS = 600.0
+# Exact zeros this long mean the player stopped, not a quiet passage. Long
+# enough to ride over a gapless track change; raise it for a track whose
+# break is true digital silence.
+DIGITAL_SILENCE_SECONDS = 2.0
+MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
 
 SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
@@ -71,6 +76,7 @@ SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'strobe_burst_seconds': (0.1, STROBE_MAX_BURST_SECONDS),
     'crossfade_beats': (0.25, MAX_CROSSFADE_BEATS),
     'quiet_brightness': (0.0, 1.0),
+    'digital_silence_seconds': (0.5, MAX_DIGITAL_SILENCE_SECONDS),
 }
 
 
@@ -82,6 +88,7 @@ class ShowSettings:
     strobe_burst_seconds: float = STROBE_BURST_SECONDS
     crossfade_beats: float = CROSSFADE_BEATS
     quiet_brightness: float = QUIET_BRIGHTNESS
+    digital_silence_seconds: float = DIGITAL_SILENCE_SECONDS
 
     def __post_init__(self):
         for name, (low, high) in SHOW_SETTING_RANGES.items():

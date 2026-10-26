@@ -86,6 +86,10 @@ INTENT_CONFIG = {
         'primary': '#b71c1c',
         'label': 'DROP',
     },
+    'standby': {
+        'primary': '#8d6e63',
+        'label': 'STANDBY',
+    },
 }
 
 _DEFAULT_CONFIG = {
@@ -523,6 +527,7 @@ SETTING_LABELS = {
     'strobe_burst_seconds': 'Strobe burst (s)',
     'crossfade_beats': 'Crossfade (beats)',
     'quiet_brightness': 'Quiet brightness',
+    'digital_silence_seconds': 'Standby after silence (s)',
 }
 
 

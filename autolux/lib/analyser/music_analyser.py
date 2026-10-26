@@ -7,6 +7,8 @@ from autolux.lib.analyser.drift_watchdog import DriftWatchdog
 from autolux.lib.analyser.madmom_rhythm import MadmomRhythm
 from autolux.lib.analyser.music_analyser_handler import IMusicAnalyserHandler
 from autolux.lib.clock import Clock, SYSTEM_CLOCK
+from autolux.lib.engine.effect_definitions import ShowSettings
+from collections.abc import Callable
 
 _BPM_BEAT_WINDOW = 9
 _BPM_FOLD_MIN = 85.0
@@ -21,11 +23,6 @@ _SILENCE_RMS = 1.5e-4
 
 _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
 
-# Exact zeros mean the source stopped (a player's stop or pause), not a quiet
-# passage; any dither or noise keeps the show running. Long enough to ride over
-# a gapless player's track change, which can emit a short run of zeros.
-DIGITAL_SILENCE_STANDBY_SEC = 2.0
-
 
 class MusicAnalyser:
     def __init__(
@@ -36,8 +33,11 @@ class MusicAnalyser:
         clock: Clock = SYSTEM_CLOCK,
         note_clicks: bool = False,
         watchdog: DriftWatchdog | None = None,
+        settings: Callable[[], ShowSettings] = ShowSettings,
     ):
         self._clock: Clock = clock
+        # Read at use so a dashboard edit applies to the next silence.
+        self._settings = settings
         self.sample_rate: int = sample_rate
         self.buffer_size: int = buffer_size
         self.handler: IMusicAnalyserHandler = handler
@@ -178,13 +178,14 @@ class MusicAnalyser:
                 self._leave_standby()
             return False
         self._digital_silence_samples += len(audio_signal)
-        threshold = DIGITAL_SILENCE_STANDBY_SEC * self.sample_rate
+        threshold = self._settings().digital_silence_seconds * self.sample_rate
         if not self.in_standby and self._digital_silence_samples >= threshold:
             self._enter_standby()
         return self.in_standby
 
     def _enter_standby(self) -> None:
-        logging.info(f'[rhythm] {DIGITAL_SILENCE_STANDBY_SEC:.1f}s of digital silence — standby')
+        seconds = self._digital_silence_samples / self.sample_rate
+        logging.info(f'[rhythm] {seconds:.1f}s of digital silence — standby')
         self.in_standby = True
         self._on_sound_stop()
         self.handler.on_digital_silence()

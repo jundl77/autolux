@@ -1434,6 +1434,7 @@ async def test_show_control_settings_survive_a_restart_and_apply_without_one(tmp
         {'crossfade_beats': 0},
         {'strobe_burst_seconds': True},
         {'drop_strobe_cooldown_seconds': float('nan')},
+        {'digital_silence_seconds': 0.1},
         {'unknown': 1},
     ],
 )

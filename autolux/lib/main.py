@@ -192,6 +192,7 @@ class AutoluxController:
             self.light_engine,
             note_clicks=debug_mode,
             watchdog=self.drift_watchdog,
+            settings=lambda: self.control.settings,
         )
         self.light_engine.set_analyser(self.music_analyser)
 
