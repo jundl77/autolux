@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections import deque
 from collections.abc import Callable
@@ -17,7 +18,7 @@ from autolux.lib.engine.autoloop_policy import (
     loudness_trend,
 )
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
-from autolux.lib.engine.effect_controller import EffectController
+from autolux.lib.engine.effect_controller import OPERATOR_FADE_SECONDS, EffectController
 from autolux.lib.engine.effect_definitions import (
     BEAT_LOSS_SECONDS,
     QUIET_HOLD_SECONDS,
@@ -43,7 +44,6 @@ _LATENCY_LOG_STEP_SEC = 0.25
 _SHED_PUBLISH_SEC = 1.0
 COLD_START_FLOOR_MARGIN_SEC = 4.0
 BRIGHTNESS_FADE_SECONDS = 1.0
-OPERATOR_FADE_SECONDS = 0.1
 FALLBACK_BAR_SECONDS = BEATS_PER_BAR * 60.0 / 128.0
 BUILD_INTENTS = (LightIntent.BREAKDOWN, LightIntent.BUILDUP)
 OUTRO_LABELS = ('outro', 'altoutro')
@@ -232,7 +232,20 @@ class LightEngine(IMusicAnalyserHandler):
         self.send_intensity()
 
     def send_intensity(self) -> None:
-        self.lighting_client.set_intensity(self._settings().intensity)
+        level = self._settings().intensity
+        LOGGER.info('[engine] intensity %.2f sent to Starfire', level)
+        self.lighting_client.set_intensity(level)
+
+    def intensity_changed(self) -> None:
+        self.send_intensity()
+        if self._holding() or self._showing_standby or self._entered_intent is None:
+            return
+        context = self._selection_context(
+            self._entered_intent, self._entered_label, self._clock.monotonic()
+        )
+        self.effect_controller.cap_energy(
+            dataclasses.replace(context, new_track=False), self._published_bpm.get('last')
+        )
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
         quiet = self._room_quiet and not self._static_mode
