@@ -501,7 +501,7 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
 }
 
 #[test]
-fn an_omitted_transition_uses_the_default_and_an_empty_one_cuts() {
+fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_an_empty_one_cuts() {
     use wire::{ParameterType as Kind, parameter::Value};
     let mut engine = engine();
     apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
@@ -529,15 +529,17 @@ fn an_omitted_transition_uses_the_default_and_an_empty_one_cuts() {
     .unwrap();
     apply_command(&mut defaulted, 0.0, &play("drop", "kick")).unwrap();
     let faded = defaulted.render_at(0.0).unwrap();
-    assert_eq!(
-        faded.fixture_properties_before_strobe,
-        before.fixture_properties_before_strobe
-    );
+    let cut = cutting.render_at(0.0).unwrap();
+    let mut expected = before.fixture_properties_before_strobe.clone();
+    for (id, state) in &mut expected {
+        state
+            .attributes
+            .clone_from(&cut.fixture_properties_before_strobe[id].attributes);
+    }
+    assert!(expected.values().any(|state| !state.attributes.is_empty()));
+    assert_eq!(faded.fixture_properties_before_strobe, expected);
     assert_ne!(
-        cutting
-            .render_at(0.0)
-            .unwrap()
-            .fixture_properties_before_strobe,
+        cut.fixture_properties_before_strobe,
         before.fixture_properties_before_strobe
     );
 }

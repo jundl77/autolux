@@ -421,7 +421,7 @@ fn login_probes_every_script_without_output_and_uses_initial_parameters() {
     let mut renderer = Renderer::start();
     for source in [
         "this is not Lua",
-        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.group('missing'), 1)} end}",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.fixture('missing'), 1)} end}",
         "return {render=function(ctx) error('invalid supplied script') end}",
     ] {
         let mut login = renderer.login.clone();

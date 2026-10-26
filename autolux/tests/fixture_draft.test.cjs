@@ -88,7 +88,7 @@ test("library adds create spec-complete fixtures and embed their GDTF", () => {
             assert.ok(child(node, tag), tag);
         }
     }
-    assert.deepEqual(plain(created.map((node) => child(node, "FixtureIDNumeric").text)), ["15", "16"]);
+    assert.deepEqual(plain(created.map((node) => child(node, "FixtureIDNumeric").text)), ["16", "17"]);
     assert.ok(added.gdtf[spec]);
     const rows = model.fixtureRows(added, settings).filter((row) => row.spec === spec);
     assert.deepEqual(plain(rows.map((row) => row.address)), [25, 26]);

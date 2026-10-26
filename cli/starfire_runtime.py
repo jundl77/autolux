@@ -99,6 +99,9 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
     if missing_autoloops:
         names = ', '.join(f'{bank}/{autoloop}' for bank, autoloop in sorted(missing_autoloops))
         raise RuntimeError(f'Starfire is missing Autolux autoloops: {names}')
+    missing_groups = report.get('missing_groups')
+    if missing_groups:
+        logging.warning('[prod] Starfire groups not in this rig: %s', ', '.join(missing_groups))
     try:
         read_autoloop_meta(autoloops)
     except AutoloopMetaError as error:

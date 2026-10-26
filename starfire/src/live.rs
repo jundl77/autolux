@@ -18,7 +18,7 @@ use crate::protocol::{
     ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message, read_control,
     wire, write_event,
 };
-use crate::script::AutoloopCatalog;
+use crate::script::{AutoloopCatalog, missing_groups_warning};
 
 const MAX_QUEUED_CONTROLS: usize = 1024;
 const MAX_CONTROLS_PER_FRAME: usize = 32;
@@ -162,6 +162,9 @@ impl LiveSession {
         }
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
         let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
+        if let Some(warning) = missing_groups_warning(&catalog.groups_missing_from(&rig)) {
+            eprintln!("starfire: warning: {warning}");
+        }
         let autoloops = catalog.list();
         let mut probe = Engine::new(rig.clone(), catalog.clone())?;
         for parameter in &login.parameters {

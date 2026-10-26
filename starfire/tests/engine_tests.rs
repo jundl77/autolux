@@ -1252,3 +1252,89 @@ fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
     near(rate(&mut engine, 1.0), 0.0);
     near(rate(&mut engine, 5.0), 0.0);
 }
+
+fn room_engine(scripts: &[(&str, &str)]) -> Engine {
+    let directory = tempfile::tempdir().unwrap();
+    fs::create_dir(directory.path().join("test")).unwrap();
+    for (name, source) in scripts {
+        fs::write(
+            directory.path().join("test").join(format!("{name}.lua")),
+            source,
+        )
+        .unwrap();
+    }
+    let catalog = AutoloopCatalog::load(directory.path()).unwrap();
+    let mut engine = Engine::new(support::room(), catalog).unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::Beat {
+                beat_index: 0,
+                bar_phase: None,
+                beats_per_bar: 4,
+                bpm: 120.0,
+            },
+        )
+        .unwrap();
+    engine
+}
+
+#[test]
+fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
+    use starfire::model::AttributeValue;
+    let mut engine = room_engine(&[
+        ("empty", "return {render=function(ctx) return {} end}"),
+        (
+            "still",
+            "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
+        ),
+        (
+            "spin",
+            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
+        ),
+    ]);
+    let red = AttributeValue::Preset("Red".into());
+    select(&mut engine, 0.0, "empty", Transition::Cut);
+    select(
+        &mut engine,
+        0.0,
+        "spin",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    for time in [0.0, 1.0, 1.9] {
+        let attributes = &engine
+            .render_at(time)
+            .unwrap()
+            .fixture_properties_before_strobe["kinta"]
+            .attributes;
+        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        assert_eq!(
+            attributes.get("Effects1PosRotate"),
+            Some(&AttributeValue::Number(160.0)),
+            "{time}"
+        );
+    }
+    select(&mut engine, 2.0, "still", Transition::Cut);
+    select(
+        &mut engine,
+        2.0,
+        "spin",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    for (time, expected) in [(2.0, 0.0), (3.0, 80.0), (4.0, 160.0)] {
+        let attributes = &engine
+            .render_at(time)
+            .unwrap()
+            .fixture_properties_before_strobe["kinta"]
+            .attributes;
+        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        let AttributeValue::Number(rotation) = attributes["Effects1PosRotate"] else {
+            panic!("{time}: {attributes:?}");
+        };
+        assert!((rotation - expected).abs() < 1e-9, "{time}: {rotation}");
+    }
+}

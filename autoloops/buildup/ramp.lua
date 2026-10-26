@@ -10,6 +10,9 @@ local CHASE_DOUBLING_BEATS = 32
 local CHASE_TAIL_PIXELS = 2
 local CENTRE_PAN, TILT = 0.5, 0.6
 local START_SWING, END_SWING = 0.2, 0.02
+local FX = sf.group("fx")
+local FX_COLOUR = "Yellow"
+local FX_MOTOR_START, FX_MOTOR_END = 40, 220
 
 return {
     render = function(ctx)
@@ -34,6 +37,8 @@ return {
                 local lit = math.max(0, 1 - behind / CHASE_TAIL_PIXELS)
                 return sf.dimmer(pixel, sf.lerp(0.3, 1, drive) * gain * lit)
             end),
+            sf.channel_preset(FX, "Color1", FX_COLOUR),
+            sf.physical_attribute(FX, "Effects1PosRotate", sf.lerp(FX_MOTOR_START, FX_MOTOR_END, ramp)),
             sf.colour(sf.group("movers"), palette.cold),
             sf.dimmer(sf.group("movers"), sf.lerp(0.3, 0.8, drive) * gain),
             sf.each(sf.group("movers"), function(mover, index)

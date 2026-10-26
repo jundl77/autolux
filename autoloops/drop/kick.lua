@@ -10,6 +10,9 @@ local FLOOR_QUIET, FLOOR_LOUD = 0.05, 0.3
 local STRIP_LEVEL, MOVER_LEVEL = 0.8, 0.9
 local CENTRE_PAN = 0.5
 local POSITIONS = { { pan_offset = 0.12, tilt = 0.55 }, { pan_offset = -0.06, tilt = 0.7 } }
+local FX = sf.group("fx")
+local FX_COLOURS = { "Red", "Yellow", "Magenta", "White" }
+local FX_MOTOR = 160
 
 return {
     render = function(ctx)
@@ -25,6 +28,8 @@ return {
             sf.dimmer(sf.group("wash"), sf.lerp(floor, 1, sf.on_beat(beat, KICK_WIDTH_BEATS)) * gain),
             sf.colour(sf.group("strip"), half_bar % 2 == 0 and palette.accent or palette.primary),
             sf.dimmer(sf.group("strip"), STRIP_LEVEL * gain),
+            sf.channel_preset(FX, "Color1", FX_COLOURS[math.floor(beat) % #FX_COLOURS + 1]),
+            sf.physical_attribute(FX, "Effects1PosRotate", FX_MOTOR),
             sf.colour(sf.group("movers"), palette.primary),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * gain),
             sf.each(sf.group("movers"), function(mover, index)
