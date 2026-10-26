@@ -74,9 +74,11 @@ class LightEngine(IMusicAnalyserHandler):
         watchdog=None,
         clock: Clock = SYSTEM_CLOCK,
         settings: Callable[[], ShowSettings] = ShowSettings,
+        silence_monitor: Callable[[], None] | None = None,
         static_rig: StaticRig = StaticRig(),
     ):
         self.lighting_client = lighting_client
+        self._silence_monitor = silence_monitor
         self._settings = settings
         self.effect_controller: EffectController = effect_controller
         self.command_queue: DelayedCommandQueue | None = command_queue
@@ -344,50 +346,33 @@ class LightEngine(IMusicAnalyserHandler):
 
     def on_digital_silence(self):
         LOGGER.info(
-            '[engine] digital silence — standby; the room hears the buffered tail, '
-            'then the standby look'
+            '[engine] digital silence — standby; the delayed audio and commands are dropped'
         )
-        now = self._clock.monotonic()
-        silence_seconds = self._settings().digital_silence_seconds
-        stopped_at, song_sec = self._pending_silence or (
-            now - silence_seconds,
-            None if self.event_buffer is None else self.event_buffer.elapsed() - silence_seconds,
-        )
-        bpm = self._published_bpm.get('last')
         self._standby = True
+        if self.command_queue:
+            self.command_queue.clear()
+        self.lighting_client.discard_delayed_audio()
+        if self._silence_monitor is not None:
+            self._silence_monitor()
         self._source_playing = False
         self._pending_silence = None
         self._room_start_monotonic_seconds = None
+        self._pending_intents.clear()
+        self._forget_room_look()
         self._quiet_since = None
         self._source_quiet = False
-        self._committed = None
-        self._publish_decoder_state(None)
-
-        def standby():
-            self._show_standby(bpm, song_sec)
-
-        if self.command_queue:
-
-            async def command():
-                standby()
-
-            self.command_queue.schedule(
-                'sound',
-                command,
-                delay_sec=max(0.0, stopped_at + self.command_queue.delay_sec - now),
-            )
-        else:
-            standby()
-
-    def _show_standby(self, bpm: float | None, song_sec: float | None) -> None:
-        LOGGER.info('[engine] the room reached the silence — standby look')
-        self._forget_room_look()
         self._room_quiet = False
         self._showing_standby = True
         self._send_brightness()
+        self._committed = None
+        self._publish_decoder_state(None)
         if self.event_buffer is not None:
-            self.event_buffer.set_intent(STANDBY_INTENT, song_sec=song_sec, trigger=SILENCE_TRIGGER)
-        self.effect_controller.enter_standby(bpm, renderer_paused=self._paused)
+            self.event_buffer.set_intent(
+                STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
+            )
+        self.effect_controller.enter_standby(
+            self._published_bpm.get('last'), renderer_paused=self._paused
+        )
         if self._static_mode:
             self.static_looks.resend()
 

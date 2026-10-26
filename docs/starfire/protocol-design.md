@@ -14,10 +14,9 @@ Only top-level wire messages have direction annotations.
 | `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
-`DiscardDelayedAudio` is the one transport command: the embedded Radius TX silences the
-audio it holds for the playback delay instead of playing it out. Autolux no longer sends it
-when the source goes digitally silent; the silence travels down the delay line so the room
-hears a song's full tail. Lighting is unaffected; Art-Net output ignores it.
+`DiscardDelayedAudio` is the one transport command: when the source stops, the embedded
+Radius TX silences the audio it holds for the playback delay instead of playing it out.
+Lighting is unaffected; Art-Net output ignores it.
 
 Each `Parameter` contains a defined enum type and a number or boolean value.
 It is shared by Login's initial settings and runtime updates.
