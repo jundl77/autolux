@@ -761,7 +761,7 @@ def test_every_intent_variant_reads_as_its_base_palette_with_its_swatches(report
     assert 'techno' in value
 
 
-def test_the_status_line_reads_health_track_autoloop_colors_tempo_render():
+def test_the_status_line_reads_health_track_autoloop_colors_bpm_render_fps():
     from autolux.simulate.visualizer_app import MEDIA_SESSION_SOURCE, _build_show_status
 
     track = {'source': MEDIA_SESSION_SOURCE, 'title': 'Windowlicker', 'artist': 'Aphex Twin'}
@@ -770,6 +770,27 @@ def test_the_status_line_reads_health_track_autoloop_colors_tempo_render():
         for snapshot in ({'track': track, 'special': 'sparkle'}, {})
     ]
     assert captions == [
-        ['Health', 'Track', 'Autoloop', 'Colors', 'Fx', 'Tempo', 'Render'],
-        ['Health', 'Autoloop', 'Colors', 'Tempo', 'Render'],
+        ['Health', 'Track', 'Autoloop', 'Colors', 'Fx', 'BPM', 'Render FPS'],
+        ['Health', 'Autoloop', 'Colors', 'BPM', 'Render FPS'],
     ]
+
+
+def test_the_render_rate_is_measured_over_the_window_and_names_missed_frames():
+    from autolux.simulate.visualizer_app import render_rate_text, render_window
+
+    def sample(at, rendered, missed):
+        return {
+            'at': at,
+            'starfire_measured_render_frames_per_second': rendered,
+            'starfire_missed_render_deadlines_per_second': missed,
+        }
+
+    steady = [sample(at, 40.0, 0.0) for at in range(100, 106)]
+    assert render_rate_text(*render_window(steady, now=105.5)) == '40.0 fps'
+    # A late frame loop renders fewer than 40 per second and counts the skipped slots.
+    rough = [sample(100, 40.0, 0.0), *(sample(at, 38.6, 1.4) for at in range(101, 104))]
+    rough += [sample(104, 40.0, 0.0), sample(105, 40.0, 0.0)]
+    fps, missed = render_window(rough, now=105.2)
+    assert render_rate_text(fps, missed) == '39.3 fps · 3 missed'
+    assert render_window([], now=0.0) == (None, 0)
+    assert render_rate_text(*render_window(steady, now=200.0)) == '— fps'

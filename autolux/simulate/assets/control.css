@@ -38,6 +38,17 @@
                color: var(--text); font-size: 14px;
                --line: #273344; --muted: #8293a6; --text: #e6edf3; }
 .status-tag { color: var(--muted); font-size: 11px; }
+.status-track { grid-column: span 2; }
+.marquee { display: inline-flex; gap: 48px; animation: marquee linear infinite; }
+@keyframes marquee {
+    0%, 12% { transform: translateX(0); }
+    100% { transform: translateX(calc(-50% - 24px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .marquee { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; animation: none; }
+    .marquee > span + span { display: none; }
+}
 .status-item .dot + .dot { margin-left: -4px; }
 .status-item { display: grid; gap: 4px; min-width: 0; }
 .status-item .status-text { display: flex; align-items: center; gap: 8px; white-space: nowrap;

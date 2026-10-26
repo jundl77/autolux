@@ -515,15 +515,44 @@ def _health(snapshot: dict) -> str:
     return health
 
 
-def _status_item(caption: str, value, **props):
+def _status_item(caption: str, value, className='status-item', **props):
     return html.Div(
         [html.Span(caption, className='control-label'), html.Span(value, className='status-text')],
-        className='status-item',
+        className=className,
         **props,
     )
 
 
-TRACK_TITLE_CHARS = 28
+TRACK_TITLE_CHARS = 40
+TRACK_MARQUEE_SECONDS_PER_CHAR = 0.3
+RENDER_WINDOW_SECONDS = 5.0
+RENDERED_RATE = 'starfire_measured_render_frames_per_second'
+MISSED_RATE = 'starfire_missed_render_deadlines_per_second'
+
+
+def render_window(history: list, now: float) -> tuple[float | None, int]:
+    """Rendered frames per second and missed deadlines over the last few seconds of samples."""
+    if not history or not 0 <= now - history[-1]['at'] < TELEMETRY_STALE_SECONDS:
+        return None, 0
+    recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
+    span = frames = missed = 0.0
+    for before, sample in zip(recent, recent[1:]):
+        interval = sample['at'] - before['at']
+        rendered, skipped = sample.get(RENDERED_RATE), sample.get(MISSED_RATE)
+        if interval > 0 and finite(rendered) and finite(skipped):
+            span += interval
+            frames += rendered * interval
+            missed += skipped * interval
+    if span == 0:
+        rendered = history[-1].get(RENDERED_RATE)
+        return (rendered if finite(rendered) else None), 0
+    return frames / span, round(missed)
+
+
+def render_rate_text(fps: float | None, missed: int) -> str:
+    if fps is None:
+        return '— fps'
+    return f'{fps:.1f} fps' + (f' · {missed} missed' if missed else '')
 
 
 def _track_status(snapshot: dict) -> list:
@@ -531,15 +560,18 @@ def _track_status(snapshot: dict) -> list:
     title = track.get('title')
     if track.get('source') != MEDIA_SESSION_SOURCE or not title:
         return []
-    shown = title if len(title) <= TRACK_TITLE_CHARS else title[: TRACK_TITLE_CHARS - 1] + '…'
     artist = track.get('artist')
-    return [
-        _status_item(
-            'Track',
-            f'{artist} – {shown}' if artist else shown,
-            title=f'{artist} – {title}' if artist else title,
+    text = f'{artist} – {title}' if artist else title
+    if len(text) <= TRACK_TITLE_CHARS:
+        value = text
+    else:
+        # Two copies scroll by half their width, so the loop has no seam.
+        value = html.Span(
+            [html.Span(text), html.Span(text, **{'aria-hidden': 'true'})],
+            className='marquee',
+            style={'animationDuration': f'{len(text) * TRACK_MARQUEE_SECONDS_PER_CHAR:.1f}s'},
         )
-    ]
+    return [_status_item('Track', value, className='status-item status-track')]
 
 
 def _build_show_status(snapshot: dict, now: float) -> list:
@@ -554,7 +586,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
     palette = snapshot.get('palette') or {}
     bpm = _room_bpm(snapshot)
     health = _health(snapshot)
-    fps = _latest_telemetry(snapshot, now).get('starfire_measured_render_frames_per_second')
+    fps, missed = render_window(snapshot.get('system_history') or [], now)
     palette_name = palette.get('name')
     items = [
         _status_item(
@@ -589,8 +621,8 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             _status_item('Fx', special.get('name', '—') if isinstance(special, dict) else special)
         )
     items += [
-        _status_item('Tempo', f'{bpm:.0f} BPM' if bpm else '— BPM'),
-        _status_item('Render', f'{fps:.0f} fps' if finite(fps) else '— fps'),
+        _status_item('BPM', f'{bpm:.0f} BPM' if bpm else '— BPM'),
+        _status_item('Render FPS', render_rate_text(fps, missed)),
     ]
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
