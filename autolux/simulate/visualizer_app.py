@@ -598,6 +598,8 @@ SETTINGS_GROUPS = (
 SETTINGS_GROUPS_STORAGE_KEY = 'autolux.settings-groups'
 SETTING_IDS = {f'control-{name}': name for name in SHOW_SETTING_RANGES}
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
+NEEDS_A_NUMBER = '{label} needs a number'
+NOT_A_NUMBER = '{label}: "{raw}" is not a number'
 LIVE_BRIGHTNESS_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
 CONTROL_EXPECT_SECONDS = 2.0
@@ -649,9 +651,9 @@ def setting_text(name: str, value: float) -> str:
 def parse_decimal(name: str, raw) -> float:
     text = '' if raw is None else str(raw).strip().replace(',', '.')
     if not text:
-        raise ValueError(f'{SETTING_LABELS[name]} needs a number')
+        raise ValueError(NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]))
     if not PLAIN_DECIMAL_TEXT.fullmatch(text):
-        raise ValueError(f'{SETTING_LABELS[name]}: "{raw}" is not a number')
+        raise ValueError(NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw=raw))
     return round(float(text) / 100, 6) if name in PERCENT_SETTINGS else float(text)
 
 
@@ -794,22 +796,31 @@ def _register_settings_drawer(app) -> None:
         return [settings_group_summary(group.names, state['settings']) for group in SETTINGS_GROUPS]
 
     limits = [
-        [setting_text(name, low), setting_text(name, high), SETTING_DISPLAY[name][1]]
+        [
+            setting_text(name, low),
+            setting_text(name, high),
+            SETTING_DISPLAY[name][1],
+            NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]),
+            NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw='{raw}'),
+        ]
         for name, (low, high) in SHOW_SETTING_RANGES.items()
     ]
     app.clientside_callback(
         r'''function(...values) {
+            const decimal = new RegExp('^(?:' + '''
+        + json.dumps(PLAIN_DECIMAL_TEXT.pattern)
+        + r''' + ')$');
             return '''
         + json.dumps(limits)
-        + r'''.map(([low, high, unit], index) => {
+        + r'''.map(([low, high, unit, needs, notNumber], index) => {
                 const raw = values[index];
                 const text = raw === null || raw === undefined
                     ? '' : String(raw).trim().replace(',', '.');
                 if (!text) {
-                    return 'Needs a number';
+                    return 'Rejected: ' + needs;
                 }
-                if (!/^-?(\d+\.?\d*|\.\d+)$/.test(text)) {
-                    return '"' + raw + '" is not a number';
+                if (!decimal.test(text)) {
+                    return 'Rejected: ' + notNumber.replace('{raw}', raw);
                 }
                 const value = parseFloat(text);
                 if (value < parseFloat(low) || value > parseFloat(high)) {
