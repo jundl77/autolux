@@ -8,6 +8,7 @@ from pathlib import Path
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.engine.autoloop_policy import DEFAULT_AUTOLOOP_META, AutoloopMetaTable
 from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS, AutoloopTable, ShowSettings
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
@@ -114,6 +115,8 @@ class AutoluxController:
         fixture_setup: dict | None = None,
         show_config_path: Path = SHOW_CONFIG_PATH,
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
+        autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
+        selection_seed: int = 0,
     ):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.clients.pyaudio_client import PyAudioClient
@@ -171,6 +174,8 @@ class AutoluxController:
             event_buffer=self.event_buffer,
             settings=lambda: self.control.settings,
             autoloops=autoloops,
+            autoloop_meta=autoloop_meta,
+            seed=selection_seed,
         )
         self.light_engine: LightEngine = LightEngine(
             self.lighting_client,

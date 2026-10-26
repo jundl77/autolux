@@ -15,6 +15,7 @@ from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
     LightIntent,
+    intent_for_class,
 )
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
@@ -1442,3 +1443,53 @@ def test_invalid_show_settings_are_refused(bad):
 
     with pytest.raises(ValueError):
         ShowSettings.from_dict(bad)
+
+
+class SelectionSpy(EffectController):
+    def __init__(self, lighting):
+        super().__init__(lighting)
+        self.contexts = []
+
+    async def change_effect(self, intent, bpm=None, context=None):
+        self.contexts.append(context)
+        await super().change_effect(intent, bpm, context)
+
+
+async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tracks():
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock)
+    spy = SelectionSpy(lighting)
+    light = LightEngine(lighting, spy, None, clock=clock)
+    light.set_analyser(FakeAnalyser())
+    light._source_playing = light._room_playing = True
+    light._room_start_monotonic_seconds = clock.monotonic()
+    bar = 4 * 60.0 / 128.0
+
+    async def section(label, bars, rms=0.1):
+        await light._commit_intent(intent_for_class(label), 0.0, section_label=label)
+        light.analyser.rms = rms
+        for _ in range(bars * 4):
+            await light.on_beat(1, 128.0, False)
+            clock.advance(bar / 4)
+
+    await section('intro', 4, rms=0.01)
+    await section('altintro', 4)
+    await section('breakdown', 8)
+    await section('buildup', 24)
+    await section('drop', 16)
+    await section('outro', 4)
+    await section('intro', 4)
+    intro, altintro, breakdown, buildup, drop, outro, next_intro = spy.contexts
+    assert intro.new_track and not altintro.new_track and not breakdown.new_track
+    assert breakdown.loudness == 'rising' and drop.loudness == 'flat'
+    assert buildup.build_bars == pytest.approx(8)
+    assert drop.build_bars == pytest.approx(32)
+    assert drop.seconds_since_drop is None
+    assert outro.seconds_since_drop == pytest.approx(16 * bar)
+    assert outro.build_bars == 0
+    assert outro.new_track and next_intro.new_track
+
+    light._show_sound_stop()
+    light._room_playing = True
+    await section('drop', 1)
+    assert spy.contexts[-1].new_track
