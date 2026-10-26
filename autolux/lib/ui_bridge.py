@@ -25,7 +25,7 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
-# The engine loop takes commands every audio buffer (~6 ms); longer means the loop is stalled.
+# The engine takes commands every Starfire frame (25 ms); ten frames means its loop is stalled.
 HANDOFF_TIMEOUT_SEC = 0.25
 CORS_MAX_AGE_SEC = 600
 HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
@@ -222,7 +222,6 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404 if self.path != CONTROL_PATH else 403)
             return
         self.send_response(204)
-        self._cors_headers()
         self.send_header('Access-Control-Allow-Methods', 'POST')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Access-Control-Max-Age', str(CORS_MAX_AGE_SEC))
@@ -271,15 +270,19 @@ class _Handler(BaseHTTPRequestHandler):
     def _cross_origin(self) -> bool:
         return _dashboard_origin(self.headers.get('Origin'), self.server.dashboard_port)
 
+    def send_response(self, code: int, message: str | None = None) -> None:
+        super().send_response(code, message)
+        # Every reply, errors included: without these the page sees a network error, not the status.
+        self._cors_headers()
+
     def _cors_headers(self) -> None:
-        if self._cross_origin():
+        if getattr(self, 'headers', None) is not None and self._cross_origin():
             self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
             self.send_header('Vary', 'Origin')
 
     def _reply(self, status: int, body: dict) -> None:
         content = json.dumps(body).encode()
         self.send_response(status)
-        self._cors_headers()
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(content)))
         self.end_headers()

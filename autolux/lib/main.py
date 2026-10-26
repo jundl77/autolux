@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import datetime
 import json
@@ -29,6 +30,8 @@ _UI_ONLY_WINDOW_SEC = 60.0
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16
 SETTINGS_SAVE_SETTLE_SECONDS = 1.0
+# One Starfire frame at 40 Hz: draining operator commands faster cannot reach the rig sooner.
+STARFIRE_FRAME_PERIOD_SEC = 1.0 / 40.0
 
 
 def load_show_settings(path: Path) -> ShowSettings:
@@ -311,16 +314,29 @@ class AutoluxController:
         LOGGER.info("[main] Autolux is ready, starting")
         self.control.start(self.light_engine)
 
+        self._monitor.arm()
+        drain = asyncio.create_task(self._drain_operator_commands())
+        try:
+            await self._play(drain)
+        finally:
+            drain.cancel()
+
+    async def _drain_operator_commands(self) -> None:
+        while True:
+            await asyncio.sleep(STARFIRE_FRAME_PERIOD_SEC)
+            await self.control.apply_pending(self.light_engine)
+
+    async def _play(self, drain: asyncio.Task) -> None:
         last_100ms_callback_execution: datetime.datetime = datetime.datetime.now()
         last_1sec_callback_execution: datetime.datetime = datetime.datetime.now()
         last_10sec_callback_execution: datetime.datetime = datetime.datetime.now()
-        self._monitor.arm()
-
         while self.is_running:
             now = datetime.datetime.now()
             audio_signal = self.audio_client.read()
-            # Every audio buffer (~6 ms), not the 100 ms tick: operator actions apply on the next frame.
-            await self.control.apply_pending(self.light_engine)
+            # The blocking read never yields; this lets the drain task run once its period is up.
+            await asyncio.sleep(0)
+            if drain.done():
+                drain.result()  # Surfaces a failed operator command instead of silently ignoring clicks.
             await self.light_engine.on_audio(audio_signal)
             new_audio_signal = await self.music_analyser.analyse(audio_signal)
             await self.command_queue.drain()
