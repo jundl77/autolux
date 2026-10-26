@@ -1,3 +1,5 @@
+mod support;
+
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::gdtf::GdtfProfile;
@@ -846,12 +848,25 @@ fn unrelated_cells_keep_independent_brightness_and_blackout() {
 }
 
 #[test]
-fn unused_catalogue_profiles_do_not_block_an_independent_rig() {
-    let rig = r#"{"schema_version":1,"fixtures":[{"id":"fog","profile":"used","universe":0,"address":1}]}"#;
-    let profiles = serde_json::json!({"schema_version":1,"profiles":{
-        "used":{"gdtf_xml":description(&channel("Fog1","Base","1", &function("Fog1",""))),"dmx_mode":"Control"},
-        "unused":{"gdtf_xml":"invalid until selected","dmx_mode":"Control"}
-    }});
-    let parsed = FixtureRig::from_json_with_profiles(rig, &profiles.to_string()).unwrap();
+fn unreferenced_gdtf_files_in_the_archive_do_not_block_an_independent_rig() {
+    let used = description(&channel("Fog1", "Base", "1", &function("Fog1", "")));
+    let scene = r#"<GeneralSceneDescription verMajor="1" verMinor="6"><Scene><Layers>
+        <Layer uuid="00000000-0000-4000-A000-000000000001"><ChildList>
+        <Fixture name="fog" uuid="00000000-0000-4000-9000-000000000001">
+        <GDTFSpec>used.gdtf</GDTFSpec><GDTFMode>Control</GDTFMode>
+        <Addresses><Address>1</Address></Addresses></Fixture>
+        </ChildList></Layer></Layers></Scene></GeneralSceneDescription>"#;
+    let archive = support::zipped(&[
+        ("GeneralSceneDescription.xml", scene.as_bytes()),
+        (
+            "used.gdtf",
+            &support::zipped(&[("description.xml", used.as_bytes())]),
+        ),
+        (
+            "unused.gdtf",
+            &support::zipped(&[("description.xml", b"invalid until selected")]),
+        ),
+    ]);
+    let parsed = FixtureRig::from_mvr(&archive).unwrap();
     assert_eq!(parsed.fixture_ids(), ["fog"]);
 }

@@ -270,7 +270,6 @@ async def _run_session(args, *, checking=False):
             rig,
             args.autoloops,
             expected_universe=tx['dmx_universe'],
-            profiles=args.profiles,
         )
         run_dir = (
             ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
@@ -295,7 +294,6 @@ async def _run_session(args, *, checking=False):
             args.autoloops,
             None,
             run_dir / 'local/starfire',
-            profiles=args.profiles,
             run_id=tx['run_id'],
             radius=radius_output(tx),
             render_core=tx.get('render_core'),

@@ -1,7 +1,8 @@
+mod support;
+
 use std::fs;
 
 use starfire::engine::Engine;
-use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
@@ -35,7 +36,8 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
         .unwrap();
     }
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
-    let mut engine = Engine::new(FixtureRig::from_json(RIG).unwrap(), catalog).unwrap();
+    let rig = support::rig(serde_json::from_str(RIG).unwrap());
+    let mut engine = Engine::new(rig, catalog).unwrap();
     engine
         .apply(
             0.0,

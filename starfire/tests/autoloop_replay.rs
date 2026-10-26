@@ -72,7 +72,7 @@ fn root() -> PathBuf {
 }
 
 fn room() -> FixtureRig {
-    FixtureRig::load(&root().join("../rigs/room.json")).unwrap()
+    FixtureRig::load(&root().join("../rigs/room.mvr")).unwrap()
 }
 
 fn catalog() -> AutoloopCatalog {
@@ -673,7 +673,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
 
 #[test]
 fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
-    let rig = FixtureRig::load(&root().join("../rigs/generic.json")).unwrap();
+    let rig = FixtureRig::load(&root().join("../rigs/generic.mvr")).unwrap();
     for look in looks() {
         let mut replay = replay_for(&look);
         replay.duration_seconds = 8.0;
