@@ -349,7 +349,7 @@ fn run_connected(
     let mut heartbeats_received = 0;
     let mut heartbeats_sent = 0;
     let mut metrics_at = Instant::now() - protocol::METRICS_INTERVAL;
-    let mut reported_realtime_denied = false;
+    let mut reported_priority_denied = false;
     let mut audio_at = None;
     let mut audio_max_gap: f64 = 0.0;
     let mut audio_peak: f32 = 0.0;
@@ -409,11 +409,11 @@ fn run_connected(
                         .is_some_and(|age| age < CALLBACK_STALE_TIMEOUT),
                 "Radius audio output stopped producing callbacks"
             );
-            if stats.realtime_denied != 0 && !reported_realtime_denied {
+            if stats.priority_denied != 0 && !reported_priority_denied {
                 eprintln!(
                     "Radius audio output runs without realtime scheduling; underruns are more likely under load"
                 );
-                reported_realtime_denied = true;
+                reported_priority_denied = true;
             }
         }
         if let Some(dmx) = &dmx {

@@ -232,7 +232,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut light_at = None;
     let mut health_error_at: Option<Instant> = None;
     let mut reported_discontinuities = 0;
-    let mut reported_realtime_denied = false;
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -312,29 +311,19 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             let stats = capture.metrics();
             ensure!(
                 !stats.faulted,
-                "{}",
                 capture_failure(capture.last_error(), &stats)
             );
             if stats.discontinuities != reported_discontinuities
                 && let Some(gap) = stats.last_gap_frames
             {
+                let bridge =
+                    ["filled with silence", "of repeated audio dropped"][usize::from(gap < 0)];
                 eprintln!(
-                    "Radius capture resynchronized after a device discontinuity: {:.1} ms {} ({} total)",
+                    "Radius capture resynchronized after a device discontinuity: {:.1} ms {bridge} ({} total)",
                     gap_seconds(gap).abs() * 1000.0,
-                    if gap >= 0 {
-                        "filled with silence"
-                    } else {
-                        "of repeated audio dropped"
-                    },
                     stats.discontinuities
                 );
                 reported_discontinuities = stats.discontinuities;
-            }
-            if stats.realtime_denied != 0 && !reported_realtime_denied {
-                eprintln!(
-                    "Radius capture runs without realtime scheduling; overruns are more likely under load"
-                );
-                reported_realtime_denied = true;
             }
             ensure!(
                 capture_started.elapsed() < CALLBACK_STALE_TIMEOUT
@@ -403,6 +392,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 tx.capture_overruns_total = stats.device_xruns;
                 tx.capture_discontinuities_total = stats.discontinuities;
                 tx.capture_last_gap_seconds = stats.last_gap_frames.map(gap_seconds);
+                tx.capture_priority_denied = stats.capture_priority_denied;
                 tx.queue_dropped_frames_total = stats.queue_overflow_frames;
             }
             let snapshot = TxSnapshot {
@@ -451,19 +441,9 @@ mod tests {
     #[test]
     fn capture_fault_names_the_discontinuity_limit_and_last_gap() {
         let stats = CaptureMetrics {
-            callbacks: 1,
-            device_frames: 0,
-            queue_overflow_frames: 0,
-            device_xruns: 3,
             discontinuities: 3,
             last_gap_frames: Some(441),
-            resync_silence_frames: 1_323,
-            resync_dropped_frames: 0,
-            stream_errors: 0,
-            realtime_denied: 0,
-            last_callback_age: None,
-            queued_frames: 0,
-            faulted: true,
+            ..Default::default()
         };
         assert_eq!(
             capture_failure(Some("capture discontinuities repeated too often"), &stats),
@@ -473,12 +453,7 @@ mod tests {
                 "RDP audio redirection and receiver connectivity"
             )
         );
-        let unmeasured = CaptureMetrics {
-            last_gap_frames: None,
-            discontinuities: 0,
-            ..stats
-        };
-        assert!(!capture_failure(None, &unmeasured).contains("last gap"));
+        assert!(!capture_failure(None, &CaptureMetrics::default()).contains("last gap"));
     }
 
     #[test]
@@ -502,6 +477,7 @@ mod tests {
         let snapshot = TxSnapshot {
             tx: wire::TxMetrics {
                 heartbeats_sent: u64::MAX,
+                capture_priority_denied: 2,
                 ..Default::default()
             },
             rx: Some(wire::Metrics {
@@ -516,6 +492,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(report["run_id"].as_u64(), Some(u64::MAX));
         assert_eq!(report["tx"]["heartbeats_sent"].as_u64(), Some(u64::MAX));
+        assert_eq!(report["tx"]["capture_priority_denied"].as_u64(), Some(2));
         assert_eq!(report["rx"]["dmx_frames_total"].as_u64(), Some(u64::MAX));
         assert_eq!(report["rx_age_seconds"].as_f64(), Some(0.25));
         assert!(report["timestamp"].as_f64().unwrap() > 0.0);
