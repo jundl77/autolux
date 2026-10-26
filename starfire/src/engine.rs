@@ -22,7 +22,8 @@ const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
 pub const STROBE_GATE_INTENSITY: f64 = 0.3;
-pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.6;
+pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.1;
+pub const FASTEST_LIMITED_RANGE_PER_SECOND: f64 = 2.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -924,7 +925,10 @@ pub fn intensity_strobe_scale(intensity: f64) -> f64 {
 }
 
 pub fn intensity_movement_range_per_second(intensity: f64) -> f64 {
-    SLOWEST_GLIDE_RANGE_PER_SECOND / (1.0 - intensity).powi(2)
+    // Squared so 0.3 and 0.7 read as a slow glide (0.27/s) and a brisk sweep (1.03/s);
+    // the old 1/(1-i)^2 curve let both move faster than the eye tracks.
+    SLOWEST_GLIDE_RANGE_PER_SECOND
+        + (FASTEST_LIMITED_RANGE_PER_SECOND - SLOWEST_GLIDE_RANGE_PER_SECOND) * intensity.powi(2)
 }
 
 fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {
