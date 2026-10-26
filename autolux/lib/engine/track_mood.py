@@ -4,8 +4,27 @@ drive = mean(tempo on TEMPO_RANGE_BPM, level on LEVEL_RANGE)
 weight = mean(level on LEVEL_RANGE, spectral centroid on CENTROID_RANGE_HZ)
 temperature = bass-over-treble balance on BASS_OVER_TREBLE_RANGE_DB
 
-Level is the per-beat normalised RMS the room already receives (-48..-12 dBFS onto 0..1).
-Each reference range maps linearly onto -1..1 and clamps outside it.
+Tempo is the analyser's folded bpm (85..170, so 170+ bpm drum & bass reads as ~85). Level is
+the per-beat normalised RMS the room already receives (-48..-12 dBFS onto 0..1). Each range
+maps linearly onto -1..1 and clamps outside it.
+
+Calibration: tools/track_mood_measures.py over the first 8 bars of 8 eval-set tracks
+(autolux/training/eval_audio; tempo is the labelled bpm, folded, because librosa's tracker
+misread two of them). Raw means:
+
+    track       genre        bpm    level  centroid Hz  bass/treble dB
+    WyETTD0PP0  drum & bass   85.2  0.833  2287          -4.4
+    kjxyhFKv6r  drum & bass  159.9  0.531  1695          -4.8
+    XYrnLI3FFV  techno       128.9  0.606   452          18.2
+    0yMOLeJRKr  tech house   127.0  0.688  4177         -23.2
+    ND8VBV4P7w  trance       138.0  0.934  1790          -9.0
+    wAbGhEja3s  trance       140.8  0.670  1402           4.7
+    7w0BT6RBPp  other        117.0  0.565  1074          12.7
+    g025pLdm4T  trance       134.0  0.621  3678         -15.0
+
+Tempo, level and centroid ranges are the measured span; bass/treble is widened so the tracks
+land at -0.8..+0.8. Tempo and intro level anti-correlate on this set, so drive only spans
+-0.49 (7w0BT6RBPp) .. +0.71 (ND8VBV4P7w), and the first 8 bars are mostly intros.
 """
 
 from __future__ import annotations
@@ -17,10 +36,10 @@ from statistics import fmean, median
 from autolux.lighting.palettes import Mood
 
 MEASURED_BARS = 8
-TEMPO_RANGE_BPM = (100.0, 150.0)
-LEVEL_RANGE = (0.5, 1.0)
-CENTROID_RANGE_HZ = (1000.0, 3500.0)
-BASS_OVER_TREBLE_RANGE_DB = (5.0, 25.0)
+TEMPO_RANGE_BPM = (85.0, 160.0)
+LEVEL_RANGE = (0.53, 0.93)
+CENTROID_RANGE_HZ = (450.0, 4200.0)
+BASS_OVER_TREBLE_RANGE_DB = (-28.0, 23.0)
 
 
 @dataclass(frozen=True)

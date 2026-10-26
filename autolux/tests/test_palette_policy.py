@@ -135,6 +135,19 @@ def beat(bpm, level, centroid_hz, bass_over_treble_db):
     return MeasuredBeat(bpm, level, centroid_hz, bass_over_treble_db)
 
 
+def midpoint(reference):
+    return sum(reference) / 2
+
+
+def middle_beat():
+    return beat(
+        midpoint(TEMPO_RANGE_BPM),
+        midpoint(LEVEL_RANGE),
+        midpoint(CENTROID_RANGE_HZ),
+        midpoint(BASS_OVER_TREBLE_RANGE_DB),
+    )
+
+
 def test_the_reference_ranges_map_their_ends_onto_the_mood_axes():
     hard = beat(
         TEMPO_RANGE_BPM[1], LEVEL_RANGE[1], CENTROID_RANGE_HZ[0], BASS_OVER_TREBLE_RANGE_DB[0]
@@ -142,16 +155,17 @@ def test_the_reference_ranges_map_their_ends_onto_the_mood_axes():
     assert track_mood([hard]) == Mood(temperature=-1.0, weight=0.0, drive=1.0)
     soft = beat(TEMPO_RANGE_BPM[0] - 20, 0.0, CENTROID_RANGE_HZ[1] + 1000, 40.0)
     assert track_mood([soft]) == Mood(temperature=1.0, weight=0.0, drive=-1.0)
-    middle = beat(125.0, 0.75, 2250.0, 15.0)
-    assert track_mood([middle]) == Mood(0.0, 0.0, 0.0)
+    middle = middle_beat()
+    assert track_mood([middle]).axes() == pytest.approx((0.0, 0.0, 0.0))
 
 
 def test_the_meter_measures_only_after_a_start_and_reports_once_the_window_fills():
     meter = TrackMoodMeter(beats_to_measure=3)
-    middle = beat(125.0, 0.75, 2250.0, 15.0)
+    middle = middle_beat()
     assert meter.add(middle) is None and not meter.measuring
     meter.start()
-    assert [meter.add(middle) for _ in range(3)] == [None, None, Mood(0.0, 0.0, 0.0)]
+    assert [meter.add(middle) for _ in range(2)] == [None, None]
+    assert meter.add(middle).axes() == pytest.approx((0.0, 0.0, 0.0))
     assert not meter.measuring and meter.finish() is None
 
 
@@ -160,7 +174,7 @@ def test_an_interrupted_meter_reports_what_it_has():
     meter.start()
     assert meter.finish() is None
     meter.start()
-    meter.add(beat(150.0, 1.0, 1000.0, 5.0))
+    meter.add(beat(TEMPO_RANGE_BPM[1], 1.0, CENTROID_RANGE_HZ[0], BASS_OVER_TREBLE_RANGE_DB[0]))
     assert meter.finish() == Mood(temperature=-1.0, weight=0.0, drive=1.0)
 
 
