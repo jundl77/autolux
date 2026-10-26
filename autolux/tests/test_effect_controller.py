@@ -3,13 +3,14 @@ import logging
 import pytest
 
 from autolux.lib.clock import VirtualClock
-from autolux.lib.engine.autoloop_policy import AutoloopMeta, SelectionContext
+from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
     STROBE_BURST_SECONDS,
     STROBE_COOLDOWN_SECONDS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
+    AutoloopMeta,
     LightIntent,
 )
 
@@ -195,7 +196,7 @@ async def test_a_new_track_chooses_again_within_the_same_intent(recorded_lightin
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     await controller.change_effect(
         LightIntent.ATMOSPHERIC,
-        context=SelectionContext(LightIntent.ATMOSPHERIC, 10.0, new_track=True),
+        context=SelectionContext(LightIntent.ATMOSPHERIC, new_track=True),
     )
     first, second = selected(recorded_lighting)
     assert first != second
@@ -228,6 +229,15 @@ async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting)
     }
 
 
+async def test_a_look_that_was_not_sent_is_not_remembered(recorded_lighting):
+    controller = rotating(recorded_lighting)
+    recorded_lighting.select_autoloop = lambda *_, **__: False
+    assert not await controller.change_effect(LightIntent.ATMOSPHERIC)
+    # No track was started and nothing counts as played or entered.
+    assert controller._policy.track_family is None
+    assert controller._entered is None
+
+
 async def test_a_realistic_set_gets_tiers_that_follow_the_music(recorded_lighting):
     from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
 
@@ -240,32 +250,34 @@ async def test_a_realistic_set_gets_tiers_that_follow_the_music(recorded_lightin
         autoloop_meta=meta,
         seed=7,
     )
-    bar = 1.875  # 128 BPM
-    # (intent, bars it lasts, what the engine knows at entry)
+    bar = 1.875  # 128 BPM, so 90 s is 48 bars
+    # (intent, bars it lasts, build bars at entry, expected energies)
     set_list = [
-        (LightIntent.ATMOSPHERIC, 32, {'new_track': True}),
-        (LightIntent.BUILDUP, 16, {}),
-        (LightIntent.DROP, 32, {'build_bars': 16}),
-        (LightIntent.BREAKDOWN, 32, {}),
-        (LightIntent.BUILDUP, 16, {'build_bars': 32}),
-        (LightIntent.DROP, 32, {'build_bars': 48}),
-        (LightIntent.BREAKDOWN, 16, {}),
-        (LightIntent.BUILDUP, 16, {'build_bars': 16}),
-        (LightIntent.DROP, 32, {'build_bars': 32}),
-        (LightIntent.ATMOSPHERIC, 16, {}),
+        (LightIntent.ATMOSPHERIC, 32, 0, {1}),
+        (LightIntent.BUILDUP, 16, 0, {3}),  # no drop yet: the first one is maximal
+        (LightIntent.DROP, 32, 16, {3}),
+        (LightIntent.BREAKDOWN, 16, 0, {1}),  # calm after a maximal drop
+        (LightIntent.BUILDUP, 8, 16, {2}),
+        (LightIntent.DROP, 32, 24, {2}),  # never maximal twice running
+        (LightIntent.BREAKDOWN, 8, 0, {1, 2}),
+        (LightIntent.BUILDUP, 8, 8, {2}),
+        (LightIntent.DROP, 16, 16, {2}),  # short build, 30 s since the last drop
+        (LightIntent.BREAKDOWN, 24, 0, {1, 2}),
+        (LightIntent.BUILDUP, 8, 24, {2}),
+        (LightIntent.DROP, 16, 32, {3}),  # 32-bar build earns it, though only 60 s passed
+        (LightIntent.ATMOSPHERIC, 16, 0, {1}),
     ]
-    last_drop = None
-    for intent, length, facts in set_list:
-        since = None if last_drop is None else clock.monotonic() - last_drop
-        context = SelectionContext(intent, clock.monotonic(), seconds_since_drop=since, **facts)
+    left_drop_at = None
+    previous = None
+    for intent, length, build_bars, _ in set_list:
+        if previous == LightIntent.DROP:
+            left_drop_at = clock.monotonic()
+        since = None if left_drop_at is None else clock.monotonic() - left_drop_at
+        context = SelectionContext(intent, seconds_since_drop=since, build_bars=build_bars)
         await controller.change_effect(intent, context=context)
-        if intent == LightIntent.DROP:
-            last_drop = clock.monotonic()
+        previous = intent
         clock.advance(length * bar)
     energies = [meta[tuple(name.split('/'))].energy for name in selected(recorded_lighting)]
-    # The first drop of the night is maximal and its buildup promised it; the
-    # breakdown after it goes calm and the next drop cannot be maximal again;
-    # after a driving drop, a long build earns the maximal one back.
-    assert energies[:6] == [1, 3, 3, 1, 2, 2]
-    assert energies[6] in (1, 2)
-    assert energies[7:] == [3, 3, 1]
+    assert len(energies) == len(set_list)
+    for energy, (intent, *_, expected) in zip(energies, set_list, strict=True):
+        assert energy in expected, (intent, energy)

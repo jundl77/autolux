@@ -100,7 +100,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._master_level = 1.0
         # Starfire boots at full brightness, so only a change needs sending.
         self._sent_brightness = 1.0
-        # Loop selection context, all on the room's clock (after the playback delay).
+        # Loop selection context, all on the room's clock (after the playback delay);
+        # updated only once a look has actually been sent.
         self._room_levels: deque[float] = deque(maxlen=LOUDNESS_TREND_BEATS)
         self._entered_intent: LightIntent | None = None
         self._entered_label: str | None = None
@@ -252,6 +253,9 @@ class LightEngine(IMusicAnalyserHandler):
         self._held_intent = None
         self._room_beat_phase = None
         self._room_levels.clear()
+        if self._entered_intent == LightIntent.DROP:
+            self._last_drop_at = self._clock.monotonic()  # silence ends a drop too
+        self._entered_intent = None
         self._build_started_at = None
         self._after_silence = True
         self.lighting_client.stop()
@@ -371,48 +375,52 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
-        if intent is not None and not self._paused:
-            await self.effect_controller.change_effect(
-                intent, context=self._selection_context(intent, self._section_class_at_playback)
-            )
-
-    def _selection_context(self, intent: LightIntent, label: str | None) -> SelectionContext:
+        if intent is None or self._paused:
+            return
+        label = self._section_class_at_playback
         now = self._clock.monotonic()
-        previous, previous_label = self._entered_intent, self._entered_label
-        if (intent, label) == (previous, previous_label) and not self._after_silence:
-            # A re-send (resume) is not a new section; the controller keeps the look.
-            return SelectionContext(intent, now)
+        context = self._selection_context(intent, label, now)
+        if await self.effect_controller.change_effect(intent, context=context):
+            self._note_new_look(intent, now)
+        # The label is what the room hears even when the look stays (intro -> outro).
+        self._entered_label = label
+
+    def _selection_context(
+        self, intent: LightIntent, label: str | None, now: float
+    ) -> SelectionContext:
+        previous = self._entered_intent
         new_track = self._after_silence or (
             intent == LightIntent.ATMOSPHERIC
-            and (
-                previous == LightIntent.DROP
-                or (previous_label in OUTRO_LABELS and label in INTRO_LABELS)
-            )
+            and label in INTRO_LABELS
+            and (previous == LightIntent.DROP or self._entered_label in OUTRO_LABELS)
         )
-        if intent not in BUILD_INTENTS and intent != LightIntent.DROP:
-            self._build_started_at = None
-        elif previous not in BUILD_INTENTS:
-            # A build starts at its first breakdown or buildup; a drop straight
-            # after an intro or another drop had none.
-            self._build_started_at = now
+        building = intent in (LightIntent.BUILDUP, LightIntent.DROP) and previous in BUILD_INTENTS
         bpm = self._published_bpm.get('last')
         bar_seconds = BEATS_PER_BAR * 60.0 / bpm if bpm else FALLBACK_BAR_SECONDS
-        context = SelectionContext(
+        # A drop ends when the next section starts, which may be this one.
+        ending_drop = previous == LightIntent.DROP and intent != LightIntent.DROP
+        left_drop_at = now if ending_drop else self._last_drop_at
+        return SelectionContext(
             intent,
-            now,
-            seconds_since_drop=None if self._last_drop_at is None else now - self._last_drop_at,
-            build_bars=0.0
-            if self._build_started_at is None
-            else (now - self._build_started_at) / bar_seconds,
+            seconds_since_drop=None if left_drop_at is None else now - left_drop_at,
+            build_bars=(now - self._build_started_at) / bar_seconds
+            if building and self._build_started_at is not None
+            else 0.0,
             loudness=loudness_trend(self._room_levels),
             new_track=new_track,
         )
-        if intent == LightIntent.DROP:
+
+    def _note_new_look(self, intent: LightIntent, now: float) -> None:
+        previous = self._entered_intent
+        if previous == LightIntent.DROP and intent != LightIntent.DROP:
             self._last_drop_at = now
+        if intent not in BUILD_INTENTS:
             self._build_started_at = None
-        self._entered_intent, self._entered_label = intent, label
+        elif previous not in BUILD_INTENTS:
+            # A build starts at its first breakdown or buildup.
+            self._build_started_at = now
+        self._entered_intent = intent
         self._after_silence = False
-        return context
 
     @staticmethod
     def _publishable_bpm(state: dict, bpm: float) -> float:

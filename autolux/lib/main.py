@@ -8,8 +8,13 @@ from pathlib import Path
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
-from autolux.lib.engine.autoloop_policy import DEFAULT_AUTOLOOP_META, AutoloopMetaTable
-from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS, AutoloopTable, ShowSettings
+from autolux.lib.engine.effect_definitions import (
+    DEFAULT_AUTOLOOP_META,
+    DEFAULT_AUTOLOOPS,
+    AutoloopMetaTable,
+    AutoloopTable,
+    ShowSettings,
+)
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 LOGGER = logging.getLogger(__name__)

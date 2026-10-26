@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from autolux.lib.engine.effect_definitions import AutoloopTable, LightIntent
-
-# The vocabulary of the header block in `autoloops/README.md`.
-ENERGIES = (1, 2, 3)
-FAMILIES = ('cold', 'warm', 'accent')
-MOVEMENTS = ('still', 'sweep', 'snap')
+from autolux.lib.engine.effect_definitions import (
+    FAMILIES,
+    AutoloopMeta,
+    AutoloopMetaTable,
+    AutoloopTable,
+    LightIntent,
+)
 
 RISING, FLAT, FALLING = 'rising', 'flat', 'falling'
 LOUDNESS_TREND_BEATS = 32  # eight bars
@@ -22,38 +24,6 @@ LONG_BUILD_BARS = 32
 LONG_SINCE_DROP_SECONDS = 90.0
 FOLLOW_FAMILY_CHANCE = 0.5
 FAMILY_WEIGHT = 3.0
-# Loops picked at the same instant still need a positive weight.
-MIN_AGE_SECONDS = 1e-3
-
-
-@dataclass(frozen=True)
-class AutoloopMeta:
-    energy: int
-    family: str
-    movement: str
-
-    def __post_init__(self):
-        for name, allowed in (
-            ('energy', ENERGIES),
-            ('family', FAMILIES),
-            ('movement', MOVEMENTS),
-        ):
-            if getattr(self, name) not in allowed:
-                raise ValueError(
-                    f'{name} {getattr(self, name)!r} is not one of {", ".join(map(str, allowed))}'
-                )
-
-
-AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
-
-# Headers of the four originals in DEFAULT_AUTOLOOPS, for tests and offline tools
-# that run without reading the library; a test keeps them equal to the files.
-DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
-    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'cold', 'sweep'),
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
-    ('buildup', 'ramp'): AutoloopMeta(2, 'warm', 'sweep'),
-    ('drop', 'kick'): AutoloopMeta(3, 'warm', 'snap'),
-}
 
 
 @dataclass(frozen=True)
@@ -61,8 +31,8 @@ class SelectionContext:
     """What the engine knows about the music when an intent enters the room."""
 
     intent: LightIntent
-    now: float  # monotonic seconds
-    seconds_since_drop: float | None = None  # None before the first drop
+    # Since the last drop ended; None before the first drop.
+    seconds_since_drop: float | None = None
     # Bars of breakdown and buildup played back to back up to this entry.
     build_bars: float = 0.0
     loudness: str = FLAT
@@ -75,6 +45,7 @@ class AutoloopChoice:
     autoloop: str
     meta: AutoloopMeta
     reason: str
+    track_family: str
 
 
 # Tier rules, first match wins. Energy is about contrast over a set, not the
@@ -112,7 +83,9 @@ def loudness_trend(levels: Sequence[float]) -> str:
 
 
 class AutoloopPolicy:
-    """Remembers what played, so it is pure given its seeded random source."""
+    """Plans a choice without side effects except drawing from its seeded random
+    source; `record` commits one that actually reached the rig. Ages count
+    selections, not seconds, so a seed and a section sequence fix the looks."""
 
     def __init__(self, autoloops: AutoloopTable, meta: AutoloopMetaTable, rng: random.Random):
         missing = sorted(
@@ -126,7 +99,9 @@ class AutoloopPolicy:
         self._autoloops = autoloops
         self._meta = meta
         self._rng = rng
-        self._last_used: dict[tuple[str, str], float] = {}
+        self._selections: Counter[LightIntent] = Counter()
+        # The intent's selection count when each loop last played.
+        self._last_used: dict[tuple[str, str], int] = {}
         self._last_by_intent: dict[LightIntent, tuple[str, str]] = {}
         self._last_drop_energy: int | None = None
         self._track_family: str | None = None
@@ -137,35 +112,38 @@ class AutoloopPolicy:
         return self._track_family
 
     def choose(self, context: SelectionContext) -> AutoloopChoice:
-        if context.new_track or self._track_family is None:
-            self._start_track()
+        new_track = context.new_track or self._track_family is None
+        family = self._next_track_family() if new_track else self._track_family
+        movement = None if new_track else self._track_movement
         tiers, reason = self._tiers(context)
-        loops = self._autoloops[context.intent]
-        candidates, exact = self._nearest_tier(loops, tiers)
+        candidates, exact = self._nearest_tier(self._autoloops[context.intent], tiers)
         if not exact:
             energies = sorted({self._meta[loop].energy for loop in candidates})
             reason = (
                 f'{reason}; no energy {"/".join(map(str, tiers))} loop, '
                 f'nearest {"/".join(map(str, energies))}'
             )
-        candidates = self._narrowed(candidates, context.intent)
-        loop = self._weighted_pick(candidates, context.now)
+        candidates = self._narrowed(candidates, context.intent, movement)
+        bank, name = self._weighted_pick(candidates, context.intent, family)
+        return AutoloopChoice(bank, name, self._meta[(bank, name)], reason, family)
 
-        meta = self._meta[loop]
-        self._last_used[loop] = context.now
+    def record(self, context: SelectionContext, choice: AutoloopChoice) -> None:
+        loop = choice.bank, choice.autoloop
+        self._selections[context.intent] += 1
+        self._last_used[loop] = self._selections[context.intent]
         self._last_by_intent[context.intent] = loop
-        self._track_movement = meta.movement
+        self._track_family = choice.track_family
+        self._track_movement = choice.meta.movement
         if context.intent == LightIntent.DROP:
-            self._last_drop_energy = meta.energy
-        return AutoloopChoice(loop[0], loop[1], meta, reason)
+            self._last_drop_energy = choice.meta.energy
 
-    def _start_track(self) -> None:
+    def _next_track_family(self) -> str:
         # A set often stays in one colour world across a mix; the coin keeps it
-        # from locking there for the whole night.
+        # from locking there for the whole night, and a re-roll is a real change.
         previous = self._track_family
-        if previous is None or self._rng.random() >= FOLLOW_FAMILY_CHANCE:
-            self._track_family = self._rng.choice(FAMILIES)
-        self._track_movement = None
+        if previous is not None and self._rng.random() < FOLLOW_FAMILY_CHANCE:
+            return previous
+        return self._rng.choice([family for family in FAMILIES if family != previous])
 
     def _tiers(self, context: SelectionContext) -> tuple[tuple[int, ...], str]:
         since_drop = context.seconds_since_drop
@@ -189,11 +167,11 @@ class AutoloopPolicy:
         nearest = min(distance(loop) for loop in loops)
         return [loop for loop in loops if distance(loop) == nearest], nearest == 0
 
-    def _narrowed(self, candidates, intent: LightIntent) -> list[tuple[str, str]]:
+    def _narrowed(self, candidates, intent: LightIntent, movement) -> list[tuple[str, str]]:
         # Each filter only applies while something is left to choose from.
         last = self._last_by_intent.get(intent)
         filters = [lambda loop: loop != last]
-        if intent != LightIntent.DROP and self._track_movement == 'still':
+        if intent != LightIntent.DROP and movement == 'still':
             # A parked rig that suddenly jumps reads as a glitch, except on a drop.
             filters.append(lambda loop: self._meta[loop].movement != 'snap')
         for keep in filters:
@@ -201,14 +179,15 @@ class AutoloopPolicy:
             candidates = kept or candidates
         return candidates
 
-    def _weighted_pick(self, candidates, now: float) -> tuple[str, str]:
+    def _weighted_pick(self, candidates, intent: LightIntent, family) -> tuple[str, str]:
         # Unplayed loops go first, so a tier is exhausted before anything repeats;
-        # after that the longer a loop has rested, the likelier it returns.
+        # after that, the more selections a loop has sat out, the likelier it returns.
         unused = [loop for loop in candidates if loop not in self._last_used]
         pool = unused or candidates
+        count = self._selections[intent]
         weights = [
-            (1.0 if loop in unused else max(now - self._last_used[loop], MIN_AGE_SECONDS))
-            * (FAMILY_WEIGHT if self._meta[loop].family == self._track_family else 1.0)
+            (1 if loop in unused else count + 1 - self._last_used[loop])
+            * (FAMILY_WEIGHT if self._meta[loop].family == family else 1.0)
             for loop in pool
         ]
         return self._rng.choices(pool, weights)[0]

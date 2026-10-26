@@ -7,18 +7,14 @@ from typing import TYPE_CHECKING
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
-from autolux.lib.engine.autoloop_policy import (
-    DEFAULT_AUTOLOOP_META,
-    AutoloopChoice,
-    AutoloopMetaTable,
-    AutoloopPolicy,
-    SelectionContext,
-)
+from autolux.lib.engine.autoloop_policy import AutoloopChoice, AutoloopPolicy, SelectionContext
 from autolux.lib.engine.effect_definitions import (
+    DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
     STROBE_BURST_BEATS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
+    AutoloopMetaTable,
     AutoloopTable,
     LightIntent,
     ShowSettings,
@@ -59,11 +55,12 @@ class EffectController:
         # Read at use so a dashboard edit applies to the next change.
         self._settings = settings
         self._last_strobe_started_at: float | None = None
-        # One seed per session: a replay of the same run picks the same looks.
+        # Seeded per session: the same seed and the same run of sections pick
+        # the same looks.
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
 
-    def _entry_choice(self, context: SelectionContext) -> AutoloopChoice:
+    def _entry_choice(self, context: SelectionContext) -> tuple[AutoloopChoice, bool]:
         # Re-sending the current intent (resume, restart after stop) keeps its
         # look; a change of intent or a new track chooses again.
         if (
@@ -71,25 +68,26 @@ class EffectController:
             and self._entered[0] == context.intent
             and not context.new_track
         ):
-            return self._entered[1]
-        choice = self._policy.choose(context)
-        self._entered = context.intent, choice
-        return choice
+            return self._entered[1], False
+        return self._policy.choose(context), True
 
     async def change_effect(
         self,
         intent: LightIntent,
         bpm: float | None = None,
         context: SelectionContext | None = None,
-    ) -> None:
-        if context is None:
-            context = SelectionContext(intent, self.clock.monotonic())
-        choice = self._entry_choice(context)
+    ) -> bool:
+        """True when a look was sent; nothing is remembered for one that was not."""
+        context = context or SelectionContext(intent)
+        choice, fresh = self._entry_choice(context)
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         if not self.lighting_client.select_autoloop(
             bank, autoloop, transition=transition_for(intent, self._settings())
         ):
-            return
+            return False
+        if fresh:
+            self._policy.record(context, choice)
+            self._entered = intent, choice
         if self.event_buffer:
             self.event_buffer.add_effect(
                 f'{bank}/{autoloop}',
@@ -114,6 +112,7 @@ class EffectController:
 
         if intent == LightIntent.DROP:
             self._strobe_unless_cooling_down(bpm)
+        return True
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
         settings = self._settings()

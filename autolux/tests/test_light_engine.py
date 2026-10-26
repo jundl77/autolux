@@ -1452,7 +1452,7 @@ class SelectionSpy(EffectController):
 
     async def change_effect(self, intent, bpm=None, context=None):
         self.contexts.append(context)
-        await super().change_effect(intent, bpm, context)
+        return await super().change_effect(intent, bpm, context)
 
 
 async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tracks():
@@ -1479,15 +1479,22 @@ async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tr
     await section('drop', 16)
     await section('outro', 4)
     await section('intro', 4)
-    intro, altintro, breakdown, buildup, drop, outro, next_intro = spy.contexts
+    await section('breakdown', 8)
+    await section('buildup', 8)
+    await section('drop', 4)
+    intro, altintro, breakdown, buildup, drop, outro, next_intro, *_, second_drop = spy.contexts
     assert intro.new_track and not altintro.new_track and not breakdown.new_track
     assert breakdown.loudness == 'rising' and drop.loudness == 'flat'
     assert buildup.build_bars == pytest.approx(8)
     assert drop.build_bars == pytest.approx(32)
     assert drop.seconds_since_drop is None
-    assert outro.seconds_since_drop == pytest.approx(16 * bar)
-    assert outro.build_bars == 0
-    assert outro.new_track and next_intro.new_track
+    # The drop's own outro is the same track; the intro after it starts the next.
+    assert not outro.new_track and outro.build_bars == 0
+    assert next_intro.new_track
+    # Counted from when the first drop ended, not from when it began.
+    assert outro.seconds_since_drop == 0
+    assert second_drop.seconds_since_drop == pytest.approx(24 * bar)
+    assert second_drop.build_bars == pytest.approx(16)
 
     light._show_sound_stop()
     light._room_playing = True

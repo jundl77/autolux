@@ -54,16 +54,20 @@ def policy(lib=TIERED, seed=0):
     return AutoloopPolicy(*lib, random.Random(seed))
 
 
-def entry(intent, now=0.0, **facts):
-    return SelectionContext(intent, now, **facts)
+def pick(chooser, intent, **facts):
+    """Choose and commit, as the controller does once the look is sent."""
+    context = SelectionContext(intent, **facts)
+    choice = chooser.choose(context)
+    chooser.record(context, choice)
+    return choice
 
 
 def drop_with_energy(chooser, energy):
     """Make the policy remember a drop of this energy, via a forced drop."""
     facts = {'seconds_since_drop': None} if energy == 3 else {'seconds_since_drop': 10.0}
     if energy == 2:
-        chooser.choose(entry(DROP, 0.0))  # first drop is maximal; the next cannot be
-    assert chooser.choose(entry(DROP, 1.0, **facts)).meta.energy == energy
+        pick(chooser, DROP)  # first drop is maximal; the next cannot be
+    assert pick(chooser, DROP, **facts).meta.energy == energy
 
 
 @pytest.mark.parametrize(
@@ -90,7 +94,7 @@ def test_each_tier_rule_picks_its_energies(last_drop, intent, facts, energies, r
         chooser = policy(seed=seed)
         if last_drop is not None:
             drop_with_energy(chooser, last_drop)
-        choice = chooser.choose(entry(intent, 100.0, **facts))
+        choice = pick(chooser, intent, **facts)
         assert reason in choice.reason
         seen.add(choice.meta.energy)
     assert seen == energies
@@ -100,7 +104,7 @@ def test_a_tier_is_exhausted_before_any_loop_repeats():
     lib = library({DROP: [(f'd{n}', 2, 'cold', 'snap') for n in range(5)]})
     for seed in range(10):
         chooser = policy(lib, seed)
-        picks = [chooser.choose(entry(DROP, float(t), seconds_since_drop=1.0)) for t in range(5)]
+        picks = [pick(chooser, DROP, seconds_since_drop=1.0) for _ in range(5)]
         assert len({choice.autoloop for choice in picks}) == 5
 
 
@@ -109,13 +113,10 @@ def test_a_long_rested_loop_is_likelier_to_return_than_a_recent_one():
     returns = Counter()
     for seed in range(200):
         chooser = policy(lib, seed)
-        order = [
-            chooser.choose(entry(DROP, t * 100.0, seconds_since_drop=1.0)).autoloop
-            for t in range(4)
-        ]
-        # The last one is excluded; of the rest, the oldest has rested three times as long
-        # as the newest.
-        nxt = chooser.choose(entry(DROP, 400.0, seconds_since_drop=1.0)).autoloop
+        order = [pick(chooser, DROP, seconds_since_drop=1.0).autoloop for _ in range(4)]
+        # The last one is excluded; of the rest, the oldest has sat out three selections,
+        # the newest one.
+        nxt = pick(chooser, DROP, seconds_since_drop=1.0).autoloop
         returns[order.index(nxt)] += 1
     assert returns[3] == 0
     assert returns[0] > returns[1] > returns[2] > 0
@@ -124,7 +125,7 @@ def test_a_long_rested_loop_is_likelier_to_return_than_a_recent_one():
 def test_the_loop_used_last_for_an_intent_never_plays_twice_running():
     lib = library({BREAKDOWN: [('a', 1, 'cold', 'still'), ('b', 1, 'cold', 'still')]})
     chooser = policy(lib, 3)
-    picks = [chooser.choose(entry(BREAKDOWN, float(t))).autoloop for t in range(20)]
+    picks = [pick(chooser, BREAKDOWN).autoloop for _ in range(20)]
     assert all(a != b for a, b in pairwise(picks))
 
 
@@ -133,23 +134,23 @@ def test_the_track_family_is_preferred_without_excluding_others():
     matches = Counter()
     for seed in range(300):
         chooser = policy(lib, seed)
-        choice = chooser.choose(entry(ATMOSPHERIC, new_track=True))
+        choice = pick(chooser, ATMOSPHERIC, new_track=True)
         if chooser.track_family != 'accent':  # no accent loop here to prefer
             matches[choice.meta.family == chooser.track_family] += 1
     # x3 weight: three in four entries take the track's family, the rest still play.
     assert matches[True] > 2.5 * matches[False] > 0
 
 
-def test_a_new_track_often_follows_the_previous_family():
+def test_a_new_track_follows_the_previous_family_half_the_time():
     followed = 0
     for seed in range(400):
         chooser = policy(seed=seed)
-        chooser.choose(entry(ATMOSPHERIC, new_track=True))
+        pick(chooser, ATMOSPHERIC, new_track=True)
         before = chooser.track_family
-        chooser.choose(entry(ATMOSPHERIC, 1.0, new_track=True))
+        pick(chooser, ATMOSPHERIC, new_track=True)
         followed += chooser.track_family == before
-    # Half follow outright; a third of the rest draw the same family again.
-    assert 0.55 < followed / 400 < 0.8
+    # Half follow; a re-roll always moves to one of the other two families.
+    assert 0.42 < followed / 400 < 0.58
 
 
 def test_a_parked_rig_does_not_snap_unless_a_drop_enters():
@@ -162,26 +163,26 @@ def test_a_parked_rig_does_not_snap_unless_a_drop_enters():
     )
     for seed in range(20):
         chooser = policy(lib, seed)
-        chooser.choose(entry(ATMOSPHERIC, new_track=True))
-        assert chooser.choose(entry(BREAKDOWN, 1.0)).autoloop == 'glide'
-        chooser.choose(entry(ATMOSPHERIC, 2.0))
-        assert chooser.choose(entry(DROP, 3.0)).meta.movement == 'snap'
+        pick(chooser, ATMOSPHERIC, new_track=True)
+        assert pick(chooser, BREAKDOWN).autoloop == 'glide'
+        pick(chooser, ATMOSPHERIC)
+        assert pick(chooser, DROP).meta.movement == 'snap'
 
 
 def test_an_empty_tier_falls_back_to_the_nearest_energy():
     lib = library({DROP: [('driving', 2, 'cold', 'snap')], BREAKDOWN: [('big', 3, 'cold', 'snap')]})
     chooser = policy(lib)
-    choice = chooser.choose(entry(DROP))
+    choice = pick(chooser, DROP)
     assert (choice.autoloop, choice.meta.energy) == ('driving', 2)
     assert 'no energy 3 loop, nearest 2' in choice.reason
-    assert chooser.choose(entry(BREAKDOWN, 1.0)).autoloop == 'big'
+    assert pick(chooser, BREAKDOWN).autoloop == 'big'
 
 
 def test_a_seeded_policy_replays_the_same_show():
     def show(seed):
         chooser = policy(seed=seed)
         return [
-            chooser.choose(entry(intent, float(t), new_track=t == 0)).autoloop
+            pick(chooser, intent, new_track=t == 0).autoloop
             for t, intent in enumerate([ATMOSPHERIC, BUILDUP, DROP, BREAKDOWN, DROP] * 4)
         ]
 
