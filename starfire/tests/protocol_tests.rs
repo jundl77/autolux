@@ -1,3 +1,5 @@
+mod support;
+
 use std::io::{Cursor, Read};
 
 use prost::Message;
@@ -74,6 +76,7 @@ fn engine() -> Engine {
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
         )
         .unwrap(),
+        support::palettes(),
     )
     .unwrap()
 }
@@ -375,7 +378,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                 bank: "atmospheric".into(),
                 autoloop: "cold_breathe".into(),
                 transition: Transition::Cut,
-                palette: None,
+                palette: "techno".into(),
             },
         ),
         (
@@ -415,7 +418,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                 transition: Transition::Crossfade {
                     duration_beats: 2.0,
                 },
-                palette: Some("house".into()),
+                palette: "house".into(),
             },
         ),
         (
@@ -470,6 +473,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         schema_version: 1,
         duration_seconds: 2.0,
         frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
         events: controls
             .iter()
             .map(|(at, _, command)| TimedCommand {
@@ -484,7 +488,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
     )
     .unwrap();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
-    let mut engine = Engine::new(rig, catalog).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let mut controls = controls.into_iter().peekable();
     for frame in expected.frames {
         while controls

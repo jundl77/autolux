@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 use std::net::UdpSocket;
 use std::path::Path;
@@ -14,6 +16,7 @@ fn replay(duration_seconds: f64) -> Replay {
         schema_version: 1,
         duration_seconds,
         frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
         events: vec![
             TimedCommand {
                 at_seconds: 0.0,
@@ -30,7 +33,7 @@ fn replay(duration_seconds: f64) -> Replay {
                     bank: "atmospheric".into(),
                     autoloop: "cold_breathe".into(),
                     transition: Transition::Cut,
-                    palette: None,
+                    palette: "techno".into(),
                 },
             },
         ],

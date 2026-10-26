@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 
 use starfire::engine::Engine;
@@ -25,7 +27,7 @@ fn steady_room() -> Engine {
     .unwrap();
     let catalogue = AutoloopCatalog::load(directory.path()).unwrap();
     let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
-    let mut engine = Engine::new(rig, catalogue).unwrap();
+    let mut engine = Engine::new(rig, catalogue, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -33,7 +35,7 @@ fn steady_room() -> Engine {
                 bank: "test".into(),
                 autoloop: "steady".into(),
                 transition: Transition::Cut,
-                palette: None,
+                palette: "techno".into(),
             },
         )
         .unwrap();

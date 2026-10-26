@@ -32,13 +32,14 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) 
         schema_version: 1,
         duration_seconds,
         frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
         events: vec![TimedCommand {
             at_seconds: 0.0,
             command: Command::Select {
                 bank: "test".into(),
                 autoloop: "fault".into(),
                 transition: Transition::Cut,
-                palette: None,
+                palette: "techno".into(),
             },
         }],
     };
@@ -80,6 +81,8 @@ fn native_pattern_matching_cannot_bypass_the_script_budget() {
             .arg(&rig)
             .arg("--autoloops")
             .arg(&autoloops)
+            .arg("--palettes")
+            .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/palettes.json"))
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()

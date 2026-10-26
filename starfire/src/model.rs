@@ -174,8 +174,7 @@ pub enum Command {
         autoloop: String,
         #[serde(default)]
         transition: Transition,
-        #[serde(default)]
-        palette: Option<String>,
+        palette: String,
     },
     SetOverride {
         value: LightingOverride,

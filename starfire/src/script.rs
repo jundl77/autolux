@@ -39,7 +39,6 @@ pub struct AutoloopInfo {
 pub struct AutoloopCatalog {
     sources: BTreeMap<(String, String), String>,
     identities: BTreeMap<String, (String, String)>,
-    palettes: PaletteTable,
 }
 
 impl AutoloopCatalog {
@@ -118,7 +117,6 @@ impl AutoloopCatalog {
         Ok(Self {
             sources,
             identities,
-            palettes: PaletteTable::builtin(),
         })
     }
 
@@ -162,17 +160,7 @@ impl AutoloopCatalog {
         Ok(Self {
             sources,
             identities,
-            palettes: PaletteTable::builtin(),
         })
-    }
-
-    pub fn with_palettes(mut self, palettes: &[wire::Palette]) -> Result<Self> {
-        self.palettes = PaletteTable::from_definitions(palettes)?;
-        Ok(self)
-    }
-
-    pub fn palettes(&self) -> &PaletteTable {
-        &self.palettes
     }
 
     pub fn resolve(&self, autoloop_id: &str) -> Result<&(String, String)> {
@@ -191,12 +179,18 @@ impl AutoloopCatalog {
             .collect()
     }
 
-    pub fn instantiate(&self, bank: &str, autoloop: &str, rig: &FixtureRig) -> Result<LuaAutoloop> {
+    pub fn instantiate(
+        &self,
+        bank: &str,
+        autoloop: &str,
+        rig: &FixtureRig,
+        palettes: &PaletteTable,
+    ) -> Result<LuaAutoloop> {
         let source = self
             .sources
             .get(&(bank.to_owned(), autoloop.to_owned()))
             .with_context(|| format!("unknown autoloop {bank}/{autoloop}"))?;
-        LuaAutoloop::new(bank, autoloop, source, rig, &self.palettes)
+        LuaAutoloop::new(bank, autoloop, source, rig, palettes)
     }
 }
 
@@ -294,15 +288,16 @@ impl LuaAutoloop {
             string.set(name, Value::Nil)?;
         }
 
-        let (api, named_palettes, active_palette): (Table, Table, Table) = lua
+        let (api, named_palettes, use_active_palette): (Table, Table, Function) = lua
             .load(LIGHTING_API)
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
         for (name, slots) in palettes.iter() {
-            named_palettes.set(name, lua.to_value(slots)?)?;
+            named_palettes.set(name, read_only(&lua, lua.to_value(slots)?)?)?;
         }
         let initial_slots = palettes.slots(palettes.initial())?;
+        let active_palette = lua.create_table()?;
         let mut active_palette_slots = Vec::new();
         for (slot, colour) in initial_slots.named_slots() {
             let table: Table = lua
@@ -313,6 +308,7 @@ impl LuaAutoloop {
             active_palette.set(slot, &table)?;
             active_palette_slots.push(table);
         }
+        use_active_palette.call::<()>(read_only(&lua, Value::Table(active_palette))?)?;
         let targets = rig.clone();
         api.set(
             "members",
@@ -434,6 +430,23 @@ impl LuaAutoloop {
         }
         Ok(effects)
     }
+}
+
+fn read_only(lua: &Lua, value: Value) -> mlua::Result<Table> {
+    let metatable = lua.create_table()?;
+    metatable.set("__index", value)?;
+    metatable.set("__metatable", false)?;
+    metatable.set(
+        "__newindex",
+        lua.create_function(|_, _: (Value, Value, Value)| -> mlua::Result<()> {
+            Err(mlua::Error::RuntimeError(
+                "palettes are read-only".to_owned(),
+            ))
+        })?,
+    )?;
+    let proxy = lua.create_table()?;
+    proxy.set_metatable(Some(metatable))?;
+    Ok(proxy)
 }
 
 fn validate_properties(values: &PropertyValues) -> Result<()> {

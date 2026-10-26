@@ -102,7 +102,7 @@ function sf.loudness_gain(rms)
     return sf.lerp(LOUDNESS_FLOOR, 1, math.min(1, math.max(0, rms / LOUDNESS_FULL_RMS)))
 end
 
-local named_palettes, active_palette = {}, {}
+local named_palettes, active_palette = {}, nil
 
 function sf.palette(name)
     if name == nil then return active_palette end
@@ -164,4 +164,4 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
-return sf, named_palettes, active_palette
+return sf, named_palettes, function(palette) active_palette = palette end

@@ -4,11 +4,11 @@ use std::fs;
 
 use starfire::fixtures::FixtureRig;
 use starfire::model::{RenderContext, Target};
-use starfire::palette::{PaletteSlots, PaletteTable};
+use starfire::palette::PaletteSlots;
 use starfire::script::{AutoloopCatalog, LuaAutoloop};
 
 fn techno() -> PaletteSlots {
-    PaletteTable::builtin().slots("techno").unwrap()
+    support::palettes().slots("techno").unwrap()
 }
 
 fn rig() -> FixtureRig {
@@ -32,7 +32,7 @@ fn catalog(source: &str) -> AutoloopCatalog {
 
 fn autoloop(source: &str) -> LuaAutoloop {
     catalog(source)
-        .instantiate("test", "autoloop", &rig())
+        .instantiate("test", "autoloop", &rig(), &support::palettes())
         .unwrap()
 }
 
@@ -115,7 +115,7 @@ fn oscillators_are_periodic_and_use_supplied_musical_time() {
 #[test]
 fn infinite_loops_are_bounded_during_load_and_render() {
     let error = catalog("while true do end")
-        .instantiate("test", "autoloop", &rig())
+        .instantiate("test", "autoloop", &rig(), &support::palettes())
         .err()
         .unwrap();
     assert!(format!("{error:#}").contains("instruction budget exhausted"));
@@ -128,7 +128,7 @@ fn infinite_loops_are_bounded_during_load_and_render() {
 #[test]
 fn excessive_allocation_is_bounded_during_load_and_render() {
     let error = catalog("local large = string.rep('x', 32 * 1024 * 1024)")
-        .instantiate("test", "autoloop", &rig())
+        .instantiate("test", "autoloop", &rig(), &support::palettes())
         .err()
         .unwrap();
     assert!(format!("{error:#}").contains("memory"));
@@ -144,7 +144,7 @@ fn excessive_allocation_is_bounded_during_load_and_render() {
 fn bytecode_and_recursive_scene_output_are_rejected() {
     assert!(
         catalog("\u{1b}Lua\u{54}\0")
-            .instantiate("test", "autoloop", &rig())
+            .instantiate("test", "autoloop", &rig(), &support::palettes())
             .is_err()
     );
     let mut autoloop = autoloop(
@@ -252,9 +252,21 @@ fn output_must_be_a_bounded_dense_effect_array() {
 #[test]
 fn selection_cannot_access_paths_outside_the_loaded_catalogue() {
     let catalog = catalog("return {render = function(ctx) return {} end}");
-    assert!(catalog.instantiate("../test", "autoloop", &rig()).is_err());
-    assert!(catalog.instantiate("test", "../autoloop", &rig()).is_err());
-    assert!(catalog.instantiate("test", "autoloop.lua", &rig()).is_err());
+    assert!(
+        catalog
+            .instantiate("../test", "autoloop", &rig(), &support::palettes())
+            .is_err()
+    );
+    assert!(
+        catalog
+            .instantiate("test", "../autoloop", &rig(), &support::palettes())
+            .is_err()
+    );
+    assert!(
+        catalog
+            .instantiate("test", "autoloop.lua", &rig(), &support::palettes())
+            .is_err()
+    );
     assert_eq!(catalog.list()[0].bank, "test");
     assert_eq!(catalog.list()[0].autoloop, "autoloop");
 }

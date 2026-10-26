@@ -1,3 +1,5 @@
+mod support;
+
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
@@ -183,7 +185,7 @@ fn check_golden(look: &Look, digest: &str) {
 }
 
 fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
-    let mut engine = Engine::new(room(), catalog()).unwrap();
+    let mut engine = Engine::new(room(), catalog(), support::palettes()).unwrap();
     let anchor_beat = select_beat.floor();
     engine
         .apply(
@@ -203,7 +205,7 @@ fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
                 bank: bank.into(),
                 autoloop: autoloop.into(),
                 transition: Transition::Cut,
-                palette: None,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -579,7 +581,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(room(), catalog).unwrap();
+    let mut engine = Engine::new(room(), catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -587,7 +589,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
                 bank: "test".into(),
                 autoloop: autoloop_id.into(),
                 transition: Transition::Cut,
-                palette: None,
+                palette: "techno".into(),
             },
         )
         .unwrap();

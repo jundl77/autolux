@@ -14,6 +14,7 @@ use crate::artnet::ArtNetOutput;
 use crate::engine::Engine;
 use crate::fixtures::FixtureRig;
 use crate::model::{Command, DEFAULT_FRAME_RATE_HZ, FixtureStates, Transition};
+use crate::palette::PaletteTable;
 use crate::protocol::{
     ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message, read_control,
     wire, write_event,
@@ -161,10 +162,10 @@ impl LiveSession {
             radius::config::pin_worker(i32::try_from(core).context("invalid render CPU index")?)?;
         }
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
-        let catalog =
-            AutoloopCatalog::from_definitions(&login.autoloops)?.with_palettes(&login.palettes)?;
+        let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
+        let palettes = PaletteTable::from_wire(&login.palettes)?;
         let autoloops = catalog.list();
-        let mut probe = Engine::new(rig.clone(), catalog.clone())?;
+        let mut probe = Engine::new(rig.clone(), catalog.clone(), palettes.clone())?;
         for parameter in &login.parameters {
             probe.set_parameter(0.0, parameter)?;
         }
@@ -175,7 +176,7 @@ impl LiveSession {
                     bank: autoloop.bank,
                     autoloop: autoloop.autoloop,
                     transition: Transition::Cut,
-                    palette: None,
+                    palette: palettes.initial().to_owned(),
                 },
             )?;
             let frame = probe.render_at(0.0)?;
@@ -185,7 +186,7 @@ impl LiveSession {
         }
         drop(probe);
         // Probing must not carry fixture positions or script state into playback.
-        let mut engine = Engine::new(rig.clone(), catalog)?;
+        let mut engine = Engine::new(rig.clone(), catalog, palettes)?;
         for parameter in &login.parameters {
             engine.set_parameter(0.0, parameter)?;
         }
@@ -594,7 +595,7 @@ mod tests {
                     bank: "test".into(),
                     autoloop: "steady".into(),
                     transition: crate::model::Transition::Cut,
-                    palette: None,
+                    palette: "techno".into(),
                 },
             )
             .unwrap();

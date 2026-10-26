@@ -5,9 +5,18 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use starfire::fixtures::FixtureRig;
+use starfire::palette::{PaletteDefinition, PaletteTable};
 use starfire::protocol::wire;
 
 pub const PROFILES: &str = include_str!("../../../rigs/profiles.json");
+
+pub fn palette_definitions() -> Vec<PaletteDefinition> {
+    serde_json::from_str(include_str!("../palettes.json")).unwrap()
+}
+
+pub fn palettes() -> PaletteTable {
+    PaletteTable::new(&palette_definitions()).unwrap()
+}
 
 pub fn rigs() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs")

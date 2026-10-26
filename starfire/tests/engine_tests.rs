@@ -37,7 +37,7 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
     }
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
     let rig = support::rig(serde_json::from_str(RIG).unwrap());
-    let mut engine = Engine::new(rig, catalog).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -60,7 +60,7 @@ fn select(engine: &mut Engine, at: f64, name: &str, transition: Transition) {
                 bank: "test".into(),
                 autoloop: name.into(),
                 transition,
-                palette: None,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -463,7 +463,7 @@ fn failed_replacement_load_keeps_running_autoloop() {
                         bank: "test".into(),
                         autoloop: name.into(),
                         transition: Transition::Cut,
-                        palette: None,
+                        palette: "techno".into(),
                     }
                 )
                 .is_err()
@@ -731,7 +731,7 @@ fn script_error_while_interrupting_a_fade_stops_the_existing_show() {
             transition: Transition::Crossfade {
                 duration_beats: 4.0,
             },
-            palette: None,
+            palette: "techno".into(),
         },
     );
     assert!(result.is_err());
@@ -819,7 +819,7 @@ fn invalid_fade_duration_does_not_replace_the_running_autoloop() {
                         bank: "test".into(),
                         autoloop: "blue".into(),
                         transition: Transition::Crossfade { duration_beats },
-                        palette: None,
+                        palette: "techno".into(),
                     }
                 )
                 .is_err()
@@ -1259,7 +1259,7 @@ fn select_with_palette(
             bank: "test".into(),
             autoloop: "secondary".into(),
             transition,
-            palette: Some(palette.into()),
+            palette: palette.into(),
         },
     )
 }
@@ -1339,7 +1339,7 @@ fn unknown_palettes_are_rejected_on_both_paths_without_changing_the_show() {
                 bank: "test".into(),
                 autoloop: "constant".into(),
                 transition: Transition::Cut,
-                palette: Some("neon".into()),
+                palette: "neon".into(),
             },
         )
         .unwrap_err();
@@ -1371,6 +1371,80 @@ fn selection_and_parameter_palettes_write_one_active_palette() {
         assert_eq!(
             selection_then_parameter.render_at(1.0).unwrap(),
             parameter_then_selection.render_at(1.0).unwrap()
+        );
+    }
+}
+
+const DIM_SECONDARY: &str = "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.2), sf.colour(sf.all(), sf.palette().secondary)} end}";
+
+#[test]
+fn a_palette_change_during_a_loop_crossfade_blends_both_loops_with_the_same_slots() {
+    let mut engine = engine(&[("dim", DIM_SECONDARY), ("secondary", SECONDARY)]);
+    engine
+        .apply(0.0, &Command::SetDefaultCrossfadeBeats { beats: 2.0 })
+        .unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::Select {
+                bank: "test".into(),
+                autoloop: "dim".into(),
+                transition: Transition::Cut,
+                palette: "techno".into(),
+            },
+        )
+        .unwrap();
+    select_with_palette(
+        &mut engine,
+        0.0,
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+        "techno",
+    )
+    .unwrap();
+    engine
+        .set_parameter(0.5, &palette_parameter("house"))
+        .unwrap();
+    let mut previous = colour_at(&mut engine, 0.5);
+    assert_eq!(previous, TECHNO_SECONDARY);
+    for step in 1..=9 {
+        let seconds = 0.5 + f64::from(step) * 0.05;
+        let colour = colour_at(&mut engine, seconds);
+        assert!(
+            (colour.green - previous.green).abs() <= 0.55 * 0.05 + 1e-9,
+            "palette snapped at {seconds}s"
+        );
+        previous = colour;
+    }
+    let halfway = engine.render_at(1.0).unwrap();
+    let left = &halfway.fixture_properties_before_strobe["left"];
+    assert_colour(left.colour, HALFWAY_SECONDARY);
+    near(left.intensity, 0.35);
+    assert_eq!(colour_at(&mut engine, 1.5), HOUSE_SECONDARY);
+}
+
+#[test]
+fn scripts_cannot_replace_palette_slots() {
+    for script in [
+        "local p = sf.palette() p.primary = sf.rgb(0, 1, 0) return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 1)} end}",
+        "local p = sf.palette('house') p.cold = sf.rgb(0, 1, 0) return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 1)} end}",
+    ] {
+        let mut engine = engine(&[("tamper", script)]);
+        let error = engine
+            .apply(
+                0.0,
+                &Command::Select {
+                    bank: "test".into(),
+                    autoloop: "tamper".into(),
+                    transition: Transition::Cut,
+                    palette: "techno".into(),
+                },
+            )
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("palettes are read-only"),
+            "{error:#}"
         );
     }
 }

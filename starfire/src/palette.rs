@@ -1,13 +1,17 @@
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::model::Rgb;
 use crate::protocol::wire;
 
 const MAX_PALETTES: usize = 64;
 const MAX_PALETTE_NAME_BYTES: usize = 64;
+const MAX_PALETTE_FILE_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct PaletteSlots {
@@ -45,11 +49,59 @@ impl PaletteSlots {
     }
 }
 
-const fn rgb(red: f64, green: f64, blue: f64) -> Rgb {
-    Rgb { red, green, blue }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaletteDefinition {
+    pub name: String,
+    pub primary: Rgb,
+    pub secondary: Rgb,
+    pub accent: Rgb,
+    pub cold: Rgb,
+    pub black: Rgb,
 }
 
-const BLACK: Rgb = rgb(0.0, 0.0, 0.0);
+impl PaletteDefinition {
+    fn from_wire(palette: &wire::Palette) -> Result<Self> {
+        let slot = |colour: &Option<wire::RgbColor>, slot: &str| -> Result<Rgb> {
+            let colour = colour
+                .as_ref()
+                .with_context(|| format!("palette {} lacks its {slot} slot", palette.name))?;
+            Ok(Rgb {
+                red: colour.red,
+                green: colour.green,
+                blue: colour.blue,
+            })
+        };
+        Ok(Self {
+            name: palette.name.clone(),
+            primary: slot(&palette.primary, "primary")?,
+            secondary: slot(&palette.secondary, "secondary")?,
+            accent: slot(&palette.accent, "accent")?,
+            cold: slot(&palette.cold, "cold")?,
+            black: slot(&palette.black, "black")?,
+        })
+    }
+
+    fn slots(&self) -> Result<PaletteSlots> {
+        let slots = PaletteSlots {
+            primary: self.primary,
+            secondary: self.secondary,
+            accent: self.accent,
+            cold: self.cold,
+            black: self.black,
+        };
+        for (slot, colour) in slots.named_slots() {
+            for channel in [colour.red, colour.green, colour.blue] {
+                ensure!(
+                    channel.is_finite() && (0.0..=1.0).contains(&channel),
+                    "palette {} {slot} channels must be finite and within 0..1",
+                    self.name
+                );
+            }
+        }
+        Ok(slots)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct PaletteTable {
@@ -58,57 +110,18 @@ pub struct PaletteTable {
 }
 
 impl PaletteTable {
-    pub fn builtin() -> Self {
-        let techno = PaletteSlots {
-            primary: rgb(1.0, 0.82, 0.6),
-            secondary: rgb(1.0, 0.55, 0.1),
-            accent: rgb(0.75, 0.0, 0.02),
-            cold: rgb(0.75, 0.85, 1.0),
-            black: BLACK,
-        };
-        let house = PaletteSlots {
-            primary: rgb(1.0, 0.82, 0.6),
-            secondary: rgb(1.0, 0.0, 0.7),
-            accent: rgb(1.0, 0.4, 0.0),
-            cold: rgb(0.0, 0.85, 1.0),
-            black: BLACK,
-        };
-        Self {
-            slots_by_name: BTreeMap::from([("techno".into(), techno), ("house".into(), house)]),
-            initial: "techno".into(),
-        }
-    }
-
-    pub fn from_definitions(palettes: &[wire::Palette]) -> Result<Self> {
+    pub fn new(palettes: &[PaletteDefinition]) -> Result<Self> {
         ensure!(
             (1..=MAX_PALETTES).contains(&palettes.len()),
-            "login must supply 1..{MAX_PALETTES} palettes; the first is active until changed"
+            "a session needs 1..{MAX_PALETTES} palettes; the first is active until changed"
         );
         let mut slots_by_name = BTreeMap::new();
         for palette in palettes {
             validate_palette_name(&palette.name)?;
-            let slot = |colour: &Option<wire::RgbColor>, slot: &str| -> Result<Rgb> {
-                let colour = colour
-                    .as_ref()
-                    .with_context(|| format!("palette {} lacks its {slot} slot", palette.name))?;
-                for channel in [colour.red, colour.green, colour.blue] {
-                    ensure!(
-                        channel.is_finite() && (0.0..=1.0).contains(&channel),
-                        "palette {} {slot} channels must be finite and within 0..1",
-                        palette.name
-                    );
-                }
-                Ok(rgb(colour.red, colour.green, colour.blue))
-            };
-            let slots = PaletteSlots {
-                primary: slot(&palette.primary, "primary")?,
-                secondary: slot(&palette.secondary, "secondary")?,
-                accent: slot(&palette.accent, "accent")?,
-                cold: slot(&palette.cold, "cold")?,
-                black: slot(&palette.black, "black")?,
-            };
             ensure!(
-                slots_by_name.insert(palette.name.clone(), slots).is_none(),
+                slots_by_name
+                    .insert(palette.name.clone(), palette.slots()?)
+                    .is_none(),
                 "duplicate palette {}",
                 palette.name
             );
@@ -117,6 +130,30 @@ impl PaletteTable {
             slots_by_name,
             initial: palettes[0].name.clone(),
         })
+    }
+
+    pub fn from_wire(palettes: &[wire::Palette]) -> Result<Self> {
+        Self::new(
+            &palettes
+                .iter()
+                .map(PaletteDefinition::from_wire)
+                .collect::<Result<Vec<_>>>()?,
+        )
+    }
+
+    pub fn load(path: &Path) -> Result<Self> {
+        let mut bytes = Vec::new();
+        File::open(path)
+            .with_context(|| format!("open palettes {}", path.display()))?
+            .take(MAX_PALETTE_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() as u64 <= MAX_PALETTE_FILE_BYTES,
+            "palette file exceeds {MAX_PALETTE_FILE_BYTES} bytes"
+        );
+        let palettes: Vec<PaletteDefinition> =
+            serde_json::from_slice(&bytes).context("decode palettes")?;
+        Self::new(&palettes)
     }
 
     pub fn slots(&self, name: &str) -> Result<PaletteSlots> {

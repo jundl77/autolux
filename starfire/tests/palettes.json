@@ -1,0 +1,18 @@
+[
+  {
+    "name": "techno",
+    "primary": { "red": 1, "green": 0.82, "blue": 0.6 },
+    "secondary": { "red": 1, "green": 0.55, "blue": 0.1 },
+    "accent": { "red": 0.75, "green": 0, "blue": 0.02 },
+    "cold": { "red": 0.75, "green": 0.85, "blue": 1 },
+    "black": { "red": 0, "green": 0, "blue": 0 }
+  },
+  {
+    "name": "house",
+    "primary": { "red": 1, "green": 0.82, "blue": 0.6 },
+    "secondary": { "red": 1, "green": 0, "blue": 0.7 },
+    "accent": { "red": 1, "green": 0.4, "blue": 0 },
+    "cold": { "red": 0, "green": 0.85, "blue": 1 },
+    "black": { "red": 0, "green": 0, "blue": 0 }
+  }
+]

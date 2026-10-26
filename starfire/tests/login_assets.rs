@@ -68,10 +68,16 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
     let supplied_catalog = AutoloopCatalog::from_definitions(&scripts).unwrap();
     let supplied_rig = FixtureRig::from_wire(&rig()).unwrap();
     for (script, autoloop) in scripts.iter().zip(offline_catalog.list()) {
-        let mut supplied = Engine::new(supplied_rig.clone(), supplied_catalog.clone()).unwrap();
+        let mut supplied = Engine::new(
+            supplied_rig.clone(),
+            supplied_catalog.clone(),
+            support::palettes(),
+        )
+        .unwrap();
         let mut offline = Engine::new(
             FixtureRig::from_mvr(&support::mvr(&serde_json::from_str(RGB_RIG).unwrap())).unwrap(),
             offline_catalog.clone(),
+            support::palettes(),
         )
         .unwrap();
         for engine in [&mut supplied, &mut offline] {
@@ -100,7 +106,7 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
                     bank: autoloop.bank,
                     autoloop: autoloop.autoloop,
                     transition: Transition::Cut,
-                    palette: None,
+                    palette: "techno".into(),
                 },
             )
             .unwrap();
@@ -249,7 +255,7 @@ fn login_palettes_need_complete_unique_named_slots_and_the_first_is_active() {
         name: "ember".into(),
         ..ice.clone()
     };
-    let table = PaletteTable::from_definitions(&[ice.clone(), ember.clone()]).unwrap();
+    let table = PaletteTable::from_wire(&[ice.clone(), ember.clone()]).unwrap();
     assert_eq!(table.initial(), "ice");
     assert_eq!(table.slots("ember").unwrap(), table.slots("ice").unwrap());
     for (invalid, reason) in [
@@ -277,7 +283,7 @@ fn login_palettes_need_complete_unique_named_slots_and_the_first_is_active() {
             "palette name \"Ice Blue\"",
         ),
     ] {
-        let error = PaletteTable::from_definitions(&invalid).unwrap_err();
+        let error = PaletteTable::from_wire(&invalid).unwrap_err();
         assert!(format!("{error:#}").contains(reason), "{error:#}");
     }
     let script = wire::AutoloopDefinition {
@@ -285,11 +291,10 @@ fn login_palettes_need_complete_unique_named_slots_and_the_first_is_active() {
         bank: "atmospheric".into(),
         lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.palette().primary), sf.dimmer(sf.all(), 1)} end}".into(),
     };
-    let catalog = AutoloopCatalog::from_definitions(&[script])
-        .unwrap()
-        .with_palettes(&[ember, ice])
-        .unwrap();
-    let mut engine = Engine::new(FixtureRig::from_wire(&rig()).unwrap(), catalog).unwrap();
+    let catalog = AutoloopCatalog::from_definitions(&[script]).unwrap();
+    let palettes = PaletteTable::from_wire(&[ember, ice]).unwrap();
+    let mut engine =
+        Engine::new(FixtureRig::from_wire(&rig()).unwrap(), catalog, palettes).unwrap();
     assert_eq!(engine.active_palette(), "ember");
     assert!(
         engine

@@ -11,7 +11,7 @@ use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
     OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
 };
-use crate::palette::PaletteSlots;
+use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
 
@@ -99,6 +99,7 @@ impl ActiveOverride {
 pub struct Engine {
     rig: FixtureRig,
     catalog: AutoloopCatalog,
+    palettes: PaletteTable,
     clock: MusicalClock,
     last_time_seconds: f64,
     active: Option<ActiveAutoloop>,
@@ -119,18 +120,16 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(rig: FixtureRig, catalog: AutoloopCatalog) -> Result<Self> {
+    pub fn new(rig: FixtureRig, catalog: AutoloopCatalog, palettes: PaletteTable) -> Result<Self> {
         let last_output_states = rig.empty_states();
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
-        let initial_palette = catalog.palettes().initial().to_owned();
-        let palette = ActivePalette::steady(
-            &initial_palette,
-            catalog.palettes().slots(&initial_palette)?,
-        );
+        let palette =
+            ActivePalette::steady(palettes.initial(), palettes.slots(palettes.initial())?);
         Ok(Self {
             rig,
             catalog,
+            palettes,
             clock: MusicalClock::default(),
             last_time_seconds: 0.0,
             active: None,
@@ -181,12 +180,7 @@ impl Engine {
                 validate_identifier(autoloop)?;
                 let transition = &self.resolve_transition(transition);
                 validate_transition(transition, time.elapsed_musical_beats)?;
-                let palette = palette
-                    .as_deref()
-                    .map(|name| {
-                        Ok::<_, anyhow::Error>((name, self.catalog.palettes().slots(name)?))
-                    })
-                    .transpose()?;
+                let slots = self.palettes.slots(palette)?;
                 if !self
                     .active
                     .as_ref()
@@ -194,17 +188,15 @@ impl Engine {
                 {
                     self.select(at_seconds, time, bank, autoloop, transition)?;
                 }
-                if let Some((name, slots)) = palette {
-                    let duration_beats = match transition {
-                        Transition::Crossfade { duration_beats } => *duration_beats,
-                        Transition::Cut | Transition::RendererDefault => 0.0,
-                    };
-                    self.palette
-                        .retarget(time.elapsed_musical_beats, name, slots, duration_beats);
-                }
+                let duration_beats = match transition {
+                    Transition::Crossfade { duration_beats } => *duration_beats,
+                    Transition::Cut | Transition::RendererDefault => 0.0,
+                };
+                self.palette
+                    .retarget(time.elapsed_musical_beats, palette, slots, duration_beats);
             }
             Command::SetPalette { name } => {
-                let slots = self.catalog.palettes().slots(name)?;
+                let slots = self.palettes.slots(name)?;
                 self.palette.retarget(
                     time.elapsed_musical_beats,
                     name,
@@ -282,7 +274,7 @@ impl Engine {
                 bank,
                 autoloop,
                 transition,
-                palette: Some(palette.to_owned()),
+                palette: palette.to_owned(),
             },
         )
     }
@@ -459,7 +451,7 @@ impl Engine {
         validate_identifier(autoloop)?;
         let script = self
             .catalog
-            .instantiate(bank, autoloop, &self.rig)
+            .instantiate(bank, autoloop, &self.rig, &self.palettes)
             .with_context(|| format!("cannot load autoloop {bank}/{autoloop}"))?;
 
         // A replacement is compiled before the active program is touched.

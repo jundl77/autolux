@@ -426,4 +426,5 @@ catalogue and sends it in Login (first entry active). Starfire keeps one active
 palette render state; `PlayAutoloop.palette` (required) retargets it with the loop's
 transition and the `PALETTE` parameter retargets it over the default crossfade.
 `sf.palette()` reads that state; `sf.palette(name)` reads a named table entry.
-Disk catalogues (replay, check) use the built-in techno/house table so goldens hold.
+Starfire has no built-in palettes: replays embed the table and `check` takes --palettes.
+Scripts see read-only palette tables, so slots cannot detach from the per-frame refresh.

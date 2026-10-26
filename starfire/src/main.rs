@@ -16,6 +16,7 @@ use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::mvr;
+use starfire::palette::PaletteTable;
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::AutoloopCatalog;
 
@@ -39,6 +40,8 @@ enum Action {
         rig: PathBuf,
         #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
         autoloops: PathBuf,
+        #[arg(long)]
+        palettes: PathBuf,
     },
     /// Render live controls from framed protobuf on stdin; status uses stdout.
     Live,
@@ -91,19 +94,24 @@ fn main() -> std::process::ExitCode {
 
 fn run(arguments: Arguments) -> Result<()> {
     match arguments.command {
-        Action::Check { rig, autoloops } => {
+        Action::Check {
+            rig,
+            autoloops,
+            palettes,
+        } => {
+            let palettes = PaletteTable::load(&palettes)?;
             let rig = FixtureRig::load(&rig)?;
             let catalog = AutoloopCatalog::load(&autoloops)?;
             let autoloops = catalog.list();
             for autoloop in &autoloops {
-                let mut engine = Engine::new(rig.clone(), catalog.clone())?;
+                let mut engine = Engine::new(rig.clone(), catalog.clone(), palettes.clone())?;
                 engine.apply(
                     0.0,
                     &Command::Select {
                         bank: autoloop.bank.clone(),
                         autoloop: autoloop.autoloop.clone(),
                         transition: Transition::Cut,
-                        palette: None,
+                        palette: palettes.initial().to_owned(),
                     },
                 )?;
                 let frame = engine.render_at(0.0).with_context(|| {
