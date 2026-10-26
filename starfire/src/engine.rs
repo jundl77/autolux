@@ -730,7 +730,7 @@ impl Engine {
         let beat = time.elapsed_musical_beats;
         self.retire_expired(seconds, beat);
         let palette = self.palette.slots_at(beat);
-        let intensity_scale = intensity_strobe_scale(self.intensity);
+        let pulse_allowed = intensity_strobe_scale(self.intensity) > 0.0;
         let layers = self
             .overrides
             .values()
@@ -769,7 +769,7 @@ impl Engine {
                     continue;
                 };
                 if let Some(value) = value {
-                    apply_properties(state, &value.values);
+                    apply_properties(&self.rig, id, state, &value.values);
                     if let Some(multiplier) = value.intensity_multiplier {
                         state.intensity *= multiplier;
                     }
@@ -788,7 +788,8 @@ impl Engine {
                             beat_position: time.beat_position,
                             elapsed_beats: beat - started_beat,
                             palette: &palette,
-                            intensity_scale,
+                            speed_scale: self.intensity,
+                            pulse_allowed,
                         },
                     );
                 }
@@ -977,8 +978,11 @@ fn validate_properties(values: &PropertyValues) -> Result<()> {
     Ok(())
 }
 
-fn apply_properties(state: &mut FixtureState, values: &PropertyValues) {
-    state.attributes.extend(values.attributes.clone());
+fn apply_properties(rig: &FixtureRig, id: &str, state: &mut FixtureState, values: &PropertyValues) {
+    match rig.profile(id) {
+        Some(profile) => profile.overlay_attributes(&mut state.attributes, &values.attributes),
+        None => state.attributes.extend(values.attributes.clone()),
+    }
     if let Some(value) = values.intensity {
         state.intensity = value;
     }
@@ -1005,7 +1009,7 @@ fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureSta
             let state = states
                 .get_mut(&id)
                 .context("resolved fixture is absent from the rig")?;
-            apply_properties(state, &effect.values);
+            apply_properties(rig, &id, state, &effect.values);
         }
     }
     Ok(states)
@@ -1023,7 +1027,11 @@ fn blend_states(
                 if let Some(destination) = to.attributes.get(key) {
                     let blended = rig.interpolate_attribute(id, key, value, destination, amount);
                     to.attributes.insert(key.clone(), blended);
-                } else if amount < 1.0 {
+                } else if amount < 1.0
+                    && rig
+                        .profile(id)
+                        .is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
+                {
                     to.attributes.insert(key.clone(), value.clone());
                 }
             }

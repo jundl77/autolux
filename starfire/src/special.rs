@@ -268,7 +268,8 @@ pub struct SpecialFrame<'a> {
     pub beat_position: f64,
     pub elapsed_beats: f64,
     pub palette: &'a PaletteSlots,
-    pub intensity_scale: f64,
+    pub speed_scale: f64,
+    pub pulse_allowed: bool,
 }
 
 pub fn apply(
@@ -285,10 +286,10 @@ pub fn apply(
     let colour = (map.colour())
         .then(|| frame.palette.slot(&special.colour_slot))
         .flatten();
-    let speed = special.speed * frame.intensity_scale;
+    let speed = special.speed * frame.speed_scale;
     let pulse = special
         .pulse_beats
-        .filter(|_| frame.intensity_scale > 0.0)
+        .filter(|_| frame.pulse_allowed)
         .and_then(|beats| Some((map.pulse.as_ref()?, f64::from(beats))));
     let pattern = special.pattern.and_then(|value| {
         let slots = map.pattern.as_ref()?;

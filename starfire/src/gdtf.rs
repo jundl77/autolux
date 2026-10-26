@@ -541,6 +541,28 @@ impl GdtfProfile {
         })
     }
 
+    /// A later layer's key replaces every earlier key that addresses one of its channels.
+    pub fn overlay_attributes(
+        &self,
+        target: &mut BTreeMap<String, AttributeValue>,
+        layer: &BTreeMap<String, AttributeValue>,
+    ) {
+        for (key, value) in layer {
+            let channels = self.channels_matching(key);
+            target.retain(|existing, _| {
+                existing == key || self.channels_matching(existing).is_disjoint(&channels)
+            });
+            target.insert(key.clone(), value.clone());
+        }
+    }
+
+    pub fn shares_channel(&self, key: &str, attributes: &BTreeMap<String, AttributeValue>) -> bool {
+        let channels = self.channels_matching(key);
+        attributes
+            .keys()
+            .any(|existing| !self.channels_matching(existing).is_disjoint(&channels))
+    }
+
     pub fn channels_matching(&self, key: &str) -> BTreeSet<usize> {
         self.matching_functions(key)
             .into_iter()

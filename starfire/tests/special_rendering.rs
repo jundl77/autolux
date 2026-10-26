@@ -365,7 +365,7 @@ fn a_replacement_crossfades_through_the_releasing_special() {
 }
 
 #[test]
-fn an_absent_group_renders_nothing_and_low_intensity_stills_speed_and_pulse() {
+fn an_absent_group_renders_nothing_and_low_intensity_gates_pulse_but_only_slows_speed() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
     let dark = dmx(&mut engine, 0.0);
@@ -395,8 +395,43 @@ fn an_absent_group_renders_nothing_and_low_intensity_stills_speed_and_pulse() {
     fire(&mut engine, 0.5, &special("spinners", pulsed));
     assert_eq!(
         &dmx(&mut engine, 0.75)[SPINNER.start + 1..SPINNER.end],
-        &[255, 0]
+        &[255, 51]
     );
+}
+
+#[test]
+fn two_keys_on_one_channel_resolve_to_the_higher_priority_layer() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let gobo = SCANNER.end - 1;
+    let layer = |id: &str, key: &str, preset: &str, priority| {
+        ClientMessage::SetActiveEffect(wire::SetActiveEffect {
+            command_id: 1,
+            effect_id: id.into(),
+            target: Some(wire::set_active_effect::Target::Fixture("scanner".into())),
+            priority,
+            attributes: [(
+                key.into(),
+                wire::set_active_effect::AttributeValue {
+                    value: Some(wire::set_active_effect::attribute_value::Value::Preset(
+                        preset.into(),
+                    )),
+                },
+            )]
+            .into(),
+            ..Default::default()
+        })
+    };
+    for (low, high, expected) in [
+        (("Gobo1", "Dots"), ("Base.Gobo1", "Tunnel"), 192),
+        (("Base.Gobo1", "Tunnel"), ("Gobo1", "Dots"), 64),
+    ] {
+        let mut engine = engine(&rig);
+        fire(&mut engine, 0.0, &layer("high", high.0, high.1, 20));
+        fire(&mut engine, 0.0, &layer("low", low.0, low.1, 10));
+        let frame = engine.render_at(0.0).unwrap();
+        assert_eq!(frame.script_error, None);
+        assert_eq!(frame.dmx_frames_by_universe[&0][gobo], expected);
+    }
 }
 
 #[test]

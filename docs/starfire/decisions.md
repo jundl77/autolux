@@ -453,8 +453,10 @@ colour, else gate a continuous Shutter(n) between its channel default (open) and
 PhysicalFrom (closed), else gate intensity. Shutter(n)Strobe is not used: its Hz
 free-runs off the beat grid and bypasses the software strobe caps. Pattern selects a
 Gobo(n), else Prism(n), slot. Attack/release ease on elapsed musical beats; release
-runs when the effect is cleared, replaced or expires. Below the strobe gate intensity,
-speed and pulse stop; above it speed scales by intensity. A group absent from the rig
-renders nothing. LoginReply reports per group which axes at least one member can express.
+runs when the effect is cleared, replaced or expires. Speed scales by intensity
+continuously; only pulse stops below the strobe gate, which mirrors strobes. Whether a
+special is intense stays Autolux policy. A group absent from the rig renders nothing.
+When two attribute keys address one DMX channel, the later (higher-priority) layer
+wins and the earlier key is dropped for that channel; this is not an error. LoginReply reports per group which axes at least one member can express.
 A dimmerless wheel resolves to its zero-luminance slot at zero intensity or black
 colour; without such a slot it closes its continuous Shutter(n) instead.
