@@ -111,7 +111,10 @@ def open_replay(path, key: dict, expected_samples: int | None = None):
             if reason is not None:
                 return None, reason
             total = int(archive["total_pushed"])
-            if expected_samples is not None and total < int(expected_samples):
+            # A run in standby feeds the chain nothing, so the chain's own count falls
+            # short of the file; what the source read is what says the run was complete.
+            covered = int(archive["source_samples"]) if "source_samples" in archive.files else total
+            if expected_samples is not None and covered < int(expected_samples):
                 return None, "miss_truncated"
             if not _internally_consistent(archive):
                 return None, "miss_schema"
@@ -198,10 +201,11 @@ class Replay:
 
 
 class Recorder:
-    def __init__(self, stream, path, key: dict) -> None:
+    def __init__(self, stream, path, key: dict, source_samples=None) -> None:
         self.stream = stream
         self.path = Path(path)
         self._key = key
+        self._source_samples = source_samples
         self._pushed = 0
         self._triggers: list = []
         self._offsets: list = [0]
@@ -243,6 +247,7 @@ class Recorder:
             {
                 "key": np.str_(json.dumps(self._key, sort_keys=True)),
                 "total_pushed": np.int64(self._pushed),
+                "source_samples": np.int64(covered_samples(self._source_samples, self._pushed)),
                 "pass_trigger": np.asarray(self._triggers, dtype=np.int64),
                 "pass_offset": np.asarray(self._offsets, dtype=np.int64),
                 "cell_index": np.asarray(self._indices, dtype=np.int64),
@@ -262,17 +267,23 @@ class RecordingStream(PosteriorStream):
         self.stream.save()
 
 
-def recording_chain(chain, path, key: dict, tracker_plan=None):
+def covered_samples(source_samples, pushed: int) -> int:
+    return pushed if source_samples is None else int(source_samples())
+
+
+def recording_chain(chain, path, key: dict, tracker_plan=None, source_samples=None):
+    """Record the chain; source_samples reports how far into the file the run read."""
     from autolux.lib.section_chain import SectionStream
 
     posteriors = RecordingStream(
-        Recorder(chain.stream.posteriors.stream, path, key), chain.stream.posteriors.model
+        Recorder(chain.stream.posteriors.stream, path, key, source_samples),
+        chain.stream.posteriors.model,
     )
     tracker = chain.stream.tracker
     if tracker is not None and tracker_plan is not None:
         from autolux.simulate.tracker_cache import TrackerRecorder
 
-        tracker = TrackerRecorder(tracker, *tracker_plan)
+        tracker = TrackerRecorder(tracker, *tracker_plan, source_samples=source_samples)
     return chain._replace(stream=SectionStream(posteriors, tracker))
 
 
