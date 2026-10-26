@@ -34,13 +34,17 @@
 
 #show-control { color: var(--text); font-size: 14px; }
 .show-status { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-               gap: 16px; padding: 8px 0; }
+               gap: 16px; padding: 8px 0 16px; border-bottom: 1px solid var(--line);
+               color: var(--text); font-size: 14px;
+               --line: #273344; --muted: #8293a6; --text: #e6edf3; }
+.status-tag { color: var(--muted); font-size: 11px; }
+.status-item .dot + .dot { margin-left: -4px; }
 .status-item { display: grid; gap: 4px; min-width: 0; }
 .status-item .status-text { display: flex; align-items: center; gap: 8px; white-space: nowrap;
                              overflow: hidden; text-overflow: ellipsis;
                              font-variant-numeric: tabular-nums; }
 .control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 40px; }
-.control-transport { border-top: 1px solid var(--line); padding: 8px 0; }
+.control-transport { padding: 8px 0; }
 
 #show-control button { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px;
                        background: var(--fill); color: var(--text); font: inherit; font-size: 14px;
@@ -49,6 +53,11 @@
 #show-control button:disabled { opacity: .4; cursor: default; }
 #show-control button.active { border-color: var(--accent); }
 #show-control .icon-button { width: 40px; height: 40px; padding: 0; font-size: 16px; }
+#show-control .transport-button { height: 40px; }
+#show-control .icon-button.playing { background: #1f3a2a; color: #b5e3c0; }
+#show-control .icon-button.playing:hover:not(:disabled) { background: #26472f; }
+#show-control .icon-button.paused { background: #45301c; color: #f2cfa9; }
+#show-control .icon-button.paused:hover:not(:disabled) { background: #523822; }
 #show-control fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 #show-control fieldset:disabled { opacity: .4; }
 
@@ -82,16 +91,17 @@
 .palette-option > span:last-child { margin-left: 4px; }
 .palette-option .dot { width: 10px; height: 10px; }
 /* Automatic: a quiet hue sweep at swatch lightness, only noticed on a second look. */
-.palette-option .dot-auto { box-shadow: inset 0 0 0 1px var(--line);
+.dot-auto { box-shadow: inset 0 0 0 1px var(--line);
     background: conic-gradient(hsl(0 25% 60%), hsl(60 25% 60%), hsl(120 25% 60%),
                                hsl(180 25% 60%), hsl(240 25% 60%), hsl(300 25% 60%),
                                hsl(360 25% 60%)); }
 
-.settings-toggle { display: block; width: max-content; margin-left: auto; line-height: 40px; color: var(--muted);
-                   font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
-                   cursor: pointer; list-style: none; user-select: none; }
-.settings-toggle::-webkit-details-marker { display: none; }
-.settings-toggle:hover, .settings[open] .settings-toggle { color: var(--text); }
+#show-control .settings-toggle { margin-left: auto; height: auto; padding: 0; border: 0;
+                                background: transparent; color: var(--muted); font-size: 11px;
+                                font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+                                line-height: 40px; }
+#show-control .settings-toggle:hover, #show-control .settings-toggle.open {
+    background: transparent; color: var(--text); }
 .settings-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
 .setting-row { display: grid; grid-template-columns: minmax(0, 1fr) 128px; column-gap: 16px;
                align-items: center; min-height: 40px; }
