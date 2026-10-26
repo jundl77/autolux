@@ -53,6 +53,7 @@ fn lighting_override(id: &str, target: Target, values: PropertyValues) -> Comman
             intensity_multiplier: None,
             lifetime: OverrideLifetime::UntilCleared,
             priority: 0,
+            special: None,
         },
     }
 }

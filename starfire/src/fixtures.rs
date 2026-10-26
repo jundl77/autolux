@@ -333,6 +333,13 @@ impl FixtureRig {
         self.profiles[&patch.profile].validate_attributes(values)
     }
 
+    pub fn profile(&self, fixture_id: &str) -> Option<&GdtfProfile> {
+        self.fixtures
+            .iter()
+            .find(|fixture| fixture.id == fixture_id)
+            .map(|fixture| &self.profiles[&fixture.profile])
+    }
+
     pub fn interpolate_attribute(
         &self,
         fixture_id: &str,

@@ -9,3 +9,4 @@ pub mod palette;
 pub mod protocol;
 pub mod replay;
 pub mod script;
+pub mod special;

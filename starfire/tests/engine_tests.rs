@@ -74,6 +74,7 @@ fn lighting_override(id: &str, values: PropertyValues) -> LightingOverride {
         intensity_multiplier: None,
         lifetime: OverrideLifetime::UntilCleared,
         priority: 0,
+        special: None,
     }
 }
 
@@ -1286,6 +1287,7 @@ fn room_engine(scripts: &[(&str, &str)]) -> Engine {
 #[test]
 fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
+    let fx_fixture = support::room().groups()["fx"][0].clone();
     let mut engine = room_engine(&[
         ("empty", "return {render=function(ctx) return {} end}"),
         (
@@ -1311,7 +1313,7 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
         let attributes = &engine
             .render_at(time)
             .unwrap()
-            .fixture_properties_before_strobe["kinta"]
+            .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
         assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
         assert_eq!(
@@ -1333,7 +1335,7 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
         let attributes = &engine
             .render_at(time)
             .unwrap()
-            .fixture_properties_before_strobe["kinta"]
+            .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
         assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
         let AttributeValue::Number(rotation) = attributes["Effects1PosRotate"] else {

@@ -28,6 +28,11 @@ const SRGB_LINEAR_SCALE: f64 = 12.92;
 const SRGB_GAMMA: f64 = 2.4;
 const SRGB_SCALE: f64 = 1.055;
 const SRGB_OFFSET: f64 = 0.055;
+const BLACK: Rgb = Rgb {
+    red: 0.0,
+    green: 0.0,
+    blue: 0.0,
+};
 const XYZ_TO_SRGB: [[f64; 3]; 3] = [
     [3.240_454_2, -1.537_138_5, -0.498_531_4],
     [-0.969_266, 1.876_010_8, 0.041_556],
@@ -75,6 +80,20 @@ struct Channel {
     has_dimmer: bool,
     has_rgb: bool,
     has_white: bool,
+    closes_when_dark: bool,
+}
+
+/// One channel function as seen by renderers that address attributes by family.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FunctionInfo {
+    pub channel: usize,
+    pub attribute: String,
+    pub key: String,
+    pub physical_from: f64,
+    pub physical_to: f64,
+    pub rest: f64,
+    pub slots: Vec<AttributeValue>,
+    pub slot_colours: bool,
 }
 
 /// Resolved mode: offsets, physical mappings and dependencies are validated before playback.
@@ -213,6 +232,7 @@ impl GdtfProfile {
                 has_dimmer: false,
                 has_rgb: false,
                 has_white: false,
+                closes_when_dark: false,
             });
         }
         // A dimmer controls its own geometry and descendants, never unrelated cells.
@@ -243,6 +263,17 @@ impl GdtfProfile {
                 .iter()
                 .all(|attribute| attributes.contains(*attribute));
             channels[index].has_white = attributes.contains("ColorAdd_W");
+        }
+        let dark_slot = channels
+            .iter()
+            .flat_map(|channel| &channel.functions)
+            .flat_map(|function| &function.sets)
+            .any(|set| set.colour == Some(BLACK));
+        for channel in &mut channels {
+            channel.closes_when_dark = !dark_slot
+                && !channel.has_dimmer
+                && !channel.has_rgb
+                && channel.functions.iter().any(is_gate_shutter);
         }
         let footprint = occupied
             .last()
@@ -432,6 +463,109 @@ impl GdtfProfile {
         Ok(())
     }
 
+    /// Unconditional functions with their physical rest value and addressable channel sets.
+    pub fn functions(&self) -> Vec<FunctionInfo> {
+        let mut infos = Vec::new();
+        for (index, channel) in self.channels.iter().enumerate() {
+            for (position, &function_index) in channel.functions_by_dmx_start.iter().enumerate() {
+                let function = &channel.functions[function_index];
+                if function.condition.is_some() {
+                    continue;
+                }
+                let last = channel.functions_by_dmx_start[position + 1..]
+                    .iter()
+                    .map(|&next| channel.functions[next].first)
+                    .find(|&first| first > function.first)
+                    .map_or(function.maximum_dmx_value, |first| first - 1);
+                let rest = if (function.first..=last).contains(&channel.default) {
+                    let span = f64::from(last - function.first);
+                    let amount = if span == 0.0 {
+                        0.0
+                    } else {
+                        f64::from(channel.default - function.first) / span
+                    };
+                    function.physical_from
+                        + (function.physical_to - function.physical_from) * amount
+                } else {
+                    function.physical_from
+                };
+                let named = |name: &str| {
+                    !name.is_empty()
+                        && function.sets.iter().filter(|set| set.name == name).count() == 1
+                };
+                let slots = function
+                    .sets
+                    .iter()
+                    .filter(|set| set.first <= last)
+                    .filter_map(|set| {
+                        if named(&set.name) {
+                            return Some(AttributeValue::Preset(set.name.clone()));
+                        }
+                        let value = AttributeValue::Number(set.physical_from);
+                        function
+                            .encode_in_range(&value, last)
+                            .is_ok()
+                            .then_some(value)
+                    })
+                    .collect();
+                let unique = |key: &str| self.matching_functions(key).len() == 1;
+                let key = [&function.attribute, &function.qualified_attribute]
+                    .into_iter()
+                    .find(|key| unique(key))
+                    .unwrap_or(&function.path)
+                    .clone();
+                infos.push(FunctionInfo {
+                    channel: index,
+                    attribute: function.attribute.clone(),
+                    key,
+                    physical_from: function.physical_from,
+                    physical_to: function.physical_to,
+                    rest,
+                    slots,
+                    slot_colours: function.sets.iter().any(|set| set.colour.is_some()),
+                });
+            }
+        }
+        infos
+    }
+
+    pub fn has_dark_wheel_slot(&self) -> bool {
+        self.channels
+            .iter()
+            .flat_map(|channel| &channel.functions)
+            .flat_map(|function| &function.sets)
+            .any(|set| set.colour == Some(BLACK))
+    }
+
+    /// A later layer's key replaces every earlier key that addresses one of its channels.
+    pub fn overlay_attributes(
+        &self,
+        target: &mut BTreeMap<String, AttributeValue>,
+        layer: &BTreeMap<String, AttributeValue>,
+    ) {
+        for (key, value) in layer {
+            let channels = self.channels_matching(key);
+            target.retain(|existing, _| {
+                existing == key || self.channels_matching(existing).is_disjoint(&channels)
+            });
+            target.insert(key.clone(), value.clone());
+        }
+    }
+
+    pub fn shares_channel(&self, key: &str, attributes: &BTreeMap<String, AttributeValue>) -> bool {
+        let channels = self.channels_matching(key);
+        attributes
+            .keys()
+            .any(|existing| !self.channels_matching(existing).is_disjoint(&channels))
+    }
+
+    pub fn channels_matching(&self, key: &str) -> BTreeSet<usize> {
+        self.matching_functions(key)
+            .into_iter()
+            .map(|(channel, _)| channel)
+            .collect()
+    }
+
     fn matching_functions(&self, key: &str) -> Vec<(usize, &Function)> {
         self.channels
             .iter()
@@ -581,8 +715,11 @@ fn semantic_value(
     };
     let wheel = !function.sets.is_empty() && function.sets.iter().any(|set| set.colour.is_some());
     if wheel && function.attribute.starts_with("Color") {
+        let dark = state.intensity <= 0.0 || colour_peak(state.colour) <= 0.0;
         let requested = if rgb {
             Rgb::default()
+        } else if dark && !channel.has_dimmer {
+            BLACK
         } else {
             normalize(state.colour)
         };
@@ -596,6 +733,9 @@ fn semantic_value(
                 colour_distance(*left, requested).total_cmp(&colour_distance(*right, requested))
             })
             .map(|(set, _)| set.first);
+    }
+    if channel.closes_when_dark && is_gate_shutter(function) {
+        return (state.intensity <= 0.0).then_some(function.first);
     }
     let value = match function.attribute.as_str() {
         "Dimmer" => {
@@ -821,6 +961,18 @@ fn dependency_order(channels: &[Channel]) -> Result<Vec<usize>> {
     Ok(order)
 }
 
+pub fn numbered_attribute(attribute: &str, prefix: &str) -> bool {
+    attribute
+        .strip_prefix(prefix)
+        .is_some_and(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn is_gate_shutter(function: &Function) -> bool {
+    numbered_attribute(&function.attribute, "Shutter")
+        && function.sets.is_empty()
+        && function.first == 0
+}
+
 fn is_brightness_attribute(attribute: &str) -> bool {
     attribute == "Dimmer"
         || attribute.starts_with("ColorAdd_")
@@ -955,11 +1107,16 @@ fn cie_to_rgb(colour: ColorCie) -> Result<Rgb> {
             SRGB_SCALE * linear.powf(1.0 / SRGB_GAMMA) - SRGB_OFFSET
         }
     });
-    Ok(normalize(Rgb {
+    let colour = Rgb {
         red: rgb[0],
         green: rgb[1],
         blue: rgb[2],
-    }))
+    };
+    Ok(if colour_peak(colour) > 0.0 {
+        normalize(colour)
+    } else {
+        BLACK
+    })
 }
 
 fn colour_peak(colour: Rgb) -> f64 {

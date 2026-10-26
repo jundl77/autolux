@@ -541,6 +541,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                         duration_seconds: 0.5,
                     },
                     priority: 0,
+                    special: None,
                 },
             },
         ),
@@ -643,10 +644,45 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
     assert_eq!(engine.active_palette(), "house");
 }
 
+const ATTRIBUTE_LOOK: &str = "drop/attribute_sweep";
+
+fn attribute_engine() -> Engine {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops");
+    let definition = |bank: &str, id: &str, lua_source: String| wire::AutoloopDefinition {
+        autoloop_id: id.into(),
+        bank: bank.into(),
+        lua_source,
+    };
+    Engine::new(
+        FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
+        AutoloopCatalog::from_definitions(&[
+            definition(
+                "atmospheric",
+                "atmospheric/cold_breathe",
+                std::fs::read_to_string(root.join("atmospheric/cold_breathe.lua")).unwrap(),
+            ),
+            definition(
+                "drop",
+                ATTRIBUTE_LOOK,
+                r#"return { render = function()
+                    return sf.scene {
+                        sf.dimmer(sf.all(), 1),
+                        sf.physical_attribute(sf.group("fx"), "Effects1PosRotate", 90),
+                    }
+                end }"#
+                    .into(),
+            ),
+        ])
+        .unwrap(),
+        support::palettes(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_an_empty_one_cuts() {
     use wire::{ParameterType as Kind, parameter::Value};
-    let mut engine = engine();
+    let mut engine = attribute_engine();
     apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     apply_command(
         &mut engine,
@@ -657,13 +693,13 @@ fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_a
     let before = engine.render_at(0.0).unwrap();
     let cut = Operation::PlayAutoloop(wire::PlayAutoloop {
         command_id: 1,
-        autoloop_id: "drop/kick".into(),
+        autoloop_id: ATTRIBUTE_LOOK.into(),
         transition: Some(wire::play_autoloop::Transition::default()),
         palette: "techno".into(),
     });
     let mut cutting = engine;
     apply_command(&mut cutting, 0.0, &cut).unwrap();
-    let mut defaulted = self::engine();
+    let mut defaulted = attribute_engine();
     apply_command(&mut defaulted, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     apply_command(
         &mut defaulted,
@@ -671,7 +707,7 @@ fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_a
         &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
     )
     .unwrap();
-    apply_command(&mut defaulted, 0.0, &play("drop", "kick")).unwrap();
+    apply_command(&mut defaulted, 0.0, &play("drop", "attribute_sweep")).unwrap();
     let faded = defaulted.render_at(0.0).unwrap();
     let cut = cutting.render_at(0.0).unwrap();
     let mut expected = before.fixture_properties_before_strobe.clone();

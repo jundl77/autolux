@@ -67,6 +67,75 @@ def test_discarding_delayed_audio_frames_as_its_own_standalone_command():
         protocol.build_command({'kind': 'discard_delayed_audio', 'seconds': 1.0})
 
 
+def test_control_adapter_translates_a_special_one_to_one():
+    special = {
+        'colour_slot': 'secondary',
+        'energy': 0.25,
+        'speed': 0.5,
+        'pulse_beats': 2,
+        'attack_beats': 8.0,
+        'release_beats': 4.0,
+        'pattern': 0.75,
+    }
+    command = {
+        'kind': 'set_override',
+        'value': {'id': 'accent', 'target': {'group': 'fx'}, 'special': special, 'priority': 50},
+    }
+    effect = protocol.build_command(command)
+    assert (effect.group, effect.priority, effect.HasField('intensity')) == ('fx', 50, False)
+    assert {field.name: value for field, value in effect.special.ListFields()} == special
+    effect.command_id = 1
+    encoded = protocol.encode_command(effect)
+    assert wire.SetActiveEffect.FromString(encoded[protocol.FRAME_HEADER.size :]) == effect
+
+    continuous = protocol.build_command(
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': 'accent',
+                'target': {'group': 'fx'},
+                'special': {**special, 'pulse_beats': None, 'pattern': None},
+            },
+        }
+    )
+    assert not continuous.special.HasField('pulse_beats')
+    assert not continuous.special.HasField('pattern')
+    with pytest.raises(ValueError, match='special'):
+        protocol.build_command(
+            {
+                'kind': 'set_override',
+                'value': {'id': 'accent', 'target': 'all', 'special': {'strobe_hz': 4.0}},
+            }
+        )
+
+
+def test_login_groups_become_plain_capability_records():
+    reply = wire.LoginReply(
+        groups=[
+            wire.GroupCapability(name='fx', fixture_count=1, colour=True, speed=True, pulse=True),
+            wire.GroupCapability(name='wash', fixture_count=4, pulse=True),
+        ]
+    )
+    assert protocol.login_groups(reply) == [
+        {
+            'name': 'fx',
+            'fixture_count': 1,
+            'colour': True,
+            'speed': True,
+            'pulse': True,
+            'pattern': False,
+        },
+        {
+            'name': 'wash',
+            'fixture_count': 4,
+            'colour': False,
+            'speed': False,
+            'pulse': True,
+            'pattern': False,
+        },
+    ]
+
+
 def test_control_adapter_preserves_gdtf_physical_values_and_named_presets():
     effect = protocol.build_command(
         {
@@ -334,7 +403,8 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
                 run_id=run_id if mode != 'wrong_login_run' else 1,
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
                 protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
-                protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply')
+                protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply'),
+                groups=[wire.GroupCapability(name='fx', fixture_count=1, colour=True, pulse=True)],
             ))
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
@@ -367,8 +437,19 @@ def _fake_runtime(tmp_path, mode='normal', **kwargs):
 
 def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     runtime = _fake_runtime(tmp_path)
+    assert runtime.groups == []
     with runtime:
         child = runtime.process
+        assert runtime.groups == [
+            {
+                'name': 'fx',
+                'fixture_count': 1,
+                'colour': True,
+                'speed': False,
+                'pulse': True,
+                'pattern': False,
+            }
+        ]
         runtime.send_command(
             {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'palette': 'techno'}
         )

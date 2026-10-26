@@ -441,3 +441,29 @@ no drop accent is sent; above it the rate and burst caps scale by `i`, and the d
 accent cooldown divides by `i`. Pan/tilt slew at most `0.6 / (1 - i)^2` of the
 normalised range per second, unlimited at 1.0. The selection policy caps energy at
 tier 1 below 0.35 and tier 2 below 0.7, then applies the nearest-tier fallback.
+
+2026-10-26 specials: `SetActiveEffect.special` renders a fixture-agnostic accent on its
+target group at the message priority, keyed only on GDTF attribute families.
+Colour slot: active palette colour, then ColorAdd/ColorSub mixing or the nearest
+coloured Color(n) wheel slot. Energy: semantic intensity (Dimmer, mixing gain, dark
+wheel slot). Speed: `*Rotate`/`*WheelSpin` over their physical range (from zero when
+the range is bidirectional), else a pan sweep centred on the beam. Pulse, on the bar
+grid: advance a Gobo(n) wheel, else a Color(n) wheel when the fixture cannot match
+colour, else gate a continuous Shutter(n) between its channel default (open) and
+PhysicalFrom (closed), else gate to a zero-luminance wheel slot. A plain dimmer blink is
+not a pulse. Shutter(n)Strobe is not used: its Hz free-runs off the beat grid and
+bypasses the software strobe caps. Pulses never exceed the strobe rate cap times the
+intensity strobe scale (the period lengthens by whole multiples); gating pulses also
+stop after the strobe burst cap, slot advances continue. Pattern selects a Gobo(n),
+else Prism(n), slot. Attack/release ease on elapsed musical beats; release runs when
+the effect is cleared, replaced or expires. Speed scales by intensity continuously
+(Starfire only; energy is never scaled by intensity) and the pan sweep accumulates its
+phase per frame, so intensity changes bend it without jumping; only pulse stops below
+the strobe gate. Whether a special is intense stays Autolux policy. An unknown colour
+slot leaves colour to the look. A group absent from the rig renders nothing. When two
+attribute keys address one DMX channel, the later (higher-priority) layer wins and the
+earlier key is dropped for that channel; this is not an error. LoginReply reports per
+group which axes at least one member can express, and login fails if that reply
+exceeds the real-time message cap.
+A dimmerless wheel resolves to its zero-luminance slot at zero intensity or black
+colour; without such a slot it closes its continuous Shutter(n) instead.

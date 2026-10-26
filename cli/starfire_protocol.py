@@ -166,6 +166,8 @@ def _active_effect(value):
         properties['attributes'] = attributes
     if value.pop('intensity_multiplier', None) is not None:
         raise ValueError('Effects set intensity directly; multipliers are not supported')
+    if (special := value.pop('special', None)) is not None:
+        value['special'] = _special(special)
     return wire.SetActiveEffect(
         effect_id=value.pop('id'),
         **target,
@@ -173,6 +175,37 @@ def _active_effect(value):
         **lifetime,
         **value,
     )
+
+
+SPECIAL_FIELDS = {
+    'colour_slot',
+    'energy',
+    'speed',
+    'pulse_beats',
+    'attack_beats',
+    'release_beats',
+    'pattern',
+}
+
+
+def _special(value):
+    if not isinstance(value, dict) or not value.keys() <= SPECIAL_FIELDS:
+        raise ValueError('Unknown special field')
+    return wire.Special(**{name: setting for name, setting in value.items() if setting is not None})
+
+
+def login_groups(reply) -> list[dict]:
+    return [
+        {
+            'name': group.name,
+            'fixture_count': group.fixture_count,
+            'colour': group.colour,
+            'speed': group.speed,
+            'pulse': group.pulse,
+            'pattern': group.pattern,
+        }
+        for group in reply.groups
+    ]
 
 
 def encode_command(message: Message) -> bytes:
