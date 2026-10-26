@@ -511,7 +511,15 @@ def _health(snapshot: dict) -> str:
     return health
 
 
-def _build_show_status(snapshot: dict) -> list:
+def _status_item(caption: str, value, **props):
+    return html.Div(
+        [html.Span(caption, className='control-label'), html.Span(value, className='status-text')],
+        className='status-item',
+        **props,
+    )
+
+
+def _build_show_status(snapshot: dict, now: float) -> list:
     cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
     name = effect.get('name')
@@ -521,24 +529,31 @@ def _build_show_status(snapshot: dict) -> list:
         if part
     )
     palette = snapshot.get('palette') or {}
-    palette_name = palette.get('name') or '—'
     bpm = _room_bpm(snapshot)
     health = _health(snapshot)
+    fps = _latest_telemetry(snapshot, now).get('starfire_measured_render_frames_per_second')
     items = [
-        html.Span([_dot(cfg['primary']), cfg['label'].capitalize()]),
-        html.Span(name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—', title=detail),
-        html.Span(palette_name),
-        html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM'),
-        html.Span([_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'),
+        _status_item('Intent', [_dot(cfg['primary']), cfg['label'].capitalize()]),
+        _status_item(
+            'Autoloop',
+            name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
+            title=detail,
+        ),
+        _status_item('Colors', palette.get('name') or '—'),
+        _status_item('Tempo', f'{bpm:.0f} BPM' if bpm else '— BPM'),
+        _status_item(
+            'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
+        ),
+        _status_item('Render', f'{fps:.0f} fps' if finite(fps) else '— fps'),
     ]
     special = snapshot.get('special')
     if special:
         items.append(
-            html.Span(f'fx {special.get("name", "—") if isinstance(special, dict) else special}')
+            _status_item('Fx', special.get('name', '—') if isinstance(special, dict) else special)
         )
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
-        items.append(html.Span(f'strobe in {cooldown:.0f} s' if cooldown > 0 else 'strobe ready'))
+        items.append(_status_item('Strobe', f'in {cooldown:.0f} s' if cooldown > 0 else 'ready'))
     return items
 
 
@@ -800,15 +815,15 @@ def _rgb_css(rgb) -> str:
 
 
 def _palette_options() -> list:
-    def option(name, colours):
-        return html.Span(
-            [*(_dot(colour) for colour in colours), html.Span(name)], className='palette-option'
-        )
+    def option(name, marks):
+        return html.Span([*marks, html.Span(name)], className='palette-option')
 
-    return [{'label': option('auto', ['transparent'] * 4), 'value': PALETTE_POLICY}] + [
+    auto = option('auto', [html.Span(className='dot dot-auto')])
+    return [{'label': auto, 'value': PALETTE_POLICY}] + [
         {
             'label': option(
-                palette.name, [_rgb_css(getattr(palette, s)) for s in PALETTE_SWATCH_SLOTS]
+                palette.name,
+                [_dot(_rgb_css(getattr(palette, s))) for s in PALETTE_SWATCH_SLOTS],
             ),
             'value': palette.name,
         }
@@ -2085,7 +2100,7 @@ def build_app(
         due = requested.get('metrics')
         if on_control or due:
             sync = _anchor(snap)
-            status = _build_show_status(snap)
+            status = _build_show_status(snap, now)
             show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
             commands = _build_command_diagnostics(snap)

@@ -33,10 +33,12 @@
 .legend > span { display: inline-flex; align-items: center; gap: 8px; }
 
 #show-control { color: var(--text); font-size: 14px; }
-.show-status { display: flex; flex-wrap: wrap; align-items: center; min-height: 40px;
-               gap: 0 8px; font-variant-numeric: tabular-nums; }
-.show-status > span { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.show-status > span + span::before { content: '·'; color: var(--muted); margin-right: 0; }
+.show-status { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+               gap: 16px; padding: 8px 0; }
+.status-item { display: grid; gap: 4px; min-width: 0; }
+.status-item .status-text { display: flex; align-items: center; gap: 8px; white-space: nowrap;
+                             overflow: hidden; text-overflow: ellipsis;
+                             font-variant-numeric: tabular-nums; }
 .control-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 40px; }
 .control-transport { border-top: 1px solid var(--line); padding: 8px 0; }
 
@@ -79,7 +81,11 @@
 .palette-option { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; }
 .palette-option > span:last-child { margin-left: 4px; }
 .palette-option .dot { width: 10px; height: 10px; }
-.palette-option .dot[style*='transparent'] { box-shadow: inset 0 0 0 1px var(--muted); }
+/* Automatic: a quiet hue sweep at swatch lightness, only noticed on a second look. */
+.palette-option .dot-auto { box-shadow: inset 0 0 0 1px var(--line);
+    background: conic-gradient(hsl(0 25% 60%), hsl(60 25% 60%), hsl(120 25% 60%),
+                               hsl(180 25% 60%), hsl(240 25% 60%), hsl(300 25% 60%),
+                               hsl(360 25% 60%)); }
 
 .settings-toggle { display: block; width: max-content; margin-left: auto; line-height: 40px; color: var(--muted);
                    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
