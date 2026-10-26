@@ -773,9 +773,14 @@ def test_the_status_line_reads_health_track_autoloop_colors_bpm_render_fps():
         ['Health', 'Track', 'Autoloop', 'Colors', 'Fx', 'BPM', 'Render FPS'],
         ['Health', 'Autoloop', 'Colors', 'BPM', 'Render FPS'],
     ]
+    values = {
+        item.children[0].children: item.children[1].children
+        for item in _build_show_status({}, now=0.0)
+    }
+    assert (values['BPM'], values['Render FPS']) == ('—', '—')
 
 
-def test_the_render_rate_is_measured_over_the_window_and_names_missed_frames():
+def test_the_render_rate_is_the_measured_rate_over_the_last_three_seconds():
     from autolux.simulate.visualizer_app import render_rate_text, render_window
 
     def sample(at, rendered, missed):
@@ -786,11 +791,11 @@ def test_the_render_rate_is_measured_over_the_window_and_names_missed_frames():
         }
 
     steady = [sample(at, 40.0, 0.0) for at in range(100, 106)]
-    assert render_rate_text(*render_window(steady, now=105.5)) == '40.0 fps'
-    # A late frame loop renders fewer than 40 per second and counts the skipped slots.
-    rough = [sample(100, 40.0, 0.0), *(sample(at, 38.6, 1.4) for at in range(101, 104))]
-    rough += [sample(104, 40.0, 0.0), sample(105, 40.0, 0.0)]
+    assert render_rate_text(render_window(steady, now=105.5)[0]) == '40.0'
+    # A late frame loop renders fewer than 40 per second; the slow sample at 101 has aged out.
+    rough = [sample(100, 40.0, 0.0), sample(101, 10.0, 30.0), sample(103, 40.0, 0.0)]
+    rough += [sample(104, 38.6, 1.4), sample(105, 38.6, 1.4)]
     fps, missed = render_window(rough, now=105.2)
-    assert render_rate_text(fps, missed) == '39.3 fps · 3 missed'
+    assert (render_rate_text(fps), missed) == ('38.6', 3)
     assert render_window([], now=0.0) == (None, 0)
-    assert render_rate_text(*render_window(steady, now=200.0)) == '— fps'
+    assert render_rate_text(render_window(steady, now=200.0)[0]) == '—'

@@ -525,7 +525,7 @@ def _status_item(caption: str, value, className='status-item', **props):
 
 TRACK_TITLE_CHARS = 40
 TRACK_MARQUEE_SECONDS_PER_CHAR = 0.3
-RENDER_WINDOW_SECONDS = 5.0
+RENDER_WINDOW_SECONDS = 3.0
 RENDERED_RATE = 'starfire_measured_render_frames_per_second'
 MISSED_RATE = 'starfire_missed_render_deadlines_per_second'
 
@@ -549,10 +549,8 @@ def render_window(history: list, now: float) -> tuple[float | None, int]:
     return frames / span, round(missed)
 
 
-def render_rate_text(fps: float | None, missed: int) -> str:
-    if fps is None:
-        return '— fps'
-    return f'{fps:.1f} fps' + (f' · {missed} missed' if missed else '')
+def render_rate_text(fps: float | None) -> str:
+    return '—' if fps is None else f'{fps:.1f}'
 
 
 def _track_status(snapshot: dict) -> list:
@@ -586,7 +584,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
     palette = snapshot.get('palette') or {}
     bpm = _room_bpm(snapshot)
     health = _health(snapshot)
-    fps, missed = render_window(snapshot.get('system_history') or [], now)
+    fps, _ = render_window(snapshot.get('system_history') or [], now)
     palette_name = palette.get('name')
     items = [
         _status_item(
@@ -621,8 +619,8 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             _status_item('Fx', special.get('name', '—') if isinstance(special, dict) else special)
         )
     items += [
-        _status_item('BPM', f'{bpm:.0f} BPM' if bpm else '— BPM'),
-        _status_item('Render FPS', render_rate_text(fps, missed)),
+        _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
+        _status_item('Render FPS', render_rate_text(fps)),
     ]
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
