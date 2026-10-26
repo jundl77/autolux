@@ -236,6 +236,9 @@ async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting)
     assert effect['name'] == 'drop/kick'
     assert effect['selection'].pop('palette') == recorded_lighting.palette
     assert effect['selection'] == {
+        'intent': 'drop',
+        'look': 'drop',
+        'level': 'balanced',
         'energy': 3,
         'texture': 'wash',
         'movement': 'snap',
@@ -527,3 +530,36 @@ async def test_static_mode_ignores_the_intensity_cap(tmp_path):
     entries = len(selections(lighting))
     await _set_intensity(control, light, 0.3)
     assert len(selections(lighting)) == entries
+
+
+async def test_a_calm_swap_during_a_drop_reaches_the_snapshot_with_the_real_intent(tmp_path):
+    from autolux.lib.main import ShowControl
+    from autolux.tests.test_light_engine import FakeDecoder, beat_at_phase, engine
+
+    control = ShowControl(tmp_path / 'show.json')
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False, events=True)
+    light._settings = lambda: control.settings
+    light.effect_controller = EffectController(
+        lighting,
+        event_buffer=light.event_buffer,
+        clock=clock,
+        settings=lambda: control.settings,
+        autoloops=CAPPED_DROPS,
+        autoloop_meta=CAPPED_DROP_META,
+    )
+    await beat_at_phase(light, decoder, 0, decision='drop')
+    before = light.event_buffer.snapshot()['current_effect']
+    assert before['name'].startswith('drop/')
+
+    clock.advance(1.0)
+    await _set_intensity(control, light, INTENSITY_CALM)
+    after = light.event_buffer.snapshot()
+    assert after['current_effect']['name'] == 'breakdown/wide_space'
+    selection = after['current_effect']['selection']
+    assert (selection['intent'], selection['look'], selection['level']) == (
+        'drop',
+        'breakdown',
+        'calm',
+    )
+    assert after['intent'] == 'drop'

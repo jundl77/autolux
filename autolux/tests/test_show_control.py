@@ -835,3 +835,23 @@ def test_the_autoloop_item_names_the_overlay_targets_while_it_is_active():
     snapshot = {'mode': 'static', 'static': {'looks': {'wash': {}, 'strip': {}}}}
     items = {item.children[0].children: item for item in _build_show_status(snapshot, now=0.0)}
     assert items['Autoloop'].children[1].children == 'Static · wash, strip'
+
+
+def test_a_remapped_loop_shows_what_plays_and_keeps_the_real_intent_in_its_tag():
+    from autolux.simulate.visualizer_app import _build_show_status
+
+    def autoloop(selection):
+        snapshot = {
+            'intent': 'drop',
+            'current_effect': {'name': 'breakdown/wide_space', 'selection': selection},
+        }
+        items = {item.children[0].children: item for item in _build_show_status(snapshot, 0.0)}
+        _, name, tag = items['Autoloop'].children[1].children
+        return name, tag.children
+
+    calm = {'intent': 'drop', 'look': 'breakdown', 'level': 'calm'}
+    assert autoloop(calm) == ('Wide Space', 'drop · calm')
+    assert autoloop({'intent': 'drop', 'look': 'drop', 'level': 'balanced'}) == (
+        'Wide Space',
+        'drop',
+    )

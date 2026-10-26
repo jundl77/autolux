@@ -249,6 +249,10 @@ class EffectController:
                 f'{bank}/{autoloop}',
                 'AUTOLOOP',
                 selection={
+                    # A calm remap plays another bank's look; the section stays the intent.
+                    'intent': intent.value,
+                    'look': choice.look.value,
+                    'level': intensity_level(self._settings().intensity),
                     'energy': meta.energy,
                     'texture': meta.texture,
                     'movement': meta.movement,

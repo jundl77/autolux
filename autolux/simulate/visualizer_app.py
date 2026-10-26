@@ -576,10 +576,14 @@ def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
     if snapshot.get('mode') == 'static':
         looks = ((snapshot.get('static') or {}).get('looks') or {}).keys()
         return _status_item('Autoloop', f'Static · {", ".join(looks) or "off"}')
+    selection = (snapshot.get('current_effect') or {}).get('selection') or {}
+    tag = selection.get('intent') or cfg['label'].lower()
+    if selection.get('look') not in (None, selection.get('intent')):
+        tag = f'{tag} · {selection.get("level")}'
     value = [
         _dot(cfg['primary']),
         name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
-        html.Span(cfg['label'].lower(), className='status-tag'),
+        html.Span(tag, className='status-tag'),
     ]
     return _status_item('Autoloop', value, title=detail)
 
