@@ -182,6 +182,7 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] static mode')
         self._static_mode = True
         self._held_intent = None
+        self.effect_controller.release_special()
         self._send_brightness(OPERATOR_FADE_SECONDS)
 
     async def leave_static(self) -> None:

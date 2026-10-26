@@ -111,8 +111,10 @@ def _static_command(payload: dict) -> dict:
     from autolux.lib.engine.static_mode import PRESETS
 
     kind = payload.get('kind')
-    if kind in ('blacklight', 'strobe'):
+    if kind in ('blacklight', 'strobe', 'special_clear'):
         return {'kind': kind}
+    if kind == 'special':
+        return {'kind': kind, **_static_special(payload)}
     if kind == 'blackout':
         if type(payload.get('enabled')) is not bool:
             raise ValueError('blackout must be true or false')
@@ -139,6 +141,13 @@ def _static_command(payload: dict) -> dict:
         'target': target,
         'colour': colour,
         'dimmer': None if dimmer is None else float(dimmer),
+    }
+
+
+def _static_special(payload: dict) -> dict:
+    return {
+        name: payload.get(name)
+        for name in ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
     }
 
 

@@ -1,0 +1,12 @@
+{
+  "name": "primary_rise",
+  "intents": [
+    "buildup"
+  ],
+  "group": "fx",
+  "colour_slot": "primary",
+  "energy": 0.5,
+  "speed": 0.4,
+  "attack_beats": 128,
+  "release_beats": 4
+}

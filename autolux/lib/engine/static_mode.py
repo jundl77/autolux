@@ -8,6 +8,8 @@ from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import Clock
 from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY, strobe_override
 from autolux.lib.engine.effect_definitions import ShowSettings
+from autolux.lib.engine.special_policy import Special, SpecialCapabilities
+from autolux.lighting.special_catalogue import special_values
 
 LOGGER = logging.getLogger(__name__)
 
@@ -15,6 +17,8 @@ STATIC_PRIORITY = DROP_ACCENT_PRIORITY + 1000
 STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
 STATIC_STROBE_ID = 'static_strobe'
+STATIC_SPECIAL_ID = 'static_special'
+STATIC_SPECIAL_RELEASE_BEATS = 4.0
 ALL_FIXTURES = 'all'
 UV_ATTRIBUTE = 'ColorAdd_UV'
 UV_FULL = 255.0
@@ -56,7 +60,44 @@ class StaticLooks:
         self._settings = settings
         self._looks: dict[str, dict] = {}
         self._strobe_until: float | None = None
+        self._special: Special | None = None
         self.blackout = False
+
+    def special(
+        self,
+        group: str,
+        colour_slot: str,
+        energy: float,
+        speed: float,
+        pulse_beats: int | None = None,
+    ) -> None:
+        values = {
+            'colour_slot': colour_slot,
+            'energy': energy,
+            'speed': speed,
+            'pulse_beats': pulse_beats,
+            'attack_beats': 0.0,
+            'release_beats': STATIC_SPECIAL_RELEASE_BEATS,
+        }
+        special = Special('static', (), group, **special_values(values))
+        if not self.special_capabilities().allows(special):
+            raise ValueError(f'{group!r} cannot render this special')
+        self._special = special
+        self._send_special()
+
+    def clear_special(self) -> None:
+        if self._special is not None:
+            self._special = None
+            self._lighting.clear_override(STATIC_SPECIAL_ID)
+
+    def special_capabilities(self) -> SpecialCapabilities:
+        return SpecialCapabilities.from_groups(self._lighting.groups())
+
+    def _send_special(self) -> None:
+        special = self._special
+        self._lighting.set_special(
+            STATIC_SPECIAL_ID, special.group, special.wire(), priority=STATIC_PRIORITY
+        )
 
     def look(self, target: str, colour=None, dimmer=None, uv=None) -> None:
         if target not in self.rig.targets:
@@ -126,11 +167,14 @@ class StaticLooks:
         self._strobe_until = None
         for target in self._looks:
             self._send(target)
+        if self._special is not None:
+            self._send_special()
 
     def clear(self) -> None:
         for target in self._looks:
             self._lighting.clear_override(STATIC_LOOK_PREFIX + target)
         self._looks.clear()
+        self.clear_special()
         if self._strobe_until is not None:
             self._strobe_until = None
             self._lighting.clear_override(STATIC_STROBE_ID)
@@ -141,6 +185,15 @@ class StaticLooks:
             'targets': list(self.rig.targets),
             'blacklight': bool(self.rig.uv_groups),
             'blackout': self.blackout,
+            'special': None
+            if self._special is None
+            else {
+                'group': self._special.group,
+                'colour_slot': self._special.colour_slot,
+                'energy': self._special.energy,
+                'speed': self._special.speed,
+                'pulse_beats': self._special.pulse_beats,
+            },
             'looks': {
                 target: {
                     'colour': None if 'colour' not in look else colour_hex(look['colour']),

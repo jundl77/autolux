@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
-from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.clients.starfire_client import StarfireClient, special_target
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import AutoloopChoice, AutoloopPolicy, SelectionContext
 from autolux.lib.engine.effect_definitions import (
@@ -15,7 +15,6 @@ from autolux.lib.engine.effect_definitions import (
     STANDBY_CROSSFADE_SECONDS,
     STROBE_BURST_BEATS,
     STROBE_GATE_INTENSITY,
-    STROBE_RATE_HZ,
     AutoloopMetaTable,
     AutoloopTable,
     LightIntent,
@@ -23,6 +22,13 @@ from autolux.lib.engine.effect_definitions import (
     transition_for,
 )
 from autolux.lib.engine.palette_policy import PalettePolicy, palette_variant
+from autolux.lib.engine.special_policy import (
+    DEFAULT_SPECIALS,
+    DROP_STROBE,
+    Special,
+    SpecialCapabilities,
+    SpecialPolicy,
+)
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Palette
 
 if TYPE_CHECKING:
@@ -32,6 +38,8 @@ LOGGER = logging.getLogger(__name__)
 
 DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
+SPECIAL_PRIORITY = DROP_ACCENT_PRIORITY
+SPECIAL_ID = 'special'
 
 
 def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
@@ -41,8 +49,8 @@ def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
     return duration * settings.intensity
 
 
-def strobe_rate_hz(settings: ShowSettings) -> float:
-    return min(STROBE_RATE_HZ, settings.strobe_max_rate_hz) * settings.intensity
+def strobe_rate_hz(settings: ShowSettings, special: Special = DROP_STROBE) -> float:
+    return min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
@@ -50,12 +58,16 @@ def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
 
 
 def strobe_override(
-    override_id: str, priority: int, duration_seconds: float, settings: ShowSettings
+    override_id: str,
+    priority: int,
+    duration_seconds: float,
+    settings: ShowSettings,
+    special: Special = DROP_STROBE,
 ) -> dict:
     return {
         'id': override_id,
-        'target': 'all',
-        'values': {'strobe_hz': strobe_rate_hz(settings)},
+        'target': special_target(special.group),
+        'values': {'strobe_hz': strobe_rate_hz(settings, special)},
         'priority': priority,
         'lifetime': {'kind': 'seconds', 'duration_seconds': duration_seconds},
     }
@@ -72,17 +84,33 @@ class EffectController:
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
         seed: int = 0,
         palettes: tuple[Palette, ...] = PALETTES,
+        specials: Sequence[Special] = DEFAULT_SPECIALS,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
         self.clock = clock
         self._settings = settings
-        self._last_strobe_started_at: float | None = None
+        self._last_intense_at: float | None = None
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
+        self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'))
+        self._special: Special | None = None
+        self._special_on = False
+        self._capabilities: SpecialCapabilities | None = None
         self._publish_palette()
+        self.special_capabilities()
+
+    def special_capabilities(self) -> SpecialCapabilities:
+        capabilities = SpecialCapabilities.from_groups(self.lighting_client.groups())
+        if capabilities != self._capabilities:
+            self._capabilities = capabilities
+            if self.event_buffer is not None:
+                self.event_buffer.set_special_groups(
+                    {name: sorted(axes) for name, axes in capabilities.groups.items()}
+                )
+        return capabilities
 
     @property
     def pinned_palette(self) -> str | None:
@@ -147,6 +175,7 @@ class EffectController:
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
         ):
+            self._restore_special()
             return False
         self._publish_palette()
         if fresh:
@@ -154,8 +183,10 @@ class EffectController:
             self._entered = intent, choice
         self._announce('[lighting]', intent, choice, palette)
 
-        if intent == LightIntent.DROP:
-            self._strobe_unless_cooling_down(bpm)
+        if fresh:
+            self._enter_special(intent, bpm)
+        else:
+            self._restore_special()
         return True
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
@@ -204,6 +235,7 @@ class EffectController:
 
     def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
+        self._forget_special()
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
@@ -216,30 +248,81 @@ class EffectController:
             self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
         LOGGER.info('[lighting] standby | autoloop=%s/%s', bank, autoloop)
 
-    def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
-        settings = self._settings()
+    def _intense_blocked(self, settings: ShowSettings, now: float) -> str | None:
         if settings.intensity < STROBE_GATE_INTENSITY:
-            LOGGER.info(
-                '[lighting] drop strobe suppressed | intensity %.2f below %.2f',
-                settings.intensity,
-                STROBE_GATE_INTENSITY,
-            )
-            return
+            return f'intensity {settings.intensity:.2f} below {STROBE_GATE_INTENSITY:.2f}'
         cooldown = drop_strobe_cooldown_seconds(settings)
-        now = self.clock.monotonic()
-        last = self._last_strobe_started_at
+        last = self._last_intense_at
         if last is not None and now - last < cooldown:
-            LOGGER.info(
-                '[lighting] drop strobe suppressed | cooldown %.0fs of %.0fs left',
-                cooldown - (now - last),
-                cooldown,
-            )
+            return f'cooldown {cooldown - (now - last):.0f}s of {cooldown:.0f}s left'
+        return None
+
+    def _enter_special(self, intent: LightIntent, bpm: float | None) -> None:
+        settings = self._settings()
+        now = self.clock.monotonic()
+        choice = self._special_policy.choose(
+            intent, self.special_capabilities(), self._intense_blocked(settings, now)
+        )
+        if choice.suppressed:
+            LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
+        if choice.intense:
+            self._last_intense_at = now
+        if choice.special is None:
+            self._forget_special()
+        else:
+            self._special_policy.record(choice.special)
+            self._fire_special(choice.special)
+        for strobe in choice.strobes:
+            self._strobe(strobe, bpm, settings)
+
+    def _fire_special(self, special: Special) -> None:
+        self.lighting_client.set_special(
+            SPECIAL_ID, special.group, special.wire(), priority=SPECIAL_PRIORITY
+        )
+        self._special = special
+        self._special_on = True
+        if self.event_buffer:
+            self.event_buffer.set_special(special.name, special.group)
+        LOGGER.info(
+            '[lighting] special %s | group=%s colour=%s energy=%.2f speed=%.2f pulse=%s',
+            special.name,
+            special.group,
+            special.colour_slot,
+            special.energy,
+            special.speed,
+            special.pulse_beats,
+        )
+
+    def release_special(self) -> None:
+        if not self._special_on:
             return
-        self._last_strobe_started_at = now
+        self.lighting_client.clear_override(SPECIAL_ID)
+        LOGGER.info(
+            '[lighting] special %s released over %g beats',
+            self._special.name,
+            self._special.release_beats,
+        )
+        self._special_on = False
+        if self.event_buffer:
+            self.event_buffer.set_special(None)
+
+    def _forget_special(self) -> None:
+        self.release_special()
+        self._special = None
+
+    def _restore_special(self) -> None:
+        if self._special is not None and not self._special_on:
+            self._fire_special(self._special)
+
+    def _strobe(self, special: Special, bpm: float | None, settings: ShowSettings) -> None:
         duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
-            strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings)
+            strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings, special)
         )
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)
+            if not self._special_on:
+                self.event_buffer.set_special(
+                    special.name, special.group, duration_seconds=duration
+                )
         LOGGER.info('[lighting] drop accent | duration=%.1fs', duration)

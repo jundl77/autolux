@@ -1,0 +1,12 @@
+{
+  "name": "drift",
+  "intents": [
+    "atmospheric"
+  ],
+  "group": "fx",
+  "colour_slot": "secondary",
+  "energy": 0.2,
+  "speed": 0.1,
+  "attack_beats": 32,
+  "release_beats": 32
+}

@@ -28,7 +28,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.palettes import PALETTE_NAMES
+from autolux.lighting.palettes import PALETTE_NAMES, SLOTS
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -546,6 +546,23 @@ def _build_show_overview(snapshot: dict) -> list:
     ]
 
 
+def special_groups_view(groups: dict) -> list:
+    if not groups:
+        return [
+            html.P('Starfire reported no group that can render specials.', className='subtitle')
+        ]
+    return [
+        html.Div(
+            [
+                html.Span(name, className='special-group-name'),
+                html.Span(' · '.join(['energy', *axes]), className='stat-tags'),
+            ],
+            className='special-group',
+        )
+        for name, axes in sorted(groups.items())
+    ]
+
+
 def _build_show_timing(snapshot: dict) -> list:
     song, room = _song_and_room(snapshot)
     return [
@@ -878,13 +895,6 @@ def _build_control_card() -> list:
                         html.Button(
                             'Pause', id='control-toggle', className='control-toggle', disabled=True
                         ),
-                        html.Button(
-                            'Next autoloop ⏭',
-                            id='control-next',
-                            className='control-next',
-                            title='Jump to the next autoloop for this section',
-                            disabled=True,
-                        ),
                         dcc.Dropdown(
                             id='control-palette',
                             options=[{'label': 'Palette: auto', 'value': PALETTE_POLICY}]
@@ -961,7 +971,13 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
-STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
+STATIC_BUTTONS = {
+    'static-blacklight': 'blacklight',
+    'static-strobe': 'strobe',
+    'static-special-clear': 'special_clear',
+}
+SPECIAL_SLOTS = tuple(slot for slot in SLOTS if slot != 'black')
+SPECIAL_PULSES = {0: 'No pulse', 1: 'Every beat', 2: 'Every 2 beats', 4: 'Every bar'}
 STATIC_DIMMER_IDS = ('static-dimmer', 'static-dimmer-live')
 HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
 STATIC_TAB_STYLE = {
@@ -996,8 +1012,36 @@ STATIC_CSS = '''
                        font-variant-numeric: tabular-nums; }
 #static-control .static-blackout-on { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
 #static-control .static-auto { margin-left: auto; }
-@media (max-width: 720px) { .static-look { grid-template-columns: 1fr; } }
+#auto-control { padding: 12px 16px; }
+#auto-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
+                       border-radius: 4px; padding: 12px 16px; cursor: pointer; font-size: 13px;
+                       font-weight: 600; }
+#auto-control button:disabled { opacity: .4; cursor: default; }
+#auto-special { color: #9baabb; font-size: 12px; }
+.static-special { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+                  gap: 12px 16px; align-items: end; border-top: 1px solid #1b2735; padding-top: 14px; }
+.static-special .Select-control { font-size: 12px; }
+.static-special .dash-dropdown { color: #0b121c; font-size: 12px; }
+.static-special-actions { display: flex; gap: 8px; }
+.special-group { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; }
+.special-group-name { color: #e6edf3; font-size: 13px; font-weight: 600; }
+#special-groups { padding: 0 0 12px; }
+@media (max-width: 720px) { .static-look, .static-special { grid-template-columns: 1fr; } }
 '''
+
+
+def static_special_command(group, colour_slot, energy, speed, pulse) -> dict:
+    if not group:
+        raise ValueError('choose a group for the special')
+    return {
+        'action': 'static',
+        'kind': 'special',
+        'group': group,
+        'colour_slot': colour_slot,
+        'energy': energy,
+        'speed': speed,
+        'pulse_beats': pulse or None,
+    }
 
 
 def static_control_command(trigger, target, colour, dimmer, blackout) -> dict | None:
@@ -1086,6 +1130,7 @@ def _build_static_panel():
                 ],
                 className='static-row',
             ),
+            _build_static_special(),
             html.P(id='static-status', role='status', className='control-status'),
         ],
         id='static-control',
@@ -1093,10 +1138,104 @@ def _build_static_panel():
     )
 
 
+def _build_auto_panel():
+    return html.Section(
+        html.Div(
+            [
+                html.Button(
+                    'Next autoloop ⏭',
+                    id='control-next',
+                    className='control-next',
+                    title='Jump to the next autoloop for this section',
+                    disabled=True,
+                ),
+                html.Span('Special —', id='auto-special', className='control-unit'),
+            ],
+            className='static-row',
+        ),
+        id='auto-control',
+        className='overview-panel',
+    )
+
+
+def _special_slider(name: str, label: str, value: float):
+    return html.Div(
+        [
+            html.Div(label, className='stat-label'),
+            dcc.Slider(
+                id=f'static-special-{name}',
+                min=0,
+                max=1,
+                step=0.05,
+                value=value,
+                marks=None,
+                tooltip={'placement': 'bottom'},
+                allow_direct_input=False,
+            ),
+        ],
+        className='control-master',
+    )
+
+
+def _build_static_special():
+    return html.Div(
+        [
+            html.Div(
+                [
+                    html.Div('Special group', className='stat-label'),
+                    dcc.Dropdown(
+                        id='static-special-group',
+                        options=[],
+                        placeholder='No capable group',
+                        clearable=False,
+                        searchable=False,
+                    ),
+                ]
+            ),
+            html.Div(
+                [
+                    html.Div('Colour slot', className='stat-label'),
+                    dcc.Dropdown(
+                        id='static-special-colour',
+                        options=[{'label': slot, 'value': slot} for slot in SPECIAL_SLOTS],
+                        value=SPECIAL_SLOTS[0],
+                        clearable=False,
+                        searchable=False,
+                    ),
+                ]
+            ),
+            html.Div(
+                [
+                    html.Div('Pulse', className='stat-label'),
+                    dcc.Dropdown(
+                        id='static-special-pulse',
+                        options=[
+                            {'label': label, 'value': beats}
+                            for beats, label in SPECIAL_PULSES.items()
+                        ],
+                        value=0,
+                        clearable=False,
+                        searchable=False,
+                    ),
+                ]
+            ),
+            html.Div(
+                [
+                    html.Button('Fire special', id='static-special-fire', disabled=True),
+                    html.Button('Clear special', id='static-special-clear'),
+                ],
+                className='static-special-actions',
+            ),
+            _special_slider('energy', 'Energy', 0.5),
+            _special_slider('speed', 'Speed', 0.3),
+        ],
+        className='static-special',
+    )
+
+
 def _with_static_mode(card: list) -> list:
-    heading, auto = card
     return [
-        heading,
+        *card,
         dcc.Tabs(
             id='control-mode',
             value='auto',
@@ -1111,7 +1250,7 @@ def _with_static_mode(card: list) -> list:
                 for label in ('Auto', 'Static')
             ],
         ),
-        html.Div(auto, id='auto-mode-panel'),
+        html.Div(_build_auto_panel(), id='auto-mode-panel'),
         html.Div(_build_static_panel(), id='static-mode-panel', style={'display': 'none'}),
     ]
 
@@ -1134,14 +1273,23 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
             const options = statics.targets.map((target) =>
                 ({label: target === 'all' ? 'All' : target, value: target}));
             const blackout = !!statics.blackout;
+            const groups = Object.keys((ready && state.special_groups) || {}).sort()
+                .map((name) => ({label: name, value: name}));
+            const special = ready && state.special;
             return [mode, options, blackout ? 'static-blackout-on' : '',
-                    blackout ? 'Blackout on' : 'Blackout', !statics.blacklight];
+                    blackout ? 'Blackout on' : 'Blackout', !statics.blacklight,
+                    groups, groups.length === 0,
+                    special ? 'Special ' + special.name.replace(/_/g, ' ') + ' · ' + special.group
+                        : 'Special —'];
         }''',
         Output('control-mode', 'value'),
         Output('static-target', 'options'),
         Output('static-blackout', 'className'),
         Output('static-blackout', 'children'),
         Output('static-blacklight', 'disabled'),
+        Output('static-special-group', 'options'),
+        Output('static-special-fire', 'disabled'),
+        Output('auto-special', 'children'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(
@@ -1171,15 +1319,21 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
         *[Input(name, 'n_clicks') for name in (*STATIC_BUTTONS, 'static-blackout')],
         Input('static-auto', 'n_clicks'),
+        Input('static-special-fire', 'n_clicks'),
         Input('static-colour', 'value'),
         Input('static-dimmer', 'value'),
         Input('static-dimmer-live', 'data'),
         State('static-target', 'value'),
         State('control-state', 'data'),
+        *[
+            State(f'static-special-{name}', 'value')
+            for name in ('group', 'colour', 'energy', 'speed', 'pulse')
+        ],
         prevent_initial_call=True,
     )
     def send_static(mode, *values):
-        *_, colour, released, live, target, state = values
+        *_, colour, released, live, target, state = values[:-5]
+        special = values[-5:]
         state = state or {}
         trigger = dash.ctx.triggered_id
         if not can_control:
@@ -1198,7 +1352,11 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
                 raise dash.exceptions.PreventUpdate
             blackout = (state.get('static') or {}).get('blackout', False)
             try:
-                command = static_control_command(trigger, target, colour, dimmer, blackout)
+                command = (
+                    static_special_command(*special)
+                    if trigger == 'static-special-fire'
+                    else static_control_command(trigger, target, colour, dimmer, blackout)
+                )
             except ValueError as error:
                 return f'Rejected: {error}', dash.no_update
             if command is None:
@@ -1896,6 +2054,21 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             style={'display': 'none'},
         )
     )
+    config_panel.children.insert(
+        1,
+        html.Section(
+            [
+                html.Div(
+                    [
+                        html.H3('Special-capable groups'),
+                        html.P('As reported by Starfire from the rig profiles at login'),
+                    ],
+                    className='section-heading',
+                ),
+                html.Div(id='special-groups'),
+            ]
+        ),
+    )
     app.layout = html.Div(
         [
             html.Header(
@@ -2134,6 +2307,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                         'palette',
                         'mode',
                         'static',
+                        'special',
+                        'special_groups',
                     )
                 }
                 settings = control['settings'] or {}
@@ -2343,6 +2518,12 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     _register_settings_drawer(app)
     _register_static_callbacks(app, snapshot_source, expectations, can_control)
+
+    @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))
+    def show_special_groups(selected):
+        if selected != 'config':
+            raise dash.exceptions.PreventUpdate
+        return special_groups_view(snapshot_source.snapshot().get('special_groups') or {})
 
     app.clientside_callback(
         ANIMATION_JS,
