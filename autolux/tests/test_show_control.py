@@ -613,6 +613,14 @@ OPERATOR_CASES = [
     ('control-brightness.value', 0.42, AUTO_STATE, 'all', 'build.master(0.42)'),
     ('control-brightness-live.data', 0.35, AUTO_STATE, 'all', 'build.master(0.35)'),
     ('control-intensity.value', 0.3, AUTO_STATE, 'all', 'build.intensity(0.3)'),
+    ('control-intensity-auto.n_clicks', 1, AUTO_STATE, 'all', 'build.intensityAuto(true)'),
+    (
+        'control-intensity-auto.n_clicks',
+        1,
+        {**AUTO_STATE, 'intensity_auto': True},
+        'all',
+        'build.intensityAuto(false)',
+    ),
     *[
         (f'{chip}.n_clicks', 1, STATIC_STATE, target, f"build.static('{chip}', '{target}')")
         for chip in STATIC_CHIP_IDS
@@ -1116,3 +1124,27 @@ def test_the_banner_counts_operator_looks_not_the_dark_under_the_blacklight():
         f"console.log(JSON.stringify(banner({{mode: 'static', static: {{looks: {json.dumps(looks)}}}}})));"
     )
     assert shown == [{}, 'Static overlay active · 1 look']
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_following_the_music_greys_the_segments_but_keeps_the_chosen_level_lit():
+    from autolux.simulate.visualizer_app import FOLLOW_SYNC_JS
+
+    rendered = _run_control_js(
+        f'const follow = {FOLLOW_SYNC_JS};\n'
+        'const states = [{intensity_auto: true}, {intensity_auto: false}, null];\n'
+        'console.log(JSON.stringify(states.map((state) => follow(state))));'
+    )
+    assert rendered == [['active', 'following'], ['', ''], ['', '']]
+    app = build_app(_Recorder())
+    # The segments stay clickable (a pick turns auto off) and are still fed the show's level.
+    writers = [key for key in app.callback_map if 'control-intensity-set.disabled' in key]
+    assert len(writers) == 1
+    assert 'control-intensity-set.className' in ' '.join(app.callback_map)
+
+
+def test_a_settings_edit_keeps_follow_the_music_on():
+    command = control_command(
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), auto=True
+    )
+    assert command['settings']['intensity_auto'] is True

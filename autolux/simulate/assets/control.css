@@ -158,3 +158,5 @@
     .settings-form { grid-template-columns: 1fr; }
     .palette-select { width: 100%; }
 }
+
+#control-intensity-set.following .segmented { opacity: .5; }

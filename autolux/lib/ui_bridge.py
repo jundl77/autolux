@@ -8,14 +8,14 @@ import os
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from contextlib import contextmanager
-import socket
 
 DEFAULT_DASHBOARD_PORT = 8765
 DASHBOARD_MDNS_HOSTNAME = 'autolux.local.'
@@ -103,6 +103,10 @@ def parse_control_command(payload) -> dict:
                 f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
             )
         return {'action': action, 'name': name}
+    if action == 'intensity_auto':
+        if type(payload.get('enabled')) is not bool:
+            raise ValueError('intensity_auto must be true or false')
+        return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
     raise ValueError(f'unknown control action {action!r}')
@@ -203,6 +207,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == '/metrics':
             from prometheus_client import CONTENT_TYPE_LATEST
+
             from autolux.lib.system_health import metrics
 
             body = metrics(self.server.event_buffer)

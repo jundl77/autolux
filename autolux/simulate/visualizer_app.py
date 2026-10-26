@@ -731,6 +731,8 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'master_brightness': command['level']}
     if action == 'settings':
         return {'settings': command['settings']}
+    if action == 'intensity_auto':
+        return {'intensity_auto': command['enabled']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
     return {}
@@ -754,8 +756,10 @@ def parse_decimal(name: str, raw) -> float:
 
 
 def control_command(
-    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY
+    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY, auto=False
 ) -> dict | None:
+    if trigger == 'control-intensity-auto':
+        return {'action': 'intensity_auto', 'enabled': not auto}
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger == 'control-next':
@@ -772,6 +776,7 @@ def control_command(
             'settings': {
                 **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
                 'intensity': intensity,
+                'intensity_auto': auto,
             },
         }
     return None
@@ -996,6 +1001,11 @@ def _build_control_card() -> list:
                         html.Div(
                             [
                                 html.Span('Intensity', className='control-label'),
+                                html.Button(
+                                    'Auto',
+                                    id='control-intensity-auto',
+                                    title='Follow the music: the show picks the level per track',
+                                ),
                                 html.Fieldset(
                                     dcc.RadioItems(
                                         id='control-intensity',
@@ -1298,16 +1308,30 @@ def _build_overlay_banner():
     )
 
 
+# While the show follows the music the segments grey out, but the level it chose stays lit.
+FOLLOW_SYNC_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    const on = !!(state && state.intensity_auto);
+    return [on ? 'active' : '', on ? 'following' : ''];
+}'''
+
+
 def _register_direct_auto_controls(app) -> None:
     # Visual state flips here at click time; the bridge round trip never gates it.
     app.clientside_callback(
-        """function(toggles, nexts, palette, intensity, state) {
+        """function(toggles, nexts, palette, intensity, follows, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
             const triggered = (window.dash_clientside.callback_context.triggered || [])
                 .map((t) => t.prop_id);
             const shown = control.view(state) || {};
             const status = 'control-status';
+            const showFollowing = (on) => {
+                window.dash_clientside.set_props(
+                    'control-intensity-auto', {className: on ? 'active' : ''});
+                window.dash_clientside.set_props(
+                    'control-intensity-set', {className: on ? 'following' : ''});
+            };
             if (triggered.includes('control-toggle.n_clicks')) {
                 const paused = !!shown.paused;
                 control.hold({paused: !paused});
@@ -1326,10 +1350,21 @@ def _register_direct_auto_controls(app) -> None:
                 if (palette && palette !== current) {
                     control.dispatch(control.build.palette(palette), status);
                 }
+            } else if (triggered.includes('control-intensity-auto.n_clicks')) {
+                const enabled = !shown.intensity_auto;
+                control.hold({intensity_auto: enabled});
+                showFollowing(enabled);
+                control.dispatch(
+                    control.build.intensityAuto(enabled), status, ['intensity_auto']);
             } else if (triggered.includes('control-intensity.value')) {
                 const current = (shown.settings || {}).intensity;
                 if (intensity !== null && intensity !== undefined
                         && (current === undefined || Math.abs(intensity - current) >= 0.005)) {
+                    // A level picked by hand takes the show off follow-the-music.
+                    if (shown.intensity_auto) {
+                        control.hold({intensity_auto: false});
+                        showFollowing(false);
+                    }
                     control.dispatch(control.build.intensity(intensity), status);
                 }
             }
@@ -1341,6 +1376,7 @@ def _register_direct_auto_controls(app) -> None:
         Input('control-next', 'n_clicks'),
         Input('control-palette', 'value'),
         Input('control-intensity', 'value'),
+        Input('control-intensity-auto', 'n_clicks'),
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
@@ -2463,6 +2499,7 @@ def build_app(
                     )
                 }
                 settings = control['settings'] or {}
+                control['intensity_auto'] = bool(settings.get('intensity_auto'))
                 control['settings_text'] = {
                     name: setting_text(name, value) for name, value in settings.items()
                 }
@@ -2615,6 +2652,12 @@ def build_app(
         Output('control-palette', 'disabled'),
         Input('control-state', 'data'),
     )
+    app.clientside_callback(
+        FOLLOW_SYNC_JS,
+        Output('control-intensity-auto', 'className'),
+        Output('control-intensity-set', 'className'),
+        Input('control-state', 'data'),
+    )
 
     operator_inputs = (
         []
@@ -2626,6 +2669,7 @@ def build_app(
             Input('control-brightness', 'value'),
             Input('control-brightness-live', 'data'),
             Input('control-intensity', 'value'),
+            Input('control-intensity-auto', 'n_clicks'),
         ]
     )
 
@@ -2665,6 +2709,7 @@ def build_app(
                 settings,
                 palette=palette,
                 intensity=intensity,
+                auto=bool(state.get('intensity_auto')),
             )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update

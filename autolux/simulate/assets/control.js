@@ -93,6 +93,7 @@
         palette: (name) => ({action: 'palette', name: name}),
         master: (level) => ({action: 'master', level: level}),
         intensity: (level) => ({action: 'intensity', level: level}),
+        intensityAuto: (enabled) => ({action: 'intensity_auto', enabled: enabled}),
         static: staticCommand,
         fx: fxCommand,
     };

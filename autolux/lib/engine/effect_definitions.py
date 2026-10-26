@@ -139,8 +139,11 @@ class ShowSettings:
     strobe_max_rate_hz: float = STROBE_RATE_HZ
     strobe_max_burst_seconds: float = STROBE_MAX_BURST_SECONDS
     intensity: float = DEFAULT_INTENSITY
+    intensity_auto: bool = False
 
     def __post_init__(self):
+        if type(self.intensity_auto) is not bool:
+            raise ValueError('intensity_auto must be true or false')
         for name, (low, high) in SHOW_SETTING_RANGES.items():
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value):

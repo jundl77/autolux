@@ -35,6 +35,7 @@ from autolux.lib.engine.event_buffer import (
     STANDBY_INTENT,
     STOP_PERSISTENCE_SEC,
 )
+from autolux.lib.engine.intensity_follow import LEVEL_INTENSITIES, FollowMusic
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
 from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat, TrackMoodMeter
@@ -137,6 +138,9 @@ class LightEngine(IMusicAnalyserHandler):
         self._capture_discontinuity_seen_at: deque[float] = deque(maxlen=8)
         self._track_mood = TrackMoodMeter(MAX_MEASURED_BARS * BEATS_PER_BAR)
         self._measured_track_mood: Mood | None = None
+        self.follow_music = FollowMusic()
+        # Set by the show: applies an automatic level through the operator's path.
+        self.on_auto_intensity: Callable[[float, str], None] | None = None
         self._static_mode = False
         self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
         self._log_chain_latency()
@@ -596,12 +600,37 @@ class LightEngine(IMusicAnalyserHandler):
         if self._measured_track_mood is not None and phase in (0, None):
             mood, self._measured_track_mood = self._measured_track_mood, None
             self.effect_controller.choose_track_palette(mood, send_now=not self._holding_the_look())
+            self._follow_track_mood(mood)
 
     def _finish_track_mood(self) -> None:
         mood = self._track_mood.finish() or self._measured_track_mood
         self._measured_track_mood = None
         if mood is not None:
             self.effect_controller.choose_track_palette(mood, send_now=False)
+            self._follow_track_mood(mood)
+
+    def _follow_track_mood(self, mood: Mood) -> None:
+        level = self.follow_music.on_track_mood(mood.drive, self._intensity_level())
+        self._follow(level, f'drive {mood.drive:+.2f}')
+
+    def _follow_drop(self, arrival: float | None) -> None:
+        if not self._settings().intensity_auto:
+            return
+        level = self.follow_music.on_drop(arrival, self._intensity_level())
+        self._follow(level, 'drop arrival ' + ('unknown' if arrival is None else f'{arrival:.2f}'))
+
+    def _intensity_level(self) -> str:
+        return intensity_level(self._settings().intensity)
+
+    def _follow(self, level: str | None, why: str) -> None:
+        if (
+            level is None
+            or level == self._intensity_level()
+            or not self._settings().intensity_auto
+            or self.on_auto_intensity is None
+        ):
+            return
+        self.on_auto_intensity(LEVEL_INTENSITIES[level], why)
 
     def _discard_track_mood(self) -> None:
         self._track_mood.finish()
@@ -852,6 +881,8 @@ class LightEngine(IMusicAnalyserHandler):
             self.event_buffer.set_intent(intent.value, song_sec=song_sec)
         self._current_intent = intent
         self._current_arrival_of_peak = arrival
+        if intent == LightIntent.DROP:
+            self._follow_drop(arrival)
         self._section_class_at_playback = section_label
         self._intent_commits += 1
         if self._holding_the_look():
