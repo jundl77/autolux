@@ -16,7 +16,12 @@ from autolux.lib.engine.autoloop_policy import (
     loudness_trend,
     max_energy_for_intensity,
 )
-from autolux.lib.engine.effect_definitions import LightIntent
+from autolux.lib.engine.effect_definitions import (
+    INTENSITY_CALM,
+    INTENSITY_MEASURED,
+    INTENSITY_WILD,
+    LightIntent,
+)
 from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
 
 DROP, BUILDUP, BREAKDOWN, ATMOSPHERIC = (
@@ -200,13 +205,24 @@ def test_loudness_trend_compares_the_halves_of_eight_bars(levels, trend):
 
 
 @pytest.mark.parametrize(
-    ('intensity', 'max_energy'), [(0.0, 1), (0.34, 1), (0.35, 2), (0.69, 2), (0.7, 3), (1.0, 3)]
+    ('intensity', 'max_energy'),
+    [
+        (0.0, 1),
+        (INTENSITY_CALM, 1),
+        (0.31, 2),
+        (0.69, 2),
+        (INTENSITY_MEASURED, 3),
+        (INTENSITY_WILD, 3),
+    ],
 )
 def test_intensity_maps_to_the_highest_allowed_energy(intensity, max_energy):
     assert max_energy_for_intensity(intensity) == max_energy
 
 
-@pytest.mark.parametrize(('intensity', 'energy'), [(0.2, 1), (0.5, 2), (0.9, 3)])
+@pytest.mark.parametrize(
+    ('intensity', 'energy'),
+    [(INTENSITY_CALM, 1), (0.5, 2), (INTENSITY_MEASURED, 3), (INTENSITY_WILD, 3)],
+)
 def test_intensity_caps_a_maximal_drop_after_the_context_rule(intensity, energy):
     chooser = policy()
     choice = chooser.choose(SelectionContext(DROP, build_bars=64), intensity=intensity)

@@ -6,6 +6,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from autolux.lib.engine.effect_definitions import (
+    INTENSITY_CALM,
+    INTENSITY_MEASURED,
     AutoloopMeta,
     AutoloopMetaTable,
     AutoloopTable,
@@ -21,7 +23,6 @@ LONG_SINCE_DROP_SECONDS = 90.0
 ARRIVAL_BEATS = 4
 MAXIMAL_ARRIVAL_OF_PEAK = 0.9
 MAX_ENERGY = 3
-INTENSITY_ENERGY_CAPS = ((0.35, 1), (0.7, 2))
 
 
 @dataclass(frozen=True)
@@ -64,9 +65,11 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
 
 
 def max_energy_for_intensity(intensity: float) -> int:
-    for below, energy in INTENSITY_ENERGY_CAPS:
-        if intensity < below:
-            return energy
+    if intensity <= INTENSITY_CALM:
+        return 1
+    # Measured and above get every tier; the renderer's intensity scaling restrains them.
+    if intensity < INTENSITY_MEASURED:
+        return 2
     return MAX_ENERGY
 
 

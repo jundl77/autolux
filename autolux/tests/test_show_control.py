@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from autolux.lib.engine.effect_definitions import ShowSettings
+from autolux.lib.engine.effect_definitions import (
+    INTENSITY_CALM,
+    INTENSITY_MEASURED,
+    INTENSITY_WILD,
+    ShowSettings,
+)
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer
@@ -458,11 +463,15 @@ def test_each_intensity_segment_sends_its_mapped_level(show):
     poller, commands = show
     app = build_app(poller, direct_control=False)
     options = app.layout['control-intensity'].options
-    assert [(o['label'], o['value']) for o in options] == list(INTENSITY_LEVELS)
-    state = {'settings': {'intensity': 0.7}}
+    assert [(o['label'], o['value']) for o in options] == [
+        ('calm', INTENSITY_CALM),
+        ('measured', INTENSITY_MEASURED),
+        ('wild', INTENSITY_WILD),
+    ]
+    state = {'settings': {'intensity': INTENSITY_MEASURED}}
     for word, level in INTENSITY_LEVELS:
         _send_control(app, 'control-intensity.value', level, state)
-        if level != 0.7:
+        if level != INTENSITY_MEASURED:
             assert commands.get_nowait() == {'action': 'intensity', 'level': level}, word
     assert commands.empty()
 

@@ -21,6 +21,7 @@ const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
+// The dashboard's calm level (autolux INTENSITY_CALM); strobes are off at or below it.
 pub const STROBE_GATE_INTENSITY: f64 = 0.3;
 pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.1;
 pub const FASTEST_LIMITED_RANGE_PER_SECOND: f64 = 2.0;
@@ -917,7 +918,7 @@ fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
 }
 
 pub fn intensity_strobe_scale(intensity: f64) -> f64 {
-    if intensity < STROBE_GATE_INTENSITY {
+    if intensity <= STROBE_GATE_INTENSITY {
         0.0
     } else {
         intensity

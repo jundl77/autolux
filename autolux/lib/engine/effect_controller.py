@@ -269,9 +269,9 @@ class EffectController:
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
         settings = self._settings()
-        if settings.intensity < STROBE_GATE_INTENSITY:
+        if settings.intensity <= STROBE_GATE_INTENSITY:
             LOGGER.info(
-                '[lighting] drop strobe suppressed | intensity %.2f below %.2f',
+                '[lighting] drop strobe suppressed | intensity %.2f at or below %.2f',
                 settings.intensity,
                 STROBE_GATE_INTENSITY,
             )

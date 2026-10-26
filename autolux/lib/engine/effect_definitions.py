@@ -90,8 +90,14 @@ MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0
 MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
-DEFAULT_INTENSITY = 0.7
-STROBE_GATE_INTENSITY = 0.3
+# The dashboard's three intensity levels; the energy cap and strobe gate key off them so
+# each level behaves as itself, not as its neighbour.
+INTENSITY_CALM = 0.3
+INTENSITY_MEASURED = 0.7
+INTENSITY_WILD = 1.0
+DEFAULT_INTENSITY = INTENSITY_MEASURED
+# Strobes (and starfire's intense-special gate) are off at or below calm.
+STROBE_GATE_INTENSITY = INTENSITY_CALM
 
 SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'drop_strobe_cooldown_seconds': (0.0, MAX_STROBE_COOLDOWN_SECONDS),

@@ -8,6 +8,9 @@ from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
+    INTENSITY_CALM,
+    INTENSITY_MEASURED,
+    INTENSITY_WILD,
     STROBE_BURST_SECONDS,
     STROBE_COOLDOWN_SECONDS,
     STROBE_MAX_BURST_SECONDS,
@@ -322,12 +325,19 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
 async def test_low_intensity_sends_no_drop_strobe_but_still_cuts_to_the_drop(
     recorded_lighting, caplog
 ):
-    settings = ShowSettings(intensity=0.29)
+    settings = ShowSettings(intensity=INTENSITY_CALM)
     controller = EffectController(recorded_lighting, settings=lambda: settings)
     with caplog.at_level(logging.INFO):
         await controller.change_effect(LightIntent.DROP)
     assert [e['command']['kind'] for e in recorded_lighting.events] == ['select']
-    assert 'intensity 0.29 below 0.30' in caplog.text
+    assert 'intensity 0.30 at or below 0.30' in caplog.text
+
+
+async def test_measured_intensity_keeps_the_drop_strobe(recorded_lighting):
+    settings = ShowSettings(intensity=INTENSITY_MEASURED)
+    controller = EffectController(recorded_lighting, settings=lambda: settings)
+    await controller.change_effect(LightIntent.DROP)
+    assert [e['command']['kind'] for e in recorded_lighting.events] == ['select', 'set_override']
 
 
 async def test_drop_strobe_rate_and_burst_scale_with_intensity_within_the_caps(recorded_lighting):
@@ -339,7 +349,7 @@ async def test_drop_strobe_rate_and_burst_scale_with_intensity_within_the_caps(r
     assert accent['lifetime']['duration_seconds'] == pytest.approx(0.5 * STROBE_BURST_SECONDS)
 
 
-@pytest.mark.parametrize(('intensity', 'cooldown'), [(1.0, 60.0), (0.5, 120.0), (0.3, 200.0)])
+@pytest.mark.parametrize(('intensity', 'cooldown'), [(1.0, 60.0), (0.5, 120.0), (0.4, 150.0)])
 async def test_drop_strobe_cooldown_lengthens_as_intensity_falls(
     recorded_lighting, intensity, cooldown
 ):
@@ -415,13 +425,14 @@ async def test_lowering_intensity_swaps_an_over_cap_loop_at_once_and_raising_it_
     from autolux.tests.test_light_engine import beat_at_phase, selections
 
     control, light, decoder, clock, lighting = _capped_show(tmp_path)
+    await _set_intensity(control, light, INTENSITY_WILD)
     await beat_at_phase(light, decoder, 0, decision='drop')
     assert lighting.selected_autoloop == ('drop', 'kick')
     entries = len(selections(lighting))
 
     clock.advance(2.0)
     with caplog.at_level(logging.INFO):
-        await _set_intensity(control, light, 0.3)
+        await _set_intensity(control, light, INTENSITY_CALM)
     swap = selections(lighting)[-1]
     assert swap['at_seconds'] == clock.monotonic()
     assert (swap['command']['autoloop'], swap['command']['transition']) == (
@@ -431,7 +442,7 @@ async def test_lowering_intensity_swaps_an_over_cap_loop_at_once_and_raising_it_
     assert 'reason=intensity cap;' in caplog.text
     assert [e['command']['kind'] for e in lighting.events[-2:]] == ['set_intensity', 'select']
 
-    await _set_intensity(control, light, 1.0)
+    await _set_intensity(control, light, INTENSITY_WILD)
     assert len(selections(lighting)) == entries + 1, 'a raised cap waits for the next entry'
     await beat_at_phase(light, decoder, 0)
     assert lighting.selected_autoloop == ('drop', 'soft'), 'the held drop keeps the swapped loop'
