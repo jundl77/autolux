@@ -775,7 +775,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
         match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
         'drop/slam, standby/warm_white$',
     ):
-        starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
+        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
 
 
 def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, monkeypatch):
@@ -803,7 +803,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
     with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
-        starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
+        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
 
 
 def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplog):
@@ -832,7 +832,7 @@ def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplo
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
     with caplog.at_level('WARNING'):
-        starfire_runtime.validate_starfire(binary, 'rig.mvr', tmp_path)
+        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
     assert 'groups not in this rig: fx, lasers' in caplog.text
 
 

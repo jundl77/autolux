@@ -163,7 +163,7 @@ fn scaled_rig() -> Value {
 fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
     let directory = tempfile::tempdir().unwrap();
     let replay_path = directory.path().join("show.json");
-    let rig_path = directory.path().join("rig.mvr");
+    let rig_path = directory.path().join("rig.pb");
     std::fs::write(&replay_path, serde_json::to_vec(&mixed_show()).unwrap()).unwrap();
     std::fs::write(&rig_path, rig).unwrap();
     let output = Process::new(env!("CARGO_BIN_EXE_starfire"))
@@ -201,7 +201,7 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig = include_bytes!("../../rigs/room.mvr");
+    let rig = include_bytes!("../../rigs/room.rig.pb");
     assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
 }
 
@@ -209,7 +209,7 @@ fn room_show_keeps_ten_times_realtime_headroom() {
 fn sixty_four_fixture_show_keeps_twice_realtime_headroom() {
     assert_render_budget(
         "scaled / 64 fixtures",
-        &support::mvr(&scaled_rig()),
+        &support::encoded(&scaled_rig()),
         MIN_SCALED_REALTIME_FACTOR,
     );
 }

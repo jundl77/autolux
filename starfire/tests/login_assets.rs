@@ -69,7 +69,7 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
     for (script, autoloop) in scripts.iter().zip(offline_catalog.list()) {
         let mut supplied = Engine::new(supplied_rig.clone(), supplied_catalog.clone()).unwrap();
         let mut offline = Engine::new(
-            FixtureRig::from_mvr(&support::mvr(&serde_json::from_str(RGB_RIG).unwrap())).unwrap(),
+            FixtureRig::decode(&support::encoded(&serde_json::from_str(RGB_RIG).unwrap())).unwrap(),
             offline_catalog.clone(),
         )
         .unwrap();

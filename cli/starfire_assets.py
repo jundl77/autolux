@@ -1,4 +1,6 @@
 import re
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from autolux.lighting import mvr
@@ -62,6 +64,14 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
     return rig
 
 
+@contextmanager
+def native_rig(path: Path):
+    with tempfile.TemporaryDirectory(prefix='starfire-rig-') as directory:
+        exported = Path(directory) / 'rig.pb'
+        exported.write_bytes(rig_definition(Path(path)).SerializeToString())
+        yield exported
+
+
 def _autoloop_definitions(directory):
     scripts = []
     total_bytes = 0
@@ -103,7 +113,6 @@ def load_login(
     radius: wire.Login.RadiusOutput | None = None,
     render_core: int | None = None,
 ) -> wire.Login:
-    """Load one immutable asset snapshot before starting the owned renderer."""
     try:
         if type(run_id) is not int or not 0 < run_id < 1 << 64:
             raise ValueError('run_id must be a nonzero uint64')

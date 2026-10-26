@@ -8,7 +8,7 @@ use serde_json::json;
 use starfire::engine::MAX_SCRIPT_ERROR_BYTES;
 use starfire::fixtures::{FixtureRig, MAX_FIXTURES};
 use starfire::model::{Command, TimedCommand, Transition};
-use starfire::mvr::MAX_MVR_BYTES;
+use starfire::protocol::MAX_LOGIN_BYTES;
 use starfire::replay::{Replay, render_replay};
 use starfire::script::AutoloopCatalog;
 
@@ -52,8 +52,8 @@ fn native_pattern_matching_cannot_bypass_the_script_budget() {
     let directory = tempfile::tempdir().unwrap();
     let autoloops = directory.path().join("autoloops");
     fs::create_dir_all(autoloops.join("test")).unwrap();
-    let rig = directory.path().join("rig.mvr");
-    support::write_mvr(&rig, &simple_rig());
+    let rig = directory.path().join("rig.pb");
+    support::write_rig(&rig, &simple_rig());
 
     for expression in [
         "string.find(text, pattern)",
@@ -131,13 +131,10 @@ fn repeated_fault_diagnostics_have_a_total_replay_memory_budget() {
 }
 
 #[test]
-fn rig_size_is_bounded_before_archive_parsing_from_memory_or_file() {
-    let input = vec![0; MAX_MVR_BYTES + 1];
-    let error = FixtureRig::from_mvr(&input).unwrap_err();
-    assert!(format!("{error:#}").contains("exceeds its size limit"));
+fn rig_size_is_bounded_before_decoding() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("oversized.mvr");
-    fs::write(&path, input).unwrap();
+    let path = directory.path().join("oversized.pb");
+    fs::write(&path, vec![0; MAX_LOGIN_BYTES + 1]).unwrap();
     let error = FixtureRig::load(&path).unwrap_err();
     assert!(format!("{error:#}").contains("input byte limit"));
 }

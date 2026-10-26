@@ -1,5 +1,3 @@
-"""Exercise browser-independent draft integrity using Node's built-in test runner."""
-
 import json
 import os
 import shutil

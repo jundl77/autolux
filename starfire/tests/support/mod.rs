@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
+use prost::Message;
 use serde_json::Value;
 use starfire::fixtures::FixtureRig;
 use starfire::protocol::wire;
@@ -14,7 +14,7 @@ pub fn rigs() -> PathBuf {
 }
 
 pub fn room() -> FixtureRig {
-    FixtureRig::load(&rigs().join("room.mvr")).unwrap()
+    FixtureRig::load(&rigs().join("room.rig.pb")).unwrap()
 }
 
 fn catalogue_profile(profile: &str) -> Option<(String, String)> {
@@ -95,124 +95,19 @@ pub fn rig(spec: Value) -> FixtureRig {
     try_rig(spec).unwrap()
 }
 
-pub fn zipped(entries: &[(&str, &[u8])]) -> Vec<u8> {
-    let mut package = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    for (name, content) in entries {
-        package
-            .start_file(*name, zip::write::SimpleFileOptions::default())
-            .unwrap();
-        package.write_all(content).unwrap();
-    }
-    package.finish().unwrap().into_inner()
+pub fn room_definition() -> wire::RigDefinition {
+    wire::RigDefinition::decode(
+        std::fs::read(rigs().join("room.rig.pb"))
+            .unwrap()
+            .as_slice(),
+    )
+    .unwrap()
 }
 
-pub fn room_entries() -> (String, Vec<(String, Vec<u8>)>) {
-    let mut package =
-        zip::ZipArchive::new(Cursor::new(std::fs::read(rigs().join("room.mvr")).unwrap())).unwrap();
-    let mut scene = String::new();
-    let mut others = Vec::new();
-    for index in 0..package.len() {
-        let mut entry = package.by_index(index).unwrap();
-        let mut content = Vec::new();
-        std::io::Read::read_to_end(&mut entry, &mut content).unwrap();
-        if entry.name() == "GeneralSceneDescription.xml" {
-            scene = String::from_utf8(content).unwrap();
-        } else {
-            others.push((entry.name().to_string(), content));
-        }
-    }
-    (scene, others)
+pub fn encoded(spec: &Value) -> Vec<u8> {
+    definition(spec).encode_to_vec()
 }
 
-pub fn room_with_scene(scene_xml: &str) -> Vec<u8> {
-    let (_, others) = room_entries();
-    let mut entries: Vec<(&str, &[u8])> =
-        vec![("GeneralSceneDescription.xml", scene_xml.as_bytes())];
-    entries.extend(
-        others
-            .iter()
-            .map(|(name, content)| (name.as_str(), content.as_slice())),
-    );
-    zipped(&entries)
-}
-
-pub fn archive(scene_xml: &str) -> Vec<u8> {
-    let catalogue: Value = serde_json::from_str(PROFILES).unwrap();
-    let packages: Vec<(String, Vec<u8>)> = catalogue["profiles"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .map(|(profile, source)| {
-            let description = source["gdtf_xml"].as_str().unwrap().as_bytes();
-            (
-                format!("{profile}.gdtf"),
-                zipped(&[("description.xml", description)]),
-            )
-        })
-        .collect();
-    let mut entries: Vec<(&str, &[u8])> =
-        vec![("GeneralSceneDescription.xml", scene_xml.as_bytes())];
-    entries.extend(
-        packages
-            .iter()
-            .map(|(name, content)| (name.as_str(), content.as_slice())),
-    );
-    zipped(&entries)
-}
-
-pub fn scene_xml(spec: &Value) -> String {
-    let groups = spec
-        .get("groups")
-        .and_then(Value::as_object)
-        .cloned()
-        .unwrap_or_default();
-    let class_uuid = |index: usize| format!("00000000-0000-4000-8000-{:012X}", index + 1);
-    let mut xml = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
-         <GeneralSceneDescription verMajor=\"1\" verMinor=\"6\"><Scene><AUXData>",
-    );
-    for (index, group) in groups.keys().enumerate() {
-        xml += &format!("<Class name=\"{group}\" uuid=\"{}\"/>", class_uuid(index));
-    }
-    xml += "</AUXData><Layers><Layer name=\"Room\" uuid=\"00000000-0000-4000-A000-000000000001\"><ChildList>";
-    for (index, fixture) in spec["fixtures"].as_array().unwrap().iter().enumerate() {
-        let id = fixture["id"].as_str().unwrap();
-        let profile = fixture["profile"].as_str().unwrap();
-        let mode = catalogue_profile(profile).map_or_else(String::new, |(_, mode)| mode);
-        xml += &format!(
-            "<Fixture name=\"{id}\" uuid=\"00000000-0000-4000-9000-{:012X}\">",
-            index + 1
-        );
-        let values = matrix(fixture);
-        if !values.is_empty() {
-            xml += "<Matrix>";
-            for row in values.chunks(3) {
-                xml += &format!("{{{},{},{}}}", row[0], row[1], row[2]);
-            }
-            xml += "</Matrix>";
-        }
-        if let Some(group) = groups.iter().position(|(_, members)| {
-            members
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|member| member == id)
-        }) {
-            xml += &format!("<Classing>{}</Classing>", class_uuid(group));
-        }
-        xml += &format!(
-            "<GDTFSpec>{profile}.gdtf</GDTFSpec><GDTFMode>{mode}</GDTFMode>\
-             <Addresses><Address break=\"0\">{}</Address></Addresses></Fixture>",
-            number(fixture, "universe") * 512 + number(fixture, "address")
-        );
-    }
-    xml + "</ChildList></Layer></Layers></Scene></GeneralSceneDescription>"
-}
-
-pub fn mvr(spec: &Value) -> Vec<u8> {
-    archive(&scene_xml(spec))
-}
-
-pub fn write_mvr(path: &Path, spec: &Value) {
-    std::fs::write(path, mvr(spec)).unwrap();
+pub fn write_rig(path: &Path, spec: &Value) {
+    std::fs::write(path, encoded(spec)).unwrap();
 }

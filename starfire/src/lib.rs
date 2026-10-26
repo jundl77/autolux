@@ -5,7 +5,6 @@ pub mod fixtures;
 pub mod gdtf;
 pub mod live;
 pub mod model;
-pub mod mvr;
 pub mod protocol;
 pub mod replay;
 pub mod script;

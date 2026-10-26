@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use prost::Message;
 use serde_json::Value;
 use starfire::script::AutoloopCatalog;
 
@@ -20,7 +21,10 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
 #[test]
 fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let output = check(&root.join("../rigs/room.mvr"), &root.join("../autoloops"));
+    let output = check(
+        &root.join("../rigs/room.rig.pb"),
+        &root.join("../autoloops"),
+    );
     assert!(
         output.status.success(),
         "{}",
@@ -42,13 +46,14 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
 fn preflight_warns_about_autoloop_groups_the_rig_lacks() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let directory = tempfile::tempdir().unwrap();
-    let (scene, _) = support::room_entries();
-    let path = directory.path().join("missing-strip.mvr");
-    fs::write(
-        &path,
-        support::room_with_scene(&scene.replace("name=\"strip\"", "name=\"pixels\"")),
-    )
-    .unwrap();
+    let mut rig = support::room_definition();
+    for group in &mut rig.groups {
+        if group.group_id == "strip" {
+            group.group_id = "pixels".into();
+        }
+    }
+    let path = directory.path().join("missing-strip.pb");
+    fs::write(&path, rig.encode_to_vec()).unwrap();
 
     let output = check(&path, &root.join("../autoloops"));
     let warning = String::from_utf8_lossy(&output.stderr);
@@ -78,7 +83,7 @@ fn preflight_executes_render_callbacks_in_every_autoloop() {
     )
     .unwrap();
 
-    let output = check(&root.join("../rigs/room.mvr"), directory.path());
+    let output = check(&root.join("../rigs/room.rig.pb"), directory.path());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(error.contains("test/z_failure"), "{error}");

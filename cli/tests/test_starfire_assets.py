@@ -6,7 +6,8 @@ import pytest
 from autolux.lighting import mvr
 from cli import starfire_assets as assets
 from cli import starfire_protocol as protocol
-from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG
+from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG, ROOT
+from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').read_text(
@@ -153,3 +154,15 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
     (autoloops / 'atmospheric/blue.lua').rename(autoloops / 'atmospheric/Blue Sky.lua')
     with pytest.raises(ValueError, match='Invalid autoloop name'):
         assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+
+
+@pytest.mark.parametrize('name', ['room', 'generic'])
+def test_committed_native_rig_is_the_exported_login_rig(name):
+    rig = ROOT / f'rigs/{name}.mvr'
+    login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
+    with assets.native_rig(rig) as exported:
+        content = exported.read_bytes()
+    assert content == (ROOT / f'rigs/{name}.rig.pb').read_bytes(), (
+        f'Regenerate with: uv run autolux starfire export-rig rigs/{name}.mvr rigs/{name}.rig.pb'
+    )
+    assert rig_wire.RigDefinition.FromString(content) == login.rig

@@ -1,9 +1,8 @@
-"""Coordinate the prebuilt Starfire renderer and the existing fixture dashboard."""
-
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -13,6 +12,7 @@ from pathlib import Path
 
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
+from cli.starfire_assets import native_rig, rig_definition
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
@@ -60,6 +60,10 @@ def add_subparser(subparsers) -> None:
     rig = actions.add_parser('rig', help='Validate an MVR rig without output')
     rig.add_argument('input', type=Path)
     rig.set_defaults(func=run_native)
+    export = actions.add_parser('export-rig', help='Write the Starfire RigDefinition of an MVR rig')
+    export.add_argument('input', type=Path)
+    export.add_argument('output', type=Path)
+    export.set_defaults(func=export_rig)
 
     importer = actions.add_parser('import-fixture', help='Import a GDTF fixture mode for Starfire')
     importer.add_argument('input', type=Path)
@@ -124,13 +128,14 @@ async def _run_child(command: list[str], *, stop_file: Path | None = None) -> No
 
 async def run_native(args: argparse.Namespace) -> None:
     command = [str(_binary(args.binary)), args.starfire_action]
-    if hasattr(args, 'input'):
+    rig = getattr(args, 'rig', None)
+    if args.starfire_action == 'rig':
+        rig = args.input
+    elif hasattr(args, 'input'):
         command.append(str(args.input.resolve()))
-    for name in ('rig', 'autoloops', 'output', 'summary'):
-        path = getattr(args, name, None)
-        if name == 'rig' and args.starfire_action == 'replay' and path is None:
-            path = saved_rig()
-        if path is not None:
+        rig = rig or saved_rig()
+    for name in ('autoloops', 'output', 'summary'):
+        if (path := getattr(args, name, None)) is not None:
             command.extend([f'--{name}', str(path.resolve())])
     if getattr(args, 'artnet', None):
         if not args.realtime:
@@ -141,15 +146,23 @@ async def run_native(args: argparse.Namespace) -> None:
     for name in ('realtime', 'broadcast'):
         if getattr(args, name, False):
             command.append(f'--{name}')
-    if getattr(args, 'artnet', None):
-        runtime = ROOT / '.live' / 'starfire'
-        runtime.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='replay-', dir=runtime) as owned:
+    with contextlib.ExitStack() as stack:
+        if rig is not None:
+            exported = str(stack.enter_context(native_rig(rig)))
+            command.extend([exported] if args.starfire_action == 'rig' else ['--rig', exported])
+        if getattr(args, 'artnet', None):
+            runtime = ROOT / '.live' / 'starfire'
+            runtime.mkdir(parents=True, exist_ok=True)
+            owned = stack.enter_context(tempfile.TemporaryDirectory(prefix='replay-', dir=runtime))
             stop_file = Path(owned) / 'stop'
             command.extend(['--stop-file', str(stop_file)])
             await _run_child(command, stop_file=stop_file)
-    else:
-        await _run_child(command)
+        else:
+            await _run_child(command)
+
+
+async def export_rig(args: argparse.Namespace) -> None:
+    args.output.write_bytes(rig_definition(args.input).SerializeToString())
 
 
 async def convert_report(args: argparse.Namespace) -> None:
@@ -169,17 +182,18 @@ async def convert_report(args: argparse.Namespace) -> None:
 
 def _validate_patch(binary: Path, patch: Path) -> None:
     try:
-        completed = subprocess.run(
-            [str(binary), 'rig', str(patch.resolve())],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=PATCH_VALIDATION_TIMEOUT_SEC,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-        )
+        with native_rig(patch) as exported:
+            completed = subprocess.run(
+                [str(binary), 'rig', str(exported)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=PATCH_VALIDATION_TIMEOUT_SEC,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+            )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError('Starfire fixture validation timed out') from error
     if completed.returncode != 0:

@@ -8,18 +8,22 @@ Config embeds a library GDTF into the MVR when a fixture first uses it.
 
 ## Contract
 
-Autolux reads and validates the MVR (`autolux/lighting/mvr*.py`) and fills the existing
-`RigDefinition` proto: one `Fixture` per patched MVR Fixture (name, `GDTFSpec#GDTFMode`
-profile, universe/address, scene-space `matrix`, DMXInvertPan/Tilt and Autolux movement
-limits), classes as groups, embedded GDTF XML as profiles. Starfire's own reader
-(`starfire/src/mvr.rs`) builds the same `RigDefinition` for `check`, `rig` and `replay`,
-so both paths share one validator (`FixtureRig::from_wire`). Proto stays the contract;
-Login does not carry archive bytes.
+Autolux is the only MVR reader (`autolux/lighting/mvr*.py`). It validates the archive and
+fills the `RigDefinition` proto: one `Fixture` per patched MVR Fixture (name,
+`GDTFSpec#GDTFMode` profile, universe/address, scene-space `matrix`, DMXInvertPan/Tilt
+and Autolux movement limits), classes as groups, embedded GDTF XML as profiles. Login
+carries it; the offline `starfire check`, `rig` and `replay` commands read the same
+message serialized to a file (`autolux starfire export-rig rig.mvr rig.rig.pb`; the
+Autolux CLI exports to a temporary file automatically). `FixtureRig::from_wire` is the
+single native validator. `rigs/room.rig.pb` and `rigs/generic.rig.pb` are the exports
+the Rust tests and goldens use; `cli/tests/test_starfire_assets.py` checks they equal
+the Login rig of their MVR.
 
 Patched = a `Fixture` anywhere under a Layer with `GDTFSpec` and an `Address`; its Matrix
 is composed through every parent (Layer, GroupObject, Truss, …). Starfire renders one
-Address on break 0 per fixture; other objects and unpatched fixtures are planning data.
-Class member order is MVR document order. Multipatch fixtures render as separate patches.
+Address on break 0 per fixture; other objects, unpatched fixtures and unreferenced GDTF
+files are planning data. Class member order is MVR document order. Multipatch fixtures
+render as separate patches.
 
 ## Orientation
 
@@ -42,26 +46,23 @@ yaw 180 and reversed. The inspector shows the derived home under each Matrix.
 Sheared, mirrored or degenerate matrices are rejected. The Config plan is a top view
 (+Y up); each arrow is the object's local Y axis.
 
-## Authority
-
-Autolux (`mvr_validation.py`) is authoritative for MVR conformance. Starfire
-(`mvr.rs`, `fixtures.rs`) is authoritative for render rules: one break-0 Address, pitch
-limit, orthonormal matrices, footprint, overlaps and GDTF mode support. Autolux mirrors
-those rules with the same wording for early dashboard errors, and every save also runs
-`starfire rig`. `cli/tests/test_rig_parity.py` checks that both readers build the same
-`RigDefinition` from the room, generic and sample rigs (`starfire rig --definition`).
-
 ## Validation on save
 
+`autolux/lighting/mvr_schema.py` holds the MVR tables as one declarative text table: one
+line per node with its attributes, children, value types, cardinality (`!` required,
+`?` 0..1, `*` 0..n, none = exactly one) and reference targets (`>Class`). The validator
+(`mvr_validation.py`), the draft templates and the Config inspector all read it.
+
 Config refuses a save, naming the node and rule, unless the archive passes
-`mvr_validation.validate` (every MVR table: allowed children and attributes, mandatory
-counts, value types — Integer, Float, Bool, UUID (non-nil), FileName, Matrix, CIE xyY,
-Vector, IPv4/IPv6, enums, DMX address `1..16777216` or `Universe.Address` — UUID
-uniqueness, references resolving to the right node type (Classing, Position, Focus,
-symdef, linkedDef, toObject, multipatch), referenced files present, GDTFMode mandatory with
-GDTFSpec and present in that GDTF, unique Address breaks, break `n` ↔ GDTF `DMXBreak n+1`,
-multipatch children without FixtureID/CustomId), then Autolux's patch rules (unique
-names, overlaps, footprint), then `starfire rig`.
+`mvr_validation.validate`: allowed children and attributes, mandatory counts, value types
+(Integer, Float, Bool, UUID (non-nil), FileName, Matrix, CIE xyY, Vector, IPv4/IPv6,
+enums, DMX address `1..16777216` or `Universe.Address`), UUID uniqueness, references
+resolving to the right node type (Classing, Position, Focus, symdef, linkedDef, toObject,
+multipatch), referenced files present, GDTFMode mandatory with GDTFSpec and present in
+that GDTF, unique Address breaks, break `n` ↔ GDTF `DMXBreak n+1`, multipatch children
+without FixtureID/CustomId. Autolux's render rules follow (unique names, one break-0
+Address, pitch limit, orthonormal matrices, footprint, overlaps), then `starfire rig` on
+the exported `RigDefinition` (GDTF mode support).
 
 ## Element support
 
@@ -82,10 +83,10 @@ names, overlaps, footprint), then `starfire rig`.
 Layer › ChildList is 0..1 in the published 1.6 tables (tag `1.6-mvr`); Autolux accepts
 that but always writes one. The third-party test sample is synthetic
 (`autolux/tests/data/mvr/sample_scene.xml`): the spec repository ships GDTF snippets but no
-exported `.mvr`. Comments, whitespace and attribute order are not preserved; unchanged archives re-save
-byte-identically. Child order is not validated (the spec examples vary); new children are
-inserted in table order. Network attributes follow Table 52 (`ipv4`, `dhcp`, …), not the
-differently cased example.
+exported `.mvr`. Comments, whitespace and attribute order are not preserved; unchanged
+archives re-save byte-identically. Child order is not validated (the spec examples vary);
+new children are inserted in table order. Network attributes follow Table 52 (`ipv4`,
+`dhcp`, …), not the differently cased example.
 
 ## GDTF support
 
@@ -100,9 +101,9 @@ ColorMacro1(Rate)).
 Every GDTF node and attribute is shown per fixture, read-only, except:
 DMXMode `Name`/`Description`; ChannelFunction `Name`, `DMXFrom`, `Default`,
 `PhysicalFrom`, `PhysicalTo`, `RealFade`, `RealAcceleration`, `Min`, `Max`, `CustomName`;
-ChannelSet `Name`, `DMXFrom`, `PhysicalFrom`, `PhysicalTo`. Edits are checked for Name
-characters (Annex C), DMXValue (`n/b[s]`), finite floats, unique mode names and an
-unchanged structure; a changed GDTF gains a `Revision` and is re-zipped with its other
-entries, an unchanged one is kept byte for byte. Full GDTF XSD validation is not run;
-Starfire's GDTF compiler rejects modes it cannot render (multiple breaks, geometry
+ChannelSet `Name`, `DMXFrom`, `PhysicalFrom`, `PhysicalTo` (`GDTF_EDITABLE`). Edits are
+checked for Name characters (Annex C), DMXValue (`n/b[s]`), finite floats, unique mode
+names and an unchanged structure; a changed GDTF gains a `Revision` and is re-zipped with
+its other entries, an unchanged one is kept byte for byte. Full GDTF XSD validation is not
+run; Starfire's GDTF compiler rejects modes it cannot render (multiple breaks, geometry
 references, relations).

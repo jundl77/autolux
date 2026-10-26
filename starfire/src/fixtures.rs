@@ -1,5 +1,3 @@
-//! Validated fixture patches and semantic values encoded into safe DMX frames.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read;
@@ -10,8 +8,8 @@ use anyhow::{Context, Result, ensure};
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::GdtfProfile;
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
-use crate::mvr::{self, MATRIX_VALUES};
-use crate::protocol::wire;
+use crate::protocol::{MAX_LOGIN_BYTES, wire};
+use prost::Message;
 
 pub const MAX_FIXTURES: usize = 512;
 const MAX_FIXTURE_GROUPS: usize = 512;
@@ -21,6 +19,7 @@ const GIMBAL_TOLERANCE: f64 = 1e-9;
 const FULL_TURN_DEGREES: f64 = 360.0;
 const HALF_TURN_DEGREES: f64 = 180.0;
 const MAX_PITCH_DEGREES: f64 = 60.0;
+const MATRIX_VALUES: usize = 12;
 
 #[derive(Clone, Debug)]
 struct FixturePatch {
@@ -140,7 +139,6 @@ pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
     })
 }
 
-/// An immutable, validated patch with fixture data separate from autoloop logic.
 #[derive(Clone, Debug)]
 pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
@@ -199,11 +197,11 @@ impl FixtureRig {
     }
 
     pub fn load(path: &Path) -> Result<Self> {
-        Self::from_mvr(&read_bounded(path, mvr::MAX_MVR_BYTES)?)
+        Self::decode(&read_bounded(path, MAX_LOGIN_BYTES)?)
     }
 
-    pub fn from_mvr(archive: &[u8]) -> Result<Self> {
-        Self::from_wire(&mvr::rig_definition(archive)?)
+    pub fn decode(definition: &[u8]) -> Result<Self> {
+        Self::from_wire(&wire::RigDefinition::decode(definition).context("decode RigDefinition")?)
     }
 
     fn from_parts(
@@ -365,8 +363,7 @@ impl FixtureRig {
             .collect()
     }
 
-    /// Encode a complete state after time-dependent strobe has been resolved.
-    /// Blackout means zero intensity, not zeroing movement or device-control bytes.
+    // Blackout zeroes intensity only; movement and device-control bytes keep their values.
     pub fn encode(&self, states: &FixtureStates) -> Result<BTreeMap<u16, Vec<u8>>> {
         ensure!(
             states.len() == self.fixtures.len(),

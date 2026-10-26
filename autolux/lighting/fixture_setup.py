@@ -137,7 +137,7 @@ class FixtureStore:
                     staged.flush()
                     os.fsync(staged.fileno())
                 self._validate(staged_path)
-                # Detect external edits made while the native validator was running.
+                # Another process may edit the rig while the native validator runs.
                 if _revision(self.rig_path.read_bytes()) != current:
                     raise ValueError('Fixture patch changed during validation. Reload and retry.')
                 os.replace(staged_path, self.rig_path)

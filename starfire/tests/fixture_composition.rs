@@ -24,7 +24,7 @@ fn steady_room() -> Engine {
     )
     .unwrap();
     let catalogue = AutoloopCatalog::load(directory.path()).unwrap();
-    let rig = FixtureRig::from_mvr(include_bytes!("../../rigs/room.mvr")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let mut engine = Engine::new(rig, catalogue).unwrap();
     engine
         .apply(

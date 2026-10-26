@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import socket
@@ -112,6 +113,7 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
         launched.append(command)
 
     monkeypatch.setattr(starfire, '_run_child', launch)
+    monkeypatch.setattr(starfire, 'native_rig', contextlib.nullcontext)
     args = argparse.Namespace(
         binary=binary,
         starfire_action='replay',
