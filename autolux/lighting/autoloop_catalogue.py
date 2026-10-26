@@ -1,14 +1,16 @@
 """Discover which Lua autoloops each lighting intent chooses from, and what they declare."""
 
-import re
 from pathlib import Path
 
-from autolux.lib.engine.autoloop_policy import AutoloopMeta, AutoloopMetaTable
-from autolux.lib.engine.effect_definitions import PREFERRED_AUTOLOOPS, AutoloopTable
+from autolux.lib.engine.effect_definitions import (
+    AUTOLOOP_META_VALUES,
+    PREFERRED_AUTOLOOPS,
+    AutoloopMeta,
+    AutoloopMetaTable,
+    AutoloopTable,
+)
 
 AUTOLOOP_DIRECTORY = Path(__file__).resolve().parents[2] / 'autoloops'
-META_KEYS = ('energy', 'family', 'movement')
-_META_LINE = re.compile(r'-- (\w+): (.*)')
 
 
 class AutoloopMetaError(ValueError):
@@ -32,29 +34,32 @@ def required_autoloops(directory: Path = AUTOLOOP_DIRECTORY) -> set[tuple[str, s
 
 
 def parse_autoloop_meta(source: str) -> AutoloopMeta:
-    """Read the `-- key: value` block right after the loop-length line."""
+    """Read the `-- key: value` block right after the loop-length line.
+
+    Mirrors `metadata` in `starfire/tests/autoloop_replay.rs` rule for rule:
+    values match the vocabulary exactly, with no padding or leading zeros.
+    """
     values: dict[str, str] = {}
-    for line in source.splitlines()[1:]:
-        match = _META_LINE.fullmatch(line.rstrip())
+    # Rust's `lines()`: split on \n, drop one trailing \r.
+    for line in source.split('\n')[1:]:
+        line = line.removesuffix('\r')
+        key, separator, value = line.removeprefix('-- ').partition(': ')
         # The group lines below (`-- wash: ...`) share the shape, so the block
         # ends at the first other key; a misspelt key then reports as missing.
-        if match is None or match[1] not in META_KEYS:
+        if not line.startswith('-- ') or not separator or key not in AUTOLOOP_META_VALUES:
             break
-        if match[1] in values:
-            raise AutoloopMetaError(f'{match[1]} declared twice')
-        values[match[1]] = match[2]
-    missing = [key for key in META_KEYS if key not in values]
+        allowed = AUTOLOOP_META_VALUES[key]
+        if value not in allowed:
+            raise AutoloopMetaError(f'{key} {value!r} is not one of {", ".join(allowed)}')
+        if key in values:
+            raise AutoloopMetaError(f'{key} declared twice')
+        values[key] = value
+    missing = [key for key in AUTOLOOP_META_VALUES if key not in values]
     if missing:
         raise AutoloopMetaError(
             f'missing {", ".join(missing)} in the header block after the loop-length line'
         )
-    energy = values['energy']
-    try:
-        return AutoloopMeta(
-            int(energy) if energy.isdigit() else energy, values['family'], values['movement']
-        )
-    except ValueError as error:
-        raise AutoloopMetaError(str(error)) from None
+    return AutoloopMeta(int(values['energy']), values['family'], values['movement'])
 
 
 def read_autoloop_meta(directory: Path = AUTOLOOP_DIRECTORY) -> AutoloopMetaTable:

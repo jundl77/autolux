@@ -1,5 +1,5 @@
 -- 16-beat loop, no beat pulses or strobe.
--- energy: 2
+-- energy: 1
 -- family: accent
 -- movement: still
 -- wash: accent, ignites over the first half beat of the phrase, then fades out across

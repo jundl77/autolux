@@ -368,14 +368,7 @@ fn every_autoloop_declares_selection_metadata_that_fits_its_bank() {
             Err(error) => problems.push(format!("{look}: {error}")),
         }
     }
-    assert!(
-        problems.is_empty(),
-        "{}",
-        problems.join(
-            "
-"
-        )
-    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 #[test]

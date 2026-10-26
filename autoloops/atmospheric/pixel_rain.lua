@@ -1,5 +1,5 @@
 -- 16-beat loop, no beat pulses or strobe.
--- energy: 2
+-- energy: 1
 -- family: cold
 -- movement: sweep
 -- wash: cold, near-black at 0.1.
