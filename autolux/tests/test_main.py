@@ -31,6 +31,7 @@ def _app(enable_ui: bool, event_buffer):
     app.health_check = None
     app.control = MagicMock()
     app.light_engine = MagicMock()
+    app.media_session = MagicMock()
     return app
 
 

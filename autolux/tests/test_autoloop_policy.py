@@ -17,8 +17,8 @@ from autolux.lib.engine.autoloop_policy import (
     max_energy_for_intensity,
 )
 from autolux.lib.engine.effect_definitions import (
+    INTENSITY_BALANCED,
     INTENSITY_CALM,
-    INTENSITY_MEASURED,
     INTENSITY_WILD,
     LightIntent,
 )
@@ -211,7 +211,7 @@ def test_loudness_trend_compares_the_halves_of_eight_bars(levels, trend):
         (INTENSITY_CALM, 1),
         (0.31, 2),
         (0.69, 2),
-        (INTENSITY_MEASURED, 3),
+        (INTENSITY_BALANCED, 3),
         (INTENSITY_WILD, 3),
     ],
 )
@@ -221,7 +221,7 @@ def test_intensity_maps_to_the_highest_allowed_energy(intensity, max_energy):
 
 @pytest.mark.parametrize(
     ('intensity', 'energy'),
-    [(INTENSITY_CALM, 1), (0.5, 2), (INTENSITY_MEASURED, 3), (INTENSITY_WILD, 3)],
+    [(INTENSITY_CALM, 1), (0.5, 2), (INTENSITY_BALANCED, 3), (INTENSITY_WILD, 3)],
 )
 def test_intensity_caps_a_maximal_drop_after_the_context_rule(intensity, energy):
     chooser = policy()
@@ -231,10 +231,64 @@ def test_intensity_caps_a_maximal_drop_after_the_context_rule(intensity, energy)
 
 
 def test_a_capped_tier_without_loops_falls_back_to_the_nearest_energy():
-    lib = library({DROP: [('driving', 2, 'snap', 'wash'), ('maximal', 3, 'snap', 'wash')]})
-    choice = policy(lib).choose(SelectionContext(DROP, build_bars=64), intensity=0.1)
+    lib = library({BREAKDOWN: [('driving', 2, 'snap', 'wash'), ('maximal', 3, 'snap', 'wash')]})
+    choice = policy(lib).choose(SelectionContext(BREAKDOWN), intensity=0.1)
     assert choice.autoloop == 'driving'
     assert 'no energy 1 loop, nearest 2' in choice.reason
+
+
+@pytest.mark.parametrize(('intent', 'look'), [(DROP, BREAKDOWN), (BUILDUP, ATMOSPHERIC)])
+def test_calm_plays_drops_and_builds_from_the_quiet_banks_at_energy_one(intent, look):
+    for seed in range(20):
+        chooser = policy(seed=seed)
+        context = SelectionContext(intent, build_bars=64)
+        choice = chooser.choose(context, intensity=INTENSITY_CALM)
+        assert (choice.bank, choice.meta.energy, choice.look) == (look.value, 1, look)
+        assert f'calm plays it from the {look.value} bank' in choice.reason
+        chooser.record(context, choice)
+
+
+@pytest.mark.parametrize('intent', [BREAKDOWN, ATMOSPHERIC])
+def test_calm_keeps_quiet_intents_in_their_own_bank(intent):
+    choice = policy().choose(SelectionContext(intent), intensity=INTENSITY_CALM)
+    assert (choice.bank, choice.look) == (intent.value, intent)
+
+
+def test_calm_nearest_tier_stays_within_the_remapped_bank():
+    lib = library({BREAKDOWN: [('drifting', 2, 'sweep', 'wash')]})
+    choice = policy(lib).choose(SelectionContext(DROP), intensity=INTENSITY_CALM)
+    assert (choice.bank, choice.autoloop) == ('breakdown', 'drifting')
+    assert 'no energy 1 loop, nearest 2' in choice.reason
+
+
+def test_wild_allows_a_maximal_drop_twice_running():
+    for seed in range(20):
+        chooser = policy(seed=seed)
+        drop_with_energy(chooser, 3)
+        choice = chooser.choose(
+            SelectionContext(DROP, seconds_since_drop=10.0), intensity=INTENSITY_WILD
+        )
+        assert choice.meta.energy == 3
+        assert 'wild: maximal twice running allowed' in choice.reason
+        balanced = chooser.choose(
+            SelectionContext(DROP, seconds_since_drop=10.0), intensity=INTENSITY_BALANCED
+        )
+        assert balanced.meta.energy == 2
+
+
+def test_wild_weights_energy_three_loops_three_to_one():
+    lib = library({DROP: [('driving', 2, 'snap', 'wash'), ('maximal', 3, 'snap', 'wash')]})
+    short_build = SelectionContext(DROP, seconds_since_drop=10.0)
+    wild = Counter(
+        policy(lib, seed).choose(short_build, intensity=INTENSITY_WILD).autoloop
+        for seed in range(400)
+    )
+    assert 0.65 < wild['maximal'] / 400 < 0.85
+    balanced = {
+        policy(lib, seed).choose(short_build, intensity=INTENSITY_BALANCED).autoloop
+        for seed in range(40)
+    }
+    assert balanced == {'driving'}
 
 
 @pytest.mark.parametrize(

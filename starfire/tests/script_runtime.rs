@@ -75,7 +75,7 @@ fn ctx_intensity_reaches_lua_and_softens_the_shared_beat_envelope() {
     assert_eq!(levels(0.6, 1.0), (1.0, 0.0));
     let (exposed, soft_peak) = levels(0.0, 0.3);
     assert_eq!(exposed, 0.3);
-    assert!((soft_peak - 0.2265).abs() < 1e-12);
+    assert!((soft_peak - starfire::intensity::PULSE_DEPTH_CALM).abs() < 1e-12);
     assert!(levels(0.6, 0.3).1 > 0.0);
     assert!(
         autoloop

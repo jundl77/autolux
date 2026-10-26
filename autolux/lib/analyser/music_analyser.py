@@ -71,9 +71,11 @@ class MusicAnalyser:
         note_clicks: bool = False,
         watchdog: DriftWatchdog | None = None,
         settings: Callable[[], ShowSettings] = ShowSettings,
+        zeros_mark_tracks: Callable[[], bool] = lambda: True,
     ):
         self._clock: Clock = clock
         self._settings = settings
+        self._zeros_mark_tracks = zeros_mark_tracks
         self.sample_rate: int = sample_rate
         self.buffer_size: int = buffer_size
         self.handler: IMusicAnalyserHandler = handler
@@ -218,15 +220,18 @@ class MusicAnalyser:
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
         if np.max(np.abs(audio_signal), initial=0.0) >= _DIGITAL_SILENCE_PEAK:
             gap, self._digital_silence_samples = self._digital_silence_samples, 0
+            if not self._zeros_mark_tracks():
+                return self.in_standby
             if self.in_standby:
-                self._leave_standby()
+                self.leave_standby()
             elif gap:
                 self._note_gap(gap)
             return False
         self._digital_silence_samples += len(audio_signal)
         threshold = self._settings().digital_silence_seconds * self.sample_rate
-        if not self.in_standby and self._digital_silence_samples >= threshold:
-            self._enter_standby()
+        if self._digital_silence_samples >= threshold and self._zeros_mark_tracks():
+            seconds = self._digital_silence_samples / self.sample_rate
+            self.enter_standby(f'{seconds:.1f}s of digital silence')
         return self.in_standby
 
     def _note_gap(self, gap_samples: int) -> None:
@@ -243,14 +248,17 @@ class MusicAnalyser:
         logging.info(f'[rhythm] {seconds * 1000:.0f} ms of digital silence — new-track cue')
         self.handler.on_digital_gap(started / self.sample_rate, seconds)
 
-    def _enter_standby(self) -> None:
-        seconds = self._digital_silence_samples / self.sample_rate
-        logging.info(f'[rhythm] {seconds:.1f}s of digital silence — standby')
+    def enter_standby(self, reason: str) -> None:
+        if self.in_standby:
+            return
+        logging.info(f'[rhythm] {reason} — standby')
         self.in_standby = True
         self._on_sound_stop()
         self.handler.on_digital_silence()
 
-    def _leave_standby(self) -> None:
+    def leave_standby(self) -> None:
+        if not self.in_standby:
+            return
         logging.info('[rhythm] signal returned — analysis restarts from scratch')
         self.in_standby = False
         self._reset_state()

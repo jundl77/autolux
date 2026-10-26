@@ -49,6 +49,7 @@ class EventBuffer:
         self._special: dict | None = None
         self._special_groups: dict[str, list[str]] = {}
         self._intense_at: float | None = None
+        self._track: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -204,17 +205,21 @@ class EventBuffer:
             self._intense_at = self._now()
 
     def _strobe_cooldown_seconds(self, now: float) -> float | None:
-        # drop_strobe_cooldown_seconds on the live settings, so a new intensity shows at once.
-        settings = self._control_state['settings'] or {}
-        cooldown, intensity = (
-            settings.get('drop_strobe_cooldown_seconds'),
-            settings.get('intensity'),
-        )
-        if cooldown is None or not intensity:
+        from autolux.lib.engine.effect_controller import drop_strobe_cooldown_seconds
+        from autolux.lib.engine.effect_definitions import ShowSettings
+
+        # From the live settings, so a new intensity level shows at once.
+        try:
+            settings = ShowSettings.from_dict(self._control_state['settings'])
+        except (TypeError, ValueError):
             return None
         if self._intense_at is None:
             return 0.0
-        return max(0.0, cooldown / intensity - (now - self._intense_at))
+        return max(0.0, drop_strobe_cooldown_seconds(settings) - (now - self._intense_at))
+
+    def set_track(self, track: dict) -> None:
+        with self._lock:
+            self._track = dict(track)
 
     def set_system_health(self, state: dict) -> None:
         with self._lock:
@@ -295,6 +300,7 @@ class EventBuffer:
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
                 'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
+                'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

@@ -13,14 +13,18 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, dcc, html
 
 from autolux.lib.engine.effect_definitions import (
+    BALANCED,
+    CALM,
     DEFAULT_INTENSITY,
+    INTENSITY_BALANCED,
     INTENSITY_CALM,
-    INTENSITY_MEASURED,
     INTENSITY_WILD,
     SHOW_SETTING_RANGES,
+    WILD,
 )
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
+from autolux.lib.media_session import MEDIA_SESSION_SOURCE
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
@@ -35,7 +39,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.palettes import BREAKDOWN_SUFFIX, PALETTES
+from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -528,6 +532,25 @@ def _fx_text(snapshot: dict) -> str | None:
     return f'{name} · {special["group"]}'
 
 
+TRACK_TITLE_CHARS = 28
+
+
+def _track_status(snapshot: dict) -> list:
+    track = snapshot.get('track') or {}
+    title = track.get('title')
+    if track.get('source') != MEDIA_SESSION_SOURCE or not title:
+        return []
+    shown = title if len(title) <= TRACK_TITLE_CHARS else title[: TRACK_TITLE_CHARS - 1] + '…'
+    artist = track.get('artist')
+    return [
+        _status_item(
+            'Track',
+            f'{artist} – {shown}' if artist else shown,
+            title=f'{artist} – {title}' if artist else title,
+        )
+    ]
+
+
 def _build_show_status(snapshot: dict, now: float) -> list:
     cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
@@ -546,6 +569,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
         _status_item(
             'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
         ),
+        *_track_status(snapshot),
         _status_item(
             'Autoloop',
             [
@@ -621,9 +645,9 @@ SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
 INTENSITY_LEVELS = (
-    ('calm', INTENSITY_CALM),
-    ('measured', INTENSITY_MEASURED),
-    ('wild', INTENSITY_WILD),
+    (CALM, INTENSITY_CALM),
+    (BALANCED, INTENSITY_BALANCED),
+    (WILD, INTENSITY_WILD),
 )
 PALETTE_SWATCH_SLOTS = ('primary', 'secondary', 'accent', 'cold')
 ACCENT = '#73b6ff'
@@ -816,7 +840,7 @@ def _with_base_palette(snapshot: dict) -> dict:
     # The show reports the section's variant (ice_breakdown); the dropdown and the pin speak base names.
     return {
         **snapshot,
-        'palette': {**palette, 'name': palette['name'].removesuffix(BREAKDOWN_SUFFIX)},
+        'palette': {**palette, 'name': base_palette_name(palette['name'])},
     }
 
 

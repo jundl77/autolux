@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from autolux.lib.engine.effect_definitions import (
+    INTENSITY_BALANCED,
     INTENSITY_CALM,
-    INTENSITY_MEASURED,
     INTENSITY_WILD,
     ShowSettings,
 )
@@ -485,13 +485,13 @@ def test_each_intensity_segment_sends_its_mapped_level(show):
     options = app.layout['control-intensity'].options
     assert [(o['label'], o['value']) for o in options] == [
         ('calm', INTENSITY_CALM),
-        ('measured', INTENSITY_MEASURED),
+        ('balanced', INTENSITY_BALANCED),
         ('wild', INTENSITY_WILD),
     ]
-    state = {'settings': {'intensity': INTENSITY_MEASURED}}
+    state = {'settings': {'intensity': INTENSITY_BALANCED}}
     for word, level in INTENSITY_LEVELS:
         _send_control(app, 'control-intensity.value', level, state)
-        if level != INTENSITY_MEASURED:
+        if level != INTENSITY_BALANCED:
             assert commands.get_nowait() == {'action': 'intensity', 'level': level}, word
     assert commands.empty()
 
@@ -860,7 +860,7 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
     buffer.set_control_state(
         paused=False,
         master_brightness=1.0,
-        settings={'drop_strobe_cooldown_seconds': 30.0, 'intensity': 0.5},
+        settings={'drop_strobe_cooldown_seconds': 60.0, 'intensity': 0.7},
     )
     assert 'FX' not in items(buffer.snapshot())
     assert items(buffer.snapshot())['Strobe'] == 'ready'
@@ -925,3 +925,37 @@ def test_a_clicked_fx_chip_lights_and_a_later_segment_change_refires_it_in_the_b
     ]
     assert cold_lit == refired_lit == lit
     assert idle == [None] * len(chips), 'a segment change with no FX lit sends nothing'
+
+
+@pytest.mark.parametrize('reported', ['techno', 'techno_breakdown', 'techno_drop'])
+def test_every_intent_variant_reads_as_its_base_palette_with_its_swatches(reported):
+    from autolux.lighting.palettes import PALETTES
+    from autolux.simulate.visualizer_app import PALETTE_SWATCH_SLOTS, _build_show_status, _rgb_css
+
+    snapshot = _with_base_palette({'palette': {'name': reported, 'pinned': True}})
+    assert snapshot['palette'] == {'name': 'techno', 'pinned': True}
+    techno = next(palette for palette in PALETTES if palette.name == 'techno')
+    colors = next(
+        item
+        for item in _build_show_status(snapshot, now=0.0)
+        if item.children[0].children == 'Colors'
+    )
+    value = colors.children[1].children
+    assert [p.style['background'] for p in value if getattr(p, 'className', None) == 'dot'] == [
+        _rgb_css(getattr(techno, slot)) for slot in PALETTE_SWATCH_SLOTS
+    ]
+    assert 'techno' in value
+
+
+def test_the_status_line_reads_health_track_autoloop_colors_tempo_render():
+    from autolux.simulate.visualizer_app import MEDIA_SESSION_SOURCE, _build_show_status
+
+    track = {'source': MEDIA_SESSION_SOURCE, 'title': 'Windowlicker', 'artist': 'Aphex Twin'}
+    captions = [
+        [item.children[0].children for item in _build_show_status(snapshot, now=0.0)]
+        for snapshot in ({'track': track, 'special': {'name': 'sparkle', 'group': 'fx'}}, {})
+    ]
+    assert captions == [
+        ['Health', 'Track', 'Autoloop', 'Colors', 'FX', 'Tempo', 'Render'],
+        ['Health', 'Autoloop', 'Colors', 'Tempo', 'Render'],
+    ]

@@ -12,19 +12,23 @@ from autolux.lib.engine.autoloop_policy import (
     AutoloopChoice,
     AutoloopPolicy,
     SelectionContext,
+    look_intent,
     max_energy_for_intensity,
 )
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
+    DROP_STROBE_COOLDOWN_SCALE,
     STANDBY_AUTOLOOP,
     STANDBY_CROSSFADE_SECONDS,
     STROBE_BURST_BEATS,
     STROBE_GATE_INTENSITY,
+    WILD,
     AutoloopMetaTable,
     AutoloopTable,
     LightIntent,
     ShowSettings,
+    intensity_level,
     transition_for,
 )
 from autolux.lib.engine.palette_policy import PalettePolicy, palette_variant
@@ -50,7 +54,9 @@ OPERATOR_FADE_SECONDS = 0.1
 
 
 def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
-    duration = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
+    duration = settings.strobe_max_burst_seconds
+    if intensity_level(settings.intensity) != WILD:
+        duration = min(settings.strobe_burst_seconds, duration)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
     return duration * settings.intensity
@@ -61,7 +67,8 @@ def strobe_rate_hz(settings: ShowSettings, special: Special = DROP_STROBE) -> fl
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
-    return settings.drop_strobe_cooldown_seconds / settings.intensity
+    scale = DROP_STROBE_COOLDOWN_SCALE[intensity_level(settings.intensity)]
+    return settings.drop_strobe_cooldown_seconds * scale
 
 
 def operator_transition(bpm: float | None) -> dict:
@@ -154,16 +161,16 @@ class EffectController:
         return chosen
 
     def _palette_for_current_look(self) -> str | None:
-        intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[0]
+        intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[1].look
         if self._pinned_palette is not None:
             return palette_variant(self._pinned_palette, intent)
         if self._entered is None:
             return None
         return self._palette_policy.variant_for(intent)
 
-    def _palette_for(self, context: SelectionContext) -> str:
+    def _palette_for(self, look: LightIntent) -> str:
         base = self._pinned_palette or self._palette_policy.track_palette
-        return palette_variant(base, context.intent)
+        return palette_variant(base, look)
 
     def _publish_palette(self) -> None:
         if self.event_buffer is not None:
@@ -191,8 +198,8 @@ class EffectController:
         context = context or SelectionContext(intent)
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
-        transition = {'kind': 'cut'} if cut else transition_for(intent)
-        palette = self._palette_for(context)
+        transition = {'kind': 'cut'} if cut else transition_for(choice.look)
+        palette = self._palette_for(choice.look)
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
         ):
@@ -210,16 +217,22 @@ class EffectController:
             self._restore_special()
         return True
 
-    def cap_energy(self, context: SelectionContext, bpm: float | None) -> AutoloopChoice | None:
-        """Swap the running loop for a calmer one; a raised cap waits for the next entry."""
+    def apply_intensity(
+        self, context: SelectionContext, bpm: float | None
+    ) -> AutoloopChoice | None:
+        """Re-map the running look to the new level's bank, or swap it for a calmer loop.
+
+        Entering or leaving calm moves a drop or build to its level's bank at once; within
+        one bank a raised cap waits for the next entry.
+        """
         if self._entered is None or self._entered[0] != context.intent:
             return None
         current = self._entered[1]
         if self.lighting_client.selected_autoloop != (current.bank, current.autoloop):
-            return None  # Standby or another look is showing; the next entry obeys the cap.
+            return None  # Standby or another look is showing; the next entry obeys the level.
         intensity = self._settings().intensity
-        max_energy = max_energy_for_intensity(intensity)
-        if current.meta.energy <= max_energy:
+        remapped = look_intent(context.intent, intensity) != current.look
+        if not remapped and current.meta.energy <= max_energy_for_intensity(intensity):
             return None
         try:
             choice = self._policy.choose(
@@ -227,16 +240,20 @@ class EffectController:
             )
         except ValueError:
             return None
-        if choice.meta.energy >= current.meta.energy:
+        if not remapped and choice.meta.energy >= current.meta.energy:
             return None
-        choice = dataclasses.replace(choice, reason=f'intensity cap; {choice.reason}')
+        cause = f'intensity {intensity_level(intensity)}' if remapped else 'intensity cap'
+        choice = dataclasses.replace(choice, reason=f'{cause}; {choice.reason}')
+        palette = self._palette_for(choice.look) if remapped else None
         self.lighting_client.select_autoloop(
-            choice.bank, choice.autoloop, transition=operator_transition(bpm)
+            choice.bank, choice.autoloop, palette=palette, transition=operator_transition(bpm)
         )
+        if palette is not None:
+            self._publish_palette()
         # Not recorded: an operator swap must not spend the loop's turn in the rotation.
         self._entered = context.intent, choice
         self._announce(
-            '[lighting] intensity cap |', context.intent, choice, self.lighting_client.palette
+            f'[lighting] {cause} |', context.intent, choice, self.lighting_client.palette
         )
         return choice
 

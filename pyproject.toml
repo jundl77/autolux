@@ -55,6 +55,11 @@ visualizer = [
     "dash>=2.14",
     "sounddevice",
 ]
+media = [
+    "winrt-runtime; sys_platform == 'win32'",
+    "winrt-Windows.Foundation; sys_platform == 'win32'",
+    "winrt-Windows.Media.Control; sys_platform == 'win32'",
+]
 # Training the acoustic model only -- the show imports nn.decoder, so training/nn/
 # is not offline-only. torch and onnxruntime are base deps and are not repeated here.
 training = [

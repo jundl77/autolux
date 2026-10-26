@@ -19,6 +19,14 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
 )
 from autolux.lib.engine.static_mode import StaticRig
+from autolux.lib.media_session import (
+    MEDIA_SESSION_SOURCE,
+    MediaEvent,
+    MediaSessionListener,
+    Playback,
+    TrackChanged,
+    TrackSource,
+)
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
@@ -258,6 +266,8 @@ class AutoluxController:
                 '(beats and silence still run)'
             )
 
+        self.track_source = TrackSource()
+        self.media_session = MediaSessionListener(self._on_media_event)
         self.control = ShowControl(show_config_path, self.event_buffer)
         self.effect_controller: EffectController = EffectController(
             self.lighting_client,
@@ -280,6 +290,7 @@ class AutoluxController:
             settings=lambda: self.control.settings,
             silence_monitor=self._monitor.silence,
             static_rig=static_rig,
+            media_session_live=lambda: self.track_source.media_session_live,
         )
         self.control.publish(self.light_engine)
 
@@ -290,11 +301,37 @@ class AutoluxController:
             note_clicks=debug_mode,
             watchdog=self.drift_watchdog,
             settings=lambda: self.control.settings,
+            zeros_mark_tracks=lambda: not self.track_source.media_session_live,
         )
         self.light_engine.set_analyser(self.music_analyser)
 
     def _play_monitored(self, audio) -> None:
         self.audio_client.play(audio)
+
+    def _on_media_event(self, event: MediaEvent) -> None:
+        self.track_source.note(event)
+        self._publish_track()
+        if isinstance(event, TrackChanged):
+            self.light_engine.on_media_track(event)
+        elif isinstance(event, Playback):
+            if event.status == 'playing':
+                self.music_analyser.leave_standby()
+            else:
+                self.music_analyser.enter_standby(f'media session {event.status}')
+
+    def _publish_track(self) -> None:
+        if self.event_buffer is None:
+            return
+        source = self.track_source.name
+        track = self.track_source.track if source == MEDIA_SESSION_SOURCE else None
+        self.event_buffer.set_track(
+            {
+                'title': None if track is None else track.title,
+                'artist': None if track is None else track.artist,
+                'album': None if track is None else track.album,
+                'source': source,
+            }
+        )
 
     def list_devices(self):
         self.audio_client.list_devices()
@@ -327,6 +364,7 @@ class AutoluxController:
         self.control.start(self.light_engine)
 
         self._monitor.arm()
+        self.media_session.start(asyncio.get_running_loop())
         drain = asyncio.create_task(self._drain_operator_commands())
         try:
             await self._play(drain)
@@ -372,6 +410,7 @@ class AutoluxController:
         self.is_running = False
         for what, close in (
             ('show settings', self.control.save_settings),
+            ('media session', self.media_session.stop),
             ('visualizer', None if self._ui is None else self._ui.stop),
             ('audio', self.audio_client.close),
             ('section chain', None if self.section is None else self.section.stop),
@@ -395,6 +434,7 @@ class AutoluxController:
         await self.light_engine.on_100ms_callback()
 
     async def _do_1s_callback(self):
+        self._publish_track()
         await self.light_engine.on_1sec_callback()
 
     async def _do_10s_callback(self):

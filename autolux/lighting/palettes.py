@@ -225,6 +225,17 @@ def palette_table() -> tuple[Palette, ...]:
     )
 
 
+VARIANT_BASES: dict[str, str] = {
+    variant.name: palette.name
+    for palette, breakdown, drop in zip(PALETTES, BREAKDOWN_PALETTES, DROP_PALETTES, strict=True)
+    for variant in (palette, breakdown, drop)
+}
+
+
+def base_palette_name(name: str) -> str:
+    return VARIANT_BASES.get(name, name)
+
+
 def palette_records() -> list[dict]:
     return [
         {'name': palette.name}

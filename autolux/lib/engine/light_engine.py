@@ -26,7 +26,9 @@ from autolux.lib.engine.effect_definitions import (
     QUIET_RMS,
     LightIntent,
     ShowSettings,
+    intensity_level,
     intent_for_class,
+    live_crossfade_beats,
 )
 from autolux.lib.engine.event_buffer import (
     SILENCE_TRIGGER,
@@ -36,6 +38,7 @@ from autolux.lib.engine.event_buffer import (
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
 from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat, TrackMoodMeter
+from autolux.lib.media_session import TrackChanged
 from autolux.lighting.palettes import Mood
 
 if TYPE_CHECKING:
@@ -76,8 +79,10 @@ class LightEngine(IMusicAnalyserHandler):
         settings: Callable[[], ShowSettings] = ShowSettings,
         silence_monitor: Callable[[], None] | None = None,
         static_rig: StaticRig = StaticRig(),
+        media_session_live: Callable[[], bool] = lambda: False,
     ):
         self.lighting_client = lighting_client
+        self._media_session_live = media_session_live
         self._silence_monitor = silence_monitor
         self._settings = settings
         self.effect_controller: EffectController = effect_controller
@@ -117,6 +122,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._showing_standby = False
         self._master_level = 1.0
         self._sent_brightness = 1.0
+        self._sent_crossfade_beats: float | None = None
         self._room_levels: deque[float] = deque(maxlen=LOUDNESS_TREND_BEATS)
         self._entered_intent: LightIntent | None = None
         self._entered_label: str | None = None
@@ -243,25 +249,33 @@ class LightEngine(IMusicAnalyserHandler):
     def send_renderer_settings(self) -> None:
         settings = self._settings()
         self.lighting_client.set_paused(self._paused)
-        self.lighting_client.set_default_crossfade_beats(settings.crossfade_beats)
+        self._send_crossfade()
         self.lighting_client.set_strobe_limits(
             settings.strobe_max_rate_hz, settings.strobe_max_burst_seconds
         )
         self.send_intensity()
 
+    def _send_crossfade(self) -> None:
+        self._sent_crossfade_beats = live_crossfade_beats(self._settings())
+        self.lighting_client.set_default_crossfade_beats(self._sent_crossfade_beats)
+
     def send_intensity(self) -> None:
         level = self._settings().intensity
-        LOGGER.info('[engine] intensity %.2f sent to Starfire', level)
+        LOGGER.info('[engine] intensity %.2f (%s) sent to Starfire', level, intensity_level(level))
         self.lighting_client.set_intensity(level)
 
     def intensity_changed(self) -> None:
         self.send_intensity()
+        # The level scales the crossfade; only a level change moves it.
+        if live_crossfade_beats(self._settings()) != self._sent_crossfade_beats:
+            self._send_crossfade()
+            LOGGER.info('[engine] crossfade %g beats', self._sent_crossfade_beats)
         if self._holding() or self._showing_standby or self._entered_intent is None:
             return
         context = self._selection_context(
             self._entered_intent, self._entered_label, self._clock.monotonic()
         )
-        self.effect_controller.cap_energy(
+        self.effect_controller.apply_intensity(
             dataclasses.replace(context, new_track=False), self._published_bpm.get('last')
         )
 
@@ -393,6 +407,24 @@ class LightEngine(IMusicAnalyserHandler):
             self.command_queue.schedule('track_cue', cue)
         elif not self._resync_near(detected_at):
             self._after_silence = True
+
+    def on_media_track(self, track: TrackChanged) -> None:
+        def cue():
+            LOGGER.info(
+                f'[engine] media session: "{track.artist} – {track.title}" — '
+                'the next look starts a track'
+            )
+            self._after_silence = True
+
+        if self.command_queue:
+
+            async def command():
+                cue()
+
+            delay_sec = max(0.0, track.at + self.command_queue.delay_sec - self._clock.monotonic())
+            self.command_queue.schedule('track_cue', command, delay_sec=delay_sec)
+        else:
+            cue()
 
     def note_capture_discontinuities(self, total: int | None) -> None:
         if total is None:
@@ -600,7 +632,8 @@ class LightEngine(IMusicAnalyserHandler):
     ) -> SelectionContext:
         previous = self._entered_intent
         new_track = self._after_silence or (
-            intent == LightIntent.ATMOSPHERIC
+            not self._media_session_live()
+            and intent == LightIntent.ATMOSPHERIC
             and label in INTRO_LABELS
             and (previous == LightIntent.DROP or self._entered_label in OUTRO_LABELS)
         )
