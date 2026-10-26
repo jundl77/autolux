@@ -35,6 +35,35 @@
         return null;
     }
 
+    // Mirrors fx_axes: the whole rig can use any axis some group has.
+    function fxAxes(groups, target) {
+        if (target === (config().allFixtures || 'all')) {
+            return [...new Set(Object.values(groups).flat())].sort();
+        }
+        return [...(groups[target] || [])].sort();
+    }
+
+    // Mirrors static_fx_command; a segment trigger re-fires activeSlot.
+    function fxCommand(trigger, target, energy, speed, pulse, axes, activeSlot) {
+        if (trigger === 'static-fx-clear') {
+            return {action: 'static', kind: 'special_clear'};
+        }
+        const slot = trigger.startsWith('static-fx-') && !trigger.match(/-(energy|speed|pulse)$/)
+            ? trigger.slice('static-fx-'.length) : activeSlot;
+        if (!slot) {
+            return null;
+        }
+        return {
+            action: 'static',
+            kind: 'special',
+            group: target,
+            colour_slot: slot,
+            energy: energy,
+            speed: axes.includes('speed') ? speed : 0.0,
+            pulse_beats: pulse && axes.includes('pulse') ? pulse : null,
+        };
+    }
+
     const build = {
         toggle: (paused) => ({action: paused ? 'play' : 'pause'}),
         next: () => ({action: 'next_autoloop'}),
@@ -43,6 +72,7 @@
         intensity: (level) => ({action: 'intensity', level: level}),
         mode: (mode) => ({action: 'mode', mode: mode}),
         static: staticCommand,
+        fx: fxCommand,
     };
 
     function post(url, command) {
@@ -152,5 +182,5 @@
         return shown;
     }
 
-    window.autoluxControl = {build, send, dispatch, sendLatest, hold, view};
+    window.autoluxControl = {build, send, dispatch, sendLatest, hold, view, fxAxes};
 })();

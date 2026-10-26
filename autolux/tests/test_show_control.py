@@ -13,6 +13,7 @@ from autolux.lib.engine.effect_definitions import (
     INTENSITY_WILD,
     ShowSettings,
 )
+from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer
@@ -756,3 +757,169 @@ def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_
             part.children for part in value if getattr(part, 'className', '') == 'status-tag'
         ] == tag
         assert not [part for part in value if 'dot-auto' in (getattr(part, 'className', '') or '')]
+
+
+FX_STATE = {
+    **STATIC_STATE,
+    'special_groups': {'fx': ['colour', 'pulse', 'speed'], 'wash': ['colour'], 'par': []},
+}
+FX_SEGMENTS = {'static-fx-energy': 0.9, 'static-fx-speed': 0.2, 'static-fx-pulse': 1}
+# (trigger, static target, control-state, the payload the show must receive)
+FX_CASES = [
+    (
+        'static-fx-cold',
+        'fx',
+        FX_STATE,
+        {'group': 'fx', 'colour_slot': 'cold', 'energy': 0.9, 'speed': 0.2, 'pulse_beats': 1},
+    ),
+    (
+        'static-fx-primary',
+        'wash',
+        FX_STATE,
+        {
+            'group': 'wash',
+            'colour_slot': 'primary',
+            'energy': 0.9,
+            'speed': 0.0,
+            'pulse_beats': None,
+        },
+    ),
+    (
+        'static-fx-speed',
+        'all',
+        {**FX_STATE, 'static': {**FX_STATE['static'], 'special': {'colour_slot': 'accent'}}},
+        {'group': 'all', 'colour_slot': 'accent', 'energy': 0.9, 'speed': 0.2, 'pulse_beats': 1},
+    ),
+]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_static_fx_chips_send_the_special_dict_from_python_and_the_browser_alike(static_show):
+    from autolux.simulate.visualizer_app import fx_axes
+
+    source = _Recorder()
+    app = build_app(source, direct_control=False)
+    static_output = next(k for k in app.callback_map if k.startswith('..static-status.children'))
+    for trigger, target, state, _ in FX_CASES:
+        values = {**FX_SEGMENTS, 'control-state': state, 'static-target': target}
+        kind = 'value' if trigger == 'static-fx-speed' else 'n_clicks'
+        _run_callback(app, static_output, values, f'{trigger}.{kind}')
+    _run_callback(app, static_output, {'control-state': FX_STATE}, 'static-fx-clear.n_clicks')
+    expected = [{'action': 'static', 'kind': 'special', **payload} for *_, payload in FX_CASES]
+    expected.append({'action': 'static', 'kind': 'special_clear'})
+    assert source.commands == expected
+
+    calls = [
+        f'control.build.fx({json.dumps(trigger)}, {json.dumps(target)}, 0.9, 0.2, 1, '
+        f'{json.dumps(fx_axes(state["special_groups"], target))}, '
+        f'{json.dumps((state["static"].get("special") or {}).get("colour_slot"))})'
+        for trigger, target, state, _ in FX_CASES
+    ]
+    calls.append("control.build.fx('static-fx-clear', 'all', 0.6, 0.5, 0, [], null)")
+    assert _run_control_js(f'console.log(JSON.stringify([{", ".join(calls)}]));') == expected
+
+    poller, commands = static_show
+    for command in expected:
+        assert poller.control(command) == {'accepted': 'static'}
+        assert commands.get_nowait() == command
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_fx_row_is_disabled_with_a_note_for_a_target_that_cannot_render_one():
+    from autolux.simulate.visualizer_app import FX_GATE_JS
+
+    gates = _run_control_js(
+        f'const gate = {FX_GATE_JS};\n'
+        f'const state = {json.dumps(FX_STATE)};\n'
+        "console.log(JSON.stringify([gate('fx', state), gate('wash', state), gate('par', state),"
+        " gate('all', state), gate('all', {special_groups: {}})]));"
+    )
+    assert gates == [
+        [False, False, False, ''],
+        [False, True, True, ''],
+        [True, True, True, 'par cannot render FX'],
+        [False, False, False, ''],
+        [True, True, True, 'No group cannot render FX'],
+    ]
+
+
+def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
+    from autolux.simulate.visualizer_app import _build_show_status
+
+    def items(snapshot):
+        return {
+            item.children[0].children: item.children[1].children
+            for item in _build_show_status(snapshot, now=0.0)
+        }
+
+    clock = VirtualClock()
+    buffer = EventBuffer(clock=clock)
+    buffer.start()
+    buffer.set_control_state(
+        paused=False,
+        master_brightness=1.0,
+        settings={'drop_strobe_cooldown_seconds': 30.0, 'intensity': 0.5},
+    )
+    assert 'FX' not in items(buffer.snapshot())
+    assert items(buffer.snapshot())['Strobe'] == 'ready'
+    buffer.set_special('cold_spin', 'fx')
+    buffer.mark_intense()
+    clock.advance(19.0)
+    shown = items(buffer.snapshot())
+    assert shown['FX'] == 'Cold spin · fx'
+    assert shown['Strobe'] == 'in 41 s'
+    labels = [item.children[0].children for item in _build_show_status(buffer.snapshot(), 0.0)]
+    assert labels.index('FX') == labels.index('Colors') + 1
+    static = {'static': {'special': {'group': 'wash', 'colour_slot': 'cold'}}}
+    assert items(static)['FX'] == 'Static · wash'
+
+
+def test_the_config_rig_area_lists_each_groups_fx_capabilities():
+    from autolux.simulate.visualizer_app import special_groups_view
+
+    line = special_groups_view({'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']})
+    assert [getattr(part, 'children', part) for part in line] == [
+        'FX',
+        '  ',
+        'fx',
+        ' ',
+        'colour · pulse · speed',
+        '  ',
+        'wash',
+        ' ',
+        'colour',
+    ]
+    assert special_groups_view({}) == ['FX: Starfire reported no groups']
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_a_clicked_fx_chip_lights_and_a_later_segment_change_refires_it_in_the_browser():
+    from autolux.simulate.visualizer_app import FX_DIRECT_JS, FX_SLOT_IDS
+
+    chips = list(FX_SLOT_IDS)
+    blank = [''] * len(chips)
+    lit = ['active' if chip == 'static-fx-cold' else '' for chip in chips]
+    clicks = [None] * (len(chips) + 1)
+    sent, cold_lit, refired_lit, idle = _run_control_js(
+        'const sent = [];\n'
+        'control.dispatch = (command) => { sent.push(command); return Promise.resolve({}); };\n'
+        'window.dash_clientside = {no_update: null, set_props: () => {},'
+        ' callback_context: {triggered: []}};\n'
+        f'const fx = {FX_DIRECT_JS};\n'
+        f'const state = {json.dumps(FX_STATE)};\n'
+        'const run = (trigger, segments, classes) => {\n'
+        '  window.dash_clientside.callback_context.triggered = [{prop_id: trigger}];\n'
+        f'  return fx(...{json.dumps(clicks)}, "static", ...segments, "fx", ...classes, state);\n'
+        '};\n'
+        f'const a = run("static-fx-cold.n_clicks", [0.6, 0.5, 0], {json.dumps(blank)});\n'
+        f'const b = run("static-fx-energy.value", [0.9, 0.5, 2], {json.dumps(lit)});\n'
+        f'const c = run("static-fx-speed.value", [0.9, 0.9, 2], {json.dumps(blank)});\n'
+        'console.log(JSON.stringify([sent, a, b, c]));'
+    )
+    special = {'action': 'static', 'kind': 'special', 'group': 'fx', 'colour_slot': 'cold'}
+    assert sent == [
+        {**special, 'energy': 0.6, 'speed': 0.5, 'pulse_beats': None},
+        {**special, 'energy': 0.9, 'speed': 0.5, 'pulse_beats': 2},
+    ]
+    assert cold_lit == refired_lit == lit
+    assert idle == [None] * len(chips), 'a segment change with no FX lit sends nothing'

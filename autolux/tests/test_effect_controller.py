@@ -556,6 +556,19 @@ async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups(
     assert buffer.snapshot()['special'] is None
 
 
+async def test_an_intense_special_starts_the_strobe_cooldown_the_dashboard_counts_down():
+    clock = VirtualClock()
+    buffer = EventBuffer(clock=clock)
+    buffer.start()
+    settings = ShowSettings(intensity=1.0, drop_strobe_cooldown_seconds=60)
+    buffer.set_control_state(paused=False, master_brightness=1.0, settings=settings.to_dict())
+    controller, _, _ = with_specials([SPIN], settings=settings, event_buffer=buffer)
+    assert buffer.snapshot()['strobe_cooldown_seconds'] == 0.0
+    await controller.change_effect(LightIntent.DROP)
+    clock.advance(19.0)
+    assert buffer.snapshot()['strobe_cooldown_seconds'] == pytest.approx(41.0)
+
+
 async def test_a_new_drop_replaces_the_drop_special_under_the_same_id():
     calm = Special('glow', (LightIntent.DROP,), 'fx', colour_slot='cold', energy=0.3)
     controller, lighting, _ = with_specials([calm], autoloops=ROTATION, autoloop_meta=ROTATION_META)

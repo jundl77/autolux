@@ -264,6 +264,7 @@ def build_fixture_panel(app, store):
                                 ],
                                 className='patch-heading',
                             ),
+                            html.P(id='special-groups', className='patch-muted'),
                             html.Div(
                                 [
                                     html.Div(id='mvr-plan'),

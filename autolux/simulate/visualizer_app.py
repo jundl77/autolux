@@ -519,6 +519,15 @@ def _status_item(caption: str, value, **props):
     )
 
 
+def _fx_text(snapshot: dict) -> str | None:
+    special = snapshot.get('special') or ((snapshot.get('static') or {}).get('special'))
+    if not special:
+        return None
+    # A static special is the operator's own and has no catalogue name.
+    name = special.get('name', 'static').replace('_', ' ').capitalize()
+    return f'{name} · {special["group"]}'
+
+
 def _build_show_status(snapshot: dict, now: float) -> list:
     cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
@@ -559,11 +568,9 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             ],
         ),
     ]
-    special = snapshot.get('special')
-    if special:
-        items.append(
-            _status_item('Fx', special.get('name', '—') if isinstance(special, dict) else special)
-        )
+    fx = _fx_text(snapshot)
+    if fx:
+        items.append(_status_item('FX', fx, id='status-fx'))
     items += [
         _status_item('Tempo', f'{bpm:.0f} BPM' if bpm else '— BPM'),
         _status_item('Render', f'{fps:.0f} fps' if finite(fps) else '— fps'),
@@ -984,6 +991,13 @@ STATIC_PRESETS = {
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
 STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
+FX_SLOT_IDS = {f'static-fx-{slot}': slot for slot in PALETTE_SWATCH_SLOTS}
+FX_CLEAR_ID = 'static-fx-clear'
+FX_ENERGY_LEVELS = (('low', 0.3), ('mid', 0.6), ('high', 0.9))
+FX_SPEED_LEVELS = (('slow', 0.2), ('mid', 0.5), ('fast', 0.9))
+# 0 stands for no pulse: a segmented control cannot hold None.
+FX_PULSE_LEVELS = (('off', 0), ('1 beat', 1), ('2 beats', 2))
+FX_SEGMENT_IDS = ('static-fx-energy', 'static-fx-speed', 'static-fx-pulse')
 HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
 STATIC_TAB_STYLE = {
     'backgroundColor': 'transparent',
@@ -1032,6 +1046,98 @@ def static_control_command(trigger, target, colour) -> dict | None:
     return None
 
 
+def fx_axes(groups: dict, target: str) -> list:
+    if target == ALL_FIXTURES:
+        return sorted({axis for axes in groups.values() for axis in axes})
+    return sorted(groups.get(target) or [])
+
+
+def static_fx_command(trigger, target, energy, speed, pulse, axes, active_slot=None):
+    """The FX payload; control.js build.fx mirrors it. A segment change re-fires the active slot."""
+    if trigger == FX_CLEAR_ID:
+        return {'action': 'static', 'kind': 'special_clear'}
+    slot = FX_SLOT_IDS.get(trigger) or (active_slot if trigger in FX_SEGMENT_IDS else None)
+    if slot is None:
+        return None
+    # A disabled segment still holds a value; the group could not render that axis.
+    return {
+        'action': 'static',
+        'kind': 'special',
+        'group': target,
+        'colour_slot': slot,
+        'energy': energy,
+        'speed': speed if 'speed' in axes else 0.0,
+        'pulse_beats': pulse if pulse and 'pulse' in axes else None,
+    }
+
+
+def _fx_segment(segment_id: str, levels: tuple, value):
+    return html.Fieldset(
+        dcc.RadioItems(
+            id=segment_id,
+            options=[{'label': word, 'value': level} for word, level in levels],
+            value=value,
+            inline=True,
+            className='segmented',
+        ),
+        id=f'{segment_id}-set',
+    )
+
+
+def special_groups_view(groups: dict) -> list:
+    if not groups:
+        return ['FX: Starfire reported no groups']
+    return [
+        html.Span('FX', className='control-label'),
+        *[
+            part
+            for name, axes in sorted(groups.items())
+            for part in (
+                '  ',
+                name,
+                ' ',
+                html.Span(' · '.join(axes) or 'none', className='status-tag'),
+            )
+        ],
+    ]
+
+
+def _build_static_fx():
+    return html.Div(
+        [
+            html.Fieldset(
+                [
+                    html.Div(
+                        [
+                            html.Span('FX', className='control-label'),
+                            *[
+                                html.Button(slot.capitalize(), id=chip)
+                                for chip, slot in FX_SLOT_IDS.items()
+                            ],
+                            html.Button('Clear FX', id=FX_CLEAR_ID),
+                        ],
+                        className='control-row',
+                    ),
+                    html.Div(
+                        [
+                            html.Span('Energy', className='control-label'),
+                            _fx_segment('static-fx-energy', FX_ENERGY_LEVELS, 0.6),
+                            html.Span('Speed', className='control-label'),
+                            _fx_segment('static-fx-speed', FX_SPEED_LEVELS, 0.5),
+                            html.Span('Pulse', className='control-label'),
+                            _fx_segment('static-fx-pulse', FX_PULSE_LEVELS, 0),
+                        ],
+                        className='control-row',
+                    ),
+                ],
+                id='static-fx-set',
+            ),
+            html.Span(id='static-fx-note', className='control-note'),
+        ],
+        id='static-fx',
+    )
+
+
 def _build_static_panel():
     return html.Section(
         [
@@ -1073,6 +1179,7 @@ def _build_static_panel():
                 ],
                 className='control-row',
             ),
+            _build_static_fx(),
             html.P(id='static-status', role='status', className='control-status'),
         ],
         id='static-control',
@@ -1186,6 +1293,73 @@ def _register_direct_static_controls(app) -> None:
     )
 
 
+# Every special drives colour, so a target without it can render none.
+FX_GATE_JS = (
+    """function(target, state) {
+    const groups = (state && state.special_groups) || {};
+    const axes = window.autoluxControl.fxAxes(groups, target);
+    if (!axes.includes('colour')) {
+        const name = target === """
+    + json.dumps(ALL_FIXTURES)
+    + """ ? 'No group' : target;
+        return [true, true, true, name + ' cannot render FX'];
+    }
+    return [false, !axes.includes('speed'), !axes.includes('pulse'), ''];
+}"""
+)
+
+
+FX_DIRECT_JS = (
+    """function(...args) {
+        const control = window.autoluxControl;
+        const chips = """
+    + json.dumps(list(FX_SLOT_IDS))
+    + """;
+        const n = chips.length;
+        const [energy, speed, pulse, target] = args.slice(n + 2, n + 6);
+        const classes = args.slice(n + 6, 2 * n + 6);
+        const state = control.view(args[2 * n + 6]) || {};
+        const trigger = ((window.dash_clientside.callback_context.triggered || [])[0] || {})
+            .prop_id.split('.')[0];
+        if (trigger === 'control-mode') {
+            // Leaving Static releases the special in the show.
+            return chips.map(() => '');
+        }
+        const active = chips.find((id, i) => classes[i] === 'active');
+        if (!chips.includes(trigger) && trigger !== """
+    + json.dumps(FX_CLEAR_ID)
+    + """ && !active) {
+            return classes.map(() => window.dash_clientside.no_update);
+        }
+        const axes = control.fxAxes(state.special_groups || {}, target);
+        const slot = active ? active.slice('static-fx-'.length) : null;
+        const command = control.build.fx(trigger, target, energy, speed, pulse, axes, slot);
+        control.dispatch(command, 'static-status').then((reply) => {
+            if (reply && reply.error) {
+                chips.forEach((id, i) => window.dash_clientside.set_props(
+                    id, {className: classes[i] || ''}));
+            }
+        });
+        const lit = command.kind === 'special' ? 'static-fx-' + command.colour_slot : null;
+        return chips.map((id) => id === lit ? 'active' : '');
+    }"""
+)
+
+
+def _register_direct_fx_controls(app) -> None:
+    app.clientside_callback(
+        FX_DIRECT_JS,
+        *[Output(chip, 'className') for chip in FX_SLOT_IDS],
+        *[Input(chip, 'n_clicks') for chip in (*FX_SLOT_IDS, FX_CLEAR_ID)],
+        Input('control-mode', 'value'),
+        *[Input(segment, 'value') for segment in FX_SEGMENT_IDS],
+        State('static-target', 'value'),
+        *[State(chip, 'className') for chip in FX_SLOT_IDS],
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+
+
 def _register_static_callbacks(app, snapshot_source, expectations, can_control, direct) -> None:
     app.clientside_callback(
         '''function(mode) {
@@ -1208,6 +1382,15 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         Output('static-blacklight', 'disabled'),
         Input('control-state', 'data'),
     )
+    app.clientside_callback(
+        FX_GATE_JS,
+        Output('static-fx-set', 'disabled'),
+        Output('static-fx-speed-set', 'disabled'),
+        Output('static-fx-pulse-set', 'disabled'),
+        Output('static-fx-note', 'children'),
+        Input('static-target', 'value'),
+        Input('control-state', 'data'),
+    )
 
     @app.callback(
         Output('control-mode-synced', 'data'),
@@ -1224,6 +1407,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
 
     if direct:
         _register_direct_static_controls(app)
+        _register_direct_fx_controls(app)
     operator_inputs = (
         []
         if direct
@@ -1231,8 +1415,21 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
             Input('control-mode', 'value'),
             *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
             *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
+            *[Input(name, 'n_clicks') for name in (*FX_SLOT_IDS, FX_CLEAR_ID)],
+            *[Input(name, 'value') for name in FX_SEGMENT_IDS],
         ]
     )
+
+    def _fx_command(trigger, target, state):
+        inputs = dash.ctx.inputs
+        active = ((state.get('static') or {}).get('special') or {}).get('colour_slot')
+        return static_fx_command(
+            trigger,
+            target,
+            *(inputs.get(f'{segment}.value') for segment in FX_SEGMENT_IDS),
+            fx_axes(state.get('special_groups') or {}, target),
+            active,
+        )
 
     @app.callback(
         Output('static-status', 'children'),
@@ -1259,7 +1456,9 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
             if trigger == 'static-colour' and not colour:
                 raise dash.exceptions.PreventUpdate
             try:
-                command = static_control_command(trigger, target, colour)
+                command = static_control_command(trigger, target, colour) or _fx_command(
+                    trigger, target, state
+                )
             except ValueError as error:
                 return f'Rejected: {error}', dash.no_update
             if command is None:
@@ -1897,6 +2096,7 @@ def build_app(
             [
                 html.Div(html.H2('Fixture setup'), className='section-heading'),
                 html.P('Fixture setup is unavailable in this session.', className='subtitle'),
+                html.P(id='special-groups', className='subtitle'),
             ],
             id='config-panel',
             style={'display': 'none'},
@@ -2154,6 +2354,7 @@ def build_app(
                         'palette',
                         'mode',
                         'static',
+                        'special_groups',
                     )
                 }
                 settings = control['settings'] or {}
@@ -2382,6 +2583,12 @@ def build_app(
 
     _register_settings_drawer(app)
     _register_static_callbacks(app, snapshot_source, expectations, can_control, direct)
+
+    @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))
+    def show_special_groups(selected):
+        if selected != 'config':
+            raise dash.exceptions.PreventUpdate
+        return special_groups_view(snapshot_source.snapshot().get('special_groups') or {})
 
     app.clientside_callback(
         ANIMATION_JS,

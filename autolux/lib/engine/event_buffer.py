@@ -48,6 +48,7 @@ class EventBuffer:
         self._palette: dict | None = None
         self._special: dict | None = None
         self._special_groups: dict[str, list[str]] = {}
+        self._intense_at: float | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -198,6 +199,23 @@ class EventBuffer:
         with self._lock:
             self._special_groups = copy.deepcopy(groups)
 
+    def mark_intense(self) -> None:
+        with self._lock:
+            self._intense_at = self._now()
+
+    def _strobe_cooldown_seconds(self, now: float) -> float | None:
+        # drop_strobe_cooldown_seconds on the live settings, so a new intensity shows at once.
+        settings = self._control_state['settings'] or {}
+        cooldown, intensity = (
+            settings.get('drop_strobe_cooldown_seconds'),
+            settings.get('intensity'),
+        )
+        if cooldown is None or not intensity:
+            return None
+        if self._intense_at is None:
+            return 0.0
+        return max(0.0, cooldown / intensity - (now - self._intense_at))
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
@@ -276,6 +294,7 @@ class EventBuffer:
                     else dict(self._special)
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
+                'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

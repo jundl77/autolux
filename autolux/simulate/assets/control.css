@@ -122,6 +122,13 @@
 .setting-error { grid-column: 1 / -1; color: #ff7b72; font-size: 11px; padding-bottom: 8px; }
 .setting-error:empty { display: none; }
 
+.control-note { color: var(--muted); font-size: 11px; }
+.control-note:empty { display: none; }
+#static-fx { display: grid; gap: 8px; }
+#static-fx-set { display: grid; gap: 8px; }
+/* The row's own dimming already covers its segments. */
+#static-fx-set:disabled fieldset { opacity: 1; }
+
 .control-status { margin: 0; color: #ff7b72; font-size: 14px; }
 .control-status:empty { display: none; }
 
