@@ -1,4 +1,7 @@
 -- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- energy: 3
+-- family: cold
+-- movement: sweep
 -- wash: cold, steady, rising with the ramp; no pulse, the strip carries the tension.
 -- strip: primary scattered flicker on a grid that densifies by ramp thirds (1, 1/2, 1/4 beat).
 -- movers: cold, mirrored, still, closing toward centre with the ramp.

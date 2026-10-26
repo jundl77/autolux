@@ -1,4 +1,7 @@
 -- 16-beat loop, no beat pulses or strobe.
+-- energy: 1
+-- family: accent
+-- movement: still
 -- wash: sunset, colour swings secondary -> accent and back across the phrase at a low level.
 -- strip: a slow secondary horizon line, drifting from the centre out to the ends and back.
 -- movers: secondary, wide and still. Palette slots: secondary, accent.

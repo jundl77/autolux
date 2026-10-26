@@ -1,4 +1,7 @@
 -- 16-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- energy: 2
+-- family: accent
+-- movement: snap
 -- wash: accent, kick hit on every beat over an RMS-scaled floor.
 -- strip: primary head running along the strip one pixel per 8th note (one lap per bar)
 -- with a fading two-pixel tail, the rolling bassline under the kick.

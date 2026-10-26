@@ -1,4 +1,7 @@
 -- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- energy: 3
+-- family: warm
+-- movement: sweep
 -- Pulse grid densifies with the ramp: the one only, then every beat, then eighth notes.
 -- wash: secondary pulses on that grid over a dim floor.
 -- strip: primary flicker on the same grid, odd and even pixels trading each pulse.

@@ -35,6 +35,7 @@ struct Look {
     autoloop: String,
     /// From the mandatory header line `-- <8|16>-beat loop...`.
     loop_beats: f64,
+    source: String,
 }
 
 impl Look {
@@ -92,9 +93,53 @@ fn looks() -> Vec<Look> {
                 }),
                 bank: entry.bank,
                 autoloop: entry.autoloop,
+                source,
             }
         })
         .collect()
+}
+
+// The selection vocabulary Autolux reads (`autolux/lighting/autoloop_catalogue.py`); a key or value
+// it does not know would make it refuse the library at readiness.
+const META_KEYS: [(&str, &[&str]); 3] = [
+    ("energy", &["1", "2", "3"]),
+    ("family", &["cold", "warm", "accent"]),
+    ("movement", &["still", "sweep", "snap"]),
+];
+
+/// The `-- key: value` block right after the loop-length line, as `[energy, family, movement]`.
+fn metadata(look: &Look) -> Result<[String; 3], String> {
+    let mut values: [Option<String>; 3] = Default::default();
+    let block = look.source.lines().skip(1).map_while(|line| {
+        let (key, value) = line.strip_prefix("-- ")?.split_once(": ")?;
+        // The group lines below (`-- wash: ...`) share the shape, so the block ends at the
+        // first key outside the vocabulary; a misspelt key then reports as missing.
+        let slot = META_KEYS.iter().position(|(name, _)| *name == key)?;
+        Some((slot, key, value))
+    });
+    for (slot, key, value) in block {
+        if !META_KEYS[slot].1.contains(&value) {
+            return Err(format!(
+                "`{key}: {value}` is not one of {:?}",
+                META_KEYS[slot].1
+            ));
+        }
+        if values[slot].replace(value.to_owned()).is_some() {
+            return Err(format!("`{key}` declared twice"));
+        }
+    }
+    let missing: Vec<_> = META_KEYS
+        .iter()
+        .zip(&values)
+        .filter(|(_, value)| value.is_none())
+        .map(|((key, _), _)| *key)
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "missing metadata {missing:?} after the loop-length line"
+        ));
+    }
+    Ok(values.map(Option::unwrap))
 }
 
 fn looks_in(banks: &[&str]) -> Vec<Look> {
@@ -301,6 +346,29 @@ fn every_autoloop_repeats_on_its_declared_loop_length() {
             }
         }
     }
+}
+
+#[test]
+fn every_autoloop_declares_selection_metadata_that_fits_its_bank() {
+    let mut problems = Vec::new();
+    for look in looks() {
+        match metadata(&look) {
+            Ok([energy, ..]) => {
+                let energy: u8 = energy.parse().unwrap();
+                // Quiet sections never get a maximal look; a drop is never calm.
+                let fits = match look.bank.as_str() {
+                    "atmospheric" | "breakdown" => energy <= 2,
+                    "drop" | "buildup" => energy >= 2,
+                    _ => true,
+                };
+                if !fits {
+                    problems.push(format!("{look}: energy {energy} does not fit its bank"));
+                }
+            }
+            Err(error) => problems.push(format!("{look}: {error}")),
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 #[test]

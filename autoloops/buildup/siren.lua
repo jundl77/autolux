@@ -1,4 +1,7 @@
 -- 8-beat loop; time since selection ramps to a plateau over 32 bars, RMS adds the top 15%.
+-- energy: 3
+-- family: warm
+-- movement: sweep
 -- wash: primary, a pulse on every beat whose depth grows with the ramp.
 -- strip: secondary, a dim bed that brightens with the ramp.
 -- movers: cold, mirrored sweep; its period halves by ramp thirds, 8 then 4 then 2 beats.

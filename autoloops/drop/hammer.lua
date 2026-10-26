@@ -1,4 +1,7 @@
 -- 8-beat loop, no strobe (Autolux adds a short one on the drop itself).
+-- energy: 3
+-- family: warm
+-- movement: snap
 -- wash: primary kick hit on every beat over an RMS-scaled floor, plus a softer ghost
 -- hit on the "and" of beat 4 that hammers into the next bar.
 -- strip: primary, mirrors the wash envelope.
