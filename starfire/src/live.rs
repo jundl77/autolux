@@ -15,8 +15,8 @@ use crate::engine::Engine;
 use crate::fixtures::FixtureRig;
 use crate::model::{Command, DEFAULT_FRAME_RATE_HZ, FixtureStates, Transition};
 use crate::protocol::{
-    ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message, read_control,
-    wire, write_event,
+    ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message,
+    read_session_control, wire, write_event,
 };
 use crate::script::AutoloopCatalog;
 
@@ -273,10 +273,11 @@ fn receive_controls(
     sender: mpsc::SyncSender<ClientMessage>,
     queued: Arc<AtomicUsize>,
     failure: SharedFailure,
+    logged_in: Arc<AtomicBool>,
 ) {
     let mut last_command_id = 0;
     loop {
-        match read_control(&mut input) {
+        match read_session_control(&mut input, logged_in.load(Ordering::Acquire)) {
             Ok(Some(control)) => {
                 if let Some(command_id) = control.command_id() {
                     if command_id <= last_command_id {
@@ -324,9 +325,19 @@ pub fn run_live(
     let (control_sender, controls) = mpsc::sync_channel(MAX_QUEUED_CONTROLS);
     let input_queued = Arc::clone(&queued);
     let input_failure = Arc::clone(&failure);
+    let logged_in = Arc::new(AtomicBool::new(false));
+    let input_logged_in = Arc::clone(&logged_in);
     thread::Builder::new()
         .name("starfire-control".into())
-        .spawn(move || receive_controls(input, control_sender, input_queued, input_failure))
+        .spawn(move || {
+            receive_controls(
+                input,
+                control_sender,
+                input_queued,
+                input_failure,
+                input_logged_in,
+            )
+        })
         .context("start control reader")?;
     let (events, event_receiver) = mpsc::sync_channel(MAX_QUEUED_EVENTS);
     let output_failure = Arc::clone(&failure);
@@ -399,6 +410,7 @@ pub fn run_live(
                             Ok(created) => {
                                 metrics.run_id = created.run_id;
                                 session = Some(created);
+                                logged_in.store(true, Ordering::Release);
                                 last_client_heartbeat = Instant::now();
                                 last_server_heartbeat = Instant::now();
                                 report_metrics = true;

@@ -162,7 +162,7 @@ def test_single_autoloop_over_its_cap_is_rejected(login_assets):
 
 def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_assets, monkeypatch):
     rig, autoloops = login_assets
-    monkeypatch.setattr(protocol, 'MAX_LOGIN_BYTES', 64 * 1024)
+    monkeypatch.setitem(protocol.PAYLOAD_LIMITS, wire.LOGIN, 64 * 1024)
     _fill_bank(autoloops, 40, 3 * 1024)
     with pytest.raises(
         ValueError, match=r'LOGIN payload of \d+ bytes exceeds the 65536-byte limit'

@@ -27,8 +27,7 @@ pub fn max_payload_bytes(kind: wire::MessageType) -> usize {
     }
 }
 
-fn check_payload_size(kind: wire::MessageType, length: usize) -> Result<()> {
-    let limit = max_payload_bytes(kind);
+fn check_payload_size(kind: wire::MessageType, length: usize, limit: usize) -> Result<()> {
     ensure!(
         length <= limit,
         "{kind:?} payload of {length} bytes exceeds the {limit}-byte limit"
@@ -59,7 +58,7 @@ macro_rules! messages {
                 let (kind, payload) = match self {
                     $(Self::$variant(value) => (wire::MessageType::$variant, value.encode_to_vec())),+
                 };
-                check_payload_size(kind, payload.len())?;
+                check_payload_size(kind, payload.len(), max_payload_bytes(kind))?;
                 output.write_all(&[u8::try_from(kind as i32)?])?;
                 output.write_all(&(payload.len() as u32).to_be_bytes())?;
                 output.write_all(&payload)?;
@@ -137,6 +136,7 @@ pub fn error_message(error: &anyhow::Error) -> String {
 fn read_frame(
     input: &mut impl Read,
     accepts: impl FnOnce(wire::MessageType) -> bool,
+    logged_in: bool,
 ) -> Result<Option<(wire::MessageType, Vec<u8>)>> {
     let mut header = [0; FRAME_HEADER_BYTES];
     loop {
@@ -153,7 +153,12 @@ fn read_frame(
     let kind = wire::MessageType::try_from(i32::from(header[0])).context("unknown message type")?;
     ensure!(accepts(kind), "message type is invalid in this direction");
     let length = u32::from_be_bytes(header[1..].try_into()?) as usize;
-    check_payload_size(kind, length)?;
+    let limit = if logged_in {
+        MAX_MESSAGE_BYTES
+    } else {
+        max_payload_bytes(kind)
+    };
+    check_payload_size(kind, length, limit)?;
     let mut payload = vec![0; length];
     input
         .read_exact(&mut payload)
@@ -162,7 +167,14 @@ fn read_frame(
 }
 
 pub fn read_control(input: &mut impl Read) -> Result<Option<ClientMessage>> {
-    let Some((kind, payload)) = read_frame(input, ClientMessage::accepts)? else {
+    read_session_control(input, false)
+}
+
+pub fn read_session_control(
+    input: &mut impl Read,
+    logged_in: bool,
+) -> Result<Option<ClientMessage>> {
+    let Some((kind, payload)) = read_frame(input, ClientMessage::accepts, logged_in)? else {
         return Ok(None);
     };
     let command = ClientMessage::decode(kind, &payload)?;
@@ -174,7 +186,7 @@ pub fn read_control(input: &mut impl Read) -> Result<Option<ClientMessage>> {
 }
 
 pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
-    let Some((kind, payload)) = read_frame(input, ServerMessage::accepts)? else {
+    let Some((kind, payload)) = read_frame(input, ServerMessage::accepts, false)? else {
         return Ok(None);
     };
     Ok(Some(ServerMessage::decode(kind, &payload)?))

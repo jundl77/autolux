@@ -34,8 +34,11 @@ MESSAGE_TYPE_BY_CLASS = {
 }
 
 
+PAYLOAD_LIMITS = {wire.LOGIN: MAX_LOGIN_BYTES}
+
+
 def check_payload_size(message_type: int, length: int):
-    limit = MAX_LOGIN_BYTES if message_type == wire.LOGIN else MAX_MESSAGE_BYTES
+    limit = PAYLOAD_LIMITS.get(message_type, MAX_MESSAGE_BYTES)
     if length > limit:
         name = wire.MessageType.Name(message_type)
         raise ValueError(

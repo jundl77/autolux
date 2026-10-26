@@ -137,6 +137,7 @@ def test_invalid_control_cannot_enter_the_pipe(command):
     [
         b'\x00',
         protocol.FRAME_HEADER.pack(wire.METRICS, protocol.MAX_MESSAGE_BYTES + 1),
+        protocol.FRAME_HEADER.pack(200, 0xFFFFFFFF),
         protocol.FRAME_HEADER.pack(wire.METRICS, 2) + b'\x08',
     ],
 )
@@ -165,6 +166,8 @@ def _round_trip(message):
     'message_class,size,accepted',
     [
         (wire.SetParameter, 5 * 1024, False),
+        (wire.UpdateBeat, protocol.MAX_MESSAGE_BYTES - 5, True),
+        (wire.UpdateBeat, protocol.MAX_MESSAGE_BYTES - 4, False),
         (wire.PlayAutoloop, 3 * 1024, True),
         (wire.Login, 1024 * 1024, True),
         (wire.Login, protocol.MAX_LOGIN_BYTES + 100 * 1024, False),
@@ -175,10 +178,8 @@ def test_only_login_may_use_the_large_message_limit(message_class, size, accepte
     if accepted:
         assert _round_trip(message) == message
     else:
-        with pytest.raises(
-            ValueError,
-            match=rf'{wire.MessageType.Name(protocol.MESSAGE_TYPE_BY_CLASS[message_class])} payload of \d+ bytes exceeds',
-        ):
+        name = wire.MessageType.Name(protocol.MESSAGE_TYPE_BY_CLASS[message_class])
+        with pytest.raises(ValueError, match=rf'{name} payload of \d+ bytes exceeds'):
             protocol.encode_command(message)
 
 

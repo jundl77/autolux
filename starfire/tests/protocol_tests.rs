@@ -1,14 +1,14 @@
 use std::io::{Cursor, Read};
 
 use prost::Message;
-use starfire::engine::Engine;
+use starfire::engine::{Engine, MAX_SCRIPT_ERROR_BYTES};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Target, TimedCommand, Transition,
 };
 use starfire::protocol::{
-    ClientMessage as Operation, MAX_LOGIN_BYTES, MAX_MESSAGE_BYTES, ServerMessage, apply_command,
-    read_control, read_event, wire,
+    ClientMessage as Operation, MAX_ERROR_BYTES, MAX_LOGIN_BYTES, MAX_MESSAGE_BYTES, ServerMessage,
+    apply_command, read_control, read_event, read_session_control, wire,
 };
 use starfire::replay::{Replay, render_replay};
 use starfire::script::AutoloopCatalog;
@@ -184,6 +184,72 @@ fn only_login_may_use_the_large_message_limit() {
         error.to_string(),
         format!("SetParameter payload of 5120 bytes exceeds the {MAX_MESSAGE_BYTES}-byte limit")
     );
+}
+
+fn padded_heartbeat(payload_bytes: usize) -> Vec<u8> {
+    let data = payload_bytes - 3;
+    let mut frame = header(wire::MessageType::Heartbeat, payload_bytes);
+    frame.extend([0x7a, (data % 128) as u8 | 0x80, (data / 128) as u8]);
+    frame.extend(vec![b'-'; data]);
+    frame
+}
+
+#[test]
+fn realtime_limit_is_inclusive_at_exactly_4096_bytes() {
+    assert_eq!(
+        read_control(&mut Cursor::new(padded_heartbeat(MAX_MESSAGE_BYTES))).unwrap(),
+        Some(Operation::Heartbeat(wire::Heartbeat {}))
+    );
+    let error =
+        read_control(&mut Cursor::new(padded_heartbeat(MAX_MESSAGE_BYTES + 1))).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Heartbeat payload of 4097 bytes exceeds the 4096-byte limit"
+    );
+}
+
+#[test]
+fn login_after_a_successful_login_gets_only_the_realtime_limit() {
+    let login = header(wire::MessageType::Login, MAX_MESSAGE_BYTES + 1);
+    assert!(
+        read_session_control(&mut Cursor::new(login.clone()), false)
+            .unwrap_err()
+            .to_string()
+            .contains("truncated")
+    );
+    assert_eq!(
+        read_session_control(&mut Cursor::new(login), true)
+            .unwrap_err()
+            .to_string(),
+        "Login payload of 4097 bytes exceeds the 4096-byte limit"
+    );
+}
+
+#[test]
+fn unknown_type_with_a_huge_length_is_rejected_from_the_header() {
+    let error = read_control(&mut Cursor::new([200, 0xff, 0xff, 0xff, 0xff])).unwrap_err();
+    assert_eq!(error.to_string(), "unknown message type");
+}
+
+#[test]
+fn metrics_at_maximum_field_lengths_fit_the_realtime_limit() {
+    let metrics = ServerMessage::Metrics(wire::Metrics {
+        elapsed_seconds: f64::MAX,
+        rendered_frames: u64::MAX,
+        missed_render_deadlines: u64::MAX,
+        queued_commands: u32::MAX,
+        last_render_duration_seconds: f64::MAX,
+        active_bank: "b".repeat(64),
+        active_autoloop: "a".repeat(128),
+        script_error: "s".repeat(MAX_SCRIPT_ERROR_BYTES),
+        runtime_error: "r".repeat(MAX_ERROR_BYTES),
+        last_processed_command_id: u64::MAX,
+        run_id: u64::MAX,
+    });
+    let mut frame = Vec::new();
+    metrics.write(&mut frame).unwrap();
+    assert!(frame.len() - 5 <= MAX_MESSAGE_BYTES);
+    assert_eq!(read_event(&mut Cursor::new(frame)).unwrap(), Some(metrics));
 }
 
 #[test]
