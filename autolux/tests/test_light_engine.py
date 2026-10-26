@@ -20,6 +20,7 @@ from autolux.lib.engine.effect_definitions import (
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
 from autolux.lib.engine.section_decoder import BarDecision, BarObservation
+from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
 
@@ -1799,3 +1800,69 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
         (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
         (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
     ]
+
+
+def palette_commands(lighting):
+    return [
+        (at, command.get('palette', command.get('name')))
+        for at, command in sent(lighting, 'select', 'set_palette')
+    ]
+
+
+async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pins_are_instant(
+    tmp_path,
+):
+    from autolux.lib.main import ShowControl
+
+    light, queue, clock, lighting = engine(events=True)
+    control = ShowControl(tmp_path / 'show.json', light.event_buffer)
+    decided_at = clock.monotonic()
+    await light._commit_intent(LightIntent.ATMOSPHERIC, 0.0, section_label='intro')
+    clock.advance(13.9)
+    await queue.drain()
+    assert sent(lighting, 'select', 'set_palette') == []
+    clock.advance(0.2)
+    await queue.drain()
+    [(selected_at, track_palette)] = palette_commands(lighting)
+    assert selected_at == pytest.approx(decided_at + 14.0, abs=0.2)
+    assert track_palette in PALETTE_NAMES
+    assert light.event_buffer.snapshot()['palette'] == {'name': track_palette, 'pinned': False}
+
+    pinned = next(name for name in PALETTE_NAMES if name != track_palette)
+    pinned_at = clock.monotonic()
+    control.commands.put_nowait({'action': 'palette', 'name': pinned})
+    await control.apply_pending(light)
+    assert palette_commands(lighting)[-1] == (pinned_at, pinned)
+    assert light.event_buffer.snapshot()['palette'] == {'name': pinned, 'pinned': True}
+
+    await light._commit_intent(LightIntent.BREAKDOWN, 0.0, section_label='breakdown')
+    clock.advance(14.1)
+    await queue.drain()
+    breakdown = [command for _, command in sent(lighting, 'select')][-1]
+    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', pinned)
+
+    control.commands.put_nowait({'action': 'palette', 'name': 'auto'})
+    await control.apply_pending(light)
+    assert palette_commands(lighting)[-1] == (clock.monotonic(), f'{track_palette}_breakdown')
+    assert light.event_buffer.snapshot()['palette'] == {
+        'name': f'{track_palette}_breakdown',
+        'pinned': False,
+    }
+
+
+async def test_palette_warmth_is_saved_and_range_checked(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl, load_show_settings
+
+    path = tmp_path / 'show.json'
+    control = ShowControl(path)
+    control.commands.put_nowait(
+        {'action': 'settings', 'settings': ShowSettings(palette_temperature_bias=-1.0)}
+    )
+    light, _, _, _ = engine(queue=False)
+    light._settings = lambda: control.settings
+    await control.apply_pending(light)
+    assert load_show_settings(path).palette_temperature_bias == -1.0
+    assert ShowControl(path).settings.palette_temperature_bias == -1.0
+    with pytest.raises(ValueError, match='palette_temperature_bias must be within -1..1'):
+        ShowSettings(palette_temperature_bias=1.5)

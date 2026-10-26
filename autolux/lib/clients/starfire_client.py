@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 
+from autolux.lighting.palettes import DEFAULT_PALETTE
+
 RMS_LEVEL_FLOOR_DBFS = -48.0
 RMS_LEVEL_CEILING_DBFS = -12.0
 
@@ -31,6 +33,7 @@ class StarfireClient:
     def __init__(self, send_command: Callable[[dict], None]):
         self._send_command = send_command
         self.selected_autoloop: tuple[str, str] | None = None
+        self.palette: str = DEFAULT_PALETTE
 
     def beat(self, beat_index: int, bar_phase: int | None, beats_per_bar: int, bpm: float) -> None:
         self._send_command(
@@ -46,16 +49,29 @@ class StarfireClient:
     def set_normalized_rms_level(self, level: float) -> None:
         self._send_command({'kind': 'set_normalized_rms_level', 'level': level})
 
-    def select_autoloop(self, bank: str, autoloop: str, *, transition: dict | None = None) -> bool:
+    def select_autoloop(
+        self,
+        bank: str,
+        autoloop: str,
+        *,
+        palette: str | None = None,
+        transition: dict | None = None,
+    ) -> bool:
         identity = bank, autoloop
-        if identity == self.selected_autoloop:
+        palette = palette or self.palette
+        if identity == self.selected_autoloop and palette == self.palette:
             return False
-        command = {'kind': 'select', 'bank': bank, 'autoloop': autoloop}
+        command = {'kind': 'select', 'bank': bank, 'autoloop': autoloop, 'palette': palette}
         if transition is not None:
             command['transition'] = transition
         self._send_command(command)
         self.selected_autoloop = identity
+        self.palette = palette
         return True
+
+    def set_palette(self, name: str) -> None:
+        self._send_command({'kind': 'set_palette', 'name': name})
+        self.palette = name
 
     def set_override(self, override: dict) -> None:
         self._send_command({'kind': 'set_override', 'value': override})

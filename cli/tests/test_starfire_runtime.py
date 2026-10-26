@@ -345,7 +345,9 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     runtime = _fake_runtime(tmp_path)
     with runtime:
         child = runtime.process
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
+        runtime.send_command(
+            {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'palette': 'techno'}
+        )
         runtime.send_command({'kind': 'stop'})
         runtime.send_command({'kind': 'heartbeat'})
         deadline = time.monotonic() + 2
@@ -383,7 +385,9 @@ def test_shutdown_discards_a_full_queue_and_closes_the_pipe_normally(tmp_path):
         runtime.send_command({'kind': 'stop'})
         assert blocked.wait(2)
         runtime._outgoing = queue.Queue(maxsize=1)
-        runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
+        runtime.send_command(
+            {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'palette': 'techno'}
+        )
         threading.Timer(0.05, release.set).start()
         started = time.monotonic()
     assert time.monotonic() - started < 1
@@ -623,14 +627,16 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             runtime.send_command(
                 {'kind': 'beat', 'beat_index': 0, 'bar_phase': 0, 'beats_per_bar': 4, 'bpm': 120.0}
             )
-            runtime.send_command({'kind': 'select', 'bank': 'drop', 'autoloop': 'kick'})
+            runtime.send_command(
+                {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'palette': 'techno'}
+            )
             runtime.send_command({'kind': 'set_normalized_rms_level', 'level': 0.8})
             runtime.send_command(
                 wire.SetActiveEffect(
                     effect_id='held_red',
                     fixture='cf805_pixel_1',
                     intensity=0.75,
-                    colour=wire.SetActiveEffect.RgbColor(red=1.0),
+                    colour=wire.RgbColor(red=1.0),
                 )
             )
             deadline = time.monotonic() + 2

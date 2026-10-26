@@ -39,6 +39,7 @@ class EventBuffer:
         self._decoder_state: dict = {}
         self._shed_state: dict = {}
         self._control_state: dict = {'paused': None, 'master_brightness': None, 'settings': None}
+        self._palette: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -152,6 +153,10 @@ class EventBuffer:
                 'settings': dict(settings),
             }
 
+    def set_palette(self, name: str, *, pinned: bool) -> None:
+        with self._lock:
+            self._palette = {'name': name, 'pinned': pinned}
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
@@ -223,6 +228,7 @@ class EventBuffer:
                 'decoder': dict(self._decoder_state),
                 'shed': dict(self._shed_state),
                 **copy.deepcopy(self._control_state),
+                'palette': copy.deepcopy(self._palette),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

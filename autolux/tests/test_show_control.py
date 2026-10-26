@@ -99,3 +99,19 @@ def test_an_unreachable_show_is_reported_instead_of_raising():
     server.stop()
     reply = SnapshotPoller(port=port, timeout=0.5).control({'action': 'pause'})
     assert reply == {'error': 'the show is not answering'}
+
+
+@pytest.mark.parametrize('name', ['ice', 'auto'])
+def test_a_palette_choice_reaches_the_controller_queue(show, name):
+    poller, commands = show
+    reply = poller.control(control_command('control-palette', False, None, (), name))
+    assert reply == {'accepted': 'palette'}
+    assert commands.get_nowait() == {'action': 'palette', 'name': name}
+
+
+@pytest.mark.parametrize('name', ['neon', 'ice_breakdown', None, 3])
+def test_unknown_palettes_are_refused_before_the_controller(show, name):
+    poller, commands = show
+    reply = poller.control({'action': 'palette', 'name': name})
+    assert reply['error'].startswith("palette must be 'auto' or one of techno, house, ice")
+    assert commands.empty()

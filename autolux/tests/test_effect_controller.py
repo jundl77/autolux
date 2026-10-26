@@ -218,6 +218,7 @@ async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting)
     await controller.change_effect(LightIntent.DROP)
     effect = buffer.snapshot()['current_effect']
     assert effect['name'] == 'drop/kick'
+    assert effect['selection'].pop('palette') == recorded_lighting.palette
     assert effect['selection'] == {
         'energy': 3,
         'family': 'warm',

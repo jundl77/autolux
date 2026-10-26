@@ -64,8 +64,12 @@ def snapshot_port(ui_port: int) -> int:
     return ui_port + 1
 
 
+PALETTE_POLICY = 'auto'
+
+
 def parse_control_command(payload) -> dict:
     from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lighting.palettes import PALETTE_NAMES
 
     if not isinstance(payload, dict):
         raise TypeError('a control command must be an object')
@@ -79,6 +83,13 @@ def parse_control_command(payload) -> dict:
         return {'action': action, 'level': float(level)}
     if action == 'settings':
         return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
+    if action == 'palette':
+        name = payload.get('name')
+        if name != PALETTE_POLICY and name not in PALETTE_NAMES:
+            raise ValueError(
+                f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
+            )
+        return {'action': action, 'name': name}
     raise ValueError(f'unknown control action {action!r}')
 
 

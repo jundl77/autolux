@@ -1,5 +1,5 @@
 -- 16-beat loop
-local palette = sf.palette()
+local palette = sf.palette("techno")
 local WASH_LEVEL = 0.12
 local STRIP_LEVEL = 0.04
 local PARK_PAN, PARK_TILT = 0.5, 0.6

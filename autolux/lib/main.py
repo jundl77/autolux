@@ -15,7 +15,7 @@ from autolux.lib.engine.effect_definitions import (
     AutoloopTable,
     ShowSettings,
 )
-from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
 
@@ -80,6 +80,10 @@ class ShowControl:
                 await light_engine.resume()
             elif action == 'master':
                 light_engine.set_master_level(command['level'])
+            elif action == 'palette':
+                light_engine.effect_controller.pin_palette(
+                    None if command['name'] == PALETTE_POLICY else command['name']
+                )
             elif action == 'settings':
                 try:
                     save_show_settings(self.config_path, command['settings'])

@@ -4,6 +4,7 @@ from pathlib import Path
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import load_rig
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
+from autolux.lighting.palettes import palette_table
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
@@ -93,6 +94,19 @@ def _autoloop_definitions(directory):
     return scripts
 
 
+def palette_definitions() -> list[wire.Palette]:
+    return [
+        wire.Palette(
+            name=palette.name,
+            **{
+                slot: wire.RgbColor(red=red, green=green, blue=blue)
+                for slot, (red, green, blue) in palette.slots().items()
+            },
+        )
+        for palette in palette_table()
+    ]
+
+
 def load_login(
     rig: Path,
     autoloops: Path,
@@ -115,6 +129,7 @@ def load_login(
             protocol_minor=wire.PROTOCOL_MINOR,
             rig=rig_definition(Path(rig)),
             autoloops=_autoloop_definitions(autoloops),
+            palettes=palette_definitions(),
             parameters=parameters,
             **({'artnet_destination': artnet} if radius is None else {'radius': radius}),
         )

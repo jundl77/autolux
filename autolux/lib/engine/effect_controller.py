@@ -21,6 +21,8 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
     transition_for,
 )
+from autolux.lib.engine.palette_policy import PalettePolicy
+from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Palette
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -48,6 +50,7 @@ class EffectController:
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
         seed: int = 0,
+        palettes: tuple[Palette, ...] = PALETTES,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
@@ -56,6 +59,42 @@ class EffectController:
         self._last_strobe_started_at: float | None = None
         self._policy = AutoloopPolicy(autoloops, autoloop_meta, random.Random(seed))
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
+        self._palette_policy = PalettePolicy(palettes, random.Random(seed))
+        self._pinned_palette: str | None = None
+        self._publish_palette()
+
+    @property
+    def pinned_palette(self) -> str | None:
+        return self._pinned_palette
+
+    def pin_palette(self, name: str | None) -> None:
+        if name is not None and name not in PALETTE_NAMES:
+            raise ValueError(f'unknown palette {name!r}; choose one of {", ".join(PALETTE_NAMES)}')
+        self._pinned_palette = name
+        palette = name or self._policy_palette_for_current_look()
+        if palette is not None and palette != self.lighting_client.palette:
+            self.lighting_client.set_palette(palette)
+        self._publish_palette()
+        LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
+
+    def _policy_palette_for_current_look(self) -> str | None:
+        if self._entered is None or self._palette_policy.track_palette is None:
+            return None
+        return self._palette_policy.variant_for(self._entered[0])
+
+    def _palette_for(self, context: SelectionContext) -> str:
+        policy_palette = self._palette_policy.palette_for(
+            context.intent,
+            new_track=context.new_track,
+            temperature_bias=self._settings().palette_temperature_bias,
+        )
+        return self._pinned_palette or policy_palette
+
+    def _publish_palette(self) -> None:
+        if self.event_buffer is not None:
+            self.event_buffer.set_palette(
+                self.lighting_client.palette, pinned=self._pinned_palette is not None
+            )
 
     def _entry_choice(self, context: SelectionContext) -> tuple[AutoloopChoice, bool]:
         if (
@@ -78,8 +117,12 @@ class EffectController:
         choice, fresh = self._entry_choice(context)
         bank, autoloop, meta = choice.bank, choice.autoloop, choice.meta
         transition = {'kind': 'cut'} if cut else transition_for(intent)
-        if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
+        palette = self._palette_for(context)
+        if not self.lighting_client.select_autoloop(
+            bank, autoloop, palette=palette, transition=transition
+        ):
             return False
+        self._publish_palette()
         if fresh:
             self._policy.record(context, choice)
             self._entered = intent, choice
@@ -91,14 +134,17 @@ class EffectController:
                     'energy': meta.energy,
                     'family': meta.family,
                     'movement': meta.movement,
+                    'palette': palette,
                     'reason': choice.reason,
                 },
             )
         LOGGER.info(
-            '[lighting] intent=%s | autoloop=%s/%s | energy=%d family=%s movement=%s | reason=%s',
+            '[lighting] intent=%s | autoloop=%s/%s | palette=%s | energy=%d family=%s movement=%s '
+            '| reason=%s',
             intent.name,
             bank,
             autoloop,
+            palette,
             meta.energy,
             meta.family,
             meta.movement,

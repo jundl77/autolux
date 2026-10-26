@@ -20,12 +20,14 @@ from autolux.lib.ui_bridge import (
     DASHBOARD_BIND_ADDRESS,
     DASHBOARD_MDNS_HOSTNAME,
     DEFAULT_DASHBOARD_PORT,
+    PALETTE_POLICY,
     SNAPSHOT_HOST,
     SNAPSHOT_PATH,
     advertise_dashboard_mdns,
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
+from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -504,6 +506,9 @@ def _build_show_overview(snapshot: dict) -> list:
     effect = snapshot.get('current_effect') or {}
     effect_name = effect.get('name', '—')
     autoloop_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
+    palette = snapshot.get('palette') or {}
+    palette_name = palette.get('name') or '—'
+    palette_text = f'{palette_name} (pinned)' if palette.get('pinned') else palette_name
     return [
         _build_stat_card(
             'Health',
@@ -517,6 +522,7 @@ def _build_show_overview(snapshot: dict) -> list:
         ),
         _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
         _build_stat_card('Autoloop', html.Span(autoloop_name, title=effect_name)),
+        _build_stat_card('Palette', html.Span(palette_text, id='palette-name')),
         _build_stat_card('Room position', html.Span(room_text, id='room-clock')),
         _build_stat_card('Source position', html.Span(song_text, id='song-clock')),
         _build_stat_card('Show delay', html.Span(f'{snapshot.get("look_ahead_sec", 0):g} s')),
@@ -531,6 +537,7 @@ SETTING_LABELS = {
     'digital_silence_seconds': 'Standby after silence (s)',
     'strobe_max_rate_hz': 'Max strobe rate (Hz)',
     'strobe_max_burst_seconds': 'Max strobe burst (s)',
+    'palette_temperature_bias': 'Palette warmth (cold −1 … warm +1)',
 }
 STROBE_SETTINGS = (
     'drop_strobe_cooldown_seconds',
@@ -557,9 +564,11 @@ def parse_decimal(name: str, raw) -> float:
     return float(text)
 
 
-def control_command(trigger, paused, level, settings) -> dict | None:
+def control_command(trigger, paused, level, settings, palette=None) -> dict | None:
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
+    if trigger == 'control-palette':
+        return {'action': 'palette', 'name': palette}
     if trigger in ('control-brightness', 'control-brightness-live'):
         return {'action': 'master', 'level': level}
     if trigger in SETTING_IDS:
@@ -607,6 +616,14 @@ def _build_control_card() -> list:
                         html.Div('Playback', className='stat-label control-heading'),
                         html.Button(
                             'Pause', id='control-toggle', className='control-toggle', disabled=True
+                        ),
+                        dcc.Dropdown(
+                            id='control-palette',
+                            options=[{'label': 'Palette: auto', 'value': PALETTE_POLICY}]
+                            + [{'label': name, 'value': name} for name in PALETTE_NAMES],
+                            clearable=False,
+                            searchable=False,
+                            disabled=True,
                         ),
                     ],
                     className='control-group',
@@ -859,6 +876,7 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
                        border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
 #show-control button:disabled { opacity: .4; cursor: default; }
 #show-control .control-toggle { width: 100%; padding: 12px 14px; font-size: 14px; font-weight: 600; }
+#control-palette { margin-top: 10px; font-size: 12px; color: #0b121c; }
 #show-control .control-toggle.playing { background: #1b3324; border-color: #3fb950; color: #aff5b4; }
 #show-control .control-toggle.paused { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
 .control-status { grid-column: 1 / -1; margin: 0; padding: 9px 16px; min-height: 34px;
@@ -1483,7 +1501,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             commands = _build_command_diagnostics(snap)
             if can_control:
                 control = {
-                    key: snap.get(key) for key in ('paused', 'master_brightness', 'settings')
+                    key: snap.get(key)
+                    for key in ('paused', 'master_brightness', 'settings', 'palette')
                 }
                 settings = control['settings'] or {}
                 control['settings_text'] = {
@@ -1589,16 +1608,32 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         prevent_initial_call=True,
     )
 
+    app.clientside_callback(
+        '''function(state) {
+            const palette = state && state.palette;
+            if (!palette) {
+                return [window.dash_clientside.no_update, true];
+            }
+            return [palette.pinned ? palette.name : '''
+        + json.dumps(PALETTE_POLICY)
+        + ''', false];
+        }''',
+        Output('control-palette', 'value'),
+        Output('control-palette', 'disabled'),
+        Input('control-state', 'data'),
+    )
+
     @app.callback(
         Output('control-status', 'children'),
         Input('control-toggle', 'n_clicks'),
+        Input('control-palette', 'value'),
         Input('control-brightness', 'value'),
         Input('control-brightness-live', 'data'),
         *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_control(_toggle, released, live, *settings_and_state):
+    def send_control(_toggle, palette, released, live, *settings_and_state):
         *settings, state = settings_and_state
         state = state or {}
         trigger = dash.ctx.triggered_id
@@ -1609,12 +1644,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         ):
             raise dash.exceptions.PreventUpdate
         try:
-            command = control_command(trigger, state.get('paused'), level, settings)
+            command = control_command(trigger, state.get('paused'), level, settings, palette)
         except ValueError as error:
             return f'Rejected: {error}'
         if command is None or not can_control:
             raise dash.exceptions.PreventUpdate
         if command['action'] == 'settings' and command['settings'] == state.get('settings'):
+            raise dash.exceptions.PreventUpdate
+        shown = state.get('palette') or {}
+        if command['action'] == 'palette' and palette == (
+            shown.get('name') if shown.get('pinned') else PALETTE_POLICY
+        ):
             raise dash.exceptions.PreventUpdate
         reply = snapshot_source.control(command)
         if 'error' in reply:
@@ -1624,6 +1664,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             'play': 'Playing.',
             'master': f'Master brightness {decimal_text(round(level, 2))}.',
             'settings': 'Settings applied.',
+            'palette': f'Palette {palette}.',
         }.get(reply.get('accepted'), 'Sent.')
 
     app.clientside_callback(
