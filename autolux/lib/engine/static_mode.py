@@ -66,6 +66,11 @@ class StaticLooks:
         self._floor = False
         self.blackout = False
 
+    @property
+    def active(self) -> bool:
+        # A strobe burst alone ends by itself, so it does not hold the automatic show; an FX does.
+        return bool(self._looks) or self._floor or self.blackout or self._special is not None
+
     def special(
         self,
         group: str,

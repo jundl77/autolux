@@ -515,10 +515,10 @@ def _health(snapshot: dict) -> str:
     return health
 
 
-def _status_item(caption: str, value, **props):
+def _status_item(caption: str, value, className='status-item', **props):
     return html.Div(
         [html.Span(caption, className='control-label'), html.Span(value, className='status-text')],
-        className='status-item',
+        className=className,
         **props,
     )
 
@@ -532,7 +532,34 @@ def _fx_text(snapshot: dict) -> str | None:
     return f'{name} · {special["group"]}'
 
 
-TRACK_TITLE_CHARS = 28
+TRACK_TITLE_CHARS = 40
+TRACK_MARQUEE_SECONDS_PER_CHAR = 0.3
+RENDER_WINDOW_SECONDS = 3.0
+RENDERED_RATE = 'starfire_measured_render_frames_per_second'
+MISSED_RATE = 'starfire_missed_render_deadlines_per_second'
+
+
+def render_window(history: list, now: float) -> tuple[float | None, int]:
+    """Rendered frames per second and missed deadlines over the last few seconds of samples."""
+    if not history or not 0 <= now - history[-1]['at'] < TELEMETRY_STALE_SECONDS:
+        return None, 0
+    recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
+    span = frames = missed = 0.0
+    for before, sample in zip(recent, recent[1:]):
+        interval = sample['at'] - before['at']
+        rendered, skipped = sample.get(RENDERED_RATE), sample.get(MISSED_RATE)
+        if interval > 0 and finite(rendered) and finite(skipped):
+            span += interval
+            frames += rendered * interval
+            missed += skipped * interval
+    if span == 0:
+        rendered = history[-1].get(RENDERED_RATE)
+        return (rendered if finite(rendered) else None), 0
+    return frames / span, round(missed)
+
+
+def render_rate_text(fps: float | None) -> str:
+    return '—' if fps is None else f'{fps:.1f}'
 
 
 def _track_status(snapshot: dict) -> list:
@@ -540,15 +567,34 @@ def _track_status(snapshot: dict) -> list:
     title = track.get('title')
     if track.get('source') != MEDIA_SESSION_SOURCE or not title:
         return []
-    shown = title if len(title) <= TRACK_TITLE_CHARS else title[: TRACK_TITLE_CHARS - 1] + '…'
     artist = track.get('artist')
-    return [
-        _status_item(
-            'Track',
-            f'{artist} – {shown}' if artist else shown,
-            title=f'{artist} – {title}' if artist else title,
+    text = f'{artist} – {title}' if artist else title
+    if len(text) <= TRACK_TITLE_CHARS:
+        value = text
+    else:
+        # Two copies scroll by half their width, so the loop has no seam.
+        value = html.Span(
+            [html.Span(text), html.Span(text, **{'aria-hidden': 'true'})],
+            className='marquee',
+            style={'animationDuration': f'{len(text) * TRACK_MARQUEE_SECONDS_PER_CHAR:.1f}s'},
         )
+    return [_status_item('Track', value, className='status-item status-track')]
+
+
+def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
+    if snapshot.get('mode') == 'static':
+        looks = ((snapshot.get('static') or {}).get('looks') or {}).keys()
+        return _status_item('Autoloop', f'Static · {", ".join(looks) or "off"}')
+    selection = (snapshot.get('current_effect') or {}).get('selection') or {}
+    tag = selection.get('intent') or cfg['label'].lower()
+    if selection.get('look') not in (None, selection.get('intent')):
+        tag = f'{tag} · {selection.get("level")}'
+    value = [
+        _dot(cfg['primary']),
+        name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
+        html.Span(tag, className='status-tag'),
     ]
+    return _status_item('Autoloop', value, title=detail)
 
 
 def _build_show_status(snapshot: dict, now: float) -> list:
@@ -563,22 +609,14 @@ def _build_show_status(snapshot: dict, now: float) -> list:
     palette = snapshot.get('palette') or {}
     bpm = _room_bpm(snapshot)
     health = _health(snapshot)
-    fps = _latest_telemetry(snapshot, now).get('starfire_measured_render_frames_per_second')
+    fps, _ = render_window(snapshot.get('system_history') or [], now)
     palette_name = palette.get('name')
     items = [
         _status_item(
             'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
         ),
         *_track_status(snapshot),
-        _status_item(
-            'Autoloop',
-            [
-                _dot(cfg['primary']),
-                name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
-                html.Span(cfg['label'].lower(), className='status-tag'),
-            ],
-            title=detail,
-        ),
+        _autoloop_status(snapshot, cfg, name, detail),
         _status_item(
             'Colors',
             [
@@ -596,8 +634,8 @@ def _build_show_status(snapshot: dict, now: float) -> list:
     if fx:
         items.append(_status_item('FX', fx, id='status-fx'))
     items += [
-        _status_item('Tempo', f'{bpm:.0f} BPM' if bpm else '— BPM'),
-        _status_item('Render', f'{fps:.0f} fps' if finite(fps) else '— fps'),
+        _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
+        _status_item('Render FPS', render_rate_text(fps)),
     ]
     cooldown = snapshot.get('strobe_cooldown_seconds')
     if finite(cooldown):
@@ -695,8 +733,6 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'settings': command['settings']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
-    if action == 'mode':
-        return {'mode': command['mode']}
     return {}
 
 
@@ -956,6 +992,7 @@ def _build_control_card() -> list:
                 ),
                 html.Div(
                     [
+                        _build_overlay_banner(),
                         html.Div(
                             [
                                 html.Span('Intensity', className='control-label'),
@@ -1014,7 +1051,22 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
-STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
+# Targets and UV come from the rig the show published; a rig without UV fixtures
+# greys both UV chips rather than offering commands the show would refuse.
+STATIC_TARGETS_JS = '''function(state) {
+    const all = %s;
+    const ready = !!state && !!state.mode && !!state.static;
+    const statics = ready ? state.static : {targets: [all], blacklight: false};
+    const options = statics.targets.map((target) =>
+        ({label: target === all ? 'All' : target, value: target}));
+    return [options, !statics.blacklight, !statics.blacklight];
+}''' % json.dumps(ALL_FIXTURES)
+STATIC_BUTTONS = {
+    'static-blacklight': 'blacklight',
+    'static-strobe': 'strobe',
+    'static-clear': 'clear',
+    'static-banner-clear': 'clear',
+}
 FX_SLOT_IDS = {f'static-fx-{slot}': slot for slot in PALETTE_SWATCH_SLOTS}
 FX_CLEAR_ID = 'static-fx-clear'
 FX_ENERGY_LEVELS = (('low', 0.3), ('mid', 0.6), ('high', 0.9))
@@ -1180,6 +1232,12 @@ def _build_static_panel():
                         persistence=True,
                         persistence_type='local',
                     ),
+                    html.Button(
+                        'Clear all',
+                        id='static-clear',
+                        title='Remove every static look and show the automatic show again',
+                        style={'marginLeft': 'auto'},
+                    ),
                 ],
                 className='control-row',
             ),
@@ -1188,8 +1246,8 @@ def _build_static_panel():
                     html.Span('Target', className='control-label'),
                     dcc.RadioItems(
                         id='static-target',
-                        options=[{'label': 'All', 'value': 'all'}],
-                        value='all',
+                        options=[{'label': 'All', 'value': ALL_FIXTURES}],
+                        value=ALL_FIXTURES,
                         inline=True,
                         className='segmented',
                     ),
@@ -1210,10 +1268,33 @@ def _build_static_panel():
     )
 
 
+OVERLAY_BANNER_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    if (!state || state.mode !== 'static') {
+        return [{display: 'none'}, ''];
+    }
+    const looks = Object.keys((state.static || {}).looks || {}).length;
+    return [{}, 'Static overlay active'
+        + (looks ? ' · ' + looks + (looks === 1 ? ' look' : ' looks') : '')];
+}'''
+
+
+def _build_overlay_banner():
+    return html.Div(
+        [
+            html.Span(id='static-banner-text'),
+            html.Button('Clear', id='static-banner-clear'),
+        ],
+        id='static-banner',
+        className='overlay-banner',
+        style={'display': 'none'},
+    )
+
+
 def _register_direct_auto_controls(app) -> None:
     # Visual state flips here at click time; the bridge round trip never gates it.
     app.clientside_callback(
-        """function(toggles, nexts, palette, intensity, mode, state) {
+        """function(toggles, nexts, palette, intensity, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
             const triggered = (window.dash_clientside.callback_context.triggered || [])
@@ -1244,11 +1325,6 @@ def _register_direct_auto_controls(app) -> None:
                         && (current === undefined || Math.abs(intensity - current) >= 0.005)) {
                     control.dispatch(control.build.intensity(intensity), status);
                 }
-            } else if (triggered.includes('control-mode.value')) {
-                if (mode && mode !== shown.mode) {
-                    control.hold({mode: mode});
-                    control.dispatch(control.build.mode(mode), 'static-status', ['mode']);
-                }
             }
             return [nu, nu];
         }""",
@@ -1258,7 +1334,6 @@ def _register_direct_auto_controls(app) -> None:
         Input('control-next', 'n_clicks'),
         Input('control-palette', 'value'),
         Input('control-intensity', 'value'),
-        Input('control-mode', 'value'),
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
@@ -1286,6 +1361,11 @@ def _register_direct_static_controls(app) -> None:
             const before = classes[ids.indexOf(chip)] || '';
             const strobing = before === 'active';
             const command = control.build.static(chip, target, strobing);
+            if (command.kind === 'clear') {
+                control.hold({mode: 'auto'});
+                control.dispatch(command, 'static-status', ['mode']);
+                return ids.map(() => '');
+            }
             control.dispatch(command, 'static-status').then((reply) => {
                 if (reply && reply.error) {
                     window.dash_clientside.set_props(chip, {className: before});
@@ -1340,13 +1420,13 @@ FX_DIRECT_JS = (
     + json.dumps(list(FX_SLOT_IDS))
     + """;
         const n = chips.length;
-        const [energy, speed, pulse, target] = args.slice(n + 2, n + 6);
-        const classes = args.slice(n + 6, 2 * n + 6);
-        const state = control.view(args[2 * n + 6]) || {};
+        const [energy, speed, pulse, target] = args.slice(n + 3, n + 7);
+        const classes = args.slice(n + 7, 2 * n + 7);
+        const state = control.view(args[2 * n + 7]) || {};
         const trigger = ((window.dash_clientside.callback_context.triggered || [])[0] || {})
             .prop_id.split('.')[0];
-        if (trigger === 'control-mode') {
-            // Leaving Static releases the special in the show.
+        if (trigger === 'static-clear' || trigger === 'static-banner-clear') {
+            // Clear all releases the special with the rest of the overlay.
             return chips.map(() => '');
         }
         const active = chips.find((id, i) => classes[i] === 'active');
@@ -1375,7 +1455,7 @@ def _register_direct_fx_controls(app) -> None:
         FX_DIRECT_JS,
         *[Output(chip, 'className') for chip in FX_SLOT_IDS],
         *[Input(chip, 'n_clicks') for chip in (*FX_SLOT_IDS, FX_CLEAR_ID)],
-        Input('control-mode', 'value'),
+        *[Input(chip, 'n_clicks') for chip in ('static-clear', 'static-banner-clear')],
         *[Input(segment, 'value') for segment in FX_SEGMENT_IDS],
         State('static-target', 'value'),
         *[State(chip, 'className') for chip in FX_SLOT_IDS],
@@ -1395,15 +1475,16 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         Input('control-mode', 'value'),
     )
     app.clientside_callback(
-        '''function(state) {
-            const ready = !!state && !!state.mode && !!state.static;
-            const statics = ready ? state.static : {targets: ['all'], blacklight: false};
-            const options = statics.targets.map((target) =>
-                ({label: target === 'all' ? 'All' : target, value: target}));
-            return [options, !statics.blacklight];
-        }''',
+        STATIC_TARGETS_JS,
         Output('static-target', 'options'),
         Output('static-blacklight', 'disabled'),
+        Output('static-preset-uv', 'disabled'),
+        Input('control-state', 'data'),
+    )
+    app.clientside_callback(
+        OVERLAY_BANNER_JS,
+        Output('static-banner', 'style'),
+        Output('static-banner-text', 'children'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(
@@ -1436,7 +1517,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         []
         if direct
         else [
-            Input('control-mode', 'value'),
             *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
             *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
             *[Input(name, 'n_clicks') for name in (*FX_SLOT_IDS, FX_CLEAR_ID)],
@@ -1457,7 +1537,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
 
     @app.callback(
         Output('static-status', 'children'),
-        Output('control-state', 'data', allow_duplicate=True),
         *operator_inputs,
         Input('static-colour', 'value'),
         State('static-target', 'value'),
@@ -1465,35 +1544,28 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         prevent_initial_call=True,
     )
     def send_static(*_):
-        mode = dash.ctx.inputs.get('control-mode.value')
         colour = dash.ctx.inputs['static-colour.value']
         target = dash.ctx.states['static-target.value']
         state = dash.ctx.states.get('control-state.data') or {}
         trigger = dash.ctx.triggered_id
         if not can_control:
             raise dash.exceptions.PreventUpdate
-        if trigger == 'control-mode':
-            if mode == state.get('mode'):
-                raise dash.exceptions.PreventUpdate
-            command = {'action': 'mode', 'mode': mode}
-        else:
-            if trigger == 'static-colour' and not colour:
-                raise dash.exceptions.PreventUpdate
-            try:
-                command = static_control_command(trigger, target, colour) or _fx_command(
-                    trigger, target, state
-                )
-            except ValueError as error:
-                return f'Rejected: {error}', dash.no_update
-            if command is None:
-                raise dash.exceptions.PreventUpdate
+        if trigger == 'static-colour' and not colour:
+            raise dash.exceptions.PreventUpdate
+        try:
+            command = static_control_command(trigger, target, colour) or _fx_command(
+                trigger, target, state
+            )
+        except ValueError as error:
+            return f'Rejected: {error}'
+        if command is None:
+            raise dash.exceptions.PreventUpdate
         reply = snapshot_source.control(command)
         if 'error' in reply:
-            return f'Rejected: {reply["error"]}', dash.no_update
-        if command['action'] == 'mode':
-            expectations.expect(mode=command['mode'])
-            return '', {**state, 'mode': command['mode']}
-        return '', dash.no_update
+            return f'Rejected: {reply["error"]}'
+        if command['kind'] == 'clear' and state:
+            expectations.expect(mode='auto')
+        return ''
 
 
 def _metric_card(label, value, detail):

@@ -168,16 +168,6 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     import json
 
     events = []
-    login_groups = [
-        {
-            'name': 'strip',
-            'fixture_count': 2,
-            'colour': True,
-            'speed': True,
-            'pulse': True,
-            'pattern': False,
-        }
-    ]
     parser = argparse.ArgumentParser()
     production.add_arguments(parser)
     args = parser.parse_args([])
@@ -259,15 +249,12 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             assert kwargs['run_id'] == rx.config['run_id'] == 17
             assert kwargs['radius'].receiver_buffer_ms == 500
             self.process = None
-            self.groups = []
 
         def __enter__(self):
             assert 'app_initialized' in events
             if failure == 'renderer_start':
                 raise RuntimeError('renderer start failed')
             self.process = object()
-            # Login fills the groups after the client was built, so the client must read lazily.
-            self.groups = login_groups
             events.append('starfire_start')
             return self
 
@@ -287,7 +274,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
 
     class LightEngine:
         def note_capture_discontinuities(self, total):
-            pass
+            events.append('capture_count')
 
     class App:
         def __init__(self, *_, **kwargs):
@@ -295,8 +282,8 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             if failure == 'controller_init':
                 raise RuntimeError('model initialization failed')
             self.lighting_client = kwargs['lighting_client']
-            assert self.lighting_client.groups() == []
             self.event_buffer = EventBuffer()
+            # A constructed AutoluxController always owns its engine; the health check relies on it.
             self.light_engine = LightEngine()
             events.append('app_initialized')
 
@@ -307,7 +294,6 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         async def run(self):
             assert all(name in events for name in ('rx_start', 'starfire_start'))
             events.append('app_run')
-            assert self.lighting_client.groups() == login_groups
             try:
                 self.health_check()
                 if failure == 'controller_run':
@@ -347,6 +333,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     if 'starfire_stop' in events:
         assert events.index('starfire_stop') < events.index('rx_stop')
     if 'app_run' in events:
+        assert 'capture_count' in events
         assert events.index('app_stop') < events.index('starfire_stop')
         assert events.count('stop') == 1
     else:

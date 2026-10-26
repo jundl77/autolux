@@ -183,7 +183,7 @@ def test_the_listener_reports_only_changes_and_ignores_untitled_tracks():
     assert listener.changes(None, at=3.0) == [Playback('stopped', at=3.0)]
 
 
-def test_the_track_status_follows_health_and_truncates_long_titles():
+def test_the_track_status_follows_health_and_scrolls_long_titles_in_full():
     from autolux.simulate.visualizer_app import _build_show_status
 
     title = 'An Extraordinarily Long Song Title That Keeps Going'
@@ -192,10 +192,13 @@ def test_the_track_status_follows_health_and_truncates_long_titles():
     captions = [item.children[0].children for item in status]
     assert captions[captions.index('Health') + 1] == 'Track'
     item = status[captions.index('Track')]
-    shown = item.children[1].children
-    assert shown.startswith('RAYE – ') and shown.endswith('…')
-    assert len(shown) == len('RAYE – ') + 28
-    assert item.title == f'RAYE – {title}'
+    marquee = item.children[1].children
+    assert marquee.className == 'marquee'
+    assert [copy.children for copy in marquee.children] == [f'RAYE – {title}'] * 2
+
+    short = _build_show_status({'track': dict(track, title='Escapism')}, now=0.0)
+    item = short[[i.children[0].children for i in short].index('Track')]
+    assert item.children[1].children == 'RAYE – Escapism'
 
     for absent in (None, dict(track, source='zeros'), dict(track, title=None)):
         status = _build_show_status({'track': absent}, now=0.0)

@@ -217,9 +217,14 @@ class LightEngine(IMusicAnalyserHandler):
         self._send_brightness(OPERATOR_FADE_SECONDS)
         await self._rejoin_current_intent()
 
+    async def sync_static(self) -> None:
+        # The overlay, not a mode switch, decides: any look, floor or blackout holds the show.
+        if self.static_looks.active:
+            self.enter_static()
+        else:
+            await self.leave_static()
+
     def static(self) -> StaticLooks:
-        if not self._static_mode:
-            raise ValueError('the show is in auto mode')
         return self.static_looks
 
     def static_look(self, target: str, colour=None, dimmer=None, uv=None) -> None:
@@ -229,7 +234,7 @@ class LightEngine(IMusicAnalyserHandler):
         if self._paused:
             raise ValueError('the show is paused')
         if self._static_mode:
-            raise ValueError('the show is in static mode')
+            raise ValueError('a static overlay is active')
         intent = self._entered_intent
         if intent is None or self._showing_standby:
             raise ValueError('no section is playing yet')

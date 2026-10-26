@@ -185,6 +185,31 @@ def _tracker_cache_plan(audio_client, data_dir=None):
     )
 
 
+def cache_misses(audio_client, data_dir=None) -> list[tuple[str, str]]:
+    """The sidecars a run of this client would recompute rather than replay, as (kind, reason).
+
+    Same plans and lookups as load_section_chain, so an empty result means the run replays
+    every stage this machine would otherwise compute.
+    """
+    plan = _cell_cache_plan(audio_client, data_dir)
+    tracker_plan = _tracker_cache_plan(audio_client, data_dir)
+    if plan is None and tracker_plan is None:
+        return []
+    expected = _expected_samples(audio_client)
+    misses = []
+    if plan is not None:
+        _, reason = cell_cache.open_replay(*plan, expected_samples=expected)
+        if reason != 'hit':
+            misses.append(('mertcells', reason))
+    if tracker_plan is not None:
+        from autolux.simulate import tracker_cache
+
+        _, reason = tracker_cache.open_replay(*tracker_plan, expected_samples=expected)
+        if reason != 'hit':
+            misses.append(('bartracker', reason))
+    return misses
+
+
 _UNBUILT = object()
 _SECTION_CHAIN = _UNBUILT
 _SECTION_CHAIN_DATA_DIR = None
