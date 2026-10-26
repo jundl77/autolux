@@ -104,6 +104,7 @@ pub struct RenderContext {
     pub autoloop_elapsed_beats: f64,
     pub autoloop_speed_scaled_elapsed_beats: f64,
     pub normalized_rms_level: Option<f64>,
+    pub intensity: f64,
 }
 
 impl Default for RenderContext {
@@ -117,6 +118,7 @@ impl Default for RenderContext {
             autoloop_elapsed_beats: 0.0,
             autoloop_speed_scaled_elapsed_beats: 0.0,
             normalized_rms_level: None,
+            intensity: 1.0,
         }
     }
 }
@@ -210,6 +212,9 @@ pub enum Command {
     },
     SetPalette {
         name: String,
+    },
+    SetIntensity {
+        level: f64,
     },
     Stop,
 }

@@ -21,6 +21,8 @@ LONG_BUILD_BARS = 32
 LONG_SINCE_DROP_SECONDS = 90.0
 FOLLOW_FAMILY_CHANCE = 0.5
 FAMILY_WEIGHT = 3.0
+MAX_ENERGY = 3
+INTENSITY_ENERGY_CAPS = ((0.35, 1), (0.7, 2))
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,13 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
     (LightIntent.ATMOSPHERIC, 'loudness_rising', (1, 2), 'loudness rising'),
     (LightIntent.ATMOSPHERIC, None, (1,), 'calm'),
 )
+
+
+def max_energy_for_intensity(intensity: float) -> int:
+    for below, energy in INTENSITY_ENERGY_CAPS:
+        if intensity < below:
+            return energy
+    return MAX_ENERGY
 
 
 def loudness_trend(levels: Sequence[float]) -> str:
@@ -93,7 +102,10 @@ class AutoloopPolicy:
         return self._track_family
 
     def choose(
-        self, context: SelectionContext, exclude: tuple[str, str] | None = None
+        self,
+        context: SelectionContext,
+        exclude: tuple[str, str] | None = None,
+        intensity: float = 1.0,
     ) -> AutoloopChoice:
         loops = [loop for loop in self._autoloops[context.intent] if loop != exclude]
         if not loops:
@@ -102,6 +114,10 @@ class AutoloopPolicy:
         family = self._next_track_family() if new_track else self._track_family
         movement = None if new_track else self._track_movement
         tiers, reason = self._tiers(context)
+        max_energy = max_energy_for_intensity(intensity)
+        if max(tiers) > max_energy:
+            tiers = tuple(sorted({min(tier, max_energy) for tier in tiers}))
+            reason = f'{reason}; intensity caps energy at {max_energy}'
         candidates, exact = self._nearest_tier(loops, tiers)
         if not exact:
             energies = sorted({self._meta[loop].energy for loop in candidates})

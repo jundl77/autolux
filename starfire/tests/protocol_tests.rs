@@ -612,6 +612,7 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
         parameter(Kind::StrobeMaxRateHz, Value::Number(6.0)),
         parameter(Kind::StrobeMaxBurstSeconds, Value::Number(3.0)),
         parameter(Kind::Palette, Value::Text("house".into())),
+        parameter(Kind::Intensity, Value::Number(0.3)),
     ] {
         assert_eq!(
             read_control(&mut Cursor::new(encoded(operation.clone()))).unwrap(),
@@ -625,6 +626,9 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
         parameter(Kind::Palette, Value::Number(1.0)),
         parameter(Kind::Palette, Value::Text("neon".into())),
         faded(Kind::StrobeMaxRateHz, 6.0, 1.0),
+        faded(Kind::Intensity, 0.5, 1.0),
+        parameter(Kind::Intensity, Value::Number(1.5)),
+        parameter(Kind::Intensity, Value::Boolean(true)),
         Operation::SetParameter(wire::SetParameter {
             command_id: 1,
             parameter: Some(wire::Parameter {

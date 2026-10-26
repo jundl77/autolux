@@ -14,6 +14,7 @@ from autolux.lib.engine.effect_definitions import (
     STANDBY_AUTOLOOP,
     STANDBY_CROSSFADE_SECONDS,
     STROBE_BURST_BEATS,
+    STROBE_GATE_INTENSITY,
     STROBE_RATE_HZ,
     AutoloopMetaTable,
     AutoloopTable,
@@ -37,7 +38,15 @@ def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
     duration = min(settings.strobe_burst_seconds, settings.strobe_max_burst_seconds)
     if bpm and bpm > 0:
         duration = min(duration, STROBE_BURST_BEATS * 60.0 / bpm)
-    return duration
+    return duration * settings.intensity
+
+
+def drop_strobe_rate_hz(settings: ShowSettings) -> float:
+    return min(STROBE_RATE_HZ, settings.strobe_max_rate_hz) * settings.intensity
+
+
+def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
+    return settings.drop_strobe_cooldown_seconds / settings.intensity
 
 
 class EffectController:
@@ -108,7 +117,7 @@ class EffectController:
             and not context.new_track
         ):
             return self._entered[1], False
-        return self._policy.choose(context), True
+        return self._policy.choose(context, intensity=self._settings().intensity), True
 
     async def change_effect(
         self,
@@ -138,7 +147,11 @@ class EffectController:
         return True
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
-        choice = self._policy.choose(context, exclude=self.lighting_client.selected_autoloop)
+        choice = self._policy.choose(
+            context,
+            exclude=self.lighting_client.selected_autoloop,
+            intensity=self._settings().intensity,
+        )
         self.lighting_client.select_autoloop(choice.bank, choice.autoloop)
         self._policy.record(context, choice)
         self._entered = context.intent, choice
@@ -193,7 +206,14 @@ class EffectController:
 
     def _strobe_unless_cooling_down(self, bpm: float | None) -> None:
         settings = self._settings()
-        cooldown = settings.drop_strobe_cooldown_seconds
+        if settings.intensity < STROBE_GATE_INTENSITY:
+            LOGGER.info(
+                '[lighting] drop strobe suppressed | intensity %.2f below %.2f',
+                settings.intensity,
+                STROBE_GATE_INTENSITY,
+            )
+            return
+        cooldown = drop_strobe_cooldown_seconds(settings)
         now = self.clock.monotonic()
         last = self._last_strobe_started_at
         if last is not None and now - last < cooldown:
@@ -209,7 +229,7 @@ class EffectController:
             {
                 'id': DROP_ACCENT_ID,
                 'target': 'all',
-                'values': {'strobe_hz': min(STROBE_RATE_HZ, settings.strobe_max_rate_hz)},
+                'values': {'strobe_hz': drop_strobe_rate_hz(settings)},
                 'priority': DROP_ACCENT_PRIORITY,
                 'lifetime': {'kind': 'seconds', 'duration_seconds': duration},
             }

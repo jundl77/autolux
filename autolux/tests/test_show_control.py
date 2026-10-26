@@ -38,6 +38,7 @@ def show():
         ('control-toggle', True, None, (), {'action': 'play'}),
         ('control-brightness', False, 0.42, (), {'action': 'master', 'level': 0.42}),
         ('control-next', False, None, (), {'action': 'next_autoloop'}),
+        ('control-intensity-live', False, 0.35, (), {'action': 'intensity', 'level': 0.35}),
         (
             'control-crossfade_beats',
             False,
@@ -108,13 +109,14 @@ def test_each_collapsed_settings_group_summarises_its_live_values():
         'strobe_burst_seconds': 1.0,
         'drop_strobe_cooldown_seconds': 60.0,
         'palette_temperature_bias': -0.5,
+        'intensity': 0.7,
     }
     assert {
         group.key: settings_group_summary(group.names, settings) for group in SETTINGS_GROUPS
     } == {
         'transitions': '1 beats · quiet 15 % · standby 2 s',
         'strobe': '8 Hz · burst 4 s · drop burst 1 s · cooldown 60 s',
-        'palette': 'warmth -0.5',
+        'palette': 'warmth -0.5 · intensity 70 %',
     }
     assert settings_group_summary(SETTINGS_GROUPS[1].names, {}) == (
         '— Hz · burst — s · drop burst — s · cooldown — s'
@@ -197,7 +199,7 @@ def test_each_accepted_command_names_the_value_the_show_should_report():
 @pytest.mark.parametrize('name', ['ice', 'auto'])
 def test_a_palette_choice_reaches_the_controller_queue(show, name):
     poller, commands = show
-    reply = poller.control(control_command('control-palette', False, None, (), name))
+    reply = poller.control(control_command('control-palette', False, None, (), palette=name))
     assert reply == {'accepted': 'palette'}
     assert commands.get_nowait() == {'action': 'palette', 'name': name}
 
@@ -207,4 +209,25 @@ def test_unknown_palettes_are_refused_before_the_controller(show, name):
     poller, commands = show
     reply = poller.control({'action': 'palette', 'name': name})
     assert reply['error'].startswith("palette must be 'auto' or one of techno, house, ice")
+    assert commands.empty()
+
+
+def test_a_settings_change_keeps_the_intensity_the_fader_set(show):
+    poller, commands = show
+    command = control_command(
+        'control-crossfade_beats',
+        False,
+        None,
+        ('30', '0.5', '2', '20', '6', '3', '3', '0'),
+        intensity=0.4,
+    )
+    assert poller.control(command) == {'accepted': 'settings'}
+    assert commands.get_nowait()['settings'].intensity == 0.4
+
+
+@pytest.mark.parametrize('level', [1.2, -0.1, '0.5', None])
+def test_an_intensity_outside_zero_to_one_is_refused_and_queues_nothing(show, level):
+    poller, commands = show
+    reply = poller.control({'action': 'intensity', 'level': level})
+    assert reply == {'error': 'intensity must be within 0..1'}
     assert commands.empty()

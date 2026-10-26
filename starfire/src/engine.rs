@@ -21,6 +21,8 @@ const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
+pub const STROBE_GATE_INTENSITY: f64 = 0.3;
+pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.6;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -51,6 +53,7 @@ impl ActiveAutoloop {
         time: ClockSample,
         normalized_rms_level: Option<f64>,
         palette: &PaletteSlots,
+        intensity: f64,
     ) -> Result<Vec<Effect>> {
         self.script.render(
             &RenderContext {
@@ -64,6 +67,7 @@ impl ActiveAutoloop {
                     - self.start_animation_beats)
                     .max(0.0),
                 normalized_rms_level,
+                intensity,
             },
             palette,
         )
@@ -117,6 +121,8 @@ pub struct Engine {
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
     palette: ActivePalette,
+    intensity: f64,
+    last_render_seconds: Option<f64>,
 }
 
 impl Engine {
@@ -147,6 +153,8 @@ impl Engine {
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
             palette,
+            intensity: 1.0,
+            last_render_seconds: None,
         })
     }
 
@@ -248,6 +256,10 @@ impl Engine {
                 );
                 self.strobe_max_burst_seconds = *seconds;
             }
+            Command::SetIntensity { level } => {
+                validate_unit(*level, "intensity")?;
+                self.intensity = *level;
+            }
             Command::Stop => {
                 self.active = None;
                 self.fade = None;
@@ -322,6 +334,9 @@ impl Engine {
             (Ok(ParameterType::Palette), Some(Value::Text(name))) => {
                 Command::SetPalette { name: name.clone() }
             }
+            (Ok(ParameterType::Intensity), Some(Value::Number(value))) => {
+                Command::SetIntensity { level: *value }
+            }
             _ => anyhow::bail!("unknown parameter type or incompatible value"),
         };
         self.apply(seconds, &command)
@@ -350,6 +365,7 @@ impl Engine {
                 state.attribute_brightness = master;
             }
         }
+        self.limit_movement_speed(time_seconds, &mut states);
         self.limit_strobes(time_seconds, &mut states);
         if self.blackout {
             extinguish(&mut states);
@@ -368,6 +384,7 @@ impl Engine {
             }
         };
         self.last_time_seconds = time_seconds;
+        self.last_render_seconds = Some(time_seconds);
         self.last_output_states = states.clone();
         Ok(RenderedFrame {
             time_seconds,
@@ -411,11 +428,20 @@ impl Engine {
 
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
+        let strobe_scale = intensity_strobe_scale(self.intensity);
+        let (max_rate_hz, max_burst_seconds) = if strobe_scale > 0.0 {
+            (
+                self.strobe_max_rate_hz * strobe_scale,
+                self.strobe_max_burst_seconds * strobe_scale,
+            )
+        } else {
+            (0.0, 0.0)
+        };
         for (id, state) in states.iter_mut() {
             if paused {
                 state.strobe_hz = 0.0;
             }
-            state.strobe_hz = state.strobe_hz.min(self.strobe_max_rate_hz);
+            state.strobe_hz = state.strobe_hz.min(max_rate_hz);
             if state.strobe_hz <= 0.0 {
                 self.strobe_started_seconds.remove(id);
                 continue;
@@ -424,8 +450,25 @@ impl Engine {
                 .strobe_started_seconds
                 .entry(id.clone())
                 .or_insert(seconds);
-            if seconds - started >= self.strobe_max_burst_seconds {
+            if seconds - started >= max_burst_seconds {
                 state.strobe_hz = 0.0;
+            }
+        }
+    }
+
+    fn limit_movement_speed(&self, seconds: f64, states: &mut FixtureStates) {
+        let Some(previous_seconds) = self.last_render_seconds else {
+            return;
+        };
+        if self.intensity >= 1.0 {
+            return;
+        }
+        let max_step =
+            intensity_movement_range_per_second(self.intensity) * (seconds - previous_seconds);
+        for (id, state) in states.iter_mut() {
+            if let Some(previous) = self.last_output_states.get(id) {
+                state.pan = step_toward(previous.pan, state.pan, max_step);
+                state.tilt = step_toward(previous.tilt, state.tilt, max_step);
             }
         }
     }
@@ -515,7 +558,13 @@ impl Engine {
             return Ok(self.dark_states());
         };
         let effects = active
-            .render(seconds, time, self.normalized_rms_level, &palette)
+            .render(
+                seconds,
+                time,
+                self.normalized_rms_level,
+                &palette,
+                self.intensity,
+            )
             .with_context(|| format!("autoloop {}/{} failed", active.bank, active.name))?;
         let destination = states_for_effects(&self.rig, &effects)?;
         let Some(fade) = &mut self.fade else {
@@ -524,8 +573,13 @@ impl Engine {
         let source = match &mut fade.source {
             FadeSource::Frozen(states) => states.clone(),
             FadeSource::Running(previous) => {
-                let effects =
-                    previous.render(seconds, time, self.normalized_rms_level, &palette)?;
+                let effects = previous.render(
+                    seconds,
+                    time,
+                    self.normalized_rms_level,
+                    &palette,
+                    self.intensity,
+                )?;
                 states_for_effects(&self.rig, &effects)?
             }
         };
@@ -859,6 +913,22 @@ fn blend_states(
 
 fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
     from + (to - from) * amount
+}
+
+pub fn intensity_strobe_scale(intensity: f64) -> f64 {
+    if intensity < STROBE_GATE_INTENSITY {
+        0.0
+    } else {
+        intensity
+    }
+}
+
+pub fn intensity_movement_range_per_second(intensity: f64) -> f64 {
+    SLOWEST_GLIDE_RANGE_PER_SECOND / (1.0 - intensity).powi(2)
+}
+
+fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {
+    from + (to - from).clamp(-max_step, max_step)
 }
 
 fn extinguish(states: &mut FixtureStates) {

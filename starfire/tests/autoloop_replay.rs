@@ -12,6 +12,8 @@ use starfire::replay::{Replay, dmx_digest, render_replay};
 use starfire::script::AutoloopCatalog;
 
 const FLOAT_TOLERANCE: f64 = 1e-9;
+const GOLDEN_INTENSITY: f64 = 1.0;
+const SOFT_INTENSITY: f64 = 0.3;
 const ROOM_FIXTURE_COUNT: usize = 15;
 const REPLAY_BPM: f64 = 120.0;
 const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
@@ -185,7 +187,14 @@ fn check_golden(look: &Look, digest: &str) {
 }
 
 fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
+    engine_at_intensity(bank, autoloop, select_beat, GOLDEN_INTENSITY)
+}
+
+fn engine_at_intensity(bank: &str, autoloop: &str, select_beat: f64, intensity: f64) -> Engine {
     let mut engine = Engine::new(room(), catalog(), support::palettes()).unwrap();
+    engine
+        .apply(0.0, &Command::SetIntensity { level: intensity })
+        .unwrap();
     let anchor_beat = select_beat.floor();
     engine
         .apply(
@@ -550,6 +559,29 @@ fn drop_washes_are_brightest_just_after_beat_edges() {
                 "{look} beat {beat}: {hit} vs mid-beat {mid_beat}"
             );
         }
+    }
+}
+
+#[test]
+fn low_intensity_softens_drop_beat_edges_without_flattening_them() {
+    for look in looks_in(&["drop"]) {
+        let beat_contrast = |intensity: f64| {
+            let mut engine = engine_at_intensity(&look.bank, &look.autoloop, 0.0, intensity);
+            (0..16)
+                .map(|beat| {
+                    wash_level(&mut engine, beat as f64 + 0.1)
+                        - wash_level(&mut engine, beat as f64 + 0.5)
+                })
+                .sum::<f64>()
+        };
+        let (full, soft) = (
+            beat_contrast(GOLDEN_INTENSITY),
+            beat_contrast(SOFT_INTENSITY),
+        );
+        assert!(
+            soft < full && soft > FLOAT_TOLERANCE,
+            "{look}: contrast {soft} at {SOFT_INTENSITY} vs {full} at {GOLDEN_INTENSITY}"
+        );
     }
 }
 

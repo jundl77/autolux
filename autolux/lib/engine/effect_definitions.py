@@ -91,6 +91,8 @@ MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0
 MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
+DEFAULT_INTENSITY = 0.7
+STROBE_GATE_INTENSITY = 0.3
 
 SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'drop_strobe_cooldown_seconds': (0.0, MAX_STROBE_COOLDOWN_SECONDS),
@@ -101,6 +103,7 @@ SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'strobe_max_rate_hz': (0.0, STARFIRE_MAX_STROBE_HZ),
     'strobe_max_burst_seconds': (0.1, STARFIRE_MAX_STROBE_BURST_SECONDS),
     'palette_temperature_bias': (-1.0, 1.0),
+    'intensity': (0.0, 1.0),
 }
 
 
@@ -114,6 +117,7 @@ class ShowSettings:
     strobe_max_rate_hz: float = STROBE_RATE_HZ
     strobe_max_burst_seconds: float = STROBE_MAX_BURST_SECONDS
     palette_temperature_bias: float = 0.0
+    intensity: float = DEFAULT_INTENSITY
 
     def __post_init__(self):
         for name, (low, high) in SHOW_SETTING_RANGES.items():

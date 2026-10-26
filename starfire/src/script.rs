@@ -238,6 +238,7 @@ fn validate_identifier(value: &str) -> Result<()> {
 pub struct LuaAutoloop {
     lua: Lua,
     render: Function,
+    use_render_intensity: Function,
     instruction_budget: Arc<AtomicU32>,
     rig: FixtureRig,
     identity: String,
@@ -314,7 +315,12 @@ impl LuaAutoloop {
             string.set(name, Value::Nil)?;
         }
 
-        let (api, named_palettes, use_active_palette): (Table, Table, Function) = lua
+        let (api, named_palettes, use_active_palette, use_render_intensity): (
+            Table,
+            Table,
+            Function,
+            Function,
+        ) = lua
             .load(LIGHTING_API)
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
@@ -368,6 +374,7 @@ impl LuaAutoloop {
         Ok(Self {
             lua,
             render,
+            use_render_intensity,
             instruction_budget,
             rig: rig.clone(),
             identity,
@@ -385,6 +392,10 @@ impl LuaAutoloop {
                 .normalized_rms_level
                 .is_none_or(|value| value.is_finite() && (0.0..=1.0).contains(&value)),
             "normalized RMS level must be finite and between zero and one"
+        );
+        ensure!(
+            context.intensity.is_finite() && (0.0..=1.0).contains(&context.intensity),
+            "intensity must be finite and between zero and one"
         );
         for value in [
             context.time_seconds,
@@ -405,6 +416,9 @@ impl LuaAutoloop {
         }
         self.instruction_budget
             .store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
+        self.use_render_intensity
+            .call::<()>(context.intensity)
+            .context("set render intensity")?;
         let values = self.lua.to_value_with(
             context,
             SerializeOptions::new().serialize_none_to_null(false),

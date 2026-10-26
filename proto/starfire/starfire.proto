@@ -50,6 +50,7 @@ enum ParameterType {
   STROBE_MAX_RATE_HZ = 7;
   STROBE_MAX_BURST_SECONDS = 8;
   PALETTE = 9;
+  INTENSITY = 10;
 }
 
 // [CLIENT -> SERVER]

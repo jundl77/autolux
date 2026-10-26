@@ -48,6 +48,49 @@ fn snapshot(beats: f64) -> RenderContext {
 }
 
 #[test]
+fn ctx_intensity_reaches_lua_and_softens_the_shared_beat_envelope() {
+    let mut autoloop = autoloop(
+        r#"return {render = function(ctx)
+          return {sf.dimmer(sf.fixture("left"), ctx.intensity),
+                  sf.dimmer(sf.fixture("right"), sf.on_beat(ctx.beat_position, 0.5))}
+        end}"#,
+    );
+    let mut levels = |beats: f64, intensity: f64| {
+        let effects = autoloop
+            .render(
+                &RenderContext {
+                    intensity,
+                    ..snapshot(beats)
+                },
+                &techno(),
+            )
+            .unwrap();
+        (
+            effects[0].values.intensity.unwrap(),
+            effects[1].values.intensity.unwrap(),
+        )
+    };
+    assert_eq!(levels(0.0, 1.0), (1.0, 1.0));
+    assert_eq!(levels(0.25, 1.0), (1.0, 0.25));
+    assert_eq!(levels(0.6, 1.0), (1.0, 0.0));
+    let (exposed, soft_peak) = levels(0.0, 0.3);
+    assert_eq!(exposed, 0.3);
+    assert!((soft_peak - 0.545).abs() < 1e-12);
+    assert!(levels(0.6, 0.3).1 > 0.0);
+    assert!(
+        autoloop
+            .render(
+                &RenderContext {
+                    intensity: 1.5,
+                    ..snapshot(0.0)
+                },
+                &techno(),
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn grid_helpers_given_ctx_use_the_authoritative_bar_fields() {
     let mut autoloop = autoloop(
         r#"return {render = function(ctx)

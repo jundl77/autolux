@@ -95,6 +95,9 @@ class StarfireClient:
         self._send_command({'kind': 'set_strobe_max_rate_hz', 'hz': max_rate_hz})
         self._send_command({'kind': 'set_strobe_max_burst_seconds', 'seconds': max_burst_seconds})
 
+    def set_intensity(self, level: float) -> None:
+        self._send_command({'kind': 'set_intensity', 'level': level})
+
     def set_speed(self, multiplier: float) -> None:
         self._send_command({'kind': 'set_speed', 'multiplier': multiplier})
 

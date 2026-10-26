@@ -12,7 +12,7 @@ import dash
 import plotly.graph_objects as go
 from dash import Input, Output, State, dcc, html
 
-from autolux.lib.engine.effect_definitions import SHOW_SETTING_RANGES
+from autolux.lib.engine.effect_definitions import DEFAULT_INTENSITY, SHOW_SETTING_RANGES
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
@@ -566,6 +566,7 @@ SETTING_DISPLAY = {
     'strobe_max_rate_hz': ('Max strobe rate', 'Hz'),
     'strobe_max_burst_seconds': ('Max strobe burst', 's'),
     'palette_temperature_bias': ('Palette warmth (cold −1 … warm +1)', ''),
+    'intensity': ('Intensity', '%'),
 }
 SETTING_LABELS = {
     name: f'{label} ({unit})' if unit and unit != '%' else label
@@ -579,7 +580,7 @@ STROBE_SETTINGS = (
     'strobe_burst_seconds',
     'drop_strobe_cooldown_seconds',
 )
-PALETTE_SETTINGS = ('palette_temperature_bias',)
+PALETTE_SETTINGS = ('palette_temperature_bias', 'intensity')
 SETTING_SUMMARY = {
     'crossfade_beats': '{} beats',
     'quiet_brightness': 'quiet {} %',
@@ -589,6 +590,7 @@ SETTING_SUMMARY = {
     'strobe_burst_seconds': 'drop burst {} s',
     'drop_strobe_cooldown_seconds': 'cooldown {} s',
     'palette_temperature_bias': 'warmth {}',
+    'intensity': 'intensity {} %',
 }
 
 
@@ -606,11 +608,14 @@ SETTINGS_GROUPS = (
     SettingsGroup('palette', 'Palette & intensity', PALETTE_SETTINGS, False),
 )
 SETTINGS_GROUPS_STORAGE_KEY = 'autolux.settings-groups'
-SETTING_IDS = {f'control-{name}': name for name in SHOW_SETTING_RANGES}
+FORM_SETTINGS = tuple(name for name in SHOW_SETTING_RANGES if name != 'intensity')
+SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
+BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
+INTENSITY_TRIGGERS = ('control-intensity', 'control-intensity-live')
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 NEEDS_A_NUMBER = '{label} needs a number'
 NOT_A_NUMBER = '{label}: "{raw}" is not a number'
-LIVE_BRIGHTNESS_INTERVAL_MS = 50
+LIVE_FADER_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
 CONTROL_EXPECT_SECONDS = 2.0
 
@@ -669,20 +674,25 @@ def parse_decimal(name: str, raw) -> float:
     return round(float(text) / 100, 6) if name in PERCENT_SETTINGS else float(text)
 
 
-def control_command(trigger, paused, level, settings, palette=None) -> dict | None:
+def control_command(
+    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY
+) -> dict | None:
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger == 'control-next':
         return {'action': 'next_autoloop'}
     if trigger == 'control-palette':
         return {'action': 'palette', 'name': palette}
-    if trigger in ('control-brightness', 'control-brightness-live'):
+    if trigger in BRIGHTNESS_TRIGGERS:
         return {'action': 'master', 'level': level}
+    if trigger in INTENSITY_TRIGGERS:
+        return {'action': 'intensity', 'level': level}
     if trigger in SETTING_IDS:
         return {
             'action': 'settings',
             'settings': {
-                name: parse_decimal(name, raw) for name, raw in zip(SHOW_SETTING_RANGES, settings)
+                **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
+                'intensity': intensity,
             },
         }
     return None
@@ -755,7 +765,9 @@ def _build_settings_drawer():
         [
             html.Div('Show settings', className='stat-label control-heading'),
             *[
-                _settings_group(group, [_setting_input(name) for name in group.names])
+                _settings_group(
+                    group, [_setting_input(name) for name in group.names if name in FORM_SETTINGS]
+                )
                 for group in SETTINGS_GROUPS
             ],
         ],
@@ -817,7 +829,8 @@ def _register_settings_drawer(app) -> None:
             NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]),
             NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw='{raw}'),
         ]
-        for name, (low, high) in SHOW_SETTING_RANGES.items()
+        for name in FORM_SETTINGS
+        for low, high in [SHOW_SETTING_RANGES[name]]
     ]
     app.clientside_callback(
         r'''function(...values) {
@@ -843,8 +856,8 @@ def _register_settings_drawer(app) -> None:
                 return '';
             });
         }''',
-        *[Output(f'control-{name}-error', 'children') for name in SHOW_SETTING_RANGES],
-        *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        *[Output(f'control-{name}-error', 'children') for name in FORM_SETTINGS],
+        *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
         prevent_initial_call=True,
     )
 
@@ -904,6 +917,25 @@ def _build_control_card() -> list:
                         ),
                         html.Div([html.Span('0%'), html.Span('100%')], className='control-scale'),
                         dcc.Store(id='control-brightness-live'),
+                        html.Div(
+                            [
+                                html.Span('Intensity'),
+                                html.Span('—', id='control-intensity-value'),
+                            ],
+                            className='stat-label control-heading control-intensity-heading',
+                        ),
+                        dcc.Slider(
+                            id='control-intensity',
+                            min=0,
+                            max=1,
+                            step=0.01,
+                            marks=None,
+                            updatemode='mouseup',
+                            allow_direct_input=False,
+                            disabled=True,
+                        ),
+                        html.Div([html.Span('0%'), html.Span('100%')], className='control-scale'),
+                        dcc.Store(id='control-intensity-live'),
                     ],
                     className='control-group control-master',
                 ),
@@ -1113,7 +1145,8 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .control-group + .control-group { border-left: 1px solid #273344; }
 .control-heading { display: flex; justify-content: space-between; align-items: baseline;
                    min-height: 16px; margin-bottom: 12px; }
-#control-brightness-value { color: #e6edf3; font-size: 18px; font-weight: 600;
+.control-intensity-heading { margin-top: 18px; }
+#control-brightness-value, #control-intensity-value { color: #e6edf3; font-size: 18px; font-weight: 600;
                             text-align: right; font-variant-numeric: tabular-nums; }
 .control-master .dash-slider-track { height: 10px; background: #1e2c3d; border-radius: 3px; }
 .control-master .dash-slider-range { background: #73b6ff; border-radius: 3px; }
@@ -1856,7 +1889,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             ),
         )
 
-    setting_names = json.dumps(list(SHOW_SETTING_RANGES))
+    setting_names = json.dumps(list(FORM_SETTINGS))
     app.clientside_callback(
         '''function(state) {
             const ready = !!state && state.paused !== null && state.paused !== undefined;
@@ -1865,7 +1898,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             const skippable = ready && !state.paused && !!state.intent
                 && state.intent !== 'standby';
             return [ready && state.paused ? 'Play ▶' : 'Pause ❚❚', 'control-toggle' + mode, !ready,
-                    !skippable, !ready || state.master_brightness === null,
+                    !skippable, !ready || state.master_brightness === null, settable,
                     ...'''
         + setting_names
         + '''.map(() => settable)];
@@ -1875,11 +1908,12 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('control-toggle', 'disabled'),
         Output('control-next', 'disabled'),
         Output('control-brightness', 'disabled'),
-        *[Output(f'control-{name}', 'disabled') for name in SHOW_SETTING_RANGES],
+        Output('control-intensity', 'disabled'),
+        *[Output(f'control-{name}', 'disabled') for name in FORM_SETTINGS],
         Input('control-state', 'data'),
     )
     app.clientside_callback(
-        '''function(state, drag, value, synced) {
+        '''function(state, drag, value, intensityDrag, intensityValue, synced) {
             const nu = window.dash_clientside.no_update;
             if (!state || state.master_brightness === null || !state.settings) {
                 throw window.dash_clientside.PreventUpdate;
@@ -1899,6 +1933,13 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             if (!touched && !dragging && state.master_brightness !== synced.master) {
                 level = next.master = state.master_brightness;
             }
+            const intensityDragging = intensityDrag !== null && intensityDrag !== undefined
+                && intensityDrag !== intensityValue;
+            let intensity = nu;
+            if (!touched && !intensityDragging
+                    && state.settings.intensity !== synced.intensity) {
+                intensity = next.intensity = state.settings.intensity;
+            }
             const fields = names.map((name) => {
                 if (touched || focused === 'control-' + name || text[name] === synced[name]) {
                     return nu;
@@ -1906,42 +1947,45 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 next[name] = text[name];
                 return text[name];
             });
-            return [level, ...fields, next];
+            return [level, intensity, ...fields, next];
         }''',
         Output('control-brightness', 'value'),
-        *[Output(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        Output('control-intensity', 'value'),
+        *[Output(f'control-{name}', 'value') for name in FORM_SETTINGS],
         Output('control-synced', 'data'),
         Input('control-state', 'data'),
         State('control-brightness', 'drag_value'),
         State('control-brightness', 'value'),
+        State('control-intensity', 'drag_value'),
+        State('control-intensity', 'value'),
         State('control-synced', 'data'),
     )
-    app.clientside_callback(
-        '''function(level) {
-            window.autoluxControlTouchedAt = Date.now();
-            const label = level === null || level === undefined
-                ? '—' : Math.round(level * 100) + '%';
-            const now = Date.now();
-            if (level === null || level === undefined
-                    || now - (window.autoluxBrightnessSentAt || 0) < '''
-        + str(LIVE_BRIGHTNESS_INTERVAL_MS)
-        + ''') {
-                return [label, window.dash_clientside.no_update];
-            }
-            window.autoluxBrightnessSentAt = now;
-            return [label, level];
-        }''',
-        Output('control-brightness-value', 'children'),
-        Output('control-brightness-live', 'data'),
-        Input('control-brightness', 'drag_value'),
-    )
+    for fader in ('brightness', 'intensity'):
+        app.clientside_callback(
+            '''function(level) {
+                window.autoluxControlTouchedAt = Date.now();
+                const label = level === null || level === undefined
+                    ? '—' : Math.round(level * 100) + '%';
+                const now = Date.now();
+                const sentAt = window.autoluxFaderSentAt = window.autoluxFaderSentAt || {};
+                if (level === null || level === undefined
+                        || now - (sentAt.FADER || 0) < INTERVAL_MS) {
+                    return [label, window.dash_clientside.no_update];
+                }
+                sentAt.FADER = now;
+                return [label, level];
+            }'''.replace('FADER', fader).replace('INTERVAL_MS', str(LIVE_FADER_INTERVAL_MS)),
+            Output(f'control-{fader}-value', 'children'),
+            Output(f'control-{fader}-live', 'data'),
+            Input(f'control-{fader}', 'drag_value'),
+        )
     app.clientside_callback(
         '''function() {
             window.autoluxControlTouchedAt = Date.now();
             return window.dash_clientside.no_update;
         }''',
         Output('control-touched', 'data'),
-        *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
         prevent_initial_call=True,
     )
 
@@ -1968,22 +2012,41 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Input('control-palette', 'value'),
         Input('control-brightness', 'value'),
         Input('control-brightness-live', 'data'),
-        *[Input(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        Input('control-intensity', 'value'),
+        Input('control-intensity-live', 'data'),
+        *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_control(_toggle, _next, palette, released, live, *settings_and_state):
+    def send_control(
+        _toggle,
+        _next,
+        palette,
+        released,
+        live,
+        intensity_released,
+        intensity_live,
+        *settings_and_state,
+    ):
         *settings, state = settings_and_state
         state = state or {}
+        intensity = (state.get('settings') or {}).get('intensity', DEFAULT_INTENSITY)
         trigger = dash.ctx.triggered_id
-        level = live if trigger == 'control-brightness-live' else released
-        current = state.get('master_brightness')
-        if trigger in ('control-brightness', 'control-brightness-live') and (
+        faders = {
+            'control-brightness': (released, state.get('master_brightness')),
+            'control-brightness-live': (live, state.get('master_brightness')),
+            'control-intensity': (intensity_released, intensity),
+            'control-intensity-live': (intensity_live, intensity),
+        }
+        level, current = faders.get(trigger, (None, None))
+        if trigger in faders and (
             level is None or (current is not None and abs(level - current) < 0.005)
         ):
             raise dash.exceptions.PreventUpdate
         try:
-            command = control_command(trigger, state.get('paused'), level, settings, palette)
+            command = control_command(
+                trigger, state.get('paused'), level, settings, palette=palette, intensity=intensity
+            )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update
         if command is None or not can_control:

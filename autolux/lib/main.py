@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import json
 import logging
@@ -8,6 +9,7 @@ from pathlib import Path
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
@@ -25,6 +27,7 @@ PLAYBACK_DELAY_SEC = 14.0
 _UI_ONLY_WINDOW_SEC = 60.0
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16
+SETTINGS_SAVE_SETTLE_SECONDS = 1.0
 
 
 def load_show_settings(path: Path) -> ShowSettings:
@@ -59,11 +62,13 @@ def save_show_settings(path: Path, settings: ShowSettings) -> None:
 
 
 class ShowControl:
-    def __init__(self, config_path: Path, event_buffer=None):
+    def __init__(self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK):
         self.config_path = Path(config_path)
         self.settings = load_show_settings(self.config_path)
         self.commands: queue.Queue = queue.Queue(maxsize=CONTROL_QUEUE_SIZE)
         self._event_buffer = event_buffer
+        self._clock = clock
+        self._unsaved_change_at: float | None = None
 
     async def apply_pending(self, light_engine) -> None:
         applied = False
@@ -89,17 +94,38 @@ class ShowControl:
                 light_engine.effect_controller.pin_palette(
                     None if command['name'] == PALETTE_POLICY else command['name']
                 )
-            elif action == 'settings':
-                try:
-                    save_show_settings(self.config_path, command['settings'])
-                except OSError:
-                    LOGGER.exception('[main] show settings were not saved; keeping the old ones')
+            elif action in ('settings', 'intensity'):
+                settings = (
+                    command['settings']
+                    if action == 'settings'
+                    else dataclasses.replace(self.settings, intensity=command['level'])
+                )
+                if settings == self.settings:
                     continue
-                self.settings = command['settings']
-                light_engine.settings_changed()
-                LOGGER.info('[main] show settings %s', self.settings.to_dict())
+                self.settings = settings
+                if action == 'intensity':
+                    light_engine.send_intensity()
+                else:
+                    light_engine.settings_changed()
+                self._unsaved_change_at = self._clock.monotonic()
         if applied:
             self.publish(light_engine)
+        if (
+            self._unsaved_change_at is not None
+            and self._clock.monotonic() - self._unsaved_change_at >= SETTINGS_SAVE_SETTLE_SECONDS
+        ):
+            self.save_settings()
+
+    def save_settings(self) -> None:
+        if self._unsaved_change_at is None:
+            return
+        self._unsaved_change_at = None
+        try:
+            save_show_settings(self.config_path, self.settings)
+        except OSError:
+            LOGGER.exception('[main] show settings were not saved; they last until the show stops')
+            return
+        LOGGER.info('[main] show settings %s', self.settings.to_dict())
 
     def start(self, light_engine) -> None:
         light_engine.send_renderer_settings()
@@ -276,6 +302,7 @@ class AutoluxController:
     def _shut_down(self) -> None:
         self.is_running = False
         for what, close in (
+            ('show settings', self.control.save_settings),
             ('visualizer', None if self._ui is None else self._ui.stop),
             ('audio', self.audio_client.close),
             ('section chain', None if self.section is None else self.section.stop),

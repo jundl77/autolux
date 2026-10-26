@@ -13,6 +13,7 @@ from autolux.lib.engine.autoloop_policy import (
     AutoloopPolicy,
     SelectionContext,
     loudness_trend,
+    max_energy_for_intensity,
 )
 from autolux.lib.engine.effect_definitions import LightIntent
 
@@ -200,3 +201,25 @@ def test_a_loop_without_metadata_is_refused():
 )
 def test_loudness_trend_compares_the_halves_of_eight_bars(levels, trend):
     assert loudness_trend(levels) == trend
+
+
+@pytest.mark.parametrize(
+    ('intensity', 'max_energy'), [(0.0, 1), (0.34, 1), (0.35, 2), (0.69, 2), (0.7, 3), (1.0, 3)]
+)
+def test_intensity_maps_to_the_highest_allowed_energy(intensity, max_energy):
+    assert max_energy_for_intensity(intensity) == max_energy
+
+
+@pytest.mark.parametrize(('intensity', 'energy'), [(0.2, 1), (0.5, 2), (0.9, 3)])
+def test_intensity_caps_a_maximal_drop_after_the_context_rule(intensity, energy):
+    chooser = policy()
+    choice = chooser.choose(SelectionContext(DROP, build_bars=64), intensity=intensity)
+    assert choice.meta.energy == energy
+    assert ('intensity caps energy' in choice.reason) == (energy < 3)
+
+
+def test_a_capped_tier_without_loops_falls_back_to_the_nearest_energy():
+    lib = library({DROP: [('driving', 2, 'cold', 'snap'), ('maximal', 3, 'cold', 'snap')]})
+    choice = policy(lib).choose(SelectionContext(DROP, build_bars=64), intensity=0.1)
+    assert choice.autoloop == 'driving'
+    assert 'no energy 1 loop, nearest 2' in choice.reason
