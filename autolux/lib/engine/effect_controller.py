@@ -44,7 +44,7 @@ def drop_strobe_rate_hz(settings: ShowSettings) -> float:
 
 
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
-    return settings.drop_strobe_cooldown_seconds / max(settings.intensity, STROBE_GATE_INTENSITY)
+    return settings.drop_strobe_cooldown_seconds / settings.intensity
 
 
 class EffectController:

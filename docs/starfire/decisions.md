@@ -420,3 +420,14 @@ Simulation and report fingerprints use the same explicitly selected corpus/model
 
 Fixture configuration uses a library, patch list and 512-channel map. Display
 universes from 1, retain native addressing internally, and validate saves atomically.
+
+2026-10-26 intensity macro: one operator `INTENSITY` parameter (0..1) scales how
+hard looks hit without changing what they do. Autolux defaults to 0.7 for living-room
+shows and persists it in show settings; Starfire defaults to 1.0, which renders
+authored loops exactly as written, so goldens replay at 1.0. Pulses multiply
+`sf.on_beat` by `lerp(0.35, 1, i)` and widen its decay to `width * (2 - i)`.
+Strobes share one 0.3 gate in Starfire and Autolux: below it no strobe renders and
+no drop accent is sent; above it the rate and burst caps scale by `i`, and the drop
+accent cooldown divides by `i`. Pan/tilt slew at most `0.6 / (1 - i)^2` of the
+normalised range per second, unlimited at 1.0. The selection policy caps energy at
+tier 1 below 0.35 and tier 2 below 0.7, then applies the nearest-tier fallback.

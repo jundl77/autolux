@@ -70,7 +70,7 @@ impl ActiveAutoloop {
 }
 
 enum FadeSource {
-    Running(ActiveAutoloop),
+    Running(Box<ActiveAutoloop>),
     Frozen(FixtureStates),
 }
 
@@ -392,8 +392,14 @@ impl Engine {
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
         let strobe_scale = intensity_strobe_scale(self.intensity);
-        let max_rate_hz = self.strobe_max_rate_hz * strobe_scale;
-        let max_burst_seconds = self.strobe_max_burst_seconds * strobe_scale;
+        let (max_rate_hz, max_burst_seconds) = if strobe_scale > 0.0 {
+            (
+                self.strobe_max_rate_hz * strobe_scale,
+                self.strobe_max_burst_seconds * strobe_scale,
+            )
+        } else {
+            (0.0, 0.0)
+        };
         for (id, state) in states.iter_mut() {
             if paused {
                 state.strobe_hz = 0.0;
@@ -479,7 +485,7 @@ impl Engine {
                 } else if self.script_error.is_some() {
                     FadeSource::Frozen(self.dark_states())
                 } else if let Some(previous) = previous {
-                    FadeSource::Running(previous)
+                    FadeSource::Running(Box::new(previous))
                 } else {
                     FadeSource::Frozen(self.dark_states())
                 };

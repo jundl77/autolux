@@ -27,7 +27,6 @@ const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
 const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
-const RENDER_INTENSITY_SETTER: &str = "starfire_render_intensity_setter";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AutoloopInfo {
@@ -206,6 +205,7 @@ fn validate_identifier(value: &str) -> Result<()> {
 pub struct LuaAutoloop {
     lua: Lua,
     render: Function,
+    use_render_intensity: Function,
     instruction_budget: Arc<AtomicU32>,
     rig: FixtureRig,
     identity: String,
@@ -280,7 +280,6 @@ impl LuaAutoloop {
             .set_name("starfire lighting API")
             .set_mode(ChunkMode::Text)
             .eval()?;
-        lua.set_named_registry_value(RENDER_INTENSITY_SETTER, use_render_intensity)?;
         let targets = rig.clone();
         api.set(
             "members",
@@ -310,6 +309,7 @@ impl LuaAutoloop {
         Ok(Self {
             lua,
             render,
+            use_render_intensity,
             instruction_budget,
             rig: rig.clone(),
             identity,
@@ -341,8 +341,7 @@ impl LuaAutoloop {
         }
         self.instruction_budget
             .store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
-        self.lua
-            .named_registry_value::<Function>(RENDER_INTENSITY_SETTER)?
+        self.use_render_intensity
             .call::<()>(context.intensity)
             .context("set render intensity")?;
         let values = self.lua.to_value_with(
