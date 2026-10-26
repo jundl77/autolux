@@ -20,6 +20,7 @@ use crate::protocol::{
     read_session_control, wire, write_event,
 };
 use crate::script::{AutoloopCatalog, missing_groups_warning};
+use crate::special;
 
 const MAX_QUEUED_CONTROLS: usize = 1024;
 const MAX_CONTROLS_PER_FRAME: usize = 32;
@@ -414,6 +415,7 @@ pub fn run_live(
                         };
                         match result {
                             Ok(created) => {
+                                let groups = special::capabilities(&created.rig);
                                 metrics.run_id = created.run_id;
                                 session = Some(created);
                                 logged_in.store(true, Ordering::Release);
@@ -432,6 +434,7 @@ pub fn run_live(
                                         max_message_bytes: MAX_MESSAGE_BYTES as u32,
                                         protocol_major: PROTOCOL_MAJOR,
                                         protocol_minor,
+                                        groups,
                                     }),
                                 )?;
                             }

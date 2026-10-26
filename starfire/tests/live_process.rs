@@ -135,6 +135,10 @@ impl Renderer {
         assert_eq!(reply.frame_rate_hz, 40);
         assert_eq!(reply.max_message_bytes, 4 * 1024);
         assert_eq!(reply.run_id, renderer.login.run_id);
+        let rig = starfire::fixtures::FixtureRig::from_wire(renderer.login.rig.as_ref().unwrap())
+            .unwrap();
+        assert!(!reply.groups.is_empty());
+        assert_eq!(reply.groups, starfire::special::capabilities(&rig));
         let metrics = renderer.next_metrics();
         assert_eq!(metrics.run_id, renderer.login.run_id);
         assert_eq!(metrics.last_processed_command_id, renderer.command_id);

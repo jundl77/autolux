@@ -20,7 +20,8 @@ import "proto/starfire/rig.proto";
 // Build constants, not a wire field.
 // Major changes are incompatible; minor additions are compatible.
 enum ProtocolVersion {
-  PROTOCOL_MINOR = 0;
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_MINOR = 1;
   PROTOCOL_MAJOR = 3;
 }
 
@@ -92,6 +93,17 @@ message LoginReply {
   uint32 protocol_major = 5;
   uint32 protocol_minor = 6;  // Negotiated minimum of client and server minor versions.
   fixed64 run_id = 7;
+  repeated GroupCapability groups = 8;  // One per rig group.
+}
+
+// Special axes at least one fixture in the group can express; energy always can.
+message GroupCapability {
+  string name = 1;
+  uint32 fixture_count = 2;
+  bool colour = 3;
+  bool speed = 4;
+  bool pulse = 5;
+  bool pattern = 6;
 }
 
 // [SERVER -> CLIENT]
@@ -141,6 +153,19 @@ message SetActiveEffect {
   optional double duration_seconds = 11;  // Positive; absent lasts until unset.
   // GDTF attribute, Geometry.Attribute or full function path.
   map<string, AttributeValue> attributes = 12;
+  // Rendered on the target; a group absent from the rig renders nothing.
+  Special special = 13;
+}
+
+// Fixture-agnostic accent; Starfire maps each axis onto the profiles' GDTF attribute families.
+message Special {
+  string colour_slot = 1;  // Active palette slot: "primary", "secondary", "cold", ...
+  float energy = 2;        // 0..1.
+  float speed = 3;         // 0..1.
+  optional uint32 pulse_beats = 4;
+  float attack_beats = 5;
+  float release_beats = 6;     // Runs when the effect is cleared, replaced or expires.
+  optional float pattern = 7;  // 0..1.
 }
 
 // [CLIENT -> SERVER]

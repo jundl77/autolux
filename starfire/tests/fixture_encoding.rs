@@ -67,6 +67,9 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         };
     }
     let frame = &rig.encode(&states).unwrap()[&0];
+    let wheel_fixture = 39..43;
+    let magenta_slot = 81;
+    assert_eq!(&frame[wheel_fixture.clone()], &[magenta_slot, 0, 0, 0]);
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
@@ -77,8 +80,9 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         assert_eq!(&frame[start..start + 8], &[255, 0, 255, 0, 191, 0, 0, 0]);
     }
     assert!(
-        frame[24..64]
+        frame[24..wheel_fixture.start]
             .iter()
+            .chain(&frame[wheel_fixture.end..64])
             .chain(frame[120..].iter())
             .all(|byte| *byte == 0)
     );

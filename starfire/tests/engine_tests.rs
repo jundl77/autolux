@@ -74,6 +74,7 @@ fn lighting_override(id: &str, values: PropertyValues) -> LightingOverride {
         intensity_multiplier: None,
         lifetime: OverrideLifetime::UntilCleared,
         priority: 0,
+        special: None,
     }
 }
 

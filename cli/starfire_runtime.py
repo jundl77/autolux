@@ -35,6 +35,7 @@ from cli.starfire_protocol import (
     build_command,
     check_payload_size,
     encode_command,
+    login_groups,
     read_event,
 )
 from proto.starfire import starfire_pb2 as wire
@@ -163,6 +164,7 @@ class StarfireRuntime:
         self._fault = None
         self._health = None
         self._health_at = None
+        self.groups = []
         self._heartbeat_at = None
         self._started_at = None
         self._threads = []
@@ -295,6 +297,7 @@ class StarfireRuntime:
                         or event.run_id != self.run_id
                     ):
                         raise ValueError('Unexpected Starfire login reply')
+                    self.groups = login_groups(event)
                     self._record_progress(event.command_id)
                     self._heartbeat_at = time.monotonic()
                     self._ready.set()
