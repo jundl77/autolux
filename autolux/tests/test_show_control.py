@@ -720,3 +720,22 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
     figures = reply['response']['telemetry-figures']['data']
     assert len(figures) == len(graphs)
     assert all('data' in figure and 'layout' in figure for figure in figures)
+
+
+def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_the_show():
+    from autolux.lighting.palettes import PALETTES
+    from autolux.simulate.visualizer_app import PALETTE_SWATCH_SLOTS, _build_show_status, _rgb_css
+
+    house = next(palette for palette in PALETTES if palette.name == 'house')
+    swatches = [_rgb_css(getattr(house, slot)) for slot in PALETTE_SWATCH_SLOTS]
+    for pinned, tag in ((False, ['auto']), (True, [])):
+        status = _build_show_status({'palette': {'name': 'house', 'pinned': pinned}}, now=0.0)
+        colors = next(item for item in status if item.children[0].children == 'Colors')
+        value = colors.children[1].children
+        dots = [part for part in value if getattr(part, 'className', None) == 'dot']
+        assert [dot.style['background'] for dot in dots] == swatches
+        assert 'house' in value
+        assert [
+            part.children for part in value if getattr(part, 'className', '') == 'status-tag'
+        ] == tag
+        assert not [part for part in value if 'dot-auto' in (getattr(part, 'className', '') or '')]

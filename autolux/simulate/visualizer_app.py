@@ -549,8 +549,13 @@ def _build_show_status(snapshot: dict, now: float) -> list:
         _status_item(
             'Colors',
             [
-                *_palette_marks(palette_name if palette.get('pinned') else None),
+                *(_palette_marks(palette_name) if palette_name in PALETTES_BY_NAME else []),
                 palette_name or '—',
+                *(
+                    [html.Span('auto', className='status-tag')]
+                    if palette_name and not palette.get('pinned')
+                    else []
+                ),
             ],
         ),
     ]
