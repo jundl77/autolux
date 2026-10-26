@@ -11,7 +11,7 @@ Only top-level wire messages have direction annotations.
 | --- | --- |
 | `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. |
-| `UpdateBeat` | Supply fractional beat position and tempo. Starfire interpolates between updates; animation speed does not change musical phase. |
+| `UpdateBeat` | Report one detected beat: index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire owns the bar-aligned grid and interpolates between beats; animation speed does not change musical phase. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
 Each `Parameter` contains a defined enum type and a number or boolean value.

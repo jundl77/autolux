@@ -5,8 +5,12 @@ One Lua file per look, `autoloops/<bank>/<loop>.lua`; banks are the intents
 
 ## Rules
 
-- **Bar-locked.** 8- or 16-beat loops, a pure function of `ctx.beat_position`
-  (beat 0 and every multiple of 4 is the one), so switching never restarts a phrase.
+- **Bar-locked.** 8- or 16-beat loops, a pure function of `ctx.beat_position`, so
+  switching never restarts a phrase. Starfire anchors that grid to the tracker's bar phase:
+  `floor(beat_position) % ctx.beats_per_bar` is the beat in bar (0 is the one).
+  For bar logic prefer the ctx form of the helpers — `sf.beat_in_bar(ctx)`, `sf.bar(ctx)`,
+  `sf.phrase_phase(ctx, bars)` — which read `ctx.bar_phase` (continuous, 0..beats_per_bar),
+  `ctx.bar_index` and `ctx.beats_per_bar`; the number form assumes 4/4.
   Only `buildup` may also use `ctx.autoloop_elapsed_beats`, for a ramp that plateaus at 128 beats.
 - **Palette slots only**: `sf.palette("techno")` primary/secondary/accent/cold/black
   (`sf.mix` of two slots is fine). No literal colours.

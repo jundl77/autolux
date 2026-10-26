@@ -66,12 +66,24 @@ end
 
 local BEATS_PER_BAR = 4
 
--- Grid helpers assume beat 0 is a downbeat, so floor(beats) % 4 == 0 is "the one".
-function sf.beat_in_bar(beats) return beats % BEATS_PER_BAR end
-function sf.bar(beats) return math.floor(beats / BEATS_PER_BAR) end
+-- Grid helpers take `ctx` (preferred: Starfire's bar fields from the tracker's phase)
+-- or a beat count, which they read as 4/4 with beat 0 on "the one". Starfire anchors
+-- ctx.beat_position so both agree, but a loop-local count (beat % 16) has no bar size.
+function sf.beat_in_bar(beats)
+    if type(beats) == "table" then return beats.bar_phase end
+    return beats % BEATS_PER_BAR
+end
+
+function sf.bar(beats)
+    if type(beats) == "table" then return beats.bar_index end
+    return math.floor(beats / BEATS_PER_BAR)
+end
 
 function sf.phrase_phase(beats, bars)
     assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
+    if type(beats) == "table" then
+        return ((beats.bar_index % bars) + beats.bar_phase / beats.beats_per_bar) / bars % 1
+    end
     return (beats / (bars * BEATS_PER_BAR)) % 1
 end
 
@@ -81,6 +93,7 @@ function sf.on_beat(beats, width, period)
     assert(finite(width) and width > 0, "beat envelope width must be positive and finite")
     period = period or 1
     assert(finite(period) and period > 0, "beat envelope period must be positive and finite")
+    if type(beats) == "table" then beats = beats.beat_position end
     local remaining = math.max(0, 1 - (beats % period) / width)
     return remaining * remaining
 end

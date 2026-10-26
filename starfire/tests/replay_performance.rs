@@ -41,8 +41,12 @@ fn mixed_show() -> Replay {
             + (at_seconds - TEMPO_CHANGE_SECONDS).max(0.0) * FINAL_TEMPO_BPM / SECONDS_PER_MINUTE;
         push(
             at_seconds,
+            // Anchors are 1.5 beats apart after the tempo change; the latest whole beat
+            // is close enough for a throughput budget.
             Command::Beat {
-                position_beats,
+                beat_index: position_beats.floor() as u64,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: if at_seconds < TEMPO_CHANGE_SECONDS {
                     INITIAL_TEMPO_BPM
                 } else {

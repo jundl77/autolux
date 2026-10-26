@@ -309,12 +309,16 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (
             0.0,
             Operation::UpdateBeat(wire::UpdateBeat {
-                position_beats: 0.0,
+                beat_index: 7,
+                bar_phase: Some(2),
+                beats_per_bar: 4,
                 tempo_bpm: 140.0,
                 ..Default::default()
             }),
             Command::Beat {
-                position_beats: 0.0,
+                beat_index: 7,
+                bar_phase: Some(2),
+                beats_per_bar: 4,
                 bpm: 140.0,
             },
         ),

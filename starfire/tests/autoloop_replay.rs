@@ -159,32 +159,43 @@ fn check_golden(look: &Look, digest: &str) {
 }
 
 /// Engine at 120 BPM with `autoloop` selected while the beat clock reads `select_beat`.
+/// Beats are whole, so the anchor is the beat at or before it, received at time zero.
 fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
     let mut engine = Engine::new(room(), catalog()).unwrap();
-    for command in [
-        Command::Beat {
-            position_beats: select_beat,
-            bpm: REPLAY_BPM,
-        },
-        Command::Select {
-            bank: bank.into(),
-            autoloop: autoloop.into(),
-            transition: Transition::Cut,
-        },
-    ] {
-        engine.apply(0.0, &command).unwrap();
-    }
+    let anchor_beat = select_beat.floor();
+    engine
+        .apply(
+            0.0,
+            &Command::Beat {
+                beat_index: anchor_beat as u64,
+                bar_phase: Some((anchor_beat as u32) % 4),
+                beats_per_bar: 4,
+                bpm: REPLAY_BPM,
+            },
+        )
+        .unwrap();
+    engine
+        .apply(
+            (select_beat - anchor_beat) * SECONDS_PER_BEAT,
+            &Command::Select {
+                bank: bank.into(),
+                autoloop: autoloop.into(),
+                transition: Transition::Cut,
+            },
+        )
+        .unwrap();
     engine
 }
 
-fn render(engine: &mut Engine, beats_after_select: f64) -> RenderedFrame {
+/// Render `beats_after_anchor` beats after the anchoring beat at time zero.
+fn render(engine: &mut Engine, beats_after_anchor: f64) -> RenderedFrame {
     engine
-        .render_at(beats_after_select * SECONDS_PER_BEAT)
+        .render_at(beats_after_anchor * SECONDS_PER_BEAT)
         .unwrap()
 }
 
-fn wash_level(engine: &mut Engine, beats_after_select: f64) -> f64 {
-    render(engine, beats_after_select).fixture_properties_before_strobe["wash_left"].intensity
+fn wash_level(engine: &mut Engine, beats_after_anchor: f64) -> f64 {
+    render(engine, beats_after_anchor).fixture_properties_before_strobe["wash_left"].intensity
 }
 
 fn set_rms(engine: &mut Engine, level: f64) {
@@ -325,7 +336,7 @@ fn selecting_mid_bar_keeps_the_musical_phrase() {
         let mut mid_bar = look.engine(2.25);
         for beat in [3.0, 3.1, 4.0, 6.5, 9.0, 13.7] {
             let expected = render(&mut on_the_one, beat);
-            let actual = render(&mut mid_bar, beat - 2.25);
+            let actual = render(&mut mid_bar, beat - 2.0);
             assert_eq!(
                 expected.dmx_frames_by_universe, actual.dmx_frames_by_universe,
                 "{look} restarted on selection"

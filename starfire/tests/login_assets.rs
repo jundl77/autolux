@@ -76,7 +76,9 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
                 .apply(
                     0.0,
                     &Command::Beat {
-                        position_beats: 0.0,
+                        beat_index: 0,
+                        bar_phase: None,
+                        beats_per_bar: 4,
                         bpm: 140.0,
                     },
                 )

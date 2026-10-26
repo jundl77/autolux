@@ -175,7 +175,9 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
         ClientMessage::UpdateBeat(value) => engine.apply(
             at_seconds,
             &Command::Beat {
-                position_beats: value.position_beats,
+                beat_index: value.beat_index,
+                bar_phase: value.bar_phase,
+                beats_per_bar: value.beats_per_bar,
                 bpm: value.tempo_bpm,
             },
         ),

@@ -20,7 +20,7 @@ import "proto/starfire/rig.proto";
 // Major changes are incompatible; minor additions are compatible.
 enum ProtocolVersion {
   PROTOCOL_MINOR = 0;
-  PROTOCOL_MAJOR = 1;
+  PROTOCOL_MAJOR = 2;
 }
 
 enum MessageType {
@@ -146,11 +146,15 @@ message UnsetActiveEffect {
 }
 
 // [CLIENT -> SERVER]
-// Starfire interpolates musical position between updates, independently of animation speed.
+// Facts about one detected beat. Starfire owns the bar-aligned musical grid built from
+// them and interpolates between beats at tempo, independently of animation speed.
 message UpdateBeat {
+  reserved 2;  // Was position_beats, when the client owned the grid.
   uint64 command_id = 1;
-  double position_beats = 2;
   double tempo_bpm = 3;
+  uint64 beat_index = 4;          // Detected beats this session; increases, gaps allowed.
+  optional uint32 bar_phase = 5;  // Tracker's beat in bar, 0 = downbeat; absent if unknown.
+  uint32 beats_per_bar = 6;       // 1..16; bar_phase is below it.
 }
 
 // [CLIENT -> SERVER]

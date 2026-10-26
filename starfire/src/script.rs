@@ -325,6 +325,7 @@ impl LuaAutoloop {
         for value in [
             context.time_seconds,
             context.beat_position,
+            context.bar_phase,
             context.autoloop_elapsed_beats,
             context.autoloop_speed_scaled_elapsed_beats,
         ] {

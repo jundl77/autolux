@@ -34,7 +34,29 @@ fn snapshot(beats: f64) -> RenderContext {
         autoloop_elapsed_beats: beats,
         autoloop_speed_scaled_elapsed_beats: beats,
         normalized_rms_level: Some(1.0),
+        ..Default::default()
     }
+}
+
+#[test]
+fn grid_helpers_given_ctx_use_the_authoritative_bar_fields() {
+    let mut autoloop = autoloop(
+        r#"return {render = function(ctx)
+          -- A 3/4 bar: the bare-number form would assume four beats per bar.
+          assert(sf.beat_in_bar(ctx) == 1.5 and sf.beat_in_bar(ctx.beat_position) == 3.5)
+          assert(sf.bar(ctx) == 2 and sf.on_beat(ctx, 1) == 0.25)
+          return {sf.dimmer(sf.group("wash"), sf.phrase_phase(ctx, 2))}
+        end}"#,
+    );
+    let context = RenderContext {
+        beat_position: 7.5,
+        bar_phase: 1.5,
+        bar_index: 2,
+        beats_per_bar: 3,
+        ..snapshot(7.5)
+    };
+    let effects = autoloop.render(&context).unwrap();
+    assert_eq!(effects[0].values.intensity, Some(0.25));
 }
 
 #[test]
