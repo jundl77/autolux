@@ -1637,7 +1637,7 @@ fn pan_after_snap(intensity: f64) -> Vec<f64> {
             },
         ),
     );
-    // Three seconds: the slowest glide at 0.3 needs about two to cross half the range.
+    // Three seconds: calm's glide needs under one to cross half the range.
     (1..=120)
         .map(|frame| {
             let state = &engine
@@ -1677,7 +1677,28 @@ fn low_and_mid_intensity_move_at_clearly_different_speeds() {
             + 1
     };
     let (low, mid) = (frames_to_target(0.3), frames_to_target(0.7));
-    assert!(low >= 3 * mid, "0.3 took {low} frames, 0.7 took {mid}");
+    // Calm moves at 0.3 of full and balanced at 0.7: 7/3 as many frames.
+    assert!(low > 2 * mid, "0.3 took {low} frames, 0.7 took {mid}");
+}
+
+#[test]
+fn pulse_depth_and_movement_follow_the_three_level_table() {
+    use starfire::intensity::{
+        INTENSITY_BALANCED, INTENSITY_CALM, INTENSITY_WILD, movement_range_per_second,
+        movement_speed, pulse_depth,
+    };
+    for (level, depth, speed) in [
+        (INTENSITY_CALM, 0.25, 0.3),
+        (INTENSITY_BALANCED, 0.8, 0.7),
+        (INTENSITY_WILD, 1.0, 1.0),
+        (0.5, 0.525, 0.5),
+        (0.0, 0.25, 0.3),
+    ] {
+        near(pulse_depth(level), depth);
+        near(movement_speed(level), speed);
+    }
+    near(movement_range_per_second(INTENSITY_CALM).unwrap(), 0.6);
+    assert_eq!(movement_range_per_second(INTENSITY_WILD), None);
 }
 
 #[test]

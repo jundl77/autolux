@@ -13,11 +13,14 @@ import plotly.graph_objects as go
 from dash import Input, Output, State, dcc, html
 
 from autolux.lib.engine.effect_definitions import (
+    BALANCED,
+    CALM,
     DEFAULT_INTENSITY,
+    INTENSITY_BALANCED,
     INTENSITY_CALM,
-    INTENSITY_MEASURED,
     INTENSITY_WILD,
     SHOW_SETTING_RANGES,
+    WILD,
 )
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
@@ -635,9 +638,9 @@ SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
 INTENSITY_LEVELS = (
-    ('calm', INTENSITY_CALM),
-    ('measured', INTENSITY_MEASURED),
-    ('wild', INTENSITY_WILD),
+    (CALM, INTENSITY_CALM),
+    (BALANCED, INTENSITY_BALANCED),
+    (WILD, INTENSITY_WILD),
 )
 PALETTE_SWATCH_SLOTS = ('primary', 'secondary', 'accent', 'cold')
 ACCENT = '#73b6ff'

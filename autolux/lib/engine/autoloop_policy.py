@@ -6,12 +6,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from autolux.lib.engine.effect_definitions import (
+    CALM,
+    INTENSITY_BALANCED,
     INTENSITY_CALM,
-    INTENSITY_MEASURED,
+    WILD,
     AutoloopMeta,
     AutoloopMetaTable,
     AutoloopTable,
     LightIntent,
+    intensity_level,
 )
 
 RISING, FLAT, FALLING = 'rising', 'flat', 'falling'
@@ -23,6 +26,13 @@ LONG_SINCE_DROP_SECONDS = 90.0
 ARRIVAL_BEATS = 4
 MAXIMAL_ARRIVAL_OF_PEAK = 0.9
 MAX_ENERGY = 3
+# Calm tranquilises: a drop plays from the breakdown bank and a build from the atmospheric
+# one, so the room never gets a drop look while the operator asked for calm.
+CALM_INTENT_BANKS: dict[LightIntent, LightIntent] = {
+    LightIntent.DROP: LightIntent.BREAKDOWN,
+    LightIntent.BUILDUP: LightIntent.ATMOSPHERIC,
+}
+WILD_MAX_ENERGY_WEIGHT = 3
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,9 @@ class AutoloopChoice:
     autoloop: str
     meta: AutoloopMeta
     reason: str
+    # The intent whose bank the loop came from; differs from the section's intent when
+    # calm re-maps it. Rotation, palette variant and transition follow the look.
+    look: LightIntent
 
 
 TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
@@ -51,10 +64,11 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
         (3,),
         'maximal again: 32-bar build, 90 s since the last drop, arrival at the track peak',
     ),
-    (LightIntent.DROP, 'maximal_drop_last', (2,), 'no maximal drop twice running'),
+    (LightIntent.DROP, 'wild_maximal_again', (3,), 'wild: maximal twice running allowed'),
+    (LightIntent.DROP, 'no_maximal_twice', (2,), 'no maximal drop twice running'),
     (LightIntent.DROP, 'long_build', (3,), 'long build or long since the last drop'),
     (LightIntent.DROP, None, (2,), 'short build'),
-    (LightIntent.BUILDUP, 'maximal_drop_last', (2,), 'next drop cannot be maximal'),
+    (LightIntent.BUILDUP, 'no_maximal_twice', (2,), 'next drop cannot be maximal'),
     (LightIntent.BUILDUP, 'long_build', (3,), 'leads into a maximal drop'),
     (LightIntent.BUILDUP, None, (2,), 'leads into a driving drop'),
     (LightIntent.BREAKDOWN, 'maximal_drop_last', (1,), 'calm after a maximal drop'),
@@ -67,10 +81,16 @@ TIER_RULES: tuple[tuple[LightIntent, str | None, tuple[int, ...], str], ...] = (
 def max_energy_for_intensity(intensity: float) -> int:
     if intensity <= INTENSITY_CALM:
         return 1
-    # Measured and above get every tier; the renderer's intensity scaling restrains them.
-    if intensity < INTENSITY_MEASURED:
+    # Balanced and above get every tier; the renderer's intensity curve restrains them.
+    if intensity < INTENSITY_BALANCED:
         return 2
     return MAX_ENERGY
+
+
+def look_intent(intent: LightIntent, intensity: float) -> LightIntent:
+    if intensity_level(intensity) == CALM:
+        return CALM_INTENT_BANKS.get(intent, intent)
+    return intent
 
 
 def arrival_of_peak(
@@ -120,16 +140,24 @@ class AutoloopPolicy:
         self,
         context: SelectionContext,
         exclude: tuple[str, str] | None = None,
-        intensity: float = 1.0,
+        intensity: float = INTENSITY_BALANCED,
     ) -> AutoloopChoice:
-        loops = [loop for loop in self._autoloops[context.intent] if loop != exclude]
+        look = look_intent(context.intent, intensity)
+        wild = intensity_level(intensity) == WILD
+        loops = [loop for loop in self._autoloops[look] if loop != exclude]
         if not loops:
-            raise ValueError(f'{context.intent.name} has no other autoloop')
-        tiers, reason = self._tiers(context)
+            raise ValueError(f'{look.name} has no other autoloop')
+        tiers, reason = self._tiers(context, wild)
         max_energy = max_energy_for_intensity(intensity)
         if max(tiers) > max_energy:
             tiers = tuple(sorted({min(tier, max_energy) for tier in tiers}))
             reason = f'{reason}; intensity caps energy at {max_energy}'
+        if look != context.intent:
+            reason = f'{reason}; calm plays it from the {look.value} bank'
+        if wild and MAX_ENERGY not in tiers:
+            # Weights alone cannot reach energy 3 when the tier rule excluded it.
+            tiers = (*tiers, MAX_ENERGY)
+            reason = f'{reason}; wild adds energy {MAX_ENERGY}'
         candidates, exact = self._nearest_tier(loops, tiers)
         if not exact:
             energies = sorted({self._meta[loop].energy for loop in candidates})
@@ -137,19 +165,19 @@ class AutoloopPolicy:
                 f'{reason}; no energy {"/".join(map(str, tiers))} loop, '
                 f'nearest {"/".join(map(str, energies))}'
             )
-        candidates = self._narrowed(candidates, context.intent)
-        bank, name = self._weighted_pick(candidates, context.intent)
-        return AutoloopChoice(bank, name, self._meta[(bank, name)], reason)
+        candidates = self._narrowed(candidates, look)
+        bank, name = self._weighted_pick(candidates, look, wild)
+        return AutoloopChoice(bank, name, self._meta[(bank, name)], reason, look)
 
     def record(self, context: SelectionContext, choice: AutoloopChoice) -> None:
         loop = choice.bank, choice.autoloop
-        self._selections[context.intent] += 1
-        self._last_used[loop] = self._selections[context.intent]
-        self._last_by_intent[context.intent] = loop
+        self._selections[choice.look] += 1
+        self._last_used[loop] = self._selections[choice.look]
+        self._last_by_intent[choice.look] = loop
         if context.intent == LightIntent.DROP:
             self._last_drop_energy = choice.meta.energy
 
-    def _tiers(self, context: SelectionContext) -> tuple[tuple[int, ...], str]:
+    def _tiers(self, context: SelectionContext, wild: bool) -> tuple[tuple[int, ...], str]:
         since_drop = context.seconds_since_drop
         long_since_drop = since_drop is None or since_drop >= LONG_SINCE_DROP_SECONDS
         long_build = context.build_bars >= LONG_BUILD_BARS
@@ -164,6 +192,8 @@ class AutoloopPolicy:
             and long_since_drop
             and maximal_arrival,
             'maximal_drop_last': maximal_drop_last,
+            'wild_maximal_again': wild and maximal_drop_last,
+            'no_maximal_twice': maximal_drop_last and not wild,
             'long_build': long_build or long_since_drop,
             'loudness_rising': context.loudness == RISING,
         }
@@ -185,9 +215,14 @@ class AutoloopPolicy:
         last = self._last_by_intent.get(intent)
         return [loop for loop in candidates if loop != last] or candidates
 
-    def _weighted_pick(self, candidates, intent: LightIntent) -> tuple[str, str]:
+    def _weighted_pick(self, candidates, intent: LightIntent, wild: bool) -> tuple[str, str]:
         unused = [loop for loop in candidates if loop not in self._last_used]
         pool = unused or candidates
         count = self._selections[intent]
         weights = [1 if loop in unused else count + 1 - self._last_used[loop] for loop in pool]
+        if wild:
+            weights = [
+                weight * WILD_MAX_ENERGY_WEIGHT if self._meta[loop].energy == MAX_ENERGY else weight
+                for weight, loop in zip(weights, pool)
+            ]
         return self._rng.choices(pool, weights)[0]

@@ -14,6 +14,7 @@ use mlua::{Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, 
 use serde::Serialize;
 
 use crate::fixtures::{FixtureRig, MAX_FIXTURES};
+use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
@@ -417,7 +418,7 @@ impl LuaAutoloop {
         self.instruction_budget
             .store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
         self.use_render_intensity
-            .call::<()>(context.intensity)
+            .call::<()>((context.intensity, intensity::pulse_depth(context.intensity)))
             .context("set render intensity")?;
         let values = self.lua.to_value_with(
             context,

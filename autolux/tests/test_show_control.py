@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from autolux.lib.engine.effect_definitions import (
+    INTENSITY_BALANCED,
     INTENSITY_CALM,
-    INTENSITY_MEASURED,
     INTENSITY_WILD,
     ShowSettings,
 )
@@ -465,13 +465,13 @@ def test_each_intensity_segment_sends_its_mapped_level(show):
     options = app.layout['control-intensity'].options
     assert [(o['label'], o['value']) for o in options] == [
         ('calm', INTENSITY_CALM),
-        ('measured', INTENSITY_MEASURED),
+        ('balanced', INTENSITY_BALANCED),
         ('wild', INTENSITY_WILD),
     ]
-    state = {'settings': {'intensity': INTENSITY_MEASURED}}
+    state = {'settings': {'intensity': INTENSITY_BALANCED}}
     for word, level in INTENSITY_LEVELS:
         _send_control(app, 'control-intensity.value', level, state)
-        if level != INTENSITY_MEASURED:
+        if level != INTENSITY_BALANCED:
             assert commands.get_nowait() == {'action': 'intensity', 'level': level}, word
     assert commands.empty()
 
