@@ -27,6 +27,9 @@ _SILENCE_RMS = 1.5e-4
 # clears that yet sits below any audible quiet passage, unlike _SILENCE_RMS,
 # which judges a song's end from mean energy.
 _DIGITAL_SILENCE_PEAK = 1e-4
+# A DJ's track change can leave a short run of exact zeros; shorter runs are dropouts.
+TRACK_GAP_MIN_SECONDS = 0.05
+TRACK_GAP_IGNORED_AFTER_START_SECONDS = 2.0
 
 _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
 
@@ -89,6 +92,8 @@ class MusicAnalyser:
         self._last_beat_activation: float = 0.0
         self._audio_started = False
         self._digital_silence_samples: int = 0
+        self._sample_clock: int = 0
+        self._track_start_sample: int | None = None
         self.in_standby: bool = False
         self._reset_state()
 
@@ -172,11 +177,14 @@ class MusicAnalyser:
         return spectral_balance(self._spectrum_frame)
 
     async def analyse(self, audio_signal: np.ndarray) -> np.ndarray:
-        if self._track_digital_silence(audio_signal):
+        silent = self._track_digital_silence(audio_signal)
+        self._sample_clock += len(audio_signal)
+        if silent:
             self._drift.observe()
             return audio_signal
         now = self._clock.now()
         if not self._audio_started:
+            self._track_start_sample = self._sample_clock - len(audio_signal)
             # The first buffer covers audio captured before this callback.
             started = now - datetime.timedelta(seconds=self.buffer_size / self.sample_rate)
             self.song_start_time = self.silence_period_start = started
@@ -209,15 +217,31 @@ class MusicAnalyser:
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
         if np.max(np.abs(audio_signal), initial=0.0) >= _DIGITAL_SILENCE_PEAK:
-            self._digital_silence_samples = 0
+            gap, self._digital_silence_samples = self._digital_silence_samples, 0
             if self.in_standby:
                 self._leave_standby()
+            elif gap:
+                self._note_gap(gap)
             return False
         self._digital_silence_samples += len(audio_signal)
         threshold = self._settings().digital_silence_seconds * self.sample_rate
         if not self.in_standby and self._digital_silence_samples >= threshold:
             self._enter_standby()
         return self.in_standby
+
+    def _note_gap(self, gap_samples: int) -> None:
+        started = self._sample_clock - gap_samples
+        if (
+            gap_samples < TRACK_GAP_MIN_SECONDS * self.sample_rate
+            or self._track_start_sample is None
+            or started - self._track_start_sample
+            < TRACK_GAP_IGNORED_AFTER_START_SECONDS * self.sample_rate
+        ):
+            return
+        self._track_start_sample = self._sample_clock
+        seconds = gap_samples / self.sample_rate
+        logging.info(f'[rhythm] {seconds * 1000:.0f} ms of digital silence — new-track cue')
+        self.handler.on_digital_gap(started / self.sample_rate, seconds)
 
     def _enter_standby(self) -> None:
         seconds = self._digital_silence_samples / self.sample_rate

@@ -52,6 +52,9 @@ OUTRO_LABELS = ('outro', 'altoutro')
 INTRO_LABELS = ('intro', 'altintro')
 BUILD_INTERRUPTION_BARS = 8
 MEASUREMENT_ENDING_INTENTS = (LightIntent.BUILDUP, LightIntent.DROP)
+# Radius bridges a capture resync with inserted zeros and reports it through telemetry that
+# Autolux polls; a gap this close to a reported resync is the bridge, not a track change.
+RESYNC_GUARD_SECONDS = 3.0
 TRACK_LEVEL_BEATS = 2048
 
 
@@ -123,6 +126,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._beat_levels: deque[tuple[float, float]] = deque(maxlen=TRACK_LEVEL_BEATS)
         self._track_started_audio_sec = 0.0
         self._current_arrival_of_peak: float | None = None
+        self._capture_discontinuities: int | None = None
+        self._capture_discontinuity_seen_at: deque[float] = deque(maxlen=8)
         self._track_mood = TrackMoodMeter(MAX_MEASURED_BARS * BEATS_PER_BAR)
         self._static_mode = False
         self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
@@ -368,6 +373,35 @@ class LightEngine(IMusicAnalyserHandler):
         )
         if self._static_mode:
             self.static_looks.resend()
+
+    def on_digital_gap(self, started_sec: float, seconds: float) -> None:
+        detected_at = self._clock.monotonic()
+
+        async def cue():
+            if self._resync_near(detected_at):
+                LOGGER.info('[engine] silence gap at a capture resync — not a new track')
+                return
+            LOGGER.info(
+                f'[engine] {seconds * 1000:.0f} ms silence gap — the next look starts a track'
+            )
+            self._after_silence = True
+
+        if self.command_queue:
+            self.command_queue.schedule('track_cue', cue)
+        elif not self._resync_near(detected_at):
+            self._after_silence = True
+
+    def note_capture_discontinuities(self, total: int | None) -> None:
+        if total is None:
+            return
+        if self._capture_discontinuities is not None and total > self._capture_discontinuities:
+            self._capture_discontinuity_seen_at.append(self._clock.monotonic())
+        self._capture_discontinuities = total
+
+    def _resync_near(self, at: float) -> bool:
+        return any(
+            abs(seen - at) <= RESYNC_GUARD_SECONDS for seen in self._capture_discontinuity_seen_at
+        )
 
     def on_signal_return(self):
         LOGGER.info('[engine] signal returned — the show restarts from scratch')
