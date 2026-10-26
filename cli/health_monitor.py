@@ -72,6 +72,7 @@ class HealthMonitor:
         counters = {
             'underruns': rx.get('underruns_total', 0) + rx.get('device_underruns_total', 0),
             'overruns': tx.get('capture_overruns_total', 0),
+            'resyncs': tx.get('capture_discontinuities_total', 0),
             'lost_frames': rx.get('lost_frames_total', 0),
             'dropped_frames': tx.get('queue_dropped_frames_total', 0)
             + rx.get('overflow_frames_total', 0),
