@@ -1,5 +1,3 @@
-"""Import GDTF fixture descriptions without extracting archive resources."""
-
 import io
 import json
 import os
@@ -35,7 +33,6 @@ def read_bounded(path: Path, limit: int) -> bytes:
 
 
 def read_description(archive: Path) -> str:
-    """Read exactly one root description.xml; never extract files or follow paths."""
     try:
         with zipfile.ZipFile(io.BytesIO(read_bounded(archive, MAX_ARCHIVE_BYTES))) as package:
             members = package.infolist()
@@ -68,7 +65,6 @@ def read_description(archive: Path) -> str:
 
 
 def _guard_description(xml: str) -> None:
-    """Bound parser allocations; GDTF interpretation belongs to pygdtf/Starfire."""
     if len(xml.encode('utf-8')) > MAX_DESCRIPTION_BYTES:
         raise ValueError('GDTF description exceeds its size limit')
     if '<!DOCTYPE' in xml or '<!ENTITY' in xml:
@@ -105,7 +101,6 @@ def _parse(xml: str):
 
 
 def profile_metadata(xml: str, mode_name: str) -> dict:
-    """Describe a selected GDTF mode using the standard parser."""
     try:
         fixture = _parse(xml)
         modes = {mode.name: mode for mode in fixture.dmx_modes}
@@ -184,7 +179,6 @@ def import_fixture(
     mode_name: str,
     validate: Callable[[Path, Path], None],
 ) -> dict:
-    """Validate a candidate registry and publish it atomically for the next session."""
     if PROFILE_ID.fullmatch(profile_id) is None:
         raise ValueError('Profile ID must contain 1..64 lowercase letters, digits, _ or -')
     xml = read_description(archive)

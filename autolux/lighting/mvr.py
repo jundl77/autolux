@@ -13,7 +13,7 @@ from autolux.lighting import mvr_schema as schema
 SCENE_ENTRY = 'GeneralSceneDescription.xml'
 GDTF_DESCRIPTION = 'description.xml'
 GDTF_SUFFIX = '.gdtf'
-PROVIDER = 'Autolux'
+PROVIDER = schema.AUTOLUX_PROVIDER
 PROVIDER_VERSION = '0.1.0'
 DEFAULT_LAYER = 'Room'
 MAX_MVR_BYTES = 32 * 1024 * 1024
@@ -21,17 +21,21 @@ MAX_SCENE_BYTES = 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 4096
 MAX_XML_NODES = 65536
 MAX_XML_DEPTH = 64
-DMX_UNIVERSE_SIZE = 512
+DMX_UNIVERSE_SIZE = schema.UNIVERSE_SIZE
 MATRIX_DECIMALS = 6
 ORTHONORMAL_TOLERANCE = 1e-3
 GIMBAL_TOLERANCE = 1e-9
-FULL_TURN_DEGREES = 360.0
-HALF_TURN_DEGREES = 180.0
 MAX_PITCH_DEGREES = 60.0
 IDENTITY_MATRIX = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
 MOVEMENT_AXES = ('pan', 'tilt')
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 REVISION_TEXT = 'Edited in Autolux Config'
+VERSION_ATTRIBUTES = {
+    'verMajor': str(schema.MVR_VERSION[0]),
+    'verMinor': str(schema.MVR_VERSION[1]),
+    'provider': PROVIDER,
+    'providerVersion': PROVIDER_VERSION,
+}
 
 
 @dataclass
@@ -57,9 +61,17 @@ def _guard_xml(content: bytes, label: str) -> ElementTree.Element:
     return root
 
 
-def _archive(
-    content: bytes, label: str, only: str | None = None
-) -> dict[str, tuple[zipfile.ZipInfo, bytes]]:
+def _unsafe(name: str, folded: set) -> bool:
+    path = PurePosixPath(name)
+    return (
+        path.is_absolute()
+        or '..' in path.parts
+        or any(character in name for character in '\\:\x00')
+        or name.casefold() in folded
+    )
+
+
+def _archive(content: bytes, label: str, only: str | None = None) -> dict:
     if len(content) > MAX_MVR_BYTES:
         raise ValueError(f'{label} exceeds its size limit')
     try:
@@ -72,22 +84,14 @@ def _archive(
             entries, folded = {}, set()
             for member in members:
                 name = member.orig_filename
-                path = PurePosixPath(name)
-                if (
-                    path.is_absolute()
-                    or '..' in path.parts
-                    or '\\' in name
-                    or ':' in name
-                    or '\x00' in name
-                    or name.casefold() in folded
-                ):
+                if _unsafe(name, folded):
                     raise ValueError(f'{label} contains an unsafe or duplicate path {name!r}')
                 if member.flag_bits & 0x1:
                     raise ValueError(f'{label} must not be encrypted')
                 if member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
                     raise ValueError(f'{label} entries must be STORE or DEFLATE compressed')
                 folded.add(name.casefold())
-                if only is None or name == only:
+                if only in (None, name):
                     entries[name] = (member, package.read(member))
             return entries
     except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as error:
@@ -102,7 +106,10 @@ def read(content: bytes) -> Scene:
     if len(scene) > MAX_SCENE_BYTES:
         raise ValueError('MVR scene exceeds its size limit')
     root = _guard_xml(scene, SCENE_ENTRY)
-    if root.tag != 'GeneralSceneDescription' or root.get('verMajor') != str(schema.MVR_VERSION[0]):
+    if (
+        root.tag != 'GeneralSceneDescription'
+        or root.get('verMajor') != VERSION_ATTRIBUTES['verMajor']
+    ):
         raise ValueError('MVR scene must be a GeneralSceneDescription with verMajor 1')
     return Scene(root, entries)
 
@@ -116,35 +123,29 @@ def _info(name: str) -> zipfile.ZipInfo:
 def _xml_bytes(root: ElementTree.Element) -> bytes:
     root = copy.deepcopy(root)
     ElementTree.indent(root, space='  ')
-    return (
-        b'<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
-        + ElementTree.tostring(root, encoding='utf-8')
-        + b'\n'
-    )
+    declaration = b'<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+    return declaration + ElementTree.tostring(root, encoding='utf-8') + b'\n'
+
+
+def _zip(first: tuple[str, bytes], others: dict) -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr(_info(first[0]), first[1])
+        for name in sorted(others):
+            package.writestr(_info(name), others[name][1])
+    return output.getvalue()
 
 
 def write(scene: Scene) -> bytes:
     xml = _xml_bytes(scene.root)
     if len(xml) > MAX_SCENE_BYTES:
         raise ValueError('MVR scene exceeds its size limit')
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as package:
-        package.writestr(_info(SCENE_ENTRY), xml)
-        for name in sorted(scene.entries):
-            package.writestr(_info(name), scene.entries[name][1])
-    return output.getvalue()
+    return _zip((SCENE_ENTRY, xml), scene.entries)
 
 
 def new_scene() -> Scene:
-    root = ElementTree.Element(
-        'GeneralSceneDescription',
-        verMajor=str(schema.MVR_VERSION[0]),
-        verMinor=str(schema.MVR_VERSION[1]),
-        provider=PROVIDER,
-        providerVersion=PROVIDER_VERSION,
-    )
-    scene = ElementTree.SubElement(root, 'Scene')
-    layers = ElementTree.SubElement(scene, 'Layers')
+    root = ElementTree.Element('GeneralSceneDescription', VERSION_ATTRIBUTES)
+    layers = ElementTree.SubElement(ElementTree.SubElement(root, 'Scene'), 'Layers')
     layer = ElementTree.SubElement(
         layers, 'Layer', uuid=stable_uuid('layer', DEFAULT_LAYER), name=DEFAULT_LAYER
     )
@@ -152,21 +153,12 @@ def new_scene() -> Scene:
     return Scene(root)
 
 
-def new_uuid() -> str:
-    return str(uuid.uuid4()).upper()
-
-
 def stable_uuid(*parts: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, 'autolux-mvr:' + '/'.join(parts))).upper()
 
 
 def gdtf_package(description: str, other: dict | None = None) -> bytes:
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as package:
-        package.writestr(_info(GDTF_DESCRIPTION), description.encode('utf-8'))
-        for name in sorted(other or {}):
-            package.writestr(_info(name), other[name][1])
-    return output.getvalue()
+    return _zip((GDTF_DESCRIPTION, description.encode('utf-8')), other or {})
 
 
 def gdtf_entries(scene: Scene, spec: str, only: str | None = None) -> dict:
@@ -191,9 +183,7 @@ def embed_gdtf(scene: Scene, spec: str, description: str, other: dict | None = N
 
 def gdtf_spec_name(manufacturer: str, fixture_type: str) -> str:
     name = f'{manufacturer}@{fixture_type}{GDTF_SUFFIX}'
-    return ''.join(
-        '_' if character in '<>:"/\\|?*' or ord(character) < 32 else character for character in name
-    )
+    return ''.join('_' if char in '<>:"/\\|?*' or ord(char) < 32 else char for char in name)
 
 
 def gdtf_root(description: str, label: str) -> ElementTree.Element:
@@ -208,77 +198,18 @@ def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
     for mode in gdtf_root(description, label).iter('DMXMode'):
         offsets, breaks, attributes = [], set(), set()
         for channel in mode.iter('DMXChannel'):
-            dmx_break = channel.get('DMXBreak', '1')
-            breaks.add(dmx_break)
-            text = channel.get('Offset', 'None')
-            if dmx_break == '1' and text != 'None':
-                offsets.extend(int(value) for value in text.split(','))
+            breaks.add(dmx_break := channel.get('DMXBreak', '1'))
+            if dmx_break == '1' and (text := channel.get('Offset', 'None')) != 'None':
+                offsets.extend(map(int, text.split(',')))
             attributes.update(
-                logical.get('Attribute', '') for logical in channel.iter('LogicalChannel')
+                node.get('Attribute', '').lower() for node in channel.iter('LogicalChannel')
             )
         modes[mode.get('Name', '')] = {
             'channels': max(offsets, default=0),
             'breaks': sorted(breaks),
-            'movement': sorted({'pan', 'tilt'} & {name.lower() for name in attributes}),
+            'movement': sorted(set(MOVEMENT_AXES) & attributes),
         }
     return modes
-
-
-def _without_keys(tree):
-    if isinstance(tree, dict):
-        return {key: _without_keys(value) for key, value in tree.items() if key != 'key'}
-    if isinstance(tree, list):
-        return [_without_keys(value) for value in tree]
-    return tree
-
-
-def _gdtf_edit_errors(original: dict, edited: dict, label: str) -> list[str]:
-    errors = []
-
-    def walk(before, after, path):
-        where = f'{label} {path}/{after["tag"]}'
-        if before['tag'] != after['tag'] or len(before['children']) != len(after['children']):
-            errors.append(f'{where}: GDTF structure is read-only')
-            return
-        if before.get('text', '') != after.get('text', ''):
-            errors.append(f'{where}: text is read-only')
-        editable = schema.GDTF_EDITABLE.get(after['tag'], {})
-        for name in set(before['attributes']) | set(after['attributes']):
-            old, new = before['attributes'].get(name), after['attributes'].get(name)
-            if old == new:
-                continue
-            if name not in editable:
-                errors.append(f'{where}@{name} is read-only')
-            elif new is None or (problem := schema.value_error(editable[name], new)):
-                errors.append(f'{where}@{name} {problem or "is required"}')
-        for index, (first, second) in enumerate(
-            zip(before['children'], after['children'], strict=True)
-        ):
-            walk(first, second, f'{path}/{after["tag"]}[{index}]')
-
-    walk(original, edited, '')
-    names = [node['attributes'].get('Name') for node in _nodes(edited) if node['tag'] == 'DMXMode']
-    if len(names) != len(set(names)):
-        errors.append(f'{label}: DMXMode names must be unique')
-    return errors
-
-
-def _with_revision(root: ElementTree.Element) -> ElementTree.Element:
-    fixture_type = root.find('FixtureType')
-    revisions = fixture_type.find('Revisions')
-    if revisions is None:
-        revisions = ElementTree.Element('Revisions')
-        anchor = fixture_type.find('FTPresets')
-        position = len(fixture_type) if anchor is None else list(fixture_type).index(anchor)
-        fixture_type.insert(position, revisions)
-    ElementTree.SubElement(
-        revisions,
-        'Revision',
-        Text=REVISION_TEXT,
-        Date=datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%S'),
-        ModifiedBy=f'{PROVIDER} {PROVIDER_VERSION}',
-    )
-    return root
 
 
 def to_tree(element: ElementTree.Element, prefix: str = 'n') -> dict:
@@ -302,11 +233,16 @@ def from_tree(tree: dict) -> ElementTree.Element:
             tree['tag'], {str(k): str(v) for k, v in tree['attributes'].items()}
         )
         element.text = tree.get('text') or None
-        for child in tree['children']:
-            element.append(from_tree(child))
+        element.extend(from_tree(child) for child in tree['children'])
     except (KeyError, TypeError, AttributeError, ValueError) as error:
         raise ValueError(f'Malformed rig draft: {error}') from error
     return element
+
+
+def _without_keys(tree):
+    if isinstance(tree, dict):
+        return {key: _without_keys(value) for key, value in tree.items() if key != 'key'}
+    return [_without_keys(value) for value in tree] if isinstance(tree, list) else tree
 
 
 def _nodes(tree: dict):
@@ -315,31 +251,70 @@ def _nodes(tree: dict):
         yield from _nodes(child)
 
 
-def draft(scene: Scene) -> dict:
-    gdtf = {}
-    for spec in sorted(referenced_specs(scene.root)):
-        if spec in scene.entries:
-            gdtf[spec] = to_tree(gdtf_root(gdtf_description(scene, spec), spec), f'g{len(gdtf)}-')
-    return {'scene': to_tree(scene.root, 's'), 'gdtf': gdtf}
+def _gdtf_edit_errors(before: dict, after: dict, label: str) -> list[str]:
+    errors = []
+
+    def walk(before, after, path):
+        where = f'{label} {path}/{after["tag"]}'
+        if before['tag'] != after['tag'] or len(before['children']) != len(after['children']):
+            return errors.append(f'{where}: GDTF structure is read-only')
+        if before.get('text', '') != after.get('text', ''):
+            errors.append(f'{where}: text is read-only')
+        editable = schema.GDTF_EDITABLE.get(after['tag'], {})
+        for name in sorted(set(before['attributes']) | set(after['attributes'])):
+            old, new = before['attributes'].get(name), after['attributes'].get(name)
+            if old == new:
+                continue
+            if name not in editable:
+                errors.append(f'{where}@{name} is read-only')
+            elif new is None or (problem := schema.value_error(editable[name], new)):
+                errors.append(f'{where}@{name} {problem or "is required"}')
+        for index, pair in enumerate(zip(before['children'], after['children'], strict=True)):
+            walk(*pair, f'{path}/{after["tag"]}[{index}]')
+
+    walk(before, after, '')
+    names = [node['attributes'].get('Name') for node in _nodes(after) if node['tag'] == 'DMXMode']
+    if len(names) != len(set(names)):
+        errors.append(f'{label}: DMXMode names must be unique')
+    return errors
+
+
+def _with_revision(root: ElementTree.Element) -> ElementTree.Element:
+    fixture_type = root.find('FixtureType')
+    revisions = fixture_type.find('Revisions')
+    if revisions is None:
+        revisions = ElementTree.Element('Revisions')
+        anchor = fixture_type.find('FTPresets')
+        fixture_type.insert(
+            len(fixture_type) if anchor is None else list(fixture_type).index(anchor), revisions
+        )
+    ElementTree.SubElement(
+        revisions,
+        'Revision',
+        Text=REVISION_TEXT,
+        Date=datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%S'),
+        ModifiedBy=f'{PROVIDER} {PROVIDER_VERSION}',
+    )
+    return root
 
 
 def referenced_specs(root: ElementTree.Element) -> set[str]:
-    return {
-        (node.text or '').strip() for node in root.iter('GDTFSpec') if (node.text or '').strip()
-    }
+    return {text for node in root.iter('GDTFSpec') if (text := (node.text or '').strip())}
+
+
+def draft(scene: Scene) -> dict:
+    gdtf = {}
+    for spec in sorted(referenced_specs(scene.root) & set(scene.entries)):
+        gdtf[spec] = to_tree(gdtf_root(gdtf_description(scene, spec), spec), f'g{len(gdtf)}-')
+    return {'scene': to_tree(scene.root, 's'), 'gdtf': gdtf}
 
 
 def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
     root = from_tree(edited['scene'])
-    root.set('verMajor', str(schema.MVR_VERSION[0]))
-    root.set('verMinor', str(schema.MVR_VERSION[1]))
-    root.set('provider', PROVIDER)
-    root.set('providerVersion', PROVIDER_VERSION)
-    result = Scene(
-        root,
-        {name: entry for name, entry in scene.entries.items() if not name.endswith(GDTF_SUFFIX)},
-    )
-    errors = []
+    for name, value in VERSION_ATTRIBUTES.items():
+        root.set(name, value)
+    kept = {name: entry for name, entry in scene.entries.items() if not name.endswith(GDTF_SUFFIX)}
+    result, errors = Scene(root, kept), []
     for spec in sorted(referenced_specs(root)):
         if spec in scene.entries:
             original = gdtf_description(scene, spec)
@@ -360,12 +335,12 @@ def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
                 result.entries[spec] = scene.entries[spec]
             else:
                 embed_gdtf(result, spec, original)
-            continue
-        if problems := _gdtf_edit_errors(before, _without_keys(tree), spec):
+        elif problems := _gdtf_edit_errors(before, _without_keys(tree), spec):
             errors.extend(problems)
-            continue
-        description = _xml_bytes(_with_revision(from_tree(tree))).decode('utf-8')
-        embed_gdtf(result, spec, description, other)
+        else:
+            embed_gdtf(
+                result, spec, _xml_bytes(_with_revision(from_tree(tree))).decode('utf-8'), other
+            )
     if errors:
         raise ValueError('; '.join(errors[:5]))
     return result
@@ -378,28 +353,24 @@ def _number(value: float) -> str:
 
 def format_matrix(matrix) -> str:
     return ''.join(
-        '{' + ','.join(_number(value) for value in matrix[row : row + 3]) + '}'
-        for row in range(0, 12, 3)
+        '{' + ','.join(map(_number, matrix[row : row + 3])) + '}' for row in range(0, 12, 3)
     )
 
 
 def parse_matrix(text: str | None) -> list[float]:
     if text is None or not text.strip():
         return list(IDENTITY_MATRIX)
-    values = schema.parse_matrix(text)
-    if values is None:
+    if (values := schema.parse_matrix(text)) is None:
         raise ValueError('MVR Matrix must contain four {x,y,z} rows of finite numbers')
     return values
 
 
 def multiply(parent, child) -> list[float]:
-
     def apply(vector):
         return [sum(parent[3 * axis + row] * vector[axis] for axis in range(3)) for row in range(3)]
 
     axes = [value for start in (0, 3, 6) for value in apply(child[start : start + 3])]
-    origin = [a + b for a, b in zip(apply(child[9:12]), parent[9:12], strict=True)]
-    return axes + origin
+    return axes + [a + b for a, b in zip(apply(child[9:12]), parent[9:12], strict=True)]
 
 
 def _dot(a, b) -> float:
@@ -410,8 +381,7 @@ def _axes(matrix):
     axes = []
     for start in (0, 3, 6):
         axis = matrix[start : start + 3]
-        length = math.sqrt(_dot(axis, axis))
-        if not length > ORTHONORMAL_TOLERANCE:
+        if not (length := math.sqrt(_dot(axis, axis))) > ORTHONORMAL_TOLERANCE:
             raise ValueError('MVR Matrix axes must be nonzero')
         axes.append([value / length for value in axis])
     u, v, w = axes
@@ -425,10 +395,8 @@ def _axes(matrix):
 
 
 def canonical_degrees(angle: float) -> float:
-    wrapped = math.remainder(angle, FULL_TURN_DEGREES)
-    if wrapped <= -HALF_TURN_DEGREES:
-        wrapped += FULL_TURN_DEGREES
-    return wrapped + 0.0
+    wrapped = math.remainder(angle, 360.0)
+    return (wrapped + 360.0 if wrapped <= -180.0 else wrapped) + 0.0
 
 
 def rotation_degrees(matrix) -> tuple[float, float, float]:
@@ -437,8 +405,7 @@ def rotation_degrees(matrix) -> tuple[float, float, float]:
     if abs(v[2]) > 1 - GIMBAL_TOLERANCE:
         yaw, roll = math.degrees(math.atan2(u[1], u[0])), 0.0
     else:
-        yaw = math.degrees(math.atan2(-v[0], v[1]))
-        roll = math.degrees(math.atan2(-u[2], w[2]))
+        yaw, roll = math.degrees(math.atan2(-v[0], v[1])), math.degrees(math.atan2(-u[2], w[2]))
     return canonical_degrees(yaw), pitch + 0.0, canonical_degrees(roll)
 
 
@@ -457,10 +424,7 @@ def home_orientation(matrix) -> dict:
 
 
 def compose_matrix(position_mm, rotation) -> list[float]:
-    yaw, pitch, roll = (math.radians(value) for value in rotation)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cr, sr = math.cos(roll), math.sin(roll)
+    (cy, sy), (cp, sp), (cr, sr) = ((math.cos(r), math.sin(r)) for r in map(math.radians, rotation))
     values = [
         cy * cr - sy * sp * sr,
         sy * cr + cy * sp * sr,
@@ -478,16 +442,9 @@ def compose_matrix(position_mm, rotation) -> list[float]:
     return [round(float(value), MATRIX_DECIMALS) + 0.0 for value in values]
 
 
-def _children(node, tag):
-    children = node.find('ChildList')
-    return [] if children is None else [child for child in children if child.tag == tag]
-
-
 def placed_objects(root: ElementTree.Element):
-
     def walk(node, matrix):
-        children = node.find('ChildList')
-        for child in [] if children is None else children:
+        for child in node.find('ChildList') if node.find('ChildList') is not None else ():
             if child.tag in schema.OBJECT_TAGS:
                 placed = multiply(matrix, parse_matrix(child.findtext('Matrix')))
                 yield child, placed
@@ -497,60 +454,59 @@ def placed_objects(root: ElementTree.Element):
         yield from walk(layer, parse_matrix(layer.findtext('Matrix')))
 
 
-def class_names(root: ElementTree.Element) -> dict[str, str]:
-    return {
-        node.get('uuid', '').upper(): node.get('name', '')
-        for node in root.findall('Scene/AUXData/Class')
-    }
+def _text(node, tag: str) -> str:
+    return (node.findtext(tag) or '').strip()
 
 
-def movement_limits(root: ElementTree.Element) -> dict[tuple[str, str], tuple[float, float]]:
-    limits = {}
-    for data in root.findall('UserData/Data'):
-        if data.get('provider') == schema.AUTOLUX_PROVIDER:
-            for node in data.findall('Movement'):
-                limits[(node.get('fixture', '').upper(), node.get('axis', '').lower())] = (
-                    float(node.get('minimum', '0')),
-                    float(node.get('maximum', '1')),
-                )
-    return limits
+def _autolux_data(root: ElementTree.Element):
+    return next(
+        (node for node in root.findall('UserData/Data') if node.get('provider') == PROVIDER), None
+    )
 
 
 def patched_fixtures(scene: Scene) -> list[dict]:
     root = scene.root
-    classes, limits, fixtures = class_names(root), movement_limits(root), []
+    classes = {
+        node.get('uuid', '').upper(): node.get('name', '')
+        for node in root.findall('Scene/AUXData/Class')
+    }
+    limits = {
+        (node.get('fixture', '').upper(), node.get('axis', '').lower()): (
+            float(node.get('minimum', '0')),
+            float(node.get('maximum', '1')),
+        )
+        for data in root.findall('UserData/Data')
+        if data.get('provider') == PROVIDER
+        for node in data.findall('Movement')
+    }
+    fixtures = []
     for node, matrix in placed_objects(root):
-        spec = (node.findtext('GDTFSpec') or '').strip()
         addresses = node.findall('Addresses/Address')
-        if node.tag != 'Fixture' or not spec or not addresses:
+        if node.tag != 'Fixture' or not _text(node, 'GDTFSpec') or not addresses:
             continue
         identity = node.get('uuid', '').upper()
         patch = []
         for address in addresses:
-            location = schema.dmx_address((address.text or '').strip())
-            if location is None:
+            if (location := schema.dmx_address((address.text or '').strip())) is None:
                 raise ValueError(f'{node.get("name", identity)}: invalid DMX address')
             patch.append((int(address.get('break', '0')), *location))
+        movement = {}
+        for axis in MOVEMENT_AXES:
+            low, high = limits.get((identity, axis), (0.0, 1.0))
+            inverted = _text(node, f'DMXInvert{axis.title()}') == 'true'
+            movement[axis] = {'min': low, 'max': high, 'inverted': inverted}
         fixtures.append(
             {
                 'uuid': identity,
                 'name': node.get('name', ''),
-                'gdtf_spec': spec,
-                'gdtf_mode': (node.findtext('GDTFMode') or '').strip(),
+                'gdtf_spec': _text(node, 'GDTFSpec'),
+                'gdtf_mode': _text(node, 'GDTFMode'),
                 'addresses': patch,
                 'universe': patch[0][1],
                 'address': patch[0][2],
-                'class': classes.get((node.findtext('Classing') or '').strip().upper(), ''),
+                'class': classes.get(_text(node, 'Classing').upper(), ''),
                 'matrix': matrix,
-                **{
-                    axis: {
-                        'min': limits.get((identity, axis), (0.0, 1.0))[0],
-                        'max': limits.get((identity, axis), (0.0, 1.0))[1],
-                        'inverted': (node.findtext(f'DMXInvert{axis.title()}') or '').strip()
-                        == 'true',
-                    }
-                    for axis in MOVEMENT_AXES
-                },
+                **movement,
             }
         )
     return fixtures
@@ -577,56 +533,51 @@ def add_fixture(
     matrix=IDENTITY_MATRIX,
     identity: str | None = None,
 ) -> ElementTree.Element:
-    root = scene.root
-    children = root.find('Scene/Layers/Layer/ChildList')
+    layer = scene.root.find('Scene/Layers/Layer')
+    children = layer.find('ChildList')
     if children is None:
-        children = ElementTree.SubElement(root.find('Scene/Layers/Layer'), 'ChildList')
-    node = ElementTree.SubElement(children, 'Fixture', uuid=identity or new_uuid(), name=name)
-    ElementTree.SubElement(node, 'Matrix').text = format_matrix(matrix)
-    if fixture_class:
-        ElementTree.SubElement(node, 'Classing').text = class_uuid(scene, fixture_class)
-    ElementTree.SubElement(node, 'GDTFSpec').text = gdtf_spec
-    ElementTree.SubElement(node, 'GDTFMode').text = gdtf_mode
-    ElementTree.SubElement(node, 'FixtureID').text = str(fixture_id)
-    ElementTree.SubElement(node, 'FixtureIDNumeric').text = str(fixture_id)
-    ElementTree.SubElement(node, 'UnitNumber').text = '0'
-    addresses = ElementTree.SubElement(node, 'Addresses')
-    ElementTree.SubElement(addresses, 'Address', {'break': '0'}).text = str(
-        universe * DMX_UNIVERSE_SIZE + address
+        children = ElementTree.SubElement(layer, 'ChildList')
+    node = ElementTree.SubElement(
+        children, 'Fixture', uuid=identity or str(uuid.uuid4()).upper(), name=name
     )
+    values = [('Matrix', format_matrix(matrix))]
+    if fixture_class:
+        values.append(('Classing', class_uuid(scene, fixture_class)))
+    values += [
+        ('GDTFSpec', gdtf_spec),
+        ('GDTFMode', gdtf_mode),
+        ('FixtureID', str(fixture_id)),
+        ('FixtureIDNumeric', str(fixture_id)),
+        ('UnitNumber', '0'),
+    ]
+    for tag, text in values:
+        ElementTree.SubElement(node, tag).text = text
+    addresses = ElementTree.SubElement(node, 'Addresses')
+    absolute = str(universe * DMX_UNIVERSE_SIZE + address)
+    ElementTree.SubElement(addresses, 'Address', {'break': '0'}).text = absolute
     return node
 
 
 def class_uuid(scene: Scene, name: str) -> str:
-    root = scene.root
-    auxdata = root.find('Scene/AUXData')
+    auxdata = scene.root.find('Scene/AUXData')
     if auxdata is None:
         auxdata = ElementTree.Element('AUXData')
-        root.find('Scene').insert(0, auxdata)
+        scene.root.find('Scene').insert(0, auxdata)
     for node in auxdata.findall('Class'):
         if node.get('name') == name:
             return node.get('uuid')
-    identity = stable_uuid('class', name)
-    ElementTree.SubElement(auxdata, 'Class', uuid=identity, name=name)
+    ElementTree.SubElement(
+        auxdata, 'Class', uuid=(identity := stable_uuid('class', name)), name=name
+    )
     return identity
 
 
 def set_movement_limits(scene: Scene, identity: str, axis: str, low: float, high: float) -> None:
     root = scene.root
-    user_data = root.find('UserData')
-    if user_data is None:
-        user_data = ElementTree.Element('UserData')
-        root.insert(0, user_data)
-    data = next(
-        (
-            node
-            for node in user_data.findall('Data')
-            if node.get('provider') == schema.AUTOLUX_PROVIDER
-        ),
-        None,
-    )
-    if data is None:
-        data = ElementTree.SubElement(user_data, 'Data', provider=schema.AUTOLUX_PROVIDER, ver='1')
+    if (user_data := root.find('UserData')) is None:
+        root.insert(0, user_data := ElementTree.Element('UserData'))
+    if (data := _autolux_data(root)) is None:
+        data = ElementTree.SubElement(user_data, 'Data', provider=PROVIDER, ver='1')
     for node in data.findall('Movement'):
         if node.get('fixture') == identity and node.get('axis') == axis.title():
             data.remove(node)
