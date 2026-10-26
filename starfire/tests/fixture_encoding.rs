@@ -238,12 +238,12 @@ fn rotated_fixed_fixtures_are_accepted_and_non_rotations_rejected() {
 }
 
 #[test]
-fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() {
+fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_the_fx_derby_dark() {
     const STRIP_START: usize = 96;
     const RGB_CHANNELS: usize = 3;
     const PIXEL_COUNT: usize = 8;
-    const MINI_KINTA_START: usize = 39;
-    const MINI_KINTA_CHANNELS: usize = 4;
+    const FX_DERBY_START: usize = 39;
+    const FX_DERBY_CHANNELS: usize = 4;
     let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
@@ -269,7 +269,7 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() 
             );
         }
         assert_eq!(
-            &frame[MINI_KINTA_START..MINI_KINTA_START + MINI_KINTA_CHANNELS],
+            &frame[FX_DERBY_START..FX_DERBY_START + FX_DERBY_CHANNELS],
             &[0, 0, 0, 0]
         );
         assert!(

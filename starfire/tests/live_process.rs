@@ -324,6 +324,25 @@ fn radius_login_owns_receiver_connection_and_writes_separate_transport_health() 
 }
 
 #[test]
+fn login_rejects_a_capability_reply_over_the_real_time_cap() {
+    let mut renderer = Renderer::start();
+    let mut login = renderer.login.clone();
+    let rig = login.rig.as_mut().unwrap();
+    let member = rig.fixtures[0].fixture_id.clone();
+    rig.groups = (0..64)
+        .map(|index| wire::FixtureGroup {
+            group_id: format!("{index:0>100}"),
+            fixture_ids: vec![member.clone()],
+        })
+        .collect();
+    assert!(matches!(
+        renderer.reply(Operation::Login(login)),
+        Event::ErrorReply(value) if value.message.contains("real-time cap")
+    ));
+    renderer.assert_no_output();
+}
+
+#[test]
 fn login_rejects_incompatible_major_and_negotiates_compatible_minor_before_output() {
     let mut renderer = Renderer::start();
     let mut login = renderer.login.clone();

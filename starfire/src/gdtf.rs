@@ -529,16 +529,12 @@ impl GdtfProfile {
         infos
     }
 
-    /// Semantic intensity reaches output through a dimmer, colour mixing, a dark wheel slot or a closing shutter.
-    pub fn expresses_intensity(&self) -> bool {
-        self.channels.iter().any(|channel| {
-            channel.has_rgb
-                || channel.closes_when_dark
-                || channel.functions.iter().any(|function| {
-                    function.attribute == "Dimmer"
-                        || function.sets.iter().any(|set| set.colour == Some(BLACK))
-                })
-        })
+    pub fn has_dark_wheel_slot(&self) -> bool {
+        self.channels
+            .iter()
+            .flat_map(|channel| &channel.functions)
+            .flat_map(|function| &function.sets)
+            .any(|set| set.colour == Some(BLACK))
     }
 
     /// A later layer's key replaces every earlier key that addresses one of its channels.

@@ -75,7 +75,13 @@ impl Slots {
 enum Pulse {
     Advance(Slots),
     Shutter(Continuous),
-    Intensity,
+    DarkSlot,
+}
+
+impl Pulse {
+    fn gates(&self) -> bool {
+        !matches!(self, Self::Advance(_))
+    }
 }
 
 /// What one fixture's profile can express, resolved once per session.
@@ -151,7 +157,7 @@ impl FixtureMap {
                     .flatten()
             })
             .or_else(|| shutter.map(Pulse::Shutter))
-            .or_else(|| profile.expresses_intensity().then_some(Pulse::Intensity));
+            .or_else(|| profile.has_dark_wheel_slot().then_some(Pulse::DarkSlot));
         Self {
             colour_channels,
             energy_channels: dimmers.iter().map(|f| f.channel).collect(),
@@ -236,13 +242,56 @@ pub fn validate(special: &Special) -> Result<()> {
             .is_none_or(|beats| (1..=MAX_PULSE_BEATS).contains(&beats)),
         "special pulse must be 1..{MAX_PULSE_BEATS} beats"
     );
-    ensure!(
-        special.colour_slot.is_empty()
-            || PaletteSlots::NAMES.contains(&special.colour_slot.as_str()),
-        "unknown palette slot {:?}",
-        special.colour_slot
-    );
     Ok(())
+}
+
+/// Running state of one special, advanced once per rendered frame.
+#[derive(Clone, Copy, Debug)]
+pub struct Progress {
+    pub started_beat: f64,
+    pub started_seconds: f64,
+    scan_cycles: f64,
+    last_beat: f64,
+}
+
+impl Progress {
+    pub fn new(beat: f64, seconds: f64) -> Self {
+        Self {
+            started_beat: beat,
+            started_seconds: seconds,
+            scan_cycles: 0.0,
+            last_beat: beat,
+        }
+    }
+
+    /// A replacement under the same effect ID keeps the beam where it was.
+    pub fn continue_scan(&mut self, replaced: &Progress) {
+        self.scan_cycles = replaced.scan_cycles;
+    }
+
+    pub fn advance(&mut self, special: &Special, beat: f64, speed_scale: f64) {
+        let elapsed = (beat - self.last_beat).max(0.0);
+        self.scan_cycles += elapsed * special.speed * speed_scale * MAX_SCAN_CYCLES_PER_BEAT;
+        self.last_beat = beat;
+    }
+}
+
+/// Lengthens the pulse period by whole multiples until its rate fits the cap.
+pub fn capped_pulse_beats(
+    pulse_beats: u32,
+    beats_per_second: f64,
+    max_rate_hz: f64,
+) -> Option<f64> {
+    if max_rate_hz <= 0.0 {
+        return None;
+    }
+    let beats = f64::from(pulse_beats);
+    let rate_hz = beats_per_second / beats;
+    Some(if rate_hz > max_rate_hz {
+        beats * (rate_hz / max_rate_hz).ceil()
+    } else {
+        beats
+    })
 }
 
 pub fn attack_level(special: &Special, elapsed_beats: f64) -> f64 {
@@ -266,10 +315,12 @@ pub fn release_level(special: &Special, from_level: f64, elapsed_beats: f64) -> 
 pub struct SpecialFrame<'a> {
     pub level: f64,
     pub beat_position: f64,
-    pub elapsed_beats: f64,
+    pub progress: Progress,
     pub palette: &'a PaletteSlots,
     pub speed_scale: f64,
-    pub pulse_allowed: bool,
+    pub beats_per_second: f64,
+    pub max_pulse_hz: f64,
+    pub gate_allowed: bool,
 }
 
 pub fn apply(
@@ -289,8 +340,11 @@ pub fn apply(
     let speed = special.speed * frame.speed_scale;
     let pulse = special
         .pulse_beats
-        .filter(|_| frame.pulse_allowed)
-        .and_then(|beats| Some((map.pulse.as_ref()?, f64::from(beats))));
+        .and_then(|beats| capped_pulse_beats(beats, frame.beats_per_second, frame.max_pulse_hz))
+        .and_then(|beats| {
+            let pulse = map.pulse.as_ref()?;
+            (frame.gate_allowed || !pulse.gates()).then_some((pulse, beats))
+        });
     let pattern = special.pattern.and_then(|value| {
         let slots = map.pattern.as_ref()?;
         Some((slots, slots.index_of(value)))
@@ -354,7 +408,7 @@ pub fn apply(
             Pulse::Shutter(shutter) => {
                 blend(shutter, if open { shutter.rest } else { shutter.from });
             }
-            Pulse::Intensity => {}
+            Pulse::DarkSlot => {}
         }
     }
     let base = pattern.map_or(0, |(_, index)| index);
@@ -378,11 +432,11 @@ pub fn apply(
         };
     }
     if scan {
-        let cycles = frame.elapsed_beats * speed * MAX_SCAN_CYCLES_PER_BEAT;
+        let cycles = frame.progress.scan_cycles;
         let sweep = 1.0 - (2.0 * (cycles + SCAN_CENTRE_PHASE).fract() - 1.0).abs();
         state.pan = lerp(state.pan, sweep, level);
     }
-    if !open && matches!(pulse, Some((Pulse::Intensity, _))) {
+    if !open && matches!(pulse, Some((Pulse::DarkSlot, _))) {
         state.intensity *= 1.0 - level;
     }
 }

@@ -2,7 +2,7 @@ mod support;
 
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
-use starfire::model::FixtureState;
+use starfire::model::{AttributeValue, FixtureState};
 use starfire::protocol::{ClientMessage, apply_command, wire};
 use starfire::script::AutoloopCatalog;
 use starfire::special::capabilities;
@@ -227,8 +227,8 @@ fn the_real_rig_reports_what_its_profiles_declare() {
         vec![
             ("fx".to_owned(), 1, [true, true, true, false]),
             ("movers".to_owned(), 2, [true, true, true, false]),
-            ("strip".to_owned(), 8, [true, false, true, false]),
-            ("wash".to_owned(), 4, [true, false, true, false]),
+            ("strip".to_owned(), 8, [true, false, false, false]),
+            ("wash".to_owned(), 4, [true, false, false, false]),
         ]
     );
 }
@@ -439,7 +439,6 @@ fn invalid_specials_are_rejected() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
     for invalid in [
-        steady("neon", 1.0, 0.0),
         steady("primary", 1.5, 0.0),
         steady("primary", 1.0, f32::NAN),
         wire::Special {
@@ -493,27 +492,139 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
     ] {
         apply_command(&mut engine, 0.0, &command).unwrap();
     }
-    assert_eq!(&dmx(&mut engine, 0.0)[address..address + 4], &[0, 0, 0, 0]);
+    let profile = rig.profile(member).unwrap();
+    let fixture = address..address + profile.footprint();
+    let rotation = profile
+        .functions()
+        .into_iter()
+        .find(|function| function.attribute.ends_with("Rotate"))
+        .unwrap();
+    let spinning = |intensity| FixtureState {
+        intensity,
+        colour: primary(),
+        attributes: [(
+            rotation.key.clone(),
+            AttributeValue::Number(rotation.physical_to),
+        )]
+        .into(),
+        ..FixtureState::default()
+    };
+    let dark = reference(
+        &rig,
+        member,
+        FixtureState {
+            colour: primary(),
+            ..FixtureState::default()
+        },
+    );
+    assert_eq!(
+        dmx(&mut engine, 0.0)[fixture.clone()],
+        dark[fixture.clone()]
+    );
     let pulsed = wire::Special {
         pulse_beats: Some(1),
         ..steady("primary", 1.0, 1.0)
     };
     fire(&mut engine, 0.0, &special("fx", pulsed));
-    let lit = reference(
-        &rig,
-        member,
-        FixtureState {
-            intensity: 1.0,
-            colour: primary(),
-            ..FixtureState::default()
-        },
-    );
     let open = dmx(&mut engine, 0.25);
-    assert_eq!(open[address], lit[address]);
-    assert_ne!(open[address], 0);
-    assert_eq!(&open[address + 1..address + 4], &[0, 255, 0]);
     assert_eq!(
-        &dmx(&mut engine, 0.75)[address..address + 4],
-        &[0, 0, 255, 0]
+        open[fixture.clone()],
+        reference(&rig, member, spinning(1.0))[fixture.clone()]
     );
+    assert_ne!(open[fixture.clone()], dark[fixture.clone()]);
+    assert_eq!(
+        dmx(&mut engine, 0.75)[fixture.clone()],
+        reference(&rig, member, spinning(0.0))[fixture]
+    );
+}
+
+fn parameter(kind: wire::ParameterType, value: f64) -> ClientMessage {
+    ClientMessage::SetParameter(wire::SetParameter {
+        command_id: 1,
+        parameter: Some(wire::Parameter {
+            r#type: kind as i32,
+            value: Some(wire::parameter::Value::Number(value)),
+            fade_seconds: 0.0,
+        }),
+    })
+}
+
+#[test]
+fn an_unknown_colour_slot_leaves_colour_to_the_look() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let mut engine = engine(&rig);
+    fire(
+        &mut engine,
+        0.0,
+        &special("scanners", steady("neon", 1.0, 0.0)),
+    );
+    assert_eq!(
+        &dmx(&mut engine, 0.5)[SCANNER.start + 2..SCANNER.start + 5],
+        &[255, 255, 255]
+    );
+}
+
+#[test]
+fn an_intensity_change_bends_the_scan_without_jumping_it() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let mut engine = engine(&rig);
+    fire(
+        &mut engine,
+        0.0,
+        &special("scanners", steady("primary", 1.0, 1.0)),
+    );
+    let pan = |engine: &mut Engine, beat: f64| {
+        engine
+            .render_at(beat * SECONDS_PER_BEAT)
+            .unwrap()
+            .fixture_properties_before_strobe["scanner"]
+            .pan
+    };
+    assert!((pan(&mut engine, 0.25) - 0.75).abs() < 1e-9);
+    fire(
+        &mut engine,
+        0.25,
+        &parameter(wire::ParameterType::Intensity, 0.5),
+    );
+    assert!((pan(&mut engine, 1.0) - 0.875).abs() < 1e-9);
+}
+
+#[test]
+fn pulses_lengthen_to_the_strobe_rate_cap_and_gates_stop_after_the_burst() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let mut engine = engine(&rig);
+    fire(
+        &mut engine,
+        0.0,
+        &parameter(wire::ParameterType::StrobeMaxRateHz, 1.0),
+    );
+    fire(
+        &mut engine,
+        0.0,
+        &parameter(wire::ParameterType::StrobeMaxBurstSeconds, 1.0),
+    );
+    let pulsed = wire::Special {
+        pulse_beats: Some(1),
+        ..steady("primary", 1.0, 0.0)
+    };
+    fire(&mut engine, 0.0, &special("fx", pulsed));
+    let shutter = SPINNER.start + 1;
+    let gobo = SCANNER.end - 1;
+    for (beat, shutter_byte, slot) in [
+        (0.25, 255, 0),
+        (0.75, 255, 0),
+        (1.25, 0, 0),
+        (1.75, 0, 0),
+        (2.25, 255, 64),
+        (3.25, 255, 64),
+        (3.75, 255, 64),
+        (4.25, 255, 128),
+    ] {
+        let frame = dmx(&mut engine, beat);
+        assert_eq!(
+            (frame[shutter], frame[gobo]),
+            (shutter_byte, slot),
+            "{beat}"
+        );
+    }
 }

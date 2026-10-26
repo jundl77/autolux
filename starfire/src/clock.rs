@@ -160,6 +160,14 @@ impl MusicalClock {
         Ok(())
     }
 
+    pub fn beats_per_second(&self) -> f64 {
+        if self.paused {
+            0.0
+        } else {
+            self.tempo_bpm / SECONDS_PER_MINUTE
+        }
+    }
+
     pub fn paused(&self) -> bool {
         self.paused
     }

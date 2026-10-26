@@ -14,7 +14,7 @@ use crate::model::{
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
-use crate::special::{self, FixtureMap, SpecialFrame};
+use crate::special::{self, FixtureMap, Progress, SpecialFrame};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -92,7 +92,7 @@ struct ActiveOverride {
     order: u64,
     expires_seconds: Option<f64>,
     expires_beat: Option<f64>,
-    started_beat: f64,
+    progress: Progress,
 }
 
 impl ActiveOverride {
@@ -103,13 +103,13 @@ impl ActiveOverride {
 
     fn release(self, beat: f64) -> Option<ReleasingSpecial> {
         let special = *self.value.special?;
-        let from_level = special::attack_level(&special, beat - self.started_beat);
+        let from_level = special::attack_level(&special, beat - self.progress.started_beat);
         (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
             special,
             fixture_ids: self.fixture_ids,
             priority: self.value.priority,
             order: self.order,
-            started_beat: self.started_beat,
+            progress: self.progress,
             released_beat: beat,
             from_level,
         })
@@ -121,7 +121,7 @@ struct ReleasingSpecial {
     fixture_ids: Vec<String>,
     priority: i32,
     order: u64,
-    started_beat: f64,
+    progress: Progress,
     released_beat: f64,
     from_level: f64,
 }
@@ -691,10 +691,13 @@ impl Engine {
                 order,
                 expires_seconds,
                 expires_beat,
-                started_beat: time.elapsed_musical_beats,
+                progress: Progress::new(time.elapsed_musical_beats, seconds),
             },
         );
         if let Some(replaced) = replaced {
+            if let Some(current) = self.overrides.get_mut(&value.id) {
+                current.progress.continue_scan(&replaced.progress);
+            }
             self.release(replaced, time.elapsed_musical_beats);
         }
         self.override_order = order;
@@ -730,7 +733,20 @@ impl Engine {
         let beat = time.elapsed_musical_beats;
         self.retire_expired(seconds, beat);
         let palette = self.palette.slots_at(beat);
-        let pulse_allowed = intensity_strobe_scale(self.intensity) > 0.0;
+        let strobe_scale = intensity_strobe_scale(self.intensity);
+        let max_pulse_hz = self.strobe_max_rate_hz * strobe_scale;
+        let max_gate_seconds = self.strobe_max_burst_seconds * strobe_scale;
+        let beats_per_second = self.clock.beats_per_second();
+        for value in self.overrides.values_mut() {
+            if let Some(special) = &value.value.special {
+                value.progress.advance(special, beat, self.intensity);
+            }
+        }
+        for releasing in &mut self.releasing {
+            releasing
+                .progress
+                .advance(&releasing.special, beat, self.intensity);
+        }
         let layers = self
             .overrides
             .values()
@@ -738,8 +754,8 @@ impl Engine {
                 let special = value.value.special.as_deref().map(|special| {
                     (
                         special,
-                        special::attack_level(special, beat - value.started_beat),
-                        value.started_beat,
+                        special::attack_level(special, beat - value.progress.started_beat),
+                        value.progress,
                     )
                 });
                 (
@@ -757,7 +773,7 @@ impl Engine {
                     Some((
                         &releasing.special,
                         releasing.level(beat),
-                        releasing.started_beat,
+                        releasing.progress,
                     )),
                 )
             }));
@@ -774,7 +790,7 @@ impl Engine {
                         state.intensity *= multiplier;
                     }
                 }
-                if let Some((special, level, started_beat)) = special
+                if let Some((special, level, progress)) = special
                     && let (Some(map), Some(profile)) =
                         (self.special_maps.get(id), self.rig.profile(id))
                 {
@@ -786,10 +802,12 @@ impl Engine {
                         &SpecialFrame {
                             level,
                             beat_position: time.beat_position,
-                            elapsed_beats: beat - started_beat,
+                            progress,
                             palette: &palette,
                             speed_scale: self.intensity,
-                            pulse_allowed,
+                            beats_per_second,
+                            max_pulse_hz,
+                            gate_allowed: seconds - progress.started_seconds < max_gate_seconds,
                         },
                     );
                 }
