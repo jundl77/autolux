@@ -21,6 +21,7 @@ from autolux.lib.engine.effect_definitions import (
 )
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
+from autolux.lib.media_session import MEDIA_SESSION_SOURCE
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
@@ -519,6 +520,25 @@ def _status_item(caption: str, value, **props):
     )
 
 
+TRACK_TITLE_CHARS = 28
+
+
+def _track_status(snapshot: dict) -> list:
+    track = snapshot.get('track') or {}
+    title = track.get('title')
+    if track.get('source') != MEDIA_SESSION_SOURCE or not title:
+        return []
+    shown = title if len(title) <= TRACK_TITLE_CHARS else title[: TRACK_TITLE_CHARS - 1] + '…'
+    artist = track.get('artist')
+    return [
+        _status_item(
+            'Track',
+            f'{artist} – {shown}' if artist else shown,
+            title=f'{artist} – {title}' if artist else title,
+        )
+    ]
+
+
 def _build_show_status(snapshot: dict, now: float) -> list:
     cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
@@ -546,6 +566,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             ],
             title=detail,
         ),
+        *_track_status(snapshot),
         _status_item(
             'Colors',
             [

@@ -36,6 +36,7 @@ from autolux.lib.engine.event_buffer import (
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
 from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat, TrackMoodMeter
+from autolux.lib.media_session import TrackChanged
 from autolux.lighting.palettes import Mood
 
 if TYPE_CHECKING:
@@ -76,8 +77,11 @@ class LightEngine(IMusicAnalyserHandler):
         settings: Callable[[], ShowSettings] = ShowSettings,
         silence_monitor: Callable[[], None] | None = None,
         static_rig: StaticRig = StaticRig(),
+        media_session_live: Callable[[], bool] = lambda: False,
     ):
         self.lighting_client = lighting_client
+        self._media_session_live = media_session_live
+        self.room_track: TrackChanged | None = None
         self._silence_monitor = silence_monitor
         self._settings = settings
         self.effect_controller: EffectController = effect_controller
@@ -393,6 +397,25 @@ class LightEngine(IMusicAnalyserHandler):
         elif not self._resync_near(detected_at):
             self._after_silence = True
 
+    def on_media_track(self, track: TrackChanged) -> None:
+        def cue():
+            LOGGER.info(
+                f'[engine] media session: "{track.artist} – {track.title}" — '
+                'the next look starts a track'
+            )
+            self.room_track = track
+            self._after_silence = True
+
+        if self.command_queue:
+
+            async def command():
+                cue()
+
+            delay_sec = max(0.0, track.at + self.command_queue.delay_sec - self._clock.monotonic())
+            self.command_queue.schedule('track_cue', command, delay_sec=delay_sec)
+        else:
+            cue()
+
     def note_capture_discontinuities(self, total: int | None) -> None:
         if total is None:
             return
@@ -599,7 +622,8 @@ class LightEngine(IMusicAnalyserHandler):
     ) -> SelectionContext:
         previous = self._entered_intent
         new_track = self._after_silence or (
-            intent == LightIntent.ATMOSPHERIC
+            not self._media_session_live()
+            and intent == LightIntent.ATMOSPHERIC
             and label in INTRO_LABELS
             and (previous == LightIntent.DROP or self._entered_label in OUTRO_LABELS)
         )

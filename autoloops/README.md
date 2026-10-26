@@ -7,6 +7,14 @@ One Lua file per look, `autoloops/<bank>/<loop>.lua`; banks are the intents
 silent (the player stopped). It is outside the rotation, required by readiness, and
 deliberately static: no beat or loudness response, movers parked dark, warm white only.
 
+Track boundaries and pauses come from the first live source, in this order. The Windows
+system media session (the `media` extra; Spotify's session is preferred, else the current
+one): a track change starts a new track when the delayed audio reaches it, and a pause or
+stop drops the delayed audio and shows standby at once, re-arming on play. It counts as live
+while it reported anything in the last 30 s. Otherwise the zeros in the audio: 2 s of
+digital silence is standby, a 50 ms gap is a new-track cue, and an intro after a drop or
+outro also starts a track.
+
 ## Rules
 
 - **Bar-locked.** 8- or 16-beat loops, a pure function of `ctx.beat_position`, so

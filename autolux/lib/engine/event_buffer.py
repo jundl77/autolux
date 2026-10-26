@@ -46,6 +46,7 @@ class EventBuffer:
             'static': None,
         }
         self._palette: dict | None = None
+        self._track: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -181,6 +182,10 @@ class EventBuffer:
         with self._lock:
             self._palette = {'name': name, 'pinned': pinned}
 
+    def set_track(self, track: dict) -> None:
+        with self._lock:
+            self._track = dict(track)
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
@@ -253,6 +258,7 @@ class EventBuffer:
                 'shed': dict(self._shed_state),
                 **copy.deepcopy(self._control_state),
                 'palette': copy.deepcopy(self._palette),
+                'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

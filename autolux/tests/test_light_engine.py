@@ -1481,7 +1481,7 @@ class _MetronomeRhythm:
 
 
 class _Show:
-    def __init__(self):
+    def __init__(self, track_source=None):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.audio_config import BUFFER_SIZE
 
@@ -1492,6 +1492,7 @@ class _Show:
         self.queue = DelayedCommandQueue(14.0, clock=self.clock)
         self.chain, self.decoder = FakeChain(), FakeDecoder()
         self.monitor_silenced = 0
+        self.track_source = track_source
         self.events = EventBuffer(window_sec=float('inf'), clock=self.clock, look_ahead_sec=14.0)
         self.events.start()
         self.light = LightEngine(
@@ -1504,8 +1505,15 @@ class _Show:
             section_decoder=self.decoder,
             clock=self.clock,
             silence_monitor=self._silence_monitor,
+            media_session_live=lambda: self.media_session_live,
         )
-        self.analyser = MusicAnalyser(SAMPLE_RATE, BUFFER_SIZE, self.light, clock=self.clock)
+        self.analyser = MusicAnalyser(
+            SAMPLE_RATE,
+            BUFFER_SIZE,
+            self.light,
+            clock=self.clock,
+            zeros_mark_tracks=lambda: not self.media_session_live,
+        )
         self.analyser._rhythm = _MetronomeRhythm()
         self.light.set_analyser(self.analyser)
         self._buffer_size = BUFFER_SIZE
@@ -1513,6 +1521,10 @@ class _Show:
 
     def _silence_monitor(self):
         self.monitor_silenced += 1
+
+    @property
+    def media_session_live(self) -> bool:
+        return self.track_source is not None and self.track_source.media_session_live
 
     async def play(self, seconds: float, level: float) -> None:
         step = self._buffer_size / SAMPLE_RATE
