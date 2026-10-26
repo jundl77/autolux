@@ -77,6 +77,11 @@ def parse_control_command(payload) -> dict:
         if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
             raise ValueError('master brightness must be within 0..1')
         return {'action': action, 'level': float(level)}
+    if action == 'intensity':
+        level = payload.get('level')
+        if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
+            raise ValueError('intensity must be within 0..1')
+        return {'action': action, 'level': float(level)}
     if action == 'settings':
         return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
     raise ValueError(f'unknown control action {action!r}')

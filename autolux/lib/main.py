@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import json
 import logging
@@ -85,13 +86,18 @@ class ShowControl:
                     LOGGER.warning('[main] next autoloop refused: %s', error)
             elif action == 'master':
                 light_engine.set_master_level(command['level'])
-            elif action == 'settings':
+            elif action in ('settings', 'intensity'):
+                settings = (
+                    command['settings']
+                    if action == 'settings'
+                    else dataclasses.replace(self.settings, intensity=command['level'])
+                )
                 try:
-                    save_show_settings(self.config_path, command['settings'])
+                    save_show_settings(self.config_path, settings)
                 except OSError:
                     LOGGER.exception('[main] show settings were not saved; keeping the old ones')
                     continue
-                self.settings = command['settings']
+                self.settings = settings
                 light_engine.settings_changed()
                 LOGGER.info('[main] show settings %s', self.settings.to_dict())
         if applied:

@@ -6,14 +6,19 @@ from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
+    DEFAULT_AUTOLOOP_META,
+    DEFAULT_AUTOLOOPS,
     STROBE_BURST_SECONDS,
     STROBE_COOLDOWN_SECONDS,
     STROBE_MAX_BURST_SECONDS,
     STROBE_RATE_HZ,
     AutoloopMeta,
     LightIntent,
+    ShowSettings,
 )
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
+
+FULL_INTENSITY = ShowSettings(intensity=1.0)
 
 
 async def test_applied_lighting_change_has_one_useful_info_line(effect_controller, caplog):
@@ -46,9 +51,8 @@ async def test_same_autoloop_continues_without_reselection_or_repeating_accent(
     )
 
 
-async def test_strobe_is_an_expiring_accent_over_the_drop_autoloop(
-    effect_controller, recorded_lighting
-):
+async def test_strobe_is_an_expiring_accent_over_the_drop_autoloop(recorded_lighting):
+    effect_controller = EffectController(recorded_lighting, settings=lambda: FULL_INTENSITY)
     await effect_controller.change_effect(LightIntent.BREAKDOWN)
     await effect_controller.change_effect(LightIntent.DROP)
     commands = [event['command'] for event in recorded_lighting.events]
@@ -94,7 +98,7 @@ async def _drop_after(controller, lighting, clock, seconds):
 
 async def test_drop_strobe_respects_cooldown_but_the_drop_still_cuts(recorded_lighting, caplog):
     clock = VirtualClock()
-    controller = EffectController(recorded_lighting, clock=clock)
+    controller = EffectController(recorded_lighting, clock=clock, settings=lambda: FULL_INTENSITY)
 
     first = await _drop_after(controller, recorded_lighting, clock, 0)
     assert [e['command']['kind'] for e in first] == ['select', 'set_override']
@@ -125,14 +129,12 @@ async def test_strobe_burst_stays_within_two_bars_four_seconds_and_eight_hz(reco
 
 
 async def test_a_cooldown_change_applies_to_the_next_drop_without_a_restart(recorded_lighting):
-    from autolux.lib.engine.effect_definitions import ShowSettings
-
     clock = VirtualClock()
-    settings = ShowSettings()
+    settings = FULL_INTENSITY
     controller = EffectController(recorded_lighting, clock=clock, settings=lambda: settings)
     await _drop_after(controller, recorded_lighting, clock, 0)
 
-    settings = ShowSettings(drop_strobe_cooldown_seconds=10)
+    settings = ShowSettings(drop_strobe_cooldown_seconds=10, intensity=1.0)
     later = await _drop_after(controller, recorded_lighting, clock, 11)
     assert [e['command']['kind'] for e in later] == ['select', 'set_override']
 
@@ -309,3 +311,53 @@ async def test_next_autoloop_switches_at_once_to_another_loop_with_the_default_c
     assert f'reason={choice.reason}' in caplog.text
     await controller.change_effect(LightIntent.BREAKDOWN)
     assert lighting.events[-1] is select, 're-entering the same section keeps the skipped loop'
+
+
+async def test_low_intensity_sends_no_drop_strobe_but_still_cuts_to_the_drop(
+    recorded_lighting, caplog
+):
+    settings = ShowSettings(intensity=0.29)
+    controller = EffectController(recorded_lighting, settings=lambda: settings)
+    with caplog.at_level(logging.INFO):
+        await controller.change_effect(LightIntent.DROP)
+    assert [e['command']['kind'] for e in recorded_lighting.events] == ['select']
+    assert 'intensity 0.29 below 0.30' in caplog.text
+
+
+async def test_drop_strobe_rate_and_burst_scale_with_intensity_within_the_caps(recorded_lighting):
+    settings = ShowSettings(intensity=0.5, strobe_max_rate_hz=6.0)
+    controller = EffectController(recorded_lighting, settings=lambda: settings)
+    await controller.change_effect(LightIntent.DROP)
+    accent = recorded_lighting.events[-1]['command']['value']
+    assert accent['values'] == {'strobe_hz': pytest.approx(3.0)}
+    assert accent['lifetime']['duration_seconds'] == pytest.approx(0.5 * STROBE_BURST_SECONDS)
+
+
+@pytest.mark.parametrize(('intensity', 'cooldown'), [(1.0, 60.0), (0.5, 120.0), (0.3, 200.0)])
+async def test_drop_strobe_cooldown_lengthens_as_intensity_falls(
+    recorded_lighting, intensity, cooldown
+):
+    clock = VirtualClock()
+    settings = ShowSettings(intensity=intensity)
+    controller = EffectController(recorded_lighting, clock=clock, settings=lambda: settings)
+    await _drop_after(controller, recorded_lighting, clock, 0)
+    early = await _drop_after(controller, recorded_lighting, clock, cooldown - 1)
+    assert [e['command']['kind'] for e in early] == ['select']
+    later = await _drop_after(controller, recorded_lighting, clock, 2)
+    assert [e['command']['kind'] for e in later] == ['select', 'set_override']
+
+
+async def test_the_intensity_setting_caps_the_drop_energy_at_selection_time(recorded_lighting):
+    settings = ShowSettings(intensity=0.2)
+    controller = EffectController(
+        recorded_lighting,
+        settings=lambda: settings,
+        autoloops={**DEFAULT_AUTOLOOPS, LightIntent.DROP: (('drop', 'kick'), ('drop', 'soft'))},
+        autoloop_meta={
+            **DEFAULT_AUTOLOOP_META,
+            ('drop', 'soft'): AutoloopMeta(2, 'warm', 'snap'),
+        },
+    )
+    await controller.change_effect(LightIntent.DROP, context=SelectionContext(LightIntent.DROP))
+    [select] = [e['command'] for e in recorded_lighting.events if e['command']['kind'] == 'select']
+    assert select['autoloop'] == 'soft'

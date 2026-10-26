@@ -34,6 +34,7 @@ def show():
         ('control-toggle', True, None, (), {'action': 'play'}),
         ('control-brightness', False, 0.42, (), {'action': 'master', 'level': 0.42}),
         ('control-next', False, None, (), {'action': 'next_autoloop'}),
+        ('control-intensity-live', False, 0.35, (), {'action': 'intensity', 'level': 0.35}),
         (
             'control-crossfade_beats',
             False,
@@ -133,4 +134,21 @@ def test_next_autoloop_without_a_playing_section_is_refused_and_queues_nothing(
     finally:
         server.stop()
     assert reply == {'error': reason}
+    assert commands.empty()
+
+
+def test_a_settings_change_keeps_the_intensity_the_fader_set(show):
+    poller, commands = show
+    command = control_command(
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), 0.4
+    )
+    assert poller.control(command) == {'accepted': 'settings'}
+    assert commands.get_nowait()['settings'].intensity == 0.4
+
+
+@pytest.mark.parametrize('level', [1.2, -0.1, '0.5', None])
+def test_an_intensity_outside_zero_to_one_is_refused_and_queues_nothing(show, level):
+    poller, commands = show
+    reply = poller.control({'action': 'intensity', 'level': level})
+    assert reply == {'error': 'intensity must be within 0..1'}
     assert commands.empty()

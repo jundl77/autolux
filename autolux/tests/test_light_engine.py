@@ -1774,12 +1774,13 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
     light._settings = lambda: control.settings
     control.start(light)
     renderer = ('set_paused', 'set_default_crossfade_beats', 'set_strobe_max_rate_hz')
-    renderer += ('set_strobe_max_burst_seconds',)
+    renderer += ('set_strobe_max_burst_seconds', 'set_intensity')
     assert [command for _, command in sent(lighting, *renderer)] == [
         {'kind': 'set_paused', 'paused': False},
         {'kind': 'set_default_crossfade_beats', 'beats': 1.0},
         {'kind': 'set_strobe_max_rate_hz', 'hz': 8.0},
         {'kind': 'set_strobe_max_burst_seconds', 'seconds': 4.0},
+        {'kind': 'set_intensity', 'level': 0.7},
     ]
 
     lighting.events.clear()
@@ -1788,7 +1789,7 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
         {
             'action': 'settings',
             'settings': ShowSettings(
-                crossfade_beats=4, strobe_max_rate_hz=5, strobe_max_burst_seconds=2
+                crossfade_beats=4, strobe_max_rate_hz=5, strobe_max_burst_seconds=2, intensity=0.4
             ),
         }
     )
@@ -1798,6 +1799,7 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
         (changed_at, {'kind': 'set_default_crossfade_beats', 'beats': 4.0}),
         (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
         (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
+        (changed_at, {'kind': 'set_intensity', 'level': 0.4}),
     ]
 
 
@@ -1833,3 +1835,22 @@ async def test_next_autoloop_is_refused_without_a_playing_section(paused, reason
         light.pause()
     with pytest.raises(ValueError, match=reason):
         light.next_autoloop()
+
+
+async def test_the_intensity_fader_applies_at_once_and_survives_a_restart(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl, load_show_settings
+
+    path = tmp_path / 'show.json'
+    control = ShowControl(path)
+    control.settings = ShowSettings(crossfade_beats=4)
+    light, _, clock, lighting = engine()
+    light._settings = lambda: control.settings
+    changed_at = clock.monotonic()
+    control.commands.put_nowait({'action': 'intensity', 'level': 0.25})
+    await control.apply_pending(light)
+    assert sent(lighting, 'set_intensity') == [
+        (changed_at, {'kind': 'set_intensity', 'level': 0.25})
+    ]
+    assert load_show_settings(path) == ShowSettings(crossfade_beats=4, intensity=0.25)
+    assert ShowControl(path).settings.intensity == 0.25
