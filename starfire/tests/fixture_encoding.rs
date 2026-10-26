@@ -1,13 +1,21 @@
+mod support;
+
 use serde_json::json;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{DMX_CHANNELS, FixtureState, Rgb, Target};
+
+const HALF_TURN: [f64; 12] = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
 
 fn fixture(profile: &str, address: usize) -> serde_json::Value {
     json!({"id":"test", "profile":profile, "universe":0, "address":address})
 }
 
 fn rig(fixtures: serde_json::Value) -> FixtureRig {
-    FixtureRig::from_json(&json!({"schema_version":1, "fixtures":fixtures}).to_string()).unwrap()
+    support::rig(json!({ "fixtures": fixtures }))
+}
+
+fn accepts(spec: serde_json::Value) -> bool {
+    support::try_rig(spec).is_ok()
 }
 
 fn full_light() -> FixtureState {
@@ -42,7 +50,7 @@ fn rgb_and_rgbw_scale_intensity_without_a_master_channel() {
 
 #[test]
 fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let mut states = rig.empty_states();
     for state in states.values_mut() {
         *state = FixtureState {
@@ -62,7 +70,7 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
-            &[64, 0, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -161,13 +169,78 @@ fn movement_calibration_maps_inverted_endpoints_without_touching_macros() {
 }
 
 #[test]
+fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
+    let degrees =
+        |frame: &[u8]| f64::from(u16::from_be_bytes([frame[0], frame[1]])) / 65535.0 * 540.0;
+    let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+    let unrotated = rig(json!([patch.clone()]));
+    patch["matrix"] = json!([
+        1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 900.0, -50.0, 3000.0
+    ]);
+    let moved = rig(json!([patch.clone()]));
+    patch["matrix"] = json!(HALF_TURN);
+    let turned = rig(json!([patch]));
+    for pan in [0.0, 0.25, 0.5, 1.0] {
+        let mut states = unrotated.empty_states();
+        states.get_mut("test").unwrap().pan = pan;
+        assert_eq!(
+            moved.encode(&states).unwrap(),
+            unrotated.encode(&states).unwrap()
+        );
+    }
+    let mut states = turned.empty_states();
+    states.get_mut("test").unwrap().pan = 0.5;
+    assert!((degrees(&turned.encode(&states).unwrap()[&0]) - 450.0).abs() < 0.01);
+}
+
+#[test]
+fn standing_head_reverses_movement_like_dmx_inversion_and_hanging_does_not() {
+    const STANDING: [f64; 12] = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0];
+    let spot = |matrix: [f64; 12], inverted: bool| {
+        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+        patch["matrix"] = json!(matrix);
+        patch["pan"] = json!({"inverted": inverted});
+        patch["tilt"] = json!({"inverted": inverted});
+        rig(json!([patch]))
+    };
+    let standing = spot(STANDING, false);
+    let hanging_inverted = spot(HALF_TURN, true);
+    let hanging = spot(HALF_TURN, false);
+    let standing_inverted = spot(STANDING, true);
+    for (pan, tilt) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
+        let mut states = standing.empty_states();
+        let state = states.get_mut("test").unwrap();
+        (state.pan, state.tilt) = (pan, tilt);
+        let encode = |rig: &FixtureRig| rig.encode(&states).unwrap()[&0][..4].to_vec();
+        assert_eq!(encode(&standing), encode(&hanging_inverted));
+        assert_eq!(encode(&standing_inverted), encode(&hanging));
+    }
+}
+
+#[test]
+fn rotated_fixed_fixtures_are_accepted_and_non_rotations_rejected() {
+    let mut wash = fixture("generic_rgb", 1);
+    wash["matrix"] = json!(HALF_TURN);
+    assert!(accepts(json!({ "fixtures": [wash] })));
+    for matrix in [
+        json!([-1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        json!([1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+        json!([1.0, 0.0, 0.0]),
+    ] {
+        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+        patch["matrix"] = matrix;
+        assert!(!accepts(json!({ "fixtures": [patch] })));
+    }
+}
+
+#[test]
 fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() {
     const STRIP_START: usize = 96;
     const RGB_CHANNELS: usize = 3;
     const PIXEL_COUNT: usize = 8;
     const MINI_KINTA_START: usize = 39;
     const MINI_KINTA_CHANNELS: usize = 4;
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
     for (selected, id) in strip.iter().enumerate() {
@@ -205,18 +278,13 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() 
 
 #[test]
 fn fixture_and_group_order_are_explicit_and_unknown_targets_fail() {
-    let rig = FixtureRig::from_json(
-        &json!({
-            "schema_version":1,
-            "fixtures":[
-                {"id":"z", "profile":"generic_dimmer", "universe":0, "address":1},
-                {"id":"a", "profile":"generic_dimmer", "universe":0, "address":2}
-            ],
-            "groups":{"wash":["a", "z"]}
-        })
-        .to_string(),
-    )
-    .unwrap();
+    let rig = support::rig(json!({
+        "fixtures":[
+            {"id":"z", "profile":"generic_dimmer", "universe":0, "address":1},
+            {"id":"a", "profile":"generic_dimmer", "universe":0, "address":2}
+        ],
+        "groups":{"wash":["a", "z"]}
+    }));
     assert_eq!(rig.resolve(&Target::All).unwrap(), ["z", "a"]);
     assert_eq!(
         rig.resolve(&Target::Group("wash".into())).unwrap(),
@@ -243,20 +311,17 @@ fn patch_rejects_overlap_invalid_addresses_profiles_and_duplicate_ids() {
         json!([{"id":"", "profile":"generic_dimmer", "universe":0, "address":1}]),
     ];
     for fixtures in invalid {
-        let definition = json!({"schema_version":1, "fixtures":fixtures});
-        assert!(
-            FixtureRig::from_json(&definition.to_string()).is_err(),
-            "{definition}"
-        );
+        let definition = json!({ "fixtures": fixtures });
+        assert!(!accepts(definition.clone()), "{definition}");
     }
     for members in [json!([]), json!(["test", "test"]), json!(["missing"])] {
-        let definition = json!({"schema_version":1,"fixtures":[fixture("generic_rgb",1)],"groups":{"wash":members}});
-        assert!(FixtureRig::from_json(&definition.to_string()).is_err());
+        let definition = json!({"fixtures":[fixture("generic_rgb",1)],"groups":{"wash":members}});
+        assert!(!accepts(definition));
     }
 }
 
 #[test]
-fn patch_rejects_bad_calibration_and_unsupported_schema() {
+fn patch_rejects_bad_calibration() {
     for bounds in [
         json!({"min":-0.1}),
         json!({"max":1.1}),
@@ -264,17 +329,8 @@ fn patch_rejects_bad_calibration_and_unsupported_schema() {
     ] {
         let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
         patch["pan"] = bounds;
-        assert!(
-            FixtureRig::from_json(&json!({"schema_version":1,"fixtures":[patch]}).to_string())
-                .is_err()
-        );
+        assert!(!accepts(json!({ "fixtures": [patch] })));
     }
-    assert!(
-        FixtureRig::from_json(
-            &json!({"schema_version":2,"fixtures":[fixture("generic_rgb",1)]}).to_string()
-        )
-        .is_err()
-    );
 }
 
 #[test]

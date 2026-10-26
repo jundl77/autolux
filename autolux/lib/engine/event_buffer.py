@@ -10,6 +10,7 @@ from autolux.lib.telemetry_history import TelemetryHistory
 
 CLASSIFIER_TRIGGER = 'classifier'
 SILENCE_TRIGGER = 'silence'
+STANDBY_INTENT = 'standby'
 
 STOP_PERSISTENCE_SEC = 2.0
 
@@ -37,6 +38,14 @@ class EventBuffer:
         self._sound_events: list[dict] = []
         self._decoder_state: dict = {}
         self._shed_state: dict = {}
+        self._control_state: dict = {
+            'paused': None,
+            'master_brightness': None,
+            'settings': None,
+            'mode': None,
+            'static': None,
+        }
+        self._palette: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -72,7 +81,12 @@ class EventBuffer:
             )
 
     def add_effect(
-        self, name: str, effect_type: str, *, duration_seconds: float | None = None
+        self,
+        name: str,
+        effect_type: str,
+        *,
+        duration_seconds: float | None = None,
+        selection: dict | None = None,
     ) -> None:
         if duration_seconds is not None and (
             not math.isfinite(duration_seconds) or duration_seconds <= 0
@@ -89,6 +103,8 @@ class EventBuffer:
             effect = {'t': now, 'name': name, 'type': effect_type}
             if duration_seconds is not None:
                 effect['end'] = now + duration_seconds
+            if selection is not None:
+                effect['selection'] = selection
             self._effects.append(effect)
             cutoff = now - self._window_sec * 2
             self._effects = [e for e in self._effects if e.get('end', now) >= cutoff]
@@ -134,6 +150,36 @@ class EventBuffer:
     def set_shed_state(self, **state) -> None:
         with self._lock:
             self._shed_state = dict(state)
+
+    def set_control_state(
+        self,
+        *,
+        paused: bool,
+        master_brightness: float,
+        settings: dict,
+        mode: str = 'auto',
+        static: dict | None = None,
+    ) -> None:
+        with self._lock:
+            self._control_state = {
+                'paused': paused,
+                'master_brightness': master_brightness,
+                'settings': dict(settings),
+                'mode': mode,
+                'static': copy.deepcopy(static),
+            }
+
+    def operator_state(self) -> tuple[str | None, bool | None, str | None]:
+        with self._lock:
+            return (
+                self._current_intent,
+                self._control_state['paused'],
+                self._control_state['mode'],
+            )
+
+    def set_palette(self, name: str, *, pinned: bool) -> None:
+        with self._lock:
+            self._palette = {'name': name, 'pinned': pinned}
 
     def set_system_health(self, state: dict) -> None:
         with self._lock:
@@ -205,6 +251,8 @@ class EventBuffer:
                 'timing_stats': timing_stats,
                 'decoder': dict(self._decoder_state),
                 'shed': dict(self._shed_state),
+                **copy.deepcopy(self._control_state),
+                'palette': copy.deepcopy(self._palette),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

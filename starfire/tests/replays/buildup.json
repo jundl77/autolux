@@ -2,12 +2,51 @@
   "schema_version": 1,
   "duration_seconds": 90,
   "frame_rate_hz": 40,
+  "palettes": [
+    {
+      "name": "techno",
+      "primary": {
+        "red": 1,
+        "green": 0.82,
+        "blue": 0.6
+      },
+      "secondary": {
+        "red": 1,
+        "green": 0.55,
+        "blue": 0.1
+      },
+      "accent": {
+        "red": 0.75,
+        "green": 0,
+        "blue": 0.02
+      },
+      "cold": {
+        "red": 0.75,
+        "green": 0.85,
+        "blue": 1
+      },
+      "black": {
+        "red": 0,
+        "green": 0,
+        "blue": 0
+      }
+    }
+  ],
   "events": [
     {
       "at_seconds": 0,
       "command": {
+        "kind": "set_intensity",
+        "level": 1.0
+      }
+    },
+    {
+      "at_seconds": 0,
+      "command": {
         "kind": "beat",
-        "position_beats": 0,
+        "beat_index": 0,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -16,10 +55,11 @@
       "command": {
         "kind": "select",
         "bank": "buildup",
-        "autoloop": "current",
+        "autoloop": "ramp",
         "transition": {
           "kind": "cut"
-        }
+        },
+        "palette": "techno"
       }
     },
     {
@@ -27,17 +67,20 @@
       "command": {
         "kind": "select",
         "bank": "buildup",
-        "autoloop": "current",
+        "autoloop": "ramp",
         "transition": {
           "kind": "cut"
-        }
+        },
+        "palette": "techno"
       }
     },
     {
       "at_seconds": 16,
       "command": {
         "kind": "beat",
-        "position_beats": 32,
+        "beat_index": 32,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -45,7 +88,9 @@
       "at_seconds": 32,
       "command": {
         "kind": "beat",
-        "position_beats": 64,
+        "beat_index": 64,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -53,7 +98,9 @@
       "at_seconds": 48,
       "command": {
         "kind": "beat",
-        "position_beats": 96,
+        "beat_index": 96,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 120
       }
     },
@@ -61,7 +108,9 @@
       "at_seconds": 64,
       "command": {
         "kind": "beat",
-        "position_beats": 128,
+        "beat_index": 128,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 150
       }
     },
@@ -69,7 +118,9 @@
       "at_seconds": 80,
       "command": {
         "kind": "beat",
-        "position_beats": 168,
+        "beat_index": 168,
+        "bar_phase": 0,
+        "beats_per_bar": 4,
         "bpm": 150
       }
     }

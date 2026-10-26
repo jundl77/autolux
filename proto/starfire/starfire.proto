@@ -6,7 +6,10 @@ import "proto/starfire/rig.proto";
 
 // CLIENT = Autolux coordinator; SERVER = its owned Starfire process.
 // Frame: one byte MessageType, four-byte big-endian payload length, then the
-// standalone Protobuf message (at most 64 KiB). No message envelope.
+// standalone Protobuf message. No message envelope. Payload caps by MessageType:
+// LOGIN carries the session assets and may use 4 MiB (each
+// AutoloopDefinition.lua_source at most 64 KiB); every other type is real-time
+// and is capped at 4 KiB. Receivers check the cap before reading the payload.
 // Login comes first. Commands apply in order at render boundaries after login.
 // A successful Login binds the connection to its nonzero run_id; it cannot be replaced.
 // Later commands and heartbeats implicitly belong to that run.
@@ -18,7 +21,7 @@ import "proto/starfire/rig.proto";
 // Major changes are incompatible; minor additions are compatible.
 enum ProtocolVersion {
   PROTOCOL_MINOR = 0;
-  PROTOCOL_MAJOR = 1;
+  PROTOCOL_MAJOR = 3;
 }
 
 enum MessageType {
@@ -33,6 +36,7 @@ enum MessageType {
   SET_PARAMETER = 11;
   HEARTBEAT = 13;
   METRICS = 14;
+  DISCARD_DELAYED_AUDIO = 15;
 }
 
 enum ParameterType {
@@ -41,6 +45,12 @@ enum ParameterType {
   ANIMATION_SPEED = 2;       // Number, 0..8; independent of beat phase.
   OUTPUT_BLACKOUT = 3;       // Boolean; final darkness gate.
   AUDIO_RMS_NORMALIZED = 4;  // Number, 0..1; missing measurements remain unknown.
+  PAUSED = 5;
+  DEFAULT_CROSSFADE_BEATS = 6;
+  STROBE_MAX_RATE_HZ = 7;
+  STROBE_MAX_BURST_SECONDS = 8;
+  PALETTE = 9;
+  INTENSITY = 10;
 }
 
 // [CLIENT -> SERVER]
@@ -59,6 +69,7 @@ message Login {
   uint32 protocol_minor = 8;  // Backwards-compatible additions within this major.
   fixed64 run_id = 9;         // Shared Autolux/Radius/Starfire run; unrelated to replay seeds.
   optional uint32 render_core = 11;  // Logical CPU index; omitted leaves OS scheduling enabled.
+  repeated Palette palettes = 12;
 
   message RadiusOutput {
     string receiver_address = 1;  // IPv4:TCP port.
@@ -77,7 +88,7 @@ message Login {
 message LoginReply {
   uint64 command_id = 1;
   uint32 frame_rate_hz = 3;
-  uint32 max_message_bytes = 4;
+  uint32 max_message_bytes = 4;  // Cap for every type except LOGIN.
   uint32 protocol_major = 5;
   uint32 protocol_minor = 6;  // Negotiated minimum of client and server minor versions.
   fixed64 run_id = 7;
@@ -95,7 +106,8 @@ message ErrorReply {
 message PlayAutoloop {
   uint64 command_id = 1;
   string autoloop_id = 2;
-  Transition transition = 4;  // Omitted means cut; idle accepts no transition.
+  Transition transition = 4;
+  string palette = 5;
 
   message Transition {
     optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
@@ -106,12 +118,6 @@ message PlayAutoloop {
 // Replace this identified effect. Only specified properties override the baseline.
 // Higher priority wins; ties use command order. Brightness/blackout parameters apply last.
 message SetActiveEffect {
-  message RgbColor {
-    double red = 1;  // Each channel is normalized to 0..1.
-    double green = 2;
-    double blue = 3;
-  }
-
   // Physical values use GDTF units; presets name a ChannelSet.
   message AttributeValue {
     oneof value {
@@ -144,11 +150,17 @@ message UnsetActiveEffect {
 }
 
 // [CLIENT -> SERVER]
-// Starfire interpolates musical position between updates, independently of animation speed.
+message DiscardDelayedAudio {
+  uint64 command_id = 1;
+}
+
+// [CLIENT -> SERVER]
 message UpdateBeat {
   uint64 command_id = 1;
-  double position_beats = 2;
   double tempo_bpm = 3;
+  uint64 beat_index = 4;
+  optional uint32 bar_phase = 5;
+  uint32 beats_per_bar = 6;
 }
 
 // [CLIENT -> SERVER]
@@ -188,5 +200,22 @@ message Parameter {
   oneof value {
     double number = 2;
     bool boolean = 3;
+    string text = 5;
   }
+  double fade_seconds = 4;
+}
+
+message RgbColor {
+  double red = 1;  // Each channel is normalized to 0..1.
+  double green = 2;
+  double blue = 3;
+}
+
+message Palette {
+  string name = 1;
+  RgbColor primary = 2;
+  RgbColor secondary = 3;
+  RgbColor accent = 4;
+  RgbColor cold = 5;
+  RgbColor black = 6;
 }

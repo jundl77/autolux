@@ -128,4 +128,7 @@ message TxMetrics {
   double playback_delay_seconds = 11;
   optional double dmx_input_age_seconds = 12;
   uint64 network_queued_bytes = 13;
+  uint64 capture_discontinuities_total = 14;
+  optional double capture_last_gap_seconds = 15;
+  uint64 capture_priority_denied = 16;
 }

@@ -65,7 +65,8 @@ Starfire is the lighting backend. Its live contract is
 - P44: Use standalone Google Protobuf messages over the owned subprocess's
   stdin/stdout. Frame each with a generated MessageType byte and a four-byte
   big-endian payload length.
-  Cap each payload at 64 KiB. The root CLI owns
+  Cap the Login payload, which carries the session assets, at 4 MiB and every
+  other message at 4 KiB, checked by type before the payload is read. The root CLI owns
   launch, readiness and shutdown; no separately exposed control listener.
 - P45: Apply accepted commands on the next 40 Hz render timestamp. The engine
   receives explicit time; monotonic pacing stays in the host. This preserves
@@ -191,7 +192,7 @@ Starfire is the lighting backend. Its live contract is
   Omitted effect target means all fixtures. No generic Empty marker is necessary.
 - P77: Load the controller's patch, used profiles and Lua sources before launching
   Starfire. Send this immutable snapshot through typed Login fields. Keep the
-  64 KiB message bound. Oversized input fails before launch; GDTF XML and Lua
+  4 MiB Login bound (64 KiB per Lua source). Oversized input fails before launch; GDTF XML and Lua
   source share the same session budget.
 - P78: Validate all supplied scripts with initial parameters in an output-free
   probe engine, then discard it. The real session begins pristine; script probes
@@ -331,6 +332,14 @@ Starfire is the lighting backend. Its live contract is
   Autolux combines both for the existing dashboard. This supersedes the short-lived
   cross-protocol metrics import; no duplicated transport message definitions.
 
+- P100: The rig is an MVR 1.6 file with its GDTF files embedded
+  ([rig-mvr.md](rig-mvr.md)). Autolux validates and parses it into the existing
+  Login rig; offline Starfire commands read that exported `RigDefinition`, so there is
+  one MVR parser and one native validator. Moving-head homes derive
+  from the fixture Matrix, superseding the `pan_offset_degrees` fields. The
+  `--profiles` catalogue is only the fixture library for import and Config; it no
+  longer flows through replay, production or Login (supersedes P81's last clause).
+
 ## Open questions and defaults
 
 | ID | Question | Prototype default |
@@ -413,3 +422,22 @@ Simulation and report fingerprints use the same explicitly selected corpus/model
 
 Fixture configuration uses a library, patch list and 512-channel map. Display
 universes from 1, retain native addressing internally, and validate saves atomically.
+
+2026-10-26 user decision: the palette is a live layer. Autolux owns the palette
+catalogue and sends it in Login (first entry active). Starfire keeps one active
+palette render state; `PlayAutoloop.palette` (required) retargets it with the loop's
+transition and the `PALETTE` parameter retargets it over the default crossfade.
+`sf.palette()` reads that state; `sf.palette(name)` reads a named table entry.
+Starfire has no built-in palettes: replays embed the table and `check` takes --palettes.
+Scripts see read-only palette tables, so slots cannot detach from the per-frame refresh.
+
+2026-10-26 intensity macro: one operator `INTENSITY` parameter (0..1) scales how
+hard looks hit without changing what they do. Autolux defaults to 0.7 for living-room
+shows and persists it in show settings; Starfire defaults to 1.0, which renders
+authored loops exactly as written, so goldens replay at 1.0. Pulses multiply
+`sf.on_beat` by `lerp(0.35, 1, i)` and widen its decay to `width * (2 - i)`.
+Strobes share one 0.3 gate in Starfire and Autolux: below it no strobe renders and
+no drop accent is sent; above it the rate and burst caps scale by `i`, and the drop
+accent cooldown divides by `i`. Pan/tilt slew at most `0.6 / (1 - i)^2` of the
+normalised range per second, unlimited at 1.0. The selection policy caps energy at
+tier 1 below 0.35 and tier 2 below 0.7, then applies the nearest-tier fallback.

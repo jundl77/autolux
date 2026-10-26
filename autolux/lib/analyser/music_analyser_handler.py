@@ -12,6 +12,14 @@ class IMusicAnalyserHandler(ABC):
         pass
 
     @abstractmethod
+    def on_digital_silence(self):
+        pass
+
+    @abstractmethod
+    def on_signal_return(self):
+        pass
+
+    @abstractmethod
     async def on_cycle(self):
         pass
 

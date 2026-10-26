@@ -11,8 +11,12 @@ Only top-level wire messages have direction annotations.
 | --- | --- |
 | `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. |
-| `UpdateBeat` | Supply fractional beat position and tempo. Starfire interpolates between updates; animation speed does not change musical phase. |
+| `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
+
+`DiscardDelayedAudio` is the one transport command: when the source stops, the embedded
+Radius TX silences the audio it holds for the playback delay instead of playing it out.
+Lighting is unaffected; Art-Net output ignores it.
 
 Each `Parameter` contains a defined enum type and a number or boolean value.
 It is shared by Login's initial settings and runtime updates.
@@ -63,7 +67,8 @@ session and attempts darkness while preserving movement positions.
 
 Commands and replies are standalone messages. Each frame contains a one-byte
 `MessageType`, a four-byte big-endian payload length, then the generated Protobuf
-payload, bounded to 64 KiB. There are no Render envelopes or custom serializers.
+payload. Login, which carries the session assets, is bounded to 4 MiB; every
+other message is real-time and bounded to 4 KiB. There are no Render envelopes or custom serializers.
 Wrong directions, unknown types, oversized and truncated frames are rejected.
 
 Commands have positive increasing IDs and apply in order at render boundaries.

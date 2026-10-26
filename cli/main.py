@@ -25,20 +25,23 @@ async def run_cmd(args: argparse.Namespace):
         debug_mode = False
 
     from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
-    from cli.starfire import PROFILE_CATALOGUE, ROOT
+    from cli.starfire import ROOT
+    from cli.starfire_assets import static_rig
     from autolux.lib.clients.starfire_client import StarfireClient
+    from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
     import uuid
 
     input_device_index = int(args.input_device) if args.input_device is not None else None
     output_device_index = int(args.output_device) if args.output_device is not None else None
+    run_id = secrets.randbits(64) or 1
+    rig = selected_rig(args.rig)
     with StarfireRuntime(
         args.starfire_binary,
-        selected_rig(args.rig),
+        rig,
         args.autoloops,
         args.artnet,
         ROOT / '.live' / 'starfire' / f'live-{uuid.uuid4().hex}',
-        run_id=secrets.randbits(64) or 1,
-        profiles=getattr(args, 'profiles', PROFILE_CATALOGUE),
+        run_id=run_id,
     ) as renderer:
         global_app = AutoluxController(
             lighting_client=StarfireClient(renderer.send_command),
@@ -49,6 +52,10 @@ async def run_cmd(args: argparse.Namespace):
             ui_port=args.ui_port,
             report_path=args.report,
             fixture_setup=fixture_setup(args),
+            autoloops=discover_autoloops(args.autoloops),
+            autoloop_meta=read_autoloop_meta(args.autoloops),
+            selection_seed=run_id,
+            static_rig=static_rig(rig),
         )
         global_app.health_check = renderer.check_health
         try:

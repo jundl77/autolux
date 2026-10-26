@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import socket
@@ -101,9 +102,9 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
 ):
     binary = tmp_path / 'renderer'
     binary.touch()
-    saved = tmp_path / 'saved-rig.json'
-    initial = tmp_path / 'initial-rig.json'
-    explicit = tmp_path / 'explicit-rig.json'
+    saved = tmp_path / 'saved-rig.mvr'
+    initial = tmp_path / 'initial-rig.mvr'
+    explicit = tmp_path / 'explicit-rig.mvr'
     monkeypatch.setattr(starfire, 'DEFAULT_FIXTURE_STORE', saved)
     monkeypatch.setattr(starfire, 'DEFAULT_RIG', initial)
     launched = []
@@ -112,6 +113,7 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
         launched.append(command)
 
     monkeypatch.setattr(starfire, '_run_child', launch)
+    monkeypatch.setattr(starfire, 'native_rig', contextlib.nullcontext)
     args = argparse.Namespace(
         binary=binary,
         starfire_action='replay',
@@ -174,7 +176,7 @@ def test_dashboard_http_readiness_and_bounded_shutdown(tmp_path, shutdown):
                     '--snapshot-port',
                     str(source.port),
                     '--rig-store',
-                    str(tmp_path / 'rig.json'),
+                    str(tmp_path / 'rig.mvr'),
                 ],
                 cwd=starfire.ROOT,
                 stdin=subprocess.DEVNULL,

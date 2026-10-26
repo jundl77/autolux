@@ -1,9 +1,8 @@
-"""Coordinate the prebuilt Starfire renderer and the existing fixture dashboard."""
-
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -13,18 +12,28 @@ from pathlib import Path
 
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
+from cli.starfire_assets import native_rig, rig_definition
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
-DEFAULT_RIG = ROOT / 'rigs' / 'room.json'
+DEFAULT_RIG = ROOT / 'rigs' / 'room.mvr'
 DEFAULT_AUTOLOOPS = ROOT / 'autoloops'
-DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
+DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.mvr'
+LEGACY_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
 PROFILE_CATALOGUE = ROOT / 'rigs' / 'profiles.json'
 CHILD_STOP_TIMEOUT_SEC = 5.0
 PATCH_VALIDATION_TIMEOUT_SEC = 10.0
 MAX_REPORT_BYTES = 32 * 1024 * 1024
 MAX_TCP_PORT = 65535
 LOGGER = logging.getLogger(__name__)
+
+
+def saved_rig() -> Path:
+    if DEFAULT_FIXTURE_STORE.is_file():
+        return DEFAULT_FIXTURE_STORE
+    if LEGACY_FIXTURE_STORE.is_file():
+        raise RuntimeError(f'rig.json is no longer supported; the rig is {DEFAULT_FIXTURE_STORE}')
+    return DEFAULT_RIG
 
 
 def add_subparser(subparsers) -> None:
@@ -36,11 +45,8 @@ def add_subparser(subparsers) -> None:
 
     replay = actions.add_parser('replay', help='Render native replay input; network output is off')
     replay.add_argument('input', type=Path)
-    replay.add_argument(
-        '--rig', type=Path, help='Fixture patch; defaults to the saved setup or room rig'
-    )
+    replay.add_argument('--rig', type=Path, help='MVR rig; defaults to the saved setup or room rig')
     replay.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
-    replay.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
     replay.add_argument('--output', type=Path, help='Write a binary DMX capture')
     replay.add_argument('--summary', type=Path, help='Write render metrics and DMX digest')
     replay.add_argument('--artnet', help='Explicit destination IPv4:port; requires --realtime')
@@ -51,10 +57,13 @@ def add_subparser(subparsers) -> None:
     listing = actions.add_parser('list', help='List autoloop banks and names')
     listing.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
     listing.set_defaults(func=run_native)
-    rig = actions.add_parser('rig', help='Validate a fixture patch without output')
+    rig = actions.add_parser('rig', help='Validate an MVR rig without output')
     rig.add_argument('input', type=Path)
-    rig.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
     rig.set_defaults(func=run_native)
+    export = actions.add_parser('export-rig', help='Write the Starfire RigDefinition of an MVR rig')
+    export.add_argument('input', type=Path)
+    export.add_argument('output', type=Path)
+    export.set_defaults(func=export_rig)
 
     importer = actions.add_parser('import-fixture', help='Import a GDTF fixture mode for Starfire')
     importer.add_argument('input', type=Path)
@@ -119,13 +128,14 @@ async def _run_child(command: list[str], *, stop_file: Path | None = None) -> No
 
 async def run_native(args: argparse.Namespace) -> None:
     command = [str(_binary(args.binary)), args.starfire_action]
-    if hasattr(args, 'input'):
+    rig = getattr(args, 'rig', None)
+    if args.starfire_action == 'rig':
+        rig = args.input
+    elif hasattr(args, 'input'):
         command.append(str(args.input.resolve()))
-    for name in ('rig', 'autoloops', 'profiles', 'output', 'summary'):
-        path = getattr(args, name, None)
-        if name == 'rig' and args.starfire_action == 'replay' and path is None:
-            path = DEFAULT_FIXTURE_STORE if DEFAULT_FIXTURE_STORE.is_file() else DEFAULT_RIG
-        if path is not None:
+        rig = rig or saved_rig()
+    for name in ('autoloops', 'output', 'summary'):
+        if (path := getattr(args, name, None)) is not None:
             command.extend([f'--{name}', str(path.resolve())])
     if getattr(args, 'artnet', None):
         if not args.realtime:
@@ -136,15 +146,23 @@ async def run_native(args: argparse.Namespace) -> None:
     for name in ('realtime', 'broadcast'):
         if getattr(args, name, False):
             command.append(f'--{name}')
-    if getattr(args, 'artnet', None):
-        runtime = ROOT / '.live' / 'starfire'
-        runtime.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='replay-', dir=runtime) as owned:
+    with contextlib.ExitStack() as stack:
+        if rig is not None:
+            exported = str(stack.enter_context(native_rig(rig)))
+            command.extend([exported] if args.starfire_action == 'rig' else ['--rig', exported])
+        if getattr(args, 'artnet', None):
+            runtime = ROOT / '.live' / 'starfire'
+            runtime.mkdir(parents=True, exist_ok=True)
+            owned = stack.enter_context(tempfile.TemporaryDirectory(prefix='replay-', dir=runtime))
             stop_file = Path(owned) / 'stop'
             command.extend(['--stop-file', str(stop_file)])
             await _run_child(command, stop_file=stop_file)
-    else:
-        await _run_child(command)
+        else:
+            await _run_child(command)
+
+
+async def export_rig(args: argparse.Namespace) -> None:
+    args.output.write_bytes(rig_definition(args.input).SerializeToString())
 
 
 async def convert_report(args: argparse.Namespace) -> None:
@@ -162,19 +180,20 @@ async def convert_report(args: argparse.Namespace) -> None:
     print(f'Source-time replay: {args.output} ({len(replay["events"])} commands; accents omitted)')
 
 
-def _validate_patch(binary: Path, patch: Path, profiles: Path = PROFILE_CATALOGUE) -> None:
+def _validate_patch(binary: Path, patch: Path) -> None:
     try:
-        completed = subprocess.run(
-            [str(binary), 'rig', str(patch.resolve()), '--profiles', str(profiles.resolve())],
-            cwd=ROOT,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=PATCH_VALIDATION_TIMEOUT_SEC,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-        )
+        with native_rig(patch) as exported:
+            completed = subprocess.run(
+                [str(binary), 'rig', str(exported)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=PATCH_VALIDATION_TIMEOUT_SEC,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+            )
     except subprocess.TimeoutExpired as error:
         raise RuntimeError('Starfire fixture validation timed out') from error
     if completed.returncode != 0:
@@ -190,7 +209,7 @@ def run_import(args: argparse.Namespace) -> None:
         args.profiles.resolve(),
         args.profile_id,
         args.mode,
-        lambda patch, profiles: _validate_patch(binary, patch, profiles),
+        lambda patch, _profiles: _validate_patch(binary, patch),
     )
     print(f'Imported {args.profile_id}: {metadata["notes"]}')
 
@@ -206,17 +225,17 @@ def run_ui(args: argparse.Namespace) -> None:
     patch = args.rig_store.resolve()
     profiles = getattr(args, 'profiles', PROFILE_CATALOGUE).resolve()
     if not patch.exists():
-        _validate_patch(binary, DEFAULT_RIG, profiles)
+        if patch == DEFAULT_FIXTURE_STORE:
+            saved_rig()
+        _validate_patch(binary, DEFAULT_RIG)
         patch.parent.mkdir(parents=True, exist_ok=True)
         try:
             with patch.open('xb') as target:
                 target.write(DEFAULT_RIG.read_bytes())
         except FileExistsError:
             pass
-    _validate_patch(binary, patch, profiles)
-    store = FixtureStore(
-        patch, profiles, lambda candidate: _validate_patch(binary, candidate, profiles)
-    )
+    _validate_patch(binary, patch)
+    store = FixtureStore(patch, profiles, lambda candidate: _validate_patch(binary, candidate))
     source = EventBuffer()
     if getattr(args, 'snapshot_port', None) is not None:
         from autolux.simulate.visualizer_app import SnapshotPoller

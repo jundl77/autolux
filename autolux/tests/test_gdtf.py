@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from autolux.lighting import gdtf
-from autolux.lighting.fixture_setup import FixtureStore
+from autolux.lighting import gdtf, mvr
+from autolux.lighting.fixture_setup import FixtureStore, require_renderable
 
 DESCRIPTION = Path(__file__).parent / 'data' / 'gdtf' / 'dimmer.xml'
+SPEC = 'Autolux@Test Dimmer.gdtf'
 
 
 @pytest.fixture
@@ -35,7 +36,10 @@ def test_import_preserves_exact_xml_and_selected_mode_before_atomic_publish(arch
             'gdtf_xml': DESCRIPTION.read_bytes().decode('utf-8'),
             'dmx_mode': '16 bit',
         }
-        assert json.loads(patch.read_bytes())['fixtures'][0]['profile'] == 'test_dimmer'
+        scene = mvr.read(patch.read_bytes())
+        [fixture] = require_renderable(scene)
+        assert (fixture['gdtf_spec'], fixture['gdtf_mode']) == (SPEC, '16 bit')
+        assert mvr.gdtf_description(scene, SPEC) == profile['gdtf_xml']
         validations.append(staged)
 
     metadata = gdtf.import_fixture(archive, catalogue, 'test_dimmer', '16 bit', validate)
@@ -43,8 +47,13 @@ def test_import_preserves_exact_xml_and_selected_mode_before_atomic_publish(arch
     assert archive.read_bytes() == original_archive
     assert len(validations) == 1
     assert not validations[0].exists()
-    store = FixtureStore(tmp_path / 'rig.json', catalogue, lambda _: None)
-    assert store.profiles()['test_dimmer'] == metadata
+    library = FixtureStore(tmp_path / 'rig.mvr', catalogue, lambda _: None).library()
+    assert library[SPEC]['profile_id'] == 'test_dimmer'
+    assert library[SPEC]['default_mode'] == '16 bit'
+    assert {mode: entry['channels'] for mode, entry in library[SPEC]['modes'].items()} == {
+        '8 bit': 1,
+        '16 bit': 2,
+    }
 
 
 @pytest.mark.parametrize('mode,channels', [('8 bit', 1), ('16 bit', 2)])
@@ -148,3 +157,13 @@ def test_archive_crc_damage_is_rejected(tmp_path):
     archive.write_bytes(archive.read_bytes().replace(b'Test Dimmer', b'Bad! Dimmer', 1))
     with pytest.raises(ValueError, match='CRC'):
         gdtf.read_description(archive)
+
+
+def test_metadata_reports_movement_axes():
+    profiles = json.loads((Path(__file__).parents[2] / 'rigs/profiles.json').read_bytes())
+    movement = {
+        name: gdtf.profile_metadata(profile['gdtf_xml'], profile['dmx_mode'])['movement']
+        for name, profile in profiles['profiles'].items()
+    }
+    assert movement['chauvet_intimidator_spot_110_12ch'] == ['pan', 'tilt']
+    assert movement['generic_rgb'] == []

@@ -1,7 +1,8 @@
+mod support;
+
 use std::fs;
 
-use starfire::engine::Engine;
-use starfire::fixtures::FixtureRig;
+use starfire::engine::{Engine, perceptual_to_linear_master};
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
@@ -35,12 +36,15 @@ fn engine(scripts: &[(&str, &str)]) -> Engine {
         .unwrap();
     }
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
-    let mut engine = Engine::new(FixtureRig::from_json(RIG).unwrap(), catalog).unwrap();
+    let rig = support::rig(serde_json::from_str(RIG).unwrap());
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
             &Command::Beat {
-                position_beats: 0.0,
+                beat_index: 0,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: 120.0,
             },
         )
@@ -56,6 +60,7 @@ fn select(engine: &mut Engine, at: f64, name: &str, transition: Transition) {
                 bank: "test".into(),
                 autoloop: name.into(),
                 transition,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -283,7 +288,13 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
         set_override(&mut engine, 0.0, value);
     }
     engine
-        .apply(0.0, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     near(
         engine
@@ -291,7 +302,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.005,
+        0.0025,
     );
     engine
         .apply(
@@ -307,7 +318,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.5,
+        0.25,
     );
     engine
         .apply(0.0, &Command::SetBlackout { enabled: true })
@@ -327,7 +338,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.5,
+        0.25,
     );
 }
 
@@ -451,7 +462,8 @@ fn failed_replacement_load_keeps_running_autoloop() {
                     &Command::Select {
                         bank: "test".into(),
                         autoloop: name.into(),
-                        transition: Transition::Cut
+                        transition: Transition::Cut,
+                        palette: "techno".into(),
                     }
                 )
                 .is_err()
@@ -616,7 +628,13 @@ fn invalid_commands_do_not_mutate_the_active_show() {
         );
         assert!(
             engine
-                .apply(2.0, &Command::SetMaster { intensity: value })
+                .apply(
+                    2.0,
+                    &Command::SetMaster {
+                        intensity: value,
+                        fade_seconds: 0.0
+                    }
+                )
                 .is_err()
         );
     }
@@ -713,6 +731,7 @@ fn script_error_while_interrupting_a_fade_stops_the_existing_show() {
             transition: Transition::Crossfade {
                 duration_beats: 4.0,
             },
+            palette: "techno".into(),
         },
     );
     assert!(result.is_err());
@@ -799,7 +818,8 @@ fn invalid_fade_duration_does_not_replace_the_running_autoloop() {
                     &Command::Select {
                         bank: "test".into(),
                         autoloop: "blue".into(),
-                        transition: Transition::Crossfade { duration_beats }
+                        transition: Transition::Crossfade { duration_beats },
+                        palette: "techno".into(),
                     }
                 )
                 .is_err()
@@ -832,7 +852,13 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
         .apply(0.25, &Command::SetNormalizedRmsLevel { level: 0.8 })
         .unwrap();
     engine
-        .apply(0.25, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.25,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     near(
         engine
@@ -840,7 +866,7 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.4,
+        0.2,
     );
     for level in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
         assert!(
@@ -855,7 +881,7 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
-        0.4,
+        0.2,
     );
     engine
         .apply(0.75, &Command::SetNormalizedRmsLevel { level: 0.0 })
@@ -889,7 +915,9 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
         .apply(
             1.0,
             &Command::Beat {
-                position_beats: 100.0,
+                beat_index: 100,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: 60.0,
             },
         )
@@ -918,4 +946,730 @@ fn crossfade_progress_uses_elapsed_beats_instead_of_corrected_phase() {
             .intensity,
         0.8,
     );
+}
+
+fn linear_master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
+    engine
+        .render_at(time_seconds)
+        .unwrap()
+        .fixture_properties_before_strobe["left"]
+        .intensity
+        / 0.5
+}
+
+fn perceptual_master_at(engine: &mut Engine, time_seconds: f64) -> f64 {
+    linear_master_at(engine, time_seconds).sqrt()
+}
+
+fn set_master_instantly(engine: &mut Engine, intensity: f64) {
+    engine
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity,
+                fade_seconds: 0.0,
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn half_perceptual_master_drives_quarter_linear_output() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    set_master_instantly(&mut engine, 0.5);
+    near(linear_master_at(&mut engine, 0.0), 0.25);
+    assert_eq!(perceptual_to_linear_master(0.5), 0.25);
+}
+
+#[test]
+fn full_master_leaves_output_unchanged() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    set_master_instantly(&mut engine, 1.0);
+    near(linear_master_at(&mut engine, 0.0), 1.0);
+    assert_eq!(perceptual_to_linear_master(1.0), 1.0);
+    assert_eq!(perceptual_to_linear_master(0.0), 0.0);
+}
+
+#[test]
+fn master_fades_evenly_in_perceptual_space_over_wall_time() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    engine
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.15,
+                fade_seconds: 1.0,
+            },
+        )
+        .unwrap();
+    near(perceptual_master_at(&mut engine, 0.0), 1.0);
+    near(perceptual_master_at(&mut engine, 0.5), 0.575);
+    near(linear_master_at(&mut engine, 0.5), 0.575 * 0.575);
+    near(perceptual_master_at(&mut engine, 1.0), 0.15);
+    near(perceptual_master_at(&mut engine, 3.0), 0.15);
+}
+
+#[test]
+fn master_retarget_mid_fade_starts_from_the_visible_level() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    let fade = |intensity| Command::SetMaster {
+        intensity,
+        fade_seconds: 1.0,
+    };
+    engine.apply(0.0, &fade(0.0)).unwrap();
+    engine.apply(0.5, &fade(1.0)).unwrap();
+    near(perceptual_master_at(&mut engine, 0.5), 0.5);
+    near(perceptual_master_at(&mut engine, 1.0), 0.75);
+    near(perceptual_master_at(&mut engine, 1.5), 1.0);
+}
+
+#[test]
+fn zero_master_fade_is_instant_and_invalid_fades_are_rejected() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    engine
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.2,
+                fade_seconds: 0.0,
+            },
+        )
+        .unwrap();
+    near(perceptual_master_at(&mut engine, 0.0), 0.2);
+    for fade_seconds in [-1.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            engine
+                .apply(
+                    0.0,
+                    &Command::SetMaster {
+                        intensity: 1.0,
+                        fade_seconds,
+                    },
+                )
+                .is_err()
+        );
+    }
+    near(perceptual_master_at(&mut engine, 0.0), 0.2);
+}
+
+fn paused(engine: &mut Engine, at: f64, paused: bool) {
+    engine.apply(at, &Command::SetPaused { paused }).unwrap();
+}
+
+#[test]
+fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() {
+    let mut engine = engine(&[("loop", LOOP)]);
+    select(&mut engine, 0.0, "loop", Transition::Cut);
+    paused(&mut engine, 1.0, true);
+    let held = engine.render_at(1.0).unwrap();
+    near(held.beat_position, 2.0);
+    engine
+        .apply(
+            2.0,
+            &Command::Beat {
+                beat_index: 4,
+                bar_phase: None,
+                beats_per_bar: 4,
+                bpm: 120.0,
+            },
+        )
+        .unwrap();
+    let later = engine.render_at(3.0).unwrap();
+    near(later.beat_position, 2.0);
+    assert_eq!(
+        later.fixture_properties_before_strobe,
+        held.fixture_properties_before_strobe
+    );
+    assert_eq!(later.dmx_frames_by_universe, held.dmx_frames_by_universe);
+
+    paused(&mut engine, 3.0, false);
+    near(engine.render_at(3.5).unwrap().beat_position, 3.0);
+    engine
+        .apply(
+            4.0,
+            &Command::Beat {
+                beat_index: 8,
+                bar_phase: None,
+                beats_per_bar: 4,
+                bpm: 120.0,
+            },
+        )
+        .unwrap();
+    near(engine.render_at(4.0).unwrap().beat_position, 8.0);
+}
+
+#[test]
+fn pause_releases_effect_and_script_strobes_and_they_stay_released() {
+    let mut engine = engine(&[("red", RED)]);
+    select(&mut engine, 0.0, "red", Transition::Cut);
+    set_override(
+        &mut engine,
+        0.0,
+        lighting_override(
+            "accent",
+            PropertyValues {
+                strobe_hz: Some(10.0),
+                ..Default::default()
+            },
+        ),
+    );
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        10.0,
+    );
+    paused(&mut engine, 0.5, true);
+    near(
+        engine
+            .render_at(0.5)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        0.0,
+    );
+    paused(&mut engine, 1.0, false);
+    near(
+        engine
+            .render_at(1.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        2.0,
+    );
+}
+
+#[test]
+fn selection_without_a_transition_uses_the_renderer_default_crossfade() {
+    let mut engine = engine(&[("red", RED), ("blue", BLUE)]);
+    select(&mut engine, 0.0, "red", Transition::RendererDefault);
+    select(&mut engine, 1.0, "blue", Transition::RendererDefault);
+    near(
+        engine
+            .render_at(1.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.8,
+    );
+    engine
+        .apply(1.0, &Command::SetDefaultCrossfadeBeats { beats: 2.0 })
+        .unwrap();
+    select(&mut engine, 1.0, "red", Transition::RendererDefault);
+    near(
+        engine
+            .render_at(1.5)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.5,
+    );
+    select(&mut engine, 2.0, "blue", Transition::Cut);
+    near(
+        engine
+            .render_at(2.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity,
+        0.8,
+    );
+}
+
+#[test]
+fn strobe_caps_clamp_the_rate_and_release_a_burst_until_its_strobe_stops() {
+    let mut engine = engine(&[("blue", BLUE), ("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "blue", Transition::Cut);
+    engine
+        .apply(0.0, &Command::SetStrobeMaxRateHz { hz: 4.0 })
+        .unwrap();
+    engine
+        .apply(0.0, &Command::SetStrobeMaxBurstSeconds { seconds: 1.0 })
+        .unwrap();
+    let rate = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz
+    };
+    near(rate(&mut engine, 0.0), 4.0);
+    near(rate(&mut engine, 0.9), 4.0);
+    near(rate(&mut engine, 1.0), 0.0);
+    near(rate(&mut engine, 5.0), 0.0);
+    select(&mut engine, 5.0, "constant", Transition::Cut);
+    near(rate(&mut engine, 5.0), 0.0);
+    select(&mut engine, 6.0, "blue", Transition::Cut);
+    near(rate(&mut engine, 6.0), 4.0);
+}
+
+#[test]
+fn renderer_settings_reject_values_outside_their_ranges() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    for invalid in [
+        Command::SetDefaultCrossfadeBeats { beats: -1.0 },
+        Command::SetDefaultCrossfadeBeats { beats: f64::NAN },
+        Command::SetStrobeMaxRateHz { hz: -0.1 },
+        Command::SetStrobeMaxRateHz { hz: 10.5 },
+        Command::SetStrobeMaxBurstSeconds { seconds: 0.0 },
+        Command::SetStrobeMaxBurstSeconds { seconds: 61.0 },
+        Command::SetStrobeMaxBurstSeconds {
+            seconds: f64::INFINITY,
+        },
+    ] {
+        assert!(engine.apply(0.0, &invalid).is_err(), "{invalid:?}");
+    }
+}
+
+#[test]
+fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    engine
+        .apply(0.0, &Command::SetStrobeMaxBurstSeconds { seconds: 1.0 })
+        .unwrap();
+    let mut accent = lighting_override(
+        "accent",
+        PropertyValues {
+            strobe_hz: Some(8.0),
+            ..Default::default()
+        },
+    );
+    accent.lifetime = OverrideLifetime::Seconds {
+        duration_seconds: 10.0,
+    };
+    set_override(&mut engine, 0.0, accent);
+    let rate = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz
+    };
+    near(rate(&mut engine, 0.0), 8.0);
+    near(rate(&mut engine, 1.0), 0.0);
+    near(rate(&mut engine, 5.0), 0.0);
+}
+
+fn room_engine(scripts: &[(&str, &str)]) -> Engine {
+    let directory = tempfile::tempdir().unwrap();
+    fs::create_dir(directory.path().join("test")).unwrap();
+    for (name, source) in scripts {
+        fs::write(
+            directory.path().join("test").join(format!("{name}.lua")),
+            source,
+        )
+        .unwrap();
+    }
+    let catalog = AutoloopCatalog::load(directory.path()).unwrap();
+    let mut engine = Engine::new(support::room(), catalog, support::palettes()).unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::Beat {
+                beat_index: 0,
+                bar_phase: None,
+                beats_per_bar: 4,
+                bpm: 120.0,
+            },
+        )
+        .unwrap();
+    engine
+}
+
+#[test]
+fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
+    use starfire::model::AttributeValue;
+    let mut engine = room_engine(&[
+        ("empty", "return {render=function(ctx) return {} end}"),
+        (
+            "still",
+            "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
+        ),
+        (
+            "spin",
+            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
+        ),
+    ]);
+    let red = AttributeValue::Preset("Red".into());
+    select(&mut engine, 0.0, "empty", Transition::Cut);
+    select(
+        &mut engine,
+        0.0,
+        "spin",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    for time in [0.0, 1.0, 1.9] {
+        let attributes = &engine
+            .render_at(time)
+            .unwrap()
+            .fixture_properties_before_strobe["kinta"]
+            .attributes;
+        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        assert_eq!(
+            attributes.get("Effects1PosRotate"),
+            Some(&AttributeValue::Number(160.0)),
+            "{time}"
+        );
+    }
+    select(&mut engine, 2.0, "still", Transition::Cut);
+    select(
+        &mut engine,
+        2.0,
+        "spin",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    for (time, expected) in [(2.0, 0.0), (3.0, 80.0), (4.0, 160.0)] {
+        let attributes = &engine
+            .render_at(time)
+            .unwrap()
+            .fixture_properties_before_strobe["kinta"]
+            .attributes;
+        assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
+        let AttributeValue::Number(rotation) = attributes["Effects1PosRotate"] else {
+            panic!("{time}: {attributes:?}");
+        };
+        assert!((rotation - expected).abs() < 1e-9, "{time}: {rotation}");
+    }
+}
+
+const SECONDARY: &str = "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.5), sf.colour(sf.all(), sf.palette().secondary)} end}";
+const TECHNO_SECONDARY: Rgb = Rgb {
+    red: 1.0,
+    green: 0.55,
+    blue: 0.1,
+};
+const HOUSE_SECONDARY: Rgb = Rgb {
+    red: 1.0,
+    green: 0.0,
+    blue: 0.7,
+};
+const HALFWAY_SECONDARY: Rgb = Rgb {
+    red: 1.0,
+    green: 0.275,
+    blue: 0.4,
+};
+
+fn palette_parameter(name: &str) -> starfire::protocol::wire::Parameter {
+    use starfire::protocol::wire;
+    wire::Parameter {
+        r#type: wire::ParameterType::Palette as i32,
+        value: Some(wire::parameter::Value::Text(name.into())),
+        ..Default::default()
+    }
+}
+
+fn select_with_palette(
+    engine: &mut Engine,
+    at: f64,
+    transition: Transition,
+    palette: &str,
+) -> anyhow::Result<()> {
+    engine.apply(
+        at,
+        &Command::Select {
+            bank: "test".into(),
+            autoloop: "secondary".into(),
+            transition,
+            palette: palette.into(),
+        },
+    )
+}
+
+fn colour_at(engine: &mut Engine, seconds: f64) -> Rgb {
+    engine
+        .render_at(seconds)
+        .unwrap()
+        .fixture_properties_before_strobe["left"]
+        .colour
+}
+
+fn assert_colour(actual: Rgb, expected: Rgb) {
+    near(actual.red, expected.red);
+    near(actual.green, expected.green);
+    near(actual.blue, expected.blue);
+}
+
+#[test]
+fn palette_parameter_crossfades_slots_over_the_default_crossfade_beats() {
+    let mut engine = engine(&[("secondary", SECONDARY)]);
+    engine
+        .apply(0.0, &Command::SetDefaultCrossfadeBeats { beats: 4.0 })
+        .unwrap();
+    select(&mut engine, 0.0, "secondary", Transition::Cut);
+    assert_colour(colour_at(&mut engine, 0.0), TECHNO_SECONDARY);
+    engine
+        .set_parameter(0.0, &palette_parameter("house"))
+        .unwrap();
+    assert_eq!(engine.active_palette(), "house");
+    let halfway = engine.render_at(1.0).unwrap();
+    assert_colour(
+        halfway.fixture_properties_before_strobe["left"].colour,
+        HALFWAY_SECONDARY,
+    );
+    near(
+        halfway.fixture_properties_before_strobe["left"].intensity,
+        0.5,
+    );
+    assert_eq!(colour_at(&mut engine, 2.0), HOUSE_SECONDARY);
+}
+
+#[test]
+fn a_selection_palette_fades_with_the_loop_transition() {
+    let mut engine = engine(&[("secondary", SECONDARY)]);
+    select_with_palette(&mut engine, 0.0, Transition::Cut, "techno").unwrap();
+    select_with_palette(
+        &mut engine,
+        0.0,
+        Transition::Crossfade {
+            duration_beats: 2.0,
+        },
+        "house",
+    )
+    .unwrap();
+    assert_colour(colour_at(&mut engine, 0.5), HALFWAY_SECONDARY);
+    assert_eq!(colour_at(&mut engine, 1.0), HOUSE_SECONDARY);
+    select_with_palette(&mut engine, 1.0, Transition::Cut, "techno").unwrap();
+    assert_eq!(colour_at(&mut engine, 1.0), TECHNO_SECONDARY);
+}
+
+#[test]
+fn unknown_palettes_are_rejected_on_both_paths_without_changing_the_show() {
+    let mut engine = engine(&[("secondary", SECONDARY), ("constant", CONSTANT)]);
+    select_with_palette(&mut engine, 0.0, Transition::Cut, "techno").unwrap();
+    let error = engine
+        .set_parameter(0.0, &palette_parameter("neon"))
+        .unwrap_err();
+    assert!(
+        format!("{error:#}").contains(r#"unknown palette "neon"; this session has house, techno"#),
+        "{error:#}"
+    );
+    let error = engine
+        .apply(
+            0.0,
+            &Command::Select {
+                bank: "test".into(),
+                autoloop: "constant".into(),
+                transition: Transition::Cut,
+                palette: "neon".into(),
+            },
+        )
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("unknown palette"));
+    let frame = engine.render_at(0.0).unwrap();
+    assert_eq!(frame.active_autoloop.as_deref(), Some("secondary"));
+    assert_eq!(engine.active_palette(), "techno");
+    assert_eq!(
+        frame.fixture_properties_before_strobe["left"].colour,
+        TECHNO_SECONDARY
+    );
+}
+
+#[test]
+fn selection_and_parameter_palettes_write_one_active_palette() {
+    for (first, last) in [("house", "techno"), ("techno", "house")] {
+        let mut selection_then_parameter = engine(&[("secondary", SECONDARY)]);
+        select_with_palette(&mut selection_then_parameter, 0.0, Transition::Cut, first).unwrap();
+        selection_then_parameter
+            .set_parameter(0.5, &palette_parameter(last))
+            .unwrap();
+        let mut parameter_then_selection = engine(&[("secondary", SECONDARY)]);
+        parameter_then_selection
+            .set_parameter(0.0, &palette_parameter(first))
+            .unwrap();
+        select_with_palette(&mut parameter_then_selection, 0.5, Transition::Cut, last).unwrap();
+        assert_eq!(selection_then_parameter.active_palette(), last);
+        assert_eq!(parameter_then_selection.active_palette(), last);
+        assert_eq!(
+            selection_then_parameter.render_at(1.0).unwrap(),
+            parameter_then_selection.render_at(1.0).unwrap()
+        );
+    }
+}
+
+const DIM_SECONDARY: &str = "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.2), sf.colour(sf.all(), sf.palette().secondary)} end}";
+
+#[test]
+fn a_palette_change_during_a_loop_crossfade_blends_both_loops_with_the_same_slots() {
+    let mut engine = engine(&[("dim", DIM_SECONDARY), ("secondary", SECONDARY)]);
+    engine
+        .apply(0.0, &Command::SetDefaultCrossfadeBeats { beats: 2.0 })
+        .unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::Select {
+                bank: "test".into(),
+                autoloop: "dim".into(),
+                transition: Transition::Cut,
+                palette: "techno".into(),
+            },
+        )
+        .unwrap();
+    select_with_palette(
+        &mut engine,
+        0.0,
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+        "techno",
+    )
+    .unwrap();
+    engine
+        .set_parameter(0.5, &palette_parameter("house"))
+        .unwrap();
+    let mut previous = colour_at(&mut engine, 0.5);
+    assert_eq!(previous, TECHNO_SECONDARY);
+    for step in 1..=9 {
+        let seconds = 0.5 + f64::from(step) * 0.05;
+        let colour = colour_at(&mut engine, seconds);
+        assert!(
+            (colour.green - previous.green).abs() <= 0.55 * 0.05 + 1e-9,
+            "palette snapped at {seconds}s"
+        );
+        previous = colour;
+    }
+    let halfway = engine.render_at(1.0).unwrap();
+    let left = &halfway.fixture_properties_before_strobe["left"];
+    assert_colour(left.colour, HALFWAY_SECONDARY);
+    near(left.intensity, 0.35);
+    assert_eq!(colour_at(&mut engine, 1.5), HOUSE_SECONDARY);
+}
+
+#[test]
+fn scripts_cannot_replace_palette_slots() {
+    for script in [
+        "local p = sf.palette() p.primary = sf.rgb(0, 1, 0) return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 1)} end}",
+        "local p = sf.palette('house') p.cold = sf.rgb(0, 1, 0) return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 1)} end}",
+    ] {
+        let mut engine = engine(&[("tamper", script)]);
+        let error = engine
+            .apply(
+                0.0,
+                &Command::Select {
+                    bank: "test".into(),
+                    autoloop: "tamper".into(),
+                    transition: Transition::Cut,
+                    palette: "techno".into(),
+                },
+            )
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("palettes are read-only"),
+            "{error:#}"
+        );
+    }
+}
+
+fn set_intensity(engine: &mut Engine, at: f64, level: f64) {
+    engine.apply(at, &Command::SetIntensity { level }).unwrap();
+}
+
+#[test]
+fn intensity_gates_strobes_below_the_threshold_and_scales_the_caps_above_it() {
+    let mut engine = engine(&[("blue", BLUE)]);
+    select(&mut engine, 0.0, "blue", Transition::Cut);
+    engine
+        .apply(0.0, &Command::SetStrobeMaxBurstSeconds { seconds: 2.0 })
+        .unwrap();
+    let rate = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz
+    };
+    set_intensity(&mut engine, 0.0, 0.29);
+    near(rate(&mut engine, 0.0), 0.0);
+    set_intensity(&mut engine, 1.0, 0.5);
+    near(rate(&mut engine, 1.0), 5.0);
+    near(rate(&mut engine, 1.9), 5.0);
+    near(rate(&mut engine, 2.0), 0.0);
+}
+
+#[test]
+fn full_intensity_leaves_strobes_at_the_operator_caps() {
+    let mut engine = engine(&[("blue", BLUE)]);
+    select(&mut engine, 0.0, "blue", Transition::Cut);
+    set_intensity(&mut engine, 0.0, 1.0);
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .strobe_hz,
+        8.0,
+    );
+}
+
+fn pan_after_snap(intensity: f64) -> Vec<f64> {
+    const FRAME_SECONDS: f64 = 1.0 / 40.0;
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    set_intensity(&mut engine, 0.0, intensity);
+    near(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .pan,
+        0.5,
+    );
+    set_override(
+        &mut engine,
+        0.0,
+        lighting_override(
+            "snap",
+            PropertyValues {
+                pan: Some(1.0),
+                tilt: Some(0.0),
+                ..Default::default()
+            },
+        ),
+    );
+    (1..=40)
+        .map(|frame| {
+            let state = &engine
+                .render_at(frame as f64 * FRAME_SECONDS)
+                .unwrap()
+                .fixture_properties_before_strobe["left"];
+            near(state.pan - 0.5, 0.5 - state.tilt);
+            state.pan
+        })
+        .collect()
+}
+
+#[test]
+fn a_snap_at_full_intensity_reaches_its_target_in_one_frame() {
+    assert!(pan_after_snap(1.0).iter().all(|pan| *pan == 1.0));
+}
+
+#[test]
+fn a_snap_at_low_intensity_glides_to_its_target_without_overshooting() {
+    let pans = pan_after_snap(0.3);
+    let frames_to_target = pans.iter().position(|pan| *pan == 1.0).unwrap() + 1;
+    assert!(frames_to_target > 5, "{pans:?}");
+    assert!(
+        pans.windows(2)
+            .all(|pair| pair[0] <= pair[1] && pair[1] <= 1.0)
+    );
+    assert!(pans[frames_to_target..].iter().all(|pan| *pan == 1.0));
+}
+
+#[test]
+fn intensity_outside_zero_to_one_is_rejected() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    for level in [-0.1, 1.1, f64::NAN] {
+        assert!(engine.apply(0.0, &Command::SetIntensity { level }).is_err());
+    }
 }

@@ -1,7 +1,6 @@
 """Imported standard fixture modes must work through the actual renderer login."""
 
 import argparse
-import json
 import os
 import socket
 import time
@@ -22,7 +21,9 @@ TEST_TIMEOUT_SECONDS = 5.0
 
 
 @pytest.mark.parametrize('mode,expected', [('8 bit', b'\x80'), ('16 bit', b'\x80\x00')])
-def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, expected):
+def test_imported_fixture_renders_from_login_without_rebuilding(
+    tmp_path, write_rig, mode, expected
+):
     if not BINARY.is_file():
         pytest.skip('Build Starfire to test native GDTF import')
     archive = tmp_path / 'fixture.gdtf'
@@ -39,17 +40,7 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
             mode=mode,
         )
     )
-    rig = tmp_path / 'rig.json'
-    rig.write_text(
-        json.dumps(
-            {
-                'schema_version': 1,
-                'fixtures': [{'id': 'lamp', 'profile': 'imported', 'universe': 0, 'address': 1}],
-                'groups': {},
-            }
-        ),
-        encoding='utf-8',
-    )
+    rig = write_rig(profiles, 'lamp')
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'test'
     bank.mkdir(parents=True)
@@ -61,12 +52,14 @@ def test_imported_fixture_renders_from_login_without_rebuilding(tmp_path, mode, 
         receiver.bind(('127.0.0.1', 0))
         receiver.settimeout(TEST_TIMEOUT_SECONDS)
         destination = f'127.0.0.1:{receiver.getsockname()[1]}'
-        login = load_login(rig, autoloops, destination, run_id=1, profiles=profiles)
+        login = load_login(rig, autoloops, destination, run_id=1)
         assert login.rig.profiles[0].gdtf_xml.encode('utf-8') == xml
         with StarfireRuntime(
-            BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1, profiles=profiles
+            BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1
         ) as runtime:
-            runtime.send_command({'kind': 'select', 'bank': 'test', 'autoloop': 'dimmer'})
+            runtime.send_command(
+                {'kind': 'select', 'bank': 'test', 'autoloop': 'dimmer', 'palette': 'techno'}
+            )
             deadline = time.monotonic() + TEST_TIMEOUT_SECONDS
             while time.monotonic() < deadline:
                 packet = receiver.recv(1024)

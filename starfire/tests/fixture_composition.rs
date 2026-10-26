@@ -1,9 +1,13 @@
+mod support;
+
+use std::collections::BTreeMap;
 use std::fs;
 
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{
-    Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
+    AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target,
+    Transition,
 };
 use starfire::script::AutoloopCatalog;
 
@@ -24,8 +28,8 @@ fn steady_room() -> Engine {
     )
     .unwrap();
     let catalogue = AutoloopCatalog::load(directory.path()).unwrap();
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
-    let mut engine = Engine::new(rig, catalogue).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    let mut engine = Engine::new(rig, catalogue, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -33,6 +37,7 @@ fn steady_room() -> Engine {
                 bank: "test".into(),
                 autoloop: "steady".into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -56,11 +61,17 @@ fn lighting_override(id: &str, target: Target, values: PropertyValues) -> Comman
 fn partial_lua_properties_compose_before_master_and_profile_encoding() {
     let mut engine = steady_room();
     engine
-        .apply(0.0, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
     for state in frame.fixture_properties_before_strobe.values() {
-        assert_eq!(state.intensity, 0.4);
+        assert_eq!(state.intensity, 0.2);
         assert_eq!(
             state.colour,
             Rgb {
@@ -73,13 +84,13 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
     for start in [0, 12] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 12],
-            &[64, 0, 191, 255, 0, 111, 7, 102, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 111, 7, 51, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 8],
-            &[0, 0, 255, 0, 102, 0, 0, 0]
+            &[0, 0, 255, 0, 51, 0, 0, 0]
         );
     }
 }
@@ -142,7 +153,7 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][..4],
-        &[64, 0, 191, 255]
+        &[149, 85, 191, 255]
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][6..12],
@@ -188,4 +199,82 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
         engine.render_at(0.5).unwrap().dmx_frames_by_universe,
         before.dmx_frames_by_universe
     );
+}
+
+#[test]
+fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look() {
+    let mut engine = steady_room();
+    let before = engine.render_at(0.0).unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::SetOverride {
+                value: LightingOverride {
+                    id: "static_wash".into(),
+                    target: Target::Group("wash".into()),
+                    values: PropertyValues {
+                        intensity: Some(1.0),
+                        colour: Some(Rgb {
+                            red: 0.0,
+                            green: 0.0,
+                            blue: 0.0,
+                        }),
+                        attributes: BTreeMap::from([(
+                            "ColorAdd_UV".into(),
+                            AttributeValue::Number(255.0),
+                        )]),
+                        ..PropertyValues::default()
+                    },
+                    intensity_multiplier: None,
+                    lifetime: OverrideLifetime::UntilCleared,
+                    priority: 1101,
+                },
+            },
+        )
+        .unwrap();
+    engine
+        .apply(
+            0.0,
+            &Command::SetOverride {
+                value: LightingOverride {
+                    id: "drop_arrival".into(),
+                    target: Target::Group("wash".into()),
+                    values: PropertyValues {
+                        intensity: Some(0.5),
+                        colour: Some(Rgb {
+                            red: 1.0,
+                            green: 0.0,
+                            blue: 0.0,
+                        }),
+                        strobe_hz: Some(2.0),
+                        ..PropertyValues::default()
+                    },
+                    intensity_multiplier: None,
+                    lifetime: OverrideLifetime::UntilCleared,
+                    priority: 100,
+                },
+            },
+        )
+        .unwrap();
+    let lit = engine.render_at(0.5).unwrap();
+    for start in [64, 72, 80, 88] {
+        assert_eq!(
+            &lit.dmx_frames_by_universe[&0][start..start + 8],
+            &[0, 0, 0, 255, 255, 0, 0, 0]
+        );
+    }
+    assert_eq!(
+        &lit.dmx_frames_by_universe[&0][..24],
+        &before.dmx_frames_by_universe[&0][..24]
+    );
+    engine
+        .apply(0.5, &Command::SetBlackout { enabled: true })
+        .unwrap();
+    let dark = engine.render_at(1.0).unwrap();
+    for start in [64, 72, 80, 88] {
+        assert_eq!(
+            &dark.dmx_frames_by_universe[&0][start..start + 8],
+            &[0, 0, 0, 0, 0, 0, 0, 0]
+        );
+    }
 }

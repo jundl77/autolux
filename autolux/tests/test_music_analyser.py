@@ -11,6 +11,12 @@ class _StubHandler:
     def on_sound_stop(self):
         pass
 
+    def on_digital_silence(self):
+        pass
+
+    def on_signal_return(self):
+        pass
+
     async def on_cycle(self):
         pass
 
@@ -161,10 +167,10 @@ async def test_renderer_beat_anchors_and_tempo_have_the_same_units(detector_bpm)
     for previous, current in zip(anchors, anchors[1:]):
         anchor = previous['command']
         extrapolated = (
-            anchor['position_beats']
+            anchor['beat_index']
             + (current['at_seconds'] - previous['at_seconds']) * anchor['bpm'] / 60.0
         )
-        assert extrapolated == pytest.approx(current['command']['position_beats'])
+        assert extrapolated == pytest.approx(current['command']['beat_index'])
 
 
 def test_an_unmeasured_bpm_is_not_a_bpm_change(analyser):
@@ -250,6 +256,82 @@ async def test_startup_wait_is_excluded_from_song_time_without_changing_song_bou
     events, durations, _ = delayed
     assert [kind for _, kind in events] == ['start', 'stop', 'start']
     assert max(durations) < datetime.timedelta(seconds=2)
+
+
+def _silence_gap(kind: str, frames: int, rng: np.random.Generator) -> np.ndarray:
+    if kind == 'zeros':
+        return np.zeros(frames, dtype=np.float32)
+    level = {'noise_1e-6': 1e-6, 'noise_-60dBFS': 1e-3}[kind]
+    return (level * rng.standard_normal(frames)).astype(np.float32)
+
+
+@pytest.mark.parametrize(
+    ('gaps', 'standby'),
+    [
+        ([('zeros', 2.1)], True),
+        ([('noise_1e-6', 2.5)], True),
+        ([('zeros', 1.5)], False),
+        ([('noise_1e-6', 1.5)], False),
+        ([('noise_-60dBFS', 5.0)], False),
+        # One audible buffer between two short gaps restarts the count.
+        ([('noise_1e-6', 1.5), ('music', 0.01), ('noise_1e-6', 1.5)], False),
+    ],
+)
+async def test_two_seconds_below_the_digital_silence_floor_mean_the_source_stopped(gaps, standby):
+    class _Recorder(_StubHandler):
+        def __init__(self):
+            self.events: list[str] = []
+
+        def on_digital_silence(self):
+            self.events.append('silence')
+
+        def on_signal_return(self):
+            self.events.append('return')
+
+    clock = VirtualClock()
+    handler = _Recorder()
+    analyser = _make_analyser(clock, handler)
+    analyser._rhythm = _FakeRhythm()
+    rng = np.random.default_rng(0)
+    step = analyser.buffer_size / analyser.sample_rate
+    for kind, seconds in [('music', 1.0), *gaps, ('music', 1.0)]:
+        for _ in range(max(1, round(seconds / step))):
+            clock.advance(step)
+            if kind == 'music':
+                buffer = np.full(256, 0.2, dtype=np.float32)
+            else:
+                buffer = _silence_gap(kind, 256, rng)
+            await analyser.analyse(buffer)
+    assert handler.events == (['silence', 'return'] if standby else [])
+    assert not analyser.in_standby
+    if standby:
+        assert analyser._rhythm.resets >= 2, 'the beat tracker restarts with the signal'
+
+
+async def test_a_raised_silence_setting_tolerates_a_true_zero_break_read_at_use_time():
+    from autolux.lib.engine.effect_definitions import ShowSettings
+
+    class _Recorder(_StubHandler):
+        def __init__(self):
+            self.silences = 0
+
+        def on_digital_silence(self):
+            self.silences += 1
+
+    clock = VirtualClock()
+    handler = _Recorder()
+    settings = ShowSettings(digital_silence_seconds=5.0)
+    analyser = MusicAnalyser(
+        sample_rate=44100, buffer_size=256, handler=handler, clock=clock, settings=lambda: settings
+    )
+    analyser._rhythm = _FakeRhythm()
+    silent = np.zeros(256, dtype=np.float32)
+    for _ in range(round(4.0 * 44100 / 256)):
+        await analyser.analyse(silent)
+    assert handler.silences == 0
+    settings = ShowSettings(digital_silence_seconds=0.5)
+    await analyser.analyse(silent)
+    assert handler.silences == 1
 
 
 async def test_the_note_event_follows_the_beat_stream():

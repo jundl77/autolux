@@ -96,3 +96,15 @@ def test_recent_glitches_clear_after_ten_seconds(tmp_path, monkeypatch):
         if second == 101:
             assert snapshot['recent']['underruns'] == 1
     assert snapshot['recent']['underruns'] == 0
+
+
+def test_capture_resyncs_count_in_the_recent_window(tmp_path, monkeypatch):
+    path = tmp_path / 'health.json'
+    monitor = HealthMonitor(path, 1)
+    for second, resyncs in ((100, 0), (101, 2)):
+        monkeypatch.setattr('cli.health_monitor.time.time', lambda second=second: second)
+        tx = {'capture_overruns_total': resyncs, 'capture_discontinuities_total': resyncs}
+        path.write_text(json.dumps({'run_id': 1, 'timestamp': second, 'tx': tx}))
+        snapshot = monitor.snapshot()
+    assert snapshot['recent']['resyncs'] == 2
+    assert snapshot['recent']['overruns'] == 2

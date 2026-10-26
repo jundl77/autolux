@@ -23,11 +23,28 @@ struct Renderer {
     runtime: tempfile::TempDir,
 }
 
+fn techno_palette() -> wire::Palette {
+    let rgb = |red, green, blue| Some(wire::RgbColor { red, green, blue });
+    wire::Palette {
+        name: "techno".into(),
+        primary: rgb(1.0, 0.82, 0.6),
+        secondary: rgb(1.0, 0.55, 0.1),
+        accent: rgb(0.75, 0.0, 0.02),
+        cold: rgb(0.75, 0.85, 1.0),
+        black: rgb(0.0, 0.0, 0.0),
+    }
+}
+
 fn play(name: &str) -> Operation {
     Operation::PlayAutoloop(wire::PlayAutoloop {
         command_id: 1,
         autoloop_id: name.into(),
         transition: None,
+        palette: if name.is_empty() {
+            String::new()
+        } else {
+            "techno".into()
+        },
     })
 }
 
@@ -42,6 +59,7 @@ fn setting(kind: wire::ParameterType, value: wire::parameter::Value) -> wire::Pa
     wire::Parameter {
         r#type: kind as i32,
         value: Some(value),
+        ..Default::default()
     }
 }
 
@@ -95,6 +113,7 @@ impl Renderer {
             output: Some(wire::login::Output::ArtnetDestination(socket.local_addr().unwrap().to_string())),
             parameters: vec![],
             render_core: None,
+            palettes: vec![techno_palette()],
         };
         Self {
             child,
@@ -114,7 +133,7 @@ impl Renderer {
             panic!("renderer did not accept login");
         };
         assert_eq!(reply.frame_rate_hz, 40);
-        assert_eq!(reply.max_message_bytes, 65536);
+        assert_eq!(reply.max_message_bytes, 4 * 1024);
         assert_eq!(reply.run_id, renderer.login.run_id);
         let metrics = renderer.next_metrics();
         assert_eq!(metrics.run_id, renderer.login.run_id);
@@ -406,7 +425,7 @@ fn failed_login_acquires_no_output_and_corrected_login_initializes_parameters() 
         Event::LoginReply(_)
     ));
     renderer.send(play("energy"));
-    renderer.wait_for_red(77);
+    renderer.wait_for_red(46);
     let metrics = renderer.metrics();
     assert!(
         metrics.elapsed_seconds < 1.0,
@@ -420,7 +439,7 @@ fn login_probes_every_script_without_output_and_uses_initial_parameters() {
     let mut renderer = Renderer::start();
     for source in [
         "this is not Lua",
-        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.group('missing'), 1)} end}",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.fixture('missing'), 1)} end}",
         "return {render=function(ctx) error('invalid supplied script') end}",
     ] {
         let mut login = renderer.login.clone();
@@ -496,7 +515,7 @@ fn semantic_rejections_preserve_scene_and_metrics_track_silent_command_bursts() 
         renderer.events.recv_timeout(SILENT_CHECK_TIMEOUT).is_err(),
         "successful commands must not produce replies"
     );
-    renderer.wait_for_red(102);
+    renderer.wait_for_red(82);
     assert!(renderer.metrics().runtime_error.is_empty());
 }
 

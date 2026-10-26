@@ -100,10 +100,10 @@ def test_all_four_intents_map_to_authored_autoloops_in_stable_order():
     assert [
         (event['command']['bank'], event['command']['autoloop']) for event in selections(result)
     ] == [
-        ('atmospheric', 'blue_tide'),
-        ('breakdown', 'violet_space'),
-        ('buildup', 'current'),
-        ('drop', 'blue_impact'),
+        ('atmospheric', 'cold_breathe'),
+        ('breakdown', 'wide_space'),
+        ('buildup', 'ramp'),
+        ('drop', 'kick'),
     ]
     assert report_to_replay(source) == report_to_replay(copy.deepcopy(source))
 
@@ -132,7 +132,8 @@ def test_zero_tempo_warmup_is_skipped_without_losing_detected_beat_count():
     beats = [
         event for event in report_to_replay(source)['events'] if event['command']['kind'] == 'beat'
     ]
-    assert [event['command']['position_beats'] for event in beats] == [1, 2]
+    assert [event['command']['beat_index'] for event in beats] == [1, 2]
+    assert {event['command']['bar_phase'] for event in beats} == {None}
     assert [event['command']['bpm'] for event in beats] == [120.0, 120.0]
 
 
@@ -165,3 +166,14 @@ def test_missing_tempo_or_delay_and_backwards_beats_are_rejected():
     source['beats'].reverse()
     with pytest.raises(ValueError, match='ordered'):
         report_to_replay(source)
+
+
+def test_a_replay_embeds_the_login_palette_table_and_names_each_selection_palette():
+    from autolux.lighting.palettes import DEFAULT_PALETTE, palette_table
+
+    replay = report_to_replay(report())
+    assert [palette['name'] for palette in replay['palettes']] == [
+        palette.name for palette in palette_table()
+    ]
+    assert replay['palettes'][0]['secondary'] == {'red': 1.0, 'green': 0.55, 'blue': 0.1}
+    assert {event['command']['palette'] for event in selections(replay)} == {DEFAULT_PALETTE}

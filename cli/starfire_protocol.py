@@ -7,7 +7,8 @@ from google.protobuf.message import Message
 
 from proto.starfire import starfire_pb2 as wire
 
-MAX_MESSAGE_BYTES = 64 * 1024
+MAX_LOGIN_BYTES = 4 * 1024 * 1024
+MAX_MESSAGE_BYTES = 4 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
 FRAME_HEADER = struct.Struct('!BI')
@@ -19,6 +20,7 @@ COMMAND_MESSAGES = {
     wire.UNSET_ACTIVE_EFFECT: wire.UnsetActiveEffect,
     wire.UPDATE_BEAT: wire.UpdateBeat,
     wire.SET_PARAMETER: wire.SetParameter,
+    wire.DISCARD_DELAYED_AUDIO: wire.DiscardDelayedAudio,
     wire.HEARTBEAT: wire.Heartbeat,
 }
 EVENT_MESSAGES = {
@@ -29,6 +31,32 @@ EVENT_MESSAGES = {
 }
 MESSAGE_TYPE_BY_CLASS = {
     message: message_type for message_type, message in (COMMAND_MESSAGES | EVENT_MESSAGES).items()
+}
+
+
+PAYLOAD_LIMITS = {wire.LOGIN: MAX_LOGIN_BYTES}
+
+
+def check_payload_size(message_type: int, length: int):
+    limit = PAYLOAD_LIMITS.get(message_type, MAX_MESSAGE_BYTES)
+    if length > limit:
+        name = wire.MessageType.Name(message_type)
+        raise ValueError(
+            f'Starfire {name} payload of {length} bytes exceeds the {limit}-byte limit'
+        )
+
+
+PARAMETERS = {
+    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
+    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
+    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
+    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
+    'set_paused': (wire.PAUSED, 'paused', 'boolean'),
+    'set_default_crossfade_beats': (wire.DEFAULT_CROSSFADE_BEATS, 'beats', 'number'),
+    'set_strobe_max_rate_hz': (wire.STROBE_MAX_RATE_HZ, 'hz', 'number'),
+    'set_strobe_max_burst_seconds': (wire.STROBE_MAX_BURST_SECONDS, 'seconds', 'number'),
+    'set_palette': (wire.PALETTE, 'name', 'text'),
+    'set_intensity': (wire.INTENSITY, 'level', 'number'),
 }
 
 
@@ -47,28 +75,28 @@ def build_command(command: dict | Message) -> Message:
             value = dict(command)
             kind = value.pop('kind')
             if kind == 'beat':
+                bar_phase = value.pop('bar_phase', None)
                 message = wire.UpdateBeat(
-                    position_beats=value.pop('position_beats'),
+                    beat_index=value.pop('beat_index'),
+                    beats_per_bar=value.pop('beats_per_bar'),
                     tempo_bpm=value.pop('bpm'),
                     **value,
                 )
+                if bar_phase is not None:
+                    message.bar_phase = bar_phase
             elif kind == 'select':
-                transition = value.pop('transition', {'kind': 'cut'})
+                if 'transition' in value:
+                    value['transition'] = _transition(value['transition'])
                 message = wire.PlayAutoloop(
                     autoloop_id=f'{value.pop("bank")}/{value.pop("autoloop")}',
-                    transition=_transition(transition),
                     **value,
                 )
-            elif kind in ('set_master', 'set_speed', 'set_blackout', 'set_normalized_rms_level'):
-                parameter, field, value_type = {
-                    'set_master': (wire.OUTPUT_BRIGHTNESS, 'intensity', 'number'),
-                    'set_speed': (wire.ANIMATION_SPEED, 'multiplier', 'number'),
-                    'set_blackout': (wire.OUTPUT_BLACKOUT, 'enabled', 'boolean'),
-                    'set_normalized_rms_level': (wire.AUDIO_RMS_NORMALIZED, 'level', 'number'),
-                }[kind]
-                message = wire.SetParameter(
-                    parameter=wire.Parameter(type=parameter, **{value_type: value.pop(field)})
-                )
+            elif kind in PARAMETERS:
+                parameter, field, value_type = PARAMETERS[kind]
+                setting = wire.Parameter(type=parameter, **{value_type: value.pop(field)})
+                if kind == 'set_master':
+                    setting.fade_seconds = value.pop('fade_seconds', 0.0)
+                message = wire.SetParameter(parameter=setting)
                 if value:
                     raise ValueError('Parameter command contains unexpected fields')
             elif kind == 'set_override':
@@ -82,6 +110,10 @@ def build_command(command: dict | Message) -> Message:
                 if value:
                     raise ValueError('Idle playback command contains unexpected fields')
                 message = wire.PlayAutoloop()
+            elif kind == 'discard_delayed_audio':
+                if value:
+                    raise ValueError('Discarding delayed audio takes no fields')
+                message = wire.DiscardDelayedAudio()
             elif kind == 'heartbeat':
                 message = wire.Heartbeat(**value)
             else:
@@ -149,9 +181,9 @@ def encode_command(message: Message) -> bytes:
     if not isinstance(message, wire.Heartbeat) and not 0 < message.command_id <= MAX_COMMAND_ID:
         raise ValueError('Starfire command ID must be positive')
     payload = message.SerializeToString()
-    if len(payload) > MAX_MESSAGE_BYTES:
-        raise ValueError('Starfire command exceeds the message limit')
-    return FRAME_HEADER.pack(MESSAGE_TYPE_BY_CLASS[type(message)], len(payload)) + payload
+    message_type = MESSAGE_TYPE_BY_CLASS[type(message)]
+    check_payload_size(message_type, len(payload))
+    return FRAME_HEADER.pack(message_type, len(payload)) + payload
 
 
 def read_event(stream) -> Message | None:
@@ -161,8 +193,7 @@ def read_event(stream) -> Message | None:
     message_type, length = FRAME_HEADER.unpack(prefix)
     if message_type not in EVENT_MESSAGES:
         raise ValueError(f'Unexpected Starfire server message type: {message_type}')
-    if length > MAX_MESSAGE_BYTES:
-        raise ValueError(f'Invalid Starfire event size: {length}')
+    check_payload_size(message_type, length)
     return EVENT_MESSAGES[message_type].FromString(_read_exact(stream, length))
 
 

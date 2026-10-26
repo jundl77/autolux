@@ -10,10 +10,17 @@ from autolux.lib.audio_config import SAMPLE_RATE
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
-from autolux.lib.engine.effect_definitions import LightIntent
+from autolux.lib.engine.effect_definitions import (
+    BEAT_LOSS_SECONDS,
+    PREFERRED_AUTOLOOPS,
+    QUIET_BRIGHTNESS,
+    LightIntent,
+    intent_for_class,
+)
 from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
 from autolux.lib.engine.light_engine import LightEngine
 from autolux.lib.engine.section_decoder import BarDecision, BarObservation
+from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
 
@@ -22,6 +29,7 @@ class FakeAnalyser:
         self.playing = True
         self.since_beat = 0.0
         self.bpm = 128.0
+        self.rms = 0.1
 
     def is_song_playing(self):
         return self.playing
@@ -36,7 +44,7 @@ class FakeAnalyser:
         return self.bpm
 
     def get_rms_energy(self):
-        return 0.1
+        return self.rms
 
     def get_song_current_duration(self):
         import datetime
@@ -91,6 +99,8 @@ class FakeDecoder:
 
     class params:
         lag_bars = 2
+
+    beat_phase = None
 
     def __init__(self, script=None):
         self.beats: list = []
@@ -1052,7 +1062,7 @@ async def test_a_song_boundary_keeps_the_intents_for_buffered_audio():
 def test_the_grid_never_tears_itself_down_before_the_show_has_gone_quiet():
     from autolux.lib.engine import light_engine, section_decoder
 
-    assert section_decoder._BEAT_GAP_SEC > light_engine._BEAT_ABSENCE_SEC, (
+    assert section_decoder._BEAT_GAP_SEC > light_engine.BEAT_LOSS_SECONDS, (
         'the bar grid re-anchors while the engine still believes a section is '
         'playing: the decisions either side of the gap would name bars on two '
         'different grids with nothing on screen saying the beat had stopped'
@@ -1220,3 +1230,730 @@ async def test_the_grid_travels_with_the_bar_numbers_that_name_it():
     state = light.event_buffer.snapshot()['decoder']
     assert state['first_bar'] == 41
     assert state['bar_sec'] == pytest.approx(FakeDecoder.bar_sec)
+
+
+async def beat_at_phase(light, decoder, phase, *, decision=None):
+    decoder.beat_phase = phase
+    if decision is not None:
+        decoder._script.append([BarDecision(0, decision, light.audio_sec)])
+    await light.on_beat(1, 128.0, False)
+
+
+def sent_beats(lighting):
+    return [e['command'] for e in lighting.events if e['command']['kind'] == 'beat']
+
+
+async def test_beats_carry_the_trackers_phase_and_count_and_leave_the_grid_to_starfire():
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    phases = [1, 2, 3, 0, 1, 3, 0, None, 0]
+    for phase in phases:
+        await beat_at_phase(light, decoder, phase)
+
+    beats = sent_beats(lighting)
+    assert [beat['beat_index'] for beat in beats] == list(range(1, len(phases) + 1))
+    assert [beat['bar_phase'] for beat in beats] == phases
+    assert {beat['beats_per_bar'] for beat in beats} == {4}
+
+
+async def test_an_unpublished_beat_leaves_an_index_gap_and_the_next_beat_keeps_its_phase():
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    light.analyser.bpm = 0.0
+    await beat_at_phase(light, decoder, 3)
+    light.analyser.bpm = 120.0
+    await beat_at_phase(light, decoder, 0)
+    await beat_at_phase(light, decoder, 1)
+
+    beats = sent_beats(lighting)
+    assert [(beat['beat_index'], beat['bar_phase']) for beat in beats] == [(2, 0), (3, 1)]
+
+
+async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest_one_wins():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 1)
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 2, decision='buildup')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    downbeat_reaches_room = clock.monotonic() + 14.0
+
+    clock.advance(13.9)
+    await queue.drain()
+    assert selections(lighting) == [], 'switched before the downbeat reached the room'
+    assert light.current_intent is LightIntent.DROP
+
+    clock.advance(0.2)
+    await queue.drain()
+    [selected] = selections(lighting)
+    assert selected['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+    assert selected['at_seconds'] == pytest.approx(downbeat_reaches_room, abs=0.15)
+
+
+async def test_a_held_intent_is_released_when_the_rooms_beats_stop():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 1)
+    await beat_at_phase(light, decoder, 2, decision='breakdown')
+    assert selections(lighting) == []
+
+    clock.advance(3.0)
+    await light.on_100ms_callback()
+    assert [e['command']['autoloop'] for e in selections(lighting)] == [
+        PREFERRED_AUTOLOOPS[LightIntent.BREAKDOWN]
+    ]
+
+
+def masters(lighting):
+    return [
+        e['command']['intensity'] for e in lighting.events if e['command']['kind'] == 'set_master'
+    ]
+
+
+async def tick(light, clock, sec: float) -> None:
+    for _ in range(round(sec / 0.1)):
+        clock.advance(0.1)
+        await light.on_100ms_callback()
+
+
+async def test_a_quiet_passage_dims_the_rig_once_and_recovers_once():
+    light, _, clock, lighting = engine(queue=False)
+    light.analyser.rms = 0.003
+    await tick(light, clock, 1.5)
+    assert masters(lighting) == [], 'a short dip is not a quiet passage'
+    await tick(light, clock, 3.0)
+    assert masters(lighting) == [QUIET_BRIGHTNESS]
+
+    light.analyser.rms = 0.1
+    await tick(light, clock, 3.0)
+    assert masters(lighting) == [QUIET_BRIGHTNESS, 1.0]
+
+
+async def test_a_lost_beat_dims_the_rig_until_beats_resume():
+    light, _, clock, lighting = engine(queue=False)
+    light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
+    await tick(light, clock, 2.0)
+    assert masters(lighting) == [QUIET_BRIGHTNESS]
+
+    light.analyser.since_beat = 0.0
+    await tick(light, clock, 2.0)
+    assert masters(lighting) == [QUIET_BRIGHTNESS, 1.0]
+
+
+async def test_a_stopped_source_is_quiet():
+    light, _, clock, lighting = engine(queue=False)
+    light.analyser.playing = False
+    await tick(light, clock, 0.5)
+    assert masters(lighting) == [QUIET_BRIGHTNESS]
+
+
+async def test_the_dim_waits_for_the_room_to_hear_the_quiet():
+    light, queue, clock, lighting = engine()
+    light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
+    await tick(light, clock, 0.1)
+    await queue.drain()
+    assert masters(lighting) == []
+    clock.advance(14.0)
+    await queue.drain()
+    assert masters(lighting) == [QUIET_BRIGHTNESS]
+
+
+def master_commands(lighting):
+    return [e['command'] for e in lighting.events if e['command']['kind'] == 'set_master']
+
+
+async def test_pause_dims_with_a_fade_and_holds_the_running_loop():
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    assert len(selections(lighting)) == 1
+
+    light.pause()
+    assert master_commands(lighting) == [
+        {'kind': 'set_master', 'intensity': QUIET_BRIGHTNESS, 'fade_seconds': 1.0}
+    ]
+    await beat_at_phase(light, decoder, 1, decision='drop')
+    await beat_at_phase(light, decoder, 0)
+    assert len(selections(lighting)) == 1, 'a paused show must not follow the model'
+    assert light.current_intent is LightIntent.DROP
+
+
+async def test_play_applies_the_current_intent_on_the_next_downbeat_and_restores_brightness():
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    light.pause()
+    await beat_at_phase(light, decoder, 1, decision='drop')
+
+    await light.resume()
+    assert master_commands(lighting)[-1] == {
+        'kind': 'set_master',
+        'intensity': 1.0,
+        'fade_seconds': 1.0,
+    }
+    await beat_at_phase(light, decoder, 2)
+    assert len(selections(lighting)) == 1, 'the change waits for the downbeat'
+    await beat_at_phase(light, decoder, 0)
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+
+
+async def test_master_scales_the_quiet_dim_and_bypasses_the_playback_delay():
+    light, queue, clock, lighting = engine()
+    light.set_master_level(0.5)
+    assert masters(lighting) == [0.5], 'a knob turn must not wait out the show delay'
+
+    light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
+    await tick(light, clock, 0.1)
+    clock.advance(14.0)
+    await queue.drain()
+    assert masters(lighting) == [0.5, pytest.approx(0.5 * QUIET_BRIGHTNESS)]
+    light.set_master_level(0.5)
+    assert len(masters(lighting)) == 2, 'an unchanged level is not resent'
+
+
+async def test_show_control_settings_survive_a_restart_and_apply_without_one(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import SETTINGS_SAVE_SETTLE_SECONDS, ShowControl, load_show_settings
+
+    path = tmp_path / 'show.json'
+    path.write_text('{"keep": "me"}')
+    light, _, clock, lighting = engine(queue=False)
+    control = ShowControl(path, clock=clock)
+    assert control.settings == ShowSettings()
+    light._settings = lambda: control.settings
+    light.pause()
+
+    control.commands.put_nowait(
+        {'action': 'settings', 'settings': ShowSettings(quiet_brightness=0.3)}
+    )
+    await control.apply_pending(light)
+    assert masters(lighting)[-1] == pytest.approx(0.3)
+    clock.advance(SETTINGS_SAVE_SETTLE_SECONDS)
+    await control.apply_pending(light)
+    assert load_show_settings(path) == ShowSettings(quiet_brightness=0.3)
+    assert ShowControl(path).settings == control.settings
+    assert '"keep": "me"' in path.read_text()
+
+
+@pytest.mark.parametrize(
+    'bad',
+    [
+        {'quiet_brightness': 1.5},
+        {'crossfade_beats': 0},
+        {'strobe_burst_seconds': True},
+        {'drop_strobe_cooldown_seconds': float('nan')},
+        {'digital_silence_seconds': 0.1},
+        {'unknown': 1},
+    ],
+)
+def test_invalid_show_settings_are_refused(bad):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+
+    with pytest.raises(ValueError):
+        ShowSettings.from_dict(bad)
+
+
+class _MetronomeRhythm:
+    def __init__(self):
+        from autolux.lib.analyser.madmom_rhythm import RhythmEvents
+
+        self._events = RhythmEvents
+        self.pending_latency_sec = 0.0
+        self.samples = 0
+
+    def reset(self):
+        self.samples = 0
+
+    def process(self, buffer):
+        half_second = SAMPLE_RATE // 2
+        before, self.samples = self.samples, self.samples + len(buffer)
+        on_beat = self.samples // half_second > before // half_second
+        return self._events(beats=[self.samples / SAMPLE_RATE] if on_beat else [])
+
+
+class _Show:
+    def __init__(self):
+        from autolux.lib.analyser.music_analyser import MusicAnalyser
+        from autolux.lib.audio_config import BUFFER_SIZE
+
+        from autolux.lib.engine.event_buffer import EventBuffer
+
+        self.clock = VirtualClock()
+        self.lighting = RecordingStarfireClient(clock=self.clock)
+        self.queue = DelayedCommandQueue(14.0, clock=self.clock)
+        self.chain, self.decoder = FakeChain(), FakeDecoder()
+        self.monitor_silenced = 0
+        self.events = EventBuffer(window_sec=float('inf'), clock=self.clock, look_ahead_sec=14.0)
+        self.events.start()
+        self.light = LightEngine(
+            self.lighting,
+            EffectController(self.lighting, event_buffer=self.events, clock=self.clock),
+            self.queue,
+            event_buffer=self.events,
+            playback_delay_sec=14.0,
+            section_chain=self.chain,
+            section_decoder=self.decoder,
+            clock=self.clock,
+            silence_monitor=self._silence_monitor,
+        )
+        self.analyser = MusicAnalyser(SAMPLE_RATE, BUFFER_SIZE, self.light, clock=self.clock)
+        self.analyser._rhythm = _MetronomeRhythm()
+        self.light.set_analyser(self.analyser)
+        self._buffer_size = BUFFER_SIZE
+        self._next_tick = 0.1
+
+    def _silence_monitor(self):
+        self.monitor_silenced += 1
+
+    async def play(self, seconds: float, level: float) -> None:
+        step = self._buffer_size / SAMPLE_RATE
+        for _ in range(round(seconds / step)):
+            buffer = np.full(self._buffer_size, level, dtype=np.float32)
+            self.clock.advance(step)
+            await self.light.on_audio(buffer)
+            await self.analyser.analyse(buffer)
+            await self.queue.drain()
+            if self.clock.monotonic() >= self._next_tick:
+                self._next_tick += 0.1
+                await self.light.on_100ms_callback()
+
+    def commands(self, since: int = 0) -> list[dict]:
+        return [event['command'] for event in self.lighting.events[since:]]
+
+
+def _selections(commands):
+    return [(c['bank'], c['autoloop']) for c in commands if c['kind'] == 'select']
+
+
+async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_at_once():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    assert _selections(show.commands()) == [('atmospheric', 'cold_breathe')]
+    assert show.queue.pending > 0, 'beats for the buffered audio are still due'
+    stopped = len(show.lighting.events)
+
+    await show.play(1.9, 0.0)
+    assert not show.light.standby
+    assert {'kind': 'discard_delayed_audio'} not in show.commands(stopped)
+
+    await show.play(0.2, 0.0)
+    assert show.light.standby
+    standby = show.commands(stopped)
+    assert standby.count({'kind': 'discard_delayed_audio'}) == 1
+    assert show.monitor_silenced == 1
+    assert show.queue.pending == 0, 'the delayed queue must be purged'
+    select = next(c for c in standby if c['kind'] == 'select')
+    assert (select['bank'], select['autoloop']) == ('standby', 'warm_white')
+    assert select['transition'] == {
+        'kind': 'crossfade',
+        'duration_beats': pytest.approx(2.0, rel=0.01),
+    }
+    assert {'kind': 'clear_override', 'id': 'drop_arrival'} in standby
+
+    parked = len(show.lighting.events)
+    chain_samples = show.chain.samples
+    await show.play(20.0, 0.0)
+    assert show.commands(parked) == [], 'nothing delayed may reach the parked rig'
+    assert show.chain.samples == chain_samples, 'model decisions must hold while silent'
+
+
+async def test_a_short_dropout_keeps_the_show_and_its_buffered_audio():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    before = len(show.lighting.events)
+    await show.play(1.5, 0.0)
+    await show.play(5.0, 0.2)
+    assert not show.light.standby
+    assert {'kind': 'discard_delayed_audio'} not in show.commands(before)
+    assert ('standby', 'warm_white') not in _selections(show.commands(before))
+    assert show.monitor_silenced == 0
+
+
+async def test_returning_signal_restarts_the_show_from_scratch_after_one_playback_delay():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    await show.play(3.0, 0.0)
+    assert show.light.standby
+    chain_resets, decoder_resets = show.chain.resets, show.decoder.resets
+    parked = len(show.lighting.events)
+
+    await show.play(1.0, 0.2)
+    assert not show.light.standby
+    assert show.chain.resets > chain_resets and show.decoder.resets > decoder_resets
+    assert show.analyser.beat_count <= 2, 'the beat stream restarted with the signal'
+    assert show.light.audio_sec <= 1.0, 'the chain clock counts only the returning audio'
+    assert show.light._pending_intents == [] and show.light._held_intent is None
+
+    await show.play(12.5, 0.2)
+    assert _selections(show.commands(parked)) == []
+    await show.play(1.5, 0.2)
+    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    await show.play(3.0, 0.2)
+    assert any(c['kind'] == 'beat' for c in show.commands(parked))
+    indices = [c['beat_index'] for c in show.commands() if c['kind'] == 'beat']
+    assert indices == sorted(set(indices)), (
+        "beat indices keep increasing across the restart, as Starfire requires"
+    )
+
+
+async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    show.light.pause()
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
+    await show.play(3.0, 0.0)
+    assert masters(show.lighting)[-1] == pytest.approx(1.0)
+    parked = len(show.lighting.events)
+
+    entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
+    assert entered['autoloop'] == 'warm_white'
+    assert entered['transition'] == {'kind': 'cut'}
+
+    await show.play(15.5, 0.2)
+    assert show.light.paused
+    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    left = [c for c in show.commands(parked) if c['kind'] == 'select'][-1]
+    assert left['transition'] == {'kind': 'cut'}
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
+
+
+async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_cleared():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    await show.play(20.0, 1e-3)
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
+    assert show.light._room_quiet and show.light._source_quiet
+    await show.play(2.1, 0.0)
+    assert show.light.standby
+    assert masters(show.lighting)[-1] == pytest.approx(1.0)
+    await show.analyser.analyse(np.full(256, 0.2, dtype=np.float32))
+    assert not show.light.standby
+    assert show.light._quiet_since is None
+    assert show.light._source_quiet is False
+    assert show.light._room_quiet is False
+
+
+async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior():
+    show = _Show()
+    fake_reset = show.decoder.reset
+
+    def reset(**kwargs):
+        fake_reset(**kwargs)
+        show.decoder.recent_observations.clear()
+
+    show.decoder.reset = reset
+    await show.play(20.0, 0.2)
+    show.decoder.recent_observations.append(BarObservation(3, 5.7, 7.6, np.ones(9) / 9, 0.5))
+    show.light._publish_decoder_state(None)
+    before = show.events.snapshot()
+    assert before['intent'] == 'atmospheric' and before['decoder']['posterior'] is not None
+    await show.play(2.1, 0.0)
+    snapshot = show.events.snapshot()
+    assert snapshot['intent'] == 'standby'
+    assert snapshot['decoder']['committed_label'] is None
+    assert snapshot['decoder']['posterior'] is None
+    assert snapshot['intents'][-1]['trigger'] == SILENCE_TRIGGER
+    assert 'standby/warm_white' in [e['name'] for e in snapshot['effects']]
+
+
+class SelectionSpy(EffectController):
+    def __init__(self, lighting):
+        super().__init__(lighting)
+        self.contexts = []
+
+    async def change_effect(self, intent, bpm=None, context=None, *, cut=False):
+        self.contexts.append(context)
+        return await super().change_effect(intent, bpm, context, cut=cut)
+
+
+async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tracks():
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock)
+    spy = SelectionSpy(lighting)
+    light = LightEngine(lighting, spy, None, clock=clock)
+    light.set_analyser(FakeAnalyser())
+    light._source_playing = light._room_playing = True
+    light._room_start_monotonic_seconds = clock.monotonic()
+    bar = 4 * 60.0 / 128.0
+
+    async def section(label, bars, rms=0.1):
+        await light._commit_intent(intent_for_class(label), 0.0, section_label=label)
+        light.analyser.rms = rms
+        for _ in range(bars * 4):
+            await light.on_beat(1, 128.0, False)
+            clock.advance(bar / 4)
+
+    await section('intro', 4, rms=0.01)
+    await section('altintro', 4)
+    await section('breakdown', 8)
+    await section('buildup', 24)
+    await section('drop', 16)
+    await section('outro', 4)
+    await section('intro', 4)
+    await section('breakdown', 8)
+    await section('buildup', 8)
+    await section('drop', 4)
+    intro, altintro, breakdown, buildup, drop, outro, next_intro, *_, second_drop = spy.contexts
+    assert intro.new_track and not altintro.new_track and not breakdown.new_track
+    assert breakdown.loudness == 'rising' and drop.loudness == 'flat'
+    assert buildup.build_bars == pytest.approx(8)
+    assert drop.build_bars == pytest.approx(32)
+    assert drop.seconds_since_drop is None
+    assert not outro.new_track and outro.build_bars == 0
+    assert next_intro.new_track
+    assert outro.seconds_since_drop == 0
+    assert second_drop.seconds_since_drop == pytest.approx(24 * bar)
+    assert second_drop.build_bars == pytest.approx(16)
+
+    light._show_sound_stop()
+    light._room_playing = True
+    await section('drop', 1)
+    assert spy.contexts[-1].new_track
+
+
+def sent(lighting, *kinds):
+    return [
+        (e['at_seconds'], e['command']) for e in lighting.events if e['command']['kind'] in kinds
+    ]
+
+
+async def test_an_operator_master_is_sent_at_once_and_a_queued_quiet_dim_uses_it():
+    light, queue, clock, lighting = engine()
+    light.analyser.since_beat = BEAT_LOSS_SECONDS + 0.5
+    await tick(light, clock, 0.1)
+    clock.advance(1.0)
+    changed_at = clock.monotonic()
+    light.set_master_level(0.5)
+    assert sent(lighting, 'set_master') == [
+        (changed_at, {'kind': 'set_master', 'intensity': 0.5, 'fade_seconds': 0.1})
+    ]
+
+    clock.advance(14.0)
+    await queue.drain()
+    at, dim = sent(lighting, 'set_master')[-1]
+    assert at > changed_at + 13.0
+    assert dim == {
+        'kind': 'set_master',
+        'intensity': pytest.approx(0.5 * QUIET_BRIGHTNESS),
+        'fade_seconds': 1.0,
+    }
+
+
+async def test_pause_and_play_reach_starfire_at_once_and_only_play_follows_the_model():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    paused_at = clock.monotonic()
+    light.pause()
+    assert sent(lighting, 'set_paused', 'set_master') == [
+        (paused_at, {'kind': 'set_paused', 'paused': True}),
+        (paused_at, {'kind': 'set_master', 'intensity': QUIET_BRIGHTNESS, 'fade_seconds': 1.0}),
+    ]
+    clock.advance(1.0)
+    await beat_at_phase(light, decoder, 0, decision='drop')
+    assert len(selections(lighting)) == 1, 'a paused show must not follow the model'
+
+    clock.advance(4.0)
+    played_at = clock.monotonic()
+    await light.resume()
+    assert sent(lighting, 'set_paused', 'set_master')[-2:] == [
+        (played_at, {'kind': 'set_paused', 'paused': False}),
+        (played_at, {'kind': 'set_master', 'intensity': 1.0, 'fade_seconds': 1.0}),
+    ]
+    await beat_at_phase(light, decoder, 0)
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
+
+
+async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    light, _, clock, lighting = engine()
+    light._settings = lambda: control.settings
+    control.start(light)
+    renderer = ('set_paused', 'set_default_crossfade_beats', 'set_strobe_max_rate_hz')
+    renderer += ('set_strobe_max_burst_seconds', 'set_intensity')
+    assert [command for _, command in sent(lighting, *renderer)] == [
+        {'kind': 'set_paused', 'paused': False},
+        {'kind': 'set_default_crossfade_beats', 'beats': 1.0},
+        {'kind': 'set_strobe_max_rate_hz', 'hz': 8.0},
+        {'kind': 'set_strobe_max_burst_seconds', 'seconds': 4.0},
+        {'kind': 'set_intensity', 'level': 0.7},
+    ]
+
+    lighting.events.clear()
+    changed_at = clock.monotonic()
+    control.commands.put_nowait(
+        {
+            'action': 'settings',
+            'settings': ShowSettings(
+                crossfade_beats=4, strobe_max_rate_hz=5, strobe_max_burst_seconds=2, intensity=0.4
+            ),
+        }
+    )
+    await control.apply_pending(light)
+    assert sent(lighting, *renderer) == [
+        (changed_at, {'kind': 'set_paused', 'paused': False}),
+        (changed_at, {'kind': 'set_default_crossfade_beats', 'beats': 4.0}),
+        (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
+        (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
+        (changed_at, {'kind': 'set_intensity', 'level': 0.4}),
+    ]
+
+
+async def test_next_autoloop_bypasses_the_playback_delay():
+    from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOP_META, DEFAULT_AUTOLOOPS
+
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder, queue=False)
+    breakdown = DEFAULT_AUTOLOOPS[LightIntent.BREAKDOWN][0]
+    light.effect_controller = EffectController(
+        lighting,
+        autoloops={**DEFAULT_AUTOLOOPS, LightIntent.BREAKDOWN: (breakdown, ('breakdown', 'deep'))},
+        autoloop_meta={
+            **DEFAULT_AUTOLOOP_META,
+            ('breakdown', 'deep'): DEFAULT_AUTOLOOP_META[breakdown],
+        },
+    )
+    await beat_at_phase(light, decoder, 0, decision='breakdown')
+    before = selections(lighting)[-1]['command']['autoloop']
+    clock.advance(3.0)
+    light.next_autoloop()
+    after = selections(lighting)[-1]
+    assert after['at_seconds'] == clock.monotonic()
+    assert after['command']['autoloop'] != before
+
+
+@pytest.mark.parametrize(
+    ('paused', 'reason'), [(False, 'no section is playing yet'), (True, 'the show is paused')]
+)
+async def test_next_autoloop_is_refused_without_a_playing_section(paused, reason):
+    light, *_ = engine(queue=False)
+    if paused:
+        light.pause()
+    with pytest.raises(ValueError, match=reason):
+        light.next_autoloop()
+
+
+def palette_commands(lighting):
+    return [
+        (at, command.get('palette', command.get('name')))
+        for at, command in sent(lighting, 'select', 'set_palette')
+    ]
+
+
+async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pins_are_instant(
+    tmp_path,
+):
+    from autolux.lib.main import ShowControl
+
+    light, queue, clock, lighting = engine(events=True)
+    control = ShowControl(tmp_path / 'show.json', light.event_buffer)
+    decided_at = clock.monotonic()
+    await light._commit_intent(LightIntent.ATMOSPHERIC, 0.0, section_label='intro')
+    clock.advance(13.9)
+    await queue.drain()
+    assert sent(lighting, 'select', 'set_palette') == []
+    clock.advance(0.2)
+    await queue.drain()
+    [(selected_at, track_palette)] = palette_commands(lighting)
+    assert selected_at == pytest.approx(decided_at + 14.0, abs=0.2)
+    assert track_palette in PALETTE_NAMES
+    assert light.event_buffer.snapshot()['palette'] == {'name': track_palette, 'pinned': False}
+
+    pinned = next(name for name in PALETTE_NAMES if name != track_palette)
+    pinned_at = clock.monotonic()
+    control.commands.put_nowait({'action': 'palette', 'name': pinned})
+    await control.apply_pending(light)
+    assert palette_commands(lighting)[-1] == (pinned_at, pinned)
+    assert light.event_buffer.snapshot()['palette'] == {'name': pinned, 'pinned': True}
+
+    await light._commit_intent(LightIntent.BREAKDOWN, 0.0, section_label='breakdown')
+    clock.advance(14.1)
+    await queue.drain()
+    breakdown = [command for _, command in sent(lighting, 'select')][-1]
+    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', f'{pinned}_breakdown')
+
+    control.commands.put_nowait({'action': 'palette', 'name': 'auto'})
+    await control.apply_pending(light)
+    assert palette_commands(lighting)[-1] == (clock.monotonic(), f'{track_palette}_breakdown')
+    assert light.event_buffer.snapshot()['palette'] == {
+        'name': f'{track_palette}_breakdown',
+        'pinned': False,
+    }
+
+
+async def test_palette_warmth_is_saved_and_range_checked(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl, load_show_settings
+
+    path = tmp_path / 'show.json'
+    control = ShowControl(path)
+    control.commands.put_nowait(
+        {'action': 'settings', 'settings': ShowSettings(palette_temperature_bias=-1.0)}
+    )
+    light, _, _, _ = engine(queue=False)
+    light._settings = lambda: control.settings
+    await control.apply_pending(light)
+    control.save_settings()
+    assert load_show_settings(path).palette_temperature_bias == -1.0
+    assert ShowControl(path).settings.palette_temperature_bias == -1.0
+    with pytest.raises(ValueError, match='palette_temperature_bias must be within -1..1'):
+        ShowSettings(palette_temperature_bias=1.5)
+
+
+async def test_the_intensity_fader_applies_at_once_and_survives_a_restart(tmp_path):
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lib.main import ShowControl, load_show_settings
+
+    path = tmp_path / 'show.json'
+    light, _, clock, lighting = engine()
+    control = ShowControl(path, clock=clock)
+    control.settings = ShowSettings(crossfade_beats=4)
+    light._settings = lambda: control.settings
+    changed_at = clock.monotonic()
+    control.commands.put_nowait({'action': 'intensity', 'level': 0.25})
+    await control.apply_pending(light)
+    assert sent(lighting, 'set_intensity') == [
+        (changed_at, {'kind': 'set_intensity', 'level': 0.25})
+    ]
+    control.save_settings()
+    assert load_show_settings(path) == ShowSettings(crossfade_beats=4, intensity=0.25)
+    assert ShowControl(path).settings.intensity == 0.25
+
+
+async def test_a_fader_drag_updates_live_but_writes_the_show_file_once_it_settles(
+    tmp_path, monkeypatch, caplog
+):
+    from autolux.lib import main
+
+    writes = []
+    save = main.save_show_settings
+    monkeypatch.setattr(
+        main,
+        'save_show_settings',
+        lambda path, settings: writes.append(settings) or save(path, settings),
+    )
+    light, _, clock, lighting = engine()
+    control = main.ShowControl(tmp_path / 'show.json', clock=clock)
+    light._settings = lambda: control.settings
+    levels = [round(0.2 + step * 0.02, 2) for step in range(30)]
+    with caplog.at_level(logging.INFO):
+        for level in levels:
+            control.commands.put_nowait({'action': 'intensity', 'level': level})
+            await control.apply_pending(light)
+            clock.advance(1.0 / len(levels))
+        assert [command['level'] for _, command in sent(lighting, 'set_intensity')] == levels
+        assert {event['command']['kind'] for event in lighting.events} == {'set_intensity'}
+        assert writes == []
+        clock.advance(main.SETTINGS_SAVE_SETTLE_SECONDS)
+        await control.apply_pending(light)
+        await control.apply_pending(light)
+    assert [settings.intensity for settings in writes] == [levels[-1]]
+    assert caplog.text.count('show settings') == 1
+    assert main.load_show_settings(tmp_path / 'show.json').intensity == levels[-1]

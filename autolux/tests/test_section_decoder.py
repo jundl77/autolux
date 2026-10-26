@@ -92,6 +92,19 @@ def test_the_first_detected_beat_is_bar_position_one_not_zero():
     assert section.bar_edges == [pytest.approx(5.5)]
 
 
+def test_the_beat_phase_is_zero_exactly_on_the_beats_that_open_a_bar():
+    section = decoder()
+    assert section.beat_phase is None
+    phases, opened = [], []
+    for beat in beats(9, period=0.5, start=4.0):
+        edges = len(section.bar_edges)
+        section.push_beat(beat)
+        phases.append(section.beat_phase)
+        opened.append(len(section.bar_edges) > edges)
+    assert phases == [1, 2, 3, 0, 1, 2, 3, 0, 1]
+    assert opened == [phase == 0 for phase in phases]
+
+
 def test_no_bar_is_decodable_until_a_second_edge_closes_it():
     section = decoder()
     for beat in beats(BEATS_PER_BAR, period=0.5):

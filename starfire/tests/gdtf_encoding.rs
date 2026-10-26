@@ -1,3 +1,5 @@
+mod support;
+
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::gdtf::GdtfProfile;
@@ -544,7 +546,7 @@ fn engine(channels: &str, source: &str) -> Engine {
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(rig(channels), catalog).unwrap();
+    let mut engine = Engine::new(rig(channels), catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -552,6 +554,7 @@ fn engine(channels: &str, source: &str) -> Engine {
                 bank: "test".into(),
                 autoloop: "test".into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         )
         .unwrap();
@@ -586,11 +589,17 @@ fn explicit_dimmer_values_respect_master_and_blackout() {
         "return {render=function(ctx) return sf.scene {sf.physical_attribute(sf.all(), 'Dimmer', 100)} end}",
     );
     engine
-        .apply(0.0, &Command::SetMaster { intensity: 0.5 })
+        .apply(
+            0.0,
+            &Command::SetMaster {
+                intensity: 0.5,
+                fade_seconds: 0.0,
+            },
+        )
         .unwrap();
     assert_eq!(
         engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],
-        128
+        64
     );
     engine
         .apply(0.1, &Command::SetBlackout { enabled: true })
@@ -654,8 +663,8 @@ fn white_only_emitters_follow_intensity_without_applying_colour_brightness_twice
 #[test]
 fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults() {
     for (attribute, default, dark, dimmed) in [
-        ("ColorAdd_A", "255/1", 0, 64),
-        ("ColorSub_UV", "0/1", 255, 192),
+        ("ColorAdd_A", "255/1", 0, 32),
+        ("ColorSub_UV", "0/1", 255, 223),
     ] {
         let channels = channel(
             attribute,
@@ -679,7 +688,13 @@ fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults()
         );
         for (master, expected) in [(0.5, dimmed), (0.0, dark), (1.0, 128)] {
             engine
-                .apply(0.0, &Command::SetMaster { intensity: master })
+                .apply(
+                    0.0,
+                    &Command::SetMaster {
+                        intensity: master,
+                        fade_seconds: 0.0,
+                    },
+                )
                 .unwrap();
             assert_eq!(
                 engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][0],
@@ -712,6 +727,7 @@ fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults()
                     bank: "test".into(),
                     autoloop: "test".into(),
                     transition: Transition::Cut,
+                    palette: "techno".into(),
                 },
             )
             .unwrap();
@@ -750,9 +766,9 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
             wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "broken".into(), lua_source: broken },
             wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "healthy".into(), lua_source: "return {render=function(ctx) return {sf.dimmer(sf.all(), 0.75), sf.pan_tilt(sf.all(), 0.75, 0.5)} end}".into() },
         ]).unwrap();
-        let mut engine = Engine::new(rig(&channels), catalog).unwrap();
+        let mut engine = Engine::new(rig(&channels), catalog, support::palettes()).unwrap();
         engine
-            .play_autoloop(0.0, "broken", Transition::Cut)
+            .play_autoloop(0.0, "broken", Transition::Cut, "techno")
             .unwrap();
         assert_eq!(
             &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][..2],
@@ -768,7 +784,7 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
             failed.dmx_frames_by_universe
         );
         engine
-            .play_autoloop(0.3, "healthy", Transition::Cut)
+            .play_autoloop(0.3, "healthy", Transition::Cut, "techno")
             .unwrap();
         let recovered = engine.render_at(0.3).unwrap();
         assert!(recovered.script_error.is_none());
@@ -831,15 +847,4 @@ fn unrelated_cells_keep_independent_brightness_and_blackout() {
         encode(&profile, &FixtureState::default()),
         [0, 255, 255, 255, 0, 0, 0]
     );
-}
-
-#[test]
-fn unused_catalogue_profiles_do_not_block_an_independent_rig() {
-    let rig = r#"{"schema_version":1,"fixtures":[{"id":"fog","profile":"used","universe":0,"address":1}]}"#;
-    let profiles = serde_json::json!({"schema_version":1,"profiles":{
-        "used":{"gdtf_xml":description(&channel("Fog1","Base","1", &function("Fog1",""))),"dmx_mode":"Control"},
-        "unused":{"gdtf_xml":"invalid until selected","dmx_mode":"Control"}
-    }});
-    let parsed = FixtureRig::from_json_with_profiles(rig, &profiles.to_string()).unwrap();
-    assert_eq!(parsed.fixture_ids(), ["fog"]);
 }

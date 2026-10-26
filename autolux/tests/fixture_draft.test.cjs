@@ -1,217 +1,177 @@
-// Draft integrity tests: no browser, DOM rendering or UI snapshots.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { test } = require("node:test");
 
+const data = JSON.parse(fs.readFileSync(process.env.FIXTURE_DRAFT_DATA, "utf8"));
 const ds = { no_update: Symbol("unchanged"), callback_context: {} };
-vm.runInNewContext(
-    fs.readFileSync(path.join(__dirname, "../simulate/assets/fixture_patch.js"), "utf8"),
-    {
-        window: { dash_clientside: ds, addEventListener() {} },
-        document: { addEventListener() {} }
-    }
-);
-const settings = {
-    profiles: { spot: { channels: 12 }, rgb: { channels: 3 } },
-    channelCount: 512,
-    maxUniverse: 32767,
-    maxQuantity: 64
+vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixture_patch.js"), "utf8"), {
+    window: { dash_clientside: ds, addEventListener() {} },
+    document: { addEventListener() {} },
+    structuredClone,
+    crypto: globalThis.crypto
+});
+const model = ds.fixture_patch_model;
+const plain = (value) => JSON.parse(JSON.stringify(value));
+const { settings } = data;
+const UUID = /^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
+
+const draft = () => structuredClone(data.draft);
+const nodes = function* (tree) {
+    yield tree;
+    for (const child of tree.children) yield* nodes(child);
 };
-const fixture = (id, address, universe = 0) => ({
-    id,
-    address,
-    universe,
-    profile: "spot",
-    _original_id: id,
-    groups: "movers",
-    pan_min: 0,
-    pan_max: 1,
-    pan_inverted: false,
-    tilt_min: 0,
-    tilt_max: 1,
-    tilt_inverted: false
-});
+const fixtureNode = (tree, name) => [...nodes(tree.scene)].find((node) => node.tag === "Fixture" && node.attributes.name === name);
+const child = (node, tag) => node.children.find((entry) => entry.tag === tag);
 
-function edit(
-    rows,
-    action,
-    {
-        trigger = "fixture-grid-action",
-        busy = "false",
-        response = null,
-        selected = [],
-        profile = "spot",
-        quantity = 1,
-        universe = 1,
-        address = null,
-        values = []
-    } = {}
-) {
+function edit(current, action, { trigger = "fixture-grid-action", busy = "false", response = null, selection = null, profile = null, quantity = 1, universe = 1, address = null } = {}) {
     ds.callback_context.triggered_id = trigger;
-    return ds.fixture_patch.editPatch(
-        0,
-        0,
-        0,
-        0,
-        action,
-        response,
-        settings,
-        busy,
-        rows,
-        {},
-        "saved-revision",
-        selected,
-        profile,
-        quantity,
-        universe,
-        address,
-        ...values
-    );
+    return ds.fixture_patch.editPatch(0, 0, 0, action, response, settings, busy, current, "saved-revision", selection, profile, quantity, universe, address);
 }
 
-function move(rows, address, universe = 0, options) {
-    const row = rows[0];
-    return edit(
-        rows,
-        {
-            action: "move",
-            fixture_id: row.id,
-            original_address: row.address,
-            original_universe: row.universe,
-            address,
-            universe
-        },
-        options
-    );
-}
+test("patched fixtures match the server's reading of the room rig", () => {
+    const rows = model.fixtureRows(draft(), settings);
+    assert.deepEqual(plain(rows.map((row) => [row.name, row.universe, row.address])), data.patched);
+    assert.deepEqual(plain(model.occupancy(rows, settings, 0).errors), []);
+    assert.equal(rows.find((row) => row.name === "spot_left").channels, 12);
+});
 
-test("rapid moves preserve identity and all other draft edits without mutating the source", () => {
-    const original = [fixture("left", 1), fixture("right", 13)];
-    let rows = original;
-    for (const address of [31, 201, 501, 31, 1]) {
-        rows = move(rows, address)[0];
-        assert.equal(rows[0].address, address);
-        assert.equal(rows[0]._original_id, "left");
-        assert.equal(rows[0].groups, "movers");
-        assert.deepEqual(JSON.parse(JSON.stringify(rows[1])), original[1]);
+test("matrix composition and decomposition agree with the server byte for byte", () => {
+    for (const { rotation, matrix, decomposed } of data.parity) {
+        assert.equal(model.formatMatrix(model.composeMatrix([10, -20, 30], rotation)), matrix);
+        const browser = model.rotationDegrees(model.composeMatrix([0, 0, 0], rotation));
+        browser.forEach((value, index) => assert.ok(Math.abs(value - decomposed[index]) < 1e-6, `${rotation}`));
     }
-    assert.equal(original[0].address, 1);
+    assert.deepEqual(plain(model.rotationDegrees([-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0])), [180, 0, 0]);
+    assert.equal(model.rotationDegrees([1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]), null);
+    assert.equal(model.parseMatrix("{1,0,0}{0,1,0}{0,0,1}"), null);
 });
 
-test("self overlap and equal addresses in different universes are valid", () => {
-    assert.equal(move([fixture("left", 1)], 2)[0][0].address, 2);
-    const moved = move([fixture("left", 1), fixture("right", 13)], 13, 1)[0];
-    assert.equal(moved[0].universe, 1);
+test("the inspector's home matches Starfire for hanging, standing and steep fixtures", () => {
+    assert.deepEqual(plain(model.homeOrientation([-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0])), { pan: 180, tilt: 0, reversed: false });
+    assert.deepEqual(plain(model.homeOrientation([1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0])), { pan: 180, tilt: 0, reversed: true });
+    const steep = model.composeMatrix([0, 0, 0], [0, 61, 0]);
+    assert.equal(typeof model.homeOrientation(steep), "string");
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const [tilted] = edit(current, { action: "set-matrix", key: spot.key, position: [0, 0, 0], rotation: [0, 61, 0] });
+    const errors = model.occupancy(model.fixtureRows(tilted, settings), settings, 0).errors;
+    assert.ok(errors.some((error) => error.includes("exceeds ±60°")), errors.join());
 });
 
-test("collisions, overflow and malformed addresses cannot change a draft", () => {
-    const rows = [fixture("left", 1), fixture("right", 13)];
-    for (const [address, universe] of [
-        [13, 0],
-        [502, 0],
-        [0, 0],
-        [1.5, 0],
-        [true, 0],
-        [1, -1],
-        [1, 32768]
-    ]) {
-        const result = move(rows, address, universe);
-        assert.equal(result[0], ds.no_update);
-        assert.match(result[3], /Patch unchanged/);
-        assert.equal(rows[0].address, 1);
+test("dragging a block rewrites the break-0 address and refuses overlaps or stale drags", () => {
+    const current = draft();
+    const wash = fixtureNode(current, "wash_right");
+    const move = (address, original = 89, universe = 0) =>
+        edit(current, { action: "move", key: wash.key, original_address: original, original_universe: 0, universe, address });
+    const addressText = (tree) => child(child(fixtureNode(tree, "wash_right"), "Addresses"), "Address").text;
+    assert.equal(addressText(move(200)[0]), "200");
+    assert.equal(addressText(move(200, 89, 1)[0]), "712");
+    assert.equal(move(1)[0], ds.no_update);
+    assert.equal(move(300, 90)[0], ds.no_update);
+    assert.equal(addressText(current), "89");
+});
+
+test("library adds create spec-complete fixtures and embed their GDTF", () => {
+    const spec = Object.keys(settings.library).find((name) => name.includes("generic_dimmer"));
+    const before = draft();
+    assert.equal(before.gdtf[spec], undefined);
+    const [added, , , selected] = edit(before, null, { trigger: "fixture-add", profile: spec, quantity: 2 });
+    const created = [...nodes(added.scene)].filter((node) => node.tag === "Fixture" && child(node, "GDTFSpec").text === spec);
+    assert.equal(created.length, 2);
+    assert.equal(selected, created[0].key);
+    for (const node of created) {
+        assert.match(node.attributes.uuid, UUID);
+        for (const tag of ["Matrix", "GDTFMode", "FixtureID", "FixtureIDNumeric", "UnitNumber", "Addresses"]) {
+            assert.ok(child(node, tag), tag);
+        }
     }
+    assert.deepEqual(plain(created.map((node) => child(node, "FixtureIDNumeric").text)), ["16", "17"]);
+    assert.ok(added.gdtf[spec]);
+    const rows = model.fixtureRows(added, settings).filter((row) => row.spec === spec);
+    assert.deepEqual(plain(rows.map((row) => row.address)), [25, 26]);
+    assert.deepEqual(plain(model.occupancy(model.fixtureRows(added, settings), settings, 0).errors), []);
 });
 
-test("stale or removed fixture drag cannot overwrite a newer edit", () => {
-    const rows = [fixture("left", 31)];
-    for (const fixture_id of ["left", "deleted"]) {
-        const result = edit(rows, {
-            action: "move",
-            fixture_id,
-            original_address: 1,
-            original_universe: 0,
-            address: 201,
-            universe: 0
-        });
-        assert.equal(result[0], ds.no_update);
-    }
+test("rotation helpers rewrite the Matrix and keep position", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const [turned] = edit(current, { action: "set-matrix", key: spot.key, position: [100, 200, 2500], rotation: [90, 0, 0] });
+    const matrix = model.parseMatrix(child(fixtureNode(turned, "spot_left"), "Matrix").text);
+    assert.deepEqual(plain(matrix.slice(9)), [100, 200, 2500]);
+    assert.ok(Math.abs(model.rotationDegrees(matrix)[0] - 90) < 1e-9);
+    assert.equal(edit(current, { action: "set-matrix", key: spot.key, position: [0, 0, 0], rotation: [NaN, 0, 0] })[0], ds.no_update);
 });
 
-test("a batch that runs out of channels is rejected atomically", () => {
-    const rows = [fixture("left", 1)];
-    const result = edit(rows, null, { trigger: "fixture-add", quantity: 2, address: 501 });
-    assert.equal(result[0], ds.no_update);
-    assert.equal(rows.length, 1);
+test("GDTF edits are limited to the correctable fields", () => {
+    const current = draft();
+    const spec = Object.keys(current.gdtf)[0];
+    const fn = [...nodes(current.gdtf[spec])].find((node) => node.tag === "ChannelFunction");
+    const [edited] = edit(current, { action: "set-attribute", doc: spec, key: fn.key, name: "PhysicalTo", value: "42" });
+    assert.equal([...nodes(edited.gdtf[spec])].find((node) => node.key === fn.key).attributes.PhysicalTo, "42");
+    assert.equal(edit(current, { action: "set-attribute", doc: spec, key: fn.key, name: "Attribute", value: "Pan" })[0], ds.no_update);
 });
 
-test("automatic allocation uses gaps and includes channel 512", () => {
-    const result = edit([fixture("left", 1), fixture("right", 25)], null, {
-        trigger: "fixture-add",
-        quantity: 2
-    })[0];
-    assert.equal(result[2].address, 13);
-    assert.equal(result[3].address, 37);
-    assert.equal(result[2]._original_id, undefined);
-    const last = edit([], null, { trigger: "fixture-add", address: 501 })[0][0];
-    assert.equal(last.address + settings.profiles[last.profile].channels - 1, 512);
+test("schema-driven structure edits add, order, clear and remove nodes", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const [withAlignments, , , selected] = edit(current, { action: "add-child", key: spot.key, tag: "Alignments" });
+    const tags = fixtureNode(withAlignments, "spot_left").children.map((node) => node.tag);
+    assert.ok(tags.indexOf("Alignments") > tags.indexOf("Addresses"));
+    assert.equal([...nodes(withAlignments.scene)].find((node) => node.key === selected).tag, "Alignments");
+    const [cleared] = edit(current, { action: "set-child-text", key: spot.key, tag: "Classing", value: null });
+    assert.equal(child(fixtureNode(cleared, "spot_left"), "Classing"), undefined);
+    const [removed] = edit(current, { action: "remove-node", key: spot.key });
+    assert.equal(fixtureNode(removed, "spot_left"), undefined);
+    assert.equal(edit(current, { action: "remove-node", key: current.scene.key })[0], ds.no_update);
+    const [withData] = edit(current, { action: "add-child", key: current.scene.key, tag: "UserData" });
+    const userData = child(withData.scene, "UserData");
+    assert.equal(withData.scene.children.indexOf(userData), 0);
+    const [autolux] = edit(withData, { action: "add-child", key: userData.key, tag: "Data", provider: "Autolux" });
+    const data = child(child(autolux.scene, "UserData"), "Data");
+    assert.equal(data.attributes.provider, "Autolux");
+    const path = model.pathTo(autolux.scene, data.key);
+    assert.equal(model.schemaKeys(path, settings).at(-1), "AutoluxData");
 });
 
-test("save failure keeps both the draft and its saved revision unchanged", () => {
-    const rows = [fixture("left", 31)];
-    const result = edit(rows, null, {
-        trigger: "fixture-server-result",
-        response: { error: "stale revision" }
-    });
-    assert.equal(result[0], ds.no_update);
-    assert.equal(result[1], ds.no_update);
-    assert.equal(result[2], ds.no_update);
-    assert.match(result[3], /stale revision/);
-    assert.equal(rows[0].address, 31);
+test("address helper validates universe and address before writing", () => {
+    const current = draft();
+    const address = child(child(fixtureNode(current, "spot_right"), "Addresses"), "Address");
+    const [moved] = edit(current, { action: "set-address", key: address.key, universe: 2, address: 7 });
+    assert.equal(child(child(fixtureNode(moved, "spot_right"), "Addresses"), "Address").text, "519");
+    assert.equal(edit(current, { action: "set-address", key: address.key, universe: 0, address: 7 })[0], ds.no_update);
+    assert.equal(edit(current, { action: "set-address", key: address.key, universe: 1, address: 513 })[0], ds.no_update);
 });
 
-test("edits are held while persistence is in flight, but its result can finish", () => {
-    const rows = [fixture("left", 1)];
-    assert.equal(move(rows, 31, 0, { busy: "true" })[0], ds.no_update);
-    const response = {
-        draft: [fixture("renamed", 31)],
-        patch: { groups: {} },
-        revision: "new-revision"
-    };
-    const result = edit(rows, null, { trigger: "fixture-server-result", busy: "true", response });
-    assert.equal(result[0], response.draft);
-    assert.equal(result[2], response.revision);
-});
-
-test("a queued edit cannot discard the save response and its new revision", () => {
-    const rows = [fixture("left", 31)];
-    const response = { draft: rows, patch: {}, revision: "new-revision" };
-    ds.callback_context.triggered = [
-        { prop_id: "fixture-grid-action.data" },
-        { prop_id: "fixture-server-result.data" }
-    ];
+test("busy saves freeze edits and responses keep the selection on the same object", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    assert.equal(edit(current, { action: "remove-node", key: spot.key }, { busy: "true" })[0], ds.no_update);
+    const saved = structuredClone(current);
+    for (const node of nodes(saved.scene)) node.key = `saved-${node.key}`;
+    ds.callback_context.triggered = [{ prop_id: "fixture-server-result.data" }];
     try {
-        const result = move(rows, 201, 0, { response });
-        assert.equal(result[0], response.draft);
-        assert.equal(result[2], "new-revision");
+        const result = edit(current, null, { response: { draft: saved, revision: "next" }, selection: spot.key });
+        assert.equal(result[0], saved);
+        assert.equal(result[1], "next");
+        assert.equal(result[3], `saved-${spot.key}`);
+        const failed = edit(current, null, { response: { error: "MVR is not spec-conforming: x" } });
+        assert.equal(failed[0], ds.no_update);
+        assert.match(failed[2], /spec-conforming/);
     } finally {
         delete ds.callback_context.triggered;
     }
 });
 
-test("invalid detail edits leave the fixture and identity intact", () => {
-    const rows = [fixture("left", 1), fixture("right", 13)];
-    for (const values of [
-        ["right", "spot", 1, 31, "movers", 0, 1, [], 0, 1, []],
-        ["left", "spot", 1, 31, "movers", 0.8, 0.2, [], 0, 1, []],
-        ["left", "spot", null, 31, "movers", 0, 1, [], 0, 1, []],
-        ["left", "spot", true, 31, "movers", 0, 1, [], 0, 1, []]
-    ]) {
-        assert.equal(
-            edit(rows, null, { trigger: "fixture-apply", selected: [0], values })[0],
-            ds.no_update
-        );
-    }
-    assert.equal(rows[0].address, 1);
+test("selecting a node changes only the inspector, never the rig layout", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const idle = ds.fixture_patch.renderRig(null, current, settings);
+    const picked = ds.fixture_patch.renderRig(spot.key, current, settings);
+    assert.deepEqual(plain(picked.slice(0, 2)), plain(idle.slice(0, 2)));
+    assert.equal(picked.at(-1), idle.at(-1));
+    assert.equal(idle[3], true);
+    assert.equal(picked[3], false);
+    assert.match(picked[2], /channels/);
 });

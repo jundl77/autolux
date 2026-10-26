@@ -1,5 +1,7 @@
 use crate::{
-    audio::CaptureStream,
+    audio::{
+        CAPTURE_DISCONTINUITY_LIMIT, CAPTURE_DISCONTINUITY_WINDOW, CaptureMetrics, CaptureStream,
+    },
     config::{TxConfig, pin_worker},
     protocol::{self, Message, wire},
     transport::Connection,
@@ -76,11 +78,32 @@ fn write_health(path: &Path, run_id: u64, snapshot: &TxSnapshot) -> Result<()> {
     std::fs::write(path, bytes).context("write Radius transport health")
 }
 
+fn gap_seconds(frames: i64) -> f64 {
+    frames as f64 / f64::from(protocol::SAMPLE_RATE)
+}
+
+fn capture_failure(reason: Option<&str>, stats: &CaptureMetrics) -> String {
+    let mut message = format!(
+        "Radius audio capture failed: {}",
+        reason.unwrap_or("capture timeline invalid")
+    );
+    if let Some(gap) = stats.last_gap_frames {
+        message += &format!(
+            " ({} discontinuities, limit {CAPTURE_DISCONTINUITY_LIMIT} within {} s; last gap {:.0} ms)",
+            stats.discontinuities,
+            CAPTURE_DISCONTINUITY_WINDOW.as_secs(),
+            gap_seconds(gap) * 1000.0
+        );
+    }
+    message + "; check the endpoint, RDP audio redirection and receiver connectivity"
+}
+
 struct Shared {
     stop: AtomicBool,
     ready: AtomicBool,
     light: ArrayQueue<TimedLight>,
     light_overflow: AtomicBool,
+    discard_delayed_audio: AtomicBool,
     metrics: Mutex<TxSnapshot>,
     error: Mutex<Option<String>>,
 }
@@ -98,6 +121,7 @@ impl RadiusTx {
             ready: AtomicBool::new(false),
             light: ArrayQueue::new(MAX_LIGHT_UPDATES),
             light_overflow: AtomicBool::new(false),
+            discard_delayed_audio: AtomicBool::new(false),
             metrics: Mutex::new(TxSnapshot::default()),
             error: Mutex::new(None),
         });
@@ -131,6 +155,12 @@ impl RadiusTx {
         {
             self.shared.light_overflow.store(true, Ordering::Release);
         }
+    }
+
+    pub fn discard_delayed_audio(&self) {
+        self.shared
+            .discard_delayed_audio
+            .store(true, Ordering::Release);
     }
 
     pub fn is_ready(&self) -> bool {
@@ -201,6 +231,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut timeline = LightTimeline::new();
     let mut light_at = None;
     let mut health_error_at: Option<Instant> = None;
+    let mut reported_discontinuities = 0;
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -274,12 +305,26 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
         }
 
         if let Some(capture) = &capture {
+            if shared.discard_delayed_audio.swap(false, Ordering::AcqRel) {
+                capture.discard_delayed_audio();
+            }
             let stats = capture.metrics();
             ensure!(
                 !stats.faulted,
-                "Radius audio capture failed: {}; check the endpoint, RDP audio redirection and receiver connectivity",
-                capture.last_error().unwrap_or("capture timeline invalid")
+                capture_failure(capture.last_error(), &stats)
             );
+            if stats.discontinuities != reported_discontinuities
+                && let Some(gap) = stats.last_gap_frames
+            {
+                let bridge =
+                    ["filled with silence", "of repeated audio dropped"][usize::from(gap < 0)];
+                eprintln!(
+                    "Radius capture resynchronized after a device discontinuity: {:.1} ms {bridge} ({} total)",
+                    gap_seconds(gap).abs() * 1000.0,
+                    stats.discontinuities
+                );
+                reported_discontinuities = stats.discontinuities;
+            }
             ensure!(
                 capture_started.elapsed() < CALLBACK_STALE_TIMEOUT
                     || stats
@@ -345,6 +390,9 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 tx.audio_buffer_seconds =
                     stats.queued_frames as f64 / f64::from(protocol::SAMPLE_RATE);
                 tx.capture_overruns_total = stats.device_xruns;
+                tx.capture_discontinuities_total = stats.discontinuities;
+                tx.capture_last_gap_seconds = stats.last_gap_frames.map(gap_seconds);
+                tx.capture_priority_denied = stats.capture_priority_denied;
                 tx.queue_dropped_frames_total = stats.queue_overflow_frames;
             }
             let snapshot = TxSnapshot {
@@ -391,6 +439,24 @@ mod tests {
     }
 
     #[test]
+    fn capture_fault_names_the_discontinuity_limit_and_last_gap() {
+        let stats = CaptureMetrics {
+            discontinuities: 3,
+            last_gap_frames: Some(441),
+            ..Default::default()
+        };
+        assert_eq!(
+            capture_failure(Some("capture discontinuities repeated too often"), &stats),
+            concat!(
+                "Radius audio capture failed: capture discontinuities repeated too often ",
+                "(3 discontinuities, limit 3 within 10 s; last gap 10 ms); check the endpoint, ",
+                "RDP audio redirection and receiver connectivity"
+            )
+        );
+        assert!(!capture_failure(None, &CaptureMetrics::default()).contains("last gap"));
+    }
+
+    #[test]
     fn health_updates_preserve_uint64_values_while_reader_prevents_replacement() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("transport-health.json");
@@ -411,6 +477,7 @@ mod tests {
         let snapshot = TxSnapshot {
             tx: wire::TxMetrics {
                 heartbeats_sent: u64::MAX,
+                capture_priority_denied: 2,
                 ..Default::default()
             },
             rx: Some(wire::Metrics {
@@ -425,6 +492,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(report["run_id"].as_u64(), Some(u64::MAX));
         assert_eq!(report["tx"]["heartbeats_sent"].as_u64(), Some(u64::MAX));
+        assert_eq!(report["tx"]["capture_priority_denied"].as_u64(), Some(2));
         assert_eq!(report["rx"]["dmx_frames_total"].as_u64(), Some(u64::MAX));
         assert_eq!(report["rx_age_seconds"].as_f64(), Some(0.25));
         assert!(report["timestamp"].as_f64().unwrap() > 0.0);

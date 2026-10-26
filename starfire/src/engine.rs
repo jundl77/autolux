@@ -5,12 +5,13 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use crate::clock::{ClockSample, MusicalClock, validate_time};
+use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::fixtures::FixtureRig;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
     OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
 };
+use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
 
@@ -18,7 +19,10 @@ const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
+const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
+pub const STROBE_GATE_INTENSITY: f64 = 0.3;
+pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.6;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -48,21 +52,30 @@ impl ActiveAutoloop {
         seconds: f64,
         time: ClockSample,
         normalized_rms_level: Option<f64>,
+        palette: &PaletteSlots,
+        intensity: f64,
     ) -> Result<Vec<Effect>> {
-        self.script.render(&RenderContext {
-            time_seconds: seconds,
-            beat_position: time.beat_position,
-            autoloop_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
-            autoloop_speed_scaled_elapsed_beats: (time.animation_beats
-                - self.start_animation_beats)
-                .max(0.0),
-            normalized_rms_level,
-        })
+        self.script.render(
+            &RenderContext {
+                time_seconds: seconds,
+                beat_position: time.beat_position,
+                bar_phase: time.bar_phase,
+                bar_index: time.bar_index,
+                beats_per_bar: time.beats_per_bar,
+                autoloop_elapsed_beats: (time.beat_position - self.start_beat).max(0.0),
+                autoloop_speed_scaled_elapsed_beats: (time.animation_beats
+                    - self.start_animation_beats)
+                    .max(0.0),
+                normalized_rms_level,
+                intensity,
+            },
+            palette,
+        )
     }
 }
 
 enum FadeSource {
-    Running(ActiveAutoloop),
+    Running(Box<ActiveAutoloop>),
     Frozen(FixtureStates),
 }
 
@@ -90,38 +103,58 @@ impl ActiveOverride {
 pub struct Engine {
     rig: FixtureRig,
     catalog: AutoloopCatalog,
+    palettes: PaletteTable,
     clock: MusicalClock,
     last_time_seconds: f64,
     active: Option<ActiveAutoloop>,
     fade: Option<Crossfade>,
     overrides: BTreeMap<String, ActiveOverride>,
     override_order: u64,
-    master_intensity: f64,
+    master: MasterFade,
     normalized_rms_level: Option<f64>,
     blackout: bool,
     script_error: Option<String>,
     last_output_states: FixtureStates,
+    paused_at_seconds: Option<f64>,
+    default_crossfade_beats: f64,
+    strobe_max_rate_hz: f64,
+    strobe_max_burst_seconds: f64,
+    strobe_started_seconds: BTreeMap<String, f64>,
+    palette: ActivePalette,
+    intensity: f64,
+    last_render_seconds: Option<f64>,
 }
 
 impl Engine {
-    pub fn new(rig: FixtureRig, catalog: AutoloopCatalog) -> Result<Self> {
+    pub fn new(rig: FixtureRig, catalog: AutoloopCatalog, palettes: PaletteTable) -> Result<Self> {
         let last_output_states = rig.empty_states();
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
+        let palette =
+            ActivePalette::steady(palettes.initial(), palettes.slots(palettes.initial())?);
         Ok(Self {
             rig,
             catalog,
+            palettes,
             clock: MusicalClock::default(),
             last_time_seconds: 0.0,
             active: None,
             fade: None,
             overrides: BTreeMap::new(),
             override_order: 0,
-            master_intensity: 1.0,
+            master: MasterFade::steady(1.0),
             normalized_rms_level: None,
             blackout: false,
             script_error: None,
             last_output_states,
+            paused_at_seconds: None,
+            default_crossfade_beats: 0.0,
+            strobe_max_rate_hz: MAX_STROBE_HZ,
+            strobe_max_burst_seconds: f64::INFINITY,
+            strobe_started_seconds: BTreeMap::new(),
+            palette,
+            intensity: 1.0,
+            last_render_seconds: None,
         })
     }
 
@@ -130,20 +163,32 @@ impl Engine {
         let time = self.clock.sample_at(at_seconds)?;
         match command {
             Command::Beat {
-                position_beats,
+                beat_index,
+                bar_phase,
+                beats_per_bar,
                 bpm,
             } => {
-                self.clock
-                    .set_beat_anchor(at_seconds, *position_beats, *bpm)?;
+                self.clock.set_beat(
+                    at_seconds,
+                    BeatFact {
+                        beat_index: *beat_index,
+                        bar_phase: *bar_phase,
+                        beats_per_bar: *beats_per_bar,
+                        bpm: *bpm,
+                    },
+                )?;
             }
             Command::Select {
                 bank,
                 autoloop,
                 transition,
+                palette,
             } => {
                 validate_identifier(bank)?;
                 validate_identifier(autoloop)?;
+                let transition = &self.resolve_transition(transition);
                 validate_transition(transition, time.elapsed_musical_beats)?;
+                let slots = self.palettes.slots(palette)?;
                 if !self
                     .active
                     .as_ref()
@@ -151,15 +196,37 @@ impl Engine {
                 {
                     self.select(at_seconds, time, bank, autoloop, transition)?;
                 }
+                let duration_beats = match transition {
+                    Transition::Crossfade { duration_beats } => *duration_beats,
+                    Transition::Cut | Transition::RendererDefault => 0.0,
+                };
+                self.palette
+                    .retarget(time.elapsed_musical_beats, palette, slots, duration_beats);
+            }
+            Command::SetPalette { name } => {
+                let slots = self.palettes.slots(name)?;
+                self.palette.retarget(
+                    time.elapsed_musical_beats,
+                    name,
+                    slots,
+                    self.default_crossfade_beats,
+                );
             }
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
             Command::ClearOverride { id } => {
                 validate_identifier(id)?;
                 self.overrides.remove(id);
             }
-            Command::SetMaster { intensity } => {
+            Command::SetMaster {
+                intensity,
+                fade_seconds,
+            } => {
                 validate_unit(*intensity, "master intensity")?;
-                self.master_intensity = *intensity;
+                ensure!(
+                    fade_seconds.is_finite() && *fade_seconds >= 0.0,
+                    "master fade must be finite and nonnegative"
+                );
+                self.master.retarget(at_seconds, *intensity, *fade_seconds);
             }
             Command::SetNormalizedRmsLevel { level } => {
                 validate_unit(*level, "normalized RMS level")?;
@@ -167,6 +234,32 @@ impl Engine {
             }
             Command::SetSpeed { multiplier } => self.clock.set_speed(at_seconds, *multiplier)?,
             Command::SetBlackout { enabled } => self.blackout = *enabled,
+            Command::SetPaused { paused } => self.set_paused(at_seconds, *paused)?,
+            Command::SetDefaultCrossfadeBeats { beats } => {
+                ensure!(
+                    beats.is_finite() && (0.0..=MAX_TRANSITION_BEATS).contains(beats),
+                    "default crossfade is outside the supported range"
+                );
+                self.default_crossfade_beats = *beats;
+            }
+            Command::SetStrobeMaxRateHz { hz } => {
+                ensure!(
+                    hz.is_finite() && (0.0..=MAX_STROBE_HZ).contains(hz),
+                    "strobe rate cap is outside the supported range"
+                );
+                self.strobe_max_rate_hz = *hz;
+            }
+            Command::SetStrobeMaxBurstSeconds { seconds } => {
+                ensure!(
+                    seconds.is_finite() && *seconds > 0.0 && *seconds <= MAX_STROBE_BURST_SECONDS,
+                    "strobe burst cap is outside the supported range"
+                );
+                self.strobe_max_burst_seconds = *seconds;
+            }
+            Command::SetIntensity { level } => {
+                validate_unit(*level, "intensity")?;
+                self.intensity = *level;
+            }
             Command::Stop => {
                 self.active = None;
                 self.fade = None;
@@ -184,6 +277,7 @@ impl Engine {
         at_seconds: f64,
         autoloop_id: &str,
         transition: Transition,
+        palette: &str,
     ) -> Result<()> {
         let (bank, autoloop) = self.catalog.resolve(autoloop_id)?.clone();
         self.apply(
@@ -192,8 +286,13 @@ impl Engine {
                 bank,
                 autoloop,
                 transition,
+                palette: palette.to_owned(),
             },
         )
+    }
+
+    pub fn active_palette(&self) -> &str {
+        self.palette.name()
     }
 
     pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
@@ -203,7 +302,13 @@ impl Engine {
             parameter.value.as_ref(),
         ) {
             (Ok(ParameterType::OutputBrightness), Some(Value::Number(value))) => {
-                Command::SetMaster { intensity: *value }
+                Command::SetMaster {
+                    intensity: *value,
+                    fade_seconds: parameter.fade_seconds,
+                }
+            }
+            _ if parameter.fade_seconds != 0.0 => {
+                anyhow::bail!("only output brightness accepts a fade")
             }
             (Ok(ParameterType::AnimationSpeed), Some(Value::Number(value))) => {
                 Command::SetSpeed { multiplier: *value }
@@ -213,6 +318,24 @@ impl Engine {
             }
             (Ok(ParameterType::AudioRmsNormalized), Some(Value::Number(value))) => {
                 Command::SetNormalizedRmsLevel { level: *value }
+            }
+            (Ok(ParameterType::Paused), Some(Value::Boolean(value))) => {
+                Command::SetPaused { paused: *value }
+            }
+            (Ok(ParameterType::DefaultCrossfadeBeats), Some(Value::Number(value))) => {
+                Command::SetDefaultCrossfadeBeats { beats: *value }
+            }
+            (Ok(ParameterType::StrobeMaxRateHz), Some(Value::Number(value))) => {
+                Command::SetStrobeMaxRateHz { hz: *value }
+            }
+            (Ok(ParameterType::StrobeMaxBurstSeconds), Some(Value::Number(value))) => {
+                Command::SetStrobeMaxBurstSeconds { seconds: *value }
+            }
+            (Ok(ParameterType::Palette), Some(Value::Text(name))) => {
+                Command::SetPalette { name: name.clone() }
+            }
+            (Ok(ParameterType::Intensity), Some(Value::Number(value))) => {
+                Command::SetIntensity { level: *value }
             }
             _ => anyhow::bail!("unknown parameter type or incompatible value"),
         };
@@ -236,11 +359,14 @@ impl Engine {
 
         if self.script_error.is_none() {
             self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states);
+            let master = perceptual_to_linear_master(self.master.level_at(time_seconds));
             for state in states.values_mut() {
-                state.intensity = state.intensity.clamp(0.0, 1.0) * self.master_intensity;
-                state.attribute_brightness = self.master_intensity;
+                state.intensity = state.intensity.clamp(0.0, 1.0) * master;
+                state.attribute_brightness = master;
             }
         }
+        self.limit_movement_speed(time_seconds, &mut states);
+        self.limit_strobes(time_seconds, &mut states);
         if self.blackout {
             extinguish(&mut states);
         }
@@ -258,6 +384,7 @@ impl Engine {
             }
         };
         self.last_time_seconds = time_seconds;
+        self.last_render_seconds = Some(time_seconds);
         self.last_output_states = states.clone();
         Ok(RenderedFrame {
             time_seconds,
@@ -268,6 +395,82 @@ impl Engine {
             active_autoloop: self.active.as_ref().map(|active| active.name.clone()),
             script_error: self.script_error.clone(),
         })
+    }
+
+    fn set_paused(&mut self, seconds: f64, paused: bool) -> Result<()> {
+        if paused == self.clock.paused() {
+            return Ok(());
+        }
+        self.clock.set_paused(seconds, paused)?;
+        self.paused_at_seconds = paused.then_some(seconds);
+        if paused {
+            self.release_strobe_overrides_instead_of_holding_them();
+        }
+        Ok(())
+    }
+
+    fn release_strobe_overrides_instead_of_holding_them(&mut self) {
+        self.overrides
+            .retain(|_, active| active.value.values.strobe_hz.is_none_or(|rate| rate <= 0.0));
+    }
+
+    fn resolve_transition(&self, transition: &Transition) -> Transition {
+        match transition {
+            Transition::RendererDefault if self.default_crossfade_beats > 0.0 => {
+                Transition::Crossfade {
+                    duration_beats: self.default_crossfade_beats,
+                }
+            }
+            Transition::RendererDefault => Transition::Cut,
+            explicit => explicit.clone(),
+        }
+    }
+
+    fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
+        let paused = self.clock.paused();
+        let strobe_scale = intensity_strobe_scale(self.intensity);
+        let (max_rate_hz, max_burst_seconds) = if strobe_scale > 0.0 {
+            (
+                self.strobe_max_rate_hz * strobe_scale,
+                self.strobe_max_burst_seconds * strobe_scale,
+            )
+        } else {
+            (0.0, 0.0)
+        };
+        for (id, state) in states.iter_mut() {
+            if paused {
+                state.strobe_hz = 0.0;
+            }
+            state.strobe_hz = state.strobe_hz.min(max_rate_hz);
+            if state.strobe_hz <= 0.0 {
+                self.strobe_started_seconds.remove(id);
+                continue;
+            }
+            let started = *self
+                .strobe_started_seconds
+                .entry(id.clone())
+                .or_insert(seconds);
+            if seconds - started >= max_burst_seconds {
+                state.strobe_hz = 0.0;
+            }
+        }
+    }
+
+    fn limit_movement_speed(&self, seconds: f64, states: &mut FixtureStates) {
+        let Some(previous_seconds) = self.last_render_seconds else {
+            return;
+        };
+        if self.intensity >= 1.0 {
+            return;
+        }
+        let max_step =
+            intensity_movement_range_per_second(self.intensity) * (seconds - previous_seconds);
+        for (id, state) in states.iter_mut() {
+            if let Some(previous) = self.last_output_states.get(id) {
+                state.pan = step_toward(previous.pan, state.pan, max_step);
+                state.tilt = step_toward(previous.tilt, state.tilt, max_step);
+            }
+        }
     }
 
     fn validate_time(&self, time_seconds: f64) -> Result<()> {
@@ -291,7 +494,7 @@ impl Engine {
         validate_identifier(autoloop)?;
         let script = self
             .catalog
-            .instantiate(bank, autoloop, &self.rig)
+            .instantiate(bank, autoloop, &self.rig, &self.palettes)
             .with_context(|| format!("cannot load autoloop {bank}/{autoloop}"))?;
 
         // A replacement is compiled before the active program is touched.
@@ -312,14 +515,14 @@ impl Engine {
         };
         let previous = self.active.take();
         self.fade = match transition {
-            Transition::Cut => None,
+            Transition::Cut | Transition::RendererDefault => None,
             Transition::Crossfade { duration_beats } => {
                 let source = if let Some(states) = frozen_source {
                     FadeSource::Frozen(states)
                 } else if self.script_error.is_some() {
                     FadeSource::Frozen(self.dark_states())
                 } else if let Some(previous) = previous {
-                    FadeSource::Running(previous)
+                    FadeSource::Running(Box::new(previous))
                 } else {
                     FadeSource::Frozen(self.dark_states())
                 };
@@ -349,11 +552,19 @@ impl Engine {
         {
             self.fade = None;
         }
+        let seconds = self.paused_at_seconds.unwrap_or(seconds);
+        let palette = self.palette.slots_at(time.elapsed_musical_beats);
         let Some(active) = &mut self.active else {
             return Ok(self.dark_states());
         };
         let effects = active
-            .render(seconds, time, self.normalized_rms_level)
+            .render(
+                seconds,
+                time,
+                self.normalized_rms_level,
+                &palette,
+                self.intensity,
+            )
             .with_context(|| format!("autoloop {}/{} failed", active.bank, active.name))?;
         let destination = states_for_effects(&self.rig, &effects)?;
         let Some(fade) = &mut self.fade else {
@@ -362,7 +573,13 @@ impl Engine {
         let source = match &mut fade.source {
             FadeSource::Frozen(states) => states.clone(),
             FadeSource::Running(previous) => {
-                let effects = previous.render(seconds, time, self.normalized_rms_level)?;
+                let effects = previous.render(
+                    seconds,
+                    time,
+                    self.normalized_rms_level,
+                    &palette,
+                    self.intensity,
+                )?;
                 states_for_effects(&self.rig, &effects)?
             }
         };
@@ -504,6 +721,98 @@ fn validate_identifier(value: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn perceptual_to_linear_master(perceptual: f64) -> f64 {
+    perceptual * perceptual
+}
+
+#[derive(Clone, Debug)]
+struct ActivePalette {
+    name: String,
+    from: PaletteSlots,
+    to: PaletteSlots,
+    start_beat: f64,
+    duration_beats: f64,
+}
+
+impl ActivePalette {
+    fn steady(name: &str, slots: PaletteSlots) -> Self {
+        Self {
+            name: name.to_owned(),
+            from: slots,
+            to: slots,
+            start_beat: 0.0,
+            duration_beats: 0.0,
+        }
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn slots_at(&self, beat: f64) -> PaletteSlots {
+        let progress = if self.duration_beats > 0.0 {
+            (beat - self.start_beat) / self.duration_beats
+        } else {
+            1.0
+        };
+        if progress >= 1.0 {
+            self.to
+        } else {
+            self.from.blend(&self.to, progress.max(0.0))
+        }
+    }
+
+    fn retarget(&mut self, beat: f64, name: &str, slots: PaletteSlots, duration_beats: f64) {
+        if name == self.name {
+            return;
+        }
+        *self = Self {
+            name: name.to_owned(),
+            from: self.slots_at(beat),
+            to: slots,
+            start_beat: beat,
+            duration_beats,
+        };
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MasterFade {
+    from: f64,
+    to: f64,
+    start_seconds: f64,
+    duration_seconds: f64,
+}
+
+impl MasterFade {
+    fn steady(level: f64) -> Self {
+        Self {
+            from: level,
+            to: level,
+            start_seconds: 0.0,
+            duration_seconds: 0.0,
+        }
+    }
+
+    fn level_at(&self, time_seconds: f64) -> f64 {
+        if self.duration_seconds <= 0.0 {
+            return self.to;
+        }
+        let progress =
+            ((time_seconds - self.start_seconds) / self.duration_seconds).clamp(0.0, 1.0);
+        self.from + (self.to - self.from) * progress
+    }
+
+    fn retarget(&mut self, time_seconds: f64, to: f64, duration_seconds: f64) {
+        *self = Self {
+            from: self.level_at(time_seconds),
+            to,
+            start_seconds: time_seconds,
+            duration_seconds,
+        };
+    }
+}
+
 fn validate_unit(value: f64, name: &str) -> Result<()> {
     ensure!(
         value.is_finite() && (0.0..=1.0).contains(&value),
@@ -604,6 +913,22 @@ fn blend_states(
 
 fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
     from + (to - from) * amount
+}
+
+pub fn intensity_strobe_scale(intensity: f64) -> f64 {
+    if intensity < STROBE_GATE_INTENSITY {
+        0.0
+    } else {
+        intensity
+    }
+}
+
+pub fn intensity_movement_range_per_second(intensity: f64) -> f64 {
+    SLOWEST_GLIDE_RANGE_PER_SECOND / (1.0 - intensity).powi(2)
+}
+
+fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {
+    from + (to - from).clamp(-max_step, max_step)
 }
 
 fn extinguish(states: &mut FixtureStates) {

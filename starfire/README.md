@@ -49,7 +49,7 @@ last processed command ID. Standalone messages are generated from [starfire.prot
 Each frame carries a message type, bounded length and generated Protobuf payload.
 An empty `PlayAutoloop` enters idle; no autoloop restarts on repeated selection.
 
-Shared patches and profiles live in root `rigs/`. The room rig has two Spot 110
+The room rig `rigs/room.mvr` has two Spot 110
 movers, four SePar washes and eight RGB cells of
 the CF805 in 24-channel mode. These are 14 independently controlled fixtures.
 Mini Kinta remains dark until its control profile is verified. Production
@@ -61,9 +61,13 @@ See [validation](../docs/starfire/validation.md) for tested behavior and hardwar
 
 Fixture types use standard GDTF XML and a selected DMX mode. Import a `.gdtf`
 archive with `uv run autolux starfire import-fixture fixture.gdtf --profile-id spot --mode "16ch"`.
-The renderer validates the mode before saving it in `rigs/profiles.json`; imported
-profiles are available next session without rebuilding. Use `--profiles` for a
-separate catalogue. Patch installed fixtures in the existing Config tab.
+The renderer validates the mode before saving it in the `rigs/profiles.json`
+library. Rigs are MVR files (`rigs/room.mvr`) that embed the GDTF files they use.
+Autolux parses them; the native `check`, `rig` and `replay` commands take the exported
+`RigDefinition` (`autolux starfire export-rig room.mvr room.rig.pb`; the Autolux CLI
+exports automatically). Moving-head homes come from
+each fixture's MVR Matrix ([rig-mvr](../docs/starfire/rig-mvr.md)). Patch and
+place fixtures in the existing Config tab.
 
 Lua `sf.physical_attribute(target, "Zoom", 25)` uses the GDTF physical unit;
 `sf.channel_preset(target, "Gobo1", "Open")` selects a named channel preset.

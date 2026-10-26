@@ -1,5 +1,3 @@
-//! Fixture-independent values shared by scripts, playback and output encoding.
-
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -7,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub const DMX_CHANNELS: usize = 512;
 pub const DEFAULT_FRAME_RATE_HZ: u32 = 40;
 pub const MAX_FRAME_RATE_HZ: u32 = 100;
-// Four output samples per cycle at the default render cadence.
 pub const MAX_STROBE_HZ: f64 = DEFAULT_FRAME_RATE_HZ as f64 / 4.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,7 +44,6 @@ pub struct PropertyValues {
     pub attributes: BTreeMap<String, AttributeValue>,
 }
 
-/// A physical value or a named GDTF channel-set preset.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AttributeValue {
@@ -102,10 +98,13 @@ pub type FixtureStates = BTreeMap<String, FixtureState>;
 pub struct RenderContext {
     pub time_seconds: f64,
     pub beat_position: f64,
+    pub bar_phase: f64,
+    pub bar_index: u64,
+    pub beats_per_bar: u32,
     pub autoloop_elapsed_beats: f64,
     pub autoloop_speed_scaled_elapsed_beats: f64,
-    /// Measured RMS mapped to 0..1, independent of operator brightness.
     pub normalized_rms_level: Option<f64>,
+    pub intensity: f64,
 }
 
 impl Default for RenderContext {
@@ -113,9 +112,13 @@ impl Default for RenderContext {
         Self {
             time_seconds: 0.0,
             beat_position: 0.0,
+            bar_phase: 0.0,
+            bar_index: 0,
+            beats_per_bar: 4,
             autoloop_elapsed_beats: 0.0,
             autoloop_speed_scaled_elapsed_beats: 0.0,
             normalized_rms_level: None,
+            intensity: 1.0,
         }
     }
 }
@@ -124,6 +127,7 @@ impl Default for RenderContext {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Transition {
     #[default]
+    RendererDefault,
     Cut,
     Crossfade {
         duration_beats: f64,
@@ -161,7 +165,10 @@ pub struct LightingOverride {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     Beat {
-        position_beats: f64,
+        beat_index: u64,
+        #[serde(default)]
+        bar_phase: Option<u32>,
+        beats_per_bar: u32,
         bpm: f64,
     },
     Select {
@@ -169,6 +176,7 @@ pub enum Command {
         autoloop: String,
         #[serde(default)]
         transition: Transition,
+        palette: String,
     },
     SetOverride {
         value: LightingOverride,
@@ -178,6 +186,8 @@ pub enum Command {
     },
     SetMaster {
         intensity: f64,
+        #[serde(default)]
+        fade_seconds: f64,
     },
     SetNormalizedRmsLevel {
         level: f64,
@@ -187,6 +197,24 @@ pub enum Command {
     },
     SetBlackout {
         enabled: bool,
+    },
+    SetPaused {
+        paused: bool,
+    },
+    SetDefaultCrossfadeBeats {
+        beats: f64,
+    },
+    SetStrobeMaxRateHz {
+        hz: f64,
+    },
+    SetStrobeMaxBurstSeconds {
+        seconds: f64,
+    },
+    SetPalette {
+        name: String,
+    },
+    SetIntensity {
+        level: f64,
     },
     Stop,
 }

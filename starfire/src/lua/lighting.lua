@@ -40,6 +40,11 @@ function sf.rgb(red, green, blue)
     return { red = red, green = green, blue = blue }
 end
 
+function sf.mix(first, last, amount)
+    return sf.rgb(sf.lerp(first.red, last.red, amount), sf.lerp(first.green, last.green, amount),
+        sf.lerp(first.blue, last.blue, amount))
+end
+
 function sf.hsv(hue_degrees, saturation, value)
     assert(finite(hue_degrees), "hue must be finite")
     assert(finite(saturation) and saturation >= 0 and saturation <= 1, "saturation must be within 0..1")
@@ -56,6 +61,67 @@ function sf.hsv(hue_degrees, saturation, value)
     elseif hue < 5 then red, green, blue = intermediate, 0, chroma
     else red, green, blue = chroma, 0, intermediate end
     return sf.rgb(red + minimum, green + minimum, blue + minimum)
+end
+
+local BEATS_PER_BAR = 4
+
+function sf.beat_in_bar(ctx_or_beats)
+    if type(ctx_or_beats) == "table" then return ctx_or_beats.bar_phase end
+    return ctx_or_beats % BEATS_PER_BAR
+end
+
+function sf.bar(ctx_or_beats)
+    if type(ctx_or_beats) == "table" then return ctx_or_beats.bar_index end
+    return math.floor(ctx_or_beats / BEATS_PER_BAR)
+end
+
+function sf.phrase_phase(ctx_or_beats, bars)
+    assert(finite(bars) and bars > 0, "phrase length must be positive and finite")
+    if type(ctx_or_beats) == "table" then
+        return ((ctx_or_beats.bar_index % bars) + ctx_or_beats.bar_phase / ctx_or_beats.beats_per_bar) / bars % 1
+    end
+    return (ctx_or_beats / (bars * BEATS_PER_BAR)) % 1
+end
+
+local PULSE_GAIN_AT_ZERO_INTENSITY = 0.35
+local render_intensity = 1
+
+local function use_render_intensity(intensity)
+    assert(finite(intensity) and intensity >= 0 and intensity <= 1, "intensity must be within 0..1")
+    render_intensity = intensity
+end
+
+function sf.intensity_pulse_gain(intensity)
+    return sf.lerp(PULSE_GAIN_AT_ZERO_INTENSITY, 1, intensity)
+end
+
+function sf.on_beat(ctx_or_beats, width, period)
+    assert(finite(width) and width > 0, "beat envelope width must be positive and finite")
+    period = period or 1
+    assert(finite(period) and period > 0, "beat envelope period must be positive and finite")
+    if type(ctx_or_beats) == "table" then ctx_or_beats = ctx_or_beats.beat_position end
+    local decay_width = width * (2 - render_intensity)
+    local remaining = math.max(0, 1 - (ctx_or_beats % period) / decay_width)
+    return remaining * remaining * sf.intensity_pulse_gain(render_intensity)
+end
+
+local LEFT, RIGHT = -1, 1
+function sf.side(index) return index % 2 == 1 and LEFT or RIGHT end
+
+local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
+
+function sf.loudness_gain(rms)
+    rms = rms or UNMEASURED_RMS
+    return sf.lerp(LOUDNESS_FLOOR, 1, math.min(1, math.max(0, rms / LOUDNESS_FULL_RMS)))
+end
+
+local named_palettes, active_palette = {}, nil
+
+function sf.palette(name)
+    if name == nil then return active_palette end
+    local palette = named_palettes[name]
+    assert(palette ~= nil, "unknown palette")
+    return palette
 end
 
 function sf.group(name) return { group = name } end
@@ -111,4 +177,4 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
-return sf
+return sf, named_palettes, function(palette) active_palette = palette end, use_render_intensity

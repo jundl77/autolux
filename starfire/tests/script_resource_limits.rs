@@ -1,11 +1,14 @@
+mod support;
+
 use std::fs;
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 use starfire::engine::MAX_SCRIPT_ERROR_BYTES;
-use starfire::fixtures::{FixtureRig, MAX_FIXTURES, MAX_RIG_INPUT_BYTES};
+use starfire::fixtures::{FixtureRig, MAX_FIXTURES};
 use starfire::model::{Command, TimedCommand, Transition};
+use starfire::protocol::MAX_LOGIN_BYTES;
 use starfire::replay::{Replay, render_replay};
 use starfire::script::AutoloopCatalog;
 
@@ -24,17 +27,19 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) 
     )
     .unwrap();
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
-    let rig = FixtureRig::from_json(&simple_rig().to_string()).unwrap();
+    let rig = support::rig(simple_rig());
     let replay = Replay {
         schema_version: 1,
         duration_seconds,
         frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
         events: vec![TimedCommand {
             at_seconds: 0.0,
             command: Command::Select {
                 bank: "test".into(),
                 autoloop: "fault".into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         }],
     };
@@ -49,9 +54,8 @@ fn native_pattern_matching_cannot_bypass_the_script_budget() {
     let directory = tempfile::tempdir().unwrap();
     let autoloops = directory.path().join("autoloops");
     fs::create_dir_all(autoloops.join("test")).unwrap();
-    let rig = directory.path().join("rig.json");
-    fs::write(&rig, simple_rig().to_string()).unwrap();
-    let profiles = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs/profiles.json");
+    let rig = directory.path().join("rig.pb");
+    support::write_rig(&rig, &simple_rig());
 
     for expression in [
         "string.find(text, pattern)",
@@ -75,10 +79,10 @@ fn native_pattern_matching_cannot_bypass_the_script_budget() {
             .arg("check")
             .arg("--rig")
             .arg(&rig)
-            .arg("--profiles")
-            .arg(&profiles)
             .arg("--autoloops")
             .arg(&autoloops)
+            .arg("--palettes")
+            .arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/palettes.json"))
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
@@ -131,13 +135,10 @@ fn repeated_fault_diagnostics_have_a_total_replay_memory_budget() {
 }
 
 #[test]
-fn rig_size_is_bounded_before_json_parsing_from_memory_or_file() {
-    let input = " ".repeat(MAX_RIG_INPUT_BYTES + 1);
-    let error = FixtureRig::from_json(&input).unwrap_err();
-    assert!(error.to_string().contains("input byte limit"));
+fn rig_size_is_bounded_before_decoding() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("oversized.json");
-    fs::write(&path, input).unwrap();
+    let path = directory.path().join("oversized.pb");
+    fs::write(&path, vec![0; MAX_LOGIN_BYTES + 1]).unwrap();
     let error = FixtureRig::load(&path).unwrap_err();
     assert!(format!("{error:#}").contains("input byte limit"));
 }
@@ -153,7 +154,7 @@ fn fixture_and_group_counts_and_identifiers_cannot_expand_frame_storage_unbounde
             }))
             .collect::<Vec<_>>()
     );
-    let error = FixtureRig::from_json(&rig.to_string()).unwrap_err();
+    let error = support::try_rig(rig.clone()).unwrap_err();
     assert!(error.to_string().contains("fixtures"));
 
     let mut rig = simple_rig();
@@ -161,18 +162,18 @@ fn fixture_and_group_counts_and_identifiers_cannot_expand_frame_storage_unbounde
         .map(|index| (format!("group_{index}"), json!(["light"])))
         .collect();
     rig["groups"] = groups.into();
-    let error = FixtureRig::from_json(&rig.to_string()).unwrap_err();
+    let error = support::try_rig(rig.clone()).unwrap_err();
     assert!(error.to_string().contains("group count"));
 
     let mut rig = simple_rig();
     rig["fixtures"][0]["id"] = json!("é".repeat(64));
-    assert!(FixtureRig::from_json(&rig.to_string()).is_ok());
+    assert!(support::try_rig(rig.clone()).is_ok());
     rig["fixtures"][0]["id"] = json!("é".repeat(65));
-    let error = FixtureRig::from_json(&rig.to_string()).unwrap_err();
+    let error = support::try_rig(rig.clone()).unwrap_err();
     assert!(error.to_string().contains("identifiers"));
 
     let mut rig = simple_rig();
     rig["groups"] = json!({"x".repeat(129):["light"]});
-    let error = FixtureRig::from_json(&rig.to_string()).unwrap_err();
+    let error = support::try_rig(rig.clone()).unwrap_err();
     assert!(error.to_string().contains("identifiers"));
 }

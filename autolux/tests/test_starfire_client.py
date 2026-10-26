@@ -30,11 +30,22 @@ def test_rejected_selection_does_not_change_cached_identity():
 
     client = StarfireClient(send)
     with pytest.raises(RuntimeError, match='queue full'):
-        client.select_autoloop('drop', 'blue_impact')
+        client.select_autoloop('drop', 'kick')
     assert client.selected_autoloop is None
-    assert client.select_autoloop('drop', 'blue_impact')
-    assert not client.select_autoloop('drop', 'blue_impact')
+    assert client.select_autoloop('drop', 'kick')
+    assert not client.select_autoloop('drop', 'kick')
     assert len(calls) == 2
+
+
+def test_master_fade_is_passed_through_and_instant_by_default():
+    calls = []
+    client = StarfireClient(calls.append)
+    client.set_master(0.15, fade_seconds=1.0)
+    client.set_master(0.5)
+    assert calls == [
+        {'kind': 'set_master', 'intensity': 0.15, 'fade_seconds': 1.0},
+        {'kind': 'set_master', 'intensity': 0.5},
+    ]
 
 
 async def test_measured_energy_and_beat_share_the_playback_delay():
@@ -55,7 +66,7 @@ async def test_measured_energy_and_beat_share_the_playback_delay():
     first = [event['command'] for event in lighting.events]
     assert first == [
         {'kind': 'set_normalized_rms_level', 'level': pytest.approx(rms_to_normalized_level(0.01))},
-        {'kind': 'beat', 'position_beats': 1, 'bpm': 120.0},
+        {'kind': 'beat', 'beat_index': 1, 'bar_phase': None, 'beats_per_bar': 4, 'bpm': 120.0},
     ]
     clock.advance(0.5)
     await queue.drain()
@@ -77,7 +88,7 @@ async def test_warmup_never_sends_zero_tempo_and_song_stop_preserves_beat_ordina
     light.analyser.bpm = 0.0
     await light.on_beat(3, 0.0, False)
     anchors = [event['command'] for event in lighting.events if event['command']['kind'] == 'beat']
-    assert [anchor['position_beats'] for anchor in anchors] == [2, 3]
+    assert [anchor['beat_index'] for anchor in anchors] == [2, 3]
     assert [anchor['bpm'] for anchor in anchors] == [120.0, 120.0]
 
 
@@ -100,4 +111,28 @@ async def test_song_relative_beat_reset_cannot_rewind_starfire(playback_stop):
     clock.advance(14.0)
     await queue.drain()
     anchors = [event['command'] for event in lighting.events if event['command']['kind'] == 'beat']
-    assert [anchor['position_beats'] for anchor in anchors] == [1, 2, 3, 4]
+    assert [anchor['beat_index'] for anchor in anchors] == [1, 2, 3, 4]
+
+
+def test_renderer_settings_and_a_default_transition_use_the_replay_command_shape():
+    calls = []
+    client = StarfireClient(calls.append)
+    client.select_autoloop('breakdown', 'wide_space')
+    client.select_autoloop('drop', 'kick', transition={'kind': 'cut'})
+    client.set_paused(True)
+    client.set_default_crossfade_beats(2.0)
+    client.set_strobe_limits(6.0, 3.0)
+    assert calls == [
+        {'kind': 'select', 'bank': 'breakdown', 'autoloop': 'wide_space', 'palette': 'techno'},
+        {
+            'kind': 'select',
+            'bank': 'drop',
+            'autoloop': 'kick',
+            'palette': 'techno',
+            'transition': {'kind': 'cut'},
+        },
+        {'kind': 'set_paused', 'paused': True},
+        {'kind': 'set_default_crossfade_beats', 'beats': 2.0},
+        {'kind': 'set_strobe_max_rate_hz', 'hz': 6.0},
+        {'kind': 'set_strobe_max_burst_seconds', 'seconds': 3.0},
+    ]

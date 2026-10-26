@@ -1,14 +1,16 @@
+mod support;
+
 use std::io::{Cursor, Read};
 
 use prost::Message;
-use starfire::engine::Engine;
+use starfire::engine::{Engine, MAX_SCRIPT_ERROR_BYTES};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Target, TimedCommand, Transition,
 };
 use starfire::protocol::{
-    ClientMessage as Operation, MAX_MESSAGE_BYTES, ServerMessage, apply_command, read_control,
-    read_event, wire,
+    ClientMessage as Operation, MAX_ERROR_BYTES, MAX_LOGIN_BYTES, MAX_MESSAGE_BYTES, ServerMessage,
+    apply_command, read_control, read_event, read_session_control, wire,
 };
 use starfire::replay::{Replay, render_replay};
 use starfire::script::AutoloopCatalog;
@@ -37,6 +39,11 @@ fn play(bank: &str, autoloop: &str) -> Operation {
             format!("{bank}/{autoloop}")
         },
         transition: None,
+        palette: if autoloop.is_empty() {
+            String::new()
+        } else {
+            "techno".into()
+        },
     })
 }
 
@@ -46,24 +53,37 @@ fn parameter(kind: wire::ParameterType, value: wire::parameter::Value) -> Operat
         parameter: Some(wire::Parameter {
             r#type: kind as i32,
             value: Some(value),
+            ..Default::default()
+        }),
+    })
+}
+
+fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation {
+    Operation::SetParameter(wire::SetParameter {
+        command_id: 1,
+        parameter: Some(wire::Parameter {
+            r#type: kind as i32,
+            value: Some(wire::parameter::Value::Number(value)),
+            fade_seconds,
         }),
     })
 }
 
 fn engine() -> Engine {
     Engine::new(
-        FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap(),
+        FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap(),
         AutoloopCatalog::load(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
         )
         .unwrap(),
+        support::palettes(),
     )
     .unwrap()
 }
 
 #[test]
 fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
-    let selection = play("atmospheric", "blue_tide");
+    let selection = play("atmospheric", "cold_breathe");
     let mut data = encoded(selection.clone());
     assert_eq!(data[0], wire::MessageType::PlayAutoloop as u8);
     assert_eq!(
@@ -71,7 +91,7 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
         data.len() - 5
     );
     let payload = wire::PlayAutoloop::decode(&data[5..]).unwrap();
-    assert_eq!(payload.autoloop_id, "atmospheric/blue_tide");
+    assert_eq!(payload.autoloop_id, "atmospheric/cold_breathe");
     assert_eq!(payload.command_id, 1);
     data.extend(encoded(play("", "")));
     let mut input = Fragmented(Cursor::new(data));
@@ -98,8 +118,161 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
 }
 
 #[test]
+fn discarding_delayed_audio_round_trips_and_leaves_lighting_untouched() {
+    let discard = Operation::DiscardDelayedAudio(wire::DiscardDelayedAudio { command_id: 7 });
+    let data = encoded(discard);
+    assert_eq!(data[0], wire::MessageType::DiscardDelayedAudio as u8);
+    let decoded = read_control(&mut Fragmented(Cursor::new(data)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(decoded.command_id(), Some(1));
+    assert!(matches!(decoded, Operation::DiscardDelayedAudio(_)));
+
+    let mut engine = engine();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    let before = engine.render_at(0.5).unwrap();
+    apply_command(&mut engine, 0.5, &decoded).unwrap();
+    let after = engine.render_at(0.5).unwrap();
+    assert_eq!(before.dmx_frames_by_universe, after.dmx_frames_by_universe);
+    assert_eq!(after.active_autoloop.as_deref(), Some("cold_breathe"));
+}
+
+fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
+    Operation::Login(wire::Login {
+        command_id: 1,
+        autoloops: (0..count)
+            .map(|index| wire::AutoloopDefinition {
+                autoloop_id: format!("atmospheric/loop_{index}"),
+                bank: "atmospheric".to_owned(),
+                lua_source: "-".repeat(source_bytes),
+            })
+            .collect(),
+        palettes: vec![wire::Palette {
+            name: "techno".into(),
+            primary: Some(wire::RgbColor {
+                red: 1.0,
+                green: 0.82,
+                blue: 0.6,
+            }),
+            black: Some(wire::RgbColor::default()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    })
+}
+
+fn header(kind: wire::MessageType, length: usize) -> Vec<u8> {
+    let mut bytes = vec![kind as u8];
+    bytes.extend((length as u32).to_be_bytes());
+    bytes
+}
+
+#[test]
+fn only_login_may_use_the_large_message_limit() {
+    let login = login_with_sources(16, 64 * 1024);
+    let bytes = encoded(login.clone());
+    assert!(bytes.len() > 1024 * 1024);
+    assert_eq!(read_control(&mut Cursor::new(bytes)).unwrap(), Some(login));
+
+    let oversized = login_with_sources(66, 64 * 1024);
+    let error = oversized.write(&mut Vec::new()).unwrap_err();
+    assert!(error.to_string().starts_with("Login payload of"));
+    let error = read_control(&mut Cursor::new(header(
+        wire::MessageType::Login,
+        MAX_LOGIN_BYTES + 100 * 1024,
+    )))
+    .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Login payload of {} bytes exceeds the {MAX_LOGIN_BYTES}-byte limit",
+            MAX_LOGIN_BYTES + 100 * 1024
+        )
+    );
+
+    let play = play("atmospheric", &"x".repeat(3 * 1024));
+    let bytes = encoded(play.clone());
+    assert!(bytes.len() > 3 * 1024);
+    assert_eq!(read_control(&mut Cursor::new(bytes)).unwrap(), Some(play));
+
+    let mut parameter = header(wire::MessageType::SetParameter, 5 * 1024);
+    parameter.extend(vec![0; 5 * 1024]);
+    let error = read_control(&mut Cursor::new(parameter)).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("SetParameter payload of 5120 bytes exceeds the {MAX_MESSAGE_BYTES}-byte limit")
+    );
+}
+
+fn padded_heartbeat(payload_bytes: usize) -> Vec<u8> {
+    let data = payload_bytes - 3;
+    let mut frame = header(wire::MessageType::Heartbeat, payload_bytes);
+    frame.extend([0x7a, (data % 128) as u8 | 0x80, (data / 128) as u8]);
+    frame.extend(vec![b'-'; data]);
+    frame
+}
+
+#[test]
+fn realtime_limit_is_inclusive_at_exactly_4096_bytes() {
+    assert_eq!(
+        read_control(&mut Cursor::new(padded_heartbeat(MAX_MESSAGE_BYTES))).unwrap(),
+        Some(Operation::Heartbeat(wire::Heartbeat {}))
+    );
+    let error =
+        read_control(&mut Cursor::new(padded_heartbeat(MAX_MESSAGE_BYTES + 1))).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Heartbeat payload of 4097 bytes exceeds the 4096-byte limit"
+    );
+}
+
+#[test]
+fn login_after_a_successful_login_gets_only_the_realtime_limit() {
+    let login = header(wire::MessageType::Login, MAX_MESSAGE_BYTES + 1);
+    assert!(
+        read_session_control(&mut Cursor::new(login.clone()), false)
+            .unwrap_err()
+            .to_string()
+            .contains("truncated")
+    );
+    assert_eq!(
+        read_session_control(&mut Cursor::new(login), true)
+            .unwrap_err()
+            .to_string(),
+        "Login payload of 4097 bytes exceeds the 4096-byte limit"
+    );
+}
+
+#[test]
+fn unknown_type_with_a_huge_length_is_rejected_from_the_header() {
+    let error = read_control(&mut Cursor::new([200, 0xff, 0xff, 0xff, 0xff])).unwrap_err();
+    assert_eq!(error.to_string(), "unknown message type");
+}
+
+#[test]
+fn metrics_at_maximum_field_lengths_fit_the_realtime_limit() {
+    let metrics = ServerMessage::Metrics(wire::Metrics {
+        elapsed_seconds: f64::MAX,
+        rendered_frames: u64::MAX,
+        missed_render_deadlines: u64::MAX,
+        queued_commands: u32::MAX,
+        last_render_duration_seconds: f64::MAX,
+        active_bank: "b".repeat(64),
+        active_autoloop: "a".repeat(128),
+        script_error: "s".repeat(MAX_SCRIPT_ERROR_BYTES),
+        runtime_error: "r".repeat(MAX_ERROR_BYTES),
+        last_processed_command_id: u64::MAX,
+        run_id: u64::MAX,
+    });
+    let mut frame = Vec::new();
+    metrics.write(&mut frame).unwrap();
+    assert!(frame.len() - 5 <= MAX_MESSAGE_BYTES);
+    assert_eq!(read_event(&mut Cursor::new(frame)).unwrap(), Some(metrics));
+}
+
+#[test]
 fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
-    let message = encoded(play("atmospheric", "blue_tide"));
+    let message = encoded(play("atmospheric", "cold_breathe"));
     for length in 1..message.len() {
         assert!(read_control(&mut Cursor::new(&message[..length])).is_err());
     }
@@ -131,7 +304,7 @@ fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
 fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
     use wire::{ParameterType as Kind, parameter::Value};
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for invalid in [
         parameter(Kind::OutputBrightness, Value::Number(-1.0)),
@@ -139,11 +312,14 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
         parameter(Kind::OutputBlackout, Value::Number(0.0)),
         parameter(Kind::AudioRmsNormalized, Value::Boolean(false)),
         parameter(Kind::Unspecified, Value::Number(0.5)),
+        faded(Kind::AnimationSpeed, 1.0, 1.0),
+        faded(Kind::OutputBrightness, 0.5, -1.0),
         Operation::SetParameter(wire::SetParameter {
             command_id: 1,
             parameter: Some(wire::Parameter {
                 r#type: 999,
                 value: Some(Value::Number(0.5)),
+                ..Default::default()
             }),
         }),
     ] {
@@ -173,20 +349,34 @@ fn global_parameter_types_are_enforced_and_invalid_updates_preserve_output() {
 #[test]
 fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     let expected = engine.render_at(0.0).unwrap();
     for operation in [
         play("atmospheric", ""),
-        play("", "blue_tide"),
+        play("", "cold_breathe"),
         Operation::PlayAutoloop(wire::PlayAutoloop {
             transition: Some(wire::play_autoloop::Transition::default()),
             ..Default::default()
         }),
         Operation::PlayAutoloop(wire::PlayAutoloop {
-            autoloop_id: "atmospheric/blue_tide".into(),
+            autoloop_id: "atmospheric/cold_breathe".into(),
             transition: Some(wire::play_autoloop::Transition {
                 crossfade_beats: Some(f64::NAN),
             }),
+            palette: "techno".into(),
+            ..Default::default()
+        }),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            autoloop_id: "drop/kick".into(),
+            ..Default::default()
+        }),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            autoloop_id: "drop/kick".into(),
+            palette: "neon".into(),
+            ..Default::default()
+        }),
+        Operation::PlayAutoloop(wire::PlayAutoloop {
+            palette: "techno".into(),
             ..Default::default()
         }),
     ] {
@@ -200,7 +390,7 @@ fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
 #[test]
 fn optional_effect_properties_preserve_zero_and_invalid_replacements_preserve_expiry() {
     let mut engine = engine();
-    apply_command(&mut engine, 0.0, &play("atmospheric", "blue_tide")).unwrap();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
     let effect = wire::SetActiveEffect {
         command_id: 1,
         effect_id: "accent".into(),
@@ -260,22 +450,27 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (
             0.0,
             Operation::UpdateBeat(wire::UpdateBeat {
-                position_beats: 0.0,
+                beat_index: 7,
+                bar_phase: Some(2),
+                beats_per_bar: 4,
                 tempo_bpm: 140.0,
                 ..Default::default()
             }),
             Command::Beat {
-                position_beats: 0.0,
+                beat_index: 7,
+                bar_phase: Some(2),
+                beats_per_bar: 4,
                 bpm: 140.0,
             },
         ),
         (
             0.0,
-            play("atmospheric", "blue_tide"),
+            play("atmospheric", "cold_breathe"),
             Command::Select {
                 bank: "atmospheric".into(),
-                autoloop: "blue_tide".into(),
+                autoloop: "cold_breathe".into(),
                 transition: Transition::Cut,
+                palette: "techno".into(),
             },
         ),
         (
@@ -286,23 +481,43 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (
             0.5,
             parameter(Kind::OutputBrightness, Value::Number(0.6)),
-            Command::SetMaster { intensity: 0.6 },
+            Command::SetMaster {
+                intensity: 0.6,
+                fade_seconds: 0.0,
+            },
+        ),
+        (
+            0.6,
+            faded(Kind::OutputBrightness, 0.3, 0.5),
+            Command::SetMaster {
+                intensity: 0.3,
+                fade_seconds: 0.5,
+            },
         ),
         (
             0.75,
             Operation::PlayAutoloop(wire::PlayAutoloop {
-                autoloop_id: "drop/blue_impact".into(),
+                autoloop_id: "drop/kick".into(),
                 transition: Some(wire::play_autoloop::Transition {
                     crossfade_beats: Some(2.0),
                 }),
+                palette: "house".into(),
                 ..Default::default()
             }),
             Command::Select {
                 bank: "drop".into(),
-                autoloop: "blue_impact".into(),
+                autoloop: "kick".into(),
                 transition: Transition::Crossfade {
                     duration_beats: 2.0,
                 },
+                palette: "house".into(),
+            },
+        ),
+        (
+            0.9,
+            parameter(Kind::Palette, Value::Text("techno".into())),
+            Command::SetPalette {
+                name: "techno".into(),
             },
         ),
         (
@@ -350,6 +565,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         schema_version: 1,
         duration_seconds: 2.0,
         frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
         events: controls
             .iter()
             .map(|(at, _, command)| TimedCommand {
@@ -358,13 +574,13 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
     let catalog = AutoloopCatalog::load(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"),
     )
     .unwrap();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
-    let mut engine = Engine::new(rig, catalog).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let mut controls = controls.into_iter().peekable();
     for frame in expected.frames {
         while controls
@@ -383,4 +599,91 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         }
         assert_eq!(engine.render_at(frame.time_seconds).unwrap(), frame);
     }
+}
+
+#[test]
+fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
+    use wire::{ParameterType as Kind, parameter::Value};
+    let mut engine = engine();
+    for operation in [
+        parameter(Kind::Paused, Value::Boolean(true)),
+        parameter(Kind::Paused, Value::Boolean(false)),
+        parameter(Kind::DefaultCrossfadeBeats, Value::Number(2.0)),
+        parameter(Kind::StrobeMaxRateHz, Value::Number(6.0)),
+        parameter(Kind::StrobeMaxBurstSeconds, Value::Number(3.0)),
+        parameter(Kind::Palette, Value::Text("house".into())),
+        parameter(Kind::Intensity, Value::Number(0.3)),
+    ] {
+        assert_eq!(
+            read_control(&mut Cursor::new(encoded(operation.clone()))).unwrap(),
+            Some(operation.clone())
+        );
+        apply_command(&mut engine, 0.0, &operation).unwrap();
+    }
+    for invalid in [
+        parameter(Kind::Paused, Value::Number(1.0)),
+        parameter(Kind::DefaultCrossfadeBeats, Value::Boolean(true)),
+        parameter(Kind::Palette, Value::Number(1.0)),
+        parameter(Kind::Palette, Value::Text("neon".into())),
+        faded(Kind::StrobeMaxRateHz, 6.0, 1.0),
+        faded(Kind::Intensity, 0.5, 1.0),
+        parameter(Kind::Intensity, Value::Number(1.5)),
+        parameter(Kind::Intensity, Value::Boolean(true)),
+        Operation::SetParameter(wire::SetParameter {
+            command_id: 1,
+            parameter: Some(wire::Parameter {
+                r#type: Kind::Paused as i32,
+                value: Some(Value::Boolean(true)),
+                fade_seconds: 1.0,
+            }),
+        }),
+    ] {
+        assert!(apply_command(&mut engine, 0.0, &invalid).is_err());
+    }
+    assert_eq!(engine.active_palette(), "house");
+}
+
+#[test]
+fn an_omitted_transition_fades_by_default_taking_target_attributes_at_once_and_an_empty_one_cuts() {
+    use wire::{ParameterType as Kind, parameter::Value};
+    let mut engine = engine();
+    apply_command(&mut engine, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(
+        &mut engine,
+        0.0,
+        &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
+    )
+    .unwrap();
+    let before = engine.render_at(0.0).unwrap();
+    let cut = Operation::PlayAutoloop(wire::PlayAutoloop {
+        command_id: 1,
+        autoloop_id: "drop/kick".into(),
+        transition: Some(wire::play_autoloop::Transition::default()),
+        palette: "techno".into(),
+    });
+    let mut cutting = engine;
+    apply_command(&mut cutting, 0.0, &cut).unwrap();
+    let mut defaulted = self::engine();
+    apply_command(&mut defaulted, 0.0, &play("atmospheric", "cold_breathe")).unwrap();
+    apply_command(
+        &mut defaulted,
+        0.0,
+        &parameter(Kind::DefaultCrossfadeBeats, Value::Number(4.0)),
+    )
+    .unwrap();
+    apply_command(&mut defaulted, 0.0, &play("drop", "kick")).unwrap();
+    let faded = defaulted.render_at(0.0).unwrap();
+    let cut = cutting.render_at(0.0).unwrap();
+    let mut expected = before.fixture_properties_before_strobe.clone();
+    for (id, state) in &mut expected {
+        state
+            .attributes
+            .clone_from(&cut.fixture_properties_before_strobe[id].attributes);
+    }
+    assert!(expected.values().any(|state| !state.attributes.is_empty()));
+    assert_eq!(faded.fixture_properties_before_strobe, expected);
+    assert_ne!(
+        cut.fixture_properties_before_strobe,
+        before.fixture_properties_before_strobe
+    );
 }

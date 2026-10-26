@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
+import re
 import signal
 import subprocess
 import sys
@@ -21,6 +23,9 @@ DASHBOARD_BIND_ADDRESS = '0.0.0.0'
 DEFAULT_ROUTE_PROBE = ('192.0.2.1', 9)
 SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
+CONTROL_PATH = '/control'
+MAX_CONTROL_BYTES = 4096
+HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
 VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
@@ -61,6 +66,100 @@ def snapshot_port(ui_port: int) -> int:
     return ui_port + 1
 
 
+PALETTE_POLICY = 'auto'
+
+
+def parse_control_command(payload) -> dict:
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.lighting.palettes import PALETTE_NAMES
+
+    if not isinstance(payload, dict):
+        raise TypeError('a control command must be an object')
+    action = payload.get('action')
+    if action in ('pause', 'play', 'next_autoloop'):
+        return {'action': action}
+    if action == 'master':
+        level = payload.get('level')
+        if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
+            raise ValueError('master brightness must be within 0..1')
+        return {'action': action, 'level': float(level)}
+    if action == 'intensity':
+        level = payload.get('level')
+        if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
+            raise ValueError('intensity must be within 0..1')
+        return {'action': action, 'level': float(level)}
+    if action == 'settings':
+        return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
+    if action == 'palette':
+        name = payload.get('name')
+        if name != PALETTE_POLICY and name not in PALETTE_NAMES:
+            raise ValueError(
+                f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
+            )
+        return {'action': action, 'name': name}
+    if action == 'mode':
+        mode = payload.get('mode')
+        if mode not in ('auto', 'static'):
+            raise ValueError('mode must be auto or static')
+        return {'action': action, 'mode': mode}
+    if action == 'static':
+        return {'action': action, **_static_command(payload)}
+    raise ValueError(f'unknown control action {action!r}')
+
+
+def _static_command(payload: dict) -> dict:
+    from autolux.lib.engine.static_mode import PRESETS
+
+    kind = payload.get('kind')
+    if kind in ('blacklight', 'strobe'):
+        return {'kind': kind}
+    if kind == 'blackout':
+        if type(payload.get('enabled')) is not bool:
+            raise ValueError('blackout must be true or false')
+        return {'kind': kind, 'enabled': payload['enabled']}
+    if kind == 'preset':
+        if payload.get('preset') not in PRESETS:
+            raise ValueError(f'unknown static preset {payload.get("preset")!r}')
+        return {'kind': kind, 'preset': payload['preset']}
+    if kind != 'look':
+        raise ValueError(f'unknown static command {kind!r}')
+    target, colour, dimmer = payload.get('target'), payload.get('colour'), payload.get('dimmer')
+    if not isinstance(target, str) or not target:
+        raise ValueError('a static look needs a target')
+    if colour is not None:
+        if not isinstance(colour, str) or not HEX_COLOUR.fullmatch(colour):
+            raise ValueError('colour must be #rrggbb')
+        colour = tuple(round(int(colour[i : i + 2], 16) / 255, 6) for i in (1, 3, 5))
+    if dimmer is not None and (type(dimmer) not in (int, float) or not 0.0 <= dimmer <= 1.0):
+        raise ValueError('a static dimmer must be within 0..1')
+    if colour is None and dimmer is None:
+        raise ValueError('a static look needs a colour or a dimmer')
+    return {
+        'kind': kind,
+        'target': target,
+        'colour': colour,
+        'dimmer': None if dimmer is None else float(dimmer),
+    }
+
+
+def command_refusal(
+    command: dict, intent: str | None, paused: bool | None, mode: str | None = None
+) -> str | None:
+    from autolux.lib.engine.event_buffer import STANDBY_INTENT
+
+    if command['action'] == 'static' and mode != 'static':
+        return 'the show is in auto mode'
+    if command['action'] != 'next_autoloop':
+        return None
+    if paused:
+        return 'the show is paused'
+    if mode == 'static':
+        return 'the show is in static mode'
+    if intent in (None, STANDBY_INTENT):
+        return 'no section is playing yet'
+    return None
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
@@ -92,6 +191,42 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self) -> None:
+        commands = self.server.commands
+        if self.path != CONTROL_PATH or commands is None:
+            self.send_error(404)
+            return
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except ValueError:
+            length = -1
+        if not 0 < length <= MAX_CONTROL_BYTES:
+            self.send_error(413 if length > MAX_CONTROL_BYTES else 400)
+            return
+        try:
+            command = parse_control_command(json.loads(self.rfile.read(length)))
+        except (ValueError, TypeError) as error:
+            self._reply(400, {'error': str(error)})
+            return
+        refusal = command_refusal(command, *self.server.event_buffer.operator_state())
+        if refusal:
+            self._reply(409, {'error': refusal})
+            return
+        try:
+            commands.put_nowait(command)
+        except queue.Full:
+            self._reply(503, {'error': 'the show is busy; try again'})
+            return
+        self._reply(202, {'accepted': command['action']})
+
+    def _reply(self, status: int, body: dict) -> None:
+        content = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def log_message(self, *args) -> None:
         pass
 
@@ -103,9 +238,10 @@ class _Http(ThreadingHTTPServer):
 
 
 class SnapshotServer:
-    def __init__(self, event_buffer, port: int):
+    def __init__(self, event_buffer, port: int, commands: queue.Queue | None = None):
         self._http = _Http((SNAPSHOT_HOST, port), _Handler)
         self._http.event_buffer = event_buffer
+        self._http.commands = commands
         self._thread = threading.Thread(
             target=self._http.serve_forever, name='snapshot-server', daemon=True
         )
@@ -208,9 +344,15 @@ class UiBridge:
         self._server.stop()
 
 
-def start(event_buffer, ui_port: int, *, fixture_setup: dict | None = None) -> UiBridge | None:
+def start(
+    event_buffer,
+    ui_port: int,
+    *,
+    fixture_setup: dict | None = None,
+    commands: queue.Queue | None = None,
+) -> UiBridge | None:
     try:
-        server = SnapshotServer(event_buffer, snapshot_port(ui_port))
+        server = SnapshotServer(event_buffer, snapshot_port(ui_port), commands)
         server.start()
     except OSError as error:
         logging.warning(

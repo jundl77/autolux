@@ -5,27 +5,35 @@ import logging
 import os
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
-from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
+from autolux.lighting.autoloop_catalogue import (
+    AutoloopMetaError,
+    read_autoloop_meta,
+    required_autoloops,
+)
+from autolux.lighting.palettes import palette_records
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
 from cli.starfire import (
+    DEFAULT_AUTOLOOPS,
     DEFAULT_BINARY,
     DEFAULT_FIXTURE_STORE,
-    DEFAULT_RIG,
-    DEFAULT_AUTOLOOPS,
     PROFILE_CATALOGUE,
     ROOT,
+    saved_rig,
 )
-from cli.starfire_assets import load_login
+from cli.starfire_assets import load_login, native_rig
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     MAX_MESSAGE_BYTES,
+    MESSAGE_TYPE_BY_CLASS,
     build_command,
+    check_payload_size,
     encode_command,
     read_event,
 )
@@ -43,21 +51,17 @@ DEFAULT_ARTNET_DESTINATION = '127.0.0.1:6454'
 
 def add_arguments(parser, *, include_artnet=False):
     parser.add_argument('--starfire-binary', type=Path, default=DEFAULT_BINARY)
-    parser.add_argument('--rig', type=Path, help='Fixture patch; defaults to the saved room patch')
+    parser.add_argument('--rig', type=Path, help='MVR rig; defaults to the saved room rig')
     parser.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
-    parser.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
+    parser.add_argument(
+        '--profiles', type=Path, default=PROFILE_CATALOGUE, help='Fixture library for Config'
+    )
     if include_artnet:
         parser.add_argument('--artnet', default=DEFAULT_ARTNET_DESTINATION)
 
 
 def selected_rig(path=None):
-    return (
-        Path(path)
-        if path
-        else DEFAULT_FIXTURE_STORE
-        if DEFAULT_FIXTURE_STORE.is_file()
-        else DEFAULT_RIG
-    )
+    return Path(path) if path else saved_rig()
 
 
 def fixture_setup(args):
@@ -68,41 +72,52 @@ def fixture_setup(args):
     }
 
 
-def validate_starfire(
-    binary, rig, autoloops, *, expected_universe=None, profiles=PROFILE_CATALOGUE
-):
+def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
     binary = Path(binary).resolve()
     if not binary.is_file():
         raise RuntimeError(f'Starfire binary is missing: {binary}. Run build-starfire.ps1.')
     build_command({'kind': 'heartbeat'})
-    result = subprocess.run(
-        [
-            str(binary),
-            'check',
-            '--rig',
-            str(Path(rig).resolve()),
-            '--autoloops',
-            str(Path(autoloops).resolve()),
-            '--profiles',
-            str(Path(profiles).resolve()),
-        ],
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=STARTUP_TIMEOUT_SECONDS,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-    )
+    with (
+        native_rig(rig) as exported,
+        tempfile.TemporaryDirectory(prefix='starfire-check-') as staging,
+    ):
+        palettes = Path(staging) / 'palettes.json'
+        palettes.write_text(json.dumps(palette_records()), encoding='utf-8')
+        result = subprocess.run(
+            [
+                str(binary),
+                'check',
+                '--rig',
+                str(exported),
+                '--autoloops',
+                str(Path(autoloops).resolve()),
+                '--palettes',
+                str(palettes),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=STARTUP_TIMEOUT_SECONDS,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
     if result.returncode:
         raise RuntimeError(f'Starfire validation failed: {result.stderr.strip()}')
     report = json.loads(result.stdout)
     checked_autoloops = {
         (autoloop['bank'], autoloop['autoloop']) for autoloop in report['checked_autoloops']
     }
-    missing_autoloops = set(AUTOLOOP_BY_LIGHT_INTENT.values()) - checked_autoloops
+    missing_autoloops = required_autoloops(autoloops) - checked_autoloops
     if missing_autoloops:
         names = ', '.join(f'{bank}/{autoloop}' for bank, autoloop in sorted(missing_autoloops))
         raise RuntimeError(f'Starfire is missing Autolux autoloops: {names}')
+    missing_groups = report.get('missing_groups')
+    if missing_groups:
+        logging.warning('[prod] Starfire groups not in this rig: %s', ', '.join(missing_groups))
+    try:
+        read_autoloop_meta(autoloops)
+    except AutoloopMetaError as error:
+        raise RuntimeError(f'Autolux cannot select from these autoloops: {error}') from None
     if expected_universe is not None:
         universes = report.get('universes')
         if universes != [expected_universe]:
@@ -125,14 +140,12 @@ class StarfireRuntime:
         startup_timeout=STARTUP_TIMEOUT_SECONDS,
         stop_timeout=STOP_TIMEOUT_SECONDS,
         initial_parameters=(),
-        profiles=PROFILE_CATALOGUE,
         radius=None,
         render_core=None,
     ):
         self.run_id = run_id
         self.command = [str(Path(binary).resolve()), 'live']
         self._rig_path = Path(rig).resolve()
-        self._profiles_path = Path(profiles).resolve()
         self._autoloop_directory = Path(autoloops).resolve()
         self._artnet_destination = artnet
         self._initial_parameters = initial_parameters
@@ -167,7 +180,6 @@ class StarfireRuntime:
                 self._autoloop_directory,
                 self._artnet_destination,
                 parameters=self._initial_parameters,
-                profiles=self._profiles_path,
                 run_id=self.run_id,
                 radius=self._radius,
                 render_core=self._render_core,
@@ -221,8 +233,9 @@ class StarfireRuntime:
         ):
             raise ValueError(f'Unknown Starfire autoloop: {message.autoloop_id}')
         # Leave room for the writer-assigned uint64 ID, including its field tag.
-        if message.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES > MAX_MESSAGE_BYTES:
-            raise ValueError('Starfire command exceeds the message limit')
+        check_payload_size(
+            MESSAGE_TYPE_BY_CLASS[type(message)], message.ByteSize() + COMMAND_ID_MAX_ENCODED_BYTES
+        )
         try:
             self._outgoing.put_nowait(message)
         except queue.Full as error:

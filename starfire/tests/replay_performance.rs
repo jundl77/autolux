@@ -1,5 +1,7 @@
 //! Coarse regression budgets for the complete replay renderer, including Lua.
 
+mod support;
+
 use std::path::Path;
 use std::process::Command as Process;
 
@@ -36,13 +38,15 @@ fn mixed_show() -> Replay {
     let anchor_count = (SHOW_DURATION_SECONDS / BEAT_ANCHOR_INTERVAL_SECONDS) as usize;
     for index in 0..=anchor_count {
         let at_seconds = index as f64 * BEAT_ANCHOR_INTERVAL_SECONDS;
-        let position_beats = at_seconds.min(TEMPO_CHANGE_SECONDS) * INITIAL_TEMPO_BPM
+        let grid_position = at_seconds.min(TEMPO_CHANGE_SECONDS) * INITIAL_TEMPO_BPM
             / SECONDS_PER_MINUTE
             + (at_seconds - TEMPO_CHANGE_SECONDS).max(0.0) * FINAL_TEMPO_BPM / SECONDS_PER_MINUTE;
         push(
             at_seconds,
             Command::Beat {
-                position_beats,
+                beat_index: grid_position.floor() as u64,
+                bar_phase: None,
+                beats_per_bar: 4,
                 bpm: if at_seconds < TEMPO_CHANGE_SECONDS {
                     INITIAL_TEMPO_BPM
                 } else {
@@ -52,12 +56,12 @@ fn mixed_show() -> Replay {
         );
     }
     for (at_seconds, bank, autoloop) in [
-        (0.0, "atmospheric", "blue_tide"),
-        (15.0, "breakdown", "violet_space"),
-        (30.0, "buildup", "current"),
-        (45.0, "drop", "blue_impact"),
-        (60.0, "buildup", "current"),
-        (75.0, "drop", "blue_impact"),
+        (0.0, "atmospheric", "cold_breathe"),
+        (15.0, "breakdown", "wide_space"),
+        (30.0, "buildup", "ramp"),
+        (45.0, "drop", "kick"),
+        (60.0, "buildup", "ramp"),
+        (75.0, "drop", "kick"),
     ] {
         push(
             at_seconds,
@@ -71,14 +75,27 @@ fn mixed_show() -> Replay {
                         duration_beats: 4.0,
                     }
                 },
+                palette: "techno".into(),
             },
         );
     }
     for (at_seconds, level) in [(5.0, 0.2), (25.0, 0.85), (45.0, 1.0), (80.0, 0.4)] {
         push(at_seconds, Command::SetNormalizedRmsLevel { level });
     }
-    push(12.0, Command::SetMaster { intensity: 0.8 });
-    push(64.0, Command::SetMaster { intensity: 0.9 });
+    push(
+        12.0,
+        Command::SetMaster {
+            intensity: 0.8,
+            fade_seconds: 0.0,
+        },
+    );
+    push(
+        64.0,
+        Command::SetMaster {
+            intensity: 0.9,
+            fade_seconds: 0.0,
+        },
+    );
     push(36.0, Command::SetSpeed { multiplier: 1.4 });
     push(70.0, Command::SetSpeed { multiplier: 0.5 });
     for at_seconds in [8.0, 32.0, 46.0, 62.0, 76.0] {
@@ -108,6 +125,7 @@ fn mixed_show() -> Replay {
         schema_version: REPLAY_SCHEMA_VERSION,
         duration_seconds: SHOW_DURATION_SECONDS,
         frame_rate_hz: FRAME_RATE_HZ,
+        palettes: support::palette_definitions(),
         events,
     }
 }
@@ -144,19 +162,17 @@ fn scaled_rig() -> Value {
     json!({"schema_version": 1, "fixtures": fixtures, "groups": {"movers": movers, "wash": wash, "strip": strip}})
 }
 
-fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
+fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
     let directory = tempfile::tempdir().unwrap();
     let replay_path = directory.path().join("show.json");
-    let rig_path = directory.path().join("rig.json");
+    let rig_path = directory.path().join("rig.pb");
     std::fs::write(&replay_path, serde_json::to_vec(&mixed_show()).unwrap()).unwrap();
-    std::fs::write(&rig_path, serde_json::to_vec(rig).unwrap()).unwrap();
+    std::fs::write(&rig_path, rig).unwrap();
     let output = Process::new(env!("CARGO_BIN_EXE_starfire"))
         .arg("replay")
         .arg(replay_path)
         .arg("--rig")
         .arg(rig_path)
-        .arg("--profiles")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs/profiles.json"))
         .arg("--autoloops")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"))
         .output()
@@ -187,15 +203,15 @@ fn assert_render_budget(name: &str, rig: &Value, minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig: Value = serde_json::from_str(include_str!("../../rigs/room.json")).unwrap();
-    assert_render_budget("room / 14 fixtures", &rig, MIN_ROOM_REALTIME_FACTOR);
+    let rig = include_bytes!("../../rigs/room.rig.pb");
+    assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
 }
 
 #[test]
 fn sixty_four_fixture_show_keeps_twice_realtime_headroom() {
     assert_render_budget(
         "scaled / 64 fixtures",
-        &scaled_rig(),
+        &support::encoded(&scaled_rig()),
         MIN_SCALED_REALTIME_FACTOR,
     );
 }

@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use crate::engine::{Engine, RenderedFrame};
 use crate::fixtures::FixtureRig;
 use crate::model::{DMX_CHANNELS, MAX_FRAME_RATE_HZ, TimedCommand};
+use crate::palette::{PaletteDefinition, PaletteTable};
 use crate::script::AutoloopCatalog;
 
 pub const REPLAY_SCHEMA_VERSION: u32 = 1;
@@ -29,6 +30,7 @@ pub struct Replay {
     pub schema_version: u32,
     pub duration_seconds: f64,
     pub frame_rate_hz: u32,
+    pub palettes: Vec<PaletteDefinition>,
     pub events: Vec<TimedCommand>,
 }
 
@@ -61,6 +63,7 @@ impl Replay {
             (1..=MAX_FRAME_RATE_HZ).contains(&self.frame_rate_hz),
             "invalid frame rate"
         );
+        PaletteTable::new(&self.palettes)?;
         let last_frame = (self.duration_seconds * f64::from(self.frame_rate_hz)).ceil();
         ensure!(
             last_frame < MAX_REPLAY_FRAMES as f64,
@@ -107,7 +110,7 @@ pub fn render_replay(
             <= MAX_REPLAY_DMX_BYTES,
         "replay exceeds DMX memory budget"
     );
-    let mut engine = Engine::new(rig, catalog)?;
+    let mut engine = Engine::new(rig, catalog, PaletteTable::new(&replay.palettes)?)?;
     let mut events = replay.events.iter().peekable();
     let mut frames = Vec::with_capacity(frame_count);
     let mut diagnostic_bytes: usize = 0;

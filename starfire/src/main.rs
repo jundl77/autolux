@@ -14,11 +14,11 @@ use starfire::artnet::ArtNetOutput;
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
+use starfire::palette::PaletteTable;
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
-use starfire::script::AutoloopCatalog;
+use starfire::script::{AutoloopCatalog, missing_groups_warning};
 
-const DEFAULT_RIG: &str = "rigs/room.json";
-const DEFAULT_PROFILES: &str = "rigs/profiles.json";
+const DEFAULT_RIG: &str = "rigs/room.rig.pb";
 const DEFAULT_AUTOLOOPS: &str = "autoloops";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
@@ -36,10 +36,10 @@ enum Action {
     Check {
         #[arg(long, default_value = DEFAULT_RIG)]
         rig: PathBuf,
-        #[arg(long, default_value = DEFAULT_PROFILES)]
-        profiles: PathBuf,
         #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
         autoloops: PathBuf,
+        #[arg(long)]
+        palettes: PathBuf,
     },
     /// Render live controls from framed protobuf on stdin; status uses stdout.
     Live,
@@ -48,8 +48,6 @@ enum Action {
         input: PathBuf,
         #[arg(long, default_value = DEFAULT_RIG)]
         rig: PathBuf,
-        #[arg(long, default_value = DEFAULT_PROFILES)]
-        profiles: PathBuf,
         #[arg(long, default_value = DEFAULT_AUTOLOOPS)]
         autoloops: PathBuf,
         #[arg(long)]
@@ -75,11 +73,7 @@ enum Action {
         autoloops: PathBuf,
     },
     /// Validate a fixture patch without emitting DMX.
-    Rig {
-        input: PathBuf,
-        #[arg(long, default_value = DEFAULT_PROFILES)]
-        profiles: PathBuf,
-    },
+    Rig { input: PathBuf },
 }
 
 fn main() -> std::process::ExitCode {
@@ -96,20 +90,26 @@ fn run(arguments: Arguments) -> Result<()> {
     match arguments.command {
         Action::Check {
             rig,
-            profiles,
             autoloops,
+            palettes,
         } => {
-            let rig = FixtureRig::load_with_profiles(&rig, &profiles)?;
+            let palettes = PaletteTable::load(&palettes)?;
+            let rig = FixtureRig::load(&rig)?;
             let catalog = AutoloopCatalog::load(&autoloops)?;
+            let missing_groups = catalog.groups_missing_from(&rig);
+            if let Some(warning) = missing_groups_warning(&missing_groups) {
+                eprintln!("starfire: warning: {warning}");
+            }
             let autoloops = catalog.list();
             for autoloop in &autoloops {
-                let mut engine = Engine::new(rig.clone(), catalog.clone())?;
+                let mut engine = Engine::new(rig.clone(), catalog.clone(), palettes.clone())?;
                 engine.apply(
                     0.0,
                     &Command::Select {
                         bank: autoloop.bank.clone(),
                         autoloop: autoloop.autoloop.clone(),
                         transition: Transition::Cut,
+                        palette: palettes.initial().to_owned(),
                     },
                 )?;
                 let frame = engine.render_at(0.0).with_context(|| {
@@ -128,6 +128,7 @@ fn run(arguments: Arguments) -> Result<()> {
                 serde_json::to_string_pretty(&json!({
                     "fixtures": rig.fixture_ids(), "groups": rig.groups(),
                     "universes": universes, "checked_autoloops": autoloops,
+                    "missing_groups": missing_groups,
                 }))?
             );
         }
@@ -144,8 +145,8 @@ fn run(arguments: Arguments) -> Result<()> {
                 serde_json::to_string_pretty(&AutoloopCatalog::load(&autoloops)?.list())?
             );
         }
-        Action::Rig { input, profiles } => {
-            let rig = FixtureRig::load_with_profiles(&input, &profiles)?;
+        Action::Rig { input } => {
+            let rig = FixtureRig::load(&input)?;
             let universes = rig
                 .encode(&rig.empty_states())?
                 .into_keys()
@@ -160,7 +161,6 @@ fn run(arguments: Arguments) -> Result<()> {
         Action::Replay {
             input,
             rig,
-            profiles,
             autoloops,
             output,
             summary,
@@ -173,15 +173,9 @@ fn run(arguments: Arguments) -> Result<()> {
                 artnet.is_none() || realtime,
                 "network playback requires --realtime"
             );
-            validate_output_paths(
-                &input,
-                &rig,
-                &profiles,
-                output.as_deref(),
-                summary.as_deref(),
-            )?;
+            validate_output_paths(&input, &rig, output.as_deref(), summary.as_deref())?;
             let replay = Replay::load(&input)?;
-            let rig = FixtureRig::load_with_profiles(&rig, &profiles)?;
+            let rig = FixtureRig::load(&rig)?;
             let catalogue = AutoloopCatalog::load(&autoloops)?;
             let started = Instant::now();
             let result = render_replay(&replay, rig.clone(), catalogue)?;
@@ -244,15 +238,10 @@ fn run(arguments: Arguments) -> Result<()> {
 fn validate_output_paths(
     input: &Path,
     rig: &Path,
-    profiles: &Path,
     output: Option<&Path>,
     summary: Option<&Path>,
 ) -> Result<()> {
-    let mut paths = vec![
-        input.canonicalize()?,
-        rig.canonicalize()?,
-        profiles.canonicalize()?,
-    ];
+    let mut paths = vec![input.canonicalize()?, rig.canonicalize()?];
     for path in [output, summary].into_iter().flatten() {
         let resolved = if path.exists() {
             path.canonicalize()?
@@ -373,7 +362,7 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig = FixtureRig::from_json(include_str!("../../rigs/room.json")).unwrap();
+        let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();

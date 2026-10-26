@@ -11,15 +11,15 @@ from __future__ import annotations
 import math
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
-from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
+from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS
+from autolux.lib.engine.section_decoder import BEATS_PER_BAR
+from autolux.lighting.palettes import DEFAULT_PALETTE, palette_records
 
 REPLAY_SCHEMA_VERSION = 1
 DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
-AUTOLOOP_BY_INTENT = {
-    intent.value: autoloop for intent, autoloop in AUTOLOOP_BY_LIGHT_INTENT.items()
-}
+AUTOLOOP_BY_INTENT = {intent.value: loops[0] for intent, loops in DEFAULT_AUTOLOOPS.items()}
 
 
 def _nonnegative(value, name: str) -> float:
@@ -87,7 +87,13 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
             events.append(
                 {
                     'at_seconds': at,
-                    'command': {'kind': 'beat', 'position_beats': beat_index, 'bpm': last_bpm},
+                    'command': {
+                        'kind': 'beat',
+                        'beat_index': beat_index,
+                        'bar_phase': None,
+                        'beats_per_bar': BEATS_PER_BAR,
+                        'bpm': last_bpm,
+                    },
                 }
             )
     if last_bpm is None:
@@ -117,6 +123,7 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
                 'kind': 'select',
                 'bank': bank,
                 'autoloop': autoloop,
+                'palette': DEFAULT_PALETTE,
                 'transition': {'kind': 'cut'},
             }
         events.append({'at_seconds': at, 'command': command})
@@ -141,5 +148,6 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
         'schema_version': REPLAY_SCHEMA_VERSION,
         'duration_seconds': duration,
         'frame_rate_hz': frame_rate_hz,
+        'palettes': palette_records(),
         'events': commands,
     }

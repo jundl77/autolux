@@ -1,8 +1,11 @@
+mod support;
+
 use std::path::Path;
 
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, FixtureState, Rgb, Transition};
+use starfire::palette::PaletteTable;
 use starfire::protocol::{ClientMessage, apply_command, wire};
 use starfire::script::AutoloopCatalog;
 
@@ -65,10 +68,16 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
     let supplied_catalog = AutoloopCatalog::from_definitions(&scripts).unwrap();
     let supplied_rig = FixtureRig::from_wire(&rig()).unwrap();
     for (script, autoloop) in scripts.iter().zip(offline_catalog.list()) {
-        let mut supplied = Engine::new(supplied_rig.clone(), supplied_catalog.clone()).unwrap();
+        let mut supplied = Engine::new(
+            supplied_rig.clone(),
+            supplied_catalog.clone(),
+            support::palettes(),
+        )
+        .unwrap();
         let mut offline = Engine::new(
-            FixtureRig::from_json(RGB_RIG).unwrap(),
+            FixtureRig::decode(&support::encoded(&serde_json::from_str(RGB_RIG).unwrap())).unwrap(),
             offline_catalog.clone(),
+            support::palettes(),
         )
         .unwrap();
         for engine in [&mut supplied, &mut offline] {
@@ -76,7 +85,9 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
                 .apply(
                     0.0,
                     &Command::Beat {
-                        position_beats: 0.0,
+                        beat_index: 0,
+                        bar_phase: None,
+                        beats_per_bar: 4,
                         bpm: 140.0,
                     },
                 )
@@ -84,6 +95,7 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
         }
         let selection = ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             autoloop_id: script.autoloop_id.clone(),
+            palette: "techno".into(),
             ..Default::default()
         });
         apply_command(&mut supplied, 0.0, &selection).unwrap();
@@ -94,6 +106,7 @@ fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_p
                     bank: autoloop.bank,
                     autoloop: autoloop.autoloop,
                     transition: Transition::Cut,
+                    palette: "techno".into(),
                 },
             )
             .unwrap();
@@ -219,10 +232,88 @@ fn supplied_catalog_requires_unique_ids_and_bounded_source() {
             ..script.clone()
         },
         wire::AutoloopDefinition {
-            lua_source: " ".repeat(128 * 1024 + 1),
+            lua_source: " ".repeat(64 * 1024 + 1),
             ..script
         },
     ] {
         assert!(AutoloopCatalog::from_definitions(&[invalid]).is_err());
     }
+}
+
+#[test]
+fn login_palettes_need_complete_unique_named_slots_and_the_first_is_active() {
+    let colour = |red, green, blue| Some(wire::RgbColor { red, green, blue });
+    let ice = wire::Palette {
+        name: "ice".into(),
+        primary: colour(0.25, 0.5, 1.0),
+        secondary: colour(0.0, 0.85, 1.0),
+        accent: colour(0.1, 0.2, 0.9),
+        cold: colour(0.9, 0.95, 1.0),
+        black: colour(0.0, 0.0, 0.0),
+    };
+    let ember = wire::Palette {
+        name: "ember".into(),
+        ..ice.clone()
+    };
+    let table = PaletteTable::from_wire(&[ice.clone(), ember.clone()]).unwrap();
+    assert_eq!(table.initial(), "ice");
+    assert_eq!(table.slots("ember").unwrap(), table.slots("ice").unwrap());
+    for (invalid, reason) in [
+        (vec![], "1..64 palettes"),
+        (vec![ice.clone(), ice.clone()], "duplicate palette ice"),
+        (
+            vec![wire::Palette {
+                accent: None,
+                ..ice.clone()
+            }],
+            "palette ice lacks its accent slot",
+        ),
+        (
+            vec![wire::Palette {
+                cold: colour(1.5, 0.0, 0.0),
+                ..ice.clone()
+            }],
+            "palette ice cold channels must be finite and within 0..1",
+        ),
+        (
+            vec![wire::Palette {
+                name: "Ice Blue".into(),
+                ..ice.clone()
+            }],
+            "palette name \"Ice Blue\"",
+        ),
+    ] {
+        let error = PaletteTable::from_wire(&invalid).unwrap_err();
+        assert!(format!("{error:#}").contains(reason), "{error:#}");
+    }
+    let script = wire::AutoloopDefinition {
+        autoloop_id: "look".into(),
+        bank: "atmospheric".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.palette().primary), sf.dimmer(sf.all(), 1)} end}".into(),
+    };
+    let catalog = AutoloopCatalog::from_definitions(&[script]).unwrap();
+    let palettes = PaletteTable::from_wire(&[ember, ice]).unwrap();
+    let mut engine =
+        Engine::new(FixtureRig::from_wire(&rig()).unwrap(), catalog, palettes).unwrap();
+    assert_eq!(engine.active_palette(), "ember");
+    assert!(
+        engine
+            .play_autoloop(0.0, "look", Transition::Cut, "techno")
+            .is_err()
+    );
+    engine
+        .play_autoloop(0.0, "look", Transition::Cut, "ice")
+        .unwrap();
+    assert_eq!(
+        engine
+            .render_at(0.0)
+            .unwrap()
+            .fixture_properties_before_strobe["wash"]
+            .colour,
+        Rgb {
+            red: 0.25,
+            green: 0.5,
+            blue: 1.0
+        }
+    );
 }

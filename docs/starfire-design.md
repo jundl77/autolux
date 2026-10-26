@@ -97,9 +97,11 @@ Explicit Art-Net output remains available for standalone rendering and replay.
 
 ## What "clock" means
 
-- **Musical position:** where we are in the music. Beat messages provide position and BPM.
-  At 120 BPM, position advances two beats per second; halfway between beats 10 and 11
-  it is 10.5. New anchors correct the estimate. The renderer uses these anchors, not audio analysis.
+- **Musical position:** where we are in the music. Beat messages report facts — beat index,
+  the tracker's committed bar phase, beats per bar and BPM — and Starfire anchors a
+  bar-aligned grid on them: `floor(position) % beats_per_bar` is the bar phase, and a phase
+  correction only moves the grid forward. At 120 BPM, position advances two beats per second;
+  halfway between beats 10 and 11 it is 10.5. The renderer uses these facts, not audio analysis.
 - **Animation position:** how far an autoloop has moved. It advances with tempo and requested
   animation speed without jumping when speed changes. Beat pulses use musical position;
   movement can use animation position.
