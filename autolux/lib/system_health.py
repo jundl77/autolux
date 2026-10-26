@@ -38,6 +38,12 @@ def health_summary(snapshot, *, now=None):
         f"Last 10 s: {int(recent.get('underruns', 0))} underruns · "
         f"{int(recent.get('overruns', 0))} overruns · {int(recent.get('lost_frames', 0))} lost frames"
     )
+    if recent.get('resyncs'):
+        # Each resync is also an overrun; this says the timeline was re-anchored, not lost.
+        audio_detail += f" · {int(recent['resyncs'])} capture resyncs"
+        gap = tx.get('capture_last_gap_seconds')
+        if finite(gap):
+            audio_detail += f' (last gap {gap * MILLISECONDS_PER_SECOND:.0f} ms)'
     if recent.get('dropped_frames'):
         audio_detail += f" · {int(recent['dropped_frames'])} dropped frames"
     if recent.get('latency_recoveries'):
@@ -141,6 +147,7 @@ GAUGES = {
 }
 COUNTERS = {
     'capture_overruns_total': 'Capture device overruns.',
+    'capture_discontinuities_total': 'Capture overruns bridged by re-anchoring the timeline.',
     'queue_dropped_frames_total': 'Audio frames dropped by a full transmitter queue.',
     'underruns_total': 'Receiver audio starvation episodes.',
     'device_underruns_total': 'Audio output device underruns.',
