@@ -232,7 +232,7 @@ fn oversized_sources_are_rejected_before_compilation() {
     fs::create_dir(directory.path().join("test")).unwrap();
     fs::write(
         directory.path().join("test/autoloop.lua"),
-        " ".repeat(128 * 1024 + 1),
+        " ".repeat(64 * 1024 + 1),
     )
     .unwrap();
     let error = AutoloopCatalog::load(directory.path()).unwrap_err();

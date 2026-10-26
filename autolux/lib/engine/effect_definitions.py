@@ -23,11 +23,22 @@ SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'altoutro': LightIntent.ATMOSPHERIC,
 }
 
-AUTOLOOP_BY_LIGHT_INTENT: dict[LightIntent, tuple[str, str]] = {
-    LightIntent.ATMOSPHERIC: ('atmospheric', 'cold_breathe'),
-    LightIntent.BREAKDOWN: ('breakdown', 'wide_space'),
-    LightIntent.BUILDUP: ('buildup', 'ramp'),
-    LightIntent.DROP: ('drop', 'kick'),
+# Each intent's bank (named after the intent) is discovered from disk, so new
+# looks join the rotation without code changes. The audited originals open
+# their bank so a fresh show starts on the known-good set.
+PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
+    LightIntent.ATMOSPHERIC: 'cold_breathe',
+    LightIntent.BREAKDOWN: 'wide_space',
+    LightIntent.BUILDUP: 'ramp',
+    LightIntent.DROP: 'kick',
+}
+
+AutoloopTable = dict[LightIntent, tuple[tuple[str, str], ...]]
+
+# Without a discovered catalogue (unit tests, offline tools) every intent keeps
+# one fixed look, which keeps recorded command streams stable.
+DEFAULT_AUTOLOOPS: AutoloopTable = {
+    intent: ((intent.value, autoloop),) for intent, autoloop in PREFERRED_AUTOLOOPS.items()
 }
 
 
@@ -49,6 +60,14 @@ CROSSFADE_BEATS = 1.0
 MAX_STROBE_COOLDOWN_SECONDS = 600.0
 MAX_CROSSFADE_BEATS = 16.0
 
+SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
+    'drop_strobe_cooldown_seconds': (0.0, MAX_STROBE_COOLDOWN_SECONDS),
+    # Starfire refuses a zero-length burst or crossfade.
+    'strobe_burst_seconds': (0.1, STROBE_MAX_BURST_SECONDS),
+    'crossfade_beats': (0.25, MAX_CROSSFADE_BEATS),
+    'quiet_brightness': (0.0, 1.0),
+}
+
 
 @dataclass(frozen=True)
 class ShowSettings:
@@ -60,13 +79,7 @@ class ShowSettings:
     quiet_brightness: float = QUIET_BRIGHTNESS
 
     def __post_init__(self):
-        for name, low, high in (
-            ('drop_strobe_cooldown_seconds', 0.0, MAX_STROBE_COOLDOWN_SECONDS),
-            # Starfire refuses a zero-length burst or crossfade.
-            ('strobe_burst_seconds', 0.1, STROBE_MAX_BURST_SECONDS),
-            ('crossfade_beats', 0.25, MAX_CROSSFADE_BEATS),
-            ('quiet_brightness', 0.0, 1.0),
-        ):
+        for name, (low, high) in SHOW_SETTING_RANGES.items():
             value = getattr(self, name)
             # bool is an int subclass, and a JSON true must not become 1 s.
             if type(value) not in (int, float) or not math.isfinite(value):

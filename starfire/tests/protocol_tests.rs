@@ -109,6 +109,39 @@ fn fragmented_coalesced_frames_use_standalone_generated_payloads() {
     }
 }
 
+fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
+    Operation::Login(wire::Login {
+        command_id: 1,
+        autoloops: (0..count)
+            .map(|index| wire::AutoloopDefinition {
+                autoloop_id: format!("atmospheric/loop_{index}"),
+                bank: "atmospheric".to_owned(),
+                lua_source: "-".repeat(source_bytes),
+            })
+            .collect(),
+        ..Default::default()
+    })
+}
+
+// Regression: a ~40-script library outgrew the old 64 KiB frame at live start.
+#[test]
+fn login_carrying_a_large_autoloop_library_round_trips() {
+    let login = login_with_sources(16, 64 * 1024);
+    let bytes = encoded(login.clone());
+    assert!(bytes.len() > 1024 * 1024);
+    assert_eq!(read_control(&mut Cursor::new(bytes)).unwrap(), Some(login));
+}
+
+#[test]
+fn login_over_the_message_limit_is_rejected_on_both_ends() {
+    let oversized = login_with_sources(MAX_MESSAGE_BYTES / (64 * 1024) + 1, 64 * 1024);
+    assert!(oversized.write(&mut Vec::new()).is_err());
+    // The length prefix alone must fail before the payload buffer is allocated.
+    let mut header = vec![wire::MessageType::Login as u8];
+    header.extend(((MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes());
+    assert!(read_control(&mut Cursor::new(header)).is_err());
+}
+
 #[test]
 fn truncated_oversized_unknown_and_wrong_direction_frames_are_rejected() {
     let message = encoded(play("atmospheric", "cold_breathe"));

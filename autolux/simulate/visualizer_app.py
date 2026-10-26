@@ -8,12 +8,14 @@ from statistics import median
 
 import dash
 import plotly.graph_objects as go
-from dash import Input, Output, dcc, html
+from dash import Input, Output, State, dcc, html
 
+from autolux.lib.engine.effect_definitions import SHOW_SETTING_RANGES
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
+    CONTROL_PATH,
     DASHBOARD_BIND_ADDRESS,
     DASHBOARD_MDNS_HOSTNAME,
     DEFAULT_DASHBOARD_PORT,
@@ -516,6 +518,96 @@ def _build_show_overview(snapshot: dict) -> list:
     ]
 
 
+SETTING_LABELS = {
+    'drop_strobe_cooldown_seconds': 'Drop strobe cooldown (s)',
+    'strobe_burst_seconds': 'Strobe burst (s)',
+    'crossfade_beats': 'Crossfade (beats)',
+    'quiet_brightness': 'Quiet brightness',
+}
+
+
+def control_command(trigger, paused, level, settings) -> dict | None:
+    """The POST /control body for the control the operator touched."""
+    if trigger == 'control-toggle':
+        return {'action': 'play' if paused else 'pause'}
+    if trigger == 'control-brightness':
+        return {'action': 'master', 'level': level}
+    if trigger == 'control-apply':
+        return {'action': 'settings', 'settings': dict(zip(SHOW_SETTING_RANGES, settings))}
+    return None
+
+
+def _setting_input(name):
+    low, high = SHOW_SETTING_RANGES[name]
+    return html.Label(
+        [
+            html.Span(SETTING_LABELS[name]),
+            dcc.Input(id=f'control-{name}', type='number', min=low, max=high, step='any'),
+        ],
+        className='control-field',
+        title=f'{low:g} to {high:g}',
+    )
+
+
+def _build_control_card() -> list:
+    return [
+        html.Div(
+            [html.H2('Show control'), html.P('Applies to the live show · settings are saved')],
+            className='section-heading',
+        ),
+        html.Section(
+            [
+                html.Div(
+                    [
+                        html.Div('Playback', className='stat-label'),
+                        html.Button('Pause', id='control-toggle', disabled=True),
+                    ],
+                    className='control-group',
+                ),
+                html.Div(
+                    [
+                        html.Div('Master brightness', className='stat-label'),
+                        html.Div(
+                            [
+                                dcc.Slider(
+                                    id='control-brightness',
+                                    min=0,
+                                    max=1,
+                                    step=0.01,
+                                    marks=None,
+                                    # mouseup sends one command per drag, not one per pixel.
+                                    updatemode='mouseup',
+                                    allow_direct_input=False,
+                                    disabled=True,
+                                ),
+                                html.Span('—', id='control-brightness-value'),
+                            ],
+                            className='control-slider',
+                        ),
+                    ],
+                    className='control-group control-brightness',
+                ),
+                html.Div(
+                    [
+                        html.Div('Show settings', className='stat-label'),
+                        html.Div(
+                            [_setting_input(name) for name in SHOW_SETTING_RANGES]
+                            + [html.Button('Apply', id='control-apply', disabled=True)],
+                            className='control-settings',
+                        ),
+                    ],
+                    className='control-group',
+                ),
+                html.P(id='control-status', role='status', className='control-status'),
+                dcc.Store(id='control-state'),
+                dcc.Store(id='control-loaded', data=False),
+            ],
+            id='show-control',
+            className='overview-panel',
+        ),
+    ]
+
+
 def _metric_card(label, value, detail):
     return html.Div(
         [
@@ -683,6 +775,22 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .command-diagnostics td { padding: 4px 0; }
 .command-diagnostics th, .command-diagnostics td { text-align: right; }
 .command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
+#show-control { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 32px;
+                padding: 14px 16px; }
+.control-group { min-width: 0; }
+.control-brightness { flex: 0 1 320px; }
+.control-slider { display: flex; align-items: center; gap: 10px; }
+.control-slider > :first-child { flex: 1; }
+#control-brightness-value { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+                            min-width: 32px; }
+.control-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.control-field > span { display: block; color: #9baabb; font-size: 10px; margin-bottom: 5px; }
+.control-field input { width: 120px; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
+                       border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px; }
+#show-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
+                       border-radius: 4px; padding: 7px 14px; cursor: pointer; font-size: 12px; }
+#show-control button:disabled { opacity: .4; cursor: default; }
+.control-status { flex-basis: 100%; margin: 0; min-height: 16px; color: #93a5b9; font-size: 12px; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -1032,6 +1140,31 @@ class SnapshotPoller:
         finally:
             self._lock.release()
 
+    def control(self, command: dict) -> dict:
+        """The controller's reply; a failure comes back as {'error': ...}, never raised."""
+        # Its own connection: the poll's lock skips when busy, and a command must not be dropped.
+        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        try:
+            connection.request(
+                'POST',
+                CONTROL_PATH,
+                json.dumps(command).encode(),
+                {'Content-Type': 'application/json'},
+            )
+            response = connection.getresponse()
+            body = response.read()
+        except (OSError, http.client.HTTPException):
+            return {'error': 'the show is not answering'}
+        finally:
+            connection.close()
+        try:
+            reply = json.loads(body)
+        except ValueError:
+            reply = None
+        if not isinstance(reply, dict):
+            return {'error': f'the show refused the command (HTTP {response.status})'}
+        return reply
+
 
 def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
     app = dash.Dash(
@@ -1071,6 +1204,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'fontWeight': '500',
         'flex': 'none',
     }
+    # An in-process EventBuffer (simulation, test rigs) has no controller to command.
+    can_control = callable(getattr(snapshot_source, 'control', None))
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
         build_fixture_panel(app, fixture_store)
@@ -1116,6 +1251,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                         className='overview-panel',
                     ),
                     html.Div(id='performance-metrics', className='performance-overview'),
+                    *_build_control_card(),
                     html.Div(
                         [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
                         className='section-heading',
@@ -1257,6 +1393,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             Output('telemetry-alerts', 'children'),
             Output('performance-metrics', 'children'),
             Output('renderer-metrics', 'children'),
+            Output('control-state', 'data'),
         ]
         + [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
         Input('gate', 'data'),
@@ -1268,13 +1405,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         snap = snapshot_source.snapshot()
         now = time.time()
         sync = metrics = decoder = commands = timeline = dash.no_update
-        notices = performance = renderer = dash.no_update
+        notices = performance = renderer = control = dash.no_update
         charts = [dash.no_update] * len(system_metrics.PANELS)
         if requested['tab'] == 'control':
             sync = _anchor(snap)
             metrics = _build_show_overview(snap)
             decoder = _build_decoder(snap)
             commands = _build_command_diagnostics(snap)
+            if can_control:
+                control = {
+                    key: snap.get(key) for key in ('paused', 'master_brightness', 'settings')
+                }
             if requested.get('timeline'):
                 timeline = _build_timeline(snap)
             if requested.get('metrics'):
@@ -1284,7 +1425,78 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             renderer = _build_renderer_overview(snap, now)
         if requested.get('metrics'):
             notices = system_metrics.build_telemetry_notices(snap, now=now)
-        return sync, metrics, decoder, commands, timeline, notices, performance, renderer, *charts
+        return (
+            sync,
+            *(metrics, decoder, commands, timeline, notices, performance, renderer, control),
+            *charts,
+        )
+
+    # The controller publishes paused=None until its engine exists; nothing is sendable before.
+    app.clientside_callback(
+        '''function(state) {
+            const ready = !!state && state.paused !== null && state.paused !== undefined;
+            return [ready && state.paused ? 'Play' : 'Pause', !ready,
+                    !ready || state.master_brightness === null, !ready || !state.settings];
+        }''',
+        Output('control-toggle', 'children'),
+        Output('control-toggle', 'disabled'),
+        Output('control-brightness', 'disabled'),
+        Output('control-apply', 'disabled'),
+        Input('control-state', 'data'),
+    )
+    # Fill the form once; later snapshots must not overwrite what the operator is typing.
+    app.clientside_callback(
+        '''function(state, loaded) {
+            if (loaded || !state || state.master_brightness === null || !state.settings) {
+                throw window.dash_clientside.PreventUpdate;
+            }
+            const names = '''
+        + json.dumps(list(SHOW_SETTING_RANGES))
+        + ''';
+            return [state.master_brightness, ...names.map((name) => state.settings[name]), true];
+        }''',
+        Output('control-brightness', 'value'),
+        *[Output(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        Output('control-loaded', 'data'),
+        Input('control-state', 'data'),
+        State('control-loaded', 'data'),
+    )
+    app.clientside_callback(
+        "function(level) { return level === null || level === undefined ? '—' : level.toFixed(2); }",
+        Output('control-brightness-value', 'children'),
+        Input('control-brightness', 'drag_value'),
+    )
+
+    @app.callback(
+        Output('control-status', 'children'),
+        Input('control-toggle', 'n_clicks'),
+        Input('control-brightness', 'value'),
+        Input('control-apply', 'n_clicks'),
+        State('control-state', 'data'),
+        *[State(f'control-{name}', 'value') for name in SHOW_SETTING_RANGES],
+        prevent_initial_call=True,
+    )
+    def send_control(_toggle, level, _apply, state, *settings):
+        state = state or {}
+        trigger = dash.ctx.triggered_id
+        current = state.get('master_brightness')
+        # The one-time fill sets the slider too; echoing it back is not an operator change.
+        if trigger == 'control-brightness' and (
+            level is None or (current is not None and abs(level - current) < 0.005)
+        ):
+            raise dash.exceptions.PreventUpdate
+        command = control_command(trigger, state.get('paused'), level, settings)
+        if command is None or not can_control:
+            raise dash.exceptions.PreventUpdate
+        reply = snapshot_source.control(command)
+        if 'error' in reply:
+            return f'Rejected: {reply["error"]}'
+        return {
+            'pause': 'Paused.',
+            'play': 'Playing.',
+            'master': f'Master brightness set to {level:.2f}.',
+            'settings': 'Settings applied.',
+        }.get(reply.get('accepted'), 'Sent.')
 
     app.clientside_callback(
         ANIMATION_JS,

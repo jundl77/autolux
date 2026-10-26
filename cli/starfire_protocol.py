@@ -7,7 +7,9 @@ from google.protobuf.message import Message
 
 from proto.starfire import starfire_pb2 as wire
 
-MAX_MESSAGE_BYTES = 64 * 1024
+# Contract value from the frame comment in proto/starfire/starfire.proto; Login with
+# the whole Lua library sets the size, and the renderer echoes it in LoginReply.
+MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
 COMMAND_ID_MAX_ENCODED_BYTES = 11
 FRAME_HEADER = struct.Struct('!BI')

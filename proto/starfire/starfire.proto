@@ -6,7 +6,9 @@ import "proto/starfire/rig.proto";
 
 // CLIENT = Autolux coordinator; SERVER = its owned Starfire process.
 // Frame: one byte MessageType, four-byte big-endian payload length, then the
-// standalone Protobuf message (at most 64 KiB). No message envelope.
+// standalone Protobuf message (at most 4 MiB, sized for Login: rig, GDTF profiles and
+// the whole Lua library; each AutoloopDefinition.lua_source is at most 64 KiB).
+// Larger declared lengths are rejected before allocation. No message envelope.
 // Login comes first. Commands apply in order at render boundaries after login.
 // A successful Login binds the connection to its nonzero run_id; it cannot be replaced.
 // Later commands and heartbeats implicitly belong to that run.

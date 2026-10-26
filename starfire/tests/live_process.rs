@@ -115,7 +115,7 @@ impl Renderer {
             panic!("renderer did not accept login");
         };
         assert_eq!(reply.frame_rate_hz, 40);
-        assert_eq!(reply.max_message_bytes, 65536);
+        assert_eq!(reply.max_message_bytes, 4 * 1024 * 1024);
         assert_eq!(reply.run_id, renderer.login.run_id);
         let metrics = renderer.next_metrics();
         assert_eq!(metrics.run_id, renderer.login.run_id);

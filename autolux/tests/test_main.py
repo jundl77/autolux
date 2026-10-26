@@ -29,6 +29,7 @@ def _app(enable_ui: bool, event_buffer):
     app.is_running = False
     app._stop_requested = False
     app.health_check = None
+    app.control = MagicMock()
     return app
 
 
@@ -53,7 +54,9 @@ def _bridge_started(monkeypatch) -> list:
 
     started = []
     monkeypatch.setattr(
-        ui_bridge, 'start', lambda buffer, port: started.append((buffer, port)) or MagicMock()
+        ui_bridge,
+        'start',
+        lambda buffer, port, **kwargs: started.append((buffer, port)) or MagicMock(),
     )
     return started
 

@@ -11,8 +11,8 @@ from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
-    AUTOLOOP_BY_LIGHT_INTENT,
     BEAT_LOSS_SECONDS,
+    PREFERRED_AUTOLOOPS,
     QUIET_BRIGHTNESS,
     LightIntent,
 )
@@ -1279,7 +1279,7 @@ async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest
     clock.advance(0.2)
     await queue.drain()
     [selected] = selections(lighting)
-    assert selected['command']['autoloop'] == AUTOLOOP_BY_LIGHT_INTENT[LightIntent.DROP][1]
+    assert selected['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
     assert selected['at_seconds'] == pytest.approx(downbeat_reaches_room, abs=0.15)
 
 
@@ -1293,7 +1293,7 @@ async def test_a_held_intent_is_released_when_the_rooms_beats_stop():
     clock.advance(3.0)
     await light.on_100ms_callback()
     assert [e['command']['autoloop'] for e in selections(lighting)] == [
-        AUTOLOOP_BY_LIGHT_INTENT[LightIntent.BREAKDOWN][1]
+        PREFERRED_AUTOLOOPS[LightIntent.BREAKDOWN]
     ]
 
 
@@ -1388,10 +1388,7 @@ async def test_play_applies_the_current_intent_on_the_next_downbeat_and_restores
     await beat_at_phase(light, decoder, 2)
     assert len(selections(lighting)) == 1, 'the change waits for the downbeat'
     await beat_at_phase(light, decoder, 0)
-    assert (
-        selections(lighting)[-1]['command']['autoloop']
-        == (AUTOLOOP_BY_LIGHT_INTENT[LightIntent.DROP][1])
-    )
+    assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
 
 
 async def test_master_scales_the_quiet_dim_and_bypasses_the_playback_delay():

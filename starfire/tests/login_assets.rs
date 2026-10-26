@@ -219,7 +219,7 @@ fn supplied_catalog_requires_unique_ids_and_bounded_source() {
             ..script.clone()
         },
         wire::AutoloopDefinition {
-            lua_source: " ".repeat(128 * 1024 + 1),
+            lua_source: " ".repeat(64 * 1024 + 1),
             ..script
         },
     ] {

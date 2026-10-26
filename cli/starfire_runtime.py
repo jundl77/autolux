@@ -11,13 +11,13 @@ from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
-from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT
+from autolux.lighting.autoloop_catalogue import required_autoloops
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
 from cli.starfire import (
+    DEFAULT_AUTOLOOPS,
     DEFAULT_BINARY,
     DEFAULT_FIXTURE_STORE,
     DEFAULT_RIG,
-    DEFAULT_AUTOLOOPS,
     PROFILE_CATALOGUE,
     ROOT,
 )
@@ -99,7 +99,7 @@ def validate_starfire(
     checked_autoloops = {
         (autoloop['bank'], autoloop['autoloop']) for autoloop in report['checked_autoloops']
     }
-    missing_autoloops = set(AUTOLOOP_BY_LIGHT_INTENT.values()) - checked_autoloops
+    missing_autoloops = required_autoloops(autoloops) - checked_autoloops
     if missing_autoloops:
         names = ', '.join(f'{bank}/{autoloop}' for bank, autoloop in sorted(missing_autoloops))
         raise RuntimeError(f'Starfire is missing Autolux autoloops: {names}')

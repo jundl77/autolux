@@ -40,6 +40,12 @@ function sf.rgb(red, green, blue)
     return { red = red, green = green, blue = blue }
 end
 
+-- Blend between two palette slots, so crossfades stay inside the palette.
+function sf.mix(first, last, amount)
+    return sf.rgb(sf.lerp(first.red, last.red, amount), sf.lerp(first.green, last.green, amount),
+        sf.lerp(first.blue, last.blue, amount))
+end
+
 function sf.hsv(hue_degrees, saturation, value)
     assert(finite(hue_degrees), "hue must be finite")
     assert(finite(saturation) and saturation >= 0 and saturation <= 1, "saturation must be within 0..1")
@@ -69,12 +75,18 @@ function sf.phrase_phase(beats, bars)
     return (beats / (bars * BEATS_PER_BAR)) % 1
 end
 
--- Kick envelope: 1 on the beat edge, squared decay to 0 after `width` beats.
-function sf.on_beat(beats, width)
+-- Kick envelope: 1 on each grid edge (every `period` beats, default 1), squared decay
+-- to 0 after `width` beats. A period of 0.5 gives eighth notes.
+function sf.on_beat(beats, width, period)
     assert(finite(width) and width > 0, "beat envelope width must be positive and finite")
-    local remaining = math.max(0, 1 - (beats % 1) / width)
+    period = period or 1
+    assert(finite(period) and period > 0, "beat envelope period must be positive and finite")
+    local remaining = math.max(0, 1 - (beats % period) / width)
     return remaining * remaining
 end
+
+-- Mirror sign for paired fixtures: odd members (left) -1, even members (right) +1.
+function sf.side(index) return index % 2 == 1 and -1 or 1 end
 
 -- RMS is normalised over -48..-12 dBFS, so a quiet room or a stopped track reads ~0.
 -- The 0.08 floor keeps the rig barely alive instead of black; full level from rms 0.8.

@@ -187,12 +187,36 @@ def test_login_uses_selected_profile_catalogue(login_assets, monkeypatch):
     assert login.rig.profiles[0].gdtf_xml == GDTF_XML
 
 
-def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_assets):
+def _fill_bank(autoloops, count, size):
+    # Regression: the 64 KiB frame rejected a ~40-script library at live start.
+    for index in range(count):
+        source = 'return { render = function(ctx) end }\n'
+        (autoloops / f'atmospheric/loop_{index}.lua').write_bytes(
+            (source + '-' * (size - len(source))).encode()
+        )
+
+
+def test_full_autoloop_library_fits_one_login(login_assets):
     rig, autoloops, _ = login_assets
-    (autoloops / 'atmospheric/blue.lua').write_text(
-        ' ' * protocol.MAX_MESSAGE_BYTES, encoding='utf-8'
-    )
-    with pytest.raises(ValueError, match='Login assets exceed the renderer message limit'):
+    _fill_bank(autoloops, 40, 3 * 1024)
+    login = assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+    assert len(login.autoloops) == 41
+
+
+def test_single_autoloop_over_its_cap_is_rejected(login_assets):
+    rig, autoloops, _ = login_assets
+    _fill_bank(autoloops, 1, assets.MAX_SCRIPT_BYTES + 1)
+    with pytest.raises(ValueError, match=f'{assets.MAX_SCRIPT_BYTES}-byte limit'):
+        assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
+
+
+def test_combined_login_limit_is_checked_before_the_renderer_is_started(login_assets, monkeypatch):
+    rig, autoloops, _ = login_assets
+    # The script catalogue cap is reached first at real sizes; shrink the frame so
+    # the combined rig + profile + script check is what trips.
+    monkeypatch.setattr(assets, 'MAX_MESSAGE_BYTES', 64 * 1024)
+    _fill_bank(autoloops, 40, 3 * 1024)
+    with pytest.raises(ValueError, match=r'renderer message limit: \d+ > 65536 bytes'):
         assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 

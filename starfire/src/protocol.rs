@@ -11,7 +11,10 @@ use crate::model::{
     Transition,
 };
 
-pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+/// Contract value from the frame comment in `proto/starfire/starfire.proto`. Login
+/// carries the rig and whole Lua library, so it sets the size; the bound still caps
+/// the payload buffer allocated from an untrusted length prefix.
+pub const MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_ERROR_BYTES: usize = 1024;
 pub const FRAME_HEADER_BYTES: usize = 5;
 

@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use serde_json::Value;
+use starfire::script::AutoloopCatalog;
 
 fn check(rig: &Path, autoloops: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_starfire"))
@@ -26,7 +27,15 @@ fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     );
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["universes"], serde_json::json!([0]));
-    assert_eq!(report["checked_autoloops"].as_array().unwrap().len(), 4);
+    // Counted from disk, so adding a loop never needs an edit here.
+    let shipped = AutoloopCatalog::load(&root.join("../autoloops"))
+        .unwrap()
+        .list()
+        .len();
+    assert_eq!(
+        report["checked_autoloops"].as_array().unwrap().len(),
+        shipped
+    );
 }
 
 #[test]

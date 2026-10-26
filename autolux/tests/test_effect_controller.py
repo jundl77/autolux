@@ -134,3 +134,68 @@ async def test_a_cooldown_change_applies_to_the_next_drop_without_a_restart(reco
     settings = ShowSettings(drop_strobe_cooldown_seconds=10)
     later = await _drop_after(controller, recorded_lighting, clock, 11)
     assert [e['command']['kind'] for e in later] == ['select', 'set_override']
+
+
+ROTATION = {
+    **{intent: ((intent.value, 'only'),) for intent in LightIntent},
+    LightIntent.ATMOSPHERIC: (
+        ('atmospheric', 'cold_breathe'),
+        ('atmospheric', 'amber_drift'),
+        ('atmospheric', 'pixel_rain'),
+    ),
+    LightIntent.DROP: (('drop', 'kick'), ('drop', 'slam'), ('drop', 'chase')),
+}
+
+
+def selected(lighting):
+    return [
+        f'{e["command"]["bank"]}/{e["command"]["autoloop"]}'
+        for e in lighting.events
+        if e['command']['kind'] == 'select'
+    ]
+
+
+async def test_each_entry_of_an_intent_takes_the_next_look_and_wraps(recorded_lighting, caplog):
+    controller = EffectController(recorded_lighting, autoloops=ROTATION)
+    with caplog.at_level(logging.INFO):
+        for _ in range(4):
+            await controller.change_effect(LightIntent.ATMOSPHERIC)
+            await controller.change_effect(LightIntent.BUILDUP)
+    looks = [name for name in selected(recorded_lighting) if name.startswith('atmospheric/')]
+    assert looks == [
+        'atmospheric/cold_breathe',
+        'atmospheric/amber_drift',
+        'atmospheric/pixel_rain',
+        'atmospheric/cold_breathe',
+    ]
+    assert 'intent=ATMOSPHERIC | autoloop=atmospheric/pixel_rain (3 of 3)' in caplog.text
+
+
+async def test_repeating_the_current_intent_keeps_its_look_and_cursor(recorded_lighting):
+    controller = EffectController(recorded_lighting, autoloops=ROTATION)
+    for _ in range(3):
+        await controller.change_effect(LightIntent.ATMOSPHERIC)
+    # A stop (silence, pause) followed by the same intent resumes the same look.
+    recorded_lighting.stop()
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    await controller.change_effect(LightIntent.BREAKDOWN)
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    assert selected(recorded_lighting) == [
+        'atmospheric/cold_breathe',
+        'atmospheric/cold_breathe',
+        'breakdown/only',
+        'atmospheric/amber_drift',
+    ]
+
+
+async def test_a_rotated_drop_still_cuts_and_keeps_the_strobe_cooldown(recorded_lighting):
+    clock = VirtualClock()
+    controller = EffectController(recorded_lighting, clock=clock, autoloops=ROTATION)
+    first = await _drop_after(controller, recorded_lighting, clock, 0)
+    second = await _drop_after(controller, recorded_lighting, clock, 30)
+    assert [(e['command']['kind'], e['command'].get('autoloop')) for e in first + second] == [
+        ('select', 'kick'),
+        ('set_override', None),
+        ('select', 'slam'),
+    ]
+    assert second[0]['command']['transition'] == {'kind': 'cut'}

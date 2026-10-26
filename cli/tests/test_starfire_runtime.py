@@ -656,19 +656,57 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path):
 
 
 def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
-    from autolux.lib.engine.effect_definitions import AUTOLOOP_BY_LIGHT_INTENT, LightIntent
+    from autolux.lib.engine.effect_definitions import PREFERRED_AUTOLOOPS, LightIntent
 
     root = Path(__file__).resolve().parents[2]
     binary = root / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise native autoloop validation')
-    for intent, (bank, autoloop) in AUTOLOOP_BY_LIGHT_INTENT.items():
+    for intent, autoloop in PREFERRED_AUTOLOOPS.items():
         if intent == LightIntent.DROP:
             continue
-        directory = tmp_path / bank
+        directory = tmp_path / intent.value
         directory.mkdir()
         (directory / f'{autoloop}.lua').write_text(
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
         starfire_runtime.validate_starfire(binary, root / 'rigs/room.json', tmp_path)
+
+
+def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    for bank, names in {
+        'atmospheric': ('cold_breathe', 'amber_drift', 'pixel_rain'),
+        'breakdown': ('wide_space',),
+        'buildup': ('ramp',),
+        'drop': ('kick', 'slam'),
+    }.items():
+        (tmp_path / bank).mkdir()
+        for name in names:
+            (tmp_path / bank / f'{name}.lua').write_text('return {}')
+    # Starfire reports only the original four, as if it skipped the new files.
+    checked = [
+        {'bank': bank, 'autoloop': name}
+        for bank, name in [
+            ('atmospheric', 'cold_breathe'),
+            ('breakdown', 'wide_space'),
+            ('buildup', 'ramp'),
+            ('drop', 'kick'),
+        ]
+    ]
+    report = json.dumps({'universes': [0], 'checked_autoloops': checked})
+    binary = tmp_path / 'starfire.exe'
+    binary.touch()
+    monkeypatch.setattr(
+        starfire_runtime.subprocess,
+        'run',
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
+    )
+    with pytest.raises(
+        RuntimeError,
+        match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
+        'drop/slam$',
+    ):
+        starfire_runtime.validate_starfire(binary, 'rig.json', tmp_path)
