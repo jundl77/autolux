@@ -644,6 +644,7 @@ globalThis.fetch = (url, options) => {
 };
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 (async () => {
+    control.operatorActs();
     const done = control.sendLatest('master', control.build.master(0.1));
     await settle();
     control.sendLatest('master', control.build.master(0.2));
@@ -676,6 +677,7 @@ const answers = [
 ];
 globalThis.fetch = async (url) => { urls.push(url); return answers.shift(); };
 (async () => {
+    control.operatorActs();
     control.hold({paused: true});
     const refused = await control.dispatch(control.build.toggle(false), null, ['paused']);
     const stalled = await control.dispatch(control.build.next(), null);
@@ -874,3 +876,57 @@ def test_a_remapped_loop_shows_what_plays_and_keeps_the_real_intent_in_its_tag()
         'Wide Space',
         'drop',
     )
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_nothing_reaches_the_show_before_the_operator_touches_the_page():
+    sent = _run_control_js(
+        """
+window.autoluxControlConfig = {direct: true, bridgePort: 8766};
+globalThis.location = {protocol: 'http:', hostname: 'autolux.local'};
+console.warn = () => {};
+const urls = [];
+globalThis.fetch = async (url) => {
+    urls.push(url);
+    return {ok: true, status: 202, json: async () => ({accepted: 'static'})};
+};
+(async () => {
+    const early = await control.dispatch(control.build.static('static-colour', 'all', undefined, '#00ff00'));
+    control.operatorActs();
+    const late = await control.dispatch(control.build.static('static-colour', 'all', undefined, '#00ff00'));
+    console.log(JSON.stringify({early, late, urls}));
+})();
+"""
+    )
+    assert sent == {
+        'early': {'dropped': 'no operator input yet'},
+        'late': {'accepted': 'static'},
+        'urls': ['http://autolux.local:8766/control'],
+    }
+
+
+def test_loading_the_page_and_its_first_poll_command_nothing():
+    source = _Recorder()
+    app = build_app(source)
+    assert app.server.test_client().get('/').status_code == 200
+    refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
+    gate = {'tab': 'control', 'metrics': True, 'timeline': True}
+    _run_callback(app, refresh, {'gate': gate}, 'gate.data')
+    _run_callback(
+        app, 'control-mode-synced.data', {'control-state': {'mode': 'static'}}, 'control-state.data'
+    )
+    assert source.commands == []
+    # In the browser path the Static tab's controls only reach the show through control.js.
+    assert 'static-status.children' not in app.callback_map
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_banner_counts_operator_looks_not_the_dark_under_the_blacklight():
+    from autolux.simulate.visualizer_app import OVERLAY_BANNER_JS
+
+    looks = {'all': {'colour': None, 'dimmer': 0.0, 'uv': False}, 'wash': {'colour': '#ff0000'}}
+    shown = _run_control_js(
+        f'const banner = {OVERLAY_BANNER_JS};\n'
+        f"console.log(JSON.stringify(banner({{mode: 'static', static: {{looks: {json.dumps(looks)}}}}})));"
+    )
+    assert shown == [{}, 'Static overlay active · 1 look']
