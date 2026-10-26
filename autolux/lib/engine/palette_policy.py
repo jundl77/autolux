@@ -1,17 +1,24 @@
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Sequence
 
 from autolux.lib.engine.effect_definitions import LightIntent
-from autolux.lighting.palettes import BREAKDOWN_SUFFIX, Palette
+from autolux.lighting.palettes import BREAKDOWN_SUFFIX, DROP_SUFFIX, Mood, Palette
 
-TEMPERATURE_SIGN = {'warm': 1.0, 'neutral': 0.0, 'cold': -1.0}
-FULL_BIAS_PREFERENCE = 4.0
+RECENCY_CAP_TRACKS = 4
+FINALISTS = 3
+FARTHEST_MOODS_APART = math.dist((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0))
+VARIANT_SUFFIXES = {LightIntent.BREAKDOWN: BREAKDOWN_SUFFIX, LightIntent.DROP: DROP_SUFFIX}
 
 
 def palette_variant(base: str, intent: LightIntent) -> str:
-    return base + BREAKDOWN_SUFFIX if intent == LightIntent.BREAKDOWN else base
+    return base + VARIANT_SUFFIXES.get(intent, '')
+
+
+def mood_closeness(first: Mood, second: Mood) -> float:
+    return 1.0 - math.dist(first.axes(), second.axes()) / FARTHEST_MOODS_APART
 
 
 class PalettePolicy:
@@ -22,33 +29,31 @@ class PalettePolicy:
         self._rng = rng
         self._tracks = 0
         self._track_used: dict[str, int] = {}
-        self._track_palette: str | None = None
+        self._track_palette = self._palettes[0].name
 
     @property
-    def track_palette(self) -> str | None:
+    def track_palette(self) -> str:
         return self._track_palette
 
-    def palette_for(self, intent: LightIntent, *, new_track: bool, temperature_bias: float) -> str:
-        if new_track or self._track_palette is None:
-            self._start_track(temperature_bias)
-        return self.variant_for(intent)
-
     def variant_for(self, intent: LightIntent) -> str:
-        if self._track_palette is None:
-            raise ValueError('no track palette has been chosen yet')
         return palette_variant(self._track_palette, intent)
 
-    def _start_track(self, temperature_bias: float) -> None:
-        candidates = [palette for palette in self._palettes if palette.name != self._track_palette]
-        weights = [
-            self._tracks_since_used(palette.name)
-            * FULL_BIAS_PREFERENCE ** (temperature_bias * TEMPERATURE_SIGN[palette.temperature])
-            for palette in candidates
-        ]
-        chosen = self._rng.choices(candidates, weights)[0].name
+    def choose_for_track(self, mood: Mood) -> str:
+        finalists = sorted(
+            self._palettes, key=lambda palette: self.score(palette, mood), reverse=True
+        )[:FINALISTS]
+        weights = [self.score(palette, mood) for palette in finalists]
+        chosen = self._rng.choices(finalists, weights)[0].name
         self._tracks += 1
         self._track_used[chosen] = self._tracks
         self._track_palette = chosen
+        return chosen
 
-    def _tracks_since_used(self, name: str) -> int:
-        return self._tracks + 1 - self._track_used.get(name, 0)
+    def score(self, palette: Palette, mood: Mood) -> float:
+        return mood_closeness(palette.mood, mood) * self._recency_weight(palette.name)
+
+    def _recency_weight(self, name: str) -> float:
+        if name not in self._track_used:
+            return 1.0
+        tracks_since_used = self._tracks + 1 - self._track_used[name]
+        return min(tracks_since_used, RECENCY_CAP_TRACKS) / RECENCY_CAP_TRACKS

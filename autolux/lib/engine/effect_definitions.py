@@ -102,9 +102,10 @@ SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'digital_silence_seconds': (0.5, MAX_DIGITAL_SILENCE_SECONDS),
     'strobe_max_rate_hz': (0.0, STARFIRE_MAX_STROBE_HZ),
     'strobe_max_burst_seconds': (0.1, STARFIRE_MAX_STROBE_BURST_SECONDS),
-    'palette_temperature_bias': (-1.0, 1.0),
     'intensity': (0.0, 1.0),
 }
+
+RETIRED_SETTINGS = frozenset({'palette_temperature_bias'})
 
 
 @dataclass(frozen=True)
@@ -116,7 +117,6 @@ class ShowSettings:
     digital_silence_seconds: float = DIGITAL_SILENCE_SECONDS
     strobe_max_rate_hz: float = STROBE_RATE_HZ
     strobe_max_burst_seconds: float = STROBE_MAX_BURST_SECONDS
-    palette_temperature_bias: float = 0.0
     intensity: float = DEFAULT_INTENSITY
 
     def __post_init__(self):
@@ -132,6 +132,7 @@ class ShowSettings:
     def from_dict(cls, data: dict) -> 'ShowSettings':
         if not isinstance(data, dict):
             raise TypeError('settings must be an object')
+        data = {name: value for name, value in data.items() if name not in RETIRED_SETTINGS}
         unknown = set(data) - {field.name for field in fields(cls)}
         if unknown:
             raise ValueError(f'unknown settings: {", ".join(sorted(unknown))}')

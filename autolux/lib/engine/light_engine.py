@@ -33,6 +33,7 @@ from autolux.lib.engine.event_buffer import (
 )
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
+from autolux.lib.engine.track_mood import MEASURED_BARS, MeasuredBeat, TrackMoodMeter
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -114,6 +115,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._build_started_at: float | None = None
         self._last_drop_at: float | None = None
         self._after_silence = True
+        self._track_mood = TrackMoodMeter(MEASURED_BARS * BEATS_PER_BAR)
         self._static_mode = False
         self.static_looks = StaticLooks(lighting_client, static_rig, clock, settings)
         self._log_chain_latency()
@@ -450,6 +452,7 @@ class LightEngine(IMusicAnalyserHandler):
     async def on_beat(self, beat_number: int, bpm: float, bpm_changed: bool) -> None:
         current_second = self.analyser.get_song_current_duration().total_seconds()
         rms_energy = self.analyser.get_rms_energy()
+        spectrum = self.analyser.get_spectral_balance()
 
         LOGGER.debug(f'[engine] [{current_second:.2f}s] beat #{beat_number}  bpm={bpm:.1f}')
         if self.event_buffer:
@@ -464,6 +467,9 @@ class LightEngine(IMusicAnalyserHandler):
 
         published_bpm = self._publishable_bpm(self._published_bpm, self.analyser.get_detector_bpm())
         normalized_rms_level = rms_to_normalized_level(rms_energy)
+        measured = MeasuredBeat(
+            bpm, normalized_rms_level, spectrum.centroid_hz, spectrum.bass_over_treble_db
+        )
 
         async def publish():
             self.lighting_client.set_normalized_rms_level(normalized_rms_level)
@@ -471,6 +477,8 @@ class LightEngine(IMusicAnalyserHandler):
             if published_bpm > 0:
                 self.lighting_client.beat(beat_index, phase, BEATS_PER_BAR, published_bpm)
             await self._on_room_beat(phase)
+            if bpm > 0:
+                self._measure_track_mood(measured)
 
         if self.command_queue:
             await self.command_queue.enqueue('beat', publish)
@@ -483,6 +491,17 @@ class LightEngine(IMusicAnalyserHandler):
         if phase == 0:
             await self._switch_held_intent()
 
+    def _measure_track_mood(self, beat: MeasuredBeat) -> None:
+        mood = self._track_mood.add(beat)
+        if mood is not None:
+            self.effect_controller.choose_track_palette(mood, send_now=not self._holding_the_look())
+
+    def _start_track_mood(self) -> None:
+        unfinished = self._track_mood.finish()
+        if unfinished is not None:
+            self.effect_controller.choose_track_palette(unfinished, send_now=False)
+        self._track_mood.start()
+
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
         if intent is None or self._holding_the_look():
@@ -490,6 +509,8 @@ class LightEngine(IMusicAnalyserHandler):
         label = self._section_class_at_playback
         now = self._clock.monotonic()
         context = self._selection_context(intent, label, now)
+        if context.new_track:
+            self._start_track_mood()
         cut = self._paused and self._showing_standby
         bpm = self._published_bpm.get('last')
         if await self.effect_controller.change_effect(intent, bpm, context=context, cut=cut):

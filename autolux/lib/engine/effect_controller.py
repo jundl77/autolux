@@ -23,7 +23,7 @@ from autolux.lib.engine.effect_definitions import (
     transition_for,
 )
 from autolux.lib.engine.palette_policy import PalettePolicy, palette_variant
-from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Palette
+from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
 
 if TYPE_CHECKING:
     from autolux.lib.engine.event_buffer import EventBuffer
@@ -98,23 +98,30 @@ class EffectController:
         self._publish_palette()
         LOGGER.info('[lighting] palette %s', f'pinned to {name}' if name else 'follows the policy')
 
+    def choose_track_palette(self, mood: Mood, *, send_now: bool = True) -> str:
+        chosen = self._palette_policy.choose_for_track(mood)
+        LOGGER.info(
+            '[lighting] track mood temperature=%+.2f weight=%+.2f drive=%+.2f | palette %s',
+            *mood.axes(),
+            chosen,
+        )
+        palette = self._palette_for_current_look()
+        if send_now and palette is not None and palette != self.lighting_client.palette:
+            self.lighting_client.set_palette(palette)
+            self._publish_palette()
+        return chosen
+
     def _palette_for_current_look(self) -> str | None:
         intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[0]
         if self._pinned_palette is not None:
             return palette_variant(self._pinned_palette, intent)
-        if self._entered is None or self._palette_policy.track_palette is None:
+        if self._entered is None:
             return None
         return self._palette_policy.variant_for(intent)
 
     def _palette_for(self, context: SelectionContext) -> str:
-        policy_palette = self._palette_policy.palette_for(
-            context.intent,
-            new_track=context.new_track,
-            temperature_bias=self._settings().palette_temperature_bias,
-        )
-        if self._pinned_palette is None:
-            return policy_palette
-        return palette_variant(self._pinned_palette, context.intent)
+        base = self._pinned_palette or self._palette_policy.track_palette
+        return palette_variant(base, context.intent)
 
     def _publish_palette(self) -> None:
         if self.event_buffer is not None:

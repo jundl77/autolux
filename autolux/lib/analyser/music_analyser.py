@@ -3,8 +3,9 @@ import logging
 import math
 import numpy as np
 from collections import deque
+from dataclasses import dataclass
 from autolux.lib.analyser.drift_watchdog import DriftWatchdog
-from autolux.lib.analyser.madmom_rhythm import MadmomRhythm
+from autolux.lib.analyser.madmom_rhythm import FRAME_SIZE, SAMPLE_RATE, MadmomRhythm
 from autolux.lib.analyser.music_analyser_handler import IMusicAnalyserHandler
 from autolux.lib.clock import Clock, SYSTEM_CLOCK
 from autolux.lib.engine.effect_definitions import ShowSettings
@@ -28,6 +29,33 @@ _SILENCE_RMS = 1.5e-4
 _DIGITAL_SILENCE_PEAK = 1e-4
 
 _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
+
+BASS_CEILING_HZ = 250.0
+TREBLE_FLOOR_HZ = 4000.0
+_SPECTRUM_WINDOW = np.hanning(FRAME_SIZE)
+_SPECTRUM_HZ = np.fft.rfftfreq(FRAME_SIZE, 1.0 / SAMPLE_RATE)
+_BASS_BINS = _SPECTRUM_HZ < BASS_CEILING_HZ
+_TREBLE_BINS = _SPECTRUM_HZ >= TREBLE_FLOOR_HZ
+_SILENT_POWER = 1e-12
+
+
+@dataclass(frozen=True)
+class SpectralBalance:
+    centroid_hz: float
+    bass_over_treble_db: float
+
+
+def spectral_balance(frame: np.ndarray) -> SpectralBalance:
+    power = np.abs(np.fft.rfft(frame * _SPECTRUM_WINDOW)) ** 2
+    total = float(power.sum())
+    if total <= _SILENT_POWER:
+        return SpectralBalance(0.0, 0.0)
+    bass = float(power[_BASS_BINS].sum()) + _SILENT_POWER
+    treble = float(power[_TREBLE_BINS].sum()) + _SILENT_POWER
+    return SpectralBalance(
+        centroid_hz=float((_SPECTRUM_HZ * power).sum() / total),
+        bass_over_treble_db=10.0 * math.log10(bass / treble),
+    )
 
 
 class MusicAnalyser:
@@ -88,6 +116,7 @@ class MusicAnalyser:
         self.song_current_time: datetime.datetime = self._clock.now()
         self.silence_period_start: datetime.datetime = self._clock.now()
         self._rms_window: deque = deque(maxlen=_ENERGY_WINDOW_BUFFERS)
+        self._spectrum_frame: np.ndarray = np.zeros(FRAME_SIZE)
 
     def get_song_current_duration(self) -> datetime.timedelta:
         if self.is_playing:
@@ -139,6 +168,9 @@ class MusicAnalyser:
             return 0.0
         return sum(self._rms_window) / len(self._rms_window)
 
+    def get_spectral_balance(self) -> SpectralBalance:
+        return spectral_balance(self._spectrum_frame)
+
     async def analyse(self, audio_signal: np.ndarray) -> np.ndarray:
         if self._track_digital_silence(audio_signal):
             self._drift.observe()
@@ -156,6 +188,7 @@ class MusicAnalyser:
 
         rms = float(np.sqrt(np.mean(audio_signal**2)))
         self._rms_window.append(rms)
+        self._spectrum_frame = np.concatenate((self._spectrum_frame, audio_signal))[-FRAME_SIZE:]
         self._track_song_duration(rms, now)
 
         rhythm = self._rhythm.process(audio_signal)

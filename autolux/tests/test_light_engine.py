@@ -46,6 +46,11 @@ class FakeAnalyser:
     def get_rms_energy(self):
         return self.rms
 
+    def get_spectral_balance(self):
+        from autolux.lib.analyser.music_analyser import SpectralBalance
+
+        return SpectralBalance(centroid_hz=2000.0, bass_over_treble_db=15.0)
+
     def get_song_current_duration(self):
         import datetime
 
@@ -1886,25 +1891,6 @@ async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pi
         'name': f'{track_palette}_breakdown',
         'pinned': False,
     }
-
-
-async def test_palette_warmth_is_saved_and_range_checked(tmp_path):
-    from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.lib.main import ShowControl, load_show_settings
-
-    path = tmp_path / 'show.json'
-    control = ShowControl(path)
-    control.commands.put_nowait(
-        {'action': 'settings', 'settings': ShowSettings(palette_temperature_bias=-1.0)}
-    )
-    light, _, _, _ = engine(queue=False)
-    light._settings = lambda: control.settings
-    await control.apply_pending(light)
-    control.save_settings()
-    assert load_show_settings(path).palette_temperature_bias == -1.0
-    assert ShowControl(path).settings.palette_temperature_bias == -1.0
-    with pytest.raises(ValueError, match='palette_temperature_bias must be within -1..1'):
-        ShowSettings(palette_temperature_bias=1.5)
 
 
 async def test_the_intensity_fader_applies_at_once_and_survives_a_restart(tmp_path):

@@ -569,7 +569,6 @@ SETTING_DISPLAY = {
     'digital_silence_seconds': ('Standby after silence', 's'),
     'strobe_max_rate_hz': ('Max strobe rate', 'Hz'),
     'strobe_max_burst_seconds': ('Max strobe burst', 's'),
-    'palette_temperature_bias': ('Palette warmth (cold −1 … warm +1)', ''),
     'intensity': ('Intensity', '%'),
 }
 SETTING_LABELS = {
@@ -615,7 +614,6 @@ SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
 INTENSITY_LEVELS = (('calm', 0.3), ('measured', 0.7), ('wild', 1.0))
-WARMTH = 'palette_temperature_bias'
 PALETTE_SWATCH_SLOTS = ('primary', 'secondary', 'accent', 'cold')
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 NEEDS_A_NUMBER = '{label} needs a number'
@@ -924,7 +922,6 @@ def _build_control_header():
 
 
 def _build_auto_panel():
-    low, high = SHOW_SETTING_RANGES[WARMTH]
     return [
         html.Div(id='control-auto-status', className='control-auto-status'),
         html.Div(
@@ -971,30 +968,6 @@ def _build_auto_panel():
                     ),
                     id='control-palette-set',
                     disabled=True,
-                ),
-                html.Div(
-                    [
-                        html.Label(
-                            'Warmth', htmlFor=f'control-{WARMTH}', className='control-label'
-                        ),
-                        html.Span('cold', className='control-unit'),
-                        dcc.Slider(
-                            id=f'control-{WARMTH}',
-                            min=low,
-                            max=high,
-                            step=0.05,
-                            marks=None,
-                            updatemode='mouseup',
-                            allow_direct_input=False,
-                            disabled=True,
-                        ),
-                        html.Span('warm', className='control-unit'),
-                        html.Span('—', id=f'control-{WARMTH}-value'),
-                        html.Span(
-                            id=f'control-{WARMTH}-error', role='alert', className='setting-error'
-                        ),
-                    ],
-                    className='control-warmth',
                 ),
             ],
             className='control-palettes',
@@ -2204,9 +2177,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 intensity = next.intensity = state.settings.intensity;
             }
             const fields = names.map((name) => {
-                const shown = name === '''
-        + json.dumps(WARMTH)
-        + ''' ? state.settings[name] : text[name];
+                const shown = text[name];
                 if (touched || focused === 'control-' + name || shown === synced[name]) {
                     return nu;
                 }
@@ -2253,16 +2224,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         }''',
         Output('control-intensity-value', 'children'),
         Input('control-intensity', 'value'),
-    )
-    app.clientside_callback(
-        '''function(drag, value) {
-            const level = drag === null || drag === undefined ? value : drag;
-            return level === null || level === undefined || level === ''
-                ? '—' : String(Number(Number(level).toFixed(2)));
-        }''',
-        Output(f'control-{WARMTH}-value', 'children'),
-        Input(f'control-{WARMTH}', 'drag_value'),
-        Input(f'control-{WARMTH}', 'value'),
     )
     app.clientside_callback(
         '''function() {

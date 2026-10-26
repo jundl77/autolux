@@ -70,13 +70,6 @@
 .palette-swatches:empty { border: 1px dashed #3b4d62; }
 .palette-card-name { color: #dce8f5; font-size: 11px; white-space: nowrap; overflow: hidden;
                      text-overflow: ellipsis; }
-.control-warmth { display: flex; align-items: center; gap: 10px; }
-.control-warmth > div { flex: 1; min-width: 0; }
-.control-warmth .dash-slider-track { height: 4px; border-radius: 2px;
-                                     background: linear-gradient(90deg, #73b6ff, #3b4d62, #f0a35e); }
-.control-warmth .dash-slider-range { background: transparent; }
-#control-palette_temperature_bias-value { flex: 0 0 40px; color: #e6edf3; font-size: 12px;
-                                          text-align: right; font-variant-numeric: tabular-nums; }
 
 .settings-drawer { display: grid; gap: 6px; align-content: start; }
 .settings-drawer .control-heading { margin-bottom: 2px; }

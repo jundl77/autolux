@@ -113,7 +113,6 @@ def test_each_collapsed_settings_group_summarises_its_live_values():
         'strobe_max_burst_seconds': 4.0,
         'strobe_burst_seconds': 1.0,
         'drop_strobe_cooldown_seconds': 60.0,
-        'palette_temperature_bias': -0.5,
         'intensity': 0.7,
     }
     assert {
