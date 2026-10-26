@@ -43,7 +43,7 @@ def build_simulation(
             watchdog=watchdog, audio_client=audio_client, data_dir=data_dir
         )
 
-    effect_controller = EffectController(lighting_client, event_buffer=event_buffer)
+    effect_controller = EffectController(lighting_client, event_buffer=event_buffer, clock=clock)
     light_engine = LightEngine(
         lighting_client,
         effect_controller,
