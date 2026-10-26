@@ -743,7 +743,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             runtime.send_command(
                 wire.SetActiveEffect(
                     effect_id='held_red',
-                    fixture='cf805_pixel_1',
+                    fixture='zq06017_pixel_1',
                     intensity=0.75,
                     colour=wire.RgbColor(red=1.0),
                 )

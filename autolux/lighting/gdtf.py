@@ -125,6 +125,18 @@ def profile_metadata(xml: str, mode_name: str) -> dict:
         raise ValueError(f'Invalid GDTF description: {error}') from error
 
 
+def archive_spec(xml: str, label: str = 'GDTF') -> str:
+    """The file name an archive's own Manufacturer, Name and newest Revision give it."""
+    fixture_type = mvr.gdtf_root(xml, label).find('FixtureType')
+    name, long_name = fixture_type.get('Name', ''), fixture_type.get('LongName')
+    if long_name is not None and long_name != name:
+        raise ValueError(f'{label}: LongName {long_name!r} must match Name {name!r}')
+    revision = mvr.gdtf_revision(xml, label)
+    if revision is None:
+        raise ValueError(f'{label}: a GDTF Share name needs a Revision with Text')
+    return mvr.gdtf_spec_name(fixture_type.get('Manufacturer', ''), name, revision)
+
+
 def _library_entry(archive: Path) -> dict:
     content = read_bounded(archive, MAX_ARCHIVE_BYTES)
     xml = read_description(archive)
@@ -132,17 +144,19 @@ def _library_entry(archive: Path) -> dict:
         fixture = _parse(xml)
     except (ElementTree.ParseError, AttributeError, IndexError, KeyError, TypeError) as error:
         raise ValueError(f'Invalid GDTF description {archive.name}: {error}') from error
-    spec = mvr.gdtf_spec_name(fixture.manufacturer, fixture.name)
+    spec = archive_spec(xml, archive.name)
     if archive.name != spec:
         # The file name is the GDTFSpec an MVR patch names it by.
         raise ValueError(f'{archive.name} describes {spec}; name the file {spec}')
+    manufacturer, name, revision = mvr.parse_spec_name(archive.name)
     modes = mvr.gdtf_modes(xml, spec)
     if not modes:
         raise ValueError(f'{spec} has no DMX mode')
     return {
         'profile_id': fixture.name,
-        'name': fixture.name,
-        'manufacturer': fixture.manufacturer,
+        'name': name,
+        'manufacturer': manufacturer,
+        'revision': revision,
         'fixture_type_id': fixture.fixture_type_id,
         'gdtf_xml': xml,
         'archive': content,
@@ -169,7 +183,7 @@ def import_fixture(
     content = read_bounded(archive, MAX_ARCHIVE_BYTES)
     xml = read_description(archive)
     metadata = profile_metadata(xml, mode_name)
-    spec = mvr.gdtf_spec_name(metadata['manufacturer'], metadata['name'])
+    spec = archive_spec(xml, archive.name)
     target = library / spec
     before = target.read_bytes() if target.exists() else None
     library.mkdir(parents=True, exist_ok=True)

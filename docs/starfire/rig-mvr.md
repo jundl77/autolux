@@ -2,9 +2,10 @@
 
 `rigs/room.mvr` is an MVR 1.6 (DIN SPEC 15801) archive: `GeneralSceneDescription.xml`
 plus every `.gdtf` (DIN SPEC 15800, `description.xml` inside) its fixtures reference, all
-at the archive root, STORE or DEFLATE. GDTF files are named
-`<Manufacturer>@<FixtureType>.gdtf`. `rigs/library/` holds the fixture *library* as GDTF 1.2
-archives under the same names: Config embeds a library archive into the MVR byte for byte
+at the archive root, STORE or DEFLATE. GDTF files are named in GDTF Share
+form, `Manufacturer@Fixture Name@Revision.gdtf` (see [rigs/AGENTS.md](../../rigs/AGENTS.md)).
+`rigs/library/` holds the venue's fixture *library* as GDTF 1.2 archives under the same
+names: Config embeds a library archive into the MVR byte for byte
 when a fixture first uses it, so a rig rebuilt from the library exports the same
 `RigDefinition`.
 
@@ -17,8 +18,8 @@ and Autolux movement limits), classes as groups, embedded GDTF XML as profiles. 
 carries it; the offline `starfire check`, `rig` and `replay` commands read the same
 message serialized to a file (`autolux starfire export-rig rig.mvr rig.rig.pb`; the
 Autolux CLI exports to a temporary file automatically). `FixtureRig::from_wire` is the
-single native validator. `rigs/room.rig.pb` and `rigs/generic.rig.pb` are the exports
-the Rust tests and goldens use; `cli/tests/test_starfire_assets.py` checks they equal
+single native validator. `rigs/room.rig.pb` and the synthetic sample rig
+`autolux/tests/data/generic_rig/generic.rig.pb` are the exports the Rust tests and goldens use; `cli/tests/test_starfire_assets.py` checks they equal
 the Login rig of their MVR.
 
 Patched = a `Fixture` anywhere under a Layer with `GDTFSpec` and an `Address`; its Matrix

@@ -13,8 +13,10 @@ from autolux.lighting.mvr_validation import validate
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(__file__).parent / 'data'
-LIBRARY = fixture_library(ROOT / 'rigs/library')
-DIMMER_SPEC = 'Autolux@Test Dimmer.gdtf'
+LIBRARY = fixture_library(ROOT / 'rigs/library') | fixture_library(
+    ROOT / 'autolux/tests/data/generic_rig'
+)
+DIMMER_SPEC = 'Generic@Test Dimmer@1.0.gdtf'
 HANGING_HALF_TURN = [-1, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0]
 STANDING = [1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0]
 FIXTURE_UUID = 'uuid="44444444-0000-4000-8000-000000000001" name="Dim 1"'
@@ -323,8 +325,8 @@ def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
     scene = mvr.read((ROOT / 'rigs/room.mvr').read_bytes())
     edited = mvr.draft(scene)
     spot = node(edited['scene'], 'Fixture', 'spot_left')
-    child(spot, 'GDTFSpec')['text'] = 'Autolux@generic_dimmer.gdtf'
+    child(spot, 'GDTFSpec')['text'] = 'Generic@Dimmer@1.0.gdtf'
     child(spot, 'GDTFMode')['text'] = '1ch'
     saved = mvr.apply_draft(scene, edited, LIBRARY)
-    assert 'Autolux@generic_dimmer.gdtf' in saved.entries
-    assert require_renderable(saved)[0]['gdtf_spec'] == 'Autolux@generic_dimmer.gdtf'
+    assert 'Generic@Dimmer@1.0.gdtf' in saved.entries
+    assert require_renderable(saved)[0]['gdtf_spec'] == 'Generic@Dimmer@1.0.gdtf'

@@ -22,7 +22,11 @@ def test_fixture_draft_integrity(tmp_path):
     data = {
         'draft': mvr.draft(room),
         'settings': {
-            'library': browser_library(fixture_library(ROOT / 'rigs/library')),
+            # The sample rig's dimmer is a type the room does not use yet.
+            'library': browser_library(
+                fixture_library(ROOT / 'rigs/library')
+                | fixture_library(ROOT / 'autolux/tests/data/generic_rig')
+            ),
             'schema': mvr_schema.describe(),
             'channelCount': mvr.DMX_UNIVERSE_SIZE,
             'maxUniverse': 32767,

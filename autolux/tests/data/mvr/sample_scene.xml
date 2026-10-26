@@ -31,7 +31,7 @@
               <Fixture uuid="44444444-0000-4000-8000-000000000001" name="Dim 1">
                 <Matrix>{1,0,0}{0,1,0}{0,0,1}{500,0,0}</Matrix>
                 <Classing>11111111-0000-4000-8000-000000000004</Classing>
-                <GDTFSpec>Autolux@Test Dimmer.gdtf</GDTFSpec>
+                <GDTFSpec>Generic@Test Dimmer@1.0.gdtf</GDTFSpec>
                 <GDTFMode>16 bit</GDTFMode>
                 <Focus>55555555-0000-4000-8000-000000000001</Focus>
                 <CastShadow>true</CastShadow>
@@ -62,7 +62,7 @@
                 <Gobo rotation="32.5">gobo.png</Gobo>
               </Fixture>
               <Fixture uuid="44444444-0000-4000-8000-000000000002" name="Dim 1 multipatch" multipatch="44444444-0000-4000-8000-000000000001">
-                <GDTFSpec>Autolux@Test Dimmer.gdtf</GDTFSpec>
+                <GDTFSpec>Generic@Test Dimmer@1.0.gdtf</GDTFSpec>
                 <GDTFMode>8 bit</GDTFMode>
                 <UnitNumber>2</UnitNumber>
                 <Addresses><Address break="0">20</Address></Addresses>

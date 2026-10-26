@@ -74,7 +74,7 @@ test("dragging a block rewrites the break-0 address and refuses overlaps or stal
 });
 
 test("library adds create spec-complete fixtures and embed their GDTF", () => {
-    const spec = Object.keys(settings.library).find((name) => name.includes("generic_dimmer"));
+    const spec = Object.keys(settings.library).find((name) => name.startsWith("Generic@Dimmer@"));
     const before = draft();
     assert.equal(before.gdtf[spec], undefined);
     const [added, , , selected] = edit(before, null, { trigger: "fixture-add", profile: spec, quantity: 2 });

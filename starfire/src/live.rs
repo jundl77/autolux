@@ -572,13 +572,13 @@ mod tests {
                 }],
                 profiles: vec![{
                     let generic = wire::RigDefinition::decode(
-                        include_bytes!("../../rigs/generic.rig.pb").as_slice(),
+                        include_bytes!("../../autolux/tests/data/generic_rig/generic.rig.pb").as_slice(),
                     )
                     .unwrap();
                     let profile = generic
                         .profiles
                         .into_iter()
-                        .find(|profile| profile.profile_id.contains("@generic_rgb.gdtf#"))
+                        .find(|profile| profile.profile_id.starts_with("Generic@RGB@"))
                         .unwrap();
                     wire::FixtureProfile {
                         profile_id: "rgb".into(),

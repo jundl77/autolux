@@ -663,7 +663,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     "#,
     );
     assert_eq!(
-        frame.fixture_properties_before_strobe["cf805_pixel_1"].colour,
+        frame.fixture_properties_before_strobe["zq06017_pixel_1"].colour,
         Rgb {
             red: 0.0,
             green: 0.85,
@@ -674,7 +674,8 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
 
 #[test]
 fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
-    let rig = FixtureRig::load(&root().join("../rigs/generic.rig.pb")).unwrap();
+    let rig =
+        FixtureRig::load(&root().join("../autolux/tests/data/generic_rig/generic.rig.pb")).unwrap();
     for look in looks() {
         let mut replay = replay_for(&look);
         replay.duration_seconds = 8.0;

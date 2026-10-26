@@ -115,7 +115,10 @@ def build_fixture_panel(app, store):
     draft, revision = store.load()
     library = browser_library(store.library())
     profile_options = [
-        {'label': f'{entry["name"].replace("_", " ")} · {entry["default_mode"]}', 'value': spec}
+        {
+            'label': f'{entry["manufacturer"]} {entry["name"]} · {entry["default_mode"]}',
+            'value': spec,
+        }
         for spec, entry in library.items()
     ]
     first_profile = next(iter(library), None)
