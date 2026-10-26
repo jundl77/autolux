@@ -20,7 +20,11 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
     intent_for_class,
 )
-from autolux.lib.engine.event_buffer import SILENCE_TRIGGER, STOP_PERSISTENCE_SEC
+from autolux.lib.engine.event_buffer import (
+    SILENCE_TRIGGER,
+    STANDBY_INTENT,
+    STOP_PERSISTENCE_SEC,
+)
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 
 if TYPE_CHECKING:
@@ -88,7 +92,10 @@ class LightEngine(IMusicAnalyserHandler):
         # The quiet state as the room hears it, after the playback delay.
         self._room_quiet = False
         self._paused = False
+        # Source side: analysis holds. Room side: the rig shows the standby look
+        # until the first look of the returning audio replaces it.
         self._standby = False
+        self._showing_standby = False
         self._master_level = 1.0
         # Starfire boots at full brightness, so only a change needs sending.
         self._sent_brightness = 1.0
@@ -150,7 +157,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._send_brightness()
 
     def _send_brightness(self) -> None:
-        dimmed = self._room_quiet or self._paused
+        # Standby sets its own low level; dimming it again would leave the room dark.
+        dimmed = (self._room_quiet or self._paused) and not self._showing_standby
         brightness = self._master_level * (self._settings().quiet_brightness if dimmed else 1.0)
         if brightness == self._sent_brightness:
             return
@@ -241,44 +249,46 @@ class LightEngine(IMusicAnalyserHandler):
             self._silence_monitor()
         self._source_playing = False
         self._pending_silence = None
-        self._room_playing = False
         self._room_start_monotonic_seconds = None
-        self._startup_baseline_pending = False
         self._pending_intents.clear()
-        self._held_intent = None
-        self._current_intent = None
-        self._section_class_at_playback = None
-        self._room_beat_phase = None
-        # Standby has its own dim level; a quiet dim on top would hide it.
-        self._clear_quiet_state()
+        self._forget_room_look()
+        # Nothing touches the quiet state again until the signal returns, so
+        # clearing it here is the reset on return too.
+        self._quiet_since = None
+        self._source_quiet = False
+        self._room_quiet = False
+        self._showing_standby = True
         self._send_brightness()
+        self._committed = None
+        self._publish_decoder_state(None)
         if self.event_buffer is not None:
-            self.event_buffer.stop_effects()
             self.event_buffer.set_intent(
-                LightIntent.ATMOSPHERIC.value,
-                song_sec=self.event_buffer.elapsed(),
-                trigger=SILENCE_TRIGGER,
+                STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
             )
         self.effect_controller.enter_standby(self._published_bpm.get('last'))
 
     def on_signal_return(self):
         """Restart as if freshly launched; the rig stays in standby until the new
-        audio reaches the room through the ordinary sound-start path."""
+        audio reaches the room through the ordinary sound-start path, whose
+        on_sound_start also resets the section chain and decoder."""
         LOGGER.info('[engine] signal returned — the show restarts from scratch')
         self._standby = False
-        self._reset_source_analysis()
-        self._publish_decoder_state(None)
         self._published_bpm.clear()
         self._room_beat_at = float('-inf')
         self._committing_late = False
-        self._clear_quiet_state()
         # _grid_beat keeps counting: Starfire rejects a beat behind its last one, and
         # the next decoder phase re-aligns the grid like any phase correction.
 
-    def _clear_quiet_state(self) -> None:
-        self._quiet_since = None
-        self._source_quiet = False
-        self._room_quiet = False
+    def _forget_room_look(self) -> None:
+        """The room no longer sees a show; the caller decides what it sees instead."""
+        self._room_playing = False
+        self._startup_baseline_pending = False
+        self._current_intent = None
+        self._section_class_at_playback = None
+        self._held_intent = None
+        self._room_beat_phase = None
+        if self.event_buffer is not None:
+            self.event_buffer.stop_effects()
 
     def _show_sound_start(self) -> None:
         self._room_playing = True
@@ -286,15 +296,9 @@ class LightEngine(IMusicAnalyserHandler):
         self.lighting_client.set_blackout(False)
 
     def _show_sound_stop(self) -> None:
-        self._room_playing = False
-        self._startup_baseline_pending = False
-        self._current_intent = None
-        self._section_class_at_playback = None
-        self._held_intent = None
-        self._room_beat_phase = None
+        self._forget_room_look()
+        self._showing_standby = False
         self.lighting_client.stop()
-        if self.event_buffer is not None:
-            self.event_buffer.stop_effects()
 
     async def _start_room_baseline(self) -> None:
         if not self._startup_baseline_pending or not self._room_playing:
@@ -411,8 +415,13 @@ class LightEngine(IMusicAnalyserHandler):
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
-        if intent is not None and not self._paused:
-            await self.effect_controller.change_effect(intent)
+        # Pause freezes a show, but standby is no show: the first look replaces it.
+        if intent is None or (self._paused and not self._showing_standby):
+            return
+        await self.effect_controller.change_effect(intent)
+        if self._showing_standby:
+            self._showing_standby = False
+            self._send_brightness()
 
     @staticmethod
     def _publishable_bpm(state: dict, bpm: float) -> float:
@@ -568,12 +577,12 @@ class LightEngine(IMusicAnalyserHandler):
         self._current_intent = intent
         self._section_class_at_playback = section_label
         self._intent_commits += 1
-        if self._paused:
+        if self._paused and not self._showing_standby:
             return
         # Loops switch on the room's downbeat; without a known bar phase there
-        # is no downbeat to wait for.
+        # is no downbeat to wait for. Standby has no phrase to finish.
         self._held_intent = intent
-        if self._room_beat_phase in (None, 0):
+        if self._showing_standby or self._room_beat_phase in (None, 0):
             await self._switch_held_intent()
 
     async def on_note(self):

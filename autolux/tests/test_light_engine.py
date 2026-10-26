@@ -1472,15 +1472,20 @@ class _Show:
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.audio_config import BUFFER_SIZE
 
+        from autolux.lib.engine.event_buffer import EventBuffer
+
         self.clock = VirtualClock()
         self.lighting = RecordingStarfireClient(clock=self.clock)
         self.queue = DelayedCommandQueue(14.0, clock=self.clock)
         self.chain, self.decoder = FakeChain(), FakeDecoder()
         self.monitor_silenced = 0
+        self.events = EventBuffer(window_sec=float('inf'), clock=self.clock, look_ahead_sec=14.0)
+        self.events.start()
         self.light = LightEngine(
             self.lighting,
-            EffectController(self.lighting, clock=self.clock),
+            EffectController(self.lighting, event_buffer=self.events, clock=self.clock),
             self.queue,
+            event_buffer=self.events,
             playback_delay_sec=14.0,
             section_chain=self.chain,
             section_decoder=self.decoder,
@@ -1587,3 +1592,61 @@ async def test_returning_signal_restarts_the_show_from_scratch_after_one_playbac
     assert positions == sorted(set(positions)), (
         "Starfire's beat clock never moves backwards across the restart"
     )
+
+
+async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    show.light.pause()
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
+    await show.play(3.0, 0.0)
+    # Standby carries its own low level; pause must not dim it towards dark.
+    assert masters(show.lighting)[-1] == pytest.approx(1.0)
+    parked = len(show.lighting.events)
+
+    await show.play(15.5, 0.2)
+    assert show.light.paused
+    assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
+
+
+async def test_standby_undims_a_quiet_room_and_return_finds_the_quiet_state_cleared():
+    show = _Show()
+    await show.play(20.0, 0.2)
+    await show.play(20.0, 1e-4)  # live but quiet: the ordinary quiet dim
+    assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
+    assert show.light._room_quiet and show.light._source_quiet
+    await show.play(2.1, 0.0)
+    assert show.light.standby
+    assert masters(show.lighting)[-1] == pytest.approx(1.0)
+    # Checked at the return itself: the next 100 ms tick judges the still-starting
+    # source quiet again, exactly as at launch.
+    await show.analyser.analyse(np.full(256, 0.2, dtype=np.float32))
+    assert not show.light.standby
+    assert show.light._quiet_since is None
+    assert show.light._source_quiet is False
+    assert show.light._room_quiet is False
+
+
+async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior():
+    show = _Show()
+    fake_reset = show.decoder.reset
+
+    def reset(**kwargs):
+        # The real decoder drops its observations on reset.
+        fake_reset(**kwargs)
+        show.decoder.recent_observations.clear()
+
+    show.decoder.reset = reset
+    await show.play(20.0, 0.2)
+    show.decoder.recent_observations.append(BarObservation(3, 5.7, 7.6, np.ones(9) / 9, 0.5))
+    show.light._publish_decoder_state(None)
+    before = show.events.snapshot()
+    assert before['intent'] == 'atmospheric' and before['decoder']['posterior'] is not None
+    await show.play(2.1, 0.0)
+    snapshot = show.events.snapshot()
+    assert snapshot['intent'] == 'standby'
+    assert snapshot['decoder']['committed_label'] is None
+    assert snapshot['decoder']['posterior'] is None
+    assert snapshot['intents'][-1]['trigger'] == SILENCE_TRIGGER
+    assert 'standby/warm_white' in [e['name'] for e in snapshot['effects']]

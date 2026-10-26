@@ -10,6 +10,8 @@ from autolux.lib.telemetry_history import TelemetryHistory
 
 CLASSIFIER_TRIGGER = 'classifier'
 SILENCE_TRIGGER = 'silence'
+# Not a LightIntent: the rig is parked because the source stopped.
+STANDBY_INTENT = 'standby'
 
 STOP_PERSISTENCE_SEC = 2.0
 
