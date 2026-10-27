@@ -149,10 +149,11 @@ class ShowSettings:
             raise ValueError('intensity_auto must be true or false')
         if not isinstance(self.group_masters, dict):
             raise TypeError('group_masters must map group names to levels')
+        # Before sorting, which mixed key types would fail with a bare TypeError.
+        if any(type(group) is not str or not group for group in self.group_masters):
+            raise ValueError('group_masters keys must be group names')
         masters = {}
         for group, level in sorted(self.group_masters.items()):
-            if type(group) is not str or not group:
-                raise ValueError('group_masters keys must be group names')
             if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
                 raise ValueError(f'group master {group} must be within 0..1')
             masters[group] = float(level)

@@ -199,6 +199,8 @@ def read_venue(directory: Path = SPECIAL_DIRECTORY) -> Venue:
     except tomllib.TOMLDecodeError as error:
         raise SpecialError(f'{VENUE_FILE}: not TOML ({error})') from error
     table = document.get('venue', {})
+    if not isinstance(table, dict):
+        raise SpecialError(f'{VENUE_FILE}: [venue] must be a table')
     unknown = sorted(document.keys() - {'venue'}) + sorted(
         f'venue.{key}' for key in table.keys() - {'max_accent_events_per_minute'}
     )

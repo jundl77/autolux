@@ -591,12 +591,12 @@ async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups(
 
 
 async def test_an_intense_special_starts_the_strobe_cooldown_the_dashboard_counts_down():
-    clock = VirtualClock()
-    buffer = EventBuffer(clock=clock)
+    buffer = EventBuffer(clock=VirtualClock())
     buffer.start()
     settings = ShowSettings(intensity=0.7, drop_strobe_cooldown_seconds=60)
-    buffer.set_control_state(paused=False, master_brightness=1.0, settings=settings.to_dict())
-    controller, _, _ = with_specials([SPIN], settings=settings, event_buffer=buffer)
+    controller, _, clock = with_specials(
+        discover_specials(), settings=settings, event_buffer=buffer
+    )
     assert buffer.snapshot()['strobe_cooldown_seconds'] == 0.0
     await controller.change_effect(LightIntent.DROP)
     clock.advance(19.0)

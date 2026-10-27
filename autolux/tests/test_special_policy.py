@@ -316,6 +316,7 @@ def test_the_venue_file_sets_the_cap_and_rejects_bad_values(tmp_path):
     for text, message in [
         ('[venue]\nmax_accent_events_per_minute = 0\n', 'must be a whole number, at least 1'),
         ('[venue]\nmax_accents = 1\n', 'unknown venue.max_accents'),
+        ('venue = 2\n', r'\[venue\] must be a table'),
     ]:
         (tmp_path / 'venue.toml').write_text(text)
         with pytest.raises(SpecialError, match=message):
@@ -349,6 +350,7 @@ def test_cooldowns_list_one_entry_per_group_and_the_strobe_on_the_shared_cooldow
             'cooldown_seconds': 60.0,
             'remaining_seconds': 20.0,
             'ready': False,
+            'strobe': True,
         },
     ]
     policy.record(spin, 1300.0)
