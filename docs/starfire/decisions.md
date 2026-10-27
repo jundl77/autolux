@@ -494,3 +494,10 @@ pygdtf drops DMXValue's byte-shifting flag, range checks and mirroring, so the c
 re-reads DMXFrom, Default, ModeFrom, ModeTo and set physical values from description.xml.
 Starfire's tests build modes directly; the synthetic test descriptions compile into the
 committed `starfire/tests/data/compiled_profiles.pb` (`tools/compile_test_profiles.py`).
+
+2026-10-27 MVR reading: `mvr.patched_fixtures` reads through pymvr 1.0.7 and `mvr.gdtf_modes`
+through pygdtf (GeometryReference breaks expanded). pymvr re-decodes GDTFSpec as cp437 and
+maps an unreadable address to DMX 1, so the spec text and address validity come from the
+scene XML. Our writer, editor tree and schema validation stay: pymvr's writer reorders
+elements and drops nodes it does not model, which Config's byte-for-byte round trip forbids.
+A room.mvr written by pymvr reads back to the same patch and exports the same rig.

@@ -3,6 +3,7 @@ import io
 import zipfile
 from pathlib import Path
 
+import pymvr
 import pytest
 
 from autolux.lighting import mvr
@@ -10,6 +11,7 @@ from autolux.lighting.fixture_setup import load_rig, require_renderable
 from autolux.lighting.gdtf import fixture_library
 from autolux.lighting.mvr_schema import dmx_address
 from autolux.lighting.mvr_validation import validate
+from cli.starfire_assets import rig_definition
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(__file__).parent / 'data'
@@ -330,3 +332,24 @@ def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
     saved = mvr.apply_draft(scene, edited, LIBRARY)
     assert 'Generic@Dimmer@1.0.gdtf' in saved.entries
     assert require_renderable(saved)[0]['gdtf_spec'] == 'Generic@Dimmer@1.0.gdtf'
+
+
+def test_the_room_rig_written_by_pymvr_reads_back_to_the_same_patch_and_dmx(tmp_path):
+    shipped = ROOT / 'rig/room.mvr'
+    scene = mvr.read(shipped.read_bytes())
+    source = pymvr.GeneralSceneDescription(io.BytesIO(shipped.read_bytes()))
+    writer = pymvr.GeneralSceneDescriptionWriter()
+    writer.serialize_scene(source.scene)
+    writer.serialize_user_data(getattr(source, 'user_data', None))
+    for spec, (_, content) in scene.entries.items():
+        archive = tmp_path / spec
+        archive.write_bytes(content)
+        writer.files_list.append((str(archive), spec))
+    rewritten = tmp_path / 'room.mvr'
+    writer.write_mvr(str(rewritten))
+    _, fixtures = load_rig(rewritten)
+    _, original = load_rig(shipped)
+    assert fixtures == original
+    assert mvr.groups(fixtures) == mvr.groups(original)
+    exported = rig_definition(rewritten).SerializeToString()
+    assert exported == (ROOT / 'rig/room.rig.pb').read_bytes()
