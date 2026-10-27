@@ -6,10 +6,8 @@ use std::path::Path;
 use std::process::{Command as Process, Stdio};
 use std::time::Duration;
 
-use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, TimedCommand, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
-use starfire::script::AutoloopCatalog;
 
 fn replay(duration_seconds: f64) -> Replay {
     Replay {
@@ -40,14 +38,8 @@ fn replay(duration_seconds: f64) -> Replay {
     }
 }
 
-fn render(input: &Replay) -> starfire::replay::ReplayResult {
-    render_replay(
-        input,
-        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
-        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
-            .unwrap(),
-    )
-    .unwrap()
+fn render(input: &Replay) -> Vec<starfire::engine::RenderedFrame> {
+    render_replay(input, support::room(), support::show_catalog()).unwrap()
 }
 
 #[test]
@@ -58,34 +50,34 @@ fn final_fractional_frame_applies_pending_commands_and_capture_is_identical() {
         command: Command::Stop,
     });
     let first = render(&input);
-    assert_eq!(first.frames.len(), 3);
-    assert_eq!(first.frames[2].time_seconds, 0.033);
+    assert_eq!(first.len(), 3);
+    assert_eq!(first[2].time_seconds, 0.033);
     assert!(
-        first.frames[0]
+        first[0]
             .fixture_properties_before_strobe
             .values()
             .any(|value| value.intensity > 0.0)
     );
     assert!(
-        first.frames[2]
+        first[2]
             .fixture_properties_before_strobe
             .values()
             .all(|value| value.intensity == 0.0)
     );
     let second = render(&input);
-    assert_eq!(dmx_digest(&first.frames), dmx_digest(&second.frames));
+    assert_eq!(dmx_digest(&first), dmx_digest(&second));
     let directory = tempfile::tempdir().unwrap();
     let one = directory.path().join("one.dmx");
     let two = directory.path().join("two.dmx");
-    write_capture(&one, &first.frames).unwrap();
-    write_capture(&two, &second.frames).unwrap();
+    write_capture(&one, &first).unwrap();
+    write_capture(&two, &second).unwrap();
     let bytes = fs::read(&one).unwrap();
     assert_eq!(bytes, fs::read(two).unwrap());
     assert_eq!(&bytes[..8], b"STARFIRE");
     assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 1);
     assert_eq!(u64::from_le_bytes(bytes[12..20].try_into().unwrap()), 3);
     assert_eq!(bytes.len(), 20 + 3 * (8 + 8 + 2 + 2 + 512));
-    assert_eq!(&bytes[40..552], &first.frames[0].dmx_frames_by_universe[&0]);
+    assert_eq!(&bytes[40..552], &first[0].dmx_frames_by_universe[&0]);
 }
 
 #[test]
@@ -112,7 +104,7 @@ fn replay_rejects_backwards_out_of_bounds_and_unbounded_input() {
         command: Command::SetBlackout { enabled: true },
     });
     assert!(
-        render(&input).frames[0]
+        render(&input)[0]
             .fixture_properties_before_strobe
             .values()
             .all(|state| state.intensity == 0.0)
@@ -125,10 +117,8 @@ fn replay_memory_budget_is_checked_before_rendering() {
     input.frame_rate_hz = 50;
     input.duration_seconds -= 0.02;
     assert!(input.validate().is_ok());
-    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
-    let catalogue =
-        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
-            .unwrap();
+    let rig = support::room();
+    let catalogue = support::show_catalog();
     assert!(
         render_replay(&input, rig, catalogue)
             .err()

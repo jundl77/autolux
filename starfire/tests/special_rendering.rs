@@ -407,10 +407,7 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
         .unwrap()
         .address as usize
         - 1;
-    let catalog = AutoloopCatalog::load(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
-    )
-    .unwrap();
+    let catalog = support::show_catalog();
     let mut engine = Engine::new(rig.clone(), catalog, support::palettes()).unwrap();
     for command in [
         ClientMessage::UpdateBeat(wire::UpdateBeat {

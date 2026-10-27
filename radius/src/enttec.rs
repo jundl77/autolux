@@ -43,7 +43,6 @@ const PARAMETERS_REQUEST: [u8; HEADER_BYTES + 2 + TRAILER_BYTES] = [
 /// One identified USB Pro. Construction establishes darkness before accepting frames.
 pub struct EnttecOutput {
     widget: Widget<Ftdi>,
-    serial_number: String,
 }
 
 impl EnttecOutput {
@@ -68,14 +67,7 @@ impl EnttecOutput {
             .context("discard stale ENTTEC receive data")?;
         let widget = Widget::initialize(port)
             .with_context(|| format!("identify ENTTEC USB Pro {}", device.serial_number))?;
-        Ok(Self {
-            widget,
-            serial_number: device.serial_number.clone(),
-        })
-    }
-
-    pub fn serial_number(&self) -> &str {
-        &self.serial_number
+        Ok(Self { widget })
     }
 
     /// Called on the DMX worker, never from an audio callback.

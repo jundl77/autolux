@@ -55,7 +55,7 @@ fn rgb_and_rgbw_scale_intensity_without_a_master_channel() {
 
 #[test]
 fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
-    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+    let rig = support::room();
     let mut states = rig.empty_states();
     for state in states.values_mut() {
         *state = FixtureState {
@@ -249,7 +249,7 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_the_fx_derby_
     const PIXEL_COUNT: usize = 8;
     const FX_DERBY_START: usize = 39;
     const FX_DERBY_CHANNELS: usize = 4;
-    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+    let rig = support::room();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
     for (selected, id) in strip.iter().enumerate() {
@@ -583,7 +583,7 @@ fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_c
         );
         FixtureRig::from_wire(&definition).unwrap();
     }
-    let room = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+    let room = support::room();
     assert_eq!(room.fixture_ids().len(), 8);
     assert_eq!(room.cell_ids().len(), 15);
     assert_eq!(

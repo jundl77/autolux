@@ -1,7 +1,5 @@
 local sf = { osc = {} }
 local FULL_TURN = 2 * math.pi
-local HUE_SECTOR_DEGREES = 60
-local HUE_CIRCLE_DEGREES = 360
 
 local function finite(value)
     return type(value) == "number" and value == value and math.abs(value) < math.huge
@@ -43,24 +41,6 @@ end
 function sf.mix(first, last, amount)
     return sf.rgb(sf.lerp(first.red, last.red, amount), sf.lerp(first.green, last.green, amount),
         sf.lerp(first.blue, last.blue, amount))
-end
-
-function sf.hsv(hue_degrees, saturation, value)
-    assert(finite(hue_degrees), "hue must be finite")
-    assert(finite(saturation) and saturation >= 0 and saturation <= 1, "saturation must be within 0..1")
-    assert(finite(value) and value >= 0 and value <= 1, "value must be within 0..1")
-    local hue = (hue_degrees % HUE_CIRCLE_DEGREES) / HUE_SECTOR_DEGREES
-    local chroma = value * saturation
-    local intermediate = chroma * (1 - math.abs(hue % 2 - 1))
-    local minimum = value - chroma
-    local red, green, blue
-    if hue < 1 then red, green, blue = chroma, intermediate, 0
-    elseif hue < 2 then red, green, blue = intermediate, chroma, 0
-    elseif hue < 3 then red, green, blue = 0, chroma, intermediate
-    elseif hue < 4 then red, green, blue = 0, intermediate, chroma
-    elseif hue < 5 then red, green, blue = intermediate, 0, chroma
-    else red, green, blue = chroma, 0, intermediate end
-    return sf.rgb(red + minimum, green + minimum, blue + minimum)
 end
 
 local BEATS_PER_BAR = 4

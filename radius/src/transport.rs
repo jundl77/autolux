@@ -27,6 +27,7 @@ pub struct Connection<S = TcpStream> {
     pending_bytes: usize,
     last_write_progress: Instant,
     read_eof: bool,
+    refused_sends: u64,
 }
 
 impl Connection {
@@ -40,6 +41,11 @@ impl Connection {
 impl<S> Connection<S> {
     pub fn pending_bytes(&self) -> usize {
         self.pending_bytes
+    }
+
+    /// Messages `send` refused under backpressure; evicted audio is counted by the caller.
+    pub fn refused_sends(&self) -> u64 {
+        self.refused_sends
     }
 }
 
@@ -55,6 +61,7 @@ impl<S: Read + Write> Connection<S> {
             pending_bytes: 0,
             last_write_progress: clock(),
             read_eof: false,
+            refused_sends: 0,
         }
     }
 
@@ -62,7 +69,9 @@ impl<S: Read + Write> Connection<S> {
     /// audio queued with `send_audio` is evicted, oldest first, to make room.
     pub fn send(&mut self, message: &Message) -> Result<bool> {
         let bytes = message.encode()?;
-        Ok(self.enqueue(bytes, false)?.0)
+        let queued = self.enqueue(bytes, false)?.0;
+        self.refused_sends += u64::from(!queued);
+        Ok(queued)
     }
 
     /// Never retains the caller: under backpressure the oldest unsent audio is
