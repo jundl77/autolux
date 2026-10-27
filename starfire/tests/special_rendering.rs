@@ -548,7 +548,7 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
 }
 
 #[test]
-fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_restores_it() {
+fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_its_render() {
     let definition = support::room_definition();
     let rig = support::room();
     let member = &rig.groups()["fx"][0];

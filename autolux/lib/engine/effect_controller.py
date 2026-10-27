@@ -194,13 +194,11 @@ class EffectController:
         intent: LightIntent,
         bpm: float | None = None,
         context: SelectionContext | None = None,
-        *,
-        cut: bool = False,
     ) -> bool:
         context = context or SelectionContext(intent)
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
-        transition = {'kind': 'cut'} if cut else transition_for(choice.look)
+        transition = transition_for(choice.look)
         palette = self._palette_for(choice.look)
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
@@ -304,13 +302,13 @@ class EffectController:
             choice.reason,
         )
 
-    def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
+    def enter_standby(self, bpm: float | None) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
         self._forget_special(cut=True)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
-            if bpm and bpm > 0 and not renderer_paused
+            if bpm and bpm > 0
             else {'kind': 'cut'}
         )
         if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):

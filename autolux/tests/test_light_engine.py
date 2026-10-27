@@ -1643,13 +1643,10 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 
     entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
     assert entered['autoloop'] == 'warm_white'
-    assert entered['transition'] == {'kind': 'cut'}
 
     await show.play(15.5, 0.2)
     assert show.light.paused
     assert _selections(show.commands(parked)) == [('atmospheric', 'cold_breathe')]
-    left = [c for c in show.commands(parked) if c['kind'] == 'select'][-1]
-    assert left['transition'] == {'kind': 'cut'}
     assert masters(show.lighting)[-1] == pytest.approx(QUIET_BRIGHTNESS)
 
 
@@ -1697,9 +1694,9 @@ class SelectionSpy(EffectController):
         super().__init__(lighting)
         self.contexts = []
 
-    async def change_effect(self, intent, bpm=None, context=None, *, cut=False):
+    async def change_effect(self, intent, bpm=None, context=None):
         self.contexts.append(context)
-        return await super().change_effect(intent, bpm, context, cut=cut)
+        return await super().change_effect(intent, bpm, context)
 
 
 async def test_the_engine_tells_selection_about_builds_drops_loudness_and_new_tracks():

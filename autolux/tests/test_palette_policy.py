@@ -317,7 +317,7 @@ async def test_a_measured_track_sends_its_palette_once_and_the_next_look_keeps_i
     assert palette_kinds(lighting) == [('select', DEFAULT_PALETTE)]
     chosen = controller.choose_track_palette(WARM_BRIGHT_LAID_BACK)
     assert palette_kinds(lighting)[1:] == [('set_palette', chosen)]
-    await controller.change_effect(LightIntent.DROP, cut=True)
+    await controller.change_effect(LightIntent.DROP)
     assert palette_kinds(lighting)[-1] == ('select', f'{chosen}_drop')
     assert [kind for kind, _ in palette_kinds(lighting)].count('set_palette') == 1
 
