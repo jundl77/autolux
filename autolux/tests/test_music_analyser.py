@@ -1,6 +1,8 @@
 import datetime
-import pytest
+
 import numpy as np
+import pytest
+
 from autolux.lib.analyser.music_analyser import MusicAnalyser
 
 
@@ -46,6 +48,8 @@ def test_seconds_since_last_beat_small_when_recent(analyser):
     analyser.last_beat_detected = datetime.datetime.now()
     assert analyser.get_seconds_since_last_beat() < 0.1
 
+
+import itertools
 
 from autolux.lib.clock import VirtualClock
 
@@ -164,7 +168,7 @@ async def test_renderer_beat_anchors_and_tempo_have_the_same_units(detector_bpm)
     anchors = [event for event in lighting.events if event['command']['kind'] == 'beat']
     assert len(anchors) == 4
     assert analyser.get_bpm() == pytest.approx(MusicAnalyser._fold_bpm(detector_bpm))
-    for previous, current in zip(anchors, anchors[1:]):
+    for previous, current in itertools.pairwise(anchors):
         anchor = previous['command']
         extrapolated = (
             anchor['beat_index']

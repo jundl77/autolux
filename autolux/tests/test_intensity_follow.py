@@ -54,7 +54,7 @@ class _Engine:
         self.on_auto_intensity = None
         self.levels_sent = []
         self.paused, self.master_level, self.mode = False, 1.0, 'auto'
-        self.static_looks = SimpleNamespace(state=lambda: {})
+        self.static_looks = SimpleNamespace(state=dict)
 
     def intensity_changed(self):
         self.levels_sent.append(self.control.settings.intensity)

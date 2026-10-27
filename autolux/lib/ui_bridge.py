@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+LOGGER = logging.getLogger(__name__)
+
 DEFAULT_DASHBOARD_PORT = 8765
 DASHBOARD_MDNS_HOSTNAME = 'autolux.local.'
 DASHBOARD_BIND_ADDRESS = '0.0.0.0'
@@ -61,7 +63,7 @@ def advertise_dashboard_mdns(port: int):
                 )
             )
         except (OSError, NonUniqueNameException) as error:
-            logging.warning('[dashboard] local hostname unavailable; use the PC IP: %s', error)
+            LOGGER.warning('[dashboard] local hostname unavailable; use the PC IP: %s', error)
         yield
     finally:
         if discovery is not None:
@@ -369,11 +371,13 @@ def kill_tree(process: subprocess.Popen) -> None:
         return
     try:
         if os.name == 'nt':
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
+            subprocess.run(
+                ['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True, check=False
+            )
         else:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
     except OSError as error:
-        logging.warning(f'[ui] could not signal the viewer ({error!r})')
+        LOGGER.warning(f'[ui] could not signal the viewer ({error!r})')
     try:
         process.wait(timeout=_KILL_GRACE_SEC)
     except subprocess.TimeoutExpired:
@@ -392,7 +396,7 @@ class UiBridge:
     def _watch(self) -> None:
         code = self._viewer.wait()
         if not self._stopping:
-            logging.warning(
+            LOGGER.warning(
                 f'[ui] the viewer process exited ({code}) — the '
                 f'show is unaffected; relaunch it with '
                 f'`python -m {VIEWER_MODULE} --port {self._ui_port}`'
@@ -427,7 +431,7 @@ def start(
         )
         server.start()
     except OSError as error:
-        logging.warning(
+        LOGGER.warning(
             f'[ui] no snapshot endpoint on port '
             f'{snapshot_port(ui_port)} ({error!r}) — the show runs '
             f'without a viewer'
@@ -436,12 +440,12 @@ def start(
     try:
         viewer = _spawn(viewer_command(ui_port, fixture_setup))
     except OSError as error:
-        logging.warning(
+        LOGGER.warning(
             f'[ui] the viewer process did not start ({error!r}) — the show runs without it'
         )
         server.stop()
         return None
-    logging.info(
+    LOGGER.info(
         f'[ui] dashboard → http://{DASHBOARD_MDNS_HOSTNAME.rstrip(".")}:{ui_port} '
         f'(pid {viewer.pid}, reading :{server.port}{SNAPSHOT_PATH})'
     )

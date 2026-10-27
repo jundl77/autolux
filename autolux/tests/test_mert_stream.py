@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import sys
@@ -233,7 +234,7 @@ def test_emission_tiles_the_stream_exactly_once(track_sec, margin):
     assert spans
     assert spans[0][0] == 0
     assert spans[-1][1] == n
-    for (_, previous_hi), (lo, _) in zip(spans, spans[1:]):
+    for (_, previous_hi), (lo, _) in itertools.pairwise(spans):
         assert lo == previous_hi
 
 
@@ -429,7 +430,7 @@ def _cell_horizons(n_samples, *, margin=3.0, hop=1.0, buffer=30.0, cell=CELL):
     for _start, end, (lo, hi) in M.pass_schedule(
         n_samples, length=_samples(buffer), hop=_samples(hop), margin=_samples(margin)
     ):
-        for index in range(int(math.floor(lo / SR / cell)), int(math.ceil(hi / SR / cell))):
+        for index in range(math.floor(lo / SR / cell), math.ceil(hi / SR / cell)):
             horizons[index] = max(horizons.get(index, 0), end)
     return horizons
 
@@ -607,7 +608,7 @@ def test_the_live_stage_pools_the_cells_the_offline_extractor_pools(track_sec, m
         margin_sec=margin,
         hop_sec=hop,
         buffer_sec=buffer,
-        n_pooled=int(math.ceil(len(audio) / SR / cell)) + 4,
+        n_pooled=math.ceil(len(audio) / SR / cell) + 4,
     )
     assert cells
     for item in cells:

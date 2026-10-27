@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import NamedTuple
 
+LOGGER = logging.getLogger(__name__)
+
 MODEL_VERSION = "ng_DACLEANTV_w128_s1234"
 _GENERATION = "l9d"
 _AFFINE = "input_affine_F3.npz"
@@ -123,7 +125,7 @@ def artifacts_present(data_dir=None) -> bool:
     try:
         return not artifacts(data_dir).missing()
     except (OSError, ValueError) as error:
-        logging.warning(
+        LOGGER.warning(
             f'[chain] cannot resolve the corpus directory '
             f'({error!r}) — treating the model as absent'
         )
@@ -268,7 +270,7 @@ def build_section_chain(
 
     feature_latency_sec = geometry.margin_sec + geometry.hop_sec + head.future_sec
     decoder = SectionDecoder(priors, params, feature_latency_sec=feature_latency_sec, phase=phase)
-    logging.info(
+    LOGGER.info(
         f'[chain] {MODEL_VERSION} on {_where(stage)} | '
         f'feature latency {feature_latency_sec:.4f}s '
         f'(F {geometry.margin_sec:g} + hop {geometry.hop_sec:g} + '
@@ -285,7 +287,7 @@ def _build_tracker(data_dir, device):
 
     generation = generation_dir(data_dir)
     if not bar_tracker.tracker_present(generation):
-        logging.info('[chain] no bar tracker artifacts — the bar grid is the counting rule')
+        LOGGER.info('[chain] no bar tracker artifacts — the bar grid is the counting rule')
         return None
     return bar_tracker.load_bar_tracker(generation, device=device)
 

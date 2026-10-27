@@ -719,7 +719,7 @@ async def test_calm_swaps_a_drop_or_build_to_its_quiet_bank_at_once_and_back_on_
 ):
     from autolux.tests.test_light_engine import beat_at_phase, selections
 
-    control, light, decoder, clock, lighting = _capped_show(tmp_path)
+    control, light, decoder, _clock, lighting = _capped_show(tmp_path)
     await beat_at_phase(light, decoder, 0, decision=decision)
     entered = lighting.selected_autoloop
     assert entered[0] == decision

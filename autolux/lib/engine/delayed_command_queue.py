@@ -3,7 +3,7 @@
 import bisect
 import logging
 from collections import deque
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 
@@ -96,7 +96,7 @@ class DelayedCommandQueue:
                 await factory()
             except Exception as error:
                 log.exception(
-                    f'[cmd_queue] {label!r} failed ({error!r}) — '
+                    f'[cmd_queue] {label!r} failed ({error!r}) — '  # noqa: TRY401
                     f'dropping it and delivering the rest'
                 )
 

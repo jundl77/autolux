@@ -11,7 +11,7 @@ runtime is a consumer too: the decoder commits these names and the engine maps
 them to lights, and ``lib`` may not import the training tree.
 """
 
-from typing import Iterable
+from collections.abc import Iterable
 
 SECTION_LABELS = (
     'intro',

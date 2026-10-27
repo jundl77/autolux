@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
-import pytest
 import pyaudio
+import pytest
 
 from autolux.lib.clients.pyaudio_client import PyAudioClient
 

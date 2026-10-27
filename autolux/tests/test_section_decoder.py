@@ -9,16 +9,15 @@ TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn.decoder import DecodeParams, FixedLagViterbi, temper  # noqa: E402
+from nn.decoder import DecodeParams, FixedLagViterbi, temper
 
-from autolux.lib.engine.section_decoder import (  # noqa: E402
+from autolux.lib.engine.section_decoder import (
     BEATS_PER_BAR,
     NOMINAL_BAR_SEC,
     BarDecision,
     SectionDecoder,
 )
-
-from autolux.tests.test_nn_decoder import one_hot, toy_priors  # noqa: E402
+from autolux.tests.test_nn_decoder import one_hot, toy_priors
 
 TOLERANCE = DecodeParams().boundary_tolerance_sec
 
@@ -452,8 +451,8 @@ def test_the_nominal_bar_is_the_corpus_median_until_bars_are_measured():
 
 
 def test_a_reused_chain_is_handed_out_reset():
-    from autolux.simulate import runner
     from autolux.lib import section_chain
+    from autolux.simulate import runner
 
     used = decoder(lag_bars=2)
     feed(used, bars=8, labels=[0] * 8)

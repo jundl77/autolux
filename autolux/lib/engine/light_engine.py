@@ -85,7 +85,7 @@ class LightEngine(IMusicAnalyserHandler):
         clock: Clock = SYSTEM_CLOCK,
         settings: Callable[[], ShowSettings] = ShowSettings,
         silence_monitor: Callable[[], None] | None = None,
-        static_rig: StaticRig = StaticRig(),
+        static_rig: StaticRig = StaticRig(),  # noqa: B008
         media_session_live: Callable[[], bool] = lambda: False,
     ):
         self.lighting_client = lighting_client

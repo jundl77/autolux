@@ -9,6 +9,8 @@ from enum import IntEnum
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 
+LOGGER = logging.getLogger(__name__)
+
 _WINDOW_SEC = 5.0
 _ENTER_SEC = 0.15
 # Positive: a hardware-paced input hands over one buffer per period, so drift never goes negative.
@@ -145,4 +147,4 @@ class DriftWatchdog:
                 return
             self._last_log_times_seconds[direction] = now
             more = self._suppressed_log_counts.pop(direction, 0)
-            logging.warning(message + (f' [+{more} more since the last line]' if more else ''))
+            LOGGER.warning(message + (f' [+{more} more since the last line]' if more else ''))

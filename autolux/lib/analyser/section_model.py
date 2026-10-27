@@ -99,7 +99,7 @@ def check_graph_geometry(session, geometry: HeadGeometry) -> None:
     declared = getattr(session, "get_inputs", None)
     produced = getattr(session, "get_outputs", None)
     if not callable(declared) or not callable(produced):
-        raise ValueError(
+        raise ValueError(  # noqa: TRY004
             "the session cannot declare its own shapes, so the "
             "graph and the sidecar cannot be cross-checked"
         )

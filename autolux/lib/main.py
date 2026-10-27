@@ -252,7 +252,7 @@ class AutoluxController:
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
         selection_seed: int = 0,
-        static_rig: StaticRig = StaticRig(),
+        static_rig: StaticRig = StaticRig(),  # noqa: B008
     ):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.clients.pyaudio_client import PyAudioClient
