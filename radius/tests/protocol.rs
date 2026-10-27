@@ -35,14 +35,59 @@ fn audio_requires_exact_preceding_light_state_and_keeps_a_copy() {
     assert!(receiver.resolve_audio(audio(0, 1)).is_err());
     receiver.cache_light(light(1, 17)).unwrap();
     assert!(receiver.resolve_audio(audio(0, 2)).is_err());
-    let first = receiver.resolve_audio(audio(0, 1)).unwrap();
+    let first = receiver.resolve_audio(audio(0, 1)).unwrap().block;
     receiver.cache_light(light(2, 99)).unwrap();
-    let second = receiver.resolve_audio(audio(1, 2)).unwrap();
+    let second = receiver.resolve_audio(audio(1, 2)).unwrap().block;
     assert_eq!(first.channels, [17; 512]);
     assert_eq!(second.channels, [99; 512]);
     assert_eq!(first.audio.audio_frame_position, 0);
     assert_eq!(second.audio.audio_frame_position, 128);
-    assert!(receiver.resolve_audio(audio(3, 2)).is_err());
+    assert!(
+        receiver.resolve_audio(audio(1, 2)).is_err(),
+        "replayed sequence"
+    );
+}
+
+#[test]
+fn audio_sequence_gap_is_filled_with_silence_and_counted() {
+    let mut receiver = MediaReceiver::default();
+    receiver.cache_light(light(1, 17)).unwrap();
+    receiver.resolve_audio(audio(0, 1)).unwrap();
+    let admitted = receiver.resolve_audio(audio(4, 1)).unwrap();
+    assert_eq!(admitted.silence_frames, 3 * 128);
+    assert_eq!(receiver.audio_gaps_total, 1);
+    assert_eq!(receiver.lost_frames_total, 3 * 128);
+    let blocks: Vec<_> = admitted.blocks().collect();
+    let positions: Vec<_> = blocks
+        .iter()
+        .map(|b| b.audio.audio_frame_position)
+        .collect();
+    assert_eq!(positions, [128, 256, 384, 512]);
+    for silence in &blocks[..3] {
+        assert_eq!(silence.audio.frames, 128);
+        assert!(silence.audio.samples.iter().all(|&sample| sample == 0.0));
+        assert_eq!(silence.channels, [17; 512]);
+    }
+    assert_eq!(blocks[3].audio.samples[0], 0.25);
+    receiver.resolve_audio(audio(5, 1)).unwrap();
+    assert_eq!(
+        receiver.audio_gaps_total, 1,
+        "consecutive audio is not a gap"
+    );
+}
+
+#[test]
+fn audio_gap_must_match_the_dropped_packet_count() {
+    let mut receiver = MediaReceiver::default();
+    receiver.cache_light(light(1, 17)).unwrap();
+    receiver.resolve_audio(audio(0, 1)).unwrap();
+    let mut skipped_timeline = audio(1, 1);
+    skipped_timeline.audio_frame_position = 128 * 3;
+    assert!(receiver.resolve_audio(skipped_timeline).is_err());
+    let mut oversized_gap = audio(2, 1);
+    oversized_gap.audio_frame_position = 128 * 3;
+    assert!(receiver.resolve_audio(oversized_gap).is_err());
+    assert_eq!(receiver.audio_gaps_total, 0);
 }
 
 #[test]
