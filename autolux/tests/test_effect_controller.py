@@ -862,8 +862,9 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
 
     # The operator's Static FX row does not ask the policy, so it still plays.
-    looks = StaticLooks(lighting, StaticRig(groups=('fx',)))
-    looks.special('fx', 'primary', 0.5, 0.5)
+    drift = Special('drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='primary', speed=0.5)
+    looks = StaticLooks(lighting, StaticRig(groups=('fx',)), [drift])
+    looks.special('drift', 'fx')
     assert accents(lighting, start)[-1]['value']['id'] == STATIC_SPECIAL_ID
     looks.clear_special()
 

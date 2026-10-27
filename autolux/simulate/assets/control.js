@@ -55,33 +55,13 @@
         return null;
     }
 
-    // Mirrors fx_axes: the whole rig can use any axis some group has.
-    function fxAxes(groups, target) {
-        if (target === (config().allFixtures || 'all')) {
-            return [...new Set(Object.values(groups).flat())].sort();
-        }
-        return [...(groups[target] || [])].sort();
-    }
-
-    // Mirrors static_fx_command; a segment trigger re-fires activeSlot.
-    function fxCommand(trigger, target, energy, speed, pulse, axes, activeSlot) {
-        if (trigger === 'static-fx-clear') {
-            return {action: 'static', kind: 'special_fx_clear'};
-        }
-        const slot = trigger.startsWith('static-fx-') && !trigger.match(/-(energy|speed|pulse)$/)
-            ? trigger.slice('static-fx-'.length) : activeSlot;
-        if (!slot) {
+    // Mirrors static_fx_command: the row already held on the target sends nothing.
+    function staticFxCommand(row, target, state) {
+        const active = ((state && state.static) || {}).special_fx || {};
+        if (!row || (active.name === row && active.group === target)) {
             return null;
         }
-        return {
-            action: 'static',
-            kind: 'special_fx',
-            group: target,
-            colour_slot: slot,
-            energy: energy,
-            speed: axes.includes('speed') ? speed : 0.0,
-            pulse_beats: pulse && axes.includes('pulse') ? pulse : null,
-        };
+        return {action: 'static_fx', row: row, target: target};
     }
 
     const build = {
@@ -93,7 +73,8 @@
         intensityAuto: (enabled) => ({action: 'intensity_auto', enabled: enabled}),
         fxAuto: (enabled) => ({action: 'fx_auto', enabled: enabled}),
         static: staticCommand,
-        fx: fxCommand,
+        staticFx: staticFxCommand,
+        staticFxClear: () => ({action: 'static', kind: 'special_fx_clear'}),
     };
 
     function post(url, command) {
@@ -250,6 +231,6 @@
     }
 
     window.autoluxControl = {
-        build, send, dispatch, sendLatest, hold, view, fxAxes, operatorActs, cooldownView,
+        build, send, dispatch, sendLatest, hold, view, operatorActs, cooldownView,
     };
 })();

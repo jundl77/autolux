@@ -118,6 +118,11 @@ def parse_control_command(payload) -> dict:
         return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
+    if action == 'static_fx':
+        row, target = payload.get('row'), payload.get('target')
+        if not isinstance(row, str) or not row or not isinstance(target, str) or not target:
+            raise ValueError('static_fx needs a row and a target')
+        return {'action': action, 'row': row, 'target': target}
     raise ValueError(f'unknown control action {action!r}')
 
 
@@ -127,9 +132,6 @@ def _static_command(payload: dict) -> dict:
     kind = payload.get('kind')
     if kind in ('clear', 'special_fx_clear'):
         return {'kind': kind}
-    if kind == 'special_fx':
-        fields = ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
-        return {'kind': kind, **{name: payload.get(name) for name in fields}}
     if kind == 'blackout':
         if type(payload.get('enabled')) is not bool:
             raise ValueError('blackout must be true or false')

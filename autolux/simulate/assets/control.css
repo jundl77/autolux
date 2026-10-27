@@ -95,6 +95,8 @@
                       border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
                       --tone: var(--accent); }
 .segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(88px, 1fr); }
+/* A picker with nothing to offer (no FX fits the target) leaves no empty outline. */
+.segmented:empty { display: none; }
 .joined .segmented { height: 100%; border: 0; border-radius: 0; }
 #show-control .joined > button { height: 100%; border: 0; border-radius: 0; background: transparent;
                                  color: var(--muted); }
