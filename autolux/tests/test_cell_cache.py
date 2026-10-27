@@ -332,6 +332,24 @@ def test_a_recording_shorter_than_this_run_is_a_named_miss(audio, key):
     assert replay is None and reason == "miss_truncated"
 
 
+def test_a_run_that_skipped_audio_in_standby_still_records_the_whole_file(audio, key):
+    path = cell_cache.sidecar_path(audio, key["decode"])
+    recorder = cell_cache.Recorder(FakeStream(), path, key, source_samples=lambda: 6 * 100 + 250)
+    drive(recorder)
+    recorder.save()
+    replay, reason = cell_cache.open_replay(path, key, expected_samples=6 * 100 + 250)
+    assert reason == "hit"
+    assert as_tuples(drive(replay, buffers=6)) == as_tuples(drive(FakeStream()))
+
+
+def test_a_run_cut_short_by_its_source_is_still_a_named_miss(audio, key):
+    path = cell_cache.sidecar_path(audio, key["decode"])
+    recorder = cell_cache.Recorder(FakeStream(), path, key, source_samples=lambda: 6 * 100)
+    drive(recorder)
+    recorder.save()
+    assert cell_cache.open_replay(path, key, expected_samples=6 * 100 + 1)[1] == "miss_truncated"
+
+
 def test_a_replay_pushed_past_its_recording_refuses_instead_of_going_quiet(audio, key):
     path = record(audio, key)
     replay, reason = cell_cache.open_replay(path, key)
@@ -402,3 +420,25 @@ def test_an_edit_to_the_extractor_moves_the_key():
         for other in range(len(sources)):
             digest.update(edited[other] + (b"# edit" if other == index else b""))
         assert digest.hexdigest()[:16] != before, f'an edit to {path.name} does not move the key'
+
+
+@pytest.mark.integration
+async def test_a_track_with_digital_silence_warms_both_sidecars(nn_artifacts, tmp_path):
+    import soundfile
+
+    from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+    from autolux.simulate import runner
+    from autolux.simulate.fake_audio_client import FileAudioClient
+
+    music = 0.2 * np.random.default_rng(0).standard_normal(SAMPLE_RATE * 20)
+    silence = np.zeros(SAMPLE_RATE * 3)
+    path = tmp_path / "gap.wav"
+    soundfile.write(path, np.concatenate([music, silence, music]).astype(np.float32), SAMPLE_RATE)
+
+    await runner.run_fast_simulation(FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, str(path)))
+
+    with np.load(cell_cache.sidecar_path(path, FileAudioClient.decode_path)) as archive:
+        # Standby skipped the chain, so this run exercised the case the source count fixes.
+        assert int(archive["total_pushed"]) < int(archive["source_samples"])
+    client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, str(path))
+    assert runner.cache_misses(client) == []

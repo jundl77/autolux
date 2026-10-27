@@ -68,5 +68,9 @@ class FileAudioClient:
         return len(self._audio) / self.sample_rate if self._audio is not None else 0.0
 
     @property
+    def samples_read(self) -> int:
+        return self._pos
+
+    @property
     def total_samples(self) -> int | None:
         return None if self._audio is None else len(self._audio)
