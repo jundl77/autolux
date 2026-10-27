@@ -119,7 +119,7 @@ fn composed_effects_resolve_named_groups_in_the_authored_order() {
             sf.dimmer(sf.group("wash"), sf.osc.sine(ctx.autoloop_speed_scaled_elapsed_beats, 4, 0.2, 0.8)),
             sf.each(sf.group("wash"), function(fixture, index, count)
               return {sf.pan_tilt(fixture, index / count, 0.5),
-                      sf.colour(fixture, sf.hsv(240, 1, 1))}
+                      sf.colour(fixture, sf.rgb(0, 0, 1))}
             end)
           }
         end}"#,
