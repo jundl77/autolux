@@ -1369,6 +1369,18 @@ DIRECT_AUTO_JS = (
                 .map((t) => t.prop_id);
             const shown = control.view(state) || {};
             const status = 'control-status';
+            // The chips and the levels act only on a real press: Dash can re-fire this
+            // callback from a re-render or a poll writing the radio's value.
+            const pressed = control.operatorJustActed();
+            const chip = ['control-fx-auto.n_clicks', 'control-fx-off.n_clicks',
+                'control-intensity-auto.n_clicks', 'control-intensity.value']
+                .find((id) => triggered.includes(id));
+            if (chip && !pressed) {
+                if (!chip.endsWith('.value')) {
+                    console.warn('[control] dropped a chip callback with no press', chip);
+                }
+                return [nu, nu];
+            }
             const showFollowing = (on) => {
                 window.dash_clientside.set_props(
                     'control-intensity-auto', {className: on ? 'active' : ''});
@@ -2480,6 +2492,10 @@ def build_app(
             return jsonify({'error': 'this dashboard cannot control the show'}), 403
         if not isinstance(command, dict):
             return jsonify({'error': 'a command must be a JSON object'}), 400
+        if direct and command.get('action') in ('fx_auto', 'intensity_auto'):
+            # The page sends these chips to the bridge itself; one arriving here is a second
+            # copy of a click (or a stale page), never a new one.
+            return jsonify({'error': f'{command["action"]} goes to the show directly'}), 409
         reply = snapshot_source.control(command)
         if 'error' not in reply:
             expectations.expect(**expected_control_values(command, reply))

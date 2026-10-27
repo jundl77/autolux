@@ -12,12 +12,18 @@
     // Nothing leaves the page before the operator's first pointer or key press: a restored
     // value, the first poll or a component settling on load must never command the show.
     let operatorActed = false;
+    let operatorActedAt = -Infinity;
     const operatorActs = () => {
         operatorActed = true;
+        operatorActedAt = performance.now();
     };
+    // A chip's callback also runs when Dash re-fires it without a press (a re-render, a poll
+    // writing the radio's value); only one within this long of a real press is the operator's.
+    const OPERATOR_PRESS_MS = 500;
+    const operatorJustActed = () => performance.now() - operatorActedAt <= OPERATOR_PRESS_MS;
     if (typeof document !== 'undefined') {
         ['pointerdown', 'keydown'].forEach((type) =>
-            document.addEventListener(type, operatorActs, {capture: true, once: true}));
+            document.addEventListener(type, operatorActs, {capture: true}));
     }
 
     function staticCommand(trigger, target, colour) {
@@ -260,7 +266,7 @@
     }
 
     window.autoluxControl = {
-        build, send, dispatch, sendLatest, hold, view, operatorActs, cooldownView,
-        cooldownFired,
+        build, send, dispatch, sendLatest, hold, view, operatorActs, operatorJustActed,
+        cooldownView, cooldownFired,
     };
 })();
