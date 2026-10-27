@@ -37,7 +37,6 @@ from autolux.lib.engine.special_policy import (
     DROP_STROBE,
     Special,
     SpecialCapabilities,
-    SpecialChoice,
     SpecialPolicy,
 )
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
@@ -324,14 +323,13 @@ class EffectController:
     def _enter_special(self, intent: LightIntent, bpm: float | None) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
-        # FX off picks nothing, so a running special is released here, at its usual section end.
-        choice = (
-            self._special_policy.choose(
-                intent, self.special_capabilities(), self._intense_blocked(settings, now)
-            )
-            if settings.fx_auto
-            else SpecialChoice(None)
+        choice = self._special_policy.choose(
+            intent, self.special_capabilities(), self._intense_blocked(settings, now)
         )
+        if not settings.fx_auto:
+            # FX off drops the special but keeps the drop strobe, the show's own accent; a
+            # running special is released here, at its usual section end.
+            choice = dataclasses.replace(choice, special=None)
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
         if choice.intense:

@@ -808,7 +808,7 @@ async def test_a_calm_swap_during_a_drop_reaches_the_snapshot_with_the_real_inte
     assert after['intent'] == 'drop'
 
 
-async def test_fx_off_picks_no_automatic_fx_or_strobe_and_fx_auto_brings_them_back():
+async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     import dataclasses
 
     from autolux.lib.engine.static_mode import STATIC_SPECIAL_ID, StaticLooks, StaticRig
@@ -830,7 +830,10 @@ async def test_fx_off_picks_no_automatic_fx_or_strobe_and_fx_auto_brings_them_ba
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
     await controller.change_effect(LightIntent.DROP)
-    assert accents(lighting, start) == [], 'no special and no drop strobe while FX is off'
+    # A loud drop still bursts the strobe; only the special (the drop's spin) is left out.
+    [strobe] = accents(lighting, start)
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+    assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
 
     # The operator's Static FX row does not ask the policy, so it still plays.
     looks = StaticLooks(lighting, StaticRig(groups=('fx',)))
