@@ -48,7 +48,6 @@ from nn.priors import (
     corpus_bar_runs_by_cause,
     fit,
     fit_runs,
-    label_runs,
     section_classes,
     transition_allowed,
 )
@@ -250,23 +249,6 @@ def test_priors_file_is_plain_json_with_no_infinities():
     priors = fit_shipping(corpus_runs())
     text = json.dumps(priors.to_dict())
     assert "Infinity" not in text and "NaN" not in text
-
-
-def test_label_runs_merge_across_a_dropped_sentinel_without_folding():
-    sections = [
-        (0.0, 10.0, "intro"),
-        (10.0, 20.0, "drop"),
-        (20.0, 30.0, "end"),
-        (30.0, 40.0, "drop"),
-        (40.0, 50.0, "cooldown"),
-        (50.0, 60.0, "altoutro"),
-    ]
-    assert label_runs(sections) == [
-        (0.0, 10.0, "intro"),
-        (10.0, 40.0, "drop"),
-        (40.0, 50.0, "cooldown"),
-        (50.0, 60.0, "altoutro"),
-    ]
 
 
 def test_the_default_class_space_to_fit_in_is_the_whole_vocabulary():

@@ -255,29 +255,6 @@ def _log(values: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 
 
-def label_runs(sections: list) -> list:
-    """Published sections -> merged runs ``[(start, end, label)]``.
-
-    The ``end`` sentinel is dropped and a merge across it joins the runs on
-    either side -- consistent with ``section_runs`` -- but the sentinel's own
-    time is never re-attributed, which is why bar counts are summed per member
-    rather than taken from the merged span.
-    """
-    from build_training_table import label_coverage
-
-    spans = sorted(
-        ((float(start), float(end), label) for start, end, label in label_coverage(sections)),
-        key=lambda span: span[0],
-    )
-    runs: list = []
-    for start, end, label in spans:
-        if runs and runs[-1][2] == label:
-            runs[-1][1] = max(runs[-1][1], end)
-        else:
-            runs.append([start, end, label])
-    return [tuple(run) for run in runs]
-
-
 def bar_runs(sections: list, downbeats: np.ndarray) -> list:
     """Merged runs as ``[(label, n_bars)]`` on a track's own bar grid.
 

@@ -66,7 +66,6 @@ LABEL_IDS = {
     "yai": "9CpH_AljPyk",
     "skylark": "doedi2MI-iM",
 }
-PROBE_KEYS = ("opus", "dwmu")
 FIT_KEYS = ("inyathi", "yai", "skylark")
 
 INTENT_FOR_CLASS = {

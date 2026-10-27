@@ -54,15 +54,6 @@ def _queue_errors_ms(report: dict) -> list:
     return [abs(e['actual_delta_sec'] - e['target_delta_sec']) * 1000 for e in report['timing_log']]
 
 
-def _queue_error_buffers(report: dict) -> int:
-    import math
-
-    from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
-
-    period_ms = BUFFER_SIZE / SAMPLE_RATE * 1000
-    return math.ceil(max(_queue_errors_ms(report), default=0.0) / period_ms)
-
-
 def _sound_events(events: list) -> list:
     return [{'t': round(e['t'], 3), 'playing': e['playing']} for e in events]
 
