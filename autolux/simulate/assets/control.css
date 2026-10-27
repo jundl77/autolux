@@ -226,16 +226,19 @@
 /* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first, drawn like the
    Section Confidence bars beside it: name and seconds on a line above a thin track. The fill is
    empty as the group fires, grows left to right as it recovers and stays full with "ready". Every
-   bar shares the AUTO blue at full strength; the text sits off the fill, so it stays readable
-   whatever the fill's length. control.js adds .flash for 650 ms when a group fires: the track
-   pulses twice toward --text with a 1px blue ring around it (the fill is empty then, so the track
-   is what shows), then settles to the empty bar. */
+   bar shares one soft grey-white, quieter than the AUTO blue so a waiting cooldown never reads as
+   the show driving; the text sits off the fill, so it stays readable whatever the fill's length.
+   control.js adds .flash for 650 ms when a group fires: the track pulses twice toward --text with
+   a 1px ring in the bar's grey around it (the fill is empty then, so the track is what shows),
+   then settles to the empty bar. */
 .cooldowns { display: grid; gap: 8px;
-             --bar-fill: var(--auto);
+             /* --balanced 65% over --fill: pale, neutral, 6.0:1 against the track. */
+             --bar-fill: #939ba3;
              /* The Section Confidence track (POSTERIOR_TRACK): both bar blocks read as one. */
              --bar-track: #161d27;
-             --bar-ring: var(--auto);
-             --bar-flash: color-mix(in srgb, var(--text) 65%, var(--fill)); }
+             --bar-ring: var(--bar-fill);
+             /* --text 85% over --fill (#c7ced5): a peak clearly above the grey dips, 1.8:1. */
+             --bar-flash: color-mix(in srgb, var(--text) 85%, var(--fill)); }
 .cooldown-row { display: grid; gap: 4px; }
 .cooldown-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
                  min-width: 0; color: var(--text); font: inherit; font-size: 11px;
@@ -248,8 +251,8 @@
                   background: var(--bar-track); }
 .cooldown-fill { height: 100%; background: var(--bar-fill); }
 .cooldown-row.flash .cooldown-track { animation: cooldown-fire 600ms ease-out; }
-/* Two peaks 150 ms apart, each a hard lift toward --text ringed outside in blue (the blue matches
-   the lifted grey in luminance, so an inset ring would vanish), then back to the empty track. */
+/* Two peaks 150 ms apart, each a hard lift toward --text ringed outside in the bar's grey (an
+   inset ring would vanish against the lifted peak), then back to the empty track. */
 @keyframes cooldown-fire {
     0%, 25% { background: var(--bar-flash); box-shadow: 0 0 0 1px var(--bar-ring); }
     12.5% { background: var(--bar-fill); box-shadow: none; }
