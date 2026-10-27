@@ -81,6 +81,10 @@ def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group()
         {'type': 'group-master', 'group': 'wash'},
     ]
     assert [slider.value for slider in sliders] == [1.0, 0.4]
+    assert [row.children[0].children for row in rows] == [
+        'movers group master (linear)',
+        'wash group master (linear)',
+    ]
     assert all(row.children[1].className == 'fader' for row in rows)
     assert all(slider.min == 0 and slider.max == 1 for slider in sliders)
     assert build_app(_Recorder()).layout['group-masters'].children is None

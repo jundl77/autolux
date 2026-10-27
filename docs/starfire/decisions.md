@@ -542,7 +542,9 @@ caps the rendered look, specials included, and never raises it; a cell in severa
 groups takes the product. The level is linear (0.5 halves the output), unlike the perceptual
 global master: it trims one group against the others rather than fading the room. Starfire
 refuses an unknown group; Autolux sends only the levels of groups in the logged-in rig, and
-only when one changes.
+only when one changes. On a fixture without a Dimmer it scales the colour (emitter levels; a
+colour wheel holds its slot until 0, then takes its dark slot) and it never touches pan, tilt
+or gobo, matching grandMA3's inhibitive Group Master.
 
 2026-10-27 Mirror by symmetry: `sf.mirror(group)` pairs each member with the member nearest
 its reflection about the stage centreline, the scene's X = 0 (MVR, DIN SPEC 15801: Matrix
