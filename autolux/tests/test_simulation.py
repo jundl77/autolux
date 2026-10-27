@@ -19,7 +19,9 @@ EVAL_SET = load_eval_set(EVAL_SET_FILE)
 DATA_DIR = run_eval_set.corpus_dir()
 
 SAMPLE_TRACK_ID = run_eval_set.shortest_track_ids(EVAL_SET, 1)[0]
-BENCH_TRACK_IDS = run_eval_set.shortest_track_ids(EVAL_SET, 3)
+# Two D&B tracks and one tech house track at 122 BPM, none with a digital-silence
+# standby. 0834 (the third shortest) stopped on silence and used to be unwarmable.
+BENCH_TRACK_IDS = ["0096.PNpXKsge4xM", "0434.SBnxzXkc_qw", "0911.hSCcLy_OBLM"]
 
 
 def _require_audio(track_ids: list) -> list:
