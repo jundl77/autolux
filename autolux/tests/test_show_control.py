@@ -1306,6 +1306,7 @@ window.dash_clientside = {{
 (async () => {{
     control.operatorActs();
     for (const [state, chip] of {json.dumps(clicks)}) {{
+        control.press('fx_auto', chip === 'control-fx-auto');
         window.dash_clientside.callback_context = {{triggered: [{{prop_id: chip + '.n_clicks'}}]}};
         clicked(null, null, null, null, null, 1, 1, state);
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1496,3 +1497,136 @@ console.log(JSON.stringify(seen));
     )
     result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == [False, False, True, True, False, False]
+
+
+# Just enough DOM for control.js's press listeners: elements answer closest() by id or as a
+# level's label, events reach the capture listeners as the browser hands them over, and the
+# clock only moves by hand.
+FAKE_DOM = """
+const listeners = [];
+let now = 0;
+Object.defineProperty(globalThis, 'performance', {value: {now: () => now}});
+globalThis.setInterval = () => {};
+globalThis.Element = class {};
+globalThis.document = {
+    addEventListener: (type, listener) => listeners.push([type, listener]),
+    querySelectorAll: () => [],
+};
+const element = (id, props) => Object.assign(new Element(), {id, ...props});
+const button = (id) => element(id, {
+    classList: {contains: () => false},
+    closest(selector) {
+        return selector.split(',').some((s) => s.trim() === '#' + this.id) ? this : null;
+    },
+});
+const level = (value, chosen, disabled = false) => element('', {
+    getAttribute: (name) => (name === 'aria-selected' ? String(chosen) : null),
+    querySelector: () => ({value, matches: (s) => s === ':disabled' && disabled}),
+    closest(selector) {
+        return selector === '#control-intensity label' ? this : null;
+    },
+});
+const deliver = (type, target, extra = {}) => listeners
+    .filter(([listened]) => listened === type)
+    .forEach(([, listener]) => listener({type, isTrusted: true, target, ...extra}));
+const clickOn = (target, isTrusted = true) => deliver('click', target, {isTrusted});
+const enterOn = (target) => deliver('keyup', target, {key: 'Enter'});
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_only_a_recorded_click_sends_and_reruns_polls_and_stale_presses_send_nothing():
+    body = f"""
+window.autoluxControlConfig = {{direct: true, bridgePort: 8766}};
+globalThis.location = {{protocol: 'http:', hostname: 'autolux.local'}};
+const sent = [];
+globalThis.fetch = async (url, options) => {{
+    sent.push(JSON.parse(options.body));
+    return {{ok: true, status: 202, json: async () => ({{}})}};
+}};
+const run = {DIRECT_AUTO_JS};
+window.dash_clientside = {{no_update: null, set_props: () => {{}}}};
+const fire = (prop, intensity, state) => {{
+    window.dash_clientside.callback_context = {{triggered: [{{prop_id: prop}}]}};
+    run(null, null, null, intensity, 1, 1, 1, state);
+    return new Promise((resolve) => setTimeout(resolve, 0));
+}};
+const log = [];
+const step = async (name, act) => {{
+    const before = sent.length;
+    await act();
+    log.push([name, sent.slice(before)]);
+}};
+(async () => {{
+    control.operatorActs();
+    // The poll from before the clicks, and the one that reports them.
+    const stale = {{settings: {{intensity: 1.0}}, intensity_auto: false, fx_auto: true}};
+    const echoed = {{settings: {{intensity: 0.7}}, intensity_auto: false, fx_auto: false}};
+    await step('click Off', () => {{
+        clickOn(button('control-fx-off'));
+        return fire('control-fx-off.n_clicks', 1.0, stale);
+    }});
+    await step('click balanced', () => {{
+        clickOn(level('0.7', false));
+        return fire('control-intensity.value', 0.7, stale);
+    }});
+    // The sync wrote the radio from the older poll; the run already sees the newer one.
+    await step('poll writes the old level', () => fire('control-intensity.value', 1.0, echoed));
+    await step('poll echoes the new level', () => fire('control-intensity.value', 0.7, echoed));
+    // Dash running the callback with chip inputs no click changed.
+    await step('re-run Auto', () => fire('control-fx-auto.n_clicks', 0.7, echoed));
+    await step('re-run Off', () => fire('control-fx-off.n_clicks', 0.7, echoed));
+    await step('re-run Intensity Auto', () => fire('control-intensity-auto.n_clicks', 0.7, echoed));
+    await step('click the level already chosen', () => {{
+        clickOn(level('0.7', true));
+        return fire('control-intensity.value', 0.7, echoed);
+    }});
+    await step('untrusted click', () => {{
+        clickOn(button('control-fx-auto'), false);
+        return fire('control-fx-auto.n_clicks', 0.7, echoed);
+    }});
+    // Levels still in the disabled fieldset before the first settings poll.
+    await step('click a disabled level, then the first poll', () => {{
+        clickOn(level('0.3', false, true));
+        return fire('control-intensity.value', 0.3, echoed);
+    }});
+    // A press whose own run never came, then a poll's run over a second later.
+    await step('stuck press, then a poll', () => {{
+        clickOn(level('1', false));
+        now += 1001;
+        return fire('control-intensity.value', 1.0, echoed);
+    }});
+    await step('Enter on a level', () => {{
+        enterOn(level('0.3', false));
+        return fire('control-intensity.value', 0.3, echoed);
+    }});
+    await step('click Intensity Auto', () => {{
+        clickOn(button('control-intensity-auto'));
+        return fire('control-intensity-auto.n_clicks', 0.7, echoed);
+    }});
+    console.log(JSON.stringify(log));
+}})();
+"""
+    script = (
+        'globalThis.window = {};\n'
+        + FAKE_DOM
+        + CONTROL_JS.read_text(encoding='utf8')
+        + '\nconst control = window.autoluxControl;\n'
+        + body
+    )
+    result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [
+        ['click Off', [{'action': 'fx_auto', 'enabled': False}]],
+        ['click balanced', [{'action': 'intensity', 'level': 0.7}]],
+        ['poll writes the old level', []],
+        ['poll echoes the new level', []],
+        ['re-run Auto', []],
+        ['re-run Off', []],
+        ['re-run Intensity Auto', []],
+        ['click the level already chosen', []],
+        ['untrusted click', []],
+        ['click a disabled level, then the first poll', []],
+        ['stuck press, then a poll', []],
+        ['Enter on a level', [{'action': 'intensity', 'level': 0.3}]],
+        ['click Intensity Auto', [{'action': 'intensity_auto', 'enabled': True}]],
+    ]
