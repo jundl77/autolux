@@ -394,6 +394,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut light_at = None;
     let mut reporter = Reporter::spawn(report_writer(config.run_id, config.health_file.clone()))?;
     let mut reported_discontinuities = 0;
+    let mut reported_scheduling = false;
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -475,6 +476,10 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 !stats.faulted,
                 capture_failure(capture.last_error(), &stats)
             );
+            if !reported_scheduling && let Some(scheduling) = stats.capture_scheduling {
+                reporter.log(scheduling.describe().into());
+                reported_scheduling = true;
+            }
             if stats.discontinuities != reported_discontinuities
                 && let Some(gap) = stats.last_gap_frames
             {

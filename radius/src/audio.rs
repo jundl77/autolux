@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
@@ -12,6 +12,7 @@ use crossbeam_queue::ArrayQueue;
 
 pub use crate::playout::{EnqueueError, JITTER_BUFFER_MS, LightingUpdate, PlaybackBlock};
 use crate::playout::{Playout, PlayoutSender};
+use crate::realtime::{self, Scheduling};
 
 pub const SAMPLE_RATE: u32 = 44_100;
 pub const CHANNELS: usize = 2;
@@ -307,6 +308,8 @@ pub struct CaptureMetrics {
     pub resync_dropped_frames: u64,
     pub stream_errors: u64,
     pub capture_priority_denied: u64,
+    /// None until the first capture callback has run.
+    pub capture_scheduling: Option<Scheduling>,
     pub last_callback_age: Option<Duration>,
     pub queued_frames: usize,
     pub faulted: bool,
@@ -322,9 +325,25 @@ struct CaptureCounters {
     last_gap_frames: AtomicI64,
     silence_frames: AtomicU64,
     dropped_frames: AtomicU64,
+    scheduling: AtomicU8,
 }
 
+const SCHEDULING_UNKNOWN: u8 = 0;
+const SCHEDULING: [Scheduling; 3] = [
+    Scheduling::Mmcss,
+    Scheduling::TimeCritical,
+    Scheduling::Denied,
+];
+
 impl CaptureCounters {
+    fn record_scheduling(&self, scheduling: Scheduling) {
+        if scheduling == Scheduling::Denied {
+            self.stream.priority_denied.fetch_add(1, Relaxed);
+        }
+        let code = SCHEDULING.iter().position(|&s| s == scheduling).unwrap() as u8 + 1;
+        self.scheduling.store(code, Release);
+    }
+
     fn metrics(&self, queued_frames: usize) -> CaptureMetrics {
         let discontinuities = self.discontinuities.load(Acquire);
         CaptureMetrics {
@@ -338,6 +357,10 @@ impl CaptureCounters {
             resync_dropped_frames: self.dropped_frames.load(Relaxed),
             stream_errors: self.stream.stream_errors.load(Relaxed),
             capture_priority_denied: self.stream.priority_denied.load(Relaxed),
+            capture_scheduling: match self.scheduling.load(Acquire) {
+                SCHEDULING_UNKNOWN => None,
+                code => Some(SCHEDULING[usize::from(code - 1)]),
+            },
             last_callback_age: self.stream.callback_age(),
             queued_frames,
             faulted: self.stream.faulted.load(Acquire),
@@ -544,10 +567,17 @@ impl CaptureStream {
         let device = select_device(device_id, true)?;
         let (queue, counters) = (assembler.queue.clone(), assembler.counters.clone());
         let errors = counters.clone();
+        let mut promoted = false;
         let stream = device
             .build_input_stream::<f32, _, _>(
                 stream_config(true),
                 move |input, info| {
+                    // cpal owns the callback thread, so the first callback is the first chance.
+                    if !std::mem::replace(&mut promoted, true) {
+                        assembler
+                            .counters
+                            .record_scheduling(realtime::promote_current_thread());
+                    }
                     let timestamp = info.timestamp();
                     assembler.capture(
                         input,
