@@ -23,7 +23,7 @@ fn fill(sender: &mut PlayoutSender, first: u64, blocks: usize) {
 
 #[test]
 fn startup_requires_full_500ms_and_audio_light_are_admitted_together() {
-    let (mut playout, mut sender) = Playout::new(500).unwrap();
+    let (mut playout, mut sender) = Playout::new();
     fill(&mut sender, 0, 172);
     playout.begin_callback();
     let mut output = [9.0; CHANNELS];
@@ -41,7 +41,7 @@ fn startup_requires_full_500ms_and_audio_light_are_admitted_together() {
 
 #[test]
 fn starvation_silences_immediately_then_requires_full_rebuffer_and_republishes_light() {
-    let (mut playout, mut sender) = Playout::new(500).unwrap();
+    let (mut playout, mut sender) = Playout::new();
     fill(&mut sender, 0, 173);
     playout.begin_callback();
     let mut output = [0.0; CHANNELS];
@@ -69,7 +69,7 @@ fn starvation_silences_immediately_then_requires_full_rebuffer_and_republishes_l
 
 #[test]
 fn starvation_emits_the_final_buffered_source_frame_before_silence() {
-    let (mut playout, mut sender) = Playout::new(500).unwrap();
+    let (mut playout, mut sender) = Playout::new();
     fill(&mut sender, 0, 173);
     playout.begin_callback();
     // Remove resampling from this exact frame-conservation check.
@@ -86,7 +86,7 @@ fn starvation_emits_the_final_buffered_source_frame_before_silence() {
 
 #[test]
 fn invalid_order_gap_and_full_queue_preserve_admission_state() {
-    let (_playout, mut sender) = Playout::new(500).unwrap();
+    let (_playout, mut sender) = Playout::new();
     sender.enqueue(block(0, 1)).unwrap();
     assert_eq!(sender.enqueue(block(0, 2)), Err(EnqueueError::OutOfOrder));
     assert_eq!(sender.enqueue(block(256, 2)), Err(EnqueueError::Gap));
@@ -107,7 +107,7 @@ fn invalid_order_gap_and_full_queue_preserve_admission_state() {
 
 #[test]
 fn lighting_queue_overflow_stops_audio_before_unscheduled_state_is_played() {
-    let (mut playout, mut sender) = Playout::new(500).unwrap();
+    let (mut playout, mut sender) = Playout::new();
     for index in 0..LIGHTING_QUEUE_UPDATES {
         sender
             .lighting
@@ -131,7 +131,7 @@ fn lighting_queue_overflow_stops_audio_before_unscheduled_state_is_played() {
 #[test]
 fn independent_hardware_clock_drift_remains_bounded_without_drops_or_rebuffers() {
     for ppm in [-500.0, 500.0] {
-        let (mut playout, mut sender) = Playout::new(500).unwrap();
+        let (mut playout, mut sender) = Playout::new();
         fill(&mut sender, 0, 173);
         let mut next_position = 173 * BLOCK_FRAMES as u64;
         let mut generated = 0.0;

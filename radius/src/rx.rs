@@ -1,8 +1,8 @@
 use crate::{
-    audio::{AudibleClock, AudibleSnapshot, AudioBlock, PlaybackBlock, PlaybackStream},
+    audio::{AudibleClock, AudibleSnapshot, AudioBlock, PlaybackStream},
     config::{RxConfig, pin_worker},
     enttec::EnttecOutput,
-    playout::LightingUpdate,
+    playout::{LightingUpdate, PlaybackBlock},
     protocol::{self, Message, wire},
     transport::Connection,
 };
@@ -366,10 +366,7 @@ fn run_connected(
         "Login outputs differ from receiver deployment settings"
     );
     let mut playback = if login.audio_enabled {
-        Some(PlaybackStream::start(
-            &config.audio_device_id,
-            login.jitter_buffer_ms,
-        )?)
+        Some(PlaybackStream::start(&config.audio_device_id)?)
     } else {
         None
     };
@@ -567,7 +564,6 @@ mod tests {
             audio_frame_position: 100,
             position_valid: true,
             callback_age: Some(Duration::ZERO),
-            device_latency_frames: 0,
         };
         assert_eq!(
             lighting.frame(&audible, &updates),

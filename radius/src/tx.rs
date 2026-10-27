@@ -509,8 +509,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             if let Some(line) = media.end_burst(&connection) {
                 reporter.log(line);
             }
-        } else {
-            timeline.state_at(Instant::now());
         }
         if last_metrics.elapsed() >= protocol::METRICS_INTERVAL {
             let mut tx = wire::TxMetrics {
