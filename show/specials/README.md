@@ -27,6 +27,7 @@ form = { pulse_beats = 1 }
 [playback]
 attack_beats = 0
 release_beats = 4
+cooldown_seconds = 90
 ```
 
 Selection (top level):
@@ -54,6 +55,11 @@ Selection (top level):
 
 - `attack_beats`, `release_beats`: ease-in when it starts and ease-out when Autolux clears or
   replaces it. Autolux never cuts a special; Starfire runs the release.
+- `cooldown_seconds` (optional): how long the row's group rests after this row fires. While a
+  group rests, no row targeting it is selectable, whichever row fired: the cooldown belongs to
+  the fixtures, so a group counts as one FX however many recipes it has. It runs on top of the
+  shared intense cooldown below. Absent means 0, the group is free at once. It stays in Autolux
+  and never goes on the wire.
 
 On the wire these are `colour_slot`, `speed`, `energy`, `pulse_beats`, `pattern`,
 `attack_beats` and `release_beats`; `FILE_FIELDS` in `autolux/lighting/special_catalogue.py`
@@ -83,13 +89,24 @@ are free.
 
 When an intent starts, Autolux picks among that intent's specials that the rig can play:
 the group must be reported by Starfire at login with fixtures in it, and able to express every
-axis the special sets (colour, speed when above 0, pulse, pattern; energy always). Within those
+axis the special sets (colour, speed when above 0, pulse, pattern; energy always), and not
+resting after its last special. Within those
 it plays each one before repeating any, then favours the least recently used, seeded like the
 loops; strobe rows are not candidates and join whichever special is chosen. An intent with no
 playable special releases the one running.
 
-`breakdown` has none on purpose: the room falls back to the loop alone, and the next buildup's
-rise reads against that.
+The room is a living room, so the `fx` group plays two tiers and stays dark through buildup:
+
+- Textures (`drift`, `cold_drift`) on `atmospheric` and `breakdown`: low size and rate, no
+  pulse, an 8-bar attack and 16-bar release, and a 240 s cooldown, so after a texture blooms in
+  and fades out `fx` plays nothing, texture or accent, for four minutes; a drop in that window
+  still gets its strobe burst. They are calm, so they never use the drop
+  strobe cooldown.
+- Drop accents (`spin`, `cold_spin`): intense, so they share the drop strobe cooldown, and each
+  rests `fx` for 90 s. An entry with no playable row releases the running special;
+  a drop accent replaces a running texture, and Starfire runs the texture's release. A soft
+  drop, one whose arrival is known and below 0.9 of the track peak (the autoloop policy's
+  grading), keeps its strobe burst but plays no intense special.
 
 ## Adding a special
 

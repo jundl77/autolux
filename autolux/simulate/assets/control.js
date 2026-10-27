@@ -208,5 +208,48 @@
         return shown;
     }
 
-    window.autoluxControl = {build, send, dispatch, sendLatest, hold, view, fxAxes, operatorActs};
+    // Mirrors _cooldown_bar: a bar elapsedSeconds after the poll that reported remaining.
+    function cooldownView(total, remaining, elapsedSeconds) {
+        const left = Math.max(0, remaining - elapsedSeconds);
+        const ready = left <= 0;
+        const filled = ready || total <= 0 ? 1 : Math.max(0, 1 - left / total);
+        return {
+            fill: (filled * 100).toFixed(1) + '%',
+            caption: ready ? 'ready' : Math.ceil(left) + ' s',
+            ready: ready,
+        };
+    }
+
+    // Ticks the FX Effects bars down between polls. Dash may reuse a bar's element for
+    // another entry, so a poll is spotted by its data attributes changing, not by the node.
+    function tickCooldowns() {
+        const now = performance.now();
+        document.querySelectorAll('.cooldown-row').forEach((row) => {
+            const key = row.dataset.total + '|' + row.dataset.remaining;
+            if (row.autoluxPolled !== key) {
+                row.autoluxPolled = key;
+                row.autoluxPolledAt = now;
+            }
+            const shown = cooldownView(Number(row.dataset.total), Number(row.dataset.remaining),
+                (now - row.autoluxPolledAt) / 1000);
+            const fill = row.querySelector('.cooldown-fill');
+            const caption = row.querySelector('.cooldown-caption');
+            if (fill) {
+                fill.style.width = shown.fill;
+            }
+            // Edit React's own text node so its next render still lands in the page.
+            if (caption && caption.firstChild) {
+                caption.firstChild.nodeValue = shown.caption;
+            }
+            row.classList.toggle('ready', shown.ready);
+        });
+    }
+
+    if (typeof document !== 'undefined') {
+        setInterval(tickCooldowns, 100);
+    }
+
+    window.autoluxControl = {
+        build, send, dispatch, sendLatest, hold, view, fxAxes, operatorActs, cooldownView,
+    };
 })();
