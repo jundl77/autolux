@@ -149,6 +149,66 @@ def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
     assert mvr._without_keys(mvr.draft(mvr.read(saved))) == mvr._without_keys(first)
 
 
+def room_layers(move: dict[str, str] | None = None, rename: dict[str, str] | None = None):
+    """The room scene with fixtures moved between layers and layers renamed."""
+    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    layers = {layer.get('name'): layer for layer in scene.root.iter('Layer')}
+    for name, target in (move or {}).items():
+        fixture = next(node for node in scene.root.iter('Fixture') if node.get('name') == name)
+        source = next(layer for layer in layers.values() if fixture in layer.find('ChildList'))
+        source.find('ChildList').remove(fixture)
+        layers[target].find('ChildList').append(fixture)
+    for old, new in (rename or {}).items():
+        layers[old].set('name', new)
+    return mvr.read(mvr.write(scene))
+
+
+def test_room_groups_take_their_role_from_the_mvr_layer_and_round_trip():
+    scene = room_layers()
+    assert [layer.get('name') for layer in scene.root.iter('Layer')] == ['loop', 'accent']
+    roles, errors, warnings = mvr.group_roles(mvr.patched_fixtures(scene))
+    assert (roles, errors, warnings) == (
+        {'movers': 'loop', 'wash': 'loop', 'strip': 'loop', 'fx': 'accent'},
+        [],
+        [],
+    )
+    groups = {group.group_id: group.role for group in rig_definition(ROOT / 'rig/room.mvr').groups}
+    assert groups == {'movers': 0, 'wash': 0, 'strip': 0, 'fx': 1}
+    content = mvr.write(scene)
+    assert mvr.write(mvr.read(content)) == content == (ROOT / 'rig/room.mvr').read_bytes()
+
+
+def test_a_class_split_across_layers_is_refused():
+    scene = room_layers(move={'wash_left': 'accent'})
+    with pytest.raises(ValueError, match='Group wash spans the layers accent, loop'):
+        require_renderable(scene)
+
+
+def test_a_group_outside_the_role_layers_defaults_to_loop_with_a_warning():
+    roles, errors, warnings = mvr.group_roles(
+        mvr.patched_fixtures(room_layers(rename={'accent': 'Room'}))
+    )
+    assert roles['fx'] == 'loop' and errors == []
+    assert warnings == ["Group fx sits in layer 'Room', not loop or accent; treating it as loop."]
+
+
+def test_a_new_fixture_joins_the_layer_of_its_class():
+    scene = room_layers()
+    mvr.add_fixture(
+        scene,
+        name='kinta_2',
+        gdtf_spec='Chauvet DJ@Mini Kinta IRC@1.0.gdtf',
+        gdtf_mode='4ch',
+        universe=0,
+        address=200,
+        fixture_id=9,
+        fixture_class='fx',
+    )
+    fixtures = mvr.patched_fixtures(scene)
+    assert {f['name']: f['layer'] for f in fixtures}['kinta_2'] == 'accent'
+    assert mvr.group_roles(fixtures)[0]['fx'] == 'accent'
+
+
 def test_third_party_sample_round_trips_every_node_and_resource():
     scene = mvr.read(sample_archive())
     assert validate(scene) == []

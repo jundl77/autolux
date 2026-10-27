@@ -4,6 +4,7 @@ from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.special_policy import DROP_STROBE, INTENSE_SPEED
 from autolux.lighting.special_catalogue import (
     SPECIAL_DIRECTORY,
+    VENUE_FILE,
     SpecialError,
     discover_specials,
     parse_special,
@@ -52,13 +53,14 @@ def row(**sections) -> dict:
 
 def test_the_shipped_specials_parse_and_skip_buildups():
     specials = discover_specials()
-    assert {path.stem for path in SPECIAL_DIRECTORY.glob('*.toml')} == {s.name for s in specials}
+    files = {path.stem for path in SPECIAL_DIRECTORY.glob('*.toml') if path.name != VENUE_FILE}
+    assert files == {s.name for s in specials}
     served = {intent for special in specials for intent in special.intents}
     assert served == {LightIntent.ATMOSPHERIC, LightIntent.BREAKDOWN, LightIntent.DROP}
 
 
 def test_the_shipped_fx_rows_are_quiet_textures_or_cooled_drop_accents():
-    rows = {s.name: s for s in discover_specials() if s.group == 'fx'}
+    rows = {s.name: s for s in discover_specials() if s.role == 'accent'}
     for name in ('drift', 'cold_drift'):
         texture = rows[name]
         assert not texture.intense and texture.energy <= 0.3, name
@@ -141,6 +143,20 @@ def test_intense_is_derived_from_pulse_or_speed(speed, pulse, intense):
 def test_invalid_rows_name_the_field_and_the_rule(change, message):
     with pytest.raises(SpecialError, match=message.replace('(', r'\(').replace('.', r'\.')):
         parse_special(row(**change), 'glow')
+
+
+def test_a_row_selects_by_role_instead_of_naming_a_group():
+    groupless = {key: value for key, value in ROW.items() if key != 'group'}
+    special = parse_special(groupless | {'role': 'accent'}, 'glow')
+    assert (special.group, special.role) == ('', 'accent')
+    assert parse_special(ROW, 'glow').role is None
+    for document, message in [
+        (ROW | {'role': 'accent'}, 'give exactly one of group, role'),
+        (groupless, 'give exactly one of group, role'),
+        (groupless | {'role': 'laser'}, "role 'laser' is not one of loop, accent"),
+    ]:
+        with pytest.raises(SpecialError, match=message):
+            parse_special(document, 'glow')
 
 
 def test_a_missing_field_is_named_by_its_file_path():

@@ -147,6 +147,7 @@ pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
 pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
     groups: BTreeMap<String, Vec<String>>,
+    accent_groups: BTreeSet<String>,
     profiles: BTreeMap<String, Vec<GdtfCell>>,
     cells: BTreeMap<String, (usize, usize)>,
 }
@@ -188,6 +189,12 @@ impl FixtureRig {
             })
             .collect::<Result<_>>()?;
         let mut groups = BTreeMap::new();
+        let accent_groups = rig
+            .groups
+            .iter()
+            .filter(|group| group.role() == wire::GroupRole::Accent)
+            .map(|group| group.group_id.clone())
+            .collect();
         for group in &rig.groups {
             ensure!(
                 groups
@@ -212,7 +219,10 @@ impl FixtureRig {
                 profile.profile_id
             );
         }
-        Self::from_parts(fixtures, groups, profiles)
+        Ok(Self {
+            accent_groups,
+            ..Self::from_parts(fixtures, groups, profiles)?
+        })
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -348,6 +358,7 @@ impl FixtureRig {
         Ok(Self {
             fixtures,
             groups: cell_groups,
+            accent_groups: BTreeSet::new(),
             profiles,
             cells,
         })
@@ -377,6 +388,11 @@ impl FixtureRig {
 
     pub fn groups(&self) -> &BTreeMap<String, Vec<String>> {
         &self.groups
+    }
+
+    /// Groups whose MVR Layer is `accent`: they play specials only, never autoloops.
+    pub fn is_accent(&self, group: &str) -> bool {
+        self.accent_groups.contains(group)
     }
 
     pub fn validate_attributes(

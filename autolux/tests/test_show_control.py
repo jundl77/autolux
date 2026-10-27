@@ -902,17 +902,19 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
 def test_the_config_rig_area_lists_each_groups_fx_capabilities():
     from autolux.simulate.visualizer_app import special_groups_view
 
-    line = special_groups_view({'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']})
+    line = special_groups_view(
+        {'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']}, {'fx': 'accent'}
+    )
     assert [getattr(part, 'children', part) for part in line] == [
         'FX',
         '  ',
         'fx',
         ' ',
-        'colour · pulse · speed',
+        'accent · colour · pulse · speed',
         '  ',
         'wash',
         ' ',
-        'colour',
+        'loop · colour',
     ]
     assert special_groups_view({}) == ['FX: Starfire reported no groups']
 

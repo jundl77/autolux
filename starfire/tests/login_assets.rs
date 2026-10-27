@@ -29,6 +29,7 @@ fn rig() -> wire::RigDefinition {
             .map(|(group, id)| wire::FixtureGroup {
                 group_id: group.into(),
                 fixture_ids: vec![id.into()],
+                ..Default::default()
             })
             .collect(),
         profiles: vec![profile("generic_rgb")],

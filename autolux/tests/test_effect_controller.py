@@ -411,6 +411,7 @@ FX_GROUP = {
     'speed': True,
     'pulse': True,
     'pattern': False,
+    'role': 'accent',
 }
 SPIN = Special(
     'spin',
@@ -849,7 +850,7 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
         return {row['group']: row for row in buffer.snapshot()['special_cooldowns']}
 
     before = cooldowns()
-    assert set(before) == {'fx', 'all'}
+    assert set(before) == {'fx', 'all', 'venue'}
     assert before['fx']['last'] is None
     assert all(row['ready'] and row['remaining_seconds'] == 0.0 for row in before.values())
     await controller.change_effect(LightIntent.DROP)
@@ -860,6 +861,7 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     # Spin sets no cooldown of its own, so fx is free at once; the strobe waits out the shared one.
     assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
     assert first['all']['last'] == 'strobe_burst'
+    assert first['venue']['label'] == 'venue · accents 1/2'
     assert first['all']['cooldown_seconds'] == pytest.approx(60.0)
     assert first['all']['remaining_seconds'] == pytest.approx(50.0)
     assert later['all']['remaining_seconds'] == pytest.approx(20.0)

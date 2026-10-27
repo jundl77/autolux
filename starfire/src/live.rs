@@ -181,6 +181,7 @@ impl LiveSession {
             reply.encoded_len()
         );
         let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
+        catalog.require_no_accent_groups(&rig)?;
         if let Some(warning) = missing_groups_warning(&catalog.groups_missing_from(&rig)) {
             eprintln!("starfire: warning: {warning}");
         }

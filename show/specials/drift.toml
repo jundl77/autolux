@@ -1,6 +1,6 @@
 name = "drift"
 intents = ["atmospheric", "breakdown"]
-group = "fx"
+role = "accent"
 
 [preset]
 colour = "secondary"

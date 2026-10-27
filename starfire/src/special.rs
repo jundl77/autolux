@@ -212,6 +212,11 @@ pub fn capabilities(rig: &FixtureRig) -> Vec<wire::GroupCapability> {
                 speed: any(CellMap::speed),
                 pulse: any(CellMap::pulse),
                 pattern: any(CellMap::pattern),
+                role: if rig.is_accent(name) {
+                    wire::GroupRole::Accent
+                } else {
+                    wire::GroupRole::Loop
+                } as i32,
             }
         })
         .collect()

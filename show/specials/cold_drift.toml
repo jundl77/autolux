@@ -1,6 +1,6 @@
 name = "cold_drift"
 intents = ["atmospheric", "breakdown"]
-group = "fx"
+role = "accent"
 
 [preset]
 colour = "cold"

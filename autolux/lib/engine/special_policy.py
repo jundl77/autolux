@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import dataclasses
 import random
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import WHOLE_RIG
 from autolux.lib.engine.effect_definitions import STROBE_RATE_HZ, LightIntent
+from autolux.lighting.mvr_schema import ACCENT_ROLE, LOOP_ROLE
 
 INTENSE_SPEED = 0.6
+ACCENT_WINDOW_SECONDS = 60.0
+VENUE_GROUP = 'venue'
 AXES = ('colour', 'speed', 'pulse', 'pattern')
 
 
@@ -15,7 +19,10 @@ AXES = ('colour', 'speed', 'pulse', 'pattern')
 class Special:
     name: str
     intents: tuple[LightIntent, ...]
-    group: str
+    # The group it plays on; a role row leaves it empty and plays on each capable group of
+    # its role, so a new fixture group inherits the rows its layer and profiles allow.
+    group: str = ''
+    role: str | None = None
     colour_slot: str | None = None
     energy: float = 0.0
     speed: float = 0.0
@@ -61,22 +68,40 @@ class Special:
 @dataclass(frozen=True)
 class SpecialCapabilities:
     groups: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    roles: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_groups(cls, groups: Iterable[Mapping]) -> SpecialCapabilities:
+        populated = [
+            group for group in groups if group.get('name') and (group.get('cell_count') or 0) > 0
+        ]
         return cls(
             {
                 group['name']: frozenset(axis for axis in AXES if group.get(axis))
-                for group in groups
-                if group.get('name') and (group.get('cell_count') or 0) > 0
-            }
+                for group in populated
+            },
+            {group['name']: group.get('role') or LOOP_ROLE for group in populated},
         )
+
+    def role(self, group: str) -> str:
+        return self.roles.get(group, LOOP_ROLE)
 
     def allows(self, special: Special) -> bool:
         if special.group == WHOLE_RIG:
             return True
         axes = self.groups.get(special.group)
         return axes is not None and special.axes <= axes
+
+    def targets(self, special: Special) -> list[Special]:
+        """The row on each group it can play on: its own group, or every capable one of its role."""
+        if special.role is None:
+            return [special] if self.allows(special) else []
+        placed = (
+            dataclasses.replace(special, group=group)
+            for group in sorted(self.groups)
+            if self.role(group) == special.role
+        )
+        return [row for row in placed if self.allows(row)]
 
 
 @dataclass(frozen=True)
@@ -90,16 +115,27 @@ class SpecialChoice:
         return bool(self.strobes) or (self.special is not None and self.special.intense)
 
 
+@dataclass(frozen=True)
+class Venue:
+    """Room-wide limits on top of each group's own rest."""
+
+    # Specials fired on accent groups in any 60 s, whichever groups; strobe rows do not count.
+    # At least 1; remove the accent rows to keep the accents dark.
+    max_accent_events_per_minute: int = 2
+
+
 DROP_STROBE = Special('strobe_burst', (LightIntent.DROP,), WHOLE_RIG, strobe_hz=STROBE_RATE_HZ)
 DEFAULT_SPECIALS = (DROP_STROBE,)
 
 
 class SpecialPolicy:
-    def __init__(self, specials: Sequence[Special], rng: random.Random):
+    def __init__(self, specials: Sequence[Special], rng: random.Random, venue: Venue | None = None):
         self._specials = tuple(specials)
         self._rng = rng
+        self._venue = venue or Venue()
+        self._accent_fired: list[float] = []  # when each accent special fired, oldest first
         self._selections = 0
-        self._last_used: dict[str, int] = {}
+        self._last_used: dict[tuple[str, str], int] = {}
         # group -> the row that last fired there and when; the group rests that row's cooldown.
         self._group_fired: dict[str, tuple[Special, float]] = {}
 
@@ -113,15 +149,19 @@ class SpecialPolicy:
         now: float = 0.0,
     ) -> SpecialChoice:
         rows = [
-            special
+            row
             for special in self._specials
-            if intent in special.intents and capabilities.allows(special)
+            if intent in special.intents
+            for row in capabilities.targets(special)
         ]
         strobes = tuple(special for special in rows if special.strobe_hz is not None)
+        crowded = self._accents_within(now) >= self._venue.max_accent_events_per_minute
         selectable = [
             special
             for special in rows
-            if special.strobe_hz is None and not self._cooling(special, now)
+            if special.strobe_hz is None
+            and not self._cooling(special, now)
+            and not (crowded and capabilities.role(special.group) == ACCENT_ROLE)
         ]
         calm = [special for special in selectable if not special.intense]
         if intense_blocked:
@@ -136,15 +176,41 @@ class SpecialPolicy:
         chosen = self._least_recent(selectable) if selectable else None
         return SpecialChoice(chosen, strobes)
 
-    def record(self, special: Special, now: float = 0.0) -> None:
+    def record(
+        self,
+        special: Special,
+        now: float = 0.0,
+        capabilities: SpecialCapabilities | None = None,
+    ) -> None:
         self._selections += 1
-        self._last_used[special.name] = self._selections
+        self._last_used[special.name, special.group] = self._selections
         self._group_fired[special.group] = (special, now)
+        if capabilities is not None and capabilities.role(special.group) == ACCENT_ROLE:
+            self._accent_fired = [*self._recent_accents(now), now]
 
-    def cooldowns(self, now: float, intense_total: float, intense_remaining: float) -> list[dict]:
+    def _recent_accents(self, now: float) -> list[float]:
+        fired = list(self._accent_fired)  # replaced, never mutated, so the snapshot reads safely
+        return [at for at in fired if now - at < ACCENT_WINDOW_SECONDS]
+
+    def _accents_within(self, now: float) -> int:
+        return len(self._recent_accents(now))
+
+    def cooldowns(
+        self,
+        now: float,
+        intense_total: float,
+        intense_remaining: float,
+        capabilities: SpecialCapabilities | None = None,
+    ) -> list[dict]:
         """One entry per group with special rows, plus each strobe row on the shared intense one."""
         fired = dict(self._group_fired)  # read from the snapshot thread while the engine records
-        groups = dict.fromkeys(s.group for s in self._specials if s.strobe_hz is None)
+        capabilities = capabilities or SpecialCapabilities()
+        groups = dict.fromkeys(
+            row.group
+            for special in self._specials
+            if special.strobe_hz is None
+            for row in (capabilities.targets(special) if special.role else [special])
+        )
         entries = []
         for group in groups:
             last, at = fired.get(group, (None, now))
@@ -152,17 +218,29 @@ class SpecialPolicy:
             entries.append(_entry(group, last and last.name, total, total - (now - at)))
         for strobe in (s for s in self._specials if s.strobe_hz is not None):
             entries.append(_entry(strobe.group, strobe.name, intense_total, intense_remaining))
+        if ACCENT_ROLE in capabilities.roles.values():
+            entries.append(self._venue_entry(now))
         return entries
+
+    def _venue_entry(self, now: float) -> dict:
+        """The accent density cap as one more bar: full while under the cap, else draining
+        until the oldest accent in the window leaves it."""
+        recent, cap = self._recent_accents(now), self._venue.max_accent_events_per_minute
+        remaining = ACCENT_WINDOW_SECONDS - (now - recent[-cap]) if len(recent) >= cap else 0.0
+        return {
+            **_entry(VENUE_GROUP, None, ACCENT_WINDOW_SECONDS, remaining),
+            'label': f'{VENUE_GROUP} · accents {len(recent)}/{cap}',
+        }
 
     def _cooling(self, special: Special, now: float) -> bool:
         last = self._group_fired.get(special.group)
         return last is not None and now - last[1] < last[0].cooldown_seconds
 
     def _least_recent(self, pool: list[Special]) -> Special:
-        unused = [special for special in pool if special.name not in self._last_used]
+        unused = [s for s in pool if (s.name, s.group) not in self._last_used]
         if unused:
             return self._rng.choice(unused)
-        weights = [self._selections + 1 - self._last_used[special.name] for special in pool]
+        weights = [self._selections + 1 - self._last_used[s.name, s.group] for s in pool]
         return self._rng.choices(pool, weights)[0]
 
 

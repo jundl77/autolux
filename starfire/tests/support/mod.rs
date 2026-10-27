@@ -143,6 +143,7 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
                     .iter()
                     .map(|member| member.as_str().unwrap().into())
                     .collect(),
+                ..Default::default()
             });
         }
     }

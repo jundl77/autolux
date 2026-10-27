@@ -1,6 +1,6 @@
 name = "cold_spin"
 intents = ["drop"]
-group = "fx"
+role = "accent"
 
 [preset]
 colour = "cold"

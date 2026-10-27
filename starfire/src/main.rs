@@ -96,6 +96,7 @@ fn run(arguments: Arguments) -> Result<()> {
             let palettes = PaletteTable::load(&palettes)?;
             let rig = FixtureRig::load(&rig)?;
             let catalog = AutoloopCatalog::load(&autoloops)?;
+            catalog.require_no_accent_groups(&rig)?;
             let missing_groups = catalog.groups_missing_from(&rig);
             if let Some(warning) = missing_groups_warning(&missing_groups) {
                 eprintln!("starfire: warning: {warning}");
