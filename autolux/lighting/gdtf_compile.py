@@ -115,6 +115,8 @@ def _channels(fixture, mode, element):
         raise ValueError('GDTF DMX channels could not be read')
     result = []
     for channel, node in zip(mode._dmx_channels, nodes, strict=True):
+        if _virtual(node):
+            continue
         if channel.geometry in referenced:
             for reference, path in instances:
                 if reference.geometry == channel.geometry:
@@ -133,10 +135,22 @@ def _dmx_break(node) -> int:
     return 1
 
 
+def _virtual(node) -> bool:
+    return node.get('Offset', 'None') in ('None', '')
+
+
+def _channel_name(node, geometry: str) -> str:
+    logical = node.find('LogicalChannel')
+    return f'{geometry}_{logical.get("Attribute", "") if logical is not None else ""}'
+
+
+def _function_name(node, index: int) -> str:
+    """GDTF names an unnamed function after its attribute and one-based position."""
+    return node.get('Name') or f'{_attribute(node)} {index + 1}'
+
+
 def _offsets(node) -> list[int]:
     text = node.get('Offset', 'None')
-    if text in ('None', ''):
-        raise ValueError('GDTF virtual channels are not supported')
     try:
         offsets = [int(value) for value in text.split(',')]
     except ValueError as error:
@@ -148,6 +162,32 @@ def _offsets(node) -> list[int]:
     return offsets
 
 
+def _dmx_profile(fixture, name: str) -> list[rig_wire.DmxProfilePoint]:
+    profile = next((entry for entry in fixture.dmx_profiles if entry.name == name), None)
+    if profile is None or not profile.points:
+        raise ValueError(f'GDTF DMX profile {name} is missing or has no points')
+    return [
+        rig_wire.DmxProfilePoint(
+            dmx_percentage=point.dmx_percentage,
+            cfc0=point.cfc0,
+            cfc1=point.cfc1,
+            cfc2=point.cfc2,
+            cfc3=point.cfc3,
+        )
+        for point in profile.points
+    ]
+
+
+def _label(set_node) -> bool:
+    """A set without its own physical range or wheel slot only names part of a continuous
+    function (GDTF Builder's "min"/"max"); encoding through the function is identical."""
+    return (
+        set_node.get('PhysicalFrom') is None
+        and set_node.get('PhysicalTo') is None
+        and int(set_node.get('WheelSlotIndex', '0')) <= 0
+    )
+
+
 def _attribute(node) -> str:
     attribute = node.get('Attribute', NO_FEATURE)
     if '.' in attribute:
@@ -157,7 +197,8 @@ def _attribute(node) -> str:
 
 def _wheel_colour(fixture, wheels, function, set_node) -> rig_wire.CieColor | None:
     index = int(set_node.get('WheelSlotIndex', '0'))
-    if index <= 0:
+    if index <= 0 or not str(function.wheel or '') or str(function.wheel) == 'None':
+        # A slot index means nothing on a function without a wheel.
         return None
     wheel = next((w for w in fixture.wheels if w.name == str(function.wheel)), None)
     if wheel is None or wheel.name not in wheels:
@@ -183,7 +224,7 @@ def _functions(fixture, wheels, attributes, entry, names, width, entries):
     logical_nodes = node.findall('LogicalChannel')
     if not logical_nodes:
         raise ValueError('GDTF channel contains no functions')
-    channel_name = f'{geometry}_{logical_nodes[0].get("Attribute", "")}'
+    channel_name = _channel_name(node, geometry)
     functions = []
     for logical, logical_node in zip(channel.logical_channels, logical_nodes, strict=True):
         if '.' in logical_node.get('Attribute', ''):
@@ -196,8 +237,8 @@ def _functions(fixture, wheels, attributes, entry, names, width, entries):
         for index, (function, function_node) in enumerate(
             zip(logical.channel_functions, function_nodes, strict=True)
         ):
-            if function_node.get('DMXProfile') or function_node.find('SubChannelSet') is not None:
-                raise ValueError('GDTF DMX profiles and sub-channel sets are unsupported')
+            if function_node.find('SubChannelSet') is not None:
+                raise ValueError('GDTF sub-channel sets are unsupported')
             physical_from = float(function_node.get('PhysicalFrom', '0'))
             physical_to = float(function_node.get('PhysicalTo', '1'))
             if not _finite(physical_from, physical_to):
@@ -206,7 +247,7 @@ def _functions(fixture, wheels, attributes, entry, names, width, entries):
             if attribute != NO_FEATURE and attribute not in attributes:
                 raise ValueError(f'missing GDTF attribute definition {attribute}')
             first = DmxValue.parse(function_node.get('DMXFrom')).widened(width)
-            name = function_node.get('Name') or f'{attribute}{index + 1}'
+            name = _function_name(function_node, index)
             compiled = rig_wire.ChannelFunction(
                 path=f'{channel_name}.{logical_node.get("Attribute", "")}.{name}',
                 attribute=attribute,
@@ -216,11 +257,14 @@ def _functions(fixture, wheels, attributes, entry, names, width, entries):
                 physical_to=physical_to,
                 snap=logical_node.get('Snap', 'No') in SNAP_ON,
             )
-            if (master := function_node.get('ModeMaster')) is not None:
+            if profile := function_node.get('DMXProfile'):
+                compiled.dmx_profile.extend(_dmx_profile(fixture, profile))
+            if master := function_node.get('ModeMaster'):
                 compiled.mode_master.CopyFrom(_mode_master(master, function_node, names, entries))
             sets = sorted(
                 (DmxValue.parse(set_node.get('DMXFrom')).widened(width), position, set_node)
                 for position, set_node in enumerate(function_node.findall('ChannelSet'))
+                if not _label(set_node)
             )
             for position, (set_first, _, set_node) in enumerate(sets):
                 if position + 1 < len(sets):
@@ -246,8 +290,8 @@ def _functions(fixture, wheels, attributes, entry, names, width, entries):
                     entry_set.wheel_slot_colour.CopyFrom(colour)
             functions.append(compiled)
     paths = [function.path for function in functions]
-    if len(paths) != len(set(paths)):
-        raise ValueError('duplicate GDTF channel-function path')
+    if duplicates := sorted({path for path in paths if paths.count(path) > 1}):
+        raise ValueError(f'duplicate GDTF channel-function path {duplicates[0]}')
     return functions
 
 
@@ -255,7 +299,7 @@ def _mode_master(link: str, function_node, names, entries) -> rig_wire.ModeMaste
     parts = link.split('.')
     master = names.get(parts[0])
     if master is None:
-        raise ValueError('GDTF ModeMaster references a missing channel/function')
+        raise ValueError(f'GDTF ModeMaster {link} references a missing or virtual channel')
     _, node, _, _, _ = entries[master]
     function = None
     if len(parts) > 1:
@@ -263,16 +307,16 @@ def _mode_master(link: str, function_node, names, entries) -> rig_wire.ModeMaste
             raise ValueError('GDTF ModeMaster references a missing channel/function')
         position = 0
         for logical in node.findall('LogicalChannel'):
-            for candidate in logical.findall('ChannelFunction'):
-                if logical.get('Attribute') == parts[1] and candidate.get('Name') == parts[2]:
+            for index, candidate in enumerate(logical.findall('ChannelFunction')):
+                if (
+                    logical.get('Attribute') == parts[1]
+                    and _function_name(candidate, index) == parts[2]
+                ):
                     function = position if function is None else function
                 position += 1
         if function is None:
-            raise ValueError('GDTF ModeMaster references a missing channel/function')
-    offsets = node.get('Offset', 'None')
-    if offsets in ('None', ''):
-        raise ValueError('virtual ModeMaster is unsupported')
-    width = len(offsets.split(','))
+            raise ValueError(f'GDTF ModeMaster {link} references a missing channel function')
+    width = len(_offsets(node))
     first = DmxValue.parse(function_node.get('ModeFrom', '0/1')).widened(width)
     last = DmxValue.parse(function_node.get('ModeTo', '0/1')).widened(width)
     if first > last:
@@ -287,6 +331,9 @@ def _initial_default(node, channel_name: str, width: int) -> int:
     logical_nodes = node.findall('LogicalChannel')
     initial = node.get('InitialFunction')
     if initial is None:
+        if node.get('Default') is not None:
+            # GDTF 1.0 put the default on the channel; 1.1 moved it to the initial function.
+            return DmxValue.parse(node.get('Default')).widened(width)
         functions = logical_nodes[0].findall('ChannelFunction') if logical_nodes else []
         if not functions:
             raise ValueError('GDTF initial function is missing')
@@ -296,10 +343,32 @@ def _initial_default(node, channel_name: str, width: int) -> int:
         raise ValueError('GDTF initial function is missing')
     for logical in logical_nodes:
         if logical.get('Attribute') == parts[1]:
-            for function in logical.findall('ChannelFunction'):
-                if function.get('Name') == parts[2]:
+            for index, function in enumerate(logical.findall('ChannelFunction')):
+                if _function_name(function, index) == parts[2]:
                     return DmxValue.parse(function.get('Default')).widened(width)
     raise ValueError('GDTF initial function is missing')
+
+
+def _require_continuous_brightness(function, function_count: int) -> None:
+    """Brightness must stay a plain zero-based range so blackout and master always darken."""
+    problem = (
+        'shares its channel with other functions'
+        if function_count != 1
+        else 'has channel sets'
+        if function.sets
+        else 'depends on a ModeMaster'
+        if function.HasField('mode_master')
+        else 'does not start at DMX 0'
+        if function.dmx_from != 0
+        else 'has an inverted or non-zero-based physical range'
+        if not (function.physical_from == 0.0 and function.physical_to > 0.0)
+        else None
+    )
+    if problem is not None:
+        raise ValueError(
+            f'GDTF brightness attribute {function.path} {problem}; it requires one continuous '
+            'zero-based function without ChannelSets or ModeMaster'
+        )
 
 
 def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
@@ -315,7 +384,8 @@ def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
     element = elements[mode_name]
     for node in element.findall('DMXChannels/DMXChannel'):
         _dmx_break(node)
-        _offsets(node)
+        if not _virtual(node):
+            _offsets(node)
     try:
         fixture = pygdtf.FixtureType(dsc_file=io.BytesIO(description.encode('utf-8')))
     except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
@@ -332,8 +402,7 @@ def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
         raise ValueError('GDTF mode must contain 1..512 physical channels')
     names = {}
     for index, (_, node, geometry, _, _) in enumerate(entries):
-        logical = node.find('LogicalChannel')
-        name = f'{geometry}_{logical.get("Attribute", "") if logical is not None else ""}'
+        name = _channel_name(node, geometry)
         if name in names:
             raise ValueError('duplicate GDTF channel name')
         names[name] = index
@@ -349,27 +418,13 @@ def compile_mode(description: str, mode_name: str) -> rig_wire.DmxMode:
             if offset in occupied:
                 raise ValueError('overlapping GDTF channel offsets')
             occupied.add(offset)
-        logical = node.find('LogicalChannel')
-        channel_name = f'{geometry}_{logical.get("Attribute", "") if logical is not None else ""}'
-        default = _initial_default(node, channel_name, len(offsets))
+        # InitialFunction names the template channel, also for a referenced instance.
+        template = _channel_name(node, node.get('Geometry', geometry))
+        default = _initial_default(node, template, len(offsets))
         functions = _functions(fixture, wheels, attributes, entry, names, len(offsets), entries)
         for function in functions:
-            brightness = function.attribute == 'Dimmer' or function.attribute.startswith(
-                BRIGHTNESS_PREFIXES
-            )
-            continuous = (
-                len(functions) == 1
-                and not function.sets
-                and not function.HasField('mode_master')
-                and function.dmx_from == 0
-                and function.physical_from == 0.0
-                and function.physical_to > 0.0
-            )
-            if brightness and not continuous:
-                raise ValueError(
-                    f'GDTF brightness attribute {function.path} requires one continuous '
-                    'zero-based function without ChannelSets or ModeMaster'
-                )
+            if function.attribute == 'Dimmer' or function.attribute.startswith(BRIGHTNESS_PREFIXES):
+                _require_continuous_brightness(function, len(functions))
         function_count += len(functions)
         if function_count > MAX_FUNCTIONS:
             raise ValueError('GDTF channel-function limit exceeded')

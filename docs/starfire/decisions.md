@@ -501,3 +501,19 @@ maps an unreadable address to DMX 1, so the spec text and address validity come 
 scene XML. Our writer, editor tree and schema validation stay: pymvr's writer reorders
 elements and drops nodes it does not model, which Config's byte-for-byte round trip forbids.
 A room.mvr written by pymvr reads back to the same patch and exports the same rig.
+
+2026-10-27 GDTF coverage (bounded): the compiler expands GeometryReference instances at
+their Break offsets, leaves virtual channels out (they carry no DMX; a ModeMaster on one is
+refused), takes GDTF 1.0's channel Default when there is no InitialFunction, names an
+unnamed function `Attribute n` for paths and ModeMaster links, ignores a WheelSlotIndex on a
+function without a wheel, and drops channel sets that have neither a physical range nor a
+wheel slot (GDTF Builder's min/max labels; the function's own mapping encodes the same
+DMX). DMXProfile curves are carried as points and inverted by Starfire on semantic and
+physical values; x and the output are read as 0..100 percent of the DMX and physical range
+(the spec leaves the scale implicit), and non-monotonic curves are refused. Master and
+attribute brightness still scale an explicit value on a curved channel in DMX steps. When
+several active functions on one channel can express the look, the lowest DMX range wins.
+Still refused, each with its reason (pinned per corpus mode in test_gdtf_compile.py):
+Relations, sub-channel sets, wheel Filter slots, DMX breaks other than 1, GDTF versions
+outside 1.0..1.2, duplicate function names, and brightness functions that share their
+channel, carry presets, depend on a ModeMaster or run inverted.

@@ -8,6 +8,9 @@ use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb};
 use crate::protocol::wire;
 
 const MAX_CHANNEL_BYTES: usize = 4;
+const FULL_PERCENT: f64 = 100.0;
+const CURVE_SAMPLES: u32 = 1024;
+const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
@@ -52,6 +55,91 @@ struct Function {
     snap: bool,
     sets: Vec<ChannelSet>,
     condition: Option<ModeCondition>,
+    curve: Option<DmxCurve>,
+}
+
+/// A GDTF DMXProfile: output percentage as a piecewise cubic of DMX percentage.
+#[derive(Clone, Debug, PartialEq)]
+struct DmxCurve {
+    points: Vec<wire::DmxProfilePoint>,
+}
+
+impl DmxCurve {
+    fn new(points: &[wire::DmxProfilePoint]) -> Result<Option<Self>> {
+        if points.is_empty() {
+            return Ok(None);
+        }
+        ensure!(
+            points.iter().all(|point| {
+                [
+                    point.dmx_percentage,
+                    point.cfc0,
+                    point.cfc1,
+                    point.cfc2,
+                    point.cfc3,
+                ]
+                .iter()
+                .all(|value| value.is_finite())
+            }) && points
+                .windows(2)
+                .all(|pair| pair[0].dmx_percentage < pair[1].dmx_percentage),
+            "GDTF DMX profile points must be finite and ascending"
+        );
+        let curve = Self {
+            points: points.to_vec(),
+        };
+        let samples: Vec<_> = (0..=CURVE_SAMPLES)
+            .map(|step| curve.output(FULL_PERCENT * f64::from(step) / f64::from(CURVE_SAMPLES)))
+            .collect();
+        ensure!(
+            samples
+                .windows(2)
+                .all(|pair| pair[1] >= pair[0] - CURVE_TOLERANCE),
+            "non-monotonic GDTF DMX profiles are unsupported"
+        );
+        Ok(Some(curve))
+    }
+
+    // GDTF: the point with the greatest DMXPercentage at or below x applies; none gives 0.
+    fn output(&self, percent: f64) -> f64 {
+        self.points
+            .iter()
+            .rev()
+            .find(|point| point.dmx_percentage <= percent)
+            .map_or(0.0, |point| {
+                let x = percent - point.dmx_percentage;
+                point.cfc0 + x * (point.cfc1 + x * (point.cfc2 + x * point.cfc3))
+            })
+    }
+
+    /// The DMX value in first..=last whose output is nearest `amount` of full output.
+    fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
+        let target = amount * FULL_PERCENT;
+        let percent = |value: u32| {
+            if last == first {
+                0.0
+            } else {
+                FULL_PERCENT * f64::from(value - first) / f64::from(last - first)
+            }
+        };
+        let (mut low, mut high) = (first, last);
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if self.output(percent(middle)) < target {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if low > first
+            && (target - self.output(percent(low - 1))).abs()
+                <= (self.output(percent(low)) - target).abs()
+        {
+            low - 1
+        } else {
+            low
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -436,20 +524,15 @@ impl GdtfProfile {
             active_function_ends[index] =
                 channel.active_function_ends(&values, &active_function_ends, &self.channels);
             let dimmer = channel.has_dimmer;
-            let mut requested = None;
-            for (function_index, function) in channel.functions.iter().enumerate() {
-                let Some(last) = active_function_ends[index][function_index] else {
-                    continue;
-                };
-                if let Some(value) = semantic_value(function, last, state, channel) {
-                    ensure!(
-                        requested.is_none(),
-                        "ambiguous semantic GDTF attribute on {}",
-                        function.path
-                    );
-                    requested = Some(value);
-                }
-            }
+            // Where several active functions can express the look (a colour wheel's indexed
+            // and scrolling ranges), the lowest DMX range wins.
+            let requested = channel
+                .functions_by_dmx_start
+                .iter()
+                .find_map(|&function_index| {
+                    let last = active_function_ends[index][function_index]?;
+                    semantic_value(&channel.functions[function_index], last, state, channel)
+                });
             let mut explicit = None;
             for (key, value) in &state.attributes {
                 for (function_index, function) in channel.functions.iter().enumerate() {
@@ -707,13 +790,21 @@ impl Function {
             AttributeValue::Number(value) => {
                 ensure!(value.is_finite(), "GDTF physical value must be finite");
                 if self.sets.is_empty() {
-                    physical_to_dmx(
+                    let linear = physical_to_dmx(
                         *value,
                         self.physical_from,
                         self.physical_to,
                         self.first,
                         last,
-                    )
+                    )?;
+                    Ok(match &self.curve {
+                        Some(curve) => curve.dmx(
+                            physical_amount(*value, self.physical_from, self.physical_to),
+                            self.first,
+                            last,
+                        ),
+                        None => linear,
+                    })
                 } else {
                     let candidates: Vec<_> = self
                         .sets
@@ -741,11 +832,13 @@ impl Function {
     }
 
     fn normalized(&self, value: f64, last: u32) -> Option<u32> {
-        if self.sets.is_empty() {
-            Some((f64::from(self.first) + f64::from(last - self.first) * value).round() as u32)
-        } else {
-            None
+        if !self.sets.is_empty() {
+            return None;
         }
+        Some(match &self.curve {
+            Some(curve) => curve.dmx(value, self.first, last),
+            None => (f64::from(self.first) + f64::from(last - self.first) * value).round() as u32,
+        })
     }
 }
 
@@ -924,6 +1017,7 @@ fn compile_wire_function(
         snap: function.snap,
         sets,
         condition,
+        curve: DmxCurve::new(&function.dmx_profile)?,
     })
 }
 
@@ -968,12 +1062,16 @@ fn physical_to_dmx(value: f64, from: f64, to: f64, first: u32, last: u32) -> Res
         (from.min(to)..=from.max(to)).contains(&value),
         "GDTF physical value is outside function range"
     );
-    let amount = if from == to {
+    let amount = physical_amount(value, from, to);
+    Ok((f64::from(first) + f64::from(last - first) * amount).round() as u32)
+}
+
+fn physical_amount(value: f64, from: f64, to: f64) -> f64 {
+    if from == to {
         0.0
     } else {
         (value - from) / (to - from)
-    };
-    Ok((f64::from(first) + f64::from(last - first) * amount).round() as u32)
+    }
 }
 
 fn cie_to_rgb(colour: &wire::CieColor) -> Result<Rgb> {

@@ -75,8 +75,6 @@ def _guard_description(xml: str) -> None:
         count += 1
         if count > MAX_XML_NODES or depth > MAX_XML_DEPTH:
             raise ValueError('GDTF XML exceeds its node or depth limit')
-        if node.tag == 'GeometryReference':
-            raise ValueError('GDTF geometry references are not supported by Starfire')
         if node.tag == 'DMXChannel':
             offsets = node.get('Offset', 'None')
             if offsets != 'None':
