@@ -421,7 +421,7 @@ impl LuaAutoloop {
         // MVR millimetres become metres here, at the Lua boundary only.
         let located = |rig: Rc<FixtureRig>| {
             move |value: &Value| -> mlua::Result<[f64; 3]> {
-                let (_, position) = cell_fact(value, |id| rig.spatial().position(id))?;
+                let position = cell_fact(value, |id| rig.spatial().position(id))?;
                 Ok(position.map(|mm| mm / MM_PER_METRE))
             }
         };
@@ -445,19 +445,15 @@ impl LuaAutoloop {
         api.set(
             "zone",
             lua.create_function(move |_, cell: Value| {
-                let (id, area) = cell_fact(&cell, |id| areas.spatial().area(id))?;
-                area.placement().ok_or_else(|| {
-                    mlua::Error::RuntimeError(format!("cell {id} has no stage area"))
-                })
+                // Rig load refuses an unspecified area, so every known cell has a placement.
+                cell_fact(&cell, |id| areas.spatial().area(id)?.placement())
             })?,
         )?;
         let fixtures = Rc::clone(&shared);
         api.set(
             "fixture_of",
             lua.create_function(move |_, cell: Value| {
-                let (_, fixture) =
-                    cell_fact(&cell, |id| fixtures.fixture_of(id).map(str::to_owned))?;
-                Ok(fixture)
+                cell_fact(&cell, |id| fixtures.fixture_of(id).map(str::to_owned))
             })?,
         )?;
         globals.set("sf", api)?;
@@ -582,10 +578,9 @@ fn cell_name(value: &Value) -> mlua::Result<String> {
 }
 
 /// What the rig knows about the cell Lua names, which must exist.
-fn cell_fact<T>(value: &Value, fact: impl FnOnce(&str) -> Option<T>) -> mlua::Result<(String, T)> {
+fn cell_fact<T>(value: &Value, fact: impl FnOnce(&str) -> Option<T>) -> mlua::Result<T> {
     let id = cell_name(value)?;
-    let found = fact(&id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
-    Ok((id, found))
+    fact(&id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {
