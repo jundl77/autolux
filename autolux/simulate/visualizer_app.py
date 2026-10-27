@@ -1244,6 +1244,13 @@ def _build_static_panel():
         [
             html.Div(
                 [
+                    html.Button(
+                        'Clear all',
+                        id='static-clear',
+                        title='Remove every static look and show the automatic show again',
+                        className='ghost-button',
+                        disabled=True,
+                    ),
                     *[
                         html.Button(label, id=f'static-preset-{name}')
                         for name, label in STATIC_PRESETS.items()
@@ -1256,12 +1263,6 @@ def _build_static_panel():
                         # Restoring the last chosen colour sends nothing: the callback skips initial calls.
                         persistence=True,
                         persistence_type='local',
-                    ),
-                    html.Button(
-                        'Clear all',
-                        id='static-clear',
-                        title='Remove every static look and show the automatic show again',
-                        style={'marginLeft': 'auto'},
                     ),
                 ],
                 className='control-row',
@@ -1302,6 +1303,13 @@ OVERLAY_BANNER_JS = (
         + (looks ? ' · ' + looks + (looks === 1 ? ' look' : ' looks') : '')];
 }'''
 )
+
+
+# Clear all has nothing to remove once the show is back on auto.
+CLEAR_GATE_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    return !(state && state.mode === 'static');
+}'''
 
 
 def _build_overlay_banner():
@@ -1525,6 +1533,11 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         OVERLAY_BANNER_JS,
         Output('static-banner', 'style'),
         Output('static-banner-text', 'children'),
+        Input('control-state', 'data'),
+    )
+    app.clientside_callback(
+        CLEAR_GATE_JS,
+        Output('static-clear', 'disabled'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(

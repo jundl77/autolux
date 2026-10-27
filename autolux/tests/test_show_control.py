@@ -1100,6 +1100,26 @@ def test_loading_the_page_and_its_first_poll_command_nothing():
     assert 'static-status.children' not in app.callback_map
 
 
+def test_clear_all_leads_the_static_action_row_in_the_quiet_style():
+    app = build_app(_Recorder())
+    row = app.layout['static-control'].children[0]
+    clear = row.children[0]
+    assert (clear.id, clear.className, clear.disabled) == ('static-clear', 'ghost-button', True)
+    assert 'static-clear.disabled' in app.callback_map
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_clear_all_is_dimmed_while_the_overlay_holds_nothing():
+    from autolux.simulate.visualizer_app import CLEAR_GATE_JS
+
+    rendered = _run_control_js(
+        f'const gate = {CLEAR_GATE_JS};\n'
+        "const states = [{mode: 'static'}, {mode: 'auto'}, null];\n"
+        'console.log(JSON.stringify(states.map((state) => gate(state))));'
+    )
+    assert rendered == [False, True, True]
+
+
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_the_banner_counts_operator_looks_not_the_dark_under_the_blacklight():
     from autolux.simulate.visualizer_app import OVERLAY_BANNER_JS
