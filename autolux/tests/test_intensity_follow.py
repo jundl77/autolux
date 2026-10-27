@@ -128,3 +128,26 @@ async def test_an_auto_level_reaches_the_specials_gate_through_the_shared_settin
 
     light.on_auto_intensity(INTENSITY_CALM, 'drive -0.52')
     assert 'at or below' in controller._intense_blocked(control.settings, 0.0)
+
+
+async def test_a_mood_that_commits_at_the_section_after_an_early_drop_still_sets_the_level():
+    from autolux.lib.engine.effect_definitions import LightIntent
+    from autolux.lib.engine.track_mood import MIN_MOOD_BEATS
+    from autolux.tests.test_palette_policy import engine_showing_an_intro, enter, measure_beats
+
+    light, _ = await engine_showing_an_intro()
+    # Starting wild, so the laid-back track's balanced verdict is a visible change.
+    settings = ShowSettings(intensity=INTENSITY_WILD, intensity_auto=True)
+    light._settings = lambda: settings
+    asked = []
+    light.on_auto_intensity = lambda level, why: asked.append((level, why))
+
+    measure_beats(light, MIN_MOOD_BEATS - 10)
+    await enter(light, LightIntent.DROP)
+    assert asked == [] and light.follow_music.track_level is None, 'the early drop defers the mood'
+
+    measure_beats(light, 4)
+    await enter(light, LightIntent.ATMOSPHERIC)
+    assert light.follow_music.track_level == BALANCED
+    [(level, why)] = asked
+    assert level == INTENSITY_BALANCED and why.startswith('drive ')
