@@ -136,6 +136,7 @@ fn truss() -> FixtureRig {
         let x = -20000.0 + 40000.0 * along * along.sqrt();
         let id = format!("w{index:03}");
         rig.fixtures.push(wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             fixture_id: id.clone(),
             profile_id: "generic_rgb".into(),
             universe: (rank / 170) as u32,

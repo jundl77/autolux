@@ -660,21 +660,34 @@
         return [5, 2, 1].map((unit) => unit * power).find((value) => value <= target);
     }
 
-    // The nine stage areas as Autolux derives them (cli/starfire_assets.py stage_areas): equal
-    // thirds of the fixtures' bounding box; an axis with no extent has no cuts.
-    function areaGrid(fixtures, n, r) {
+    // Draws the nine-area stage grid (equal thirds of the fixtures' bounding box) and its area
+    // names; it only draws lines and labels and never assigns areas, which come from
+    // stage_areas in cli/starfire_assets.py. An axis without extent has no cuts and only its
+    // centre names.
+    const AREA_ROWS = ["up", "centre", "down"];
+    const AREA_COLUMNS = ["left", "centre", "right"];
+    const areaName = (row, column) => (row === "centre" && column === "centre" ? "centre" : `${row} ${column}`);
+    function areaGrid(fixtures, n, r, font) {
         if (!fixtures.length) return "";
         const xs = fixtures.map((mark) => mark.x);
         const ys = fixtures.map((mark) => -mark.y);
         const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
         const cuts = (low, high) => (high > low ? [1, 2].map((k) => low + ((high - low) * k) / 3) : []);
+        // Each third's centre and index.
+        const thirds = (low, high) => (high > low ? [0, 1, 2].map((k) => [low + ((high - low) * (2 * k + 1)) / 6, k]) : [[low, 1]]);
         const line = (ax, ay, bx, by) => `<line x1="${n(ax)}" y1="${n(ay)}" x2="${n(bx)}" y2="${n(by)}"/>`;
+        // SVG y grows downstage, so the top row is upstage.
+        const names = thirds(y0, y1).flatMap(([y, row]) =>
+            thirds(x0, x1).map(([x, column]) => `<text class="plan-area-name" x="${n(x)}" y="${n(y)}">${areaName(AREA_ROWS[row], AREA_COLUMNS[column])}</text>`)
+        );
+        const box = x1 > x0 && y1 > y0 ? `<rect x="${n(x0)}" y="${n(y0)}" width="${n(x1 - x0)}" height="${n(y1 - y0)}"/>` : "";
         return [
             `<g class="plan-areas" stroke-width="${n(r * 0.2)}" stroke-dasharray="${n(r)} ${n(r * 0.6)}" fill="none">`,
-            `<rect x="${n(x0)}" y="${n(y0)}" width="${n(x1 - x0)}" height="${n(y1 - y0)}"/>`,
+            box,
             ...cuts(x0, x1).map((x) => line(x, y0, x, y1)),
             ...cuts(y0, y1).map((y) => line(x0, y, x1, y)),
-            "</g>"
+            "</g>",
+            `<g font-size="${n(font * 0.7)}" text-anchor="middle" dominant-baseline="middle">${names.join("")}</g>`
         ].join("");
     }
 
@@ -699,7 +712,7 @@
         const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
         const parts = [
             `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${n(left)} ${n(top)} ${n(width)} ${n(height)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}">`,
-            areaGrid(fixtures, n, r),
+            areaGrid(fixtures, n, r, font),
             // MVR has no stage edge; the plan draws it at the most downstage object.
             `<line class="plan-stage-edge" x1="${n(left)}" y1="${edge}" x2="${n(left + width)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
             `<text x="${n(left + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,
