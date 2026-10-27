@@ -284,7 +284,7 @@ async def test_a_command_at_exactly_the_same_fire_time_is_a_predecessor_not_a_re
     assert fired == ['bar10', 'bar11']
 
 
-async def test_an_inclusive_drop_takes_the_equal_fire_time_the_default_keeps():
+async def test_a_drop_keeps_a_command_at_the_equal_fire_time():
     from autolux.lib.clock import VirtualClock
 
     clock = VirtualClock()
@@ -293,11 +293,10 @@ async def test_an_inclusive_drop_takes_the_equal_fire_time_the_default_keeps():
 
     await q.enqueue('refresh', _record(fired, 'refresh'), delay_sec=0.0)
     assert q.drop_pending('refresh', clock.monotonic()) == 0
-    assert q.drop_pending('refresh', clock.monotonic(), inclusive=True) == 1
 
     clock.advance(1.0)
     await q.drain()
-    assert fired == []
+    assert fired == ['refresh']
 
 
 async def test_one_failing_command_does_not_take_the_batch_or_the_show_with_it():

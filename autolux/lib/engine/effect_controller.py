@@ -62,10 +62,6 @@ def strobe_burst_seconds(bpm: float | None, settings: ShowSettings) -> float:
     return duration * settings.intensity
 
 
-def strobe_rate_hz(settings: ShowSettings, special: Special = DROP_STROBE) -> float:
-    return min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
-
-
 def drop_strobe_cooldown_seconds(settings: ShowSettings) -> float:
     scale = DROP_STROBE_COOLDOWN_SCALE[intensity_level(settings.intensity)]
     return settings.drop_strobe_cooldown_seconds * scale
@@ -88,7 +84,9 @@ def strobe_override(
     return {
         'id': override_id,
         'target': special_target(special.group),
-        'values': {'strobe_hz': strobe_rate_hz(settings, special)},
+        'values': {
+            'strobe_hz': min(special.strobe_hz, settings.strobe_max_rate_hz) * settings.intensity
+        },
         'priority': priority,
         'lifetime': {'kind': 'seconds', 'duration_seconds': duration_seconds},
     }
@@ -132,10 +130,6 @@ class EffectController:
                     {name: sorted(axes) for name, axes in capabilities.groups.items()}
                 )
         return capabilities
-
-    @property
-    def pinned_palette(self) -> str | None:
-        return self._pinned_palette
 
     def pin_palette(self, name: str | None) -> None:
         if name is not None and name not in PALETTE_NAMES:
@@ -217,31 +211,29 @@ class EffectController:
             self._restore_special()
         return True
 
-    def apply_intensity(
-        self, context: SelectionContext, bpm: float | None
-    ) -> AutoloopChoice | None:
+    def apply_intensity(self, context: SelectionContext, bpm: float | None) -> None:
         """Re-map the running look to the new level's bank, or swap it for a calmer loop.
 
         Entering or leaving calm moves a drop or build to its level's bank at once; within
         one bank a raised cap waits for the next entry.
         """
         if self._entered is None or self._entered[0] != context.intent:
-            return None
+            return
         current = self._entered[1]
         if self.lighting_client.selected_autoloop != (current.bank, current.autoloop):
-            return None  # Standby or another look is showing; the next entry obeys the level.
+            return  # Standby or another look is showing; the next entry obeys the level.
         intensity = self._settings().intensity
         remapped = look_intent(context.intent, intensity) != current.look
         if not remapped and current.meta.energy <= max_energy_for_intensity(intensity):
-            return None
+            return
         try:
             choice = self._policy.choose(
                 context, exclude=(current.bank, current.autoloop), intensity=intensity
             )
         except ValueError:
-            return None
+            return
         if not remapped and choice.meta.energy >= current.meta.energy:
-            return None
+            return
         cause = f'intensity {intensity_level(intensity)}' if remapped else 'intensity cap'
         choice = dataclasses.replace(choice, reason=f'{cause}; {choice.reason}')
         palette = self._palette_for(choice.look) if remapped else None
@@ -255,7 +247,6 @@ class EffectController:
         self._announce(
             f'[lighting] {cause} |', context.intent, choice, self.lighting_client.palette
         )
-        return choice
 
     def skip_autoloop(self, context: SelectionContext) -> AutoloopChoice:
         choice = self._policy.choose(
