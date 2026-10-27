@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import ctypes
 import importlib
 import os
+import sys
 from pathlib import Path
+
+
+def below_normal_priority() -> None:
+    """Drop this process to BELOW_NORMAL so a long offline run never starves the live show."""
+    if sys.platform == "win32":
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.SetPriorityClass(kernel32.GetCurrentProcess(), 0x00004000)
 
 
 def experiment_checkout(environment_variable: str) -> Path:

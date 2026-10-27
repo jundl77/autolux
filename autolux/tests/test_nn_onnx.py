@@ -49,16 +49,14 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import corpus_root  # noqa: E402
-
-from autolux.lib.label_space import NUM_SECTION_CLASSES  # noqa: E402
-from nn.dataset import (  # noqa: E402
+import corpus_root
+from nn.dataset import (
     FRAME_SEC,
     LABEL_POOL,
     WINDOW_FRAMES,
     load_sidecar,
 )
-from nn.export_onnx import (  # noqa: E402
+from nn.export_onnx import (
     BOUNDARY_OUTPUT,
     INPUT_NAME,
     LABEL_OUTPUT,
@@ -75,7 +73,7 @@ from nn.export_onnx import (  # noqa: E402
     session_options,
     sha256_file,
 )
-from nn.infer import (  # noqa: E402
+from nn.infer import (
     EDGE_FRAMES,
     EDGE_SEC,
     HOP_FRAMES,
@@ -91,7 +89,9 @@ from nn.infer import (  # noqa: E402
     usable_frames,
     window_offsets,
 )
-from nn.model import SectionCRNN  # noqa: E402
+from nn.model import SectionCRNN
+
+from autolux.lib.label_space import NUM_SECTION_CLASSES
 
 MEL_BANDS = 40
 GOLDEN_FILE = Path(__file__).resolve().parent / "data" / "nn_onnx_golden.npz"
@@ -232,7 +232,7 @@ def test_exported_graph_runs_at_a_length_it_was_not_traced_at(graph, frames):
 
 def test_export_writes_nothing_when_the_graph_is_rejected(tmp_path, monkeypatch):
     """A half-written model.onnx would be picked up by the next run as valid."""
-    import nn.export_onnx as export_onnx
+    from nn import export_onnx
 
     monkeypatch.setattr(export_onnx, "declared_axes", lambda _p: {"mel": [1, 348, 40]})
     with pytest.raises(RuntimeError, match="specialized"):
@@ -957,7 +957,7 @@ def test_a_failed_track_does_not_leave_an_older_models_sidecar_readable(tmp_path
 
     assert manifest["failed"] == 1
     assert not stale.exists()
-    assert [r for r in manifest["records"] if r["youtube_id"] == "aaa"][0]["removed_stale"]
+    assert next(r for r in manifest["records"] if r["youtube_id"] == "aaa")["removed_stale"]
 
 
 def test_a_forced_recompute_that_fails_keeps_the_current_sidecar(tmp_path, graph):

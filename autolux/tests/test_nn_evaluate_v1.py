@@ -11,8 +11,8 @@ TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from build_training_table import NO_INTENT  # noqa: E402
-from evaluate_against_labels import (  # noqa: E402
+from build_training_table import NO_INTENT
+from evaluate_against_labels import (
     INTENT_TO_LABELS,
     LABEL_COLUMN,
     PRIMARY_SPACE,
@@ -23,7 +23,7 @@ from evaluate_against_labels import (  # noqa: E402
     TrackBeats,
     aggregate,
 )
-from nn.decoder import (  # noqa: E402
+from nn.decoder import (
     SHIPPING_DECODER_CONFIG,
     DecodeParams,
     bar_grid,
@@ -31,7 +31,7 @@ from nn.decoder import (  # noqa: E402
     decode_track,
     load_decoder_config,
 )
-from nn.evaluate_v1 import (  # noqa: E402
+from nn.evaluate_v1 import (
     DEFAULT_SPACE,
     EVAL_FILE,
     UNDECODED,
@@ -51,13 +51,14 @@ from nn.evaluate_v1 import (  # noqa: E402
     score_predicted,
     sidecar_model_sha,
 )
-from nn.sweep import (  # noqa: E402
+from nn.sweep import (
     enumerate_configs,
     refinement_axes,
     select_config,
     sensitivity,
 )
-from autolux.tests.test_nn_decoder import (  # noqa: E402
+
+from autolux.tests.test_nn_decoder import (
     graded_bars,
     rows_npz,
     synthetic_npz,

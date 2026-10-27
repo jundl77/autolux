@@ -228,7 +228,7 @@ def load_tracks(data_dir: Path) -> list:
     with open(path, "r", encoding="utf-8") as handle:
         tracks = json.load(handle)
     if not isinstance(tracks, list):
-        raise RuntimeError(f"{SEGMENTS_FILE}: expected a JSON list, got {type(tracks).__name__}")
+        raise RuntimeError(f"{SEGMENTS_FILE}: expected a JSON list, got {type(tracks).__name__}")  # noqa: TRY004
     return tracks
 
 
@@ -269,7 +269,7 @@ def load_hand_tracks(data_dir: Path) -> list:
         except ValueError as exc:
             raise RuntimeError(f"{path.name}: hand label does not parse ({exc})") from None
         if not isinstance(record, dict):
-            raise RuntimeError(f"{path.name}: expected a JSON object, got {type(record).__name__}")
+            raise RuntimeError(f"{path.name}: expected a JSON object, got {type(record).__name__}")  # noqa: TRY004
         missing = [field for field in _HAND_LABEL_FIELDS if field not in record]
         if missing:
             raise RuntimeError(f"{path.name}: hand label lacks {', '.join(missing)}")

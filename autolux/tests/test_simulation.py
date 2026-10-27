@@ -9,12 +9,12 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import run_eval_set  # noqa: E402  (needs the path insert above)
-from select_eval_set import EVAL_SET_FILE, load_eval_set  # noqa: E402
+import run_eval_set
+from select_eval_set import EVAL_SET_FILE, load_eval_set
 
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE  # noqa: E402
-from autolux.simulate.fake_audio_client import FileAudioClient  # noqa: E402
-from autolux.simulate.runner import run_fast_simulation  # noqa: E402
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.simulate.fake_audio_client import FileAudioClient
+from autolux.simulate.runner import run_fast_simulation
 
 EVAL_SET = load_eval_set(EVAL_SET_FILE)
 DATA_DIR = run_eval_set.corpus_dir()

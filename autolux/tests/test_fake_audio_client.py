@@ -3,7 +3,7 @@ import time
 import numpy as np
 import pytest
 
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.simulate.fake_audio_client import FileAudioClient
 
 

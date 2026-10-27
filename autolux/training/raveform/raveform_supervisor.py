@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import shutil
 import signal
 import subprocess
@@ -35,16 +36,15 @@ def _retry_reasons(data_dir: Path) -> str:
     previous = sys.dont_write_bytecode
     sys.dont_write_bytecode = True
     try:
-        import importlib.util
+        with contextlib.suppress(Exception):
+            import importlib.util
 
-        spec = importlib.util.spec_from_file_location("_raveform_download_probe", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        reasons = sorted(module.RETRYABLE_REASONS)
-        if reasons:
-            return ",".join(reasons)
-    except Exception:
-        pass
+            spec = importlib.util.spec_from_file_location("_raveform_download_probe", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            reasons = sorted(module.RETRYABLE_REASONS)
+            if reasons:
+                return ",".join(reasons)
     finally:
         sys.dont_write_bytecode = previous
     return _RETRY_REASONS_FALLBACK
@@ -75,12 +75,8 @@ def install_signal_handlers() -> None:
             pass
 
 
-def _stamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
-
-
 def log(log_path: Path, event: str) -> None:
-    line = f"{_stamp()}  {event}"
+    line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')}  {event}"
     try:
         with open(log_path, "a", encoding="ascii", errors="replace", newline="\n") as handle:
             handle.write(line + "\n")

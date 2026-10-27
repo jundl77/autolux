@@ -66,6 +66,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+from build_training_table import default_data_dir
+
+from autolux.lib.label_space import NUM_SECTION_CLASSES
 
 from .dataset import (
     FEATURES_DIR,
@@ -76,9 +79,6 @@ from .dataset import (
     load_sidecar,
 )
 from .export_onnx import MODEL_FILE, model_dir, run_window, session, sha256_file
-
-from build_training_table import default_data_dir  # noqa: E402
-from autolux.lib.label_space import NUM_SECTION_CLASSES  # noqa: E402
 
 POSTERIORS_DIR = "posteriors"
 MANIFEST_FILE = "manifest.json"
@@ -462,7 +462,7 @@ def generate(
             mel = load_sidecar(features / f"{youtube_id}.npz")
             track = infer_track(sess, mel)
             save_posteriors(path, posterior_arrays(track, model_sha))
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             # A corpus-wide run is hours long and the sidecars are cached, so one
             # unreadable track must not throw away every other track's work.  The
             # failure is recorded and re-reported at the end rather than logged

@@ -23,7 +23,7 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import tp_fetch_queue as queue  # noqa: E402
+import tp_fetch_queue as queue
 
 SALAMI_METADATA_HEADER = ("SONG_ID", "SOURCE", "SONG_TITLE", "ARTIST", "CLASS")
 PAIRINGS_HEADER = (

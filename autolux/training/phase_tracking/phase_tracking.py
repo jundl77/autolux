@@ -201,33 +201,6 @@ def repair_from_ratios(
     return positions, advances
 
 
-def interval_repair(
-    beats: np.ndarray,
-    *,
-    window: int = 8,
-    min_history: int = 3,
-    del_lo: float = 1.5,
-    ins_hi: float = 0.65,
-    pair_lo: float = 0.70,
-    pair_hi: float = 1.35,
-    clean_lo: float = 0.75,
-    clean_hi: float = 1.35,
-    max_advance: int = 8,
-):
-    ratios = interval_ratios(
-        beats, window=window, min_history=min_history, clean_lo=clean_lo, clean_hi=clean_hi
-    )
-    positions, advances = repair_from_ratios(
-        ratios,
-        del_lo=del_lo,
-        ins_hi=ins_hi,
-        pair_lo=pair_lo,
-        pair_hi=pair_hi,
-        max_advance=max_advance,
-    )
-    return positions, advances, ratios
-
-
 # --------------------------------------------------------------------------- #
 # candidate B -- a 4-state fixed-lag phase filter
 # --------------------------------------------------------------------------- #

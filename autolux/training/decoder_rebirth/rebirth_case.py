@@ -32,7 +32,7 @@ for entry in (str(HERE), str(ROOT / "training" / "raveform"), str(ROOT / "traini
     if entry not in sys.path:
         sys.path.insert(0, entry)
 
-import module_source  # noqa: E402
+import module_source
 
 # The banked phase-B artifacts are replayed through THIS repo's decoder -- the
 # one the offline package still tolerates an older class space for.  Asked
@@ -40,11 +40,10 @@ import module_source  # noqa: E402
 # measurement of a codebase nobody named.
 module_source.require_imported_package_under_root("training.nn", ROOT)
 
-from training.nn.decoder import DecodeParams, build_decoder, temper  # noqa: E402
-from training.nn.evaluate_v1 import write_json  # noqa: E402
-from training.nn.priors import MODELS_DIR, PRIORS_FILE, Priors  # noqa: E402
-
-import rebirth as RB  # noqa: E402
+import rebirth as RB
+from training.nn.decoder import DecodeParams, build_decoder, temper
+from training.nn.evaluate_v1 import write_json
+from training.nn.priors import MODELS_DIR, PRIORS_FILE, Priors
 
 LAG_BARS = 2
 

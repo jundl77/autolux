@@ -64,8 +64,12 @@ from typing import NamedTuple
 import numpy as np
 import torch
 import torch.nn.functional as F
+from build_training_table import default_data_dir
+from raveform_fetch_annotations import load_all_tracks, parse_sections
 from torch import nn
 from torch.utils.data import DataLoader
+
+from autolux.lib.label_space import NUM_SECTION_CLASSES, SECTION_LABELS
 
 from .dataset import (
     FEATURES_DIR,
@@ -79,10 +83,6 @@ from .dataset import (
     track_targets,
 )
 from .model import PARAM_BUDGET, SectionCRNN, count_parameters
-
-from build_training_table import default_data_dir  # noqa: E402
-from autolux.lib.label_space import NUM_SECTION_CLASSES, SECTION_LABELS  # noqa: E402
-from raveform_fetch_annotations import load_all_tracks, parse_sections  # noqa: E402
 
 MODELS_DIR = "models"
 MODEL_VERSION = "v1"
@@ -445,9 +445,8 @@ def config_fingerprint(config: dict) -> str:
 
 
 def port_is_open(port: int, host: str = "127.0.0.1") -> bool:
-    with contextlib.suppress(OSError):
-        with socket.create_connection((host, port), timeout=0.5):
-            return True
+    with contextlib.suppress(OSError), socket.create_connection((host, port), timeout=0.5):
+        return True
     return False
 
 
@@ -464,25 +463,25 @@ def ensure_tensorboard(logdir: Path, port: int, log_path: Path) -> bool:
     flags = 0
     if os.name == "nt":
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-    handle = open(log_path, "ab")
-    subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "tensorboard.main",
-            "--logdir",
-            str(logdir),
-            "--port",
-            str(port),
-            "--host",
-            "127.0.0.1",
-        ],
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        creationflags=flags,
-        close_fds=True,
-    )
+    with open(log_path, "ab") as handle:
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "tensorboard.main",
+                "--logdir",
+                str(logdir),
+                "--port",
+                str(port),
+                "--host",
+                "127.0.0.1",
+            ],
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=flags,
+            close_fds=True,
+        )
     return True
 
 
@@ -601,7 +600,7 @@ def evaluate(
                 torch.sigmoid(boundary_logits).reshape(-1).float().cpu().numpy()[live]
             )
             boundary_labels.append(
-                (boundary.reshape(-1).cpu().numpy()[live] >= BOUNDARY_POSITIVE_THRESHOLD)
+                boundary.reshape(-1).cpu().numpy()[live] >= BOUNDARY_POSITIVE_THRESHOLD
             )
 
     probs = np.concatenate(probs_chunks) if probs_chunks else np.zeros((0, NUM_SECTION_CLASSES))
@@ -621,7 +620,7 @@ def evaluate(
         "ece_mean": float(ece.mean()),
         "loss": {key: value / divisor for key, value in losses.items()},
         "confusion": matrix.tolist(),
-        "frames": int(len(truth)),
+        "frames": len(truth),
     }
 
 

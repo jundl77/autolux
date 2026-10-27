@@ -27,10 +27,10 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import raveform_download  # noqa: E402
-import tp_download as download  # noqa: E402
-import tp_fetch_queue as queue  # noqa: E402
-import tp_supervisor as supervisor  # noqa: E402
+import raveform_download
+import tp_download as download
+import tp_fetch_queue as queue
+import tp_supervisor as supervisor
 
 BOT_CHECK_TEXT = "ERROR: Sign in to confirm you're not a bot"
 PRIVATE_TEXT = (

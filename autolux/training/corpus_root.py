@@ -52,6 +52,7 @@ def _git(*args: str) -> str | None:
             text=True,
             stdin=subprocess.DEVNULL,
             timeout=30,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

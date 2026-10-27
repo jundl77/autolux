@@ -68,8 +68,8 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from build_clean_manifest import AUDIO_DIR  # noqa: E402  (needs the path inserts)
-from raveform_fetch_annotations import (  # noqa: E402
+from build_clean_manifest import AUDIO_DIR
+from raveform_fetch_annotations import (
     HAND_LABEL_SUFFIX,
     SEGMENTS_FILE,
     annotations_dir,
@@ -77,6 +77,8 @@ from raveform_fetch_annotations import (  # noqa: E402
     load_tracks,
     merge_hand_tracks,
     parse_sections,
+)
+from raveform_fetch_annotations import (
     youtube_id as track_youtube_id,
 )
 
@@ -169,7 +171,7 @@ def load_labels(path: Path | None = None) -> dict:
     except ValueError as exc:
         raise RuntimeError(f"{path} is not valid JSON: {exc}") from None
     if not isinstance(document, dict) or not isinstance(document.get("tracks"), list):
-        raise RuntimeError(f"{path} has no 'tracks' list -- it is not a label slice")
+        raise RuntimeError(f"{path} has no 'tracks' list -- it is not a label slice")  # noqa: TRY004
     schema = document.get("schema")
     if schema != LABELS_SCHEMA_VERSION:
         raise RuntimeError(

@@ -11,14 +11,14 @@ torch = pytest.importorskip(
     "torch",
     reason="torch is a base dependency -- the venv is not synced (uv sync --extra dev --extra visualizer)",
 )
-import torch.nn.functional as F  # noqa: E402
+import torch.nn.functional as F
 
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from autolux.lib.label_space import NUM_SECTION_CLASSES  # noqa: E402
-from nn.dataset import (  # noqa: E402
+from nn import train as nn_train
+from nn.dataset import (
     IGNORE_INDEX,
     LABEL_FRAMES,
     LABEL_POOL,
@@ -26,9 +26,8 @@ from nn.dataset import (  # noqa: E402
     TrackTargets,
     WindowDataset,
 )
-from nn import train as nn_train  # noqa: E402
-from nn.model import PARAM_BUDGET, SectionCRNN, count_parameters  # noqa: E402
-from nn.train import (  # noqa: E402
+from nn.model import PARAM_BUDGET, SectionCRNN, count_parameters
+from nn.train import (
     accumulate_target_stats,
     boundary_bce,
     boundary_pos_weight,
@@ -47,6 +46,8 @@ from nn.train import (  # noqa: E402
     tv_penalty,
     weight_hash,
 )
+
+from autolux.lib.label_space import NUM_SECTION_CLASSES
 
 MEL_BANDS = 40
 

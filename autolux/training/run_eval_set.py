@@ -22,7 +22,6 @@ import argparse
 import asyncio
 import concurrent.futures
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -37,28 +36,29 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from build_training_table import (  # noqa: E402  (needs the path inserts above)
-    _git,
+from build_training_table import (
     join_track,
     load_sections_by_track,
     pipeline_sha,
 )
-from eval_assets import (  # noqa: E402
+from eval_assets import (
+    ANNOTATION_SOURCES,
     EVAL_AUDIO_DIR,
     EVAL_LABELS_FILE,
     OVERRIDDEN,
     OWNER,
     PUBLISHED,
-    ANNOTATION_SOURCES,
     UNREVIEWED,
     committed_audio_path,
     corpus_audio_path,
     labels_source_sha,
     load_labels,
     owner_rulings,
+)
+from eval_assets import (
     sections_by_truth as sections_from_slice,
 )
-from evaluate_against_labels import (  # noqa: E402
+from evaluate_against_labels import (
     LABEL_COLUMN,
     LEGACY_V1,
     PRIMARY_TOLERANCE_SEC,
@@ -66,13 +66,12 @@ from evaluate_against_labels import (  # noqa: E402
     SPACES,
     TrackBeats,
     aggregate,
-    default_data_dir,
     file_sha256,
     score_track,
     write_json,
 )
-from raveform_fetch_annotations import SEGMENTS_FILE, annotations_dir  # noqa: E402
-from select_eval_set import EVAL_SET_FILE, load_eval_set, verify_inputs  # noqa: E402
+from raveform_fetch_annotations import SEGMENTS_FILE, annotations_dir
+from select_eval_set import EVAL_SET_FILE, load_eval_set, verify_inputs
 
 BASELINE_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "eval_set_baseline.json"
 
@@ -140,7 +139,7 @@ SCHEMA_VERSION = 1
 
 DATA_DIR_ENV = "RAVEFORM_DATA_DIR"
 
-from corpus_root import corpus_dir  # noqa: E402,F401
+from corpus_root import corpus_dir
 
 
 def audio_path(data_dir: Path, youtube_id: str) -> Path:
@@ -401,7 +400,7 @@ def load_baseline(path: Path) -> dict:
     except ValueError as exc:
         raise RuntimeError(f"{path} is not valid JSON: {exc}") from None
     if not isinstance(document, dict) or not isinstance(document.get("tracks"), dict):
-        raise RuntimeError(f"{path} has no 'tracks' map -- it is not a baseline")
+        raise RuntimeError(f"{path} has no 'tracks' map -- it is not a baseline")  # noqa: TRY004
     return document
 
 
@@ -738,9 +737,11 @@ def render_table(
     runs: list, aggregate_entry: dict, total_song: float, total_wall: float, workers: int = 1
 ) -> str:
     lines = [
-        f'  {"track_id":<20}{"song":>7}{"wall":>7}{"x-rt":>7}{"beats":>7}'
-        f'{"rows":>7}{"macroF1":>9}{"acc":>7}{"bF1":>7}{"crisp":>7}'
-        f'{"flick/m":>9}{"chg i/c":>10}{"late":>8}  checksum',
+        (
+            f'  {"track_id":<20}{"song":>7}{"wall":>7}{"x-rt":>7}{"beats":>7}'
+            f'{"rows":>7}{"macroF1":>9}{"acc":>7}{"bF1":>7}{"crisp":>7}'
+            f'{"flick/m":>9}{"chg i/c":>10}{"late":>8}  checksum'
+        ),
         "  " + "-" * (WIDTH - 2),
     ]
     for run in runs:
@@ -772,8 +773,8 @@ def render_table(
         f'+/-{CRISPNESS_TOLERANCE_SEC}s'
     )
     lines.append(
-        f'  late = intent blocks committed more than the playback delay after '
-        f'the audio they name, of those that can be measured (#154, accepted)'
+        '  late = intent blocks committed more than the playback delay after '
+        'the audio they name, of those that can be measured (#154, accepted)'
     )
     if workers > 1 and len(runs) > 1:
         lines.append(

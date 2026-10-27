@@ -31,7 +31,7 @@ for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "l9c_campaign")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import ng_arc_read  # noqa: E402
+import ng_arc_read
 
 # The labelled drop from the probe report the false finding was read off.
 OPUS_DROP = [("drop", 342.307, 386.551)]

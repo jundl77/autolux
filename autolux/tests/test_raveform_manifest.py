@@ -5,17 +5,17 @@ RAVEFORM_DIR = Path(__file__).resolve().parents[1] / "training" / "raveform"
 if str(RAVEFORM_DIR) not in sys.path:
     sys.path.insert(0, str(RAVEFORM_DIR))
 
-import pytest  # noqa: E402
-
-import raveform_manifest  # noqa: E402
-from autolux.lib.label_space import DROPPED_LABELS  # noqa: E402
-from raveform_manifest import (  # noqa: E402
+import pytest
+import raveform_manifest
+from raveform_manifest import (
     MANIFEST_HEADER,
     build_manifest_rows,
     raw_runs,
     section_length,
     section_runs,
 )
+
+from autolux.lib.label_space import DROPPED_LABELS
 
 
 def _track(key="0001.aaa", youtube="aaa", duration=150.0, **extra) -> dict:

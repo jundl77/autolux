@@ -15,7 +15,6 @@ Priors.save do everything else.
 from __future__ import annotations
 
 import argparse
-import ctypes
 import json
 import os
 import subprocess
@@ -27,18 +26,14 @@ from ng_common import CAMP, CORPUS, VENV_PY
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import module_source
 
+module_source.below_normal_priority()
+
 W = str(module_source.experiment_checkout("AUTOLUX_LABEL9_CHECKOUT"))
 sys.path[:0] = [W, str(Path(W) / "training")]
 module_source.require_imported_package_under_root("nn", Path(W))
 
-try:
-    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
-import numpy as np  # noqa: E402
-
-from nn import priors as P  # noqa: E402
+import numpy as np
+from nn import priors as P
 
 SPAN_TOLERANCE = 0.05
 
@@ -94,7 +89,7 @@ def bar_run_sequences(data_dir: Path, youtube_ids: list, spans_by_id: dict) -> t
         parse_sections,
     )
 
-    wanted = set(str(i) for i in youtube_ids)
+    wanted = {str(i) for i in youtube_ids}
     by_id = {str(track.get("id")): track for track in load_all_tracks(data_dir)}
 
     sequences: list = []
@@ -132,7 +127,7 @@ def bar_run_sequences(data_dir: Path, youtube_ids: list, spans_by_id: dict) -> t
 def fit_arm(data_dir: Path, split: str, overlay: dict | None):
     ids = P.split_ids(data_dir, split)
     spans_by_id = overlay["spans"] if overlay else {}
-    outside = sorted(set(spans_by_id) - set(str(i) for i in ids))
+    outside = sorted(set(spans_by_id) - {str(i) for i in ids})
     if outside:
         raise SystemExit(
             f"overlay names {len(outside)} track(s) outside the "
@@ -202,6 +197,7 @@ def verify_anchor(data_dir: Path, split: str, out_dir: Path) -> int:
         env=env,
         cwd=W,
         timeout=3600,
+        check=False,
     )
     if result.returncode != 0:
         sys.stderr.write(result.stdout[-2000:] + result.stderr[-2000:])

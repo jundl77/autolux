@@ -128,7 +128,7 @@ class LiveCommitter:
         if carried is not None and self._override is not None:
             carried = self._override
         if carried is not None and not np.isfinite(viterbi.priors.log_initial[carried]):
-            logging.warning(
+            logging.getLogger(__name__).warning(
                 f'[rebirth] the priors give {viterbi.classes[carried]!r} no way '
                 f'to start a track, so a birth cannot carry it -- spreading the '
                 f'start-of-track prior instead'

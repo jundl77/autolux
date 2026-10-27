@@ -14,13 +14,15 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import build_clean_manifest as gate  # noqa: E402
-import raveform_download as downloader  # noqa: E402
-from raveform_fetch_annotations import (  # noqa: E402
+import build_clean_manifest as gate
+import raveform_download as downloader
+from raveform_fetch_annotations import (
     beat_csv_path,
     load_all_tracks,
     parse_beat_csv,
     parse_sections,
+)
+from raveform_fetch_annotations import (
     youtube_id as annotation_youtube_id,
 )
 

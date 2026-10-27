@@ -22,23 +22,23 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from eval_assets import (  # noqa: E402  (needs the path insert above)
+from eval_assets import (
     ACCEPTED,
+    AUDIO_FILENAME_HASH_LENGTH,
     AUDIO_NAME_SCHEME,
     EVAL_AUDIO_DIR,
     EVAL_LABELS_FILE,
     LABELS_SCHEMA_VERSION,
-    AUDIO_FILENAME_HASH_LENGTH,
     OVERRIDDEN,
     OWNER,
-    PUBLISHED,
     OWNER_RULING_STATUSES,
+    PUBLISHED,
     UNREVIEWED,
     build_eval_artifact_metadata,
     build_labels_document,
+    collect_artifact_problems,
     committed_audio_path,
     copy_audio,
-    write_eval_label_slice,
     hand_label_path,
     labels_source_sha,
     load_labels,
@@ -46,10 +46,10 @@ from eval_assets import (  # noqa: E402  (needs the path insert above)
     owner_rulings,
     sections_by_track,
     sections_by_truth,
-    collect_artifact_problems,
+    write_eval_label_slice,
 )
-from raveform_fetch_annotations import merge_hand_tracks  # noqa: E402
-from select_eval_set import EVAL_SET_FILE, load_eval_set  # noqa: E402
+from raveform_fetch_annotations import merge_hand_tracks
+from select_eval_set import EVAL_SET_FILE, load_eval_set
 
 EVAL_SET = load_eval_set(EVAL_SET_FILE)
 

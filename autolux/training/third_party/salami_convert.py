@@ -31,12 +31,10 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
-import hashlib
 import json
 import re
-import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -50,12 +48,16 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from corpus_root import corpus_dir  # noqa: E402
-from tp_record import (  # noqa: E402
+import itertools
+
+from corpus_root import corpus_dir
+from tp_record import (
     ID_PREFIXES,
     RECORD_SCHEMA,
     annotation_path,
     audio_path,
+    copy_audio,
+    sha256,
     third_party_dir,
     validate_record,
     write_record,
@@ -153,14 +155,6 @@ def vocab_path(salami: Path) -> Path:
     return salami / VOCAB_FILE
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 # --------------------------------------------------------------------------- #
 # The function vocabulary
 # --------------------------------------------------------------------------- #
@@ -246,17 +240,13 @@ def parse_rows(text: str, vocab: dict) -> list:
         rows.append(Row(time, tuple(large), tuple(small), tuple(function)))
     if not rows:
         raise ConvertError("no annotation lines")
-    for index, (before, after) in enumerate(zip(rows, rows[1:]), 2):
+    for index, (before, after) in enumerate(itertools.pairwise(rows), 2):
         if after.time < before.time:
             raise ConvertError(
                 f"line {index}: time {after.time!r} is before line "
                 f"{index - 1}'s {before.time!r} -- unsorted"
             )
     return rows
-
-
-def _is_end(row: Row) -> bool:
-    return any(name.casefold() == END_MARKER for name in row.function)
 
 
 def _musical(function: tuple) -> tuple:
@@ -363,14 +353,6 @@ def track_duration(row: dict, parse: Parse) -> tuple:
     return duration, "metadata"
 
 
-def copy_audio(source: Path, target: Path) -> str:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.stat().st_size == source.stat().st_size:
-        return "kept"
-    shutil.copy2(source, target)
-    return "copied"
-
-
 # --------------------------------------------------------------------------- #
 # One track
 # --------------------------------------------------------------------------- #
@@ -426,7 +408,7 @@ def convert_track(
         "masked": parse.masked,
         "provenance": {
             "converter": CONVERTER,
-            "converted_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "converted_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "annotator": annotator,
             "annotation_file": path.name,
             "annotation_sha256": sha256(path),
@@ -497,7 +479,6 @@ def eligible(salami: Path, metadata: dict, ids: list | None, include_live: bool)
 def _report(verdicts: list, failures: list, buckets: tuple, requested: int, partial: bool) -> dict:
     labels: dict = {}
     letters: dict = {}
-    two_annotators = []
     fallbacks = []
     for verdict in verdicts:
         for name in verdict.names:

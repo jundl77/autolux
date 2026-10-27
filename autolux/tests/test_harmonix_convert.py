@@ -22,8 +22,8 @@ for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"), str(TRAINING_DI
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import harmonix_convert  # noqa: E402
-import tp_record  # noqa: E402
+import harmonix_convert
+import tp_record
 
 NATIVE = "0001_12step"
 TRACK = "hx-0001_12step"

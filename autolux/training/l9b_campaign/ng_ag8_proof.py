@@ -24,22 +24,15 @@ Writes CAMP/ag8_proof.json.  Any violation exits nonzero and the arm holds.
 
 from __future__ import annotations
 
-import ctypes
 import datetime
 import json
 import sys
 from pathlib import Path
 
-try:
-    _k32 = ctypes.windll.kernel32
-    _k32.GetCurrentProcess.restype = ctypes.c_void_p
-    _k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    _k32.SetPriorityClass(_k32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import module_source
+
+module_source.below_normal_priority()
 
 PHASE_B = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
 sys.path.insert(0, str(PHASE_B))
@@ -50,16 +43,14 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 # first -- the two disagree, and nothing downstream would say which ran.
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
-import numpy as np  # noqa: E402
-
-from ng_common import CAMP, CORPUS, NEW_HAND_IDS  # noqa: E402
-from ng_ag8_variants import SHIFTS, variant_id  # noqa: E402
-
-from training.nn.ceiling import data as D  # noqa: E402
-from training.nn.ceiling import demote as DD  # noqa: E402
-from training.nn.ceiling.stream_extract import read_stream_geometry  # noqa: E402
-from training.nn.dataset import load_label_space, track_targets  # noqa: E402
-from training.nn.infer import usable_frames  # noqa: E402
+import numpy as np
+from ng_ag8_variants import SHIFTS, variant_id
+from ng_common import CAMP, CORPUS, NEW_HAND_IDS
+from training.nn.ceiling import data as D
+from training.nn.ceiling import demote as DD
+from training.nn.ceiling.stream_extract import read_stream_geometry
+from training.nn.dataset import load_label_space, track_targets
+from training.nn.infer import usable_frames
 
 FEAT_ROOT = CAMP / "features_ag8_root" / "MERT-v1-330M_L6-22_F3_hop1"
 LAYERS = [6, 22]
@@ -140,16 +131,16 @@ def main() -> int:
             per_variant[vid] = state
 
     # Through FullTrackDataset itself, exactly as the online_crnn arm builds it.
-    common = dict(
-        feature_dir=FEAT_ROOT,
-        layers=LAYERS,
-        augment=False,
-        sections_by_youtube_id=sections,
-        classes=classes,
-        normalise=False,
-        store_fp16=True,
-        cache_bytes=0,
-    )
+    common = {
+        "feature_dir": FEAT_ROOT,
+        "layers": LAYERS,
+        "augment": False,
+        "sections_by_youtube_id": sections,
+        "classes": classes,
+        "normalise": False,
+        "store_fp16": True,
+        "cache_bytes": 0,
+    }
     base_set = D.FullTrackDataset(CORPUS, list(NEW_HAND_IDS), **common)
     var_set = D.FullTrackDataset(CORPUS, variants, **common)
     base_samples = {s.youtube_id: s for s in (base_set[i] for i in range(len(base_set)))}
@@ -184,7 +175,7 @@ def main() -> int:
             print(f"  dataset check {checked}/{len(var_set)}", flush=True)
 
     proof = {
-        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "feature_root": str(FEAT_ROOT),
         "variants_checked": checked,
         "features_distinct_from_base": distinct,

@@ -4,13 +4,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 
 TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from build_training_table import (  # noqa: E402  (needs the path insert above)
+from build_training_table import (
     MEL_BANDS,
     MEL_EXPORTER_KEY,
     MEL_EXPORTER_VERSION,

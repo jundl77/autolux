@@ -13,13 +13,13 @@ TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn.decoder import (  # noqa: E402
+from nn.decoder import (
     DecodeParams,
     FixedLagViterbi,
     load_decoder_config,
 )
-from nn.priors import Priors, transition_allowed  # noqa: E402
-from nn.sweep import enumerate_configs  # noqa: E402
+from nn.priors import Priors, transition_allowed
+from nn.sweep import enumerate_configs
 
 CLASSES = ("intro", "buildup", "breakdown", "drop", "outro")
 INTRO, BUILDUP, BREAKDOWN, DROP, OUTRO = range(5)
