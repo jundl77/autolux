@@ -12,13 +12,13 @@ use anyhow::{Context, Result, bail, ensure};
 use prost::Message;
 
 use crate::artnet::ArtNetOutput;
-use crate::engine::Engine;
+use crate::engine::{Engine, extinguish};
 use crate::fixtures::FixtureRig;
 use crate::model::{Command, DEFAULT_FRAME_RATE_HZ, FixtureStates, Transition};
 use crate::palette::PaletteTable;
 use crate::protocol::{
     ClientMessage, MAX_MESSAGE_BYTES, ServerMessage, apply_command, error_message,
-    read_session_control, wire, write_event,
+    read_session_control, wire,
 };
 use crate::script::{AutoloopCatalog, missing_groups_warning};
 use crate::special;
@@ -261,11 +261,7 @@ impl LiveSession {
         let Some(mut output) = self.output.take() else {
             return Ok(());
         };
-        for state in self.last_states.values_mut() {
-            state.intensity = 0.0;
-            state.output_blackout = true;
-            state.strobe_hz = 0.0;
-        }
+        extinguish(&mut self.last_states);
         output
             .send_frame(&self.rig.encode(&self.last_states)?)
             .context("send final blackout")
@@ -370,7 +366,7 @@ pub fn run_live(
         .name("starfire-status".into())
         .spawn(move || {
             for event in event_receiver {
-                if let Err(error) = write_event(&mut output, &event) {
+                if let Err(error) = ServerMessage::write(&event, &mut output) {
                     record_failure(&output_failure, format!("status output failed: {error:#}"));
                     break;
                 }
@@ -411,7 +407,7 @@ pub fn run_live(
             let mut report_metrics = false;
             let mut input_closed = false;
             for _ in 0..MAX_CONTROLS_PER_FRAME {
-                let control = match controls.try_recv() {
+                let command = match controls.try_recv() {
                     Ok(control) => control,
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
@@ -420,7 +416,6 @@ pub fn run_live(
                     }
                 };
                 queued.fetch_sub(1, Ordering::Relaxed);
-                let command = control;
                 if let Some(command_id) = command.command_id() {
                     last_processed_command_id = command_id;
                 }

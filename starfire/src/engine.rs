@@ -941,7 +941,7 @@ impl MasterFade {
         }
         let progress =
             ((time_seconds - self.start_seconds) / self.duration_seconds).clamp(0.0, 1.0);
-        self.from + (self.to - self.from) * progress
+        lerp(self.from, self.to, progress)
     }
 
     fn retarget(&mut self, time_seconds: f64, to: f64, duration_seconds: f64) {
@@ -1047,14 +1047,15 @@ fn blend_states(
 ) -> FixtureStates {
     for (id, to) in &mut destination {
         if let Some(from) = source.get(id) {
+            let profile = rig.profile(id);
             for (key, value) in &from.attributes {
                 if let Some(destination) = to.attributes.get(key) {
-                    let blended = rig.interpolate_attribute(id, key, value, destination, amount);
+                    let blended = profile
+                        .expect("validated cell state")
+                        .interpolate_attribute(key, value, destination, amount);
                     to.attributes.insert(key.clone(), blended);
                 } else if amount < 1.0
-                    && rig
-                        .profile(id)
-                        .is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
+                    && profile.is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
                 {
                     to.attributes.insert(key.clone(), value.clone());
                 }
@@ -1075,7 +1076,7 @@ fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {
     from + (to - from).clamp(-max_step, max_step)
 }
 
-fn extinguish(states: &mut FixtureStates) {
+pub fn extinguish(states: &mut FixtureStates) {
     for state in states.values_mut() {
         state.intensity = 0.0;
         state.strobe_hz = 0.0;

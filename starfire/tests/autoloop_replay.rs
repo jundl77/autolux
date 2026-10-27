@@ -257,7 +257,7 @@ fn check_replay(look: &Look) {
         "{look}: replay under 16 bars"
     );
     let first = render_replay(&replay, room(), catalog()).unwrap();
-    for frame in &first.frames {
+    for frame in &first {
         assert!(
             frame.script_error.is_none(),
             "{look}: {:?}",
@@ -278,12 +278,8 @@ fn check_replay(look: &Look) {
     }
 
     let second = render_replay(&replay, room(), catalog()).unwrap();
-    let digest = dmx_digest(&first.frames);
-    assert_eq!(
-        digest,
-        dmx_digest(&second.frames),
-        "{look} is not deterministic"
-    );
+    let digest = dmx_digest(&first);
+    assert_eq!(digest, dmx_digest(&second), "{look} is not deterministic");
 
     // Duplicate selections cannot restart the current autoloop.
     let mut without_duplicate = replay.clone();
@@ -293,7 +289,7 @@ fn check_replay(look: &Look) {
     let continued = render_replay(&without_duplicate, room(), catalog()).unwrap();
     assert_eq!(
         digest,
-        dmx_digest(&continued.frames),
+        dmx_digest(&continued),
         "{look} restarted on reselect"
     );
 
@@ -301,10 +297,10 @@ fn check_replay(look: &Look) {
     let mut slower = replay.clone();
     slower.frame_rate_hz = replay.frame_rate_hz / 2;
     let slower = render_replay(&slower, room(), catalog()).unwrap();
-    for (index, frame) in slower.frames.iter().enumerate() {
+    for (index, frame) in slower.iter().enumerate() {
         assert_eq!(
             frame.dmx_frames_by_universe,
-            first.frames[index * 2].dmx_frames_by_universe,
+            first[index * 2].dmx_frames_by_universe,
             "{look} depends on frame rate"
         );
     }
@@ -683,7 +679,7 @@ fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
             .events
             .retain(|event| event.at_seconds <= replay.duration_seconds);
         let rendered = render_replay(&replay, rig.clone(), catalog()).unwrap();
-        for frame in rendered.frames {
+        for frame in rendered {
             assert!(
                 frame.script_error.is_none(),
                 "{look}: {:?}",

@@ -42,7 +42,7 @@ impl Continuous {
         } else {
             self.from
         };
-        from + (self.to - from) * speed
+        lerp(from, self.to, speed)
     }
 }
 

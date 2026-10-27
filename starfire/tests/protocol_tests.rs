@@ -583,7 +583,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let mut controls = controls.into_iter().peekable();
-    for frame in expected.frames {
+    for frame in expected {
         while controls
             .peek()
             .is_some_and(|entry| entry.0 <= frame.time_seconds)
