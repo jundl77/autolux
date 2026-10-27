@@ -50,7 +50,6 @@ class EventBuffer:
         self._special: dict | None = None
         self._special_groups: dict[str, list[str]] = {}
         self._group_roles: dict[str, str] = {}
-        self._intense_at: float | None = None
         self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
         self._system_health: dict = {}
@@ -203,26 +202,9 @@ class EventBuffer:
             self._special_groups = copy.deepcopy(groups)
             self._group_roles = dict(roles or {})
 
-    def mark_intense(self) -> None:
-        with self._lock:
-            self._intense_at = self.elapsed()
-
     def set_cooldown_source(self, source: Callable[[], list[dict]]) -> None:
         with self._lock:
             self._cooldown_source = source
-
-    def _strobe_cooldown_seconds(self, now: float) -> float | None:
-        from autolux.lib.engine.effect_controller import drop_strobe_cooldown_seconds
-        from autolux.lib.engine.effect_definitions import ShowSettings
-
-        # From the live settings, so a new intensity level shows at once.
-        try:
-            settings = ShowSettings.from_dict(self._control_state['settings'])
-        except (TypeError, ValueError):
-            return None
-        if self._intense_at is None:
-            return 0.0
-        return max(0.0, drop_strobe_cooldown_seconds(settings) - (now - self._intense_at))
 
     def set_track(self, track: dict) -> None:
         with self._lock:
@@ -310,7 +292,9 @@ class EventBuffer:
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
                 'group_roles': dict(self._group_roles),
-                'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
+                'strobe_cooldown_seconds': next(
+                    (row['remaining_seconds'] for row in cooldowns if row.get('strobe')), None
+                ),
                 'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),

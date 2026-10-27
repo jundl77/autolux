@@ -102,9 +102,10 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
             if (movement := _movement(fixture[axis])) is not None:
                 getattr(entry, axis).CopyFrom(movement)
     roles, _, warnings = mvr.group_roles(fixtures)
-    for warning in warnings:
+    groups, order_warnings = mvr.groups(fixtures)
+    for warning in warnings + order_warnings:
         LOGGER.warning('[rig] %s', warning)
-    for group, members in mvr.groups(fixtures).items():
+    for group, members in groups.items():
         rig.groups.add(group_id=group, fixture_ids=members, role=WIRE_ROLES[roles[group]])
     return rig
 
@@ -132,7 +133,7 @@ def static_rig(path: Path) -> StaticRig:
             )
         fixture['uv'] = lit_by_uv[spec, mode]
     by_name = {fixture['name']: fixture for fixture in fixtures}
-    groups = mvr.groups(fixtures)
+    groups = mvr.groups(fixtures)[0]
     return StaticRig(
         groups=tuple(sorted(groups)),
         uv_groups=tuple(

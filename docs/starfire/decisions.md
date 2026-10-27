@@ -539,10 +539,11 @@ kept in show.json as `settings.group_masters` (`{"wash": 0.5}`; an absent group 
 sent as the `GROUP_MASTER` parameter with its `group` (protocol minor 2). Starfire multiplies the
 group's cell intensity and attribute brightness by it right after the global master, so it
 caps the rendered look, specials included, and never raises it; a cell in several capped
-groups takes the product. The level is linear (0.5 halves the output), unlike the perceptual
-global master: it trims one group against the others rather than fading the room. Starfire
+groups takes the product. Starfire
 refuses an unknown group; Autolux sends only the levels of groups in the logged-in rig, and
-only when one changes.
+only when one changes. It follows the same perceptual curve as the global master; it scales
+intensity, and colour on fixtures without a Dimmer (a colour wheel holds its slot until 0, then
+takes its dark slot); pan, tilt and gobo are untouched; inhibitive like grandMA3's Group Master.
 
 2026-10-27 Mirror by symmetry: `sf.mirror(group)` pairs each member with the member nearest
 its reflection about the stage centreline, the scene's X = 0 (MVR, DIN SPEC 15801: Matrix

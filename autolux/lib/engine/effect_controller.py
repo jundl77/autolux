@@ -356,8 +356,6 @@ class EffectController:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
         if choice.intense:
             self._last_intense_at = now
-            if self.event_buffer:
-                self.event_buffer.mark_intense()
         if choice.special is None:
             self._forget_special()
         else:
