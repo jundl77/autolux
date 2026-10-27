@@ -498,6 +498,8 @@ impl Engine {
         self.paused_at_seconds = paused.then_some(seconds);
         if paused {
             self.release_strobe_overrides_instead_of_holding_them();
+            // A frozen clock would hold a fade at its level and replay it on play.
+            self.releasing.clear();
         }
         Ok(())
     }

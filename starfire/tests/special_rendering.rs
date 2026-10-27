@@ -361,6 +361,23 @@ fn a_seconds_capped_cut_on_a_paused_clock_is_over_when_play_resumes() {
     assert_eq!(dmx(&mut engine, 4.3)[red], 0);
 }
 
+#[test]
+fn pausing_within_a_cut_fade_leaves_the_special_gone_on_play() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let red = SCANNER.start + 2;
+    let mut engine = engine(&rig);
+    let texture = wire::SpecialFx {
+        release_beats: 64.0,
+        ..steady("primary", 1.0, 0.0)
+    };
+    fire(&mut engine, 0.0, &special("scanners", texture));
+    unset_within(4.0, &mut engine, Some(1.0), Some(0.5));
+    assert_ne!(dmx(&mut engine, 4.25)[red], 0);
+    fire(&mut engine, 4.25, &paused(true));
+    fire(&mut engine, 6.0, &paused(false));
+    assert_eq!(dmx(&mut engine, 6.0)[red], 0);
+}
+
 fn paused(value: bool) -> ClientMessage {
     ClientMessage::SetParameter(wire::SetParameter {
         command_id: 1,
