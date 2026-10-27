@@ -543,3 +543,16 @@ groups takes the product. The level is linear (0.5 halves the output), unlike th
 global master: it trims one group against the others rather than fading the room. Starfire
 refuses an unknown group; Autolux sends only the levels of groups in the logged-in rig, and
 only when one changes.
+
+2026-10-27 Mirror by symmetry: `sf.mirror(group)` pairs each member with the member nearest
+its reflection about the stage centreline, the scene's X = 0 (MVR, DIN SPEC 15801: Matrix
+"u1,u2,u3 / v1,v2,v3 / w1,w2,w3 / o1,o2,o3", "Right-handed, Z-Up, 1 Distance Unit equals 1
+mm"; position is the o row). The reflection keeps Y and Z, so two rows that interleave in X
+still pair within their row. A partner must be unique, mutual and within 300 mm of the
+reflection; otherwise the group pairs by rank as before, with a warning (none for a single
+multi-cell fixture, whose cells share its position). A rig that does not straddle X = 0 has
+no centreline placement, so each group mirrors about its own X centre, with a warning.
+Starfire derives the pairs once at rig load (`starfire::spatial`, O(n log n) per group) from
+`Fixture.matrix`, which the rig already carries; a cell takes its fixture's position since the
+rig carries no GDTF geometry offsets, so the RigDefinition is unchanged. The room is symmetric
+about X = 0, so its pairs equal the rank pairs and the goldens are unchanged.

@@ -388,6 +388,41 @@ impl LuaAutoloop {
                 lua.create_sequence_from(members)
             })?,
         )?;
+        let spatial = rig.clone();
+        api.set(
+            "mirror",
+            lua.create_function(move |lua, value: Value| {
+                let target: Target = lua.from_value(value)?;
+                let named: Vec<(String, String)> = match &target {
+                    Target::Group(group) => spatial
+                        .spatial()
+                        .mirror(group)
+                        .map(<[_]>::to_vec)
+                        .unwrap_or_default(),
+                    // A fixture's cells share its position, so only their order can pair them.
+                    _ => {
+                        let members = spatial.resolve(&target).map_err(mlua::Error::external)?;
+                        crate::spatial::rank_pairs(members.len())
+                            .into_iter()
+                            .map(|(left, right)| (members[left].clone(), members[right].clone()))
+                            .collect()
+                    }
+                };
+                let fixture = |id: &str| -> mlua::Result<Table> {
+                    let table = lua.create_table()?;
+                    table.set("fixture", id)?;
+                    Ok(table)
+                };
+                lua.create_sequence_from(
+                    named
+                        .iter()
+                        .map(|(left, right)| {
+                            lua.create_sequence_from([fixture(left)?, fixture(right)?])
+                        })
+                        .collect::<mlua::Result<Vec<_>>>()?,
+                )
+            })?,
+        )?;
         globals.set("sf", api)?;
         let identity = format!("{bank}/{autoloop}");
         instruction_budget.store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);

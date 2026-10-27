@@ -185,6 +185,90 @@ fn mirror_pairs_and_sides_follow_the_groups_left_to_right_order() {
     assert_eq!(pans, [0.25, 0.5, 0.75]);
 }
 
+fn at(x: f64, y: f64) -> String {
+    format!("[1,0,0,0,1,0,0,0,1,{x},{y},0]")
+}
+
+fn placed(id: &str, address: u32, x: f64, y: f64) -> String {
+    format!(
+        r#"{{"id":"{id}","profile":"generic_rgb","universe":0,"address":{address},"matrix":{}}}"#,
+        at(x, y)
+    )
+}
+
+/// Uneven spacing: the house-left members sit 100 mm off the house-right ones, the middle
+/// 40 mm off the centreline, and two rows of different depth interleave in X, so rank would
+/// pair across rows.
+fn uneven_rig() -> FixtureRig {
+    support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{},{},{},{}],
+              "groups":{{"row":["a","b","m","c","d"]}}}}"#,
+            placed("a", 1, -1000.0, 0.0),
+            placed("b", 4, -900.0, -2000.0),
+            placed("m", 7, 40.0, -1000.0),
+            placed("c", 10, 900.0, 0.0),
+            placed("d", 13, 1000.0, -2000.0),
+        ))
+        .unwrap(),
+    )
+}
+
+#[test]
+fn mirror_pairs_by_reflection_about_the_centreline_not_by_rank() {
+    let rig = uneven_rig();
+    assert!(rig.spatial().warnings().is_empty());
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          local effects = {}
+          for rank, pair in ipairs(sf.mirror(sf.group("row"))) do
+            effects[#effects + 1] = sf.dimmer(pair[1], rank / 10)
+            effects[#effects + 1] = sf.dimmer(pair[2], rank / 10)
+          end
+          return effects
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let pairs: Vec<_> = autoloop
+        .render(&snapshot(0.0), &techno())
+        .unwrap()
+        .iter()
+        .map(|effect| (effect.target.clone(), effect.values.intensity.unwrap()))
+        .collect();
+    let fixture = |id: &str| Target::Fixture(id.into());
+    // Outermost first: a↔c and b↔d both reach 1000 mm, broken by the left member's rank.
+    assert_eq!(
+        pairs,
+        [
+            (fixture("a"), 0.1),
+            (fixture("c"), 0.1),
+            (fixture("b"), 0.2),
+            (fixture("d"), 0.2),
+            (fixture("m"), 0.3),
+            (fixture("m"), 0.3),
+        ]
+    );
+}
+
+#[test]
+fn an_asymmetric_group_falls_back_to_rank_and_says_so() {
+    let rig = support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{}],"groups":{{"row":["a","b"]}}}}"#,
+            placed("a", 1, -2000.0, 0.0),
+            placed("b", 4, 500.0, 0.0),
+        ))
+        .unwrap(),
+    );
+    assert_eq!(
+        rig.spatial().mirror("row").unwrap(),
+        [("a".to_owned(), "b".to_owned())]
+    );
+    let warnings = rig.spatial().warnings();
+    assert!(warnings[0].contains("group row"), "{warnings:?}");
+}
+
 #[test]
 fn oscillators_are_periodic_and_use_supplied_musical_time() {
     let mut autoloop = autoloop(
