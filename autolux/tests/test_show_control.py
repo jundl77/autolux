@@ -871,7 +871,7 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
         master_brightness=1.0,
         settings={'drop_strobe_cooldown_seconds': 60.0, 'intensity': 0.7},
     )
-    assert 'FX' not in items(buffer.snapshot())
+    assert items(buffer.snapshot())['FX'] == '-'
     assert items(buffer.snapshot())['Strobe'] == 'ready'
     buffer.set_special('cold_spin', 'fx')
     buffer.mark_intense()
@@ -966,7 +966,7 @@ def test_the_status_line_reads_health_track_autoloop_colors_bpm_render_fps():
     ]
     assert captions == [
         ['Health', 'Track', 'Autoloop', 'Colors', 'FX', 'BPM', 'Render FPS'],
-        ['Health', 'Autoloop', 'Colors', 'BPM', 'Render FPS'],
+        ['Health', 'Autoloop', 'Colors', 'FX', 'BPM', 'Render FPS'],
     ]
     values = {
         item.children[0].children: item.children[1].children

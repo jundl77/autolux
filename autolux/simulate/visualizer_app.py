@@ -627,10 +627,8 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             ],
         ),
     ]
-    fx = _fx_text(snapshot)
-    if fx:
-        items.append(_status_item('FX', fx, id='status-fx'))
     items += [
+        _status_item('FX', _fx_text(snapshot) or '-', id='status-fx'),
         _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
         _status_item('Render FPS', render_rate_text(fps)),
     ]
