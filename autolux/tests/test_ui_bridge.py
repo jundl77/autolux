@@ -154,3 +154,25 @@ def test_an_oversized_control_body_is_refused_before_parsing(bridge):
     reply, _ = _request(connection, 'POST', {'action': 'pause', 'pad': 'x' * 5000}, JSON)
     assert reply.status == 413
     assert commands.empty()
+
+
+def test_a_refusal_arrives_whole_even_when_the_body_is_still_on_its_way(bridge):
+    import socket
+
+    connection, commands = bridge
+    body = json.dumps({'action': 'pause', 'pad': 'x' * 5000}).encode()
+    head = (
+        f'POST {CONTROL_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n'
+        f'Origin: {DASHBOARD}\r\nContent-Length: {len(body)}\r\n\r\n'
+    ).encode()
+    with socket.create_connection((connection.host, connection.port), timeout=2) as client:
+        client.sendall(head)
+        # The bridge waits for the body it refuses; replying first would reset the socket.
+        time.sleep(0.1)
+        client.sendall(body)
+        reply = http.client.HTTPResponse(client)
+        reply.begin()
+        assert (reply.status, reply.getheader('Connection')) == (413, 'close')
+        assert reply.getheader('Access-Control-Allow-Origin') == DASHBOARD
+        reply.read()
+    assert commands.empty()

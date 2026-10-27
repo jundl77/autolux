@@ -25,6 +25,9 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
+# A refused body up to this size is read and discarded so the refusal arrives intact.
+MAX_DRAINED_BYTES = 16 * MAX_CONTROL_BYTES
+DRAIN_TIMEOUT_SEC = 1.0
 # The engine takes commands every Starfire frame (25 ms); ten frames means its loop is stalled.
 HANDOFF_TIMEOUT_SEC = 0.25
 CORS_MAX_AGE_SEC = 600
@@ -223,22 +226,22 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         commands = self.server.commands
-        if self.path != CONTROL_PATH or commands is None:
-            self.send_error(404)
-            return
-        if 'Origin' in self.headers and not self._cross_origin():
-            self.send_error(403)
-            return
-        if self.headers.get_content_type() != 'application/json':
-            # Forces a preflight for any cross-site page, so the origin check above cannot be skipped.
-            self.send_error(415)
-            return
         try:
             length = int(self.headers.get('Content-Length', 0))
         except ValueError:
             length = -1
+        if self.path != CONTROL_PATH or commands is None:
+            self._refuse(404, length)
+            return
+        if 'Origin' in self.headers and not self._cross_origin():
+            self._refuse(403, length)
+            return
+        if self.headers.get_content_type() != 'application/json':
+            # Forces a preflight for any cross-site page, so the origin check above cannot be skipped.
+            self._refuse(415, length)
+            return
         if not 0 < length <= MAX_CONTROL_BYTES:
-            self.send_error(413 if length > MAX_CONTROL_BYTES else 400)
+            self._refuse(413 if length > MAX_CONTROL_BYTES else 400, length)
             return
         try:
             command = parse_control_command(json.loads(self.rfile.read(length)))
@@ -259,6 +262,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(504, {'error': 'the show has not taken the command yet'})
             return
         self._reply(202, {'accepted': command['action']})
+
+    def _refuse(self, status: int, length: int) -> None:
+        # Closing with the body unread resets the socket, and the client can lose the reply.
+        if 0 < length <= MAX_DRAINED_BYTES:
+            self.connection.settimeout(DRAIN_TIMEOUT_SEC)
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
+            finally:
+                self.connection.settimeout(None)
+        self.send_error(status)
 
     def _cross_origin(self) -> bool:
         return _dashboard_origin(self.headers.get('Origin'), self.server.dashboard_port)
