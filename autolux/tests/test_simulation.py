@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from pathlib import Path
@@ -95,6 +96,10 @@ async def test_report_duration_matches_song_not_flush_tail():
 
 
 @pytest.mark.integration
+# Wall-clock speed depends on machine load, so it stays out of the deterministic run.
+@pytest.mark.skipif(
+    os.environ.get('AUTOLUX_TIMING_TESTS') != '1', reason='set AUTOLUX_TIMING_TESTS=1 to time runs'
+)
 async def test_runs_much_faster_than_real_time():
     # 2x, not 4x: madmom's online nets measure ~3.8x real time here (aubio was ~46x).
     run = await _sample_run()
