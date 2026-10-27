@@ -44,17 +44,12 @@ impl PaletteSlots {
     }
 
     pub fn blend(&self, to: &Self, amount: f64) -> Self {
-        let mix = |from: Rgb, to: Rgb| Rgb {
-            red: from.red + (to.red - from.red) * amount,
-            green: from.green + (to.green - from.green) * amount,
-            blue: from.blue + (to.blue - from.blue) * amount,
-        };
         Self {
-            primary: mix(self.primary, to.primary),
-            secondary: mix(self.secondary, to.secondary),
-            accent: mix(self.accent, to.accent),
-            cold: mix(self.cold, to.cold),
-            black: mix(self.black, to.black),
+            primary: self.primary.lerp(to.primary, amount),
+            secondary: self.secondary.lerp(to.secondary, amount),
+            accent: self.accent.lerp(to.accent, amount),
+            cold: self.cold.lerp(to.cold, amount),
+            black: self.black.lerp(to.black, amount),
         }
     }
 }

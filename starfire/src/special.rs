@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 
 use crate::fixtures::FixtureRig;
 use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
-use crate::model::{AttributeValue, FixtureState, Rgb, SpecialFx};
+use crate::model::{AttributeValue, FixtureState, SpecialFx, lerp};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
 
@@ -42,7 +42,7 @@ impl Continuous {
         } else {
             self.from
         };
-        from + (self.to - from) * speed
+        lerp(from, self.to, speed)
     }
 }
 
@@ -425,11 +425,7 @@ pub fn apply(
 
     state.intensity = lerp(state.intensity, special.energy, level);
     if let Some(colour) = colour {
-        state.colour = Rgb {
-            red: lerp(state.colour.red, colour.red, level),
-            green: lerp(state.colour.green, colour.green, level),
-            blue: lerp(state.colour.blue, colour.blue, level),
-        };
+        state.colour = state.colour.lerp(colour, level);
     }
     if scan {
         let cycles = frame.progress.scan_cycles;
@@ -439,8 +435,4 @@ pub fn apply(
     if !open && matches!(pulse, Some((Pulse::DarkSlot, _))) {
         state.intensity *= 1.0 - level;
     }
-}
-
-fn lerp(from: f64, to: f64, amount: f64) -> f64 {
-    from + (to - from) * amount
 }

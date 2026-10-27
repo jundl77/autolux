@@ -113,8 +113,8 @@ fn native_pattern_matching_cannot_bypass_the_script_budget() {
 fn a_giant_multibyte_lua_error_cannot_amplify_replay_memory_per_frame() {
     let (replay, rig, catalog) = fault_replay(90.0);
     let result = render_replay(&replay, rig, catalog).unwrap();
-    assert_eq!(result.frames.len(), 3601);
-    for frame in result.frames {
+    assert_eq!(result.len(), 3601);
+    for frame in result {
         let diagnostic = frame.script_error.unwrap();
         assert!(diagnostic.len() <= MAX_SCRIPT_ERROR_BYTES);
         assert!(diagnostic.ends_with("… [truncated]"));

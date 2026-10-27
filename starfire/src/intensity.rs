@@ -6,6 +6,8 @@
 //! each level gets the value chosen for it and a continuous level in between interpolates.
 //! Below calm the calm value holds: calm is already the floor of the show.
 
+use crate::model::lerp;
+
 pub const INTENSITY_CALM: f64 = 0.3;
 pub const INTENSITY_BALANCED: f64 = 0.7;
 pub const INTENSITY_WILD: f64 = 1.0;
@@ -74,8 +76,4 @@ fn by_level(intensity: f64, calm: f64, balanced: f64, wild: f64) -> f64 {
     } else {
         wild
     }
-}
-
-fn lerp(from: f64, to: f64, amount: f64) -> f64 {
-    from + (to - from) * amount
 }

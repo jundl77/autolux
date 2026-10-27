@@ -509,8 +509,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             if let Some(line) = media.end_burst(&connection) {
                 reporter.log(line);
             }
-        } else {
-            timeline.state_at(Instant::now());
         }
         if last_metrics.elapsed() >= protocol::METRICS_INTERVAL {
             let mut tx = wire::TxMetrics {
@@ -522,6 +520,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 playback_delay_seconds: config.playback_delay_seconds,
                 dmx_input_age_seconds: light_at.map(|at| at.elapsed().as_secs_f64()),
                 network_queued_bytes: connection.pending_bytes() as u64,
+                send_failures_total: connection.refused_sends(),
                 ..Default::default()
             };
             if let Some(capture) = &capture {
@@ -662,6 +661,18 @@ mod tests {
             .collect();
         let survivors: Vec<u32> = (dropped as u32 + 1..=BLOCKS as u32).collect();
         assert_eq!(sequences, survivors, "only the oldest audio is dropped");
+    }
+
+    #[test]
+    fn refused_sends_count_as_send_failures_but_queued_ones_do_not() {
+        let socket = FakeSocket::default();
+        socket.0.borrow_mut().0 = usize::MAX;
+        let mut connection = Connection::with_stream(socket, frozen_clock);
+        let heartbeat = Message::Heartbeat(wire::Heartbeat { run_id: 7 });
+        while connection.send(&heartbeat).unwrap() {}
+        assert_eq!(connection.refused_sends(), 1);
+        assert!(!connection.send(&heartbeat).unwrap());
+        assert_eq!(connection.refused_sends(), 2);
     }
 
     #[test]

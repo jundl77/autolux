@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 
 use crossbeam_queue::ArrayQueue;
 
-use crate::audio::{AudioBlock, BLOCK_FRAMES, CHANNELS, SAMPLE_RATE};
+use crate::audio::AudioBlock;
+use crate::protocol::{BLOCK_FRAMES, BUFFER_MILLISECONDS, CHANNELS, SAMPLE_RATE};
 
-pub const JITTER_BUFFER_MS: u32 = 500;
+const TARGET_FRAMES: u64 = SAMPLE_RATE as u64 * BUFFER_MILLISECONDS as u64 / 1000;
 const PLAYBACK_QUEUE_BLOCKS: usize = 512;
 const LIGHTING_QUEUE_UPDATES: usize = 512;
 const CLOCK_CORRECTION_GAIN: f64 = 0.01;
@@ -122,7 +123,6 @@ pub(crate) struct Playout {
     lighting: Arc<ArrayQueue<LightingUpdate>>,
     latest_sample_position: Arc<AtomicU64>,
     pub counters: Arc<PlayoutCounters>,
-    target_frames: u64,
     block: Option<PlaybackBlock>,
     block_offset: usize,
     next_sample_position: u64,
@@ -139,11 +139,7 @@ pub(crate) struct Playout {
 }
 
 impl Playout {
-    pub fn new(jitter_buffer_ms: u32) -> anyhow::Result<(Self, PlayoutSender)> {
-        anyhow::ensure!(
-            jitter_buffer_ms == JITTER_BUFFER_MS,
-            "Radius requires a 500 ms playback buffer"
-        );
+    pub fn new() -> (Self, PlayoutSender) {
         let queue = Arc::new(ArrayQueue::new(PLAYBACK_QUEUE_BLOCKS));
         let lighting = Arc::new(ArrayQueue::new(LIGHTING_QUEUE_UPDATES));
         let latest_sample_position = Arc::new(AtomicU64::new(0));
@@ -155,13 +151,12 @@ impl Playout {
             counters: counters.clone(),
             lighting: lighting.clone(),
         };
-        Ok((
+        (
             Self {
                 queue,
                 lighting,
                 latest_sample_position,
                 counters,
-                target_frames: u64::from(SAMPLE_RATE) * u64::from(jitter_buffer_ms) / 1000,
                 block: None,
                 block_offset: 0,
                 next_sample_position: 0,
@@ -177,7 +172,7 @@ impl Playout {
                 last_light_sequence: None,
             },
             sender,
-        ))
+        )
     }
 
     fn load_block(&mut self) -> bool {
@@ -237,7 +232,7 @@ impl Playout {
                 .load(Ordering::Acquire)
                 .saturating_sub(self.next_sample_position);
             self.counters.buffered_frames.store(fill, Ordering::Relaxed);
-            if fill < self.target_frames {
+            if fill < TARGET_FRAMES {
                 return;
             }
             self.last_light_sequence = None;
@@ -265,7 +260,7 @@ impl Playout {
             .load(Ordering::Acquire)
             .saturating_sub(self.next_sample_position);
         self.counters.buffered_frames.store(fill, Ordering::Relaxed);
-        let correction = ((fill as f64 - self.target_frames as f64) / f64::from(SAMPLE_RATE)
+        let correction = ((fill as f64 - TARGET_FRAMES as f64) / f64::from(SAMPLE_RATE)
             * CLOCK_CORRECTION_GAIN)
             .clamp(-MAX_CLOCK_CORRECTION_RATIO, MAX_CLOCK_CORRECTION_RATIO);
         self.ratio += CLOCK_CORRECTION_SMOOTHING * (1.0 + correction - self.ratio);

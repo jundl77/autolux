@@ -10,14 +10,10 @@ use anyhow::{Context, Result, ensure};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crossbeam_queue::ArrayQueue;
 
-pub use crate::playout::{EnqueueError, JITTER_BUFFER_MS, LightingUpdate, PlaybackBlock};
-use crate::playout::{Playout, PlayoutSender};
+use crate::playout::{EnqueueError, LightingUpdate, PlaybackBlock, Playout, PlayoutSender};
+use crate::protocol::{BLOCK_FRAMES, CHANNELS, SAMPLE_RATE};
 use crate::realtime::{self, Scheduling};
 
-pub const SAMPLE_RATE: u32 = 44_100;
-pub const CHANNELS: usize = 2;
-pub const BLOCK_FRAMES: usize = 128;
-pub const SHOW_DELAY_SECONDS: f64 = 14.0;
 const CAPTURE_QUEUE_BLOCKS: usize = (SAMPLE_RATE as usize / 2).div_ceil(BLOCK_FRAMES);
 const OUTPUT_HISTORY_FRAMES: usize = 131_072;
 const SILENCE_POSITION: u64 = u64::MAX;
@@ -121,33 +117,18 @@ fn stream_config(input: bool) -> cpal::StreamConfig {
     }
 }
 
-/// Resolves the exact endpoint and verifies a stereo Float32 44.1 kHz stream can be opened.
+/// Resolves the exact playback endpoint and verifies a stereo Float32 44.1 kHz stream opens.
 /// No stream is started and no audio is captured or played.
-pub fn check_device(device_id: &str, input: bool) -> Result<AudioDevice> {
-    let device = select_device(device_id, input)?;
-    let description = device.description()?;
-    let _stream = if input {
-        device.build_input_stream::<f32, _, _>(
-            stream_config(true),
-            |_, _| {},
-            |_| {},
-            Some(STREAM_OPEN_TIMEOUT),
-        )
-    } else {
-        device.build_output_stream::<f32, _, _>(
+pub fn check_device(device_id: &str) -> Result<()> {
+    let _stream = select_device(device_id, false)?
+        .build_output_stream::<f32, _, _>(
             stream_config(false),
             |output, _| output.fill(0.0),
             |_| {},
             Some(STREAM_OPEN_TIMEOUT),
         )
-    }
-    .context("open stereo Float32 44100 Hz stream on configured endpoint")?;
-    Ok(AudioDevice {
-        id: device.id()?.id().to_owned(),
-        name: description.name().to_owned(),
-        input: description.supports_input(),
-        output: description.supports_output(),
-    })
+        .context("open stereo Float32 44100 Hz stream on configured endpoint")?;
+    Ok(())
 }
 
 struct AudioDelay {
@@ -624,27 +605,23 @@ pub struct AudibleSnapshot {
     /// False during startup/rebuffer silence, failed output, or an inconsistent clock read.
     pub position_valid: bool,
     pub callback_age: Option<Duration>,
-    pub device_latency_frames: u64,
 }
 
 pub struct AudibleClock {
     sequence: AtomicU64,
     audio_frame_position: AtomicU64,
     position_valid: AtomicBool,
-    device_latency_frames: AtomicU64,
     counters: Arc<StreamCounters>,
 }
 
 impl AudibleClock {
-    fn publish(&self, audio_frame_position: Option<u64>, device_latency_frames: u64) {
+    fn publish(&self, audio_frame_position: Option<u64>) {
         self.sequence.fetch_add(1, SeqCst);
         if let Some(position) = audio_frame_position {
             self.audio_frame_position.store(position, SeqCst);
         }
         self.position_valid
             .store(audio_frame_position.is_some(), SeqCst);
-        self.device_latency_frames
-            .store(device_latency_frames, SeqCst);
         self.sequence.fetch_add(1, SeqCst);
     }
 
@@ -660,7 +637,6 @@ impl AudibleClock {
                 position_valid: self.position_valid.load(SeqCst)
                     && !self.counters.faulted.load(Acquire),
                 callback_age: self.counters.callback_age(),
-                device_latency_frames: self.device_latency_frames.load(SeqCst),
             };
             if before == self.sequence.load(SeqCst) {
                 return snapshot;
@@ -670,7 +646,6 @@ impl AudibleClock {
             audio_frame_position: self.audio_frame_position.load(Acquire),
             position_valid: false,
             callback_age: self.counters.callback_age(),
-            device_latency_frames: self.device_latency_frames.load(Acquire),
         }
     }
 }
@@ -730,15 +705,14 @@ pub struct PlaybackStream {
 }
 
 impl PlaybackStream {
-    pub fn start(device_id: &str, jitter_buffer_ms: u32) -> Result<Self> {
-        let (mut playout, sender) = Playout::new(jitter_buffer_ms)?;
+    pub fn start(device_id: &str) -> Result<Self> {
+        let (mut playout, sender) = Playout::new();
         let device = select_device(device_id, false)?;
         let counters = Arc::new(StreamCounters::default());
         let clock = Arc::new(AudibleClock {
             sequence: AtomicU64::new(0),
             audio_frame_position: AtomicU64::new(0),
             position_valid: AtomicBool::new(false),
-            device_latency_frames: AtomicU64::new(0),
             counters: counters.clone(),
         });
         let callback_clock = clock.clone();
@@ -766,14 +740,8 @@ impl PlaybackStream {
                         history.push(playout.frame(frame));
                     }
                     let audible = history.audible_position(callback_start_frame, pending_frames);
-                    callback_clock.publish(
-                        if playout.counters.faulted.load(Acquire) {
-                            None
-                        } else {
-                            audible
-                        },
-                        pending_frames,
-                    );
+                    callback_clock
+                        .publish(audible.filter(|_| !playout.counters.faulted.load(Acquire)));
                 },
                 move |error| errors.error(error),
                 Some(STREAM_OPEN_TIMEOUT),

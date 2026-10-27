@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
 
-use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb};
+use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb, lerp};
 use crate::protocol::wire;
 
 const MAX_CHANNEL_BYTES: usize = 4;
@@ -114,7 +114,6 @@ impl DmxCurve {
 
     /// The DMX value in first..=last whose output is nearest `amount` of full output.
     fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
-        let target = amount;
         let position = |value: u32| {
             if last == first {
                 0.0
@@ -125,15 +124,15 @@ impl DmxCurve {
         let (mut low, mut high) = (first, last);
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.output(position(middle)) < target {
+            if self.output(position(middle)) < amount {
                 low = middle + 1;
             } else {
                 high = middle;
             }
         }
         if low > first
-            && (target - self.output(position(low - 1))).abs()
-                <= (self.output(position(low)) - target).abs()
+            && (amount - self.output(position(low - 1))).abs()
+                <= (self.output(position(low)) - amount).abs()
         {
             low - 1
         } else {
@@ -539,7 +538,7 @@ impl GdtfProfile {
             if functions.len() == 1 {
                 let function = functions[0].1;
                 if !function.snap && function.sets.is_empty() {
-                    return AttributeValue::Number(first + (last - first) * amount);
+                    return AttributeValue::Number(lerp(*first, *last, amount));
                 }
             }
         }
@@ -678,8 +677,7 @@ impl GdtfProfile {
                     } else {
                         f64::from(channel.default - function.first) / span
                     };
-                    function.physical_from
-                        + (function.physical_to - function.physical_from) * amount
+                    lerp(function.physical_from, function.physical_to, amount)
                 } else {
                     function.physical_from
                 };

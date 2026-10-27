@@ -87,15 +87,11 @@ impl Replay {
     }
 }
 
-pub struct ReplayResult {
-    pub frames: Vec<RenderedFrame>,
-}
-
 pub fn render_replay(
     replay: &Replay,
     rig: FixtureRig,
     catalog: AutoloopCatalog,
-) -> Result<ReplayResult> {
+) -> Result<Vec<RenderedFrame>> {
     let frame_count = replay.validate()?;
     let states = rig.empty_states();
     ensure!(
@@ -133,7 +129,7 @@ pub fn render_replay(
         );
         frames.push(frame);
     }
-    Ok(ReplayResult { frames })
+    Ok(frames)
 }
 
 /// Hash the actual complete output: supplied frame time, universe and DMX bytes.
