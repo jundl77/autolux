@@ -1357,17 +1357,22 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
         )
 
     assert [shown(row) for row in rows] == [
-        ('all · Strobe burst', 'ready', '0.0%', True),
-        ('wash', 'ready', '0.0%', True),
+        ('all · Strobe burst', 'ready', '100.0%', True),
+        ('wash', 'ready', '100.0%', True),
         ('movers · Spin', '45 s', '50.0%', False),
-        ('fx · Cold drift', '180 s', '74.8%', False),
+        ('fx · Cold drift', '180 s', '25.2%', False),
     ]
     # The ticker in control.js reads these to count down between polls.
     props = rows[3].to_plotly_json()['props']
     assert (props['data-total'], props['data-remaining']) == (240, 179.5)
+    assert (props['data-group'], props['data-last'], props['data-ready']) == (
+        'fx',
+        'cold_drift',
+        'false',
+    )
 
 
-def test_an_fx_effects_bar_drains_to_empty_in_a_colour_the_page_defines():
+def test_an_fx_effects_bar_fills_to_full_in_a_colour_the_page_defines():
     from autolux.simulate.visualizer_app import _build_cooldowns
 
     def fill(total, remaining):
@@ -1381,24 +1386,26 @@ def test_an_fx_effects_bar_drains_to_empty_in_a_colour_the_page_defines():
         [row] = _build_cooldowns({'special_cooldowns': [entry]})
         return row.children[1].children.style['width']
 
-    # Full as the group fires, remaining/cooldown on the way, empty once ready.
-    assert [fill(240, r) for r in (240, 180, 60, 0)] == ['100.0%', '75.0%', '25.0%', '0.0%']
+    # Empty as the group fires, 1 - remaining/cooldown on the way, full once ready.
+    assert [fill(240, r) for r in (240, 180, 60, 0)] == ['0.0%', '25.0%', '75.0%', '100.0%']
 
-    # The block sits outside #show-control, so every token the fill paints with must be set on
-    # .cooldowns or the row itself; an undefined var() would leave the bar transparent.
+    # The block sits outside #show-control, so every token the fill and the fire flash paint
+    # with must be set on .cooldowns or the row itself; an undefined var() would leave the bar
+    # transparent.
     css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
     rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
-    [paint] = [body for selector, body in rules.items() if selector.strip() == '.cooldown-fill']
-    background = re.search(r'background:\s*([^;]+);', paint).group(1)
-    assert 'transparent' not in background
     scopes = [
         body
         for selector, body in rules.items()
         if {'.cooldowns', '.cooldown-row'} & {part.strip() for part in selector.split(',')}
     ]
     defined = {name for body in scopes for name in re.findall(r'(--[\w-]+)\s*:', body)}
-    assert 'var(' in background
-    assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
+    for painted in ('.cooldown-fill', '.cooldown-row.flash .cooldown-track'):
+        [paint] = [body for selector, body in rules.items() if selector.strip() == painted]
+        background = re.search(r'background:\s*([^;]+);', paint).group(1)
+        assert 'transparent' not in background
+        assert 'var(' in background
+        assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -1427,3 +1434,60 @@ def test_the_fx_effects_ticker_counts_a_bar_down_from_the_last_poll():
     ticked = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
     # Ticking e seconds after a poll shows what a poll e seconds later would have rendered.
     assert ticked == [rendered(t, max(0.0, r - e)) for t, r, e in cases]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routine_poll():
+    def poll(last, remaining, ready=False):
+        return {'last': last, 'remaining': remaining, 'ready': ready}
+
+    # (previous poll of the group, this poll)
+    cases = [
+        (None, poll('drift', 240)),  # first sight of the group: no history, no flash
+        (poll('drift', 180), poll('drift', 179)),  # counting down
+        (poll('drift', 0, True), poll('drift', 0, True)),  # staying ready
+        (poll('drift', 0, True), poll('drift', 240)),  # ready group fires the same special
+        (poll('drift', 30), poll('drift', 240)),  # fired again before it was ready
+        (poll('drift', 0, True), poll('spin', 90)),  # a different special fired
+    ]
+    calls = ', '.join(
+        f'control.cooldownFired({json.dumps(previous)}, {json.dumps(polled)})'
+        for previous, polled in cases
+    )
+    fired = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
+    assert fired == [False, False, False, True, True, True]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_fx_effects_ticker_holds_the_flash_class_for_half_a_second_after_a_fire():
+    # A fake document with one bar and a hand-driven clock and setInterval.
+    body = """
+const row = {
+    dataset: {group: 'fx', last: 'drift', total: '240', remaining: '0', ready: 'true'},
+    classes: new Set(['cooldown-row', 'ready']),
+    querySelector: () => null,
+};
+row.classList = {toggle: (name, on) => (on ? row.classes.add(name) : row.classes.delete(name))};
+let now = 0;
+let tick = null;
+Object.defineProperty(globalThis, 'performance', {value: {now: () => now}});
+globalThis.setInterval = (fn) => { tick = fn; };
+globalThis.document = {querySelectorAll: () => [row], addEventListener: () => {}};
+"""
+    script = (
+        body
+        + 'globalThis.window = {};\n'
+        + CONTROL_JS.read_text(encoding='utf8')
+        + """
+const seen = [];
+const at = (ms) => { now = ms; tick(); seen.push(row.classes.has('flash')); };
+at(0); at(100);
+Object.assign(row.dataset, {remaining: '240', ready: 'false'});  // the poll after a fire
+at(200); at(600); at(700);
+row.dataset.remaining = '239';  // the next routine poll
+at(800);
+console.log(JSON.stringify(seen));
+"""
+    )
+    result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [False, False, True, True, False, False]

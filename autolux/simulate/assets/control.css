@@ -203,9 +203,11 @@
 .status-item.fx-running .status-text { color: #73b6ff; }
 
 /* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first. Name and
-   seconds sit inside the bar; the flat group-tinted fill is full as the group fires and drains
-   right to left, leaving the bare track and "ready". The fill is the same 30% tint over the surface
-   as an Intensity level that follows the music. Head and track share one grid cell. */
+   seconds sit inside the bar; the flat group-tinted fill is empty as the group fires, grows
+   left to right as it recovers and stays full with "ready". The fill is the same 30% tint over the
+   surface as an Intensity level that follows the music. Head and track share one grid cell.
+   control.js adds .flash for 500 ms when a group fires: the whole track lights in its tint (the
+   fill is empty then, so the track is what shows) and fades back once the class goes. */
 .cooldowns { display: grid; gap: 4px; }
 .cooldown-row { --tint: var(--muted); display: grid; }
 .cooldown-head, .cooldown-track { grid-area: 1 / 1; }
@@ -215,5 +217,11 @@
 .cooldown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cooldown-caption { flex: none; font-variant-numeric: tabular-nums; }
 .cooldown-row.ready .cooldown-caption { color: var(--muted); }
-.cooldown-track { height: 20px; border-radius: 6px; overflow: hidden; background: var(--fill); }
+.cooldown-track { height: 20px; border-radius: 6px; overflow: hidden; background: var(--fill);
+                  transition: background-color 400ms ease-out; }
 .cooldown-fill { height: 100%; background: color-mix(in srgb, var(--tint) 30%, var(--fill)); }
+.cooldown-row.flash .cooldown-track { background: color-mix(in srgb, var(--tint) 60%, var(--fill));
+                                      transition: none; }
+@media (prefers-reduced-motion: reduce) {
+    .cooldown-track { transition: none; }
+}

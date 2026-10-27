@@ -1751,8 +1751,8 @@ def _cooldown_bar(row: dict):
     # control.js ticks fill and caption down from these data attributes between polls and
     # mirrors the arithmetic here (cooldownView); keep the two in step.
     total, remaining = row['cooldown_seconds'], row['remaining_seconds']
-    # The bar drains: full as the group fires, empty once it is ready (or has no cooldown).
-    left = 0.0 if row['ready'] or total <= 0 else min(1.0, max(0.0, remaining / total))
+    # The bar fills: empty as the group fires, full once it is ready (or has no cooldown).
+    filled = 1.0 if row['ready'] or total <= 0 else 1.0 - min(1.0, max(0.0, remaining / total))
     label = row['group']
     if row['last']:
         label += ' · ' + row['last'].replace('_', ' ').capitalize()
@@ -1769,13 +1769,20 @@ def _cooldown_bar(row: dict):
                 className='cooldown-head',
             ),
             html.Div(
-                html.Div(className='cooldown-fill', style={'width': f'{left:.1%}'}),
+                html.Div(className='cooldown-fill', style={'width': f'{filled:.1%}'}),
                 className='cooldown-track',
             ),
         ],
         className='cooldown-row ready' if row['ready'] else 'cooldown-row',
         style={'--tint': _group_tint(row['group'])},
-        **{'data-total': total, 'data-remaining': remaining},
+        # group and last let the ticker spot a fire even when Dash reuses this element.
+        **{
+            'data-group': row['group'],
+            'data-last': row['last'] or '',
+            'data-total': total,
+            'data-remaining': remaining,
+            'data-ready': 'true' if row['ready'] else 'false',
+        },
     )
 
 
