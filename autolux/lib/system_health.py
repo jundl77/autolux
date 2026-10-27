@@ -45,8 +45,6 @@ def health_summary(snapshot, *, now=None):
             audio_detail += f' (last gap {gap * MILLISECONDS_PER_SECOND:.0f} ms)'
     if recent.get('dropped_frames'):
         audio_detail += f" · {int(recent['dropped_frames'])} dropped frames"
-    if recent.get('latency_recoveries'):
-        audio_detail += f" · {int(recent['latency_recoveries'])} latency recovery drops"
     peak = rx.get('audio_signal_peak')
     if peak is not None:
         audio_detail += (
@@ -151,13 +149,8 @@ COUNTERS = {
     'underruns_total': 'Receiver audio starvation episodes.',
     'device_underruns_total': 'Audio output device underruns.',
     'lost_frames_total': 'Missing audio frames observed at the receiver.',
-    'concealed_frames_total': 'Audio frames replaced with silence.',
     'overflow_frames_total': 'Audio frames rejected by a full receiver queue.',
-    'late_packets_total': 'Audio packets arriving after their accepted media position.',
-    'latency_trims_total': 'Audio packets discarded to recover excessive latency.',
     'send_failures_total': 'Failed transport writes.',
-    'invalid_packets_total': 'Rejected transport messages.',
-    'dmx_dropped_total': 'Dropped or out-of-order lighting packets.',
     'dmx_frames_total': 'Lighting frames written to the Enttec output.',
 }
 

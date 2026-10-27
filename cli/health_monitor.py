@@ -77,7 +77,6 @@ class HealthMonitor:
             'lost_frames': rx.get('lost_frames_total', 0),
             'dropped_frames': tx.get('queue_dropped_frames_total', 0)
             + rx.get('overflow_frames_total', 0),
-            'latency_recoveries': rx.get('latency_trims_total', 0),
         }
         if age is not None and age < TELEMETRY_STALE_SECONDS:
             if not self._history or now - self._history[-1][0] >= HEALTH_SAMPLE_INTERVAL_SECONDS:
