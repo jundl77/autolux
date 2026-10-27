@@ -1427,34 +1427,36 @@ DIRECT_AUTO_JS = (
                 if (palette && palette !== current) {
                     control.dispatch(control.build.palette(palette), status);
                 }
-            } else if (triggered.includes('control-fx-auto.n_clicks')
-                    || triggered.includes('control-fx-off.n_clicks')) {
-                // Every click goes out: the poll can be missing or stale, the show ignores a
-                // repeat.
-                const enabled = triggered.includes('control-fx-auto.n_clicks');
-                control.hold({fx_auto: enabled});
+            }
+            // These three act on control.js's record of the click, never on `triggered` or
+            // the poll alone: see presses there. Every click goes out; the show ignores a
+            // repeat.
+            const take = (action, ...inputs) => inputs.some((input) => triggered.includes(input))
+                ? control.takePress(action) : undefined;
+            const fxAuto = take('fx_auto', 'control-fx-auto.n_clicks', 'control-fx-off.n_clicks');
+            if (fxAuto !== undefined) {
+                control.hold({fx_auto: fxAuto});
                 window.dash_clientside.set_props(
-                    'control-fx-auto', {className: enabled ? 'active' : ''});
+                    'control-fx-auto', {className: fxAuto ? 'active' : ''});
                 window.dash_clientside.set_props(
-                    'control-fx-off', {className: enabled ? '' : 'active'});
-                control.dispatch(control.build.fxAuto(enabled), status, ['fx_auto']);
-            } else if (triggered.includes('control-intensity-auto.n_clicks')) {
-                const enabled = !shown.intensity_auto;
-                control.hold({intensity_auto: enabled});
-                showFollowing(enabled);
+                    'control-fx-off', {className: fxAuto ? '' : 'active'});
+                control.dispatch(control.build.fxAuto(fxAuto), status, ['fx_auto']);
+            }
+            const follow = take('intensity_auto', 'control-intensity-auto.n_clicks');
+            if (follow !== undefined) {
+                control.hold({intensity_auto: follow});
+                showFollowing(follow);
                 control.dispatch(
-                    control.build.intensityAuto(enabled), status, ['intensity_auto']);
-            } else if (triggered.includes('control-intensity.value')) {
-                const current = (shown.settings || {}).intensity;
-                if (intensity !== null && intensity !== undefined
-                        && (current === undefined || Math.abs(intensity - current) >= 0.005)) {
-                    // A level picked by hand takes the show off follow-the-music.
-                    if (shown.intensity_auto) {
-                        control.hold({intensity_auto: false});
-                        showFollowing(false);
-                    }
-                    control.dispatch(control.build.intensity(intensity), status);
+                    control.build.intensityAuto(follow), status, ['intensity_auto']);
+            }
+            const level = take('intensity', 'control-intensity.value');
+            if (level !== undefined) {
+                // A level picked by hand takes the show off follow-the-music.
+                if (shown.intensity_auto) {
+                    control.hold({intensity_auto: false});
+                    showFollowing(false);
                 }
+                control.dispatch(control.build.intensity(level), status);
             }
             return [nu, nu];
         }"""
