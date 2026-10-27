@@ -105,9 +105,9 @@ def parse_control_command(payload) -> dict:
                 f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
             )
         return {'action': action, 'name': name}
-    if action == 'intensity_auto':
+    if action in ('intensity_auto', 'fx_auto'):
         if type(payload.get('enabled')) is not bool:
-            raise ValueError('intensity_auto must be true or false')
+            raise ValueError(f'{action} must be true or false')
         return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}

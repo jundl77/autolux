@@ -677,6 +677,8 @@ SETTINGS_ORDER = (
 SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
+# FX chips: automatic specials on or off.
+FX_AUTO_IDS = {'control-fx-auto': True, 'control-fx-off': False}
 INTENSITY_LEVELS = (
     (CALM, INTENSITY_CALM),
     (BALANCED, INTENSITY_BALANCED),
@@ -726,8 +728,8 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'master_brightness': command['level']}
     if action == 'settings':
         return {'settings': command['settings']}
-    if action == 'intensity_auto':
-        return {'intensity_auto': command['enabled']}
+    if action in ('intensity_auto', 'fx_auto'):
+        return {action: command['enabled']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
     return {}
@@ -751,10 +753,21 @@ def parse_decimal(name: str, raw) -> float:
 
 
 def control_command(
-    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY, auto=False
+    trigger,
+    paused,
+    level,
+    settings,
+    *,
+    palette=None,
+    intensity=DEFAULT_INTENSITY,
+    auto=False,
+    fx_auto=True,
 ) -> dict | None:
     if trigger == 'control-intensity-auto':
         return {'action': 'intensity_auto', 'enabled': not auto}
+    if trigger in FX_AUTO_IDS:
+        enabled = FX_AUTO_IDS[trigger]
+        return None if enabled == fx_auto else {'action': 'fx_auto', 'enabled': enabled}
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger == 'control-next':
@@ -772,6 +785,7 @@ def control_command(
                 **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
                 'intensity': intensity,
                 'intensity_auto': auto,
+                'fx_auto': fx_auto,
             },
         }
     return None
@@ -1031,6 +1045,17 @@ def _build_control_card() -> list:
                                     disabled=True,
                                 ),
                                 html.Span(id='control-intensity-value', className='fader-value'),
+                                html.Span('FX', className='control-label'),
+                                html.Button(
+                                    'Auto',
+                                    id='control-fx-auto',
+                                    title='The show picks FX for each section',
+                                ),
+                                html.Button(
+                                    'Off',
+                                    id='control-fx-off',
+                                    title='No automatic FX; a running one ends with its section',
+                                ),
                                 html.Span('Colors', className='control-label'),
                                 dcc.Dropdown(
                                     id='control-palette',
@@ -1339,10 +1364,21 @@ FOLLOW_SYNC_JS = '''function(state) {
 }'''
 
 
+# Before the first poll neither chip is lit, as the show's choice is not known yet.
+FX_SYNC_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    if (!state || !state.settings) {
+        return ['', ''];
+    }
+    const on = state.fx_auto !== false;
+    return [on ? 'active' : '', on ? '' : 'active'];
+}'''
+
+
 def _register_direct_auto_controls(app) -> None:
     # Visual state flips here at click time; the bridge round trip never gates it.
     app.clientside_callback(
-        """function(toggles, nexts, palette, intensity, follows, state) {
+        """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
             const triggered = (window.dash_clientside.callback_context.triggered || [])
@@ -1373,6 +1409,17 @@ def _register_direct_auto_controls(app) -> None:
                 if (palette && palette !== current) {
                     control.dispatch(control.build.palette(palette), status);
                 }
+            } else if (triggered.includes('control-fx-auto.n_clicks')
+                    || triggered.includes('control-fx-off.n_clicks')) {
+                const enabled = triggered.includes('control-fx-auto.n_clicks');
+                if (enabled !== (shown.fx_auto !== false)) {
+                    control.hold({fx_auto: enabled});
+                    window.dash_clientside.set_props(
+                        'control-fx-auto', {className: enabled ? 'active' : ''});
+                    window.dash_clientside.set_props(
+                        'control-fx-off', {className: enabled ? '' : 'active'});
+                    control.dispatch(control.build.fxAuto(enabled), status, ['fx_auto']);
+                }
             } else if (triggered.includes('control-intensity-auto.n_clicks')) {
                 const enabled = !shown.intensity_auto;
                 control.hold({intensity_auto: enabled});
@@ -1400,6 +1447,7 @@ def _register_direct_auto_controls(app) -> None:
         Input('control-palette', 'value'),
         Input('control-intensity', 'value'),
         Input('control-intensity-auto', 'n_clicks'),
+        *[Input(name, 'n_clicks') for name in FX_AUTO_IDS],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
@@ -2498,6 +2546,7 @@ def build_app(
                 }
                 settings = control['settings'] or {}
                 control['intensity_auto'] = bool(settings.get('intensity_auto'))
+                control['fx_auto'] = bool(settings.get('fx_auto', True))
                 control['settings_text'] = {
                     name: setting_text(name, value) for name, value in settings.items()
                 }
@@ -2654,6 +2703,11 @@ def build_app(
         Output('control-intensity-set', 'className'),
         Input('control-state', 'data'),
     )
+    app.clientside_callback(
+        FX_SYNC_JS,
+        *[Output(name, 'className') for name in FX_AUTO_IDS],
+        Input('control-state', 'data'),
+    )
 
     operator_inputs = (
         []
@@ -2666,6 +2720,7 @@ def build_app(
             Input('control-brightness-live', 'data'),
             Input('control-intensity', 'value'),
             Input('control-intensity-auto', 'n_clicks'),
+            *[Input(name, 'n_clicks') for name in FX_AUTO_IDS],
         ]
     )
 
@@ -2709,6 +2764,7 @@ def build_app(
                     palette=palette,
                     intensity=intensity,
                     auto=bool(state.get('intensity_auto')),
+                    fx_auto=state.get('fx_auto') is not False,
                 )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update

@@ -806,3 +806,64 @@ async def test_a_calm_swap_during_a_drop_reaches_the_snapshot_with_the_real_inte
         'calm',
     )
     assert after['intent'] == 'drop'
+
+
+async def test_fx_off_picks_no_automatic_fx_or_strobe_and_fx_auto_brings_them_back():
+    import dataclasses
+
+    from autolux.lib.engine.static_mode import STATIC_SPECIAL_ID, StaticLooks, StaticRig
+
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
+    current = [FULL_INTENSITY]
+    controller = EffectController(
+        lighting, clock=clock, settings=lambda: current[0], specials=discover_specials()
+    )
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID]
+
+    current[0] = dataclasses.replace(FULL_INTENSITY, fx_auto=False)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.BUILDUP)
+    # The running special is released on its usual section change, not cut at the toggle.
+    assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
+    start = len(lighting.events)
+    clock.advance(STROBE_COOLDOWN_SECONDS + 1)
+    await controller.change_effect(LightIntent.DROP)
+    assert accents(lighting, start) == [], 'no special and no drop strobe while FX is off'
+
+    # The operator's Static FX row does not ask the policy, so it still plays.
+    looks = StaticLooks(lighting, StaticRig(groups=('fx',)))
+    looks.special('fx', 'primary', 0.5, 0.5)
+    assert accents(lighting, start)[-1]['value']['id'] == STATIC_SPECIAL_ID
+    looks.clear_special()
+
+    current[0] = FULL_INTENSITY
+    start = len(lighting.events)
+    clock.advance(STROBE_COOLDOWN_SECONDS + 1)
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    await controller.change_effect(LightIntent.DROP)
+    ids = [c['value']['id'] for c in accents(lighting, start) if 'value' in c]
+    assert ids == [SPECIAL_ID, SPECIAL_ID, DROP_ACCENT_ID]
+
+
+async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_json(tmp_path):
+    import json
+
+    from autolux.lib.main import ShowControl
+    from autolux.lib.ui_bridge import parse_control_command
+
+    control, light, _, _, lighting = _capped_show(tmp_path)
+    assert control.settings.fx_auto is True
+    sent = len(lighting.events)
+    control.commands.put_nowait(parse_control_command({'action': 'fx_auto', 'enabled': False}))
+    await control.apply_pending(light)
+    assert light.effect_controller._settings().fx_auto is False
+    assert len(lighting.events) == sent, 'switching FX off cuts nothing at once'
+    # The control's own clock settles the save; saving at once stands in for that wait.
+    control.save_settings()
+    saved = json.loads((tmp_path / 'show.json').read_text(encoding='utf-8'))
+    assert saved['settings']['fx_auto'] is False
+    assert ShowControl(tmp_path / 'show.json').settings.fx_auto is False
+    with pytest.raises(ValueError, match='fx_auto must be true or false'):
+        parse_control_command({'action': 'fx_auto', 'enabled': 'off'})

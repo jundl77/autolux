@@ -191,6 +191,9 @@ class ShowControl:
             )
         elif action == 'intensity_auto':
             self._follow_music(light_engine, command['enabled'])
+        elif action == 'fx_auto' and command['enabled'] != self.settings.fx_auto:
+            self.settings = dataclasses.replace(self.settings, fx_auto=command['enabled'])
+            self._unsaved_change_at = self._clock.monotonic()
         elif action == 'settings' and command['settings'] != self.settings:
             self.settings = command['settings']
             light_engine.settings_changed()

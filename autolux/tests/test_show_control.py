@@ -632,6 +632,8 @@ OPERATOR_CASES = [
         'all',
         'build.intensityAuto(false)',
     ),
+    ('control-fx-off.n_clicks', 1, AUTO_STATE, 'all', 'build.fxAuto(false)'),
+    ('control-fx-auto.n_clicks', 1, {**AUTO_STATE, 'fx_auto': False}, 'all', 'build.fxAuto(true)'),
     *[
         (f'{chip}.n_clicks', 1, STATIC_STATE, target, f"build.static('{chip}', '{target}')")
         for chip in STATIC_CHIP_IDS
@@ -1240,3 +1242,24 @@ async def test_a_preset_on_a_group_target_changes_only_that_group(
         f'console.log(JSON.stringify(banner({json.dumps(state)})));'
     )
     assert banner == [{}, 'Static overlay active · 1 look']
+
+
+def test_the_auto_tab_has_fx_auto_and_off_chips_and_fx_defaults_to_auto():
+    from autolux.simulate.visualizer_app import FX_AUTO_IDS, FX_SYNC_JS
+
+    app = build_app(_Recorder())
+    assert [app.layout[name].children for name in FX_AUTO_IDS] == ['Auto', 'Off']
+    states = [{'settings': {}}, {'settings': {}, 'fx_auto': False}, None]
+    if NODE is not None:
+        synced = _run_control_js(
+            f'const sync = {FX_SYNC_JS};\n'
+            f'console.log(JSON.stringify({json.dumps(states)}.map((s) => sync(s))));'
+        )
+        assert synced == [['active', ''], ['', 'active'], ['', '']]
+    off = control_command('control-fx-off', False, None, ())
+    assert off == {'action': 'fx_auto', 'enabled': False}
+    assert control_command('control-fx-auto', False, None, ()) is None, 'already on'
+    edit = control_command(
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), fx_auto=False
+    )
+    assert edit['settings']['fx_auto'] is False

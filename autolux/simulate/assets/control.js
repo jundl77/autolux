@@ -91,6 +91,7 @@
         master: (level) => ({action: 'master', level: level}),
         intensity: (level) => ({action: 'intensity', level: level}),
         intensityAuto: (enabled) => ({action: 'intensity_auto', enabled: enabled}),
+        fxAuto: (enabled) => ({action: 'fx_auto', enabled: enabled}),
         static: staticCommand,
         fx: fxCommand,
     };

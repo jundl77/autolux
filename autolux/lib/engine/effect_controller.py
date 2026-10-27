@@ -37,6 +37,7 @@ from autolux.lib.engine.special_policy import (
     DROP_STROBE,
     Special,
     SpecialCapabilities,
+    SpecialChoice,
     SpecialPolicy,
 )
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
@@ -323,8 +324,13 @@ class EffectController:
     def _enter_special(self, intent: LightIntent, bpm: float | None) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
-        choice = self._special_policy.choose(
-            intent, self.special_capabilities(), self._intense_blocked(settings, now)
+        # FX off picks nothing, so a running special is released here, at its usual section end.
+        choice = (
+            self._special_policy.choose(
+                intent, self.special_capabilities(), self._intense_blocked(settings, now)
+            )
+            if settings.fx_auto
+            else SpecialChoice(None)
         )
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
@@ -376,6 +382,8 @@ class EffectController:
         self._special = None
 
     def _restore_special(self) -> None:
+        if not self._settings().fx_auto:
+            self._special = None
         if self._special is not None and not self._special_on:
             self._fire_special(self._special)
 
