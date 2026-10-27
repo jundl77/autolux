@@ -2,11 +2,9 @@
 -- energy: 1
 -- movement: sweep
 -- texture: wash
--- A soft peak crosses each group house left to house right (beats 0-8), then closes in from
--- both sides at once (beats 8-16). sf.position gives each member's X, normalised to the
--- group's own extent so the same travel fits 1.8 m of washes or a 40 m truss; sf.mirror pairs
--- members by position for the closing half; sf.side splits the movers' pan. Cells sharing one
--- position (one fixture's pixels) travel in geometry order; a lone fixture holds still.
+-- X is normalised to each group's own extent, so one travel fits 1.8 m of washes or a 40 m truss.
+-- Members sharing one X travel in geometry order; a lone member sits mid-group; an empty group is skipped.
+-- Only glowing cells get their own dimmer (under 70 % of a group), so 512 cells stay inside the effect cap.
 local palette = sf.palette()
 local LOOP_BEATS, HALF_BEATS = 16, 8
 local WIDTH = 0.35
@@ -25,14 +23,14 @@ local function placed(group)
             along[cell] = (sf.position(cell) - low) / (high - low)
         elseif #members > 1 then
             along[cell] = (index - 1) / (#members - 1)
+        else
+            along[cell] = 0.5
         end
     end
     for _, pair in ipairs(sf.mirror(group)) do
         local left, right = along[pair[1].fixture], along[pair[2].fixture]
-        if left and right then
-            local outer = math.max(math.abs(2 * left - 1), math.abs(2 * right - 1))
-            reach[pair[1].fixture], reach[pair[2].fixture] = outer, outer
-        end
+        local outer = math.max(math.abs(2 * left - 1), math.abs(2 * right - 1))
+        reach[pair[1].fixture], reach[pair[2].fixture] = outer, outer
     end
     return { target = group, members = members, along = along, reach = reach }
 end
@@ -44,14 +42,16 @@ local function bump(offset)
     return (1 + math.cos(math.pi * offset / WIDTH)) / 2
 end
 
-local function travelling(group, colour, floor, peak, beat, level)
+local function travelling(group, colour, floor, peak, beat, loudness)
     local closing = beat >= HALF_BEATS
     local front = sf.lerp(-WIDTH, 1 + WIDTH, (beat % HALF_BEATS) / HALF_BEATS)
-    local effects = { sf.colour(group.target, colour) }
+    local effects = { sf.colour(group.target, colour), sf.dimmer(group.target, floor * loudness) }
     for _, cell in ipairs(group.members) do
-        local spot = closing and group.reach[cell] and 1 - group.reach[cell] or group.along[cell]
-        local glow = spot and bump(spot - front) or 0
-        effects[#effects + 1] = sf.dimmer(sf.fixture(cell), (floor + (peak - floor) * glow) * level)
+        local spot = closing and 1 - group.reach[cell] or group.along[cell]
+        local glow = bump(spot - front)
+        if glow > 0 then
+            effects[#effects + 1] = sf.dimmer(sf.fixture(cell), (floor + (peak - floor) * glow) * loudness)
+        end
     end
     return effects
 end
@@ -59,16 +59,19 @@ end
 return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
-        local energy = ctx.normalized_rms_level or 0.6
-        local level = sf.loudness_gain(ctx.normalized_rms_level)
-        local swing = PAN_SWING * sf.lerp(0.5, 1, energy) * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
+        local loudness = sf.loudness_gain(ctx.normalized_rms_level)
+        local swing = PAN_SWING * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
+        local pans = {}
+        for _, mover in ipairs(movers.members) do
+            local along = movers.along[mover]
+            local side = along < 0.5 and -1 or along > 0.5 and 1 or 0
+            pans[#pans + 1] = sf.pan_tilt(sf.fixture(mover), CENTRE_PAN + side * swing, TILT)
+        end
         return sf.scene {
-            travelling(wash, palette.secondary, 0.06, 0.5, beat, level),
-            travelling(strip, palette.cold, 0.02, 0.25, beat, level),
-            travelling(movers, palette.cold, 0.04, 0.3, beat, level),
-            sf.each(sf.group("movers"), function(mover, index, count)
-                return sf.pan_tilt(mover, CENTRE_PAN + sf.side(index, count) * swing, TILT)
-            end)
+            travelling(wash, palette.secondary, 0.06, 0.4, beat, loudness),
+            travelling(strip, palette.cold, 0.02, 0.25, beat, loudness),
+            travelling(movers, palette.cold, 0.04, 0.3, beat, loudness),
+            pans
         }
     end
 }

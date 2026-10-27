@@ -5,14 +5,22 @@ mod support;
 use std::collections::BTreeMap;
 
 use starfire::fixtures::FixtureRig;
-use starfire::model::{RenderContext, Target};
+use starfire::model::RenderContext;
 use starfire::protocol::wire;
 
 const LOOP: (&str, &str) = ("atmospheric", "traverse");
 const WASH: [&str; 4] = ["wash_left", "wash_mid_left", "wash_mid_right", "wash_right"];
+/// starfire::script's MAX_EFFECTS_PER_FRAME, a detector the loop must stay well inside.
+const EFFECT_CAP: usize = 512;
+const SEAM_TOLERANCE: f64 = 1e-3;
 
-/// Each target's dimmer at `beats` into the loop.
-fn levels(rig: &FixtureRig, beats: f64) -> BTreeMap<String, f64> {
+struct Frame {
+    levels: BTreeMap<String, f64>,
+    effects: usize,
+}
+
+/// Each cell's dimmer at `beats` into the loop, later effects winning as in the engine.
+fn render(rig: &FixtureRig, beats: f64) -> Frame {
     let mut autoloop = support::show_catalog()
         .instantiate(LOOP.0, LOOP.1, rig, &support::palettes())
         .unwrap();
@@ -23,15 +31,23 @@ fn levels(rig: &FixtureRig, beats: f64) -> BTreeMap<String, f64> {
         ..Default::default()
     };
     let palette = support::palettes().slots("techno").unwrap();
-    autoloop
-        .render(&context, &palette)
-        .unwrap()
-        .into_iter()
-        .filter_map(|effect| match (effect.target, effect.values.intensity) {
-            (Target::Fixture(id), Some(level)) => Some((id, level)),
-            _ => None,
-        })
-        .collect()
+    let effects = autoloop.render(&context, &palette).unwrap();
+    let mut levels = BTreeMap::new();
+    for effect in &effects {
+        if let Some(level) = effect.values.intensity {
+            for cell in rig.resolve(&effect.target).unwrap() {
+                levels.insert(cell, level);
+            }
+        }
+    }
+    Frame {
+        levels,
+        effects: effects.len(),
+    }
+}
+
+fn levels(rig: &FixtureRig, beats: f64) -> BTreeMap<String, f64> {
+    render(rig, beats).levels
 }
 
 fn brightest<'a>(levels: &BTreeMap<String, f64>, among: &[&'a str]) -> &'a str {
@@ -40,6 +56,17 @@ fn brightest<'a>(levels: &BTreeMap<String, f64>, among: &[&'a str]) -> &'a str {
         .copied()
         .max_by(|a, b| levels[*a].total_cmp(&levels[*b]))
         .unwrap()
+}
+
+/// The half-way and loop seams are continuous: no level jumps.
+fn assert_seamless(rig: &FixtureRig) {
+    for (before, after) in [(7.999, 8.0), (15.999, 0.0)] {
+        let (before, after) = (levels(rig, before), levels(rig, after));
+        for (cell, level) in &before {
+            let jump = (level - after[cell]).abs();
+            assert!(jump < SEAM_TOLERANCE, "{cell} jumps {jump}");
+        }
+    }
 }
 
 #[test]
@@ -53,12 +80,13 @@ fn the_sweep_crosses_the_room_washes_house_left_to_house_right() {
     // The movers follow: house left lit first, house right last.
     let early = levels(&room, 1.0);
     assert!(early["spot_left"] > early["spot_right"]);
-    // The strip's cells share one position, so they travel in geometry order.
+    // The strip's cells have no X spread between them, so they travel in geometry order.
     let strip = levels(&room, 1.5);
     assert!(
         strip["zq06017/Beam Segment 1"] > strip["zq06017/Beam Segment 8"],
         "{strip:?}"
     );
+    assert_seamless(&room);
 }
 
 #[test]
@@ -73,7 +101,7 @@ fn the_mirrored_half_lights_both_sides_at_once_then_closes_in() {
 }
 
 #[test]
-fn a_lone_fixture_holds_still() {
+fn a_lone_fixture_rises_and_falls_once_per_half() {
     let rig = support::rig(
         serde_json::from_str(
             r#"{"schema_version":1,"fixtures":[
@@ -82,10 +110,15 @@ fn a_lone_fixture_holds_still() {
         )
         .unwrap(),
     );
-    let still: Vec<_> = (0..16)
-        .map(|beat| levels(&rig, f64::from(beat))["solo"])
+    let solo: Vec<_> = (0..64)
+        .map(|step| levels(&rig, f64::from(step) / 4.0)["solo"])
         .collect();
-    assert!(still.windows(2).all(|pair| pair[0] == pair[1]), "{still:?}");
+    let mut peaks = 0;
+    for window in solo.windows(3) {
+        peaks += usize::from(window[1] > window[0] && window[1] >= window[2]);
+    }
+    assert_eq!(peaks, 2, "{solo:?}");
+    assert_seamless(&rig);
 }
 
 /// 400 washes on a 40 m truss, unevenly spaced and patched in shuffled order.
@@ -129,10 +162,16 @@ fn on_a_400_fixture_truss_the_peak_travels_monotonically_along_x() {
     let mut last_x = f64::MIN;
     for step in 0..=14 {
         let beat = 0.5 + step as f64 * 0.5;
-        let levels = levels(&rig, beat);
+        let frame = render(&rig, beat);
+        // Only glowing cells get their own dimmer: at most the peak's 70 % of the group.
+        assert!(
+            frame.effects * 4 <= EFFECT_CAP * 3,
+            "{} effects",
+            frame.effects
+        );
         let peak = names
             .iter()
-            .max_by(|a, b| levels[*a].total_cmp(&levels[*b]))
+            .max_by(|a, b| frame.levels[*a].total_cmp(&frame.levels[*b]))
             .unwrap();
         let x = rig.spatial().position(peak).unwrap()[0];
         // The front enters off the house-left edge, so the first frames may share a peak.
@@ -143,4 +182,5 @@ fn on_a_400_fixture_truss_the_peak_travels_monotonically_along_x() {
         last_x = x;
     }
     assert!(last_x > 15000.0, "{last_x}");
+    assert_seamless(&rig);
 }

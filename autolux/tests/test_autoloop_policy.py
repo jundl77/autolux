@@ -1,6 +1,8 @@
 import random
+import re
 from collections import Counter
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +24,7 @@ from autolux.lib.engine.effect_definitions import (
     INTENSITY_WILD,
     LightIntent,
 )
+from autolux.lighting import mvr
 from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
 
 DROP, BUILDUP, BREAKDOWN, ATMOSPHERIC = (
@@ -391,11 +394,6 @@ async def test_a_drop_carries_its_arrival_grade_into_the_selection():
 
 
 def test_the_spatial_traverse_is_a_calm_wash_the_policy_picks_and_names_no_accent_group():
-    import re
-    from pathlib import Path
-
-    from autolux.lighting import mvr
-
     loop = ('atmospheric', 'traverse')
     autoloops, meta = discover_autoloops(), read_autoloop_meta()
     assert loop in autoloops[ATMOSPHERIC]
