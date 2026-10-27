@@ -357,6 +357,13 @@ def test_every_transition_is_logged(stage, caplog):
 def test_the_shipped_chain_runs_on_its_own_thread_and_its_vram_pool_settles(
     nn_artifacts, anchor_mp3
 ):
+    import torch
+
+    # The VRAM pool only exists on CUDA. device_count, not is_available: with
+    # CUDA_VISIBLE_DEVICES="" torch still reports CUDA available but has no device.
+    if torch.cuda.device_count() == 0:
+        pytest.skip('no CUDA on this machine')
+
     from autolux.lib import section_chain
     from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
     from autolux.lib.clients.pyaudio_client import PyAudioClient  # noqa: F401
