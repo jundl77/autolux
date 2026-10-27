@@ -33,14 +33,6 @@ NUM_SECTION_CLASSES = len(SECTION_LABELS)
 LABEL_INDEX = {label: index for index, label in enumerate(SECTION_LABELS)}
 
 
-def is_section_label(label: str) -> bool:
-    return label in LABEL_INDEX
-
-
-def is_dropped_label(label: str) -> bool:
-    return label in DROPPED_LABELS
-
-
 def check_class_space(classes: Iterable[str], source: str) -> None:
     """Refuse a class space that is not vocabulary names in vocabulary order.
 
