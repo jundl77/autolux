@@ -201,7 +201,8 @@
         };
     }
 
-    const FLASH_MS = 500;
+    // Covers the double pulse in control.css (600 ms).
+    const FLASH_MS = 650;
 
     // Whether a group fired between two polls of it ({last, remaining, ready}): a new special,
     // a ready bar going busy, or the time left jumping back up. Polls only ever count down

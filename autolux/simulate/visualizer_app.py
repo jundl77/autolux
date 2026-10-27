@@ -8,7 +8,6 @@ import os
 import re
 import threading
 import time
-import zlib
 from statistics import median
 
 import dash
@@ -1742,11 +1741,6 @@ def _build_cooldowns(snapshot):
     return [_cooldown_bar(row) for row in rows]
 
 
-def _group_tint(group: str) -> str:
-    # A stable hue per group name, so a bar keeps its tint while the rows re-sort.
-    return f'hsl({zlib.crc32(group.encode()) % 360} 30% 62%)'
-
-
 def _cooldown_bar(row: dict):
     # control.js ticks fill and caption down from these data attributes between polls and
     # mirrors the arithmetic here (cooldownView); keep the two in step.
@@ -1774,7 +1768,6 @@ def _cooldown_bar(row: dict):
             ),
         ],
         className='cooldown-row ready' if row['ready'] else 'cooldown-row',
-        style={'--tint': _group_tint(row['group'])},
         # group and last let the ticker spot a fire even when Dash reuses this element.
         **{
             'data-group': row['group'],

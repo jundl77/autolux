@@ -1370,6 +1370,8 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
         'cold_drift',
         'false',
     )
+    # Every bar paints in the same page colour: no per-group tint on any row.
+    assert all('style' not in row.to_plotly_json()['props'] for row in rows)
 
 
 def test_an_fx_effects_bar_fills_to_full_in_a_colour_the_page_defines():
@@ -1393,6 +1395,7 @@ def test_an_fx_effects_bar_fills_to_full_in_a_colour_the_page_defines():
     # with must be set on .cooldowns or the row itself; an undefined var() would leave the bar
     # transparent.
     css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
+    css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
     rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
     scopes = [
         body
@@ -1400,12 +1403,14 @@ def test_an_fx_effects_bar_fills_to_full_in_a_colour_the_page_defines():
         if {'.cooldowns', '.cooldown-row'} & {part.strip() for part in selector.split(',')}
     ]
     defined = {name for body in scopes for name in re.findall(r'(--[\w-]+)\s*:', body)}
-    for painted in ('.cooldown-fill', '.cooldown-row.flash .cooldown-track'):
-        [paint] = [body for selector, body in rules.items() if selector.strip() == painted]
-        background = re.search(r'background:\s*([^;]+);', paint).group(1)
-        assert 'transparent' not in background
-        assert 'var(' in background
-        assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
+    [paint] = [body for selector, body in rules.items() if selector.strip() == '.cooldown-fill']
+    background = re.search(r'background:\s*([^;]+);', paint).group(1)
+    assert 'transparent' not in background
+    assert 'var(' in background
+    assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
+    # The fire pulse paints only with tokens the block itself sets.
+    pulse = re.search(r'@keyframes cooldown-fire\s*\{(.*?)\n\}', css, re.DOTALL).group(1)
+    assert set(re.findall(r'var\((--[\w-]+)\)', pulse)) <= defined
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -1459,7 +1464,7 @@ def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routin
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_the_fx_effects_ticker_holds_the_flash_class_for_half_a_second_after_a_fire():
+def test_the_fx_effects_ticker_holds_the_flash_class_through_the_pulse_after_a_fire():
     # A fake document with one bar and a hand-driven clock and setInterval.
     body = """
 const row = {
@@ -1483,9 +1488,9 @@ const seen = [];
 const at = (ms) => { now = ms; tick(); seen.push(row.classes.has('flash')); };
 at(0); at(100);
 Object.assign(row.dataset, {remaining: '240', ready: 'false'});  // the poll after a fire
-at(200); at(600); at(700);
+at(200); at(600); at(900);
 row.dataset.remaining = '239';  // the next routine poll
-at(800);
+at(1000);
 console.log(JSON.stringify(seen));
 """
     )

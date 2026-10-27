@@ -203,25 +203,33 @@
 .status-item.fx-running .status-text { color: #73b6ff; }
 
 /* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first. Name and
-   seconds sit inside the bar; the flat group-tinted fill is empty as the group fires, grows
-   left to right as it recovers and stays full with "ready". The fill is the same 30% tint over the
-   surface as an Intensity level that follows the music. Head and track share one grid cell.
-   control.js adds .flash for 500 ms when a group fires: the whole track lights in its tint (the
-   fill is empty then, so the track is what shows) and fades back once the class goes. */
-.cooldowns { display: grid; gap: 4px; }
-.cooldown-row { --tint: var(--muted); display: grid; }
+   seconds sit inside the bar; the fill is empty as the group fires, grows left to right as it
+   recovers and stays full with "ready". Every bar shares one neutral fill so the bars read as one
+   quiet instrument, not a legend. Head and track share one grid cell. control.js adds .flash for
+   650 ms when a group fires: the track pulses twice toward --text with a 1px ring in the same
+   colour (the fill is empty then, so the track is what shows), then settles to the empty bar. */
+.cooldowns { display: grid; gap: 4px;
+             --bar-fill: color-mix(in srgb, var(--muted) 22%, var(--fill));
+             --bar-flash: color-mix(in srgb, var(--text) 65%, var(--fill)); }
+.cooldown-row { display: grid; }
 .cooldown-head, .cooldown-track { grid-area: 1 / 1; }
 .cooldown-head { position: relative; display: flex; justify-content: space-between;
                  align-items: center; gap: 12px; padding: 0 8px; min-width: 0;
                  color: var(--text); font: inherit; font-size: 11px; font-weight: 400; }
-.cooldown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cooldown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                  color: var(--muted); }
 .cooldown-caption { flex: none; font-variant-numeric: tabular-nums; }
 .cooldown-row.ready .cooldown-caption { color: var(--muted); }
-.cooldown-track { height: 20px; border-radius: 6px; overflow: hidden; background: var(--fill);
-                  transition: background-color 400ms ease-out; }
-.cooldown-fill { height: 100%; background: color-mix(in srgb, var(--tint) 30%, var(--fill)); }
-.cooldown-row.flash .cooldown-track { background: color-mix(in srgb, var(--tint) 60%, var(--fill));
-                                      transition: none; }
+.cooldown-track { height: 20px; border-radius: 6px; overflow: hidden; background: var(--fill); }
+.cooldown-fill { height: 100%; background: var(--bar-fill); }
+.cooldown-row.flash .cooldown-track { animation: cooldown-fire 600ms ease-out; }
+/* Two peaks 150 ms apart, each a hard lift toward --text, then back to the empty track. */
+@keyframes cooldown-fire {
+    0%, 25% { background: var(--bar-flash); box-shadow: inset 0 0 0 1px var(--text); }
+    12.5% { background: var(--bar-fill); box-shadow: none; }
+    37.5% { background: var(--bar-fill); box-shadow: none; }
+    100% { background: var(--fill); box-shadow: none; }
+}
 @media (prefers-reduced-motion: reduce) {
-    .cooldown-track { transition: none; }
+    .cooldown-row.flash .cooldown-track { animation: none; background: var(--bar-flash); }
 }
