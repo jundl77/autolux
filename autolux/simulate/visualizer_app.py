@@ -1341,10 +1341,11 @@ def _build_overlay_banner():
     )
 
 
-# While the show follows the music Auto lights, and the level it chose stays lit beside it.
+# While the show follows the music the segments grey out, but the level it chose stays lit.
 FOLLOW_SYNC_JS = '''function(state) {
     state = window.autoluxControl ? window.autoluxControl.view(state) : state;
-    return state && state.intensity_auto ? 'active' : '';
+    const on = !!(state && state.intensity_auto);
+    return [on ? 'active' : '', on ? 'following' : ''];
 }'''
 
 
@@ -1371,6 +1372,8 @@ DIRECT_AUTO_JS = (
             const showFollowing = (on) => {
                 window.dash_clientside.set_props(
                     'control-intensity-auto', {className: on ? 'active' : ''});
+                window.dash_clientside.set_props(
+                    'control-intensity-set', {className: on ? 'following' : ''});
             };
             if (triggered.includes('control-toggle.n_clicks')) {
                 const paused = !!shown.paused;
@@ -2687,6 +2690,7 @@ def build_app(
     app.clientside_callback(
         FOLLOW_SYNC_JS,
         Output('control-intensity-auto', 'className'),
+        Output('control-intensity-set', 'className'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(

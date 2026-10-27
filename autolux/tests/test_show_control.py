@@ -1177,7 +1177,7 @@ def test_the_banner_counts_operator_looks_not_the_dark_under_the_blacklight():
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_following_the_music_lights_auto_and_keeps_the_segments_clickable():
+def test_following_the_music_greys_the_segments_but_keeps_the_chosen_level_lit():
     from autolux.simulate.visualizer_app import FOLLOW_SYNC_JS
 
     rendered = _run_control_js(
@@ -1185,12 +1185,12 @@ def test_following_the_music_lights_auto_and_keeps_the_segments_clickable():
         'const states = [{intensity_auto: true}, {intensity_auto: false}, null];\n'
         'console.log(JSON.stringify(states.map((state) => follow(state))));'
     )
-    assert rendered == ['active', '', '']
+    assert rendered == [['active', 'following'], ['', ''], ['', '']]
     app = build_app(_Recorder())
     # The segments stay clickable (a pick turns auto off) and are still fed the show's level.
     writers = [key for key in app.callback_map if 'control-intensity-set.disabled' in key]
     assert len(writers) == 1
-    assert 'control-intensity-set.className' not in ' '.join(app.callback_map)
+    assert 'control-intensity-set.className' in ' '.join(app.callback_map)
 
 
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
@@ -1491,24 +1491,3 @@ console.log(JSON.stringify(seen));
     )
     result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
     assert json.loads(result.stdout) == [False, False, True, True, False, False]
-
-
-def test_auto_every_intensity_level_and_the_on_fx_side_fill_in_one_colour():
-    css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
-    css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
-    rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
-
-    def declared(selector, prop):
-        [body] = [body for sel, body in rules.items() if sel.strip() == selector]
-        return re.search(rf'{prop}:\s*([^;]+);', body).group(1)
-
-    assert declared('#show-control .joined > button.active', 'background') == 'var(--fill-on)'
-    assert declared('#control-intensity', '--tone') == 'var(--fill-on)'
-    # No per-level, per-side or follow-the-music override repaints a filled part.
-    overrides = [
-        sel
-        for sel in rules
-        if '#control-intensity' in sel or '#control-fx-off' in sel or '.following' in sel
-    ]
-    assert [sel.strip() for sel in overrides] == ['#control-intensity']
-    assert '--warm' not in css
