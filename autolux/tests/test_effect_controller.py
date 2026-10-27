@@ -482,7 +482,7 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
     ]
 
 
-async def test_the_catalogue_plays_each_texture_once_per_row_cooldown_then_a_drop_accent():
+async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accent():
     controller, lighting, clock = with_specials(discover_specials())
     textures = []
     for _ in range(3):
@@ -490,13 +490,17 @@ async def test_the_catalogue_plays_each_texture_once_per_row_cooldown_then_a_dro
         await controller.change_effect(LightIntent.ATMOSPHERIC)
         textures += [c['value']['special_fx']['colour_slot'] for c in accents(lighting, start)]
         await controller.change_effect(LightIntent.BUILDUP)
-    # Both textures played once; the third entry finds them inside their 240 s row cooldown.
-    assert sorted(textures) == ['cold', 'secondary']
+    # The first texture rests fx for 240 s, so neither texture plays again inside it.
+    assert len(textures) == 1
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting, start)] == [DROP_ACCENT_ID]
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.BREAKDOWN)
     assert accents(lighting, start)[0]['kind'] == 'set_override'
 
+    clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
     spin, strobe = accents(lighting, start)
@@ -842,22 +846,28 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     )
 
     def cooldowns():
-        return {row['name']: row for row in buffer.snapshot()['special_cooldowns']}
+        return {row['group']: row for row in buffer.snapshot()['special_cooldowns']}
 
     before = cooldowns()
-    assert set(before) == {'drift', 'spin', 'strobe_burst'}
+    assert set(before) == {'fx', 'all'}
+    assert before['fx']['last'] is None
     assert all(row['ready'] and row['remaining_seconds'] == 0.0 for row in before.values())
     await controller.change_effect(LightIntent.DROP)
     clock.advance(10.0)
     first = cooldowns()
     clock.advance(30.0)
     later = cooldowns()
-    # Spin sets no cooldown of its own; the shared intense one holds it and the strobe alike.
-    for name in ('spin', 'strobe_burst'):
-        assert first[name]['cooldown_seconds'] == pytest.approx(60.0)
-        assert first[name]['remaining_seconds'] == pytest.approx(50.0)
-        assert later[name]['remaining_seconds'] == pytest.approx(20.0)
-        assert not later[name]['ready']
-    assert later['drift']['ready']
-    clock.advance(20.0)
+    # Spin sets no cooldown of its own, so fx is free at once; the strobe waits out the shared one.
+    assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
+    assert first['all']['last'] == 'strobe_burst'
+    assert first['all']['cooldown_seconds'] == pytest.approx(60.0)
+    assert first['all']['remaining_seconds'] == pytest.approx(50.0)
+    assert later['all']['remaining_seconds'] == pytest.approx(20.0)
+    assert not later['all']['ready']
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    clock.advance(100.0)
+    rested = cooldowns()['fx']
+    assert (rested['last'], rested['cooldown_seconds']) == ('drift', 240)
+    assert rested['remaining_seconds'] == pytest.approx(140.0)
+    clock.advance(140.0)
     assert all(row['ready'] for row in cooldowns().values())

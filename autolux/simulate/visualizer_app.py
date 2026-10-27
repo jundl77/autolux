@@ -3,6 +3,7 @@ import http.client
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -1722,7 +1723,7 @@ def _build_renderer_overview(snapshot, now):
 def _build_cooldowns(snapshot):
     rows = sorted(
         snapshot.get('special_cooldowns') or [],
-        key=lambda row: (row['remaining_seconds'], row['name']),
+        key=lambda row: (row['remaining_seconds'], row['group'], row['last'] or ''),
     )
     if not rows:
         return html.Div('No specials loaded.', className='diagnostic-empty')
@@ -1730,17 +1731,21 @@ def _build_cooldowns(snapshot):
 
 
 def _cooldown_bar(row: dict):
+    # control.js ticks fill and caption down from these data attributes between polls and
+    # mirrors the arithmetic here (cooldownView); keep the two in step.
     total, remaining = row['cooldown_seconds'], row['remaining_seconds']
-    # A row without any cooldown is always ready, so its bar is full.
+    # A group without any cooldown is always ready, so its bar is full.
     elapsed = 1.0 if row['ready'] or total <= 0 else max(0.0, 1.0 - remaining / total)
-    name = row['name'].replace('_', ' ').capitalize()
+    label = row['group']
+    if row['last']:
+        label += ' · ' + row['last'].replace('_', ' ').capitalize()
     return html.Div(
         [
             html.Div(
                 [
-                    html.Span(f'{name} · {row["group"]}', className='cooldown-label'),
+                    html.Span(label, className='cooldown-label'),
                     html.Span(
-                        'ready' if row['ready'] else f'{remaining:.0f} s',
+                        'ready' if row['ready'] else f'{math.ceil(remaining)} s',
                         className='cooldown-caption',
                     ),
                 ],
@@ -1752,6 +1757,7 @@ def _cooldown_bar(row: dict):
             ),
         ],
         className='cooldown-row ready' if row['ready'] else 'cooldown-row',
+        **{'data-total': total, 'data-remaining': remaining},
     )
 
 
@@ -2336,7 +2342,7 @@ def build_app(
                                     ),
                                     html.Section(
                                         [
-                                            html.H2('Cooldowns'),
+                                            html.H2('FX Effects'),
                                             html.Div(
                                                 id='special-cooldowns',
                                                 className='diagnostics-content cooldowns',

@@ -24,7 +24,8 @@ class Special:
     release_beats: float = 0.0
     pattern: float | None = None
     strobe_hz: float | None = None
-    # Never on the wire: the policy keeps the row out of selection this long after it fires.
+    # Never on the wire: how long the row's group rests after it fires; no row on that group
+    # is selectable meanwhile, since the fixtures are what the room tires of, not the recipe.
     cooldown_seconds: float = 0.0
 
     @property
@@ -99,7 +100,8 @@ class SpecialPolicy:
         self._rng = rng
         self._selections = 0
         self._last_used: dict[str, int] = {}
-        self._fired_at: dict[str, float] = {}
+        # group -> the row that last fired there and when; the group rests that row's cooldown.
+        self._group_fired: dict[str, tuple[Special, float]] = {}
 
     def choose(
         self,
@@ -137,31 +139,24 @@ class SpecialPolicy:
     def record(self, special: Special, now: float = 0.0) -> None:
         self._selections += 1
         self._last_used[special.name] = self._selections
-        self._fired_at[special.name] = now
+        self._group_fired[special.group] = (special, now)
 
     def cooldowns(self, now: float, intense_total: float, intense_remaining: float) -> list[dict]:
-        """Each row's cooldown; intense rows also wait out the shared intense cooldown."""
-        fired_at = dict(self._fired_at)  # read from the snapshot thread while the engine records
-        rows = []
-        for special in self._specials:
-            fired = fired_at.get(special.name)
-            own = 0.0 if fired is None else max(0.0, special.cooldown_seconds - (now - fired))
-            shared = intense_total if special.intense else 0.0
-            remaining = max(own, intense_remaining if special.intense else 0.0)
-            rows.append(
-                {
-                    'name': special.name,
-                    'group': special.group,
-                    'cooldown_seconds': max(special.cooldown_seconds, shared),
-                    'remaining_seconds': remaining,
-                    'ready': remaining <= 0.0,
-                }
-            )
-        return rows
+        """One entry per group with special rows, plus each strobe row on the shared intense one."""
+        fired = dict(self._group_fired)  # read from the snapshot thread while the engine records
+        groups = dict.fromkeys(s.group for s in self._specials if s.strobe_hz is None)
+        entries = []
+        for group in groups:
+            last, at = fired.get(group, (None, now))
+            total = last.cooldown_seconds if last else 0.0
+            entries.append(_entry(group, last and last.name, total, total - (now - at)))
+        for strobe in (s for s in self._specials if s.strobe_hz is not None):
+            entries.append(_entry(strobe.group, strobe.name, intense_total, intense_remaining))
+        return entries
 
     def _cooling(self, special: Special, now: float) -> bool:
-        fired = self._fired_at.get(special.name)
-        return fired is not None and now - fired < special.cooldown_seconds
+        last = self._group_fired.get(special.group)
+        return last is not None and now - last[1] < last[0].cooldown_seconds
 
     def _least_recent(self, pool: list[Special]) -> Special:
         unused = [special for special in pool if special.name not in self._last_used]
@@ -169,3 +164,14 @@ class SpecialPolicy:
             return self._rng.choice(unused)
         weights = [self._selections + 1 - self._last_used[special.name] for special in pool]
         return self._rng.choices(pool, weights)[0]
+
+
+def _entry(group: str, last: str | None, total: float, remaining: float) -> dict:
+    remaining = max(0.0, remaining)
+    return {
+        'group': group,
+        'last': last,
+        'cooldown_seconds': total,
+        'remaining_seconds': remaining,
+        'ready': remaining <= 0.0,
+    }

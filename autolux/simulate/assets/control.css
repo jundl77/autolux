@@ -160,7 +160,7 @@
 }
 
 #control-intensity-set.following .segmented { opacity: .5; }
-/* Cooldowns: one bar per special, full once the row can fire again. */
+/* FX Effects: one bar per fixture group, full once the group can fire a special again. */
 .cooldowns { display: grid; gap: 9px; }
 .cooldown-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
                  margin-bottom: 4px; }
