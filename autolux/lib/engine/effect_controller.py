@@ -121,6 +121,8 @@ class EffectController:
         self._capabilities: SpecialCapabilities | None = None
         self._publish_palette()
         self.special_capabilities()
+        if event_buffer is not None:
+            event_buffer.set_cooldown_source(self.special_cooldowns)
 
     def special_capabilities(self) -> SpecialCapabilities:
         capabilities = SpecialCapabilities.from_groups(self.lighting_client.groups())
@@ -311,6 +313,13 @@ class EffectController:
         if self.event_buffer:
             self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
         LOGGER.info('[lighting] standby | autoloop=%s/%s', bank, autoloop)
+
+    def special_cooldowns(self) -> list[dict]:
+        now = self.clock.monotonic()
+        total = drop_strobe_cooldown_seconds(self._settings())
+        last = self._last_intense_at
+        remaining = 0.0 if last is None else max(0.0, total - (now - last))
+        return self._special_policy.cooldowns(now, total, remaining)
 
     def _intense_blocked(self, settings: ShowSettings, now: float) -> str | None:
         if settings.intensity <= STROBE_GATE_INTENSITY:

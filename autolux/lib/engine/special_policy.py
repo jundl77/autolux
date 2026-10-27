@@ -139,6 +139,26 @@ class SpecialPolicy:
         self._last_used[special.name] = self._selections
         self._fired_at[special.name] = now
 
+    def cooldowns(self, now: float, intense_total: float, intense_remaining: float) -> list[dict]:
+        """Each row's cooldown; intense rows also wait out the shared intense cooldown."""
+        fired_at = dict(self._fired_at)  # read from the snapshot thread while the engine records
+        rows = []
+        for special in self._specials:
+            fired = fired_at.get(special.name)
+            own = 0.0 if fired is None else max(0.0, special.cooldown_seconds - (now - fired))
+            shared = intense_total if special.intense else 0.0
+            remaining = max(own, intense_remaining if special.intense else 0.0)
+            rows.append(
+                {
+                    'name': special.name,
+                    'group': special.group,
+                    'cooldown_seconds': max(special.cooldown_seconds, shared),
+                    'remaining_seconds': remaining,
+                    'ready': remaining <= 0.0,
+                }
+            )
+        return rows
+
     def _cooling(self, special: Special, now: float) -> bool:
         fired = self._fired_at.get(special.name)
         return fired is not None and now - fired < special.cooldown_seconds

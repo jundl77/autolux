@@ -156,3 +156,24 @@ def test_a_drop_accent_waits_out_its_row_cooldown_after_the_shared_one_expires()
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1070.0)
     assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
     assert fire(policy, DROP, 1090.0).name == 'spin'
+
+
+def test_cooldowns_list_every_row_and_intense_rows_wait_out_the_shared_cooldown():
+    calm = row('drift', ATMOSPHERIC, speed=0.1, cooldown=240)
+    spin = row('spin', pulse=1, cooldown=90)
+    plain = row('glow')
+    policy = SpecialPolicy([calm, spin, plain, DROP_STROBE], random.Random(0))
+    policy.record(calm, 1000.0)
+    rows = {r['name']: r for r in policy.cooldowns(1100.0, 60.0, 20.0)}
+    assert set(rows) == {'drift', 'spin', 'glow', 'strobe_burst'}
+    assert rows['drift'] == {
+        'name': 'drift',
+        'group': 'fx',
+        'cooldown_seconds': 240,
+        'remaining_seconds': 140.0,
+        'ready': False,
+    }
+    # Never fired, but intense: the shared cooldown alone holds them.
+    assert (rows['spin']['cooldown_seconds'], rows['spin']['remaining_seconds']) == (90, 20.0)
+    assert (rows['strobe_burst']['cooldown_seconds'], rows['strobe_burst']['ready']) == (60, False)
+    assert (rows['glow']['cooldown_seconds'], rows['glow']['ready']) == (0.0, True)

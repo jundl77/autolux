@@ -11,7 +11,8 @@ The dashboard at `http://autolux.local:8765` groups playback, tempo, intent and 
 above the show timeline. Transport charts retain five minutes of receiver buffer,
 audio level, interruptions, lost/dropped audio frames, scheduling error and DMX
 delivery. Counters appear as rates; missing reports and counter resets leave gaps.
-Analysis and per-command details are under **Analysis & command diagnostics**.
+Analysis details are under **Analysis diagnostics**; **Cooldowns** shows when each
+special and the drop strobe can fire again, readiest first.
 Link, telemetry and hardware faults appear only when they need attention.
 
 - **No link:** check receiver power, SSH access and TCP 19002. Heartbeats run every

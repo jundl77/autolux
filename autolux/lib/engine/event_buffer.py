@@ -4,6 +4,7 @@ import copy
 import math
 import threading
 from collections import deque
+from collections.abc import Callable
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.telemetry_history import TelemetryHistory
@@ -49,6 +50,7 @@ class EventBuffer:
         self._special: dict | None = None
         self._special_groups: dict[str, list[str]] = {}
         self._intense_at: float | None = None
+        self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
@@ -201,6 +203,10 @@ class EventBuffer:
         with self._lock:
             self._intense_at = self.elapsed()
 
+    def set_cooldown_source(self, source: Callable[[], list[dict]]) -> None:
+        with self._lock:
+            self._cooldown_source = source
+
     def _strobe_cooldown_seconds(self, now: float) -> float | None:
         from autolux.lib.engine.effect_controller import drop_strobe_cooldown_seconds
         from autolux.lib.engine.effect_definitions import ShowSettings
@@ -262,6 +268,9 @@ class EventBuffer:
         return recent
 
     def snapshot(self) -> dict:
+        # Outside the lock: the source reads the controller's settings and clock.
+        source = self._cooldown_source
+        cooldowns = source() if source is not None else []
         with self._lock:
             now = self.elapsed()
             cutoff = now - min(self._window_sec, self.SNAPSHOT_WINDOW_SEC + self._look_ahead_sec)
@@ -297,6 +306,7 @@ class EventBuffer:
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
                 'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
+                'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),

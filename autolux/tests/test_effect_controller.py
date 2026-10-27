@@ -818,3 +818,46 @@ async def test_a_calm_swap_during_a_drop_reaches_the_snapshot_with_the_real_inte
         'calm',
     )
     assert after['intent'] == 'drop'
+
+
+async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
+    texture = Special(
+        'drift',
+        (LightIntent.ATMOSPHERIC,),
+        'fx',
+        colour_slot='cold',
+        energy=0.3,
+        speed=0.1,
+        cooldown_seconds=240,
+    )
+    clock = VirtualClock()
+    buffer = EventBuffer(clock=clock)
+    buffer.start()
+    controller = EffectController(
+        RecordingStarfireClient(clock=clock, groups=(FX_GROUP,)),
+        event_buffer=buffer,
+        clock=clock,
+        settings=lambda: BALANCED,
+        specials=[texture, SPIN, DROP_STROBE],
+    )
+
+    def cooldowns():
+        return {row['name']: row for row in buffer.snapshot()['special_cooldowns']}
+
+    before = cooldowns()
+    assert set(before) == {'drift', 'spin', 'strobe_burst'}
+    assert all(row['ready'] and row['remaining_seconds'] == 0.0 for row in before.values())
+    await controller.change_effect(LightIntent.DROP)
+    clock.advance(10.0)
+    first = cooldowns()
+    clock.advance(30.0)
+    later = cooldowns()
+    # Spin sets no cooldown of its own; the shared intense one holds it and the strobe alike.
+    for name in ('spin', 'strobe_burst'):
+        assert first[name]['cooldown_seconds'] == pytest.approx(60.0)
+        assert first[name]['remaining_seconds'] == pytest.approx(50.0)
+        assert later[name]['remaining_seconds'] == pytest.approx(20.0)
+        assert not later[name]['ready']
+    assert later['drift']['ready']
+    clock.advance(20.0)
+    assert all(row['ready'] for row in cooldowns().values())

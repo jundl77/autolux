@@ -1171,3 +1171,43 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
     assert source.commands == [
         {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
     ]
+
+
+def test_the_cooldowns_block_replaces_the_command_table_and_lists_the_readiest_first():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    app = build_app(_Recorder())
+    with pytest.raises(KeyError):
+        app.layout['command-diagnostics']
+    assert app.layout['special-cooldowns'] is not None
+
+    def cooldown(name, total, remaining):
+        return {
+            'name': name,
+            'group': 'fx',
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining == 0,
+        }
+
+    rows = _build_cooldowns(
+        {
+            'special_cooldowns': [
+                cooldown('drift', 240, 180.0),
+                cooldown('strobe_burst', 60, 0.0),
+                cooldown('spin', 90, 45.0),
+                cooldown('glow', 0, 0.0),
+            ]
+        }
+    )
+
+    def shown(row):
+        head, track = row.children
+        return head.children[0].children, head.children[1].children, track.children.style['width']
+
+    assert [shown(row) for row in rows] == [
+        ('Glow · fx', 'ready', '100.0%'),
+        ('Strobe burst · fx', 'ready', '100.0%'),
+        ('Spin · fx', '45 s', '50.0%'),
+        ('Drift · fx', '180 s', '25.0%'),
+    ]

@@ -1719,37 +1719,39 @@ def _build_renderer_overview(snapshot, now):
     ]
 
 
-def _build_command_diagnostics(snapshot):
-    streams = (snapshot.get('timing_stats') or {}).get('by_label') or {}
-    if not streams:
-        return html.Div('No scheduled commands yet.', className='diagnostic-empty')
-    return html.Table(
+def _build_cooldowns(snapshot):
+    rows = sorted(
+        snapshot.get('special_cooldowns') or [],
+        key=lambda row: (row['remaining_seconds'], row['name']),
+    )
+    if not rows:
+        return html.Div('No specials loaded.', className='diagnostic-empty')
+    return [_cooldown_bar(row) for row in rows]
+
+
+def _cooldown_bar(row: dict):
+    total, remaining = row['cooldown_seconds'], row['remaining_seconds']
+    # A row without any cooldown is always ready, so its bar is full.
+    elapsed = 1.0 if row['ready'] or total <= 0 else max(0.0, 1.0 - remaining / total)
+    name = row['name'].replace('_', ' ').capitalize()
+    return html.Div(
         [
-            html.Thead(
-                html.Tr(
-                    [
-                        html.Th('Stream'),
-                        html.Th('Commands'),
-                        html.Th('Mean error'),
-                        html.Th('Max error'),
-                    ]
-                )
-            ),
-            html.Tbody(
+            html.Div(
                 [
-                    html.Tr(
-                        [
-                            html.Td(label.replace('_', ' ').title()),
-                            html.Td(stream['samples']),
-                            html.Td(_metric_text(stream.get('mean_error_ms'), ' ms', 1)),
-                            html.Td(_metric_text(stream.get('max_error_ms'), ' ms', 1)),
-                        ]
-                    )
-                    for label, stream in streams.items()
-                ]
+                    html.Span(f'{name} · {row["group"]}', className='cooldown-label'),
+                    html.Span(
+                        'ready' if row['ready'] else f'{remaining:.0f} s',
+                        className='cooldown-caption',
+                    ),
+                ],
+                className='cooldown-head',
+            ),
+            html.Div(
+                html.Div(className='cooldown-fill', style={'width': f'{elapsed:.1%}'}),
+                className='cooldown-track',
             ),
         ],
-        className='command-diagnostics',
+        className='cooldown-row ready' if row['ready'] else 'cooldown-row',
     )
 
 
@@ -1799,12 +1801,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .diagnostics h2 { margin: 0; font-size: 14px; color: #e6edf3; }
 .diagnostics-content { padding-top: 16px; font-size: 12px; }
 .diagnostic-empty { color: #8293a6; }
-.command-diagnostics { width: 100%; border-collapse: collapse; font-size: 11px;
-                       font-variant-numeric: tabular-nums; }
-.command-diagnostics th { color: #8293a6; font-weight: 500; padding-bottom: 7px; }
-.command-diagnostics td { padding: 4px 0; }
-.command-diagnostics th, .command-diagnostics td { text-align: right; }
-.command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -2095,6 +2091,7 @@ BLANK_SNAPSHOT = {
     'beats_detected': 0,
     'intent': None,
     'timing_stats': {},
+    'special_cooldowns': [],
     'decoder': {},
     'shed': {},
 }
@@ -2339,10 +2336,10 @@ def build_app(
                                     ),
                                     html.Section(
                                         [
-                                            html.H2('Command diagnostics'),
+                                            html.H2('Cooldowns'),
                                             html.Div(
-                                                id='command-diagnostics',
-                                                className='diagnostics-content',
+                                                id='special-cooldowns',
+                                                className='diagnostics-content cooldowns',
                                             ),
                                         ],
                                         className='diagnostics',
@@ -2463,7 +2460,7 @@ def build_app(
             Output('show-status', 'children'),
             Output('show-timing', 'children'),
             Output('decoder', 'children'),
-            Output('command-diagnostics', 'children'),
+            Output('special-cooldowns', 'children'),
             Output('timeline-data', 'data'),
             Output('telemetry-alerts', 'children'),
             Output('performance-metrics', 'children'),
@@ -2479,7 +2476,7 @@ def build_app(
             raise dash.exceptions.PreventUpdate
         snap = expectations.apply(_with_base_palette(snapshot_source.snapshot()))
         now = time.time()
-        sync = status = show_timing = decoder = commands = dash.no_update
+        sync = status = show_timing = decoder = cooldowns = dash.no_update
         timeline = dash.no_update
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
@@ -2489,7 +2486,7 @@ def build_app(
             status = _build_show_status(snap, now)
             show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
-            commands = _build_command_diagnostics(snap)
+            cooldowns = _build_cooldowns(snap)
             if can_control:
                 control = {
                     key: snap.get(key)
@@ -2521,7 +2518,7 @@ def build_app(
             status,
             show_timing,
             decoder,
-            commands,
+            cooldowns,
             timeline,
             notices,
             performance,
