@@ -104,6 +104,7 @@ impl ActiveOverride {
         let special = *self.value.special_fx?;
         let from_level = special::attack_level(&special, beat - self.progress.started_beat);
         (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
+            id: self.value.id,
             special,
             cell_ids: self.cell_ids,
             priority: self.value.priority,
@@ -116,6 +117,7 @@ impl ActiveOverride {
 }
 
 struct ReleasingSpecial {
+    id: String,
     special: SpecialFx,
     cell_ids: Vec<String>,
     priority: i32,
@@ -128,6 +130,14 @@ struct ReleasingSpecial {
 impl ReleasingSpecial {
     fn level(&self, beat: f64) -> f64 {
         special::release_level(&self.special, self.from_level, beat - self.released_beat)
+    }
+
+    /// Shortens the fade still to run to at most `cap` beats, falling from its level now.
+    fn cut(&mut self, beat: f64, cap: f64) {
+        let remaining = self.special.release_beats - (beat - self.released_beat);
+        self.from_level = self.level(beat);
+        self.released_beat = beat;
+        self.special.release_beats = remaining.min(cap);
     }
 }
 
@@ -270,6 +280,12 @@ impl Engine {
                     .into_iter()
                     .flatten()
                     .reduce(f64::min);
+                if let Some(cap) = cap {
+                    // A special already fading under this ID (released, or replaced) is cut too.
+                    for releasing in self.releasing.iter_mut().filter(|r| r.id == *id) {
+                        releasing.cut(time.elapsed_musical_beats, cap);
+                    }
+                }
                 if let Some(mut removed) = self.overrides.remove(id) {
                     if let (Some(cap), Some(special)) = (cap, removed.value.special_fx.as_mut()) {
                         special.release_beats = special.release_beats.min(cap);
@@ -498,6 +514,8 @@ impl Engine {
         self.paused_at_seconds = paused.then_some(seconds);
         if paused {
             self.release_strobe_overrides_instead_of_holding_them();
+            // A frozen clock would hold a fade at its level and replay it on play.
+            self.releasing.clear();
         }
         Ok(())
     }
