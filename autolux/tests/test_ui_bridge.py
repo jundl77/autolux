@@ -199,6 +199,7 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
     command = parse_control_command(
         {'action': 'settings', 'settings': {'group_masters': {'wash': 0.5}}}
     )
-    assert command['settings'].group_masters == {'wash': 0.5}
+    # A settings edit carries only the fields it changes; the engine merges them.
+    assert command['settings'] == {'group_masters': {'wash': 0.5}}
     with pytest.raises(ValueError, match='group master wash'):
         parse_control_command({'action': 'settings', 'settings': {'group_masters': {'wash': 2}}})

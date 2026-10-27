@@ -368,6 +368,7 @@ fn paused(value: bool) -> ClientMessage {
             r#type: wire::ParameterType::Paused as i32,
             value: Some(wire::parameter::Value::Boolean(value)),
             fade_seconds: 0.0,
+            group: String::new(),
         }),
     })
 }

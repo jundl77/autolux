@@ -63,14 +63,15 @@ class StaticLooks:
         return bool(self._looks) or self._floor or self.blackout or self._special is not None
 
     def special_rows(self, target: str) -> list[str]:
-        """Catalogue rows the operator may hold on target: its own group's rows (any row on the
-        whole rig) that the target's fixtures can render."""
+        """Catalogue rows the operator may hold on target: the rows the automatic show could
+        place on that group (its own group, or its role where the fixtures render the row's
+        axes), and any row on the whole rig."""
         capabilities = self.special_capabilities()
         return [
             name
             for name, row in self._rows.items()
-            if target in (row.group, ALL_FIXTURES)
-            and capabilities.allows(dataclasses.replace(row, group=target))
+            if target == ALL_FIXTURES
+            or any(placed.group == target for placed in capabilities.targets(row))
         ]
 
     def special(self, row: str, target: str) -> None:
