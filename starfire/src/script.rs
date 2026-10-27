@@ -223,16 +223,6 @@ fn referenced_groups(source: &str) -> impl Iterator<Item = String> + '_ {
     })
 }
 
-/// Checked wherever a loop resolves a target, so no way of naming an accent group escapes it.
-fn refuse_accent(rig: &FixtureRig, target: &Target) -> Result<()> {
-    match target {
-        Target::Group(group) if rig.is_accent(group) => {
-            bail!("accent group {group} plays specials only, never autoloops")
-        }
-        _ => Ok(()),
-    }
-}
-
 fn validate_identifier(value: &str) -> Result<()> {
     ensure!(
         !value.is_empty() && value.len() <= MAX_IDENTIFIER_BYTES,
@@ -368,12 +358,13 @@ impl LuaAutoloop {
             "members",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
-                refuse_accent(&targets, &target).map_err(mlua::Error::external)?;
                 if matches!(&target, Target::Group(group) if !targets.groups().contains_key(group))
                 {
                     return lua.create_table();
                 }
-                let members = targets.resolve(&target).map_err(mlua::Error::external)?;
+                let members = targets
+                    .resolve_for_loop(&target)
+                    .map_err(mlua::Error::external)?;
                 if members.len() > MAX_CELLS {
                     return Err(mlua::Error::RuntimeError(
                         "cell target limit exceeded".to_owned(),
@@ -387,16 +378,25 @@ impl LuaAutoloop {
             "mirror",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
-                refuse_accent(&spatial, &target).map_err(mlua::Error::external)?;
+                spatial
+                    .refuse_accent(&target)
+                    .map_err(mlua::Error::external)?;
                 let named: Vec<(String, String)> = match &target {
                     Target::Group(group) => spatial
                         .spatial()
                         .mirror(group)
-                        .map(<[_]>::to_vec)
-                        .unwrap_or_default(),
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|(left, right)| {
+                            !spatial.is_accent_cell(left) && !spatial.is_accent_cell(right)
+                        })
+                        .cloned()
+                        .collect(),
                     // A fixture's cells share its position, so only their order can pair them.
                     _ => {
-                        let members = spatial.resolve(&target).map_err(mlua::Error::external)?;
+                        let members = spatial
+                            .resolve_for_loop(&target)
+                            .map_err(mlua::Error::external)?;
                         crate::spatial::rank_pairs(members.len())
                             .into_iter()
                             .map(|(left, right)| (members[left].clone(), members[right].clone()))
@@ -554,9 +554,11 @@ impl LuaAutoloop {
             _ => true,
         });
         for effect in &effects {
-            refuse_accent(&self.rig, &effect.target)
+            let cells = self
+                .rig
+                .resolve_for_loop(&effect.target)
                 .with_context(|| format!("autoloop {} failed", self.identity))?;
-            for id in self.rig.resolve(&effect.target)? {
+            for id in cells {
                 self.rig
                     .validate_attributes(&id, &effect.values.attributes)?;
             }

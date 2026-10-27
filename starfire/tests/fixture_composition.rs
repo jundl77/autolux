@@ -70,7 +70,12 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
         )
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
-    for state in frame.fixture_properties_before_strobe.values() {
+    // The loop's sf.all() passes over the accent Kinta, which plays specials only.
+    let room = support::room();
+    for (id, state) in &frame.fixture_properties_before_strobe {
+        if room.is_accent_cell(id) {
+            continue;
+        }
         assert_eq!(state.intensity, 0.2);
         assert_eq!(
             state.colour,
@@ -111,13 +116,15 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
             ),
         )
         .unwrap();
+    let room = support::room();
     for (seconds, expected_intensity) in [(0.0, 204), (0.25, 0), (0.5, 204)] {
         let frame = engine.render_at(seconds).unwrap();
         assert!(
             frame
                 .fixture_properties_before_strobe
-                .values()
-                .all(|state| state.strobe_hz == 2.0 && state.intensity == 0.8)
+                .iter()
+                .filter(|(id, _)| !room.is_accent_cell(id))
+                .all(|(_, state)| state.strobe_hz == 2.0 && state.intensity == 0.8)
         );
         for start in [0, 12] {
             assert_eq!(

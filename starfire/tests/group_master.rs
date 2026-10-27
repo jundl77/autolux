@@ -49,7 +49,7 @@ fn lit_engine(definition: &wire::RigDefinition) -> Engine {
 /// strobes, so the group master must reach its light through the wheel.
 #[test]
 fn a_group_master_on_the_dimmerless_kinta_keeps_its_colour_and_at_zero_selects_black() {
-    let definition = support::room_definition();
+    let definition = support::room_definition_as_loops();
     let member = support::room().groups()["fx"][0].clone();
     let fixture = definition
         .fixtures
@@ -89,7 +89,7 @@ fn a_group_master_on_the_dimmerless_kinta_keeps_its_colour_and_at_zero_selects_b
 
 #[test]
 fn a_cell_in_two_capped_groups_takes_the_product_of_their_masters() {
-    let mut definition = support::room_definition();
+    let mut definition = support::room_definition_as_loops();
     let wash = support::room().groups()["wash"].clone();
     let fx = support::room().groups()["fx"][0].clone();
     let (shared, wash_only) = (&wash[0], &wash[1]);
