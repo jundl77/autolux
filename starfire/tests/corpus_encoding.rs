@@ -18,6 +18,7 @@ fn rig(source: &str) -> FixtureRig {
         groups: vec![wire::FixtureGroup {
             group_id: "group".into(),
             fixture_ids: vec!["fixture".into()],
+            ..Default::default()
         }],
         profiles: vec![support::compiled_profile(source, "profile")],
     })

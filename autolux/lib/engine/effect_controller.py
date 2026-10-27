@@ -130,7 +130,8 @@ class EffectController:
             self._capabilities = capabilities
             if self.event_buffer is not None:
                 self.event_buffer.set_special_groups(
-                    {name: sorted(axes) for name, axes in capabilities.groups.items()}
+                    {name: sorted(axes) for name, axes in capabilities.groups.items()},
+                    dict(capabilities.roles),
                 )
         return capabilities
 

@@ -41,6 +41,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
+from autolux.lighting.mvr_schema import LOOP_ROLE
 from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
@@ -1188,9 +1189,10 @@ def _fx_segment(segment_id: str, levels: tuple, value):
     )
 
 
-def special_groups_view(groups: dict) -> list:
+def special_groups_view(groups: dict, roles: dict | None = None) -> list:
     if not groups:
         return ['FX: Starfire reported no groups']
+    roles = roles or {}
     return [
         html.Span('FX', className='control-label'),
         *[
@@ -1200,7 +1202,7 @@ def special_groups_view(groups: dict) -> list:
                 '  ',
                 name,
                 ' ',
-                html.Span(' · '.join(axes) or 'none', className='status-tag'),
+                html.Span(' · '.join([roles.get(name, LOOP_ROLE), *axes]), className='status-tag'),
             )
         ],
     ]
@@ -2746,7 +2748,10 @@ def build_app(
     def show_special_groups(selected):
         if selected != 'config':
             raise dash.exceptions.PreventUpdate
-        return special_groups_view(snapshot_source.snapshot().get('special_groups') or {})
+        snapshot = snapshot_source.snapshot()
+        return special_groups_view(
+            snapshot.get('special_groups') or {}, snapshot.get('group_roles') or {}
+        )
 
     app.clientside_callback(
         ANIMATION_JS,

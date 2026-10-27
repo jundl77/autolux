@@ -3,6 +3,11 @@ import re
 
 MVR_VERSION = (1, 6)
 AUTOLUX_PROVIDER = 'Autolux'
+# A group's role is the name of the MVR Layer its fixtures sit in: loop groups carry the
+# autoloops, accent groups only play specials.
+LOOP_ROLE = 'loop'
+ACCENT_ROLE = 'accent'
+ROLES = (LOOP_ROLE, ACCENT_ROLE)
 ONE, OPTIONAL, MANY = '1', '0..1', '0..n'
 OBJECT_TAGS = ('SceneObject', 'GroupObject', 'FocusPoint', 'Fixture')
 OBJECT_TAGS += ('Support', 'Truss', 'VideoScreen', 'Projector')

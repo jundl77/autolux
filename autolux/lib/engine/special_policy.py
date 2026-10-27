@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import WHOLE_RIG
 from autolux.lib.engine.effect_definitions import STROBE_RATE_HZ, LightIntent
+from autolux.lighting.mvr_schema import LOOP_ROLE
 
 INTENSE_SPEED = 0.6
 AXES = ('colour', 'speed', 'pulse', 'pattern')
@@ -61,16 +62,23 @@ class Special:
 @dataclass(frozen=True)
 class SpecialCapabilities:
     groups: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    roles: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_groups(cls, groups: Iterable[Mapping]) -> SpecialCapabilities:
+        populated = [
+            group for group in groups if group.get('name') and (group.get('cell_count') or 0) > 0
+        ]
         return cls(
             {
                 group['name']: frozenset(axis for axis in AXES if group.get(axis))
-                for group in groups
-                if group.get('name') and (group.get('cell_count') or 0) > 0
-            }
+                for group in populated
+            },
+            {group['name']: group.get('role') or LOOP_ROLE for group in populated},
         )
+
+    def role(self, group: str) -> str:
+        return self.roles.get(group, LOOP_ROLE)
 
     def allows(self, special: Special) -> bool:
         if special.group == WHOLE_RIG:

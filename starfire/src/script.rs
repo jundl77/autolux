@@ -188,6 +188,27 @@ impl AutoloopCatalog {
             .collect()
     }
 
+    /// Accent groups play specials only; a loop naming one is refused at login.
+    pub fn require_no_accent_groups(&self, rig: &FixtureRig) -> Result<()> {
+        let named: Vec<String> = self
+            .sources
+            .iter()
+            .flat_map(|((bank, autoloop), source)| {
+                referenced_groups(source)
+                    .filter(|group| rig.is_accent(group))
+                    .map(move |group| format!("{bank}/{autoloop} names {group}"))
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        ensure!(
+            named.is_empty(),
+            "autoloops may not run on accent groups, which only play specials: {}",
+            named.join(", ")
+        );
+        Ok(())
+    }
+
     pub fn instantiate(
         &self,
         bank: &str,

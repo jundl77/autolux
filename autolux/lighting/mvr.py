@@ -27,7 +27,10 @@ GDTF_DESCRIPTION = 'description.xml'
 GDTF_SUFFIX = '.gdtf'
 PROVIDER = schema.AUTOLUX_PROVIDER
 PROVIDER_VERSION = '0.1.0'
-DEFAULT_LAYER = 'Room'
+LOOP_ROLE = schema.LOOP_ROLE
+ACCENT_ROLE = schema.ACCENT_ROLE
+ROLES = schema.ROLES
+DEFAULT_LAYER = LOOP_ROLE
 MAX_MVR_BYTES = 32 * 1024 * 1024
 MAX_SCENE_BYTES = 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 4096
@@ -610,13 +613,15 @@ def patched_fixtures(scene: Scene) -> list[dict]:
             if schema.dmx_address((address.text or '').strip()) is None:
                 raise ValueError(f'{node.get("name", node.get("uuid"))}: invalid DMX address')
     placed = [
-        (item, matrix)
+        (item, matrix, layer.name)
         for layer in library.layers
         for item, matrix in _library_objects(layer.child_list, _library_matrix(layer.matrix))
         if isinstance(item, pymvr.Fixture)
     ]
     fixtures = []
-    for node, matrix in sorted(placed, key=lambda entry: order.get(entry[0].uuid.upper(), 0)):
+    for node, matrix, layer in sorted(
+        placed, key=lambda entry: order.get(entry[0].uuid.upper(), 0)
+    ):
         identity = node.uuid.upper()
         if not specs.get(identity) or not node.addresses.addresses:
             continue
@@ -639,6 +644,7 @@ def patched_fixtures(scene: Scene) -> list[dict]:
                 'universe': patch[0][1],
                 'address': patch[0][2],
                 'class': classes.get((node.classing or '').strip().upper(), ''),
+                'layer': layer or '',
                 'matrix': matrix,
                 **movement,
             }
@@ -654,6 +660,56 @@ def groups(fixtures) -> dict[str, list[str]]:
     return result
 
 
+def group_roles(fixtures) -> tuple[dict[str, str], list[str], list[str]]:
+    """Each group's role from its fixtures' Layer, with (errors, warnings) for the rig check."""
+    layers = {}
+    for fixture in fixtures:
+        if fixture['class']:
+            layers.setdefault(fixture['class'], set()).add(fixture['layer'])
+    roles, errors, warnings = {}, [], []
+    for group, names in layers.items():
+        if len(names) > 1:
+            errors.append(
+                f'Group {group} spans the layers {", ".join(sorted(names))}; '
+                'all fixtures of one class sit in one layer.'
+            )
+        layer = min(names)
+        if layer in ROLES:
+            roles[group] = layer
+        else:
+            roles[group] = LOOP_ROLE
+            warnings.append(
+                f'Group {group} sits in layer {layer!r}, not {" or ".join(ROLES)}; '
+                f'treating it as {LOOP_ROLE}.'
+            )
+    return roles, errors, warnings
+
+
+def layer(scene: Scene, name: str) -> ElementTree.Element:
+    layers = scene.root.find('Scene/Layers')
+    for node in layers.findall('Layer'):
+        if node.get('name') == name:
+            return node
+    node = ElementTree.SubElement(layers, 'Layer', uuid=stable_uuid('layer', name), name=name)
+    ElementTree.SubElement(node, 'ChildList')
+    return node
+
+
+def _class_layer(scene: Scene, fixture_class: str) -> ElementTree.Element:
+    """The layer already holding this class, else the first, so a fixture keeps its group's role."""
+    classes = {
+        node.get('uuid', '').upper(): node.get('name')
+        for node in scene.root.findall('Scene/AUXData/Class')
+    }
+    for node in scene.root.findall('Scene/Layers/Layer'):
+        if any(
+            classes.get((fixture.findtext('Classing') or '').strip().upper()) == fixture_class
+            for fixture in node.iter('Fixture')
+        ):
+            return node
+    return scene.root.find('Scene/Layers/Layer')
+
+
 def add_fixture(
     scene: Scene,
     *,
@@ -667,10 +723,10 @@ def add_fixture(
     matrix=IDENTITY_MATRIX,
     identity: str | None = None,
 ) -> ElementTree.Element:
-    layer = scene.root.find('Scene/Layers/Layer')
-    children = layer.find('ChildList')
+    parent = _class_layer(scene, fixture_class)
+    children = parent.find('ChildList')
     if children is None:
-        children = ElementTree.SubElement(layer, 'ChildList')
+        children = ElementTree.SubElement(parent, 'ChildList')
     node = ElementTree.SubElement(
         children, 'Fixture', uuid=identity or str(uuid.uuid4()).upper(), name=name
     )

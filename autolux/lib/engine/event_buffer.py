@@ -49,6 +49,7 @@ class EventBuffer:
         self._palette: dict | None = None
         self._special: dict | None = None
         self._special_groups: dict[str, list[str]] = {}
+        self._group_roles: dict[str, str] = {}
         self._intense_at: float | None = None
         self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
@@ -195,9 +196,12 @@ class EventBuffer:
             if duration_seconds is not None:
                 self._special['end'] = self.elapsed() + duration_seconds
 
-    def set_special_groups(self, groups: dict[str, list[str]]) -> None:
+    def set_special_groups(
+        self, groups: dict[str, list[str]], roles: dict[str, str] | None = None
+    ) -> None:
         with self._lock:
             self._special_groups = copy.deepcopy(groups)
+            self._group_roles = dict(roles or {})
 
     def mark_intense(self) -> None:
         with self._lock:
@@ -305,6 +309,7 @@ class EventBuffer:
                     else dict(self._special)
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
+                'group_roles': dict(self._group_roles),
                 'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
                 'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),

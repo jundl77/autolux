@@ -40,6 +40,14 @@ message Fixture {
 message FixtureGroup {
   string group_id = 1;
   repeated string fixture_ids = 2;
+  GroupRole role = 3;  // The MVR Layer the group's fixtures sit in.
+}
+
+// Loop groups carry the autoloops; accent groups only play specials, so no autoloop may
+// name one.
+enum GroupRole {
+  GROUP_ROLE_LOOP = 0;
+  GROUP_ROLE_ACCENT = 1;
 }
 
 // One GDTF fixture type's selected DMX mode, compiled by Autolux from its description.
