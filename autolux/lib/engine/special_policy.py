@@ -24,6 +24,8 @@ class Special:
     release_beats: float = 0.0
     pattern: float | None = None
     strobe_hz: float | None = None
+    # Never on the wire: the policy keeps the row out of selection this long after it fires.
+    cooldown_seconds: float = 0.0
 
     @property
     def intense(self) -> bool:
@@ -97,6 +99,7 @@ class SpecialPolicy:
         self._rng = rng
         self._selections = 0
         self._last_used: dict[str, int] = {}
+        self._fired_at: dict[str, float] = {}
 
     def choose(
         self,
@@ -104,6 +107,8 @@ class SpecialPolicy:
         capabilities: SpecialCapabilities,
         intense_blocked: str | None = None,
         soft_drop: str | None = None,
+        *,
+        now: float = 0.0,
     ) -> SpecialChoice:
         rows = [
             special
@@ -111,7 +116,11 @@ class SpecialPolicy:
             if intent in special.intents and capabilities.allows(special)
         ]
         strobes = tuple(special for special in rows if special.strobe_hz is not None)
-        selectable = [special for special in rows if special.strobe_hz is None]
+        selectable = [
+            special
+            for special in rows
+            if special.strobe_hz is None and not self._cooling(special, now)
+        ]
         calm = [special for special in selectable if not special.intense]
         if intense_blocked:
             suppressed = intense_blocked if strobes or len(calm) < len(selectable) else None
@@ -125,9 +134,14 @@ class SpecialPolicy:
         chosen = self._least_recent(selectable) if selectable else None
         return SpecialChoice(chosen, strobes)
 
-    def record(self, special: Special) -> None:
+    def record(self, special: Special, now: float = 0.0) -> None:
         self._selections += 1
         self._last_used[special.name] = self._selections
+        self._fired_at[special.name] = now
+
+    def _cooling(self, special: Special, now: float) -> bool:
+        fired = self._fired_at.get(special.name)
+        return fired is not None and now - fired < special.cooldown_seconds
 
     def _least_recent(self, pool: list[Special]) -> Special:
         unused = [special for special in pool if special.name not in self._last_used]

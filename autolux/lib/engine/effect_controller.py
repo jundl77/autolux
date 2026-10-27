@@ -338,6 +338,7 @@ class EffectController:
                 if soft
                 else None
             ),
+            now=now,
         )
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
@@ -348,7 +349,7 @@ class EffectController:
         if choice.special is None:
             self._forget_special()
         else:
-            self._special_policy.record(choice.special)
+            self._special_policy.record(choice.special, now)
             self._fire_special(choice.special)
         for strobe in choice.strobes:
             self._strobe(strobe, bpm, settings)

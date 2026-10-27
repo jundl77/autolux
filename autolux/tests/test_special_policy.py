@@ -21,7 +21,7 @@ FX = {
 }
 
 
-def row(name, intent=DROP, *, group='fx', speed=0.3, pulse=None, pattern=None):
+def row(name, intent=DROP, *, group='fx', speed=0.3, pulse=None, pattern=None, cooldown=0.0):
     return Special(
         name,
         (intent,),
@@ -31,6 +31,7 @@ def row(name, intent=DROP, *, group='fx', speed=0.3, pulse=None, pattern=None):
         speed=speed,
         pulse_beats=pulse,
         pattern=pattern,
+        cooldown_seconds=cooldown,
     )
 
 
@@ -131,3 +132,26 @@ def test_a_soft_drop_keeps_the_strobe_and_a_calm_row_but_no_intense_one():
         (DROP_STROBE,),
         'soft',
     )
+
+
+def fire(policy, intent, now, blocked=None):
+    choice = policy.choose(intent, SpecialCapabilities.from_groups([FX]), blocked, now=now)
+    if choice.special is not None:
+        policy.record(choice.special, now)
+    return choice.special
+
+
+def test_a_texture_cannot_return_inside_its_row_cooldown():
+    policy = SpecialPolicy([row('drift', ATMOSPHERIC, speed=0.1, cooldown=240)], random.Random(0))
+    assert fire(policy, ATMOSPHERIC, 1000.0).name == 'drift'
+    assert fire(policy, ATMOSPHERIC, 1239.0) is None
+    assert fire(policy, ATMOSPHERIC, 1240.0).name == 'drift'
+
+
+def test_a_drop_accent_waits_out_its_row_cooldown_after_the_shared_one_expires():
+    policy = SpecialPolicy([row('spin', pulse=1, cooldown=90), DROP_STROBE], random.Random(0))
+    assert fire(policy, DROP, 1000.0).name == 'spin'
+    # 70 s on, the shared 60 s intense cooldown has run out (no block) but the row's has not.
+    choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1070.0)
+    assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
+    assert fire(policy, DROP, 1090.0).name == 'spin'

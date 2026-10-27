@@ -80,6 +80,13 @@ def test_a_row_parses_into_the_wire_vocabulary():
     }
 
 
+def test_the_row_cooldown_defaults_to_none_and_stays_off_the_wire():
+    assert parse_special(row(), 'glow').cooldown_seconds == 0.0
+    special = parse_special(row(playback={'cooldown_seconds': 240}), 'glow')
+    assert special.cooldown_seconds == 240.0
+    assert 'cooldown_seconds' not in special.wire()
+
+
 @pytest.mark.parametrize(
     ('speed', 'pulse', 'intense'),
     [
@@ -117,6 +124,7 @@ def test_intense_is_derived_from_pulse_or_speed(speed, pulse, intense):
         ({'effect': {'form': {'beats': 2}}}, 'unknown effect.form.beats'),
         ({'effect': {'pattern': 2}}, 'effect.pattern 2 must be a number within 0..1'),
         ({'playback': {'attack_beats': -1}}, 'playback.attack_beats -1'),
+        ({'playback': {'cooldown_seconds': -1}}, 'playback.cooldown_seconds -1 must be a number'),
         ({'scaling': ['energy']}, 'unknown scaling'),
     ],
 )
