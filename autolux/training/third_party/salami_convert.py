@@ -36,7 +36,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -50,8 +50,10 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from corpus_root import corpus_dir  # noqa: E402
-from tp_record import (  # noqa: E402
+import itertools
+
+from corpus_root import corpus_dir
+from tp_record import (
     ID_PREFIXES,
     RECORD_SCHEMA,
     annotation_path,
@@ -246,7 +248,7 @@ def parse_rows(text: str, vocab: dict) -> list:
         rows.append(Row(time, tuple(large), tuple(small), tuple(function)))
     if not rows:
         raise ConvertError("no annotation lines")
-    for index, (before, after) in enumerate(zip(rows, rows[1:]), 2):
+    for index, (before, after) in enumerate(itertools.pairwise(rows), 2):
         if after.time < before.time:
             raise ConvertError(
                 f"line {index}: time {after.time!r} is before line "
@@ -426,7 +428,7 @@ def convert_track(
         "masked": parse.masked,
         "provenance": {
             "converter": CONVERTER,
-            "converted_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "converted_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "annotator": annotator,
             "annotation_file": path.name,
             "annotation_sha256": sha256(path),
@@ -497,7 +499,6 @@ def eligible(salami: Path, metadata: dict, ids: list | None, include_live: bool)
 def _report(verdicts: list, failures: list, buckets: tuple, requested: int, partial: bool) -> dict:
     labels: dict = {}
     letters: dict = {}
-    two_annotators = []
     fallbacks = []
     for verdict in verdicts:
         for name in verdict.names:

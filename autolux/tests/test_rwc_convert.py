@@ -22,8 +22,8 @@ for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"), str(TRAINING_DI
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import rwc_convert  # noqa: E402
-import tp_record  # noqa: E402
+import rwc_convert
+import tp_record
 
 # The first three lines of RM-P001.CHORUS.TXT: a start of 4 frames rather than
 # 0, an interior space in the label, and the two key-shift extremes.
@@ -534,7 +534,7 @@ def test_a_second_conversion_leaves_the_record_byte_identical(tmp_path, monkeypa
 
 def test_a_changed_record_takes_the_fresh_timestamp(tmp_path, monkeypatch):
     rig = make_rig(tmp_path)
-    archive, preprocessed, _audio, corpus = rig
+    _archive, preprocessed, _audio, corpus = rig
     monkeypatch.setattr(rwc_convert, "_now_utc", lambda: "2026-01-01T00:00:00Z")
     run(rig)
 

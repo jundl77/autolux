@@ -92,17 +92,19 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from build_clean_manifest import CLEAN_MANIFEST_FILE, STATUS_OK  # noqa: E402
-from eval_assets import build_eval_artifact_metadata  # noqa: E402
-from raveform_fetch_annotations import (  # noqa: E402
+import itertools
+
+from build_clean_manifest import CLEAN_MANIFEST_FILE, STATUS_OK
+from eval_assets import build_eval_artifact_metadata
+from raveform_fetch_annotations import (
     SEGMENTS_FILE,
     annotations_dir,
     load_tracks,
     parse_sections,
 )
-from raveform_manifest import section_runs  # noqa: E402
+from raveform_manifest import section_runs
 
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
+from autolux.lib.label_space import SECTION_LABELS
 
 EVAL_SET_FILE = AUTOLUX_PACKAGE_ROOT / "training" / "eval_set.json"
 
@@ -145,7 +147,7 @@ def beat_grid_bpm(times: list) -> float | None:
     single mis-placed beat would drag a mean off the tempo the track actually
     sits at for most of its length.
     """
-    intervals = [later - earlier for earlier, later in zip(times, times[1:]) if later > earlier]
+    intervals = [later - earlier for earlier, later in itertools.pairwise(times) if later > earlier]
     if len(times) < MIN_BEATS or not intervals:
         return None
     median = statistics.median(intervals)
@@ -240,7 +242,7 @@ def tiebreak(seed: int, youtube_id_: str) -> str:
     A hash rather than an RNG so the choice depends on nothing but the seed and
     the id: no draw order, no set iteration order, no platform hash salt.
     """
-    digest = hashlib.blake2b(f"{seed}:{youtube_id_}".encode("utf-8"), digest_size=8)
+    digest = hashlib.blake2b(f"{seed}:{youtube_id_}".encode(), digest_size=8)
     return digest.hexdigest()
 
 

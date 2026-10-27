@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -205,7 +206,7 @@ class BarPhaseHMM:
         period = float(np.median(self._periods))
         if period <= 0.0 or gap < self.params.coast_ratio * period:
             return [], gap
-        missing = int(round(gap / period)) - 1
+        missing = round(gap / period) - 1
         if missing < 1:
             return [], gap
         if missing > int(self.params.max_coast_beats):
@@ -277,7 +278,7 @@ def downbeat_times(decisions) -> np.ndarray:
 def phase_flips(decisions, subdivision: int = DEFAULT_SUBDIVISION) -> int:
     cycle = BEATS_PER_BAR * int(subdivision)
     flips = 0
-    for previous, current in zip(decisions, decisions[1:]):
+    for previous, current in itertools.pairwise(decisions):
         if current.phase != previous.phase % cycle + 1:
             flips += 1
     return flips

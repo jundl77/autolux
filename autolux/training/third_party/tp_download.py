@@ -21,7 +21,6 @@ here instead, after the mp3 is confirmed non-empty on disk.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import random
 import subprocess
@@ -39,10 +38,10 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import tp_fetch_queue  # noqa: E402
-import tp_record  # noqa: E402
-from corpus_root import corpus_dir  # noqa: E402
-from raveform_download import (  # noqa: E402
+import tp_fetch_queue
+import tp_record
+from corpus_root import corpus_dir
+from raveform_download import (
     BLOCK_REASONS,
     INTERRUPT_REASON,
     KNOWN_REASONS,
@@ -173,6 +172,7 @@ def download_one(corpus: Path, row, timeout_sec: int) -> tuple:
             encoding="utf-8",
             errors="replace",
             timeout=timeout_sec,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         if interrupt_requested():

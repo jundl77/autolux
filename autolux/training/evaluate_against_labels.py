@@ -102,11 +102,12 @@ for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training"))
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from build_training_table import (  # noqa: E402  (needs the path inserts above)
+from build_training_table import (
     NO_INTENT,
     TABLE_FILE,
 )
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
+
+from autolux.lib.label_space import SECTION_LABELS
 
 # The one column the table now carries a label in; a space is a view over it.
 LABEL_COLUMN = "label"
@@ -871,9 +872,7 @@ def _song_entry(score: Score) -> dict:
 def evaluate(tracks: list[TrackBeats], worst: int = WORST_SONGS) -> dict:
     """Score every track in every space and assemble the JSON-ready result."""
     result: dict = {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc)
-        .replace(microsecond=0)
-        .isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat(),
         "tolerances_sec": list(TOLERANCES_SEC),
         "primary_tolerance_sec": PRIMARY_TOLERANCE_SEC,
         "max_gap_factor": MAX_GAP_FACTOR,
@@ -891,15 +890,15 @@ def evaluate(tracks: list[TrackBeats], worst: int = WORST_SONGS) -> dict:
             track.times[i + 1] - track.times[i] for i in range(len(track.times) - 1)
         )
 
-    for space in SPACES:
+    for space, space_def in SPACES.items():
         songs = [score_track(track, space) for track in tracks]
         corpus = corpus_by_space[space] = aggregate(songs)
         ranked = sorted(songs, key=lambda score: (score.macro_f1, score.track_id))
         per_song = [_song_entry(score) for score in songs]
         result["spaces"][space] = {
             "space": space,
-            "caption": SPACES[space].caption,
-            "labels": list(SPACES[space].labels),
+            "caption": space_def.caption,
+            "labels": list(space_def.labels),
             "macro_f1": _round(corpus.macro_f1),
             "macro_classes": list(corpus.macro_classes),
             "macro_f1_expressible": _round(corpus.macro_f1_expressible),
@@ -1014,8 +1013,10 @@ def _row_percent_block(space_result: dict) -> list[str]:
 
 def _per_class_block(space_result: dict) -> list[str]:
     lines = [
-        f'  {"class":<12}{"support":>10}{"share":>8}{"predicted":>11}'
-        f'{"precision":>11}{"recall":>9}{"f1":>8}',
+        (
+            f'  {"class":<12}{"support":>10}{"share":>8}{"predicted":>11}'
+            f'{"precision":>11}{"recall":>9}{"f1":>8}'
+        ),
         "  " + "-" * 67,
     ]
     per_class = space_result["per_class"]
@@ -1063,8 +1064,10 @@ def _boundary_block(space_result: dict) -> list[str]:
         "  two coincide now that no two live intents claim the same class; they are",
         "  still measured apart so the day that stops holding is visible here.",
         "",
-        f'  {"stream":<8}{"boundary set":<16}{"tol":>7}{"truth":>9}{"pred":>9}'
-        f'{"matched":>9}{"precision":>11}{"recall":>9}{"f1":>8}',
+        (
+            f'  {"stream":<8}{"boundary set":<16}{"tol":>7}{"truth":>9}{"pred":>9}'
+            f'{"matched":>9}{"precision":>11}{"recall":>9}{"f1":>8}'
+        ),
         "  " + "-" * 84,
     ]
     for stream in STREAM_ORDER:
@@ -1096,8 +1099,10 @@ def _boundary_block(space_result: dict) -> list[str]:
 
 def _flicker_block(space_result: dict) -> list[str]:
     lines = [
-        f'  {"stream":<8}{"tolerance":<11}{"loose changes":>15}{"of that stream":>17}'
-        f'{"per audience-minute":>22}',
+        (
+            f'  {"stream":<8}{"tolerance":<11}{"loose changes":>15}{"of that stream":>17}'
+            f'{"per audience-minute":>22}'
+        ),
         "  " + "-" * 73,
     ]
     for stream in STREAM_ORDER:
@@ -1115,13 +1120,13 @@ def _flicker_block(space_result: dict) -> list[str]:
             for song in space_result["per_song"]
         )
         if per_song:
-
-            def _quantile(fraction: float) -> float:
-                return per_song[min(len(per_song) - 1, int(fraction * len(per_song)))]
-
+            median, p90 = (
+                per_song[min(len(per_song) - 1, int(fraction * len(per_song)))]
+                for fraction in (0.5, 0.9)
+            )
             lines.append(
                 f'           per-song at +/-{PRIMARY_TOLERANCE_SEC}s: '
-                f'median {_quantile(0.5):.2f}, p90 {_quantile(0.9):.2f}, '
+                f'median {median:.2f}, p90 {p90:.2f}, '
                 f'max {per_song[-1]:.2f} changes/min '
                 f'({block["changes_total"]} changes total)'
             )
@@ -1142,16 +1147,24 @@ def _structural_block(space_result: dict) -> list[str]:
     lines = [
         f'  intents the engine committed : {", ".join(structural["observed_intents"])}',
         f'  intents NEVER committed      : {", ".join(silent) if silent else "(none)"}',
-        f'  label classes therefore out of reach: '
-        f'{", ".join(unreachable) if unreachable else "(none)"}',
-        f'  ground truth sitting in those classes: '
-        f'{structural["unreachable_label_sec"] / 60.0:.1f} min '
-        f'({100.0 * structural["unreachable_label_share"]:.1f}% of labelled time)',
-        f'  macro-F1 CANNOT EXCEED               : '
-        f'{structural["macro_f1_upper_bound"]:.3f}  (reachable classes / all classes)',
-        f'  best macro-F1 actually achievable    : '
-        f'{structural["macro_f1_best_achievable"]:.3f}  (the unreachable time still '
-        f'has to be',
+        (
+            f'  label classes therefore out of reach: '
+            f'{", ".join(unreachable) if unreachable else "(none)"}'
+        ),
+        (
+            f'  ground truth sitting in those classes: '
+            f'{structural["unreachable_label_sec"] / 60.0:.1f} min '
+            f'({100.0 * structural["unreachable_label_share"]:.1f}% of labelled time)'
+        ),
+        (
+            f'  macro-F1 CANNOT EXCEED               : '
+            f'{structural["macro_f1_upper_bound"]:.3f}  (reachable classes / all classes)'
+        ),
+        (
+            f'  best macro-F1 actually achievable    : '
+            f'{structural["macro_f1_best_achievable"]:.3f}  (the unreachable time still '
+            f'has to be'
+        ),
         "                                                predicted as something, so it lands as",
         "                                                false positives on the reachable classes)",
     ]
@@ -1178,9 +1191,11 @@ def space_result_space(space_result: dict) -> str:
 def _worst_block(space_result: dict) -> list[str]:
     space = space_result_space(space_result)
     lines = [
-        f'  {"track_id":<22}{"macro-F1":>9}{"acc":>7}{"bF1@2s":>8}'
-        f'{"flick/min":>11}{"chg i/c":>10}{"bounds":>8}{"min":>7}   '
-        f'(boundary/flicker: intent stream)',
+        (
+            f'  {"track_id":<22}{"macro-F1":>9}{"acc":>7}{"bF1@2s":>8}'
+            f'{"flick/min":>11}{"chg i/c":>10}{"bounds":>8}{"min":>7}   '
+            f'(boundary/flicker: intent stream)'
+        ),
         "  " + "-" * 83,
     ]
     tol = f"{PRIMARY_TOLERANCE_SEC}"
@@ -1218,20 +1233,30 @@ def render_report(result: dict) -> str:
         f'  generated            : {result["generated_at"]}',
         f'  tracks               : {coverage["tracks"]}',
         f'  labelled beats (rows): {coverage["rows"]}',
-        f'  evaluated show time  : {coverage["exposure_min"]:.1f} min '
-        f'({coverage["exposure_sec"] / 3600.0:.2f} h)',
-        f'  median beat interval : {coverage["median_beat_interval_sec"]:.3f} s '
-        f'-- the quantisation floor of every boundary number below',
-        f'  beats with no intent : {coverage["no_intent_rows"]} rows / '
-        f'{coverage["no_intent_sec"]:.1f} s '
-        f'({100.0 * coverage["no_intent_share"]:.3f}% of show time), excluded as '
-        f'"no prediction"',
-        f'                         leading {coverage["no_intent_leading_rows"]}, '
-        f'interior {coverage["no_intent_interior_rows"]}, '
-        f'trailing {coverage["no_intent_trailing_rows"]} '
-        f'-- interior gaps would bridge the change stream',
-        f'  time discarded by the dropout clamp: {coverage["clamped_sec"]:.1f} s '
-        f'({100.0 * coverage["clamped_sec"] / max(coverage["exposure_sec"], 1e-9):.4f}%)',
+        (
+            f'  evaluated show time  : {coverage["exposure_min"]:.1f} min '
+            f'({coverage["exposure_sec"] / 3600.0:.2f} h)'
+        ),
+        (
+            f'  median beat interval : {coverage["median_beat_interval_sec"]:.3f} s '
+            f'-- the quantisation floor of every boundary number below'
+        ),
+        (
+            f'  beats with no intent : {coverage["no_intent_rows"]} rows / '
+            f'{coverage["no_intent_sec"]:.1f} s '
+            f'({100.0 * coverage["no_intent_share"]:.3f}% of show time), excluded as '
+            f'"no prediction"'
+        ),
+        (
+            f'                         leading {coverage["no_intent_leading_rows"]}, '
+            f'interior {coverage["no_intent_interior_rows"]}, '
+            f'trailing {coverage["no_intent_trailing_rows"]} '
+            f'-- interior gaps would bridge the change stream'
+        ),
+        (
+            f'  time discarded by the dropout clamp: {coverage["clamped_sec"]:.1f} s '
+            f'({100.0 * coverage["clamped_sec"] / max(coverage["exposure_sec"], 1e-9):.4f}%)'
+        ),
         "",
         "  mapping used (intent -> labels it is correct for):",
     ]
@@ -1284,7 +1309,7 @@ def git_sha() -> str:
             capture_output=True,
             text=True,
         ).stdout.strip()
-    except Exception:  # pragma: no cover
+    except (OSError, subprocess.CalledProcessError):
         return "unknown"
 
 

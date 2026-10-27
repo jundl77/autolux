@@ -30,7 +30,7 @@ from ng_common import CAMP, CORPUS, inject_repo_paths
 
 inject_repo_paths()
 
-from raveform_fetch_annotations import load_tracks  # noqa: E402
+from raveform_fetch_annotations import load_tracks
 
 OVERLAY_KIND = "nextgen_supervision_mask"
 DELTA_Q_MIN = 0.6
@@ -136,7 +136,7 @@ def main(argv: list | None = None) -> int:
             "delta_q_min": DELTA_Q_MIN,
             "rho_min": RHO_MIN,
         },
-        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "sections": kept,
     }
     camp.mkdir(parents=True, exist_ok=True)

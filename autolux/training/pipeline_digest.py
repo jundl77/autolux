@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import itertools
 import json
 import time
 from pathlib import Path
@@ -46,7 +47,7 @@ def _normalise_streams(streams: dict | None) -> dict:
 
 def _non_decreasing(values) -> bool:
     values = list(values)
-    return all(a <= b for a, b in zip(values, values[1:]))
+    return all(a <= b for a, b in itertools.pairwise(values))
 
 
 def _queue_errors_ms(report: dict) -> list:
@@ -59,7 +60,7 @@ def _queue_error_buffers(report: dict) -> int:
     from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 
     period_ms = BUFFER_SIZE / SAMPLE_RATE * 1000
-    return int(math.ceil(max(_queue_errors_ms(report), default=0.0) / period_ms))
+    return math.ceil(max(_queue_errors_ms(report), default=0.0) / period_ms)
 
 
 def _sound_events(events: list) -> list:

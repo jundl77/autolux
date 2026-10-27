@@ -74,4 +74,4 @@ class DownbeatCRNN(nn.Module):
         return self.downbeat_head(recurrent).squeeze(-1)
 
 
-__all__ = ["DownbeatCRNN", "PARAM_BUDGET", "FREQ_POOL"]
+__all__ = ["FREQ_POOL", "PARAM_BUDGET", "DownbeatCRNN"]

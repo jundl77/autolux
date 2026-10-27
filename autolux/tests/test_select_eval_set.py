@@ -19,8 +19,8 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import select_eval_set  # noqa: E402
-from select_eval_set import (  # noqa: E402  (needs the path insert above)
+import select_eval_set
+from select_eval_set import (
     EVAL_SET_FILE,
     GAP_BUCKET_BPM,
     MAX_DURATION_SEC,
@@ -40,7 +40,8 @@ from select_eval_set import (  # noqa: E402  (needs the path insert above)
     tiebreak,
     verify_inputs,
 )
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
+
+from autolux.lib.label_space import SECTION_LABELS
 
 
 def candidate(

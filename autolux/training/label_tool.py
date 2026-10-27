@@ -129,6 +129,7 @@ generates a beat grid, ~30 s with nothing on screen otherwise -- and the
 server's stamped verdict overwrites it.
 """
 
+import contextlib
 import csv
 import hashlib
 import json
@@ -396,7 +397,7 @@ def known_metadata(audio_path: str) -> dict:
     gate still judges the form, and nothing here may raise.
     """
     known = {'artist': None, 'title': None, 'genre': None}
-    try:
+    with contextlib.suppress(Exception):
         identifier, native = resolve_identity(audio_path)
         records = [_json_record(hand_label_path(identifier))]
         source = _source_annotation(audio_path)
@@ -410,8 +411,6 @@ def known_metadata(audio_path: str) -> dict:
                 known['artist'], known['title'] = artist or None, title
             genre = str(record.get('genre') or '').strip()
             known['genre'] = known['genre'] or (genre or None)
-    except Exception:
-        pass
     if not known['title']:
         known['title'] = default_title(audio_path)
     return known
@@ -492,7 +491,7 @@ def to_annotation(
     audio_name: str,
     title: str,
     no_artist: bool = False,
-    genre: str = None,
+    genre: str | None = None,
 ) -> dict:
     ordered = normalise(sections)
     spans = []
@@ -598,7 +597,7 @@ def admit_track(identifier: str, audio: Path, labels: Path) -> tuple:
         return True, str(
             entry(track_id=identifier, audio=audio, labels=labels, corpus=corpus_dir())
         )
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001
         return False, f'admission FAILED ({type(error).__name__}: {error})'
 
 
@@ -608,7 +607,7 @@ def commit_labels(
     duration: float,
     title: str,
     no_artist: bool = False,
-    genre: str = None,
+    genre: str | None = None,
 ) -> dict:
     identifier, native = resolve_identity(audio_path)
     copied = native is None
@@ -821,7 +820,7 @@ def apply_edit(
     trigger,
     sections: list,
     cursor: float = 0.0,
-    new_label: str = None,
+    new_label: str | None = None,
     new_strength: str = DEFAULT_STRENGTH,
     row_labels: list = (),
     row_strengths: list = (),
@@ -830,8 +829,8 @@ def apply_edit(
     title: str = '',
     no_artist: bool = False,
     genre: str = '',
-    page_token: str = None,
-    server_token: str = None,
+    page_token: str | None = None,
+    server_token: str | None = None,
 ) -> tuple:
     """Apply one UI event and write the result. `None` means "leave it alone".
 
@@ -947,6 +946,7 @@ def decode_mono(audio_path: str, rate: int = DECODE_RATE) -> np.ndarray:
             ],
             capture_output=True,
             stdin=subprocess.DEVNULL,
+            check=False,
         )
     except OSError as error:
         raise SystemExit(f'ffmpeg could not run: {error}')
@@ -1001,17 +1001,17 @@ def section_shapes(track: Track, sections: list) -> tuple:
     traces behind it are the whole decode and are the same on every edit.
     """
     shapes = [
-        dict(
-            type='line',
-            xref='x',
-            yref='paper',
-            layer='above',
-            x0=0.0,
-            x1=0.0,
-            y0=0.0,
-            y1=1.0,
-            line=dict(color='#ffffff', width=1.5),
-        )
+        {
+            'type': 'line',
+            'xref': 'x',
+            'yref': 'paper',
+            'layer': 'above',
+            'x0': 0.0,
+            'x1': 0.0,
+            'y0': 0.0,
+            'y1': 1.0,
+            'line': {'color': '#ffffff', 'width': 1.5},
+        }
     ]
     annotations = []
     for index, entry in enumerate(sections):
@@ -1025,61 +1025,63 @@ def section_shapes(track: Track, sections: list) -> tuple:
             continue
         color = LABEL_COLORS.get(entry['label'], MUTED)
         shapes.append(
-            dict(
-                type='rect',
-                xref='x',
-                yref='paper',
-                layer='below',
-                x0=start,
-                x1=end,
-                y0=0.0,
-                y1=RIBBON_LOW,
-                fillcolor=color,
-                opacity=0.14,
-                line_width=0,
-            )
+            {
+                'type': 'rect',
+                'xref': 'x',
+                'yref': 'paper',
+                'layer': 'below',
+                'x0': start,
+                'x1': end,
+                'y0': 0.0,
+                'y1': RIBBON_LOW,
+                'fillcolor': color,
+                'opacity': 0.14,
+                'line_width': 0,
+            }
         )
         shapes.append(
-            dict(
-                type='rect',
-                xref='x',
-                yref='paper',
-                layer='below',
-                x0=start,
-                x1=end,
-                y0=RIBBON_LOW,
-                y1=RIBBON_HIGH,
-                fillcolor=color,
-                opacity=0.85,
-                line_width=0,
-            )
+            {
+                'type': 'rect',
+                'xref': 'x',
+                'yref': 'paper',
+                'layer': 'below',
+                'x0': start,
+                'x1': end,
+                'y0': RIBBON_LOW,
+                'y1': RIBBON_HIGH,
+                'fillcolor': color,
+                'opacity': 0.85,
+                'line_width': 0,
+            }
         )
         minor = entry['strength'] == 'minor'
         shapes.append(
-            dict(
-                type='line',
-                xref='x',
-                yref='paper',
-                layer='below',
-                x0=start,
-                x1=start,
-                y0=0.0,
-                y1=RIBBON_HIGH,
-                line=dict(
-                    color=color, width=1.0 if minor else 2.0, dash='dash' if minor else 'dot'
-                ),
-            )
+            {
+                'type': 'line',
+                'xref': 'x',
+                'yref': 'paper',
+                'layer': 'below',
+                'x0': start,
+                'x1': start,
+                'y0': 0.0,
+                'y1': RIBBON_HIGH,
+                'line': {
+                    'color': color,
+                    'width': 1.0 if minor else 2.0,
+                    'dash': 'dash' if minor else 'dot',
+                },
+            }
         )
         annotations.append(
-            dict(
-                x=(start + end) / 2,
-                y=0.94,
-                xref='x',
-                yref='paper',
-                text=f'{entry["label"]} ·minor' if minor else entry['label'],
-                showarrow=False,
-                font=dict(color='rgba(255,255,255,0.92)', size=10, family='monospace'),
-            )
+            {
+                'x': (start + end) / 2,
+                'y': 0.94,
+                'xref': 'x',
+                'yref': 'paper',
+                'text': f'{entry["label"]} ·minor' if minor else entry['label'],
+                'showarrow': False,
+                'font': {'color': 'rgba(255,255,255,0.92)', 'size': 10, 'family': 'monospace'},
+            }
         )
     return shapes, annotations
 
@@ -1113,7 +1115,7 @@ def build_figure(track: Track, sections: list, beats: list = ()) -> go.Figure:
                 x=track.times,
                 y=WAVE_MID + sign * WAVE_HALF * track.envelope,
                 mode='lines',
-                line=dict(color='rgba(88,166,255,0.75)', width=1),
+                line={'color': 'rgba(88,166,255,0.75)', 'width': 1},
                 hoverinfo='skip',
             )
         )
@@ -1122,7 +1124,7 @@ def build_figure(track: Track, sections: list, beats: list = ()) -> go.Figure:
             x=track.times,
             y=FLUX_BASE + FLUX_SPAN * track.flux,
             mode='lines',
-            line=dict(color='rgba(63,185,80,0.9)', width=1),
+            line={'color': 'rgba(63,185,80,0.9)', 'width': 1},
             hoverinfo='skip',
         )
     )
@@ -1134,29 +1136,29 @@ def build_figure(track: Track, sections: list, beats: list = ()) -> go.Figure:
                     x=times,
                     y=[height] * len(times),
                     mode='markers',
-                    marker=dict(
-                        symbol='line-ns',
-                        size=size,
-                        line=dict(color=f'rgba(168,218,220,{alpha})', width=1.4),
-                    ),
+                    marker={
+                        'symbol': 'line-ns',
+                        'size': size,
+                        'line': {'color': f'rgba(168,218,220,{alpha})', 'width': 1.4},
+                    },
                     hoverinfo='skip',
                 )
             )
     figure.update_layout(
         shapes=shapes,
         annotations=annotations,
-        xaxis=dict(
-            range=[0.0, track.duration],
-            gridcolor='#1a2332',
-            color=MUTED,
-            ticksuffix='s',
-            showline=False,
-        ),
-        yaxis=dict(range=[0.0, 1.0], showticklabels=False, showgrid=False, fixedrange=True),
+        xaxis={
+            'range': [0.0, track.duration],
+            'gridcolor': '#1a2332',
+            'color': MUTED,
+            'ticksuffix': 's',
+            'showline': False,
+        },
+        yaxis={'range': [0.0, 1.0], 'showticklabels': False, 'showgrid': False, 'fixedrange': True},
         plot_bgcolor=DARK_BG,
         paper_bgcolor=DARK_BG,
         height=330,
-        margin=dict(l=8, r=8, t=8, b=34),
+        margin={'l': 8, 'r': 8, 't': 8, 'b': 34},
         dragmode='pan',
         uirevision='labels',
         showlegend=False,

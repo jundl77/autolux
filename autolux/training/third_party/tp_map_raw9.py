@@ -43,9 +43,10 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import tp_record  # noqa: E402
-from corpus_root import corpus_dir  # noqa: E402
-from raveform_fetch_annotations import annotations_dir  # noqa: E402
+import module_source
+import tp_record
+from corpus_root import corpus_dir
+from raveform_fetch_annotations import annotations_dir
 
 MAPPED_SUFFIX = ".mapped.json"
 MAPPED_SCHEMA = 1
@@ -155,6 +156,7 @@ def decode_audio(path: Path) -> np.ndarray:
             "-",
         ],
         capture_output=True,
+        check=False,
     )
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", "replace").strip()[-300:]
@@ -232,7 +234,7 @@ def quantiles(values: list) -> dict:
             ("max", 1.0),
         )
     }
-    result.update(n=int(len(arr)), mean=round(float(arr.mean()), 3), sd=round(float(arr.std()), 3))
+    result.update(n=len(arr), mean=round(float(arr.mean()), 3), sd=round(float(arr.std()), 3))
     return result
 
 
@@ -430,15 +432,6 @@ def choose_sample(stats: list, per_bucket: int = 2) -> list:
 # --------------------------------------------------------------------------- #
 
 
-def _below_normal_priority():
-    if sys.platform != "win32":
-        return
-    import ctypes
-
-    handle = ctypes.windll.kernel32.GetCurrentProcess()
-    ctypes.windll.kernel32.SetPriorityClass(handle, 0x00004000)
-
-
 def admitted_rows(corpus: Path) -> list:
     manifest = tp_record.third_party_dir(corpus) / "clean_manifest.csv"
     with open(manifest, newline="", encoding="utf-8") as handle:
@@ -482,7 +475,7 @@ def feature_pass(rows: list, records: dict, cache: dict, workers: int) -> tuple:
             return track_id, held, None
         try:
             return track_id, measure_track(record, audio), None
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return track_id, None, str(exc)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -505,7 +498,7 @@ def main(argv=None) -> int:
     parser.add_argument("--force-features", action="store_true")
     args = parser.parse_args(argv)
 
-    _below_normal_priority()
+    module_source.below_normal_priority()
     corpus = corpus_dir()
     tp = tp_record.third_party_dir(corpus)
     ann = annotations_dir(corpus)
@@ -654,15 +647,19 @@ def write_summary_md(path: Path, summary: dict) -> None:
     lines = [
         "# Raw-9 mapping summary (drafts, quarantined)",
         "",
-        f"Generated {summary['generated_utc']} -- "
-        f"{summary['tracks_mapped']} of {summary['tracks_admitted']} "
-        f"admitted tracks mapped, {len(summary['tracks_skipped'])} skipped.",
+        (
+            f"Generated {summary['generated_utc']} -- "
+            f"{summary['tracks_mapped']} of {summary['tracks_admitted']} "
+            f"admitted tracks mapped, {len(summary['tracks_skipped'])} skipped."
+        ),
         "",
         "## Registered threshold",
         "",
-        f"chorus -> drop iff entry contrast >= "
-        f"**{summary['thresholds']['chorus_drop_threshold_db']} dB** "
-        f"({summary['thresholds']['basis']}).",
+        (
+            f"chorus -> drop iff entry contrast >= "
+            f"**{summary['thresholds']['chorus_drop_threshold_db']} dB** "
+            f"({summary['thresholds']['basis']})."
+        ),
         "",
         "Measured chorus entry-contrast distribution (dB):",
         "",
@@ -700,16 +697,20 @@ def write_spot_check_md(path: Path, seeded: list, skipped: list) -> None:
     lines = [
         "# Spot-check sample -- raw-9 drafts staged for the owner's audit",
         "",
-        "Each track below has its mapped draft seeded into "
-        "`<corpus>/tmp_labels/` in the labelling tool's working format. "
-        "Open one with the command shown (from the main checkout); "
-        "correct and commit as usual.",
+        (
+            "Each track below has its mapped draft seeded into "
+            "`<corpus>/tmp_labels/` in the labelling tool's working format. "
+            "Open one with the command shown (from the main checkout); "
+            "correct and commit as usual."
+        ),
         "",
-        "The tool's vocabulary cannot express a masked span, so masked "
-        "spans (verse/solo/inst/...) carry NO boundary in the seed and "
-        "visually inherit the previous section's label; a track opening "
-        "masked starts with a placeholder `intro` at 0.0. The full masked "
-        "spans are in the track's `annotations/<id>.mapped.json`.",
+        (
+            "The tool's vocabulary cannot express a masked span, so masked "
+            "spans (verse/solo/inst/...) carry NO boundary in the seed and "
+            "visually inherit the previous section's label; a track opening "
+            "masked starts with a placeholder `intro` at 0.0. The full masked "
+            "spans are in the track's `annotations/<id>.mapped.json`."
+        ),
         "",
     ]
     for pick in seeded:
@@ -723,8 +724,10 @@ def write_spot_check_md(path: Path, seeded: list, skipped: list) -> None:
             f"## {pick['id']} ({pick['source']}, {pick['bucket']})",
             "",
             f"- audio: `{pick['audio_path']}`",
-            f"- chorus->drop {pick['drops']}, chorus->breakdown "
-            f"{pick['breakdowns']}, masked {pick['masked_frac']:.0%}",
+            (
+                f"- chorus->drop {pick['drops']}, chorus->breakdown "
+                f"{pick['breakdowns']}, masked {pick['masked_frac']:.0%}"
+            ),
             "- masked spans needing the owner's ear: "
             + ("; ".join(masked_spans) if masked_spans else "none"),
             f"- open: `python -m autolux label \"{pick['audio_path']}\"`",

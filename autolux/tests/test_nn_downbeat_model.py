@@ -11,10 +11,10 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn.dataset import FRAME_SEC, WINDOW_FRAMES  # noqa: E402
-from nn.downbeat_dataset import DownbeatTargets, DownbeatWindowDataset  # noqa: E402
-from nn.downbeat_model import PARAM_BUDGET, DownbeatCRNN  # noqa: E402
-from nn.downbeat_train import (  # noqa: E402
+from nn.dataset import FRAME_SEC, WINDOW_FRAMES
+from nn.downbeat_dataset import DownbeatTargets, DownbeatWindowDataset
+from nn.downbeat_model import PARAM_BUDGET, DownbeatCRNN
+from nn.downbeat_train import (
     MIN_PEAK_DISTANCE_SEC,
     POSITIVE_THRESHOLD,
     TOLERANCE_SEC,
@@ -29,10 +29,10 @@ from nn.downbeat_train import (  # noqa: E402
     stitch,
     sweep_peak_f1,
 )
-from nn.model import SectionCRNN, count_parameters, freq_pool_blocks  # noqa: E402
-from nn.train import boundary_pos_weight, build_loader  # noqa: E402
+from nn.model import SectionCRNN, count_parameters, freq_pool_blocks
+from nn.train import boundary_pos_weight, build_loader
 
-from autolux.tests.test_nn_downbeat_dataset import with_grids  # noqa: E402
+from autolux.tests.test_nn_downbeat_dataset import with_grids
 
 MEL_BANDS = 40
 
@@ -445,7 +445,7 @@ def test_evaluate_scores_a_perfect_head_at_f1_one(tmp_path):
         dataset,
         torch.device("cpu"),
         pos_weight=9.0,
-        min_distance=max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))),
+        min_distance=max(1, round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC)),
     )
 
     assert metrics["f1"] == pytest.approx(1.0)
@@ -472,7 +472,7 @@ def test_evaluate_scores_a_dead_head_at_f1_zero(tmp_path):
         dataset,
         torch.device("cpu"),
         pos_weight=9.0,
-        min_distance=max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))),
+        min_distance=max(1, round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC)),
     )
 
     assert metrics["f1"] < 0.05

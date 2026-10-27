@@ -26,7 +26,9 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from raveform_fetch_annotations import BEATS_DIR, annotations_dir  # noqa: E402
+import itertools
+
+from raveform_fetch_annotations import BEATS_DIR, annotations_dir
 
 RECORD_SCHEMA = 1
 THIRD_PARTY_SOURCES = ("rwc", "salami", "harmonix")
@@ -94,7 +96,7 @@ def _number(value, what: str) -> float:
 
 def _span(entry, what: str, duration: float) -> tuple:
     if not isinstance(entry, dict):
-        raise ValueError(f"{what}: expected an object, got {type(entry).__name__}")
+        raise ValueError(f"{what}: expected an object, got {type(entry).__name__}")  # noqa: TRY004
     start = _number(entry.get("start"), f"{what} start")
     end = _number(entry.get("end"), f"{what} end")
     if start < 0.0:
@@ -107,7 +109,7 @@ def _span(entry, what: str, duration: float) -> tuple:
 
 
 def _check_order(spans: list, what: str) -> None:
-    for index, (before, after) in enumerate(zip(spans, spans[1:])):
+    for index, (before, after) in enumerate(itertools.pairwise(spans)):
         if after[0] < before[0]:
             raise ValueError(
                 f"{what} {index + 1} starts at {after[0]!r}, before {what} "
@@ -122,7 +124,7 @@ def _check_order(spans: list, what: str) -> None:
 
 def _check_id(track_id, source: str) -> None:
     if not isinstance(track_id, str):
-        raise ValueError(f"id: expected a str, got {type(track_id).__name__}")
+        raise ValueError(f"id: expected a str, got {type(track_id).__name__}")  # noqa: TRY004
     prefix = ID_PREFIXES[source]
     if not track_id.startswith(prefix):
         raise ValueError(f"id {track_id!r}: a {source} id must start with {prefix!r}")
@@ -136,7 +138,7 @@ def _check_id(track_id, source: str) -> None:
 
 def validate_record(record: dict) -> None:
     if not isinstance(record, dict):
-        raise ValueError(f"expected a JSON object, got {type(record).__name__}")
+        raise ValueError(f"expected a JSON object, got {type(record).__name__}")  # noqa: TRY004
     missing = [field for field in REQUIRED_FIELDS if field not in record]
     if missing:
         raise ValueError(f"record lacks {', '.join(missing)}")
@@ -153,7 +155,7 @@ def validate_record(record: dict) -> None:
 
     sections = record["sections"]
     if not isinstance(sections, list):
-        raise ValueError(f"sections: expected a list, got {type(sections).__name__}")
+        raise ValueError(f"sections: expected a list, got {type(sections).__name__}")  # noqa: TRY004
     if not sections:
         raise ValueError("sections: empty -- the record labels nothing")
     spans = []
@@ -164,7 +166,7 @@ def validate_record(record: dict) -> None:
         # No vocabulary check anywhere: a source's labels are its own ground
         # truth, and mapping them into ours is a later training decision.
         if not isinstance(name, str):
-            raise ValueError(f"{what}: name is not a str ({name!r})")
+            raise ValueError(f"{what}: name is not a str ({name!r})")  # noqa: TRY004
         if not name:
             raise ValueError(f"{what}: name is empty")
         if name != name.strip():
@@ -185,7 +187,7 @@ def validate_record(record: dict) -> None:
 
     provenance = record["provenance"]
     if not isinstance(provenance, dict):
-        raise ValueError(f"provenance: expected an object, got {type(provenance).__name__}")
+        raise ValueError(f"provenance: expected an object, got {type(provenance).__name__}")  # noqa: TRY004
     absent = [field for field in PROVENANCE_FIELDS if not provenance.get(field)]
     if absent:
         raise ValueError(f"provenance lacks {', '.join(absent)}")

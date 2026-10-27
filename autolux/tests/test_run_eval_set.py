@@ -11,9 +11,9 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from eval_assets import (  # noqa: E402
-    ANNOTATION_SOURCES,
+from eval_assets import (
     ACCEPTED,
+    ANNOTATION_SOURCES,
     EVAL_LABELS_FILE,
     OVERRIDDEN,
     OWNER,
@@ -22,8 +22,8 @@ from eval_assets import (  # noqa: E402
     committed_audio_path,
     owner_rulings,
 )
-from evaluate_against_labels import LEGACY_V1, RAW9  # noqa: E402
-from run_eval_set import (  # noqa: E402
+from evaluate_against_labels import LEGACY_V1, RAW9, default_data_dir
+from run_eval_set import (
     AUDIO_MISSING_HINT,
     BASELINE_FILE,
     BOUNDARY_TOLERANCE_SEC,
@@ -43,7 +43,6 @@ from run_eval_set import (  # noqa: E402
     compare,
     corpus_audio_path,
     corpus_dir,
-    default_data_dir,
     file_sha256,
     labels_source,
     load_baseline,
@@ -1161,6 +1160,7 @@ def test_lateness_is_a_count_fact_rather_than_a_score_with_a_tolerance():
 
 def test_a_machine_without_the_model_is_refused_rather_than_scored(tmp_path, monkeypatch):
     import run_eval_set
+
     from autolux.lib import section_chain
 
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda *a, **k: False)
@@ -1174,6 +1174,7 @@ def test_a_machine_without_the_model_is_refused_rather_than_scored(tmp_path, mon
 
 def test_the_refusal_happens_before_anything_is_simulated(tmp_path, monkeypatch, capsys):
     import run_eval_set
+
     from autolux.lib import section_chain
 
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda *a, **k: False)
@@ -1280,6 +1281,7 @@ def test_a_cold_sidecar_is_named_with_its_kind_and_the_caches_own_reason(tmp_pat
 
 def test_check_cache_fails_on_a_miss_and_simulates_nothing(tmp_path, monkeypatch, capsys):
     import run_eval_set
+
     from autolux.lib import section_chain
     from autolux.simulate import runner
 

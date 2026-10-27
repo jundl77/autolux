@@ -42,7 +42,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -56,9 +56,11 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from corpus_root import corpus_dir  # noqa: E402
-from hand_label_admission import beat_rows, write_beat_csv  # noqa: E402
-from tp_record import (  # noqa: E402
+import itertools
+
+from corpus_root import corpus_dir
+from hand_label_admission import beat_rows, write_beat_csv
+from tp_record import (
     ID_PREFIXES,
     RECORD_SCHEMA,
     annotation_path,
@@ -155,7 +157,7 @@ def corpus_audio_path(corpus: Path, native: str) -> Path:
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def sha256(path: Path) -> str:
@@ -198,7 +200,7 @@ def segment_rows(text: str) -> list:
         rows.append((time, fields[1]))
     if not rows:
         raise ConvertError("no segment lines")
-    for index, (before, after) in enumerate(zip(rows, rows[1:]), 2):
+    for index, (before, after) in enumerate(itertools.pairwise(rows), 2):
         if after[0] <= before[0]:
             raise ConvertError(
                 f"segments line {index}: time {after[0]!r} does not advance on "
@@ -242,7 +244,7 @@ def section_dicts(sections: list) -> list:
 
 
 def adjacent_identical(sections: list) -> int:
-    return sum(1 for before, after in zip(sections, sections[1:]) if before.name == after.name)
+    return sum(1 for before, after in itertools.pairwise(sections) if before.name == after.name)
 
 
 # --------------------------------------------------------------------------- #
@@ -268,7 +270,7 @@ def parse_beats(text: str) -> list:
         beats.append((time, position))
     if not beats:
         raise ConvertError("no beat lines")
-    for index, (before, after) in enumerate(zip(beats, beats[1:]), 2):
+    for index, (before, after) in enumerate(itertools.pairwise(beats), 2):
         if after[0] <= before[0]:
             raise ConvertError(
                 f"beats line {index}: time {after[0]!r} does not advance on "

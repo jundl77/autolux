@@ -4,11 +4,11 @@ import ast
 import dataclasses
 import inspect
 import json
+import math
 import subprocess
 import sys
 from pathlib import Path
 
-import math
 import numpy as np
 import pytest
 
@@ -17,9 +17,10 @@ TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
-from nn import priors as nn_priors  # noqa: E402
-from nn.decoder import (  # noqa: E402
+import itertools
+
+from nn import priors as nn_priors
+from nn.decoder import (
     DEFAULT_BOUNDARY_REF,
     DecodeParams,
     FixedLagViterbi,
@@ -32,7 +33,9 @@ from nn.decoder import (  # noqa: E402
     temper,
     trellis_knobs,
 )
-from nn.priors import (  # noqa: E402
+from nn.priors import (
+    INTRO_FAMILY,
+    OUTRO_FAMILY,
     PRIORS_FILE,
     SKIP_CAUSES,
     SKIP_DEGENERATE_GRID,
@@ -47,10 +50,10 @@ from nn.priors import (  # noqa: E402
     fit_runs,
     label_runs,
     section_classes,
-    INTRO_FAMILY,
-    OUTRO_FAMILY,
     transition_allowed,
 )
+
+from autolux.lib.label_space import SECTION_LABELS
 
 # The shipping chain's five classes.  A subset of the vocabulary, in vocabulary
 # order, which ruling #264 requires to keep fitting, loading and decoding -- so
@@ -201,7 +204,7 @@ def test_initial_distribution_is_fitted_not_assumed():
 def test_duration_floor_is_the_corpus_fifth_percentile_in_bars():
     priors = fit_shipping(corpus_runs())
     drop_bars = sorted([32, 32, 48, 16, 32])
-    expected = max(1, int(round(float(np.percentile(drop_bars, 5.0)))))
+    expected = max(1, round(float(np.percentile(drop_bars, 5.0))))
     assert priors.floor_bars[INDEX["drop"]] == expected
 
 
@@ -477,7 +480,7 @@ def test_the_opt_in_strictness_flag_refuses_a_fit_that_dropped_an_id(tmp_path):
 
 
 def test_a_dropped_id_warns_by_default_rather_than_raising(tmp_path, caplog):
-    data_dir, ids = four_cause_corpus(tmp_path)
+    data_dir, _ids = four_cause_corpus(tmp_path)
 
     with caplog.at_level("WARNING"):
         priors = fit(data_dir, classes=SHIPPING_CLASSES)
@@ -555,7 +558,7 @@ def test_no_illegal_transition_is_emitted_under_adversarial_evidence():
         [one_hot(INTRO)] * 6 + [one_hot(OUTRO)] * 6 + [one_hot(DROP)] * 6 + [one_hot(INTRO)] * 6
     )
     spans = segments(FixedLagViterbi(priors, lag_bars=2).decode(posteriors))
-    for before, after in zip(spans, spans[1:]):
+    for before, after in itertools.pairwise(spans):
         assert transition_allowed(before[2], after[2]), f"{before[2]}->{after[2]}"
 
 
@@ -614,7 +617,7 @@ def test_the_emitted_stream_is_itself_one_legal_path(seed, alpha, floor, lag):
     posteriors = rng.dirichlet(np.full(5, alpha), size=40)
     spans = segments(FixedLagViterbi(priors, lag_bars=lag).decode(posteriors))
 
-    for before, after in zip(spans, spans[1:]):
+    for before, after in itertools.pairwise(spans):
         assert transition_allowed(before[2], after[2]), (
             f"emitted {before[2]}->{after[2]}, which is -inf in the matrix"
         )
@@ -840,7 +843,11 @@ def test_importing_the_decoder_does_not_drag_torch_onto_the_decode_path():
         "print(leaked, len(sys.modules))"
     )
     result = subprocess.run(
-        [sys.executable, "-c", probe], cwd=str(AUTOLUX_PACKAGE_ROOT), capture_output=True, text=True
+        [sys.executable, "-c", probe],
+        cwd=str(AUTOLUX_PACKAGE_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     leaked, modules = result.stdout.strip().rsplit(" ", 1)
@@ -1272,8 +1279,8 @@ def test_decode_track_forwards_the_temperature_to_the_bar_average(tmp_path):
 
     neutral = DecodeParams(lag_bars=0, boundary_weight=0.0, min_coverage=1)
     hot = dataclasses.replace(neutral, temperature=8.0)
-    assert set(label for _, label in decode_track(npz, beats, neutral, priors=priors)) == {"drop"}
-    assert set(label for _, label in decode_track(npz, beats, hot, priors=priors)) == {"breakdown"}
+    assert {label for _, label in decode_track(npz, beats, neutral, priors=priors)} == {"drop"}
+    assert {label for _, label in decode_track(npz, beats, hot, priors=priors)} == {"breakdown"}
 
 
 def test_decode_track_forwards_the_outro_escape_to_the_trellis(tmp_path):
@@ -1284,7 +1291,7 @@ def test_decode_track_forwards_the_outro_escape_to_the_trellis(tmp_path):
 
     terminal = DecodeParams(lag_bars=0, boundary_weight=0.0, min_coverage=1)
     escaping = dataclasses.replace(terminal, outro_escape=0.2)
-    assert set(label for _, label in decode_track(npz, beats, terminal, priors=priors)) == {"outro"}
+    assert {label for _, label in decode_track(npz, beats, terminal, priors=priors)} == {"outro"}
     assert "drop" in [label for _, label in decode_track(npz, beats, escaping, priors=priors)]
 
 

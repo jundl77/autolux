@@ -9,7 +9,7 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn.downbeat_decoder import (  # noqa: E402
+from nn.downbeat_decoder import (
     BEATS_PER_BAR,
     BarPhaseHMM,
     PhaseDecision,
@@ -18,7 +18,7 @@ from nn.downbeat_decoder import (  # noqa: E402
     downbeat_times,
     phase_flips,
 )
-from nn.evaluate_downbeat import (  # noqa: E402
+from nn.evaluate_downbeat import (
     INTERVAL_DEVIATION,
     REACH_LABELS,
     TOLERANCE_SEC,
@@ -487,9 +487,9 @@ def relock_bars(params, *, gap_beats: float, new_period: float, phase_offset: in
 
 def test_re_lock_after_a_deck_transition_is_bought_with_the_flip_penalty():
     cuts = (
-        dict(gap_beats=1.9, new_period=0.5, phase_offset=2),
-        dict(gap_beats=1.9, new_period=PERIOD, phase_offset=1),
-        dict(gap_beats=0.0, new_period=0.5, phase_offset=3),
+        {"gap_beats": 1.9, "new_period": 0.5, "phase_offset": 2},
+        {"gap_beats": 1.9, "new_period": PERIOD, "phase_offset": 1},
+        {"gap_beats": 0.0, "new_period": 0.5, "phase_offset": 3},
     )
 
     responsive = PhaseParams(lag_beats=4, subdivision=2, flip_penalty=2.0)

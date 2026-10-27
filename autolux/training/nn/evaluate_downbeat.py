@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures as futures
 import datetime as dt
 import hashlib
+import itertools
 import json
 import sys
+from concurrent import futures
 from dataclasses import asdict
 from pathlib import Path
 
@@ -415,7 +416,7 @@ def beat_anchored_flips(decisions, subdivision: int) -> dict:
         grid_index += 1
 
     flips = pairs = breaks = 0
-    for (previous, _), (current, broken) in zip(records, records[1:]):
+    for (previous, _), (current, broken) in itertools.pairwise(records):
         if broken:
             breaks += 1
             continue
@@ -800,7 +801,12 @@ def ablation_rows(
     models_subdir: str,
     naive: dict | None = None,
 ) -> dict:
-    from .decoder import DecodeParams, bar_grid, observation_knobs
+    from build_training_table import TABLE_FILE
+    from evaluate_against_labels import TOLERANCES_SEC as SECTION_TOLERANCES_SEC
+    from evaluate_against_labels import load_tracks
+    from raveform_fetch_annotations import BEATS_DIR, annotations_dir
+
+    from .decoder import bar_grid, observation_knobs
     from .evaluate_v1 import (
         DEFAULT_SPACE,
         POSTERIORS_DIR,
@@ -810,10 +816,6 @@ def ablation_rows(
         load_decoder_config,
     )
     from .priors import Priors
-    from build_training_table import TABLE_FILE
-    from evaluate_against_labels import TOLERANCES_SEC as SECTION_TOLERANCES_SEC
-    from evaluate_against_labels import load_tracks
-    from raveform_fetch_annotations import BEATS_DIR, annotations_dir
 
     data_dir = Path(data_dir)
     models = data_dir / MODELS_DIR / models_subdir
@@ -1017,7 +1019,7 @@ def main(argv: list | None = None) -> int:
             f"{args.split} and must score only {args.split}",
         )
     truth = load_truth(data_dir, ids)
-    stamp = dt.datetime.now(dt.timezone.utc).isoformat()
+    stamp = dt.datetime.now(dt.UTC).isoformat()
 
     if args.align:
         payload = {"generated_at": stamp, "split": "val", **run_alignment(data_dir, ids, truth)}

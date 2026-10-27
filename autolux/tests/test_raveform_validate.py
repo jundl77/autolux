@@ -12,8 +12,8 @@ RAVEFORM_DIR = Path(__file__).resolve().parents[1] / "training" / "raveform"
 if str(RAVEFORM_DIR) not in sys.path:
     sys.path.insert(0, str(RAVEFORM_DIR))
 
-import build_clean_manifest as gate  # noqa: E402
-from raveform_validate import (  # noqa: E402
+import build_clean_manifest as gate
+from raveform_validate import (
     CHECKSUMS_FILE,
     STATUS_CORRUPT,
     STATUS_DURATION_MISMATCH,

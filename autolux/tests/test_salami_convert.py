@@ -24,8 +24,8 @@ for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform"), str(TRAINING_DI
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import salami_convert  # noqa: E402
-import tp_record  # noqa: E402
+import salami_convert
+import tp_record
 
 # annotations/10/textfile1.txt, verbatim: a Silence sentinel, a row carrying all
 # three layers plus an opening instrument paren, rows carrying only the

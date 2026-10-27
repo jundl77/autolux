@@ -7,7 +7,7 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn.downbeat_baselines import tunable_split_ids  # noqa: E402
+from nn.downbeat_baselines import tunable_split_ids
 
 SPLITS = {"train": ["a", "b"], "val": ["c", "d"], "test": ["e"], "seed": 1337}
 

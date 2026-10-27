@@ -13,6 +13,8 @@ from typing import NamedTuple
 
 import numpy as np
 import torch
+from build_training_table import default_data_dir
+from raveform_fetch_annotations import load_all_tracks, parse_sections
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -34,16 +36,14 @@ from .downbeat_dataset import (
 from .downbeat_model import PARAM_BUDGET, DownbeatCRNN
 from .model import count_parameters
 from .train import (
+    BEST_CHECKPOINT,
     CONFIG_FILE,
     ECE_BINS,
     LAST_CHECKPOINT,
-    BEST_CHECKPOINT,
     MODELS_DIR,
     REPORT_FILE,
     TB_DIR,
     TENSORBOARD_PORT,
-    boundary_bce as masked_bce,
-    boundary_pos_weight as sparsity_pos_weight,
     build_loader,
     capture_rng,
     config_fingerprint,
@@ -55,9 +55,12 @@ from .train import (
     select_smoke_subset,
     weight_hash,
 )
-
-from build_training_table import default_data_dir  # noqa: E402
-from raveform_fetch_annotations import load_all_tracks, parse_sections  # noqa: E402
+from .train import (
+    boundary_bce as masked_bce,
+)
+from .train import (
+    boundary_pos_weight as sparsity_pos_weight,
+)
 
 MODEL_VERSION = "downbeat_v1"
 
@@ -92,7 +95,7 @@ def accumulate_downbeat_stats(targets_iterable) -> DownbeatStats:
         supervised = int(live.sum())
         positive += mass
         valid += supervised
-        frames += int(len(targets.downbeat))
+        frames += len(targets.downbeat)
         per_track.append(mass / supervised if supervised else 0.0)
     return DownbeatStats(positive, valid, frames, np.asarray(per_track, dtype=np.float64))
 
@@ -379,7 +382,7 @@ def train(config: dict) -> dict:
         if config["pos_weight"] > 0
         else sparsity_pos_weight(stats.positive, stats.valid)
     )
-    min_distance = max(1, int(round(config["min_peak_distance"] / FRAME_SEC)))
+    min_distance = max(1, round(config["min_peak_distance"] / FRAME_SEC))
 
     model = DownbeatCRNN(
         rnn_hidden=config["rnn_hidden"],

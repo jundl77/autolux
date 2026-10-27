@@ -31,16 +31,17 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import build_clean_manifest as gate  # noqa: E402
-import tp_admission as admission  # noqa: E402
-import tp_record  # noqa: E402
-from build_training_table import load_sections_by_track  # noqa: E402
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
-from raveform_fetch_annotations import (  # noqa: E402
+import build_clean_manifest as gate
+import tp_admission as admission
+import tp_record
+from build_training_table import load_sections_by_track
+from raveform_fetch_annotations import (
     load_all_tracks,
     load_hand_tracks,
     parse_beat_csv,
 )
+
+from autolux.lib.label_space import SECTION_LABELS
 
 PUBLISHED_SECTIONS = [
     {"name": "intro", "start": 0.0, "end": 60.0},

@@ -39,17 +39,17 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import build_clean_manifest as gate  # noqa: E402
-import tp_record  # noqa: E402
-from corpus_root import corpus_dir  # noqa: E402
-from hand_label_admission import (  # noqa: E402
+import build_clean_manifest as gate
+import tp_record
+from corpus_root import corpus_dir
+from hand_label_admission import (
     BEAT_CSV_HEADER,
     END_SENTINEL,
     beat_rows,
     detect_beats,
     write_beat_csv,
 )
-from raveform_fetch_annotations import parse_beat_csv  # noqa: E402
+from raveform_fetch_annotations import parse_beat_csv
 
 TP_DIR = "third_party"
 TP_MANIFEST_FILE = "manifest.csv"
@@ -368,7 +368,7 @@ def main(argv: list | None = None) -> int:
         try:
             print(admit(track_id, args.source, corpus=corpus))
             admitted += 1
-        except Exception as exc:  # one bad track must not end a batch of a hundred
+        except Exception as exc:  # noqa: BLE001 -- one bad track must not end a batch of a hundred
             print(f"FAILED {track_id}: {exc}")
             failed += 1
     print(f"admitted {admitted}, failed {failed}")

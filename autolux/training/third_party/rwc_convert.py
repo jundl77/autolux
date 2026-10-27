@@ -27,7 +27,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -41,9 +41,9 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from corpus_root import corpus_dir  # noqa: E402
-from hand_label_admission import beat_rows, write_beat_csv  # noqa: E402
-from tp_record import (  # noqa: E402
+from corpus_root import corpus_dir
+from hand_label_admission import beat_rows, write_beat_csv
+from tp_record import (
     ID_PREFIXES,
     RECORD_SCHEMA,
     annotation_path,
@@ -125,7 +125,7 @@ def metadata_path(preprocessed: Path) -> Path:
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def sha256(path: Path) -> str:

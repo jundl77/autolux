@@ -24,11 +24,11 @@ for _path in (str(TRAINING_DIR), str(TRAINING_DIR / "raveform")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import build_clean_manifest as gate  # noqa: E402
-import hand_label_admission as admission  # noqa: E402
-import run_eval_set  # noqa: E402
-from build_training_table import load_sections_by_track  # noqa: E402
-from nn.dataset import (  # noqa: E402
+import build_clean_manifest as gate
+import hand_label_admission as admission
+import run_eval_set
+from build_training_table import load_sections_by_track
+from nn.dataset import (
     SPLIT_NAMES,
     TrackRef,
     assign_split,
@@ -36,7 +36,7 @@ from nn.dataset import (  # noqa: E402
     excluded_artist_names,
     partition,
 )
-from raveform_fetch_annotations import (  # noqa: E402
+from raveform_fetch_annotations import (
     load_all_tracks,
     load_hand_tracks,
     load_tracks,

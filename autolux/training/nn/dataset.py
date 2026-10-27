@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import datetime
 import hashlib
+import itertools
 import json
 import math
 import re
@@ -13,20 +14,20 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-
-from . import _TRAINING_DIR  # noqa: F401  (imported for its sys.path side effect)
-
-from build_clean_manifest import CLEAN_MANIFEST_FILE, STATUS_OK  # noqa: E402
-from build_training_table import (  # noqa: E402
+from build_clean_manifest import CLEAN_MANIFEST_FILE, STATUS_OK
+from build_training_table import (
     FEATURES_DIR,
     MEL_BANDS,
     POOL_BUFFERS,
     label_coverage,
 )
-from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE  # noqa: E402
-from autolux.lib.label_space import LABEL_INDEX, NUM_SECTION_CLASSES  # noqa: E402
-from raveform_fetch_annotations import load_all_tracks, parse_sections  # noqa: E402
-from select_eval_set import EVAL_SET_FILE, artist_of, load_eval_set  # noqa: E402
+from raveform_fetch_annotations import load_all_tracks, parse_sections
+from select_eval_set import EVAL_SET_FILE, artist_of, load_eval_set
+
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.label_space import LABEL_INDEX, NUM_SECTION_CLASSES
+
+from . import _TRAINING_DIR  # noqa: F401  (imported for its sys.path side effect)
 
 try:
     from torch.utils.data import Dataset as _TorchDataset
@@ -83,7 +84,7 @@ def excluded_artist_names(eval_tracks) -> frozenset:
 
 
 def assign_split(youtube_id: str, seed: int = SPLIT_SEED) -> str:
-    digest = hashlib.sha256(f"{seed}:{youtube_id}".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"{seed}:{youtube_id}".encode()).digest()
     value = int.from_bytes(digest[:8], "big") / float(1 << 64)
     if value < SPLIT_RATIOS[0]:
         return "train"
@@ -216,9 +217,7 @@ def make_splits(
             "skipped_no_annotation": no_annotation,
             "skipped_unlabeled": unlabeled,
             "candidates": len(candidates),
-            "written_at": datetime.datetime.now(datetime.timezone.utc)
-            .replace(microsecond=0)
-            .isoformat(),
+            "written_at": datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat(),
         }
     )
 
@@ -269,7 +268,7 @@ def _boundaries_and_gaps(spans: list) -> tuple:
     """
     boundaries: list = []
     gaps: list = []
-    for before, after in zip(spans, spans[1:]):
+    for before, after in itertools.pairwise(spans):
         if after[0] > before[1] + 1e-9:
             gaps.append((before[1], after[0]))
         else:
@@ -344,16 +343,15 @@ def track_targets(
 
 def sidecar_shape(path) -> tuple:
     try:
-        with zipfile.ZipFile(path) as archive:
-            with archive.open("mel.npy") as handle:
-                version = np.lib.format.read_magic(handle)
-                if version == (1, 0):
-                    shape, _fortran, _dtype = np.lib.format.read_array_header_1_0(handle)
-                elif version == (2, 0):
-                    shape, _fortran, _dtype = np.lib.format.read_array_header_2_0(handle)
-                else:  # pragma: no cover
-                    raise ValueError(f"unsupported .npy version {version}")
-                return tuple(shape)
+        with zipfile.ZipFile(path) as archive, archive.open("mel.npy") as handle:
+            version = np.lib.format.read_magic(handle)
+            if version == (1, 0):
+                shape, _fortran, _dtype = np.lib.format.read_array_header_1_0(handle)
+            elif version == (2, 0):
+                shape, _fortran, _dtype = np.lib.format.read_array_header_2_0(handle)
+            else:  # pragma: no cover
+                raise ValueError(f"unsupported .npy version {version}")
+            return tuple(shape)
     except (KeyError, ValueError, zipfile.BadZipFile):
         with np.load(path) as archive:
             return tuple(archive["mel"].shape)

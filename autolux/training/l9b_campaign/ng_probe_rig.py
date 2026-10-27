@@ -42,7 +42,7 @@ sys.path.insert(0, str(MAIN))
 # This campaign is retired, so what it mirrors stays the record it was; what
 # changes is that a shadow the live chain cannot resolve is refused instead of
 # simulated, which is the whole difference between no answer and a wrong one.
-from autolux.lib import section_chain  # noqa: E402
+from autolux.lib import section_chain
 from autolux.training import module_source
 
 ANCHOR_TRACK = MAIN / "training" / "eval_audio" / "0yMOLeJRKr.mp3"
@@ -117,7 +117,10 @@ def _junction_or_copy(link: Path, target: Path) -> str:
     if link.exists():
         return "existed"
     proc = subprocess.run(
-        ["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, text=True
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if proc.returncode == 0:
         return "junction"
@@ -204,6 +207,7 @@ def export_arm(chain: str, run: str) -> None:
         ],
         cwd=str(phase_b),
         env=env,
+        check=False,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"online_export failed with rc {proc.returncode}")
@@ -285,7 +289,7 @@ def run_sim(
             str(track),
             str(report),
         ]
-    proc = subprocess.run(command, cwd=str(MAIN), env=env)
+    proc = subprocess.run(command, cwd=str(MAIN), env=env, check=False)
     if proc.returncode not in (0, 1):
         raise RuntimeError(f"simulation died with rc {proc.returncode}")
     if not report.exists():
@@ -299,7 +303,7 @@ def run_sim(
 def run_sim_inner(shadow: str, track: str, report: str) -> None:
     root = Path(shadow)
     sys.path[:0] = [str(root / "nn_shadow"), str(MAIN)]
-    import nn.decoder  # noqa: PLC0415
+    import nn.decoder
 
     wanted = (root / "nn_shadow" / "nn" / "decoder_config.json").resolve()
     loaded = Path(nn.decoder.SHIPPING_DECODER_CONFIG).resolve()
@@ -309,7 +313,7 @@ def run_sim_inner(shadow: str, track: str, report: str) -> None:
         )
     os.environ["RAVEFORM_DATA_DIR"] = str(root)
     sys.argv = ["autolux", "simulate", "file", track, "--report", report]
-    from cli.main import main  # noqa: PLC0415
+    from cli.main import main
 
     asyncio.run(main())
 
@@ -370,8 +374,10 @@ def timeline_read(chain: str, track_key: str, report_path: Path, sections) -> st
     lines += [
         "## label vs show",
         "",
-        "| label section | start | end | intent wanted | entered at "
-        "(delta) | held to section end |",
+        (
+            "| label section | start | end | intent wanted | entered at "
+            "(delta) | held to section end |"
+        ),
         "|---|---|---|---|---|---|",
     ]
     for name, start, end in sections:
@@ -430,7 +436,7 @@ def combine() -> None:
         for path in sorted(out_dir.glob("*_*.md"))
         if path.name != "PROBES.md"
     ]
-    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    stamp = datetime.datetime.now(datetime.UTC).isoformat()
     (out_dir / "PROBES.md").write_text(
         f"# l9b campaign probe reads ({stamp})\n\n" + "\n---\n\n".join(parts), encoding="utf-8"
     )
@@ -448,7 +454,7 @@ def anchor() -> int:
     sha_direct, sha_shadow = sha256_file(direct), sha256_file(shadow)
     identical = sha_direct == sha_shadow
     verdict = {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "track": str(ANCHOR_TRACK),
         "direct": {"report": str(direct), "sha256": sha_direct},
         "shadow": {"report": str(shadow), "sha256": sha_shadow, "root": str(shadow_root("anchor"))},
