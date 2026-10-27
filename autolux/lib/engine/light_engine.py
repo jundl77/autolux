@@ -43,6 +43,7 @@ from autolux.lib.engine.track_mood import (
     MIN_MOOD_BEATS,
     MeasuredBeat,
     TrackMoodMeter,
+    track_mood,
 )
 from autolux.lib.media_session import TrackChanged
 from autolux.lighting.palettes import Mood
@@ -144,6 +145,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._track_mood = TrackMoodMeter(MAX_MEASURED_BARS * BEATS_PER_BAR)
         self._measured_track_mood: Mood | None = None
         self._mood_closes_at_next_section = False
+        self._track_beats: list[MeasuredBeat] | None = None
         self.follow_music = FollowMusic()
         # Set by the show: applies an automatic level through the operator's path.
         self.on_auto_intensity: Callable[[float, str], None] | None = None
@@ -602,6 +604,8 @@ class LightEngine(IMusicAnalyserHandler):
             await self._switch_held_intent()
 
     def _measure_track_mood(self, beat: MeasuredBeat, phase: int | None) -> None:
+        if self._track_beats is not None:
+            self._track_beats.append(beat)
         self._measured_track_mood = self._track_mood.add(beat) or self._measured_track_mood
         if self._measured_track_mood is not None and phase in (0, None):
             mood, self._measured_track_mood = self._measured_track_mood, None
@@ -622,8 +626,16 @@ class LightEngine(IMusicAnalyserHandler):
     def _follow_drop(self, arrival: float | None) -> None:
         if not self._settings().intensity_auto:
             return
-        level = self.follow_music.on_drop(arrival, self._intensity_level())
-        self._follow(level, 'drop arrival ' + ('unknown' if arrival is None else f'{arrival:.2f}'))
+        drive = None
+        if self._track_beats and not self._track_mood.measuring:
+            drive = track_mood(self._track_beats).drive
+        level = self.follow_music.on_drop(arrival, self._intensity_level(), drive)
+        if drive is not None and not self.follow_music.capped:
+            self._follow(level, f'drive {drive:+.2f}')
+        else:
+            self._follow(
+                level, 'drop arrival ' + ('unknown' if arrival is None else f'{arrival:.2f}')
+            )
 
     def _intensity_level(self) -> str:
         return intensity_level(self._settings().intensity)
@@ -642,6 +654,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._track_mood.finish()
         self._measured_track_mood = None
         self._mood_closes_at_next_section = False
+        self._track_beats = None
 
     def _section_closes_track_mood(self, intent: LightIntent) -> bool:
         # A full window still waiting for its downbeat rides this section's select instead.
@@ -662,6 +675,7 @@ class LightEngine(IMusicAnalyserHandler):
     def _start_track_mood(self) -> None:
         self._discard_track_mood()
         self._track_mood.start()
+        self._track_beats = []
 
     async def _switch_held_intent(self) -> None:
         intent, self._held_intent = self._held_intent, None
