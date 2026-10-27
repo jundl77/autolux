@@ -56,6 +56,8 @@ the plan as GDTF draws a device, with the audience as the viewer (-X house left,
 the standard texts are quoted at `stage_areas` in `cli/starfire_assets.py`). Each fixture's
 `StageArea` is its cell of the nine-area stage grid over the rig's bounding box: X and Y cut
 into equal thirds, a fixture on a cut in the centre third, an axis without extent all centre.
+Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.
 The Config rig map is a standard plot from the same draft: plan view, audience at the bottom,
 the dashed nine-area grid over the fixtures' bounding box, the stage edge at the most downstage
 object, a 1-2-5 metre scale

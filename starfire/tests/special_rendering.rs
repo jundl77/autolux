@@ -15,6 +15,7 @@ const SCANNER: std::ops::Range<usize> = 10..16;
 
 fn synthetic_rig() -> wire::RigDefinition {
     let fixture = |id: &str, profile: &str, address| wire::Fixture {
+        area: wire::StageArea::Centre as i32,
         fixture_id: id.into(),
         profile_id: profile.into(),
         universe: 0,
@@ -136,7 +137,8 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
-        // The synthetic rig carries no stage areas, so no group reports one.
+        // Every synthetic fixture lies in the centre area.
+        area: Some(wire::StageArea::Centre as i32),
         ..Default::default()
     };
     assert_eq!(

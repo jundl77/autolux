@@ -194,7 +194,11 @@ impl FixtureRig {
                         .matrix
                         .get(9..12)
                         .map_or([0.0; 3], |o| [o[0], o[1], o[2]]),
-                    area: fixture.area(),
+                    area: Some(fixture.area())
+                        .filter(|&area| area != wire::StageArea::Unspecified)
+                        .with_context(|| {
+                            format!("fixture {} has no stage area", fixture.fixture_id)
+                        })?,
                 })
             })
             .collect::<Result<_>>()?;

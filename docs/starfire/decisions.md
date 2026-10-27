@@ -561,7 +561,8 @@ centre, also without a warning. Starfire derives the pairs once at rig load
 O(n log n) for spread members, O(n²) where many members share one X. It reads
 `Fixture.matrix`, which the rig already carries; a cell takes its fixture's position since the
 rig carries no GDTF geometry offsets, so the RigDefinition is unchanged. The room is symmetric
-about X = 0, so its pairs equal the rank pairs and the goldens are unchanged.
+about X = 0, so its pairs equal the rank pairs and the goldens are unchanged. Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.
 
 2026-10-27 Stage areas: every fixture carries one `StageArea` of the standard nine-area stage
 grid (down/centre/up × left/centre/right, named from the audience), derived once by Autolux
@@ -578,3 +579,5 @@ fixture's area (the rig carries no GDTF geometry offsets). Starfire applies no g
 Login reports a group's `area` only when every member shares it, plus its mean X
 (`centre_x_metres`, which accent alternation uses), so a role row with `zone` or `depth` plays
 only on groups lying in one area of that column or row; no MIXED value is needed.
+Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.

@@ -77,8 +77,7 @@ impl Spatial {
         for (group, members) in groups {
             let centre_x_mm =
                 members.iter().map(|id| positions[id][0]).sum::<f64>() / members.len() as f64;
-            let area = shared(members.iter().map(|id| areas[id]))
-                .filter(|&area| area != wire::StageArea::Unspecified);
+            let area = shared(members.iter().map(|id| areas[id]));
             places.insert(group.clone(), GroupPlace { area, centre_x_mm });
             let mut slots = BTreeMap::new();
             let mut fixtures: Vec<Vec<usize>> = Vec::new();
@@ -336,27 +335,19 @@ mod tests {
     }
 
     #[test]
-    fn a_group_has_an_area_only_when_every_member_shares_a_specified_one() {
+    fn a_group_has_an_area_only_when_every_member_shares_it() {
         use wire::StageArea as A;
         let spatial = spatial_in(
             &[
                 ("a", at(-1000.0, 0.0)),
                 ("b", at(1000.0, 0.0)),
                 ("c", at(3000.0, 0.0)),
-                ("u", at(0.0, 0.0)),
             ],
             &[("a", A::UpLeft), ("b", A::UpLeft), ("c", A::UpRight)],
-            &[
-                ("same", &["a", "b"]),
-                ("split", &["a", "c"]),
-                ("unplaced", &["u"]),
-            ],
+            &[("same", &["a", "b"]), ("split", &["a", "c"])],
         );
         let area = |group| spatial.group_place(group).unwrap().area;
-        assert_eq!(
-            [area("same"), area("split"), area("unplaced")],
-            [Some(A::UpLeft), None, None]
-        );
+        assert_eq!([area("same"), area("split")], [Some(A::UpLeft), None]);
         assert_eq!(spatial.group_place("same").unwrap().centre_x_mm, 0.0);
         assert_eq!(spatial.area("c"), Some(A::UpRight));
         assert_eq!(

@@ -63,6 +63,7 @@ FIXTURE_CSS = '''
 #mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
 #mvr-plan .plan-areas {stroke:#3b4d62;}
+#mvr-plan .plan-area-name {fill:var(--muted);}
 #mvr-plan .plan-stage-edge {stroke:#6d7f95;}
 #mvr-plan .plan-scale line {stroke:#a9bbcf;}
 #mvr-plan text {fill:#a9bbcf;pointer-events:none;}
@@ -295,7 +296,7 @@ def build_fixture_panel(app, store):
                             ),
                             html.P(
                                 'Plan view, audience at the bottom (MVR -Y downstage), dashed '
-                                'centreline at X = 0; colour is the group, a dashed ring an accent '
+                                'nine-area stage grid over the fixtures; colour is the group, a dashed ring an accent '
                                 'group, arrows the local Y axis (yaw). Click any object or tree '
                                 'node to edit every MVR field.',
                                 className='patch-muted',

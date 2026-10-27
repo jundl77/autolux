@@ -218,22 +218,25 @@ def _special_fx(value):
 
 
 def login_groups(reply) -> list[dict]:
-    return [
-        {
-            'name': group.name,
-            'cell_count': group.cell_count,
-            'colour': group.colour,
-            'speed': group.speed,
-            'pulse': group.pulse,
-            'pattern': group.pattern,
-            'role': ROLE_NAMES[group.role],
-            # An absent area (the members' areas differ) reads as UNSPECIFIED, which has no place.
-            'zone': AREA_PLACES.get(group.area, (None, None))[0],
-            'depth': AREA_PLACES.get(group.area, (None, None))[1],
-            'x': group.centre_x_metres,
-        }
-        for group in reply.groups
-    ]
+    groups = []
+    for group in reply.groups:
+        # An absent area (the members' areas differ) reads as UNSPECIFIED, which has no place.
+        zone, depth = AREA_PLACES.get(group.area, (None, None))
+        groups.append(
+            {
+                'name': group.name,
+                'cell_count': group.cell_count,
+                'colour': group.colour,
+                'speed': group.speed,
+                'pulse': group.pulse,
+                'pattern': group.pattern,
+                'role': ROLE_NAMES[group.role],
+                'zone': zone,
+                'depth': depth,
+                'x': group.centre_x_metres,
+            }
+        )
+    return groups
 
 
 def encode_command(message: Message) -> bytes:

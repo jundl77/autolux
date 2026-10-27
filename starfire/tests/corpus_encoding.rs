@@ -10,6 +10,7 @@ use starfire::special::capabilities;
 fn rig(source: &str) -> FixtureRig {
     FixtureRig::from_wire(&wire::RigDefinition {
         fixtures: vec![wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             fixture_id: "fixture".into(),
             profile_id: "profile".into(),
             address: 1,

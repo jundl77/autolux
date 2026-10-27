@@ -294,21 +294,17 @@ fn lua_reads_zone_position_and_distance_in_metres() {
 }
 
 #[test]
-fn a_cell_without_a_stage_area_has_no_zone() {
-    let rig = support::rig(
+fn a_rig_with_a_fixture_outside_every_stage_area_is_refused_at_load() {
+    let error = support::try_rig(
         serde_json::from_str(&format!(
             r#"{{"schema_version":1,"fixtures":[{}],"groups":{{"row":["a"]}}}}"#,
-            placed("a", 1, 0.0, 0.0),
+            placed_in("a", 1, 0.0, 0.0, "UNSPECIFIED"),
         ))
         .unwrap(),
-    );
-    let mut autoloop =
-        catalog(r#"return {render = function(ctx) sf.zone(sf.fixture("a")); return {} end}"#)
-            .instantiate("test", "autoloop", &rig, &support::palettes())
-            .unwrap();
-    let error = autoloop.render(&snapshot(0.0), &techno()).unwrap_err();
+    )
+    .unwrap_err();
     assert!(
-        format!("{error:#}").contains("cell a has no stage area"),
+        format!("{error:#}").contains("fixture a has no stage area"),
         "{error:#}"
     );
 }

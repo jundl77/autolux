@@ -45,6 +45,7 @@ Selection (top level):
   Both pick a column or row of the nine-area stage grid: the rig's bounding box cut into thirds
   on each axis, derived from the fixtures' MVR positions, never from names. The row plays only
   on groups whose members all lie in one area, and that area is in the zone and depth given.
+  A group spanning more than one area (the room's washes) cannot be targeted by zone or depth.
 
 `[preset]`:
 
