@@ -171,6 +171,7 @@ fn compiled_defaults_are_written_at_channel_resolution() {
 fn rig_with(mode: wire::DmxMode, fixture: wire::Fixture) -> FixtureRig {
     FixtureRig::from_wire(&wire::RigDefinition {
         fixtures: vec![wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             profile_id: "test".into(),
             address: 1,
             ..fixture
@@ -195,6 +196,7 @@ fn physical_pan_values_obey_patch_calibration() {
             vec![function("Pan", "Control")],
         )]),
         wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             fixture_id: "mover".into(),
             pan: Some(wire::fixture::MovementRange {
                 minimum: Some(0.25),
@@ -595,6 +597,7 @@ fn rig(channels: Vec<wire::DmxChannel>) -> FixtureRig {
     rig_with(
         mode(channels),
         wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             fixture_id: "fixture".into(),
             ..Default::default()
         },

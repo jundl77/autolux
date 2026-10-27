@@ -23,7 +23,8 @@ class Special:
     # its role, so a new fixture group inherits the rows its layer and profiles allow.
     group: str = ''
     role: str | None = None
-    # A role row narrowed to the groups whose members all lie in this zone or depth.
+    # A role row narrowed to the groups whose members all share one stage area in this zone
+    # (column) or depth (row).
     zone: str | None = None
     depth: str | None = None
     colour_slot: str | None = None
@@ -72,7 +73,8 @@ class Special:
 class SpecialCapabilities:
     groups: Mapping[str, frozenset[str]] = field(default_factory=dict)
     roles: Mapping[str, str] = field(default_factory=dict)
-    # group -> (zone, depth, centre X in metres) as Starfire derived them; None is mixed.
+    # group -> (zone, depth, centre X in metres) of the members' shared stage area; both None
+    # when the members' areas differ.
     places: Mapping[str, tuple[str | None, str | None, float]] = field(default_factory=dict)
 
     @classmethod

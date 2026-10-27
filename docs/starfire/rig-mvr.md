@@ -51,13 +51,16 @@ Sheared, mirrored or degenerate matrices are rejected.
 
 ## Plan and stage directions
 
-MVR fixes the frame ("Right-handed, Z-Up, 1 Distance Unit equals 1 mm") but names no audience
-side; Autolux reads the plan as GDTF draws a device, "X – from left (-X) to right (+X), Y – from
-the outside of the monitor (-Y) to the inside of the monitor (+Y)", with the audience as the
-viewer: -X house left, +X house right, -Y downstage, +Y upstage. The scene origin is the
-reference: X = 0 is the centreline and Y = 0 splits downstage from upstage (Y >= 0 upstage). The
-Config rig map is a standard plot from the same draft: plan view, audience at the bottom, the
-dashed centreline at X = 0, the stage edge at the most downstage object, a 1-2-5 metre scale
+MVR fixes the frame but names no audience side and gives its origin no meaning; Autolux reads
+the plan as GDTF draws a device, with the audience as the viewer (-X house left, -Y downstage;
+the standard texts are quoted at `stage_areas` in `cli/starfire_assets.py`). Each fixture's
+`StageArea` is its cell of the nine-area stage grid over the rig's bounding box: X and Y cut
+into equal thirds, a fixture on a cut in the centre third, an axis without extent all centre.
+Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.
+The Config rig map is a standard plot from the same draft: plan view, audience at the bottom,
+the dashed nine-area grid over the fixtures' bounding box, the stage edge at the most downstage
+object, a 1-2-5 metre scale
 bar, one ring per fixture coloured by group (golden-angle hues past the configured six) and
 dashed for an accent-layer group, an arrow along the local Y axis (yaw), and a legend. Names
 label the marks up to 48 fixtures; past that marks shrink with density and names move to the

@@ -95,6 +95,7 @@ impl Renderer {
             protocol_minor: starfire::live::PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
+                    area: wire::StageArea::Centre as i32,
                     fixture_id: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
                 }],
                 groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()], ..Default::default() }],
