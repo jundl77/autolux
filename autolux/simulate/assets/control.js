@@ -9,9 +9,19 @@
     const latest = {};
     const inflight = {};
     let directDownAt = -Infinity;
+    // Nothing leaves the page before the operator's first pointer or key press: a restored
+    // value, the first poll or a component settling on load must never command the show.
+    let operatorActed = false;
+    const operatorActs = () => {
+        operatorActed = true;
+    };
+    if (typeof document !== 'undefined') {
+        ['pointerdown', 'keydown'].forEach((type) =>
+            document.addEventListener(type, operatorActs, {capture: true, once: true}));
+    }
 
     // strobeActive: whether the page shows the strobe running; omitted, the command toggles.
-    function staticCommand(trigger, target, strobeActive) {
+    function staticCommand(trigger, target, strobeActive, colour) {
         const all = config().allFixtures || 'all';
         const colours = config().presetColours || {};
         if (trigger.startsWith('static-preset-')) {
@@ -26,6 +36,16 @@
         }
         if (trigger === 'static-clear' || trigger === 'static-banner-clear') {
             return {action: 'static', kind: 'clear'};
+        }
+        if (trigger === 'static-colour') {
+            const text = (colour || '').trim();
+            if (!/^#?[0-9a-fA-F]{6}$/.test(text)) {
+                return null;
+            }
+            return {
+                action: 'static', kind: 'look', target: target,
+                colour: '#' + text.replace(/^#/, '').toLowerCase(),
+            };
         }
         if (trigger === 'static-blacklight') {
             return {action: 'static', kind: 'blacklight'};
@@ -98,6 +118,11 @@
     }
 
     async function send(command) {
+        if (!operatorActed) {
+            console.warn('[control] dropped a command sent before any operator input',
+                command, new Error().stack);
+            return {dropped: 'no operator input yet'};
+        }
         const {direct, bridgePort} = config();
         if (direct && bridgePort && Date.now() - directDownAt >= RETRY_DIRECT_MS) {
             let response = null;
@@ -184,5 +209,5 @@
         return shown;
     }
 
-    window.autoluxControl = {build, send, dispatch, sendLatest, hold, view, fxAxes};
+    window.autoluxControl = {build, send, dispatch, sendLatest, hold, view, fxAxes, operatorActs};
 })();

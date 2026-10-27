@@ -28,8 +28,12 @@ MAX_TCP_PORT = 65535
 LOGGER = logging.getLogger(__name__)
 
 
-def saved_rig() -> Path:
+def saved_rig(library: Path = FIXTURE_LIBRARY) -> Path:
     if DEFAULT_FIXTURE_STORE.is_file():
+        from autolux.lighting.fixture_setup import refresh_profiles
+
+        # The store was seeded once; profiles fixed in the library since must still reach it.
+        refresh_profiles(DEFAULT_FIXTURE_STORE, library)
         return DEFAULT_FIXTURE_STORE
     if LEGACY_FIXTURE_STORE.is_file():
         raise RuntimeError(f'rig.json is no longer supported; the rig is {DEFAULT_FIXTURE_STORE}')
@@ -216,7 +220,7 @@ def run_import(args: argparse.Namespace) -> None:
 
 def run_ui(args: argparse.Namespace) -> None:
     from autolux.lib.engine.event_buffer import EventBuffer
-    from autolux.lighting.fixture_setup import FixtureStore
+    from autolux.lighting.fixture_setup import FixtureStore, refresh_profiles
     from autolux.simulate.visualizer_app import run_app
 
     if not 1 <= args.port <= MAX_TCP_PORT:
@@ -234,6 +238,7 @@ def run_ui(args: argparse.Namespace) -> None:
                 target.write(DEFAULT_RIG.read_bytes())
         except FileExistsError:
             pass
+    refresh_profiles(patch, library)
     _validate_patch(binary, patch)
     store = FixtureStore(patch, library, lambda candidate: _validate_patch(binary, candidate))
     source = EventBuffer()

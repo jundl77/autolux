@@ -249,3 +249,71 @@ def test_config_names_the_library_folder_it_lists():
     assert library_folder(LIBRARY) == 'rig/library'
     listed = FixtureStore(ROOT / 'rig/room.mvr', LIBRARY, lambda _: None).library()
     assert set(listed) == {path.name for path in LIBRARY.glob('*.gdtf')}
+
+
+KINTA = 'Chauvet DJ@Mini Kinta IRC@1.0.gdtf'
+STALE_KINTA = 'CHAUVET DJ@chauvet_mini_kinta_irc_4ch.gdtf'
+
+
+def _stale_store(path: Path) -> bytes:
+    """The room as an old store holds it: the Kinta under its old name, with a stale profile."""
+    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    stale = mvr.gdtf_description(scene, KINTA).replace(
+        'Name="Mini Kinta IRC"', 'Name="chauvet_mini_kinta_irc_4ch"', 1
+    )
+    stale = stale.replace('<Revisions>', '<!-- before the wheel colours -->\n    <Revisions>', 1)
+    for node in scene.root.iter('GDTFSpec'):
+        if node.text == KINTA:
+            node.text = STALE_KINTA
+    del scene.entries[KINTA]
+    mvr.embed_gdtf(scene, STALE_KINTA, stale)
+    content = mvr.write(scene)
+    path.write_bytes(content)
+    return content
+
+
+def _patch(content: bytes) -> list[dict]:
+    return [
+        {key: value for key, value in fixture.items() if key != 'gdtf_spec'}
+        for fixture in mvr.patched_fixtures(mvr.read(content))
+    ]
+
+
+def test_a_start_refreshes_stale_store_profiles_from_the_library_and_keeps_the_patch(
+    tmp_path, caplog
+):
+    from autolux.lighting.fixture_setup import refresh_profiles
+
+    store = tmp_path / 'rig.mvr'
+    before = _stale_store(store)
+    with caplog.at_level('INFO'):
+        assert refresh_profiles(store, LIBRARY) == [STALE_KINTA]
+    after = store.read_bytes()
+    scene = mvr.read(after)
+    assert scene.entries[KINTA][1] == (LIBRARY / KINTA).read_bytes()
+    assert STALE_KINTA not in scene.entries
+    assert _patch(after) == _patch(before)
+    kinta = next(f for f in mvr.patched_fixtures(scene) if f['name'] == 'kinta')
+    assert kinta['gdtf_spec'] == KINTA
+    assert f'refreshed {STALE_KINTA} from the library as {KINTA}' in caplog.text
+    # The other profiles already match the library, so nothing else changes and a rerun is a no-op.
+    assert after == (ROOT / 'rig/room.mvr').read_bytes()
+    assert refresh_profiles(store, LIBRARY) == []
+    assert store.read_bytes() == after
+
+
+def test_a_store_profile_missing_from_the_library_is_kept_with_a_warning(tmp_path, caplog):
+    from autolux.lighting.fixture_setup import refresh_profiles
+
+    library = tmp_path / 'library'
+    library.mkdir()
+    for archive in LIBRARY.glob('*.gdtf'):
+        if archive.name != KINTA:
+            (library / archive.name).write_bytes(archive.read_bytes())
+    store = tmp_path / 'rig.mvr'
+    before = _stale_store(store)
+    with caplog.at_level('WARNING'):
+        assert refresh_profiles(store, library) == []
+    assert store.read_bytes() == before
+    assert f'{STALE_KINTA} (FixtureTypeID 25DB1C80-' in caplog.text
+    assert 'keeping the stored profile' in caplog.text

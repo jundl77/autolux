@@ -265,7 +265,7 @@ async def _run_session(args, *, checking=False):
                 'The shipped neural model is missing; refusing a degraded production show.'
             )
         input_index = resolve_devices(args.input_device, tx)
-        rig = selected_rig(args.rig)
+        rig = selected_rig(args.rig, getattr(args, 'library', None))
         validate_starfire(
             args.starfire_binary,
             rig,
