@@ -98,9 +98,14 @@ def parse_control_command(payload) -> dict:
             raise ValueError('intensity must be within 0..1')
         return {'action': action, 'level': float(level)}
     if action == 'settings':
-        # Only the named fields change: a panel's stale fx_auto, intensity or follow-the-music
-        # flag must never undo the chip that owns it.
+        # Only the named fields change, and never fx_auto, intensity or intensity_auto: their
+        # own actions also cut the special and track the hand-picked level.
         changes = payload.get('settings')
+        if (
+            isinstance(changes, dict)
+            and {'fx_auto', 'intensity', 'intensity_auto'} & changes.keys()
+        ):
+            raise ValueError('fx_auto, intensity and intensity_auto have their own actions')
         validated = ShowSettings.from_dict(changes).to_dict()
         return {
             'action': action,

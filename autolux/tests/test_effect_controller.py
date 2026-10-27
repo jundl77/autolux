@@ -1044,8 +1044,7 @@ async def test_a_settings_edit_keeps_fx_off_and_the_level_picked_since_its_page_
         {'action': 'fx_auto', 'enabled': False},
         {'action': 'intensity', 'level': 0.3},
         {'action': 'settings', 'settings': {'crossfade_beats': 2.0}},
-        # A panel from before the FX chips: a settings dict with no fx_auto in it.
-        {'action': 'settings', 'settings': {'quiet_brightness': 0.25, 'intensity_auto': False}},
+        {'action': 'settings', 'settings': {'quiet_brightness': 0.25}},
     ):
         control.commands.put_nowait(parse_control_command(command))
     await control.apply_pending(light)
