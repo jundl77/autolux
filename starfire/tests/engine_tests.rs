@@ -1074,12 +1074,17 @@ fn paused(engine: &mut Engine, at: f64, paused: bool) {
 }
 
 #[test]
-fn pause_holds_the_frame_and_beat_and_resume_continues_from_the_held_position() {
+fn pause_goes_dark_holds_the_beat_and_resume_continues_from_the_held_position() {
     let mut engine = engine(&[("loop", LOOP)]);
     select(&mut engine, 0.0, "loop", Transition::Cut);
     paused(&mut engine, 1.0, true);
     let held = engine.render_at(1.0).unwrap();
     near(held.beat_position, 2.0);
+    assert!(
+        held.fixture_properties_before_strobe
+            .values()
+            .all(|state| state.output_blackout)
+    );
     engine
         .apply(
             2.0,
