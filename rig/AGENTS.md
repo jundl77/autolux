@@ -13,6 +13,9 @@
   (`autolux/tests/data/generic_rig/`), never in `rig/library/`.
 - MVR files are named after the venue or show (`room.mvr`) and embed their GDTF archives
   under those same names.
+- The live rig store (`.live/starfire/rig.mvr`) holds the patch: fixtures, addresses,
+  positions, classes and user data. `rig/library/` holds the profiles: every start refreshes
+  the store's embedded GDTF from the library by FixtureTypeID, so fix a profile in the library.
 - `*.rig.pb` is the exported Starfire rig: regenerate it with
   `autolux starfire export-rig`, never edit it by hand.
 - `import-fixture` derives the file name from the archive's own fields and revision.

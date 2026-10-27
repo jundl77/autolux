@@ -61,8 +61,8 @@ def add_arguments(parser, *, include_artnet=False):
         parser.add_argument('--artnet', default=DEFAULT_ARTNET_DESTINATION)
 
 
-def selected_rig(path=None):
-    return Path(path) if path else saved_rig()
+def selected_rig(path=None, library=None):
+    return Path(path) if path else saved_rig(Path(library or FIXTURE_LIBRARY))
 
 
 def fixture_setup(args):

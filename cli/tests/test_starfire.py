@@ -121,7 +121,8 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
         rig=None,
     )
     await starfire.run_native(args)
-    saved.write_text('{}')
+    # A real patch: every start refreshes the saved store's profiles from the library.
+    saved.write_bytes((starfire.ROOT / 'rig/room.mvr').read_bytes())
     await starfire.run_native(args)
     args.rig = explicit
     await starfire.run_native(args)
