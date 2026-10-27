@@ -1722,7 +1722,7 @@ fn group_master(group: &str, level: f64) -> starfire::protocol::wire::Parameter 
 }
 
 #[test]
-fn a_half_group_master_halves_only_that_groups_output_after_the_master() {
+fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
     let mut engine = room_engine(&[(
         "lit",
         "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8), sf.colour(sf.all(), sf.rgb(1, 0.5, 0))} end}",
@@ -1737,7 +1737,7 @@ fn a_half_group_master_halves_only_that_groups_output_after_the_master() {
     let wash = support::room().groups()["wash"].clone();
     for (cell, state) in &before.fixture_properties_before_strobe {
         let expected = if wash.contains(cell) {
-            state.intensity * 0.5
+            state.intensity * perceptual_to_linear_master(0.5)
         } else {
             state.intensity
         };
