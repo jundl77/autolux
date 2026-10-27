@@ -950,17 +950,19 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
 def test_the_config_rig_area_lists_each_groups_fx_capabilities():
     from autolux.simulate.visualizer_app import special_groups_view
 
-    line = special_groups_view({'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']})
+    line = special_groups_view(
+        {'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']}, {'fx': 'accent'}
+    )
     assert [getattr(part, 'children', part) for part in line] == [
         'FX',
         '  ',
         'fx',
         ' ',
-        'colour · pulse · speed',
+        'accent · colour · pulse · speed',
         '  ',
         'wash',
         ' ',
-        'colour',
+        'loop · colour',
     ]
     assert special_groups_view({}) == ['FX: Starfire reported no groups']
 
@@ -1219,3 +1221,79 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
     assert source.commands == [
         {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
     ]
+
+
+def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    app = build_app(_Recorder())
+    with pytest.raises(KeyError):
+        app.layout['command-diagnostics']
+    assert app.layout['special-cooldowns'] is not None
+
+    def cooldown(group, last, total, remaining):
+        return {
+            'group': group,
+            'last': last,
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining == 0,
+        }
+
+    rows = _build_cooldowns(
+        {
+            'special_cooldowns': [
+                cooldown('fx', 'cold_drift', 240, 179.5),
+                cooldown('all', 'strobe_burst', 60, 0.0),
+                cooldown('movers', 'spin', 90, 45.0),
+                cooldown('wash', None, 0, 0.0),
+            ]
+        }
+    )
+
+    def shown(row):
+        head, track = row.children
+        return (
+            head.children[0].children,
+            head.children[1].children,
+            track.children.style['width'],
+            'ready' in row.className,
+        )
+
+    assert [shown(row) for row in rows] == [
+        ('all · Strobe burst', 'ready', '100.0%', True),
+        ('wash', 'ready', '100.0%', True),
+        ('movers · Spin', '45 s', '50.0%', False),
+        ('fx · Cold drift', '180 s', '25.2%', False),
+    ]
+    # The ticker in control.js reads these to count down between polls.
+    props = rows[3].to_plotly_json()['props']
+    assert (props['data-total'], props['data-remaining']) == (240, 179.5)
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_fx_effects_ticker_counts_a_bar_down_from_the_last_poll():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    def rendered(total, remaining):
+        entry = {
+            'group': 'fx',
+            'last': 'drift',
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining <= 0,
+        }
+        [row] = _build_cooldowns({'special_cooldowns': [entry]})
+        head, track = row.children
+        return {
+            'fill': track.children.style['width'],
+            'caption': head.children[1].children,
+            'ready': 'ready' in row.className,
+        }
+
+    # (total, remaining at the poll, seconds since the poll)
+    cases = [(240, 180.0, 0.0), (240, 180.0, 59.5), (90, 10.0, 10.0), (90, 10.0, 30.0), (0, 0, 0)]
+    calls = ', '.join(f'control.cooldownView({t}, {r}, {e})' for t, r, e in cases)
+    ticked = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
+    # Ticking e seconds after a poll shows what a poll e seconds later would have rendered.
+    assert ticked == [rendered(t, max(0.0, r - e)) for t, r, e in cases]

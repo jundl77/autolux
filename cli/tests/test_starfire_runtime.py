@@ -14,6 +14,7 @@ from autolux.lighting import mvr
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
 from cli.starfire import DEFAULT_RIG
+from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 
@@ -112,7 +113,14 @@ def test_control_adapter_translates_a_special_one_to_one():
 def test_login_groups_become_plain_capability_records():
     reply = wire.LoginReply(
         groups=[
-            wire.GroupCapability(name='fx', cell_count=1, colour=True, speed=True, pulse=True),
+            wire.GroupCapability(
+                name='fx',
+                cell_count=1,
+                colour=True,
+                speed=True,
+                pulse=True,
+                role=rig_wire.GROUP_ROLE_ACCENT,
+            ),
             wire.GroupCapability(name='wash', cell_count=4, pulse=True),
         ]
     )
@@ -124,6 +132,7 @@ def test_login_groups_become_plain_capability_records():
             'speed': True,
             'pulse': True,
             'pattern': False,
+            'role': 'accent',
         },
         {
             'name': 'wash',
@@ -132,6 +141,7 @@ def test_login_groups_become_plain_capability_records():
             'speed': False,
             'pulse': True,
             'pattern': False,
+            'role': 'loop',
         },
     ]
 
@@ -457,6 +467,7 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
                 'speed': False,
                 'pulse': True,
                 'pattern': False,
+                'role': 'loop',
             }
         ]
         runtime.send_command(

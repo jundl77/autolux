@@ -5,8 +5,11 @@ import struct
 
 from google.protobuf.message import Message
 
+from autolux.lighting.mvr_schema import ACCENT_ROLE, LOOP_ROLE
+from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
+ROLE_NAMES = {rig_wire.GROUP_ROLE_LOOP: LOOP_ROLE, rig_wire.GROUP_ROLE_ACCENT: ACCENT_ROLE}
 MAX_LOGIN_BYTES = 4 * 1024 * 1024
 MAX_MESSAGE_BYTES = 4 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
@@ -208,6 +211,7 @@ def login_groups(reply) -> list[dict]:
             'speed': group.speed,
             'pulse': group.pulse,
             'pattern': group.pattern,
+            'role': ROLE_NAMES[group.role],
         }
         for group in reply.groups
     ]

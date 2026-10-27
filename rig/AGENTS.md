@@ -18,6 +18,9 @@
 - The live rig store (`.live/starfire/rig.mvr`) holds the patch: fixtures, addresses,
   positions, classes and user data. `rig/library/` holds the profiles: every start refreshes
   the store's embedded GDTF from the library by FixtureTypeID, so fix a profile in the library.
+- A group is an MVR Class; its role is the MVR Layer its fixtures sit in: `loop` (autoloops
+  run there) or `accent` (specials only; a loop naming one is refused). All fixtures of a class
+  share one layer; any other layer name counts as `loop`, with a warning.
 - `*.rig.pb` is the exported Starfire rig: regenerate it with
   `autolux starfire export-rig`, never edit it by hand.
 - `import-fixture` derives the file name from the archive's own fields and revision.

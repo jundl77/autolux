@@ -24,6 +24,7 @@ fn synthetic_rig() -> wire::RigDefinition {
     let group = |id: &str, members: &[&str]| wire::FixtureGroup {
         group_id: id.into(),
         fixture_ids: members.iter().map(|member| (*member).into()).collect(),
+        ..Default::default()
     };
     let profile = |id: &str, source: &str| support::compiled_profile(source, id);
     wire::RigDefinition {
@@ -135,6 +136,7 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
+        ..Default::default()
     };
     assert_eq!(
         capabilities(&rig),

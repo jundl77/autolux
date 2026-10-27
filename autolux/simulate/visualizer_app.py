@@ -3,6 +3,7 @@ import http.client
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -40,6 +41,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
+from autolux.lighting.mvr_schema import LOOP_ROLE
 from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
@@ -1238,9 +1240,10 @@ def _fx_segment(segment_id: str, levels: tuple, value):
     )
 
 
-def special_groups_view(groups: dict) -> list:
+def special_groups_view(groups: dict, roles: dict | None = None) -> list:
     if not groups:
         return ['FX: Starfire reported no groups']
+    roles = roles or {}
     return [
         html.Span('FX', className='control-label'),
         *[
@@ -1250,7 +1253,7 @@ def special_groups_view(groups: dict) -> list:
                 '  ',
                 name,
                 ' ',
-                html.Span(' · '.join(axes) or 'none', className='status-tag'),
+                html.Span(' · '.join([roles.get(name, LOOP_ROLE), *axes]), className='status-tag'),
             )
         ],
     ]
@@ -1770,37 +1773,44 @@ def _build_renderer_overview(snapshot, now):
     ]
 
 
-def _build_command_diagnostics(snapshot):
-    streams = (snapshot.get('timing_stats') or {}).get('by_label') or {}
-    if not streams:
-        return html.Div('No scheduled commands yet.', className='diagnostic-empty')
-    return html.Table(
+def _build_cooldowns(snapshot):
+    rows = sorted(
+        snapshot.get('special_cooldowns') or [],
+        key=lambda row: (row['remaining_seconds'], row['group'], row['last'] or ''),
+    )
+    if not rows:
+        return html.Div('No specials loaded.', className='diagnostic-empty')
+    return [_cooldown_bar(row) for row in rows]
+
+
+def _cooldown_bar(row: dict):
+    # control.js ticks fill and caption down from these data attributes between polls and
+    # mirrors the arithmetic here (cooldownView); keep the two in step.
+    total, remaining = row['cooldown_seconds'], row['remaining_seconds']
+    # A group without any cooldown is always ready, so its bar is full.
+    elapsed = 1.0 if row['ready'] or total <= 0 else max(0.0, 1.0 - remaining / total)
+    label = row.get('label') or row['group']
+    if row['last']:
+        label += ' · ' + row['last'].replace('_', ' ').capitalize()
+    return html.Div(
         [
-            html.Thead(
-                html.Tr(
-                    [
-                        html.Th('Stream'),
-                        html.Th('Commands'),
-                        html.Th('Mean error'),
-                        html.Th('Max error'),
-                    ]
-                )
-            ),
-            html.Tbody(
+            html.Div(
                 [
-                    html.Tr(
-                        [
-                            html.Td(label.replace('_', ' ').title()),
-                            html.Td(stream['samples']),
-                            html.Td(_metric_text(stream.get('mean_error_ms'), ' ms', 1)),
-                            html.Td(_metric_text(stream.get('max_error_ms'), ' ms', 1)),
-                        ]
-                    )
-                    for label, stream in streams.items()
-                ]
+                    html.Span(label, className='cooldown-label'),
+                    html.Span(
+                        'ready' if row['ready'] else f'{math.ceil(remaining)} s',
+                        className='cooldown-caption',
+                    ),
+                ],
+                className='cooldown-head',
+            ),
+            html.Div(
+                html.Div(className='cooldown-fill', style={'width': f'{elapsed:.1%}'}),
+                className='cooldown-track',
             ),
         ],
-        className='command-diagnostics',
+        className='cooldown-row ready' if row['ready'] else 'cooldown-row',
+        **{'data-total': total, 'data-remaining': remaining},
     )
 
 
@@ -1850,12 +1860,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .diagnostics h2 { margin: 0; font-size: 14px; color: #e6edf3; }
 .diagnostics-content { padding-top: 16px; font-size: 12px; }
 .diagnostic-empty { color: #8293a6; }
-.command-diagnostics { width: 100%; border-collapse: collapse; font-size: 11px;
-                       font-variant-numeric: tabular-nums; }
-.command-diagnostics th { color: #8293a6; font-weight: 500; padding-bottom: 7px; }
-.command-diagnostics td { padding: 4px 0; }
-.command-diagnostics th, .command-diagnostics td { text-align: right; }
-.command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -2146,6 +2150,7 @@ BLANK_SNAPSHOT = {
     'beats_detected': 0,
     'intent': None,
     'timing_stats': {},
+    'special_cooldowns': [],
     'decoder': {},
     'shed': {},
 }
@@ -2390,10 +2395,10 @@ def build_app(
                                     ),
                                     html.Section(
                                         [
-                                            html.H2('Command diagnostics'),
+                                            html.H2('FX Effects'),
                                             html.Div(
-                                                id='command-diagnostics',
-                                                className='diagnostics-content',
+                                                id='special-cooldowns',
+                                                className='diagnostics-content cooldowns',
                                             ),
                                         ],
                                         className='diagnostics',
@@ -2514,7 +2519,7 @@ def build_app(
             Output('show-status', 'children'),
             Output('show-timing', 'children'),
             Output('decoder', 'children'),
-            Output('command-diagnostics', 'children'),
+            Output('special-cooldowns', 'children'),
             Output('timeline-data', 'data'),
             Output('telemetry-alerts', 'children'),
             Output('performance-metrics', 'children'),
@@ -2530,7 +2535,7 @@ def build_app(
             raise dash.exceptions.PreventUpdate
         snap = expectations.apply(_with_base_palette(snapshot_source.snapshot()))
         now = time.time()
-        sync = status = show_timing = decoder = commands = dash.no_update
+        sync = status = show_timing = decoder = cooldowns = dash.no_update
         timeline = dash.no_update
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
@@ -2540,7 +2545,7 @@ def build_app(
             status = _build_show_status(snap, now)
             show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
-            commands = _build_command_diagnostics(snap)
+            cooldowns = _build_cooldowns(snap)
             if can_control:
                 control = {
                     key: snap.get(key)
@@ -2570,7 +2575,7 @@ def build_app(
             status,
             show_timing,
             decoder,
-            commands,
+            cooldowns,
             timeline,
             notices,
             performance,
@@ -2836,7 +2841,10 @@ def build_app(
     def show_special_groups(selected):
         if selected != 'config':
             raise dash.exceptions.PreventUpdate
-        return special_groups_view(snapshot_source.snapshot().get('special_groups') or {})
+        snapshot = snapshot_source.snapshot()
+        return special_groups_view(
+            snapshot.get('special_groups') or {}, snapshot.get('group_roles') or {}
+        )
 
     app.clientside_callback(
         ANIMATION_JS,

@@ -1,6 +1,6 @@
 name = "drift"
-intents = ["atmospheric"]
-group = "fx"
+intents = ["atmospheric", "breakdown"]
+role = "accent"
 
 [preset]
 colour = "secondary"
@@ -11,4 +11,5 @@ size = 0.2
 
 [playback]
 attack_beats = 32
-release_beats = 32
+release_beats = 64
+cooldown_seconds = 240

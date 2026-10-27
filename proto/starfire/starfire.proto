@@ -105,6 +105,7 @@ message GroupCapability {
   bool speed = 4;
   bool pulse = 5;
   bool pattern = 6;
+  GroupRole role = 7;  // Echoed from the rig's FixtureGroup.
 }
 
 // [SERVER -> CLIENT]

@@ -1,3 +1,4 @@
+import logging
 import re
 import tempfile
 from contextlib import contextmanager
@@ -11,6 +12,7 @@ from autolux.lighting.gdtf_compile import compile_mode
 from autolux.lighting.palettes import palette_table
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
+    ROLE_NAMES,
     check_payload_size,
 )
 from proto.starfire import rig_pb2 as rig_wire
@@ -20,6 +22,8 @@ MAX_SCRIPT_BYTES = 64 * 1024
 MAX_SCRIPT_CATALOGUE_BYTES = 4 * 1024 * 1024
 MAX_SCRIPTS = 256
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,64}')
+WIRE_ROLES = {name: role for role, name in ROLE_NAMES.items()}
+LOGGER = logging.getLogger(__name__)
 
 
 def _read(path: Path, limit: int) -> bytes:
@@ -66,8 +70,11 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
         for axis in mvr.MOVEMENT_AXES:
             if (movement := _movement(fixture[axis])) is not None:
                 getattr(entry, axis).CopyFrom(movement)
+    roles, _, warnings = mvr.group_roles(fixtures)
+    for warning in warnings:
+        LOGGER.warning('[rig] %s', warning)
     for group, members in mvr.groups(fixtures).items():
-        rig.groups.add(group_id=group, fixture_ids=members)
+        rig.groups.add(group_id=group, fixture_ids=members, role=WIRE_ROLES[roles[group]])
     return rig
 
 

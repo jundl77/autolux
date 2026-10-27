@@ -31,7 +31,8 @@ outro also starts a track.
   scale levels and sweep size, never colour, timing or pattern.
 - **No strobe.** Autolux adds the drop strobe itself.
 - **Living room.** Slow symmetric mover sweeps (mirror with `sf.side(index)`, centre pan 0.5),
-  nothing frantic, wash peaks at or below 0.9. Groups: `movers` (2), `wash` (4), `strip` (8).
+  nothing frantic, wash peaks at or below 0.9. Groups: `movers` (2), `wash` (4), `strip` (8);
+  accent groups (MVR layer `accent`, such as `fx`) are refused, they play specials only.
 - **Small.** At most ~80 lines. The first line is `-- 8-beat loop` or `-- 16-beat loop`
   (the tests read the loop length from it), then the metadata block. No other comments:
   encode intent in names.
