@@ -191,6 +191,8 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
+        # Paused, the renderer outputs the off frame; cut the special so play does not revive it.
+        self.effect_controller.cut_special()
         self.lighting_client.set_paused(True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
@@ -410,7 +412,7 @@ class LightEngine(IMusicAnalyserHandler):
             self.event_buffer.set_intent(
                 STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
             )
-        self.effect_controller.enter_standby(self._last_bpm, renderer_paused=self._paused)
+        self.effect_controller.enter_standby(self._last_bpm)
         if self._static_mode:
             self.static_looks.resend()
 
@@ -704,9 +706,8 @@ class LightEngine(IMusicAnalyserHandler):
             self._track_started_audio_sec = self._audio_sec - self._playback_delay_sec
         elif self._section_closes_track_mood(intent):
             self._finish_track_mood()
-        cut = self._paused and self._showing_standby
         bpm = self._last_bpm
-        if await self.effect_controller.change_effect(intent, bpm, context=context, cut=cut):
+        if await self.effect_controller.change_effect(intent, bpm, context=context):
             self._note_new_look(intent, now)
         self._entered_label = label
         if self._showing_standby:

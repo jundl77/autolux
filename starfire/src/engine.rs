@@ -457,7 +457,10 @@ impl Engine {
         }
         self.limit_movement_speed(time_seconds, &mut states);
         self.limit_strobes(time_seconds, &mut states);
-        if self.blackout {
+        // Pause is the operator's lights-off. A dimmerless fixture (the Kinta) shows any master
+        // above zero at full colour and keeps its frozen spin, so all but pan/tilt go to the
+        // GDTF default. Overrides and static looks go dark too, on purpose: pause means off.
+        if self.blackout || self.clock.paused() {
             extinguish(&mut states);
         }
 
