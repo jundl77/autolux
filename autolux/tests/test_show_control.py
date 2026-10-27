@@ -55,6 +55,8 @@ def test_group_masters_round_trip_through_show_json_and_reject_levels_outside_un
     for masters in ({'wash': 1.5}, {'wash': -0.1}, {'wash': True}, {'': 0.5}, ['wash']):
         with pytest.raises((TypeError, ValueError)):
             ShowSettings(group_masters=masters)
+    with pytest.raises(ValueError, match='keys must be group names'):
+        ShowSettings(group_masters={'wash': 0.5, 1: 0.5})
 
 
 def test_a_group_master_edit_changes_only_that_group_and_keeps_every_other_setting():
