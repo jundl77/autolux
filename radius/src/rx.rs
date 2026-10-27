@@ -496,6 +496,7 @@ fn run_connected(
                 audio_signal_peak: audio_peak,
                 lost_frames_total: receiver.lost_frames_total,
                 audio_gaps_total: receiver.audio_gaps_total,
+                send_failures_total: connection.refused_sends(),
                 ..Default::default()
             };
             if let Some(playback) = &playback {
