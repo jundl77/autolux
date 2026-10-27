@@ -124,7 +124,6 @@ class LightEngine(IMusicAnalyserHandler):
         self._startup_baseline_pending = False
         self._pending_silence: tuple[float, float | None] | None = None
         self._shed_published_at: float = float('-inf')
-        self._committed = None
         self._quiet_since: float | None = None
         self._source_quiet = False
         self._room_quiet = False
@@ -394,8 +393,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._room_quiet = False
         self._showing_standby = True
         self._send_brightness()
-        self._committed = None
-        self._publish_decoder_state(None)
+        self._publish_decoder_state()
         if self.event_buffer is not None:
             self.event_buffer.set_intent(
                 STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
@@ -505,7 +503,6 @@ class LightEngine(IMusicAnalyserHandler):
 
     def _reset_source_analysis(self) -> None:
         self._floor_armed = True
-        self._committed = None
         self._audio_sec = 0.0
         self._beat_levels.clear()
         self._track_started_audio_sec = 0.0
@@ -541,8 +538,7 @@ class LightEngine(IMusicAnalyserHandler):
         drained = self.section_chain.push_audio(audio_signal)
         if drained.gap:
             self.section_decoder.reset(cold_start=False)
-            self._committed = None
-            self._publish_decoder_state(None)
+            self._publish_decoder_state()
         for posterior in drained.posteriors:
             if isinstance(posterior, TrackerChunk):
                 self.section_decoder.push_evidence(posterior)
@@ -761,7 +757,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._after_silence = False
 
     async def _commit(self, decisions) -> None:
-        self._publish_decoder_state(decisions[-1] if decisions else None)
+        self._publish_decoder_state()
         for decision in decisions:
             intent = intent_for_class(decision.label)
 
@@ -775,14 +771,11 @@ class LightEngine(IMusicAnalyserHandler):
                 section_label=decision.label,
             )
 
-    def _publish_decoder_state(self, decision) -> None:
+    def _publish_decoder_state(self) -> None:
         if self.event_buffer is None or self.section_decoder is None:
             return
         decoder = self.section_decoder
-        if decision is not None:
-            self._committed = decision
         observed = decoder.recent_observations[-1] if decoder.recent_observations else None
-        committed = self._committed
         self.event_buffer.set_decoder_state(
             classes=list(decoder.classes),
             posterior=(
@@ -791,13 +784,6 @@ class LightEngine(IMusicAnalyserHandler):
                 else [round(float(p), 6) for p in observed.posterior]
             ),
             boundary=(None if observed is None else float(observed.boundary)),
-            observed_bar=(None if observed is None else observed.bar),
-            committed_bar=(None if committed is None else committed.bar),
-            committed_label=(None if committed is None else committed.label),
-            lag_bars=(
-                None if observed is None or committed is None else observed.bar - committed.bar
-            ),
-            chain_latency_sec=decoder.chain_latency_sec,
             bar_sec=round(decoder.bar_sec, 4),
             first_bar=decoder.first_bar,
             bar_edges=self._edges_on_the_buffers_clock(decoder.bar_edges),

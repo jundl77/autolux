@@ -7,14 +7,14 @@
     --muted: #8293a6;
     /* Text on a filled segment. */
     --ink: #111923;
-    /* Intensity levels picked by hand, cool to warm (L* 63, 87, 69); ink on each 6.1, 12.8, 7.5:1. */
-    --calm: #5e9be0;            /* a clean mid blue, the old #5c91ca lifted to ink-safe 6:1 */
+    /* Intensity levels picked by hand, green to warm (L* 67, 87, 69); ink on each 7.0, 12.8, 7.5:1. */
+    --calm: #6fb35a;            /* a leafy green, clearly apart from the AUTO blue */
     --balanced: #d5dce3;        /* white dimmed off glare, still the lightest fill */
     --wild: #f0924a;            /* a saturated orange so it reads hot, not beige */
-    /* The show driving: AUTO at the calm blue's L* 64 so neither outshouts the other; ink 6.4:1. */
-    --auto: #74a68b;
-    /* The level AUTO follows: --auto 35% over --fill, one colour for every level; text 7.3:1. */
-    --follow: #38504e;
+    /* The show driving: the Section Confidence bar blue (POSTERIOR_FILL); ink 7.0:1. */
+    --auto: #58a6ff;
+    /* The level AUTO follows: --auto 35% over --fill, one colour for every level; text 7.0:1. */
+    --follow: #2e5076;
     /* FX off as a chosen state: --muted 30% over --fill, quiet but plainly filled; text 8.5:1. */
     --fx-off: #384351;
     /* 1px top highlight that lifts a filled segment off the panel. */
@@ -117,7 +117,7 @@
 #show-control .joined > button:hover:not(:disabled):not(.active) { background: var(--fill);
                                                                      color: var(--text); }
 #show-control .joined > button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
-/* AUTO and FX auto share one green: the show is driving. Hover previews it as a tint. */
+/* AUTO and FX auto share one blue: the show is driving. Hover previews it as a tint. */
 #show-control #control-intensity-auto.active, #show-control #control-fx-auto.active {
     background: var(--auto); color: var(--ink); box-shadow: var(--lift); }
 #show-control #control-intensity-auto:hover:not(:disabled):not(.active),
@@ -219,33 +219,38 @@
 /* A running FX reads in the accent; "-" keeps the plain text colour. */
 .status-item.fx-running .status-text { color: #73b6ff; }
 
-/* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first. Name and
-   seconds sit inside the bar; the fill is empty as the group fires, grows left to right as it
-   recovers and stays full with "ready". Every bar shares one neutral fill so the bars read as one
-   quiet instrument, not a legend. Head and track share one grid cell. control.js adds .flash for
-   650 ms when a group fires: the track pulses twice toward --text with a 1px ring in the same
-   colour (the fill is empty then, so the track is what shows), then settles to the empty bar. */
-.cooldowns { display: grid; gap: 4px;
-             --bar-fill: color-mix(in srgb, var(--muted) 22%, var(--fill));
+/* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first, drawn like the
+   Section Confidence bars beside it: name and seconds on a line above a thin track. The fill is
+   empty as the group fires, grows left to right as it recovers and stays full with "ready". Every
+   bar shares the AUTO blue at full strength; the text sits off the fill, so it stays readable
+   whatever the fill's length. control.js adds .flash for 650 ms when a group fires: the track
+   pulses twice toward --text with a 1px blue ring around it (the fill is empty then, so the track
+   is what shows), then settles to the empty bar. */
+.cooldowns { display: grid; gap: 8px;
+             --bar-fill: var(--auto);
+             /* The Section Confidence track, so both bar blocks read as one family. */
+             --bar-track: #161d27;
+             --bar-ring: var(--auto);
              --bar-flash: color-mix(in srgb, var(--text) 65%, var(--fill)); }
-.cooldown-row { display: grid; }
-.cooldown-head, .cooldown-track { grid-area: 1 / 1; }
-.cooldown-head { position: relative; display: flex; justify-content: space-between;
-                 align-items: center; gap: 12px; padding: 0 8px; min-width: 0;
-                 color: var(--text); font: inherit; font-size: 11px; font-weight: 400; }
+.cooldown-row { display: grid; gap: 4px; }
+.cooldown-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+                 min-width: 0; color: var(--text); font: inherit; font-size: 11px;
+                 font-weight: 400; }
 .cooldown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                   color: var(--muted); }
 .cooldown-caption { flex: none; font-variant-numeric: tabular-nums; }
 .cooldown-row.ready .cooldown-caption { color: var(--muted); }
-.cooldown-track { height: 20px; border-radius: 6px; overflow: hidden; background: var(--fill); }
+.cooldown-track { height: 10px; border-radius: 3px; overflow: hidden;
+                  background: var(--bar-track); }
 .cooldown-fill { height: 100%; background: var(--bar-fill); }
 .cooldown-row.flash .cooldown-track { animation: cooldown-fire 600ms ease-out; }
-/* Two peaks 150 ms apart, each a hard lift toward --text, then back to the empty track. */
+/* Two peaks 150 ms apart, each a hard lift toward --text ringed outside in blue (the blue matches
+   the lifted grey in luminance, so an inset ring would vanish), then back to the empty track. */
 @keyframes cooldown-fire {
-    0%, 25% { background: var(--bar-flash); box-shadow: inset 0 0 0 1px var(--text); }
+    0%, 25% { background: var(--bar-flash); box-shadow: 0 0 0 1px var(--bar-ring); }
     12.5% { background: var(--bar-fill); box-shadow: none; }
     37.5% { background: var(--bar-fill); box-shadow: none; }
-    100% { background: var(--fill); box-shadow: none; }
+    100% { background: var(--bar-track); box-shadow: none; }
 }
 @media (prefers-reduced-motion: reduce) {
     .cooldown-row.flash .cooldown-track { animation: none; background: var(--bar-flash); }

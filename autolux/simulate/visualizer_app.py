@@ -460,26 +460,7 @@ def _build_decoder(snapshot: dict) -> list:
             )
         )
 
-    committed = state.get('committed_bar')
-    cursor = (
-        'no bar committed yet'
-        if committed is None
-        else (
-            f'bar {state.get("observed_bar")} observed  →  committed '
-            f'{committed} {state.get("committed_label")}  ·  '
-            f'lag {state.get("lag_bars")} bars'
-        )
-    )
-    if posterior is None:
-        cursor += '  ·  no evidence at this bar'
-    latency = state.get('chain_latency_sec')
-    if latency is not None:
-        cursor += f'  ·  chain {latency:.1f}s'
-
-    return [
-        html.Div(bars, style={'display': 'flex', 'gap': '10px'}),
-        html.Div(cursor, style={'color': MUTED, 'fontSize': '12px', 'marginTop': '8px'}),
-    ]
+    return [html.Div(bars, style={'display': 'flex', 'gap': '10px'})]
 
 
 def _dot(colour: str):
@@ -2353,7 +2334,7 @@ def build_app(
                                 [
                                     html.Section(
                                         [
-                                            html.H2('Analysis diagnostics'),
+                                            html.H2('Section Confidence'),
                                             html.Div(id='decoder', className='diagnostics-content'),
                                         ],
                                         className='diagnostics',
