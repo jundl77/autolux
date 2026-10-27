@@ -6,10 +6,8 @@ use std::path::Path;
 use std::process::{Command as Process, Stdio};
 use std::time::Duration;
 
-use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, TimedCommand, Transition};
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
-use starfire::script::AutoloopCatalog;
 
 fn replay(duration_seconds: f64) -> Replay {
     Replay {
@@ -41,13 +39,7 @@ fn replay(duration_seconds: f64) -> Replay {
 }
 
 fn render(input: &Replay) -> Vec<starfire::engine::RenderedFrame> {
-    render_replay(
-        input,
-        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
-        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
-            .unwrap(),
-    )
-    .unwrap()
+    render_replay(input, support::room(), support::show_catalog()).unwrap()
 }
 
 #[test]
@@ -125,10 +117,8 @@ fn replay_memory_budget_is_checked_before_rendering() {
     input.frame_rate_hz = 50;
     input.duration_seconds -= 0.02;
     assert!(input.validate().is_ok());
-    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
-    let catalogue =
-        AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
-            .unwrap();
+    let rig = support::room();
+    let catalogue = support::show_catalog();
     assert!(
         render_replay(&input, rig, catalogue)
             .err()

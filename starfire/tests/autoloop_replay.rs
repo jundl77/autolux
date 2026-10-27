@@ -59,16 +59,8 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn room() -> FixtureRig {
-    FixtureRig::load(&root().join("../rig/room.rig.pb")).unwrap()
-}
-
-fn catalog() -> AutoloopCatalog {
-    AutoloopCatalog::load(&root().join("../show/autoloops")).unwrap()
-}
-
 fn looks() -> Vec<Look> {
-    catalog()
+    support::show_catalog()
         .list()
         .into_iter()
         .map(|entry| {
@@ -191,7 +183,12 @@ fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
 }
 
 fn engine_at_intensity(bank: &str, autoloop: &str, select_beat: f64, intensity: f64) -> Engine {
-    let mut engine = Engine::new(room(), catalog(), support::palettes()).unwrap();
+    let mut engine = Engine::new(
+        support::room(),
+        support::show_catalog(),
+        support::palettes(),
+    )
+    .unwrap();
     engine
         .apply(0.0, &Command::SetIntensity { level: intensity })
         .unwrap();
@@ -256,7 +253,7 @@ fn check_replay(look: &Look) {
         replay.duration_seconds >= MIN_REPLAY_SECONDS,
         "{look}: replay under 16 bars"
     );
-    let first = render_replay(&replay, room(), catalog()).unwrap();
+    let first = render_replay(&replay, support::room(), support::show_catalog()).unwrap();
     for frame in &first {
         assert!(
             frame.script_error.is_none(),
@@ -277,7 +274,7 @@ fn check_replay(look: &Look) {
         }
     }
 
-    let second = render_replay(&replay, room(), catalog()).unwrap();
+    let second = render_replay(&replay, support::room(), support::show_catalog()).unwrap();
     let digest = dmx_digest(&first);
     assert_eq!(digest, dmx_digest(&second), "{look} is not deterministic");
 
@@ -286,7 +283,8 @@ fn check_replay(look: &Look) {
     without_duplicate.events.retain(|event| {
         event.at_seconds == 0.0 || !matches!(event.command, Command::Select { .. })
     });
-    let continued = render_replay(&without_duplicate, room(), catalog()).unwrap();
+    let continued =
+        render_replay(&without_duplicate, support::room(), support::show_catalog()).unwrap();
     assert_eq!(
         digest,
         dmx_digest(&continued),
@@ -296,7 +294,7 @@ fn check_replay(look: &Look) {
     // Frame rate changes sampling density, never the authored effect at a given time.
     let mut slower = replay.clone();
     slower.frame_rate_hz = replay.frame_rate_hz / 2;
-    let slower = render_replay(&slower, room(), catalog()).unwrap();
+    let slower = render_replay(&slower, support::room(), support::show_catalog()).unwrap();
     for (index, frame) in slower.iter().enumerate() {
         assert_eq!(
             frame.dmx_frames_by_universe,
@@ -609,7 +607,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(room(), catalog, support::palettes()).unwrap();
+    let mut engine = Engine::new(support::room(), catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -678,7 +676,7 @@ fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
         replay
             .events
             .retain(|event| event.at_seconds <= replay.duration_seconds);
-        let rendered = render_replay(&replay, rig.clone(), catalog()).unwrap();
+        let rendered = render_replay(&replay, rig.clone(), support::show_catalog()).unwrap();
         for frame in rendered {
             assert!(
                 frame.script_error.is_none(),

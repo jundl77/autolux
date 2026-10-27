@@ -4,7 +4,6 @@ use std::io::{Cursor, Read};
 
 use prost::Message;
 use starfire::engine::{Engine, MAX_SCRIPT_ERROR_BYTES};
-use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Target, TimedCommand, Transition,
 };
@@ -71,11 +70,8 @@ fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation 
 
 fn engine() -> Engine {
     Engine::new(
-        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
-        AutoloopCatalog::load(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
-        )
-        .unwrap(),
+        support::room(),
+        support::show_catalog(),
         support::palettes(),
     )
     .unwrap()
@@ -575,11 +571,8 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
-    let catalog = AutoloopCatalog::load(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"),
-    )
-    .unwrap();
+    let rig = support::room();
+    let catalog = support::show_catalog();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let mut controls = controls.into_iter().peekable();
@@ -654,7 +647,7 @@ fn attribute_engine() -> Engine {
         lua_source,
     };
     Engine::new(
-        FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap(),
+        support::room(),
         AutoloopCatalog::from_definitions(&[
             definition(
                 "atmospheric",
