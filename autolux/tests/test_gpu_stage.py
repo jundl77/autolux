@@ -366,8 +366,13 @@ def test_the_shipped_chain_runs_on_its_own_thread_and_its_vram_pool_settles(
     chain = section_chain.build_section_chain(watchdog=watchdog)
     assert isinstance(chain.stream, GpuStage)
 
+    # A GPU shared with the live show can stall passes for good; fail instead of hanging the run.
+    deadline = time.monotonic() + 300.0
+
     def wait_for_the_pass_the_disk_outran():
         while not chain.stream.idle:
+            if time.monotonic() > deadline:
+                pytest.fail(f'{chain.stream.passes} passes in 300 s; is the GPU shared?')
             time.sleep(0.001)
 
     try:
