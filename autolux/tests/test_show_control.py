@@ -1357,14 +1357,48 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
         )
 
     assert [shown(row) for row in rows] == [
-        ('all · Strobe burst', 'ready', '100.0%', True),
-        ('wash', 'ready', '100.0%', True),
+        ('all · Strobe burst', 'ready', '0.0%', True),
+        ('wash', 'ready', '0.0%', True),
         ('movers · Spin', '45 s', '50.0%', False),
-        ('fx · Cold drift', '180 s', '25.2%', False),
+        ('fx · Cold drift', '180 s', '74.8%', False),
     ]
     # The ticker in control.js reads these to count down between polls.
     props = rows[3].to_plotly_json()['props']
     assert (props['data-total'], props['data-remaining']) == (240, 179.5)
+
+
+def test_an_fx_effects_bar_drains_to_empty_in_a_colour_the_page_defines():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    def fill(total, remaining):
+        entry = {
+            'group': 'fx',
+            'last': 'drift',
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining <= 0,
+        }
+        [row] = _build_cooldowns({'special_cooldowns': [entry]})
+        return row.children[1].children.style['width']
+
+    # Full as the group fires, remaining/cooldown on the way, empty once ready.
+    assert [fill(240, r) for r in (240, 180, 60, 0)] == ['100.0%', '75.0%', '25.0%', '0.0%']
+
+    # The block sits outside #show-control, so every token the fill paints with must be set on
+    # .cooldowns or the row itself; an undefined var() would leave the bar transparent.
+    css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
+    rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
+    [paint] = [body for selector, body in rules.items() if selector.strip() == '.cooldown-fill']
+    background = re.search(r'background:\s*([^;]+);', paint).group(1)
+    assert 'transparent' not in background
+    scopes = [
+        body
+        for selector, body in rules.items()
+        if {'.cooldowns', '.cooldown-row'} & {part.strip() for part in selector.split(',')}
+    ]
+    defined = {name for body in scopes for name in re.findall(r'(--[\w-]+)\s*:', body)}
+    assert 'var(' in background
+    assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')

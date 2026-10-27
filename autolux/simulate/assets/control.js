@@ -193,7 +193,7 @@
     function cooldownView(total, remaining, elapsedSeconds) {
         const left = Math.max(0, remaining - elapsedSeconds);
         const ready = left <= 0;
-        const filled = ready || total <= 0 ? 1 : Math.max(0, 1 - left / total);
+        const filled = ready || total <= 0 ? 0 : Math.min(1, left / total);
         return {
             fill: (filled * 100).toFixed(1) + '%',
             caption: ready ? 'ready' : Math.ceil(left) + ' s',

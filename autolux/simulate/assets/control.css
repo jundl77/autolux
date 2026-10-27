@@ -198,8 +198,8 @@
 /* A running FX reads in the accent; "-" keeps the plain text colour. */
 .status-item.fx-running .status-text { color: #73b6ff; }
 
-/* FX Effects: one bar per fixture group, full once the group can fire a special again. Each
-   group keeps its own faint tint; a ready bar fills with the accent. */
+/* FX Effects: one bar per fixture group, full as the group fires and draining to an empty
+   track once it can fire a special again. Each group keeps its own tint. */
 .cooldowns { display: grid; gap: 12px; }
 .cooldown-row { --tint: var(--muted); }
 .cooldown-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
@@ -213,5 +213,4 @@
 .cooldown-track { height: 6px; border-radius: 3px; overflow: hidden;
                   background: color-mix(in srgb, var(--tint) 12%, var(--fill)); }
 .cooldown-fill { height: 100%; border-radius: 3px;
-                 background: color-mix(in srgb, var(--tint) 60%, var(--fill)); }
-.cooldown-row.ready .cooldown-fill { background: var(--accent); }
+                 background: color-mix(in srgb, var(--tint) 75%, var(--fill)); }

@@ -1751,8 +1751,8 @@ def _cooldown_bar(row: dict):
     # control.js ticks fill and caption down from these data attributes between polls and
     # mirrors the arithmetic here (cooldownView); keep the two in step.
     total, remaining = row['cooldown_seconds'], row['remaining_seconds']
-    # A group without any cooldown is always ready, so its bar is full.
-    elapsed = 1.0 if row['ready'] or total <= 0 else max(0.0, 1.0 - remaining / total)
+    # The bar drains: full as the group fires, empty once it is ready (or has no cooldown).
+    left = 0.0 if row['ready'] or total <= 0 else min(1.0, max(0.0, remaining / total))
     label = row['group']
     if row['last']:
         label += ' · ' + row['last'].replace('_', ' ').capitalize()
@@ -1769,7 +1769,7 @@ def _cooldown_bar(row: dict):
                 className='cooldown-head',
             ),
             html.Div(
-                html.Div(className='cooldown-fill', style={'width': f'{elapsed:.1%}'}),
+                html.Div(className='cooldown-fill', style={'width': f'{left:.1%}'}),
                 className='cooldown-track',
             ),
         ],
