@@ -567,31 +567,27 @@ fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
 }
 
 #[test]
-fn a_loop_naming_an_accent_group_is_refused_and_the_shipped_loops_name_none() {
-    let mut definition = support::room_definition();
-    let fx = definition
-        .groups
-        .iter()
-        .find(|group| group.group_id == "fx")
-        .unwrap();
-    assert_eq!(fx.role(), starfire::protocol::wire::GroupRole::Accent);
-    let room = FixtureRig::from_wire(&definition).unwrap();
-    support::show_catalog()
-        .require_no_accent_groups(&room)
-        .unwrap();
-    let named_fx =
-        catalog(r#"return {render = function(ctx) return {sf.dimmer(sf.group("fx"), 1)} end}"#);
-    assert_eq!(
-        named_fx
-            .require_no_accent_groups(&room)
-            .unwrap_err()
-            .to_string(),
-        "autoloops may not run on accent groups, which only play specials: test/autoloop names fx"
-    );
-    for group in &mut definition.groups {
-        group.role = 0;
+fn a_loop_reaching_an_accent_group_by_any_route_is_refused() {
+    let room = FixtureRig::from_wire(&support::room_definition()).unwrap();
+    assert!(room.is_accent("fx"));
+    for body in [
+        r#"return {sf.dimmer({ group = "fx" }, 1)}"#,
+        r#"local g = "fx"; return sf.each(sf.group(g), function(cell) return sf.dimmer(cell, 1) end)"#,
+        r#"return {sf.dimmer(sf.mirror({ group = "fx" })[1][1], 1)}"#,
+    ] {
+        let error = catalog(&format!("return {{render = function(ctx) {body} end}}"))
+            .instantiate("test", "autoloop", &room, &support::palettes())
+            .unwrap()
+            .render(&snapshot(0.0), &techno())
+            .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.starts_with("autoloop test/autoloop failed"),
+            "{error}"
+        );
+        assert!(
+            error.contains("accent group fx plays specials only, never autoloops"),
+            "{error}"
+        );
     }
-    named_fx
-        .require_no_accent_groups(&FixtureRig::from_wire(&definition).unwrap())
-        .unwrap();
 }

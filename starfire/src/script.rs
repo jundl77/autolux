@@ -190,27 +190,6 @@ impl AutoloopCatalog {
             .collect()
     }
 
-    /// Accent groups play specials only; a loop naming one is refused at login.
-    pub fn require_no_accent_groups(&self, rig: &FixtureRig) -> Result<()> {
-        let named: Vec<String> = self
-            .sources
-            .iter()
-            .flat_map(|((bank, autoloop), source)| {
-                referenced_groups(source)
-                    .filter(|group| rig.is_accent(group))
-                    .map(move |group| format!("{bank}/{autoloop} names {group}"))
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        ensure!(
-            named.is_empty(),
-            "autoloops may not run on accent groups, which only play specials: {}",
-            named.join(", ")
-        );
-        Ok(())
-    }
-
     pub fn instantiate(
         &self,
         bank: &str,
@@ -242,6 +221,16 @@ fn referenced_groups(source: &str) -> impl Iterator<Item = String> + '_ {
         let name = &call[1..];
         Some(name[..name.find(quote)?].to_owned())
     })
+}
+
+/// Checked wherever a loop resolves a target, so no way of naming an accent group escapes it.
+fn refuse_accent(rig: &FixtureRig, target: &Target) -> Result<()> {
+    match target {
+        Target::Group(group) if rig.is_accent(group) => {
+            bail!("accent group {group} plays specials only, never autoloops")
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_identifier(value: &str) -> Result<()> {
@@ -379,6 +368,7 @@ impl LuaAutoloop {
             "members",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
+                refuse_accent(&targets, &target).map_err(mlua::Error::external)?;
                 if matches!(&target, Target::Group(group) if !targets.groups().contains_key(group))
                 {
                     return lua.create_table();
@@ -397,6 +387,7 @@ impl LuaAutoloop {
             "mirror",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
+                refuse_accent(&spatial, &target).map_err(mlua::Error::external)?;
                 let named: Vec<(String, String)> = match &target {
                     Target::Group(group) => spatial
                         .spatial()
@@ -566,6 +557,8 @@ impl LuaAutoloop {
             _ => true,
         });
         for effect in &effects {
+            refuse_accent(&self.rig, &effect.target)
+                .with_context(|| format!("autoloop {} failed", self.identity))?;
             for id in self.rig.resolve(&effect.target)? {
                 self.rig
                     .validate_attributes(&id, &effect.values.attributes)?;
