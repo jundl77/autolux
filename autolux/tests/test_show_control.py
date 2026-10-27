@@ -15,10 +15,13 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
 )
 from autolux.lib.engine.event_buffer import EventBuffer
+from autolux.lib.engine.static_mode import STATIC_GROUP_PRIORITY
 from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer
 from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.visualizer_app import (
+    DIRECT_AUTO_JS,
+    FORM_SETTINGS,
     INTENSITY_LEVELS,
     PALETTE_POLICY,
     PALETTE_SYNC_JS,
@@ -36,6 +39,7 @@ from autolux.simulate.visualizer_app import (
     group_master_rows,
     setting_text,
     static_control_command,
+    with_control_flags,
 )
 from autolux.tests.test_static_mode import overrides, static_engine
 
@@ -112,7 +116,10 @@ def show():
             False,
             None,
             (30, 0.5, 2, 20, 6, 3),
-            {'action': 'settings', 'settings': ShowSettings(30.0, 0.5, 2.0, 0.2, 6.0, 3.0)},
+            {
+                'action': 'settings',
+                'settings': dict(zip(FORM_SETTINGS, (30.0, 0.5, 2.0, 0.2, 6.0, 3.0))),
+            },
         ),
     ],
 )
@@ -145,7 +152,9 @@ def test_a_comma_decimal_is_sent_as_the_same_number(show):
         'control-crossfade_beats', False, None, ('30', '0,5', '2', ' 15,5 ', '6', '3')
     )
     assert poller.control(command) == {'accepted': 'settings'}
-    assert commands.get_nowait()['settings'] == ShowSettings(30.0, 0.5, 2.0, 0.155, 6.0, 3.0)
+    assert commands.get_nowait()['settings'] == dict(
+        zip(FORM_SETTINGS, (30.0, 0.5, 2.0, 0.155, 6.0, 3.0))
+    )
 
 
 @pytest.mark.parametrize(
@@ -221,6 +230,47 @@ def test_an_expected_control_value_outlasts_one_stale_snapshot_until_confirmed_o
     assert expectations.apply(stale)['master_brightness'] == 1.0, 'an unconfirmed value expires'
 
 
+def test_a_held_chip_or_settings_field_outlasts_a_stale_poll_of_the_settings_it_lives_in():
+    now = [0.0]
+    expectations = ControlExpectations(hold_seconds=2.0, clock=lambda: now[0])
+    expectations.expect(fx_auto=False, settings={'crossfade_beats': 2.0})
+    stale = with_control_flags({'settings': {'crossfade_beats': 1.0, 'fx_auto': True}})
+    shown = expectations.apply(stale)
+    assert shown['fx_auto'] is False
+    assert shown['settings'] == {'crossfade_beats': 2.0, 'fx_auto': True}
+    landed = with_control_flags({'settings': {'crossfade_beats': 2.0, 'fx_auto': False}})
+    assert expectations.apply(landed) == landed
+    assert expectations.apply(stale) == stale, 'both confirmed, the poll rules again'
+
+
+def test_the_relay_holds_an_fx_click_on_the_chip_until_the_show_reports_it():
+    class Lagging(_Recorder):
+        def __init__(self):
+            super().__init__()
+            self.settings = {'fx_auto': True}
+
+        def snapshot(self):
+            return {'settings': dict(self.settings), 'master_brightness': 1.0}
+
+    source = Lagging()
+    app = build_app(source, direct_control=False)
+    refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
+    gate = {'tab': 'control', 'metrics': False, 'timeline': False}
+
+    def polled():
+        reply = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()
+        return reply['response']['control-state']['data']['fx_auto']
+
+    client = app.server.test_client()
+    reply = client.post('/control-relay', json={'action': 'fx_auto', 'enabled': False})
+    assert reply.get_json() == {'accepted': 'fx_auto'}
+    assert polled() is False, 'the engine has not published it yet'
+    source.settings = {'fx_auto': False}
+    assert polled() is False
+    source.settings = {'fx_auto': True}
+    assert polled() is True, 'confirmed once, the show rules the chip again'
+
+
 def test_each_accepted_command_names_the_value_the_show_should_report():
     settings = {'crossfade_beats': 2.0}
     assert expected_control_values({'action': 'pause'}, {'accepted': 'pause'}) == {'paused': True}
@@ -256,17 +306,13 @@ def test_unknown_palettes_are_refused_before_the_controller(show, name):
     assert commands.empty()
 
 
-def test_a_settings_change_keeps_the_intensity_the_fader_set(show):
+def test_a_settings_change_carries_only_the_form_so_a_stale_poll_cannot_undo_a_chip(show):
     poller, commands = show
     command = control_command(
-        'control-crossfade_beats',
-        False,
-        None,
-        ('30', '0.5', '2', '20', '6', '3', '3', '0'),
-        intensity=0.4,
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3', '3'), auto=True
     )
     assert poller.control(command) == {'accepted': 'settings'}
-    assert commands.get_nowait()['settings'].intensity == 0.4
+    assert set(commands.get_nowait()['settings']) == set(FORM_SETTINGS)
 
 
 def test_a_settings_change_from_an_old_panel_still_carrying_warmth_is_accepted(show):
@@ -276,7 +322,7 @@ def test_a_settings_change_from_an_old_panel_still_carrying_warmth_is_accepted(s
     )
     command['settings']['palette_temperature_bias'] = -0.5
     assert poller.control(command) == {'accepted': 'settings'}
-    assert 'palette_temperature_bias' not in commands.get_nowait()['settings'].to_dict()
+    assert 'palette_temperature_bias' not in commands.get_nowait()['settings']
 
 
 @pytest.mark.parametrize('level', [1.2, -0.1, '0.5', None])
@@ -334,9 +380,20 @@ def static_show():
             '#ffffff',
             {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.0},
         ),
-        ('static-preset-uv', 'wash', None, {'action': 'static', 'kind': 'preset', 'preset': 'uv'}),
-        ('static-blacklight', 'wash', None, {'action': 'static', 'kind': 'blacklight'}),
-        ('static-strobe', 'wash', None, {'action': 'static', 'kind': 'strobe'}),
+        ('static-preset-uv', 'all', None, {'action': 'static', 'kind': 'preset', 'preset': 'uv'}),
+        (
+            'static-preset-uv',
+            'wash',
+            None,
+            {
+                'action': 'static',
+                'kind': 'look',
+                'target': 'wash',
+                'colour': (0.0, 0.0, 0.0),
+                'dimmer': 1.0,
+                'uv': True,
+            },
+        ),
         (
             'static-colour',
             'wash',
@@ -385,8 +442,7 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
         o['value']['id']: o['value'] for o in overrides(lighting) if o['kind'] == 'set_override'
     }
     assert looks['static_wash']['target'] == {'group': 'wash'}
-    assert looks['static_floor']['target'] == 'all'
-    assert looks['static_floor']['values'] == {'intensity': 0.0}
+    assert 'static_floor' not in looks
 
 
 @pytest.mark.parametrize(
@@ -403,7 +459,7 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
         ),
         ({'action': 'static', 'kind': 'preset', 'preset': 'party'}, 'unknown static preset'),
         ({'action': 'static', 'kind': 'blackout', 'enabled': 1}, 'true or false'),
-        ({'action': 'static', 'kind': 'strobe', 'enabled': 'on'}, 'true or false'),
+        ({'action': 'static', 'kind': 'strobe'}, 'unknown static command'),
     ],
 )
 def test_malformed_static_commands_return_the_reason_and_queue_nothing(
@@ -601,12 +657,12 @@ def _static_targets(state):
 def test_static_targets_and_uv_chips_follow_the_published_rig():
     # Group names a venue might use that the room rig does not have.
     venue = {'targets': ['all', 'truss_a', 'floor_pars'], 'blacklight': False}
-    options, blacklight_off, uv_off = _static_targets({'mode': 'static', 'static': venue})
+    options, uv_off = _static_targets({'mode': 'static', 'static': venue})
     assert [option['value'] for option in options] == venue['targets']
     assert options[0]['label'] == 'All'
-    assert blacklight_off and uv_off
+    assert uv_off
     uv_rig = {'targets': ['all', 'uv_bar'], 'blacklight': True}
-    assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False, False]
+    assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False]
 
 
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
@@ -669,6 +725,8 @@ OPERATOR_CASES = [
         'all',
         'build.intensityAuto(false)',
     ),
+    ('control-fx-off.n_clicks', 1, AUTO_STATE, 'all', 'build.fxAuto(false)'),
+    ('control-fx-auto.n_clicks', 1, {**AUTO_STATE, 'fx_auto': False}, 'all', 'build.fxAuto(true)'),
     *[
         (f'{chip}.n_clicks', 1, STATIC_STATE, target, f"build.static('{chip}', '{target}')")
         for chip in STATIC_CHIP_IDS
@@ -785,18 +843,6 @@ def test_no_poll_output_writes_an_operator_control():
     app = build_app(_Recorder())
     owned = ('control-brightness.value', 'control-intensity.value', 'control-palette.value')
     assert not [key for key in app.callback_map for prop in owned if prop in key]
-
-
-@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_the_page_sends_the_strobe_state_it_wants_so_a_retry_cannot_flip_it(static_show):
-    poller, commands = static_show
-    start, stop = _run_control_js(
-        "console.log(JSON.stringify([control.build.static('static-strobe', 'all', false),"
-        " control.build.static('static-strobe', 'all', true)]));"
-    )
-    for command, enabled in ((start, True), (stop, False)):
-        assert poller.control(command) == {'accepted': 'static'}
-        assert commands.get_nowait() == {'action': 'static', 'kind': 'strobe', 'enabled': enabled}
 
 
 def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_poll():
@@ -933,7 +979,7 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
         master_brightness=1.0,
         settings={'drop_strobe_cooldown_seconds': 60.0, 'intensity': 0.7},
     )
-    assert 'FX' not in items(buffer.snapshot())
+    assert items(buffer.snapshot())['FX'] == '-'
     assert items(buffer.snapshot())['Strobe'] == 'ready'
     buffer.set_special('cold_spin', 'fx')
     buffer.mark_intense()
@@ -1030,7 +1076,7 @@ def test_the_status_line_reads_health_track_autoloop_colors_bpm_render_fps():
     ]
     assert captions == [
         ['Health', 'Track', 'Autoloop', 'Colors', 'FX', 'BPM', 'Render FPS'],
-        ['Health', 'Autoloop', 'Colors', 'BPM', 'Render FPS'],
+        ['Health', 'Autoloop', 'Colors', 'FX', 'BPM', 'Render FPS'],
     ]
     values = {
         item.children[0].children: item.children[1].children
@@ -1135,9 +1181,9 @@ globalThis.fetch = async (url) => {
     return {ok: true, status: 202, json: async () => ({accepted: 'static'})};
 };
 (async () => {
-    const early = await control.dispatch(control.build.static('static-colour', 'all', undefined, '#00ff00'));
+    const early = await control.dispatch(control.build.static('static-colour', 'all', '#00ff00'));
     control.operatorActs();
-    const late = await control.dispatch(control.build.static('static-colour', 'all', undefined, '#00ff00'));
+    const late = await control.dispatch(control.build.static('static-colour', 'all', '#00ff00'));
     console.log(JSON.stringify({early, late, urls}));
 })();
 """
@@ -1162,6 +1208,26 @@ def test_loading_the_page_and_its_first_poll_command_nothing():
     assert source.commands == []
     # In the browser path the Static tab's controls only reach the show through control.js.
     assert 'static-status.children' not in app.callback_map
+
+
+def test_clear_all_leads_the_static_action_row_in_the_quiet_style():
+    app = build_app(_Recorder())
+    row = app.layout['static-control'].children[0]
+    clear = row.children[0]
+    assert (clear.id, clear.className, clear.disabled) == ('static-clear', 'ghost-button', True)
+    assert 'static-clear.disabled' in app.callback_map
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_clear_all_is_dimmed_while_the_overlay_holds_nothing():
+    from autolux.simulate.visualizer_app import CLEAR_GATE_JS
+
+    rendered = _run_control_js(
+        f'const gate = {CLEAR_GATE_JS};\n'
+        "const states = [{mode: 'static'}, {mode: 'auto'}, null];\n"
+        'console.log(JSON.stringify(states.map((state) => gate(state))));'
+    )
+    assert rendered == [False, True, True]
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -1193,16 +1259,8 @@ def test_following_the_music_greys_the_segments_but_keeps_the_chosen_level_lit()
     assert 'control-intensity-set.className' in ' '.join(app.callback_map)
 
 
-def test_a_settings_edit_keeps_follow_the_music_on():
-    command = control_command(
-        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), auto=True
-    )
-    assert command['settings']['intensity_auto'] is True
-
-
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
-    from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.simulate.visualizer_app import FORM_SETTINGS, settings_text
+    from autolux.simulate.visualizer_app import settings_text
 
     source = _Recorder()
     app = build_app(source)
@@ -1218,9 +1276,114 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
 
     edited = {**shown, 'control-crossfade_beats': '2'}
     _run_callback(app, output, {**edited, 'control-state': state}, 'control-crossfade_beats.value')
-    assert source.commands == [
-        {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
+    assert source.commands == [{'action': 'settings', 'settings': {'crossfade_beats': 2.0}}]
+
+
+RED = {'red': 1.0, 'green': 0.0, 'blue': 0.0}
+BLACK = {'red': 0.0, 'green': 0.0, 'blue': 0.0}
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run the overlay banner')
+@pytest.mark.parametrize(
+    ('chip', 'target', 'values'),
+    [
+        ('static-preset-off', 'fx', {'intensity': 0.0}),
+        ('static-preset-off', 'movers', {'intensity': 0.0}),
+        ('static-preset-red', 'strip', {'colour': RED, 'intensity': 1.0}),
+        (
+            'static-preset-uv',
+            'wash',
+            {'colour': BLACK, 'intensity': 1.0, 'attributes': {'ColorAdd_UV': 255.0}},
+        ),
+    ],
+)
+async def test_a_preset_on_a_group_target_changes_only_that_group(
+    static_show, chip, target, values
+):
+    from autolux.simulate.visualizer_app import OVERLAY_BANNER_JS
+
+    poller, commands = static_show
+    assert poller.control(static_control_command(chip, target, None)) == {'accepted': 'static'}
+    light, _, _, lighting = static_engine()
+    apply_static(light, commands.get_nowait())
+    await light.sync_static()
+    assert light.mode == 'static'
+    # Every other group keeps what it showed: no dark floor, no whole-rig look, no blackout.
+    assert overrides(lighting) == [
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': f'static_{target}',
+                'target': {'group': target},
+                'values': values,
+                'priority': STATIC_GROUP_PRIORITY,
+            },
+        }
     ]
+    assert not light.static_looks.blackout
+    state = {'mode': 'static', 'static': light.static_looks.state()}
+    banner = _run_control_js(
+        f'const banner = {OVERLAY_BANNER_JS};\n'
+        f'console.log(JSON.stringify(banner({json.dumps(state)})));'
+    )
+    assert banner == [{}, 'Static overlay active · 1 look']
+
+
+def test_the_auto_tab_has_fx_auto_and_off_chips_and_fx_defaults_to_auto():
+    from autolux.simulate.visualizer_app import FX_AUTO_IDS, FX_SYNC_JS
+
+    app = build_app(_Recorder())
+    assert [app.layout[name].children for name in FX_AUTO_IDS] == ['Auto', 'Off']
+    states = [{'settings': {}}, {'settings': {}, 'fx_auto': False}, None]
+    if NODE is not None:
+        synced = _run_control_js(
+            f'const sync = {FX_SYNC_JS};\n'
+            f'console.log(JSON.stringify({json.dumps(states)}.map((s) => sync(s))));'
+        )
+        assert synced == [['active', ''], ['', 'active'], ['', '']]
+    off = control_command('control-fx-off', False, None, ())
+    assert off == {'action': 'fx_auto', 'enabled': False}
+    # Sent even when the last poll says the show has it: that poll may be stale.
+    assert control_command('control-fx-auto', False, None, ()) == {
+        'action': 'fx_auto',
+        'enabled': True,
+    }
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_an_fx_chip_click_dispatches_whatever_the_page_last_polled():
+    # No poll yet, a state from before the chips, and one that already reports the value.
+    states = [None, {'settings': {}}, {'settings': {'fx_auto': True}, 'fx_auto': True}]
+    clicks = [(state, chip) for state in states for chip in ('control-fx-off', 'control-fx-auto')]
+    result = _run_control_js(
+        f'''
+window.autoluxControlConfig = {{direct: true, bridgePort: 8766}};
+globalThis.location = {{protocol: 'http:', hostname: 'autolux.local'}};
+const sent = [];
+const classes = [];
+globalThis.fetch = async (url, options) => {{
+    sent.push(JSON.parse(options.body));
+    return {{ok: true, status: 202, json: async () => ({{accepted: 'fx_auto'}})}};
+}};
+const clicked = {DIRECT_AUTO_JS};
+window.dash_clientside = {{
+    no_update: null,
+    set_props: (id, props) => classes.push([id, props.className]),
+}};
+(async () => {{
+    control.operatorActs();
+    for (const [state, chip] of {json.dumps(clicks)}) {{
+        window.dash_clientside.callback_context = {{triggered: [{{prop_id: chip + '.n_clicks'}}]}};
+        clicked(null, null, null, null, null, 1, 1, state);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }}
+    console.log(JSON.stringify({{sent, classes, shown: control.view({{fx_auto: false}})}}));
+}})();
+'''
+    )
+    assert result['sent'] == [{'action': 'fx_auto', 'enabled': on} for on in (False, True)] * 3
+    assert result['classes'][:2] == [['control-fx-auto', ''], ['control-fx-off', 'active']]
+    assert result['shown'] == {'fx_auto': True}, 'the last click holds until the show reports it'
 
 
 def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():

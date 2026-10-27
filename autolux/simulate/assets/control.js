@@ -20,8 +20,7 @@
             document.addEventListener(type, operatorActs, {capture: true, once: true}));
     }
 
-    // strobeActive: whether the page shows the strobe running; omitted, the command toggles.
-    function staticCommand(trigger, target, strobeActive, colour) {
+    function staticCommand(trigger, target, colour) {
         const all = config().allFixtures || 'all';
         const colours = config().presetColours || {};
         if (trigger.startsWith('static-preset-')) {
@@ -31,6 +30,12 @@
             }
             if (target !== all && preset === 'off') {
                 return {action: 'static', kind: 'look', target: target, dimmer: 0.0};
+            }
+            if (target !== all && preset === 'uv') {
+                return {
+                    action: 'static', kind: 'look', target: target,
+                    colour: '#000000', dimmer: 1.0, uv: true,
+                };
             }
             return {action: 'static', kind: 'preset', preset: preset};
         }
@@ -46,14 +51,6 @@
                 action: 'static', kind: 'look', target: target,
                 colour: '#' + text.replace(/^#/, '').toLowerCase(),
             };
-        }
-        if (trigger === 'static-blacklight') {
-            return {action: 'static', kind: 'blacklight'};
-        }
-        if (trigger === 'static-strobe') {
-            return typeof strobeActive === 'boolean'
-                ? {action: 'static', kind: 'strobe', enabled: !strobeActive}
-                : {action: 'static', kind: 'strobe'};
         }
         return null;
     }
@@ -94,6 +91,7 @@
         master: (level) => ({action: 'master', level: level}),
         intensity: (level) => ({action: 'intensity', level: level}),
         intensityAuto: (enabled) => ({action: 'intensity_auto', enabled: enabled}),
+        fxAuto: (enabled) => ({action: 'fx_auto', enabled: enabled}),
         static: staticCommand,
         fx: fxCommand,
     };

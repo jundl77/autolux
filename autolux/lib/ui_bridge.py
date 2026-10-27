@@ -97,7 +97,14 @@ def parse_control_command(payload) -> dict:
             raise ValueError('intensity must be within 0..1')
         return {'action': action, 'level': float(level)}
     if action == 'settings':
-        return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
+        # Only the named fields change: a panel's stale fx_auto, intensity or follow-the-music
+        # flag must never undo the chip that owns it.
+        changes = payload.get('settings')
+        validated = ShowSettings.from_dict(changes).to_dict()
+        return {
+            'action': action,
+            'settings': {name: value for name, value in validated.items() if name in changes},
+        }
     if action == 'palette':
         name = payload.get('name')
         if name != PALETTE_POLICY and name not in PALETTE_NAMES:
@@ -105,9 +112,9 @@ def parse_control_command(payload) -> dict:
                 f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
             )
         return {'action': action, 'name': name}
-    if action == 'intensity_auto':
+    if action in ('intensity_auto', 'fx_auto'):
         if type(payload.get('enabled')) is not bool:
-            raise ValueError('intensity_auto must be true or false')
+            raise ValueError(f'{action} must be true or false')
         return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
@@ -118,19 +125,11 @@ def _static_command(payload: dict) -> dict:
     from autolux.lib.engine.static_mode import PRESETS
 
     kind = payload.get('kind')
-    if kind in ('blacklight', 'clear', 'special_fx_clear'):
+    if kind in ('clear', 'special_fx_clear'):
         return {'kind': kind}
     if kind == 'special_fx':
         fields = ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
         return {'kind': kind, **{name: payload.get(name) for name in fields}}
-    if kind == 'strobe':
-        # The page sends the state it wants, so a retried request cannot flip the strobe twice.
-        enabled = payload.get('enabled')
-        if enabled is None:
-            return {'kind': kind}
-        if type(enabled) is not bool:
-            raise ValueError('strobe must be true or false')
-        return {'kind': kind, 'enabled': enabled}
     if kind == 'blackout':
         if type(payload.get('enabled')) is not bool:
             raise ValueError('blackout must be true or false')
@@ -152,12 +151,17 @@ def _static_command(payload: dict) -> dict:
         raise ValueError('a static dimmer must be within 0..1')
     if colour is None and dimmer is None:
         raise ValueError('a static look needs a colour or a dimmer')
-    return {
+    look = {
         'kind': kind,
         'target': target,
         'colour': colour,
         'dimmer': None if dimmer is None else float(dimmer),
     }
+    if 'uv' in payload:
+        if type(payload['uv']) is not bool:
+            raise ValueError('uv must be true or false')
+        look['uv'] = payload['uv']
+    return look
 
 
 def command_refusal(

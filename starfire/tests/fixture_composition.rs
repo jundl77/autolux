@@ -193,7 +193,14 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
     expected.get_mut(&0).unwrap()[5] = 32;
     assert_eq!(held.dmx_frames_by_universe, expected);
     engine
-        .apply(0.25, &Command::ClearOverride { id: "red".into() })
+        .apply(
+            0.25,
+            &Command::ClearOverride {
+                id: "red".into(),
+                release_beats: None,
+                release_seconds: None,
+            },
+        )
         .unwrap();
     assert_eq!(
         engine.render_at(0.5).unwrap().dmx_frames_by_universe,

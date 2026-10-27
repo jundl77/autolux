@@ -25,7 +25,7 @@ from autolux.lib.engine.effect_definitions import (
     WILD,
 )
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
-from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
+from autolux.lib.engine.static_mode import ALL_FIXTURES, BLACK, PRESET_COLOURS, colour_hex
 from autolux.lib.media_session import MEDIA_SESSION_SOURCE
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
@@ -629,10 +629,8 @@ def _build_show_status(snapshot: dict, now: float) -> list:
             ],
         ),
     ]
-    fx = _fx_text(snapshot)
-    if fx:
-        items.append(_status_item('FX', fx, id='status-fx'))
     items += [
+        _status_item('FX', _fx_text(snapshot) or '-', id='status-fx'),
         _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
         _status_item('Render FPS', render_rate_text(fps)),
     ]
@@ -681,6 +679,8 @@ SETTINGS_ORDER = (
 SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
 INTENSITY_TRIGGERS = ('control-intensity',)
+# FX chips: automatic specials on or off.
+FX_AUTO_IDS = {'control-fx-auto': True, 'control-fx-off': False}
 INTENSITY_LEVELS = (
     (CALM, INTENSITY_CALM),
     (BALANCED, INTENSITY_BALANCED),
@@ -717,11 +717,25 @@ class ControlExpectations:
         held = {}
         with self._lock:
             for key, (value, at) in list(self._expected.items()):
-                if snapshot.get(key) == value or now - at >= self._hold_seconds:
+                reported = snapshot.get(key)
+                # A settings command names only the fields it changes.
+                partial = isinstance(value, dict) and isinstance(reported, dict)
+                confirmed = value.items() <= reported.items() if partial else reported == value
+                if confirmed or now - at >= self._hold_seconds:
                     del self._expected[key]
                 else:
-                    held[key] = value
+                    held[key] = {**reported, **value} if partial else value
         return {**snapshot, **held}
+
+
+def with_control_flags(snapshot: dict) -> dict:
+    # Lifted beside the settings they live in, so a held chip value can win over a stale poll.
+    settings = snapshot.get('settings') or {}
+    return {
+        **snapshot,
+        'intensity_auto': bool(settings.get('intensity_auto')),
+        'fx_auto': settings.get('fx_auto') is not False,
+    }
 
 
 def expected_control_values(command: dict, reply: dict) -> dict:
@@ -732,8 +746,8 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'master_brightness': command['level']}
     if action == 'settings':
         return {'settings': command['settings']}
-    if action == 'intensity_auto':
-        return {'intensity_auto': command['enabled']}
+    if action in ('intensity_auto', 'fx_auto'):
+        return {action: command['enabled']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
     return {}
@@ -766,10 +780,19 @@ def parse_decimal(name: str, raw) -> float:
 
 
 def control_command(
-    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY, auto=False
+    trigger,
+    paused,
+    level,
+    settings,
+    *,
+    palette=None,
+    auto=False,
 ) -> dict | None:
     if trigger == 'control-intensity-auto':
         return {'action': 'intensity_auto', 'enabled': not auto}
+    if trigger in FX_AUTO_IDS:
+        # Sent on every click: a stale poll must not decide that the show already has it.
+        return {'action': 'fx_auto', 'enabled': FX_AUTO_IDS[trigger]}
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger == 'control-next':
@@ -784,9 +807,7 @@ def control_command(
         return {
             'action': 'settings',
             'settings': {
-                **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
-                'intensity': intensity,
-                'intensity_auto': auto,
+                name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)
             },
         }
     return None
@@ -796,8 +817,8 @@ def settings_edit(name: str, raw, state: dict) -> dict | None:
     """The settings command for one edited field, or None when it still shows the show's value.
 
     A field the poll filled (or the browser restored) reads exactly the show's own text, so
-    only an operator's change goes out; every other setting is sent as the show reported it,
-    not as its rounded text.
+    only an operator's change goes out, and only that field: the show keeps every other
+    setting as it has it, never a stale poll's copy.
     """
     current = state.get('settings')
     if not current or str(raw).strip() == (state.get('settings_text') or {}).get(name):
@@ -805,7 +826,7 @@ def settings_edit(name: str, raw, state: dict) -> dict | None:
     value = parse_decimal(name, raw)
     if value == current.get(name):
         return None
-    return {'action': 'settings', 'settings': {**current, name: value}}
+    return {'action': 'settings', 'settings': {name: value}}
 
 
 def group_master_edit(group: str, level, state: dict) -> dict | None:
@@ -1086,6 +1107,17 @@ def _build_control_card() -> list:
                                     disabled=True,
                                 ),
                                 html.Span(id='control-intensity-value', className='fader-value'),
+                                html.Span('FX', className='control-label'),
+                                html.Button(
+                                    'Auto',
+                                    id='control-fx-auto',
+                                    title='The show picks FX for each section',
+                                ),
+                                html.Button(
+                                    'Off',
+                                    id='control-fx-off',
+                                    title='No automatic FX; a running one ends with its section',
+                                ),
                                 html.Span('Colors', className='control-label'),
                                 dcc.Dropdown(
                                     id='control-palette',
@@ -1128,7 +1160,7 @@ STATIC_PRESETS = {
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
 # Targets and UV come from the rig the show published; a rig without UV fixtures
-# greys both UV chips rather than offering commands the show would refuse.
+# greys the UV chip rather than offering commands the show would refuse.
 STATIC_TARGETS_JS = (
     '''function(state) {
     const all = '''
@@ -1138,12 +1170,10 @@ STATIC_TARGETS_JS = (
     const statics = ready ? state.static : {targets: [all], blacklight: false};
     const options = statics.targets.map((target) =>
         ({label: target === all ? 'All' : target, value: target}));
-    return [options, !statics.blacklight, !statics.blacklight];
+    return [options, !statics.blacklight];
 }'''
 )
 STATIC_BUTTONS = {
-    'static-blacklight': 'blacklight',
-    'static-strobe': 'strobe',
     'static-clear': 'clear',
     'static-banner-clear': 'clear',
 }
@@ -1186,6 +1216,15 @@ def static_control_command(trigger, target, colour) -> dict | None:
             }
         if target != ALL_FIXTURES and preset == 'off':
             return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': 0.0}
+        if target != ALL_FIXTURES and preset == 'uv':
+            return {
+                'action': 'static',
+                'kind': 'look',
+                'target': target,
+                'colour': colour_hex(BLACK),
+                'dimmer': 1.0,
+                'uv': True,
+            }
         return {'action': 'static', 'kind': 'preset', 'preset': preset}
     if trigger in STATIC_BUTTONS:
         return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
@@ -1300,6 +1339,13 @@ def _build_static_panel():
         [
             html.Div(
                 [
+                    html.Button(
+                        'Clear all',
+                        id='static-clear',
+                        title='Remove every static look and show the automatic show again',
+                        className='ghost-button',
+                        disabled=True,
+                    ),
                     *[
                         html.Button(label, id=f'static-preset-{name}')
                         for name, label in STATIC_PRESETS.items()
@@ -1312,12 +1358,6 @@ def _build_static_panel():
                         # Restoring the last chosen colour sends nothing: the callback skips initial calls.
                         persistence=True,
                         persistence_type='local',
-                    ),
-                    html.Button(
-                        'Clear all',
-                        id='static-clear',
-                        title='Remove every static look and show the automatic show again',
-                        style={'marginLeft': 'auto'},
                     ),
                 ],
                 className='control-row',
@@ -1332,13 +1372,6 @@ def _build_static_panel():
                         inline=True,
                         className='segmented',
                     ),
-                ],
-                className='control-row',
-            ),
-            html.Div(
-                [
-                    html.Button('Blacklight', id='static-blacklight', title='UV ignores master'),
-                    html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
                 ],
                 className='control-row',
             ),
@@ -1367,6 +1400,13 @@ OVERLAY_BANNER_JS = (
 )
 
 
+# Clear all has nothing to remove once the show is back on auto.
+CLEAR_GATE_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    return !(state && state.mode === 'static');
+}'''
+
+
 def _build_overlay_banner():
     return html.Div(
         [
@@ -1387,10 +1427,20 @@ FOLLOW_SYNC_JS = '''function(state) {
 }'''
 
 
-def _register_direct_auto_controls(app) -> None:
-    # Visual state flips here at click time; the bridge round trip never gates it.
-    app.clientside_callback(
-        """function(toggles, nexts, palette, intensity, follows, state) {
+# Before the first poll neither chip is lit, as the show's choice is not known yet.
+FX_SYNC_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    if (!state || !state.settings) {
+        return ['', ''];
+    }
+    const on = state.fx_auto !== false;
+    return [on ? 'active' : '', on ? '' : 'active'];
+}'''
+
+
+# The Auto tab's clicks in the browser path.
+DIRECT_AUTO_JS = (
+    """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
             const triggered = (window.dash_clientside.callback_context.triggered || [])
@@ -1416,11 +1466,22 @@ def _register_direct_auto_controls(app) -> None:
             } else if (triggered.includes('control-palette.value')) {
                 const pin = shown.palette || {};
                 const current = pin.pinned ? pin.name : """
-        + json.dumps(PALETTE_POLICY)
-        + """;
+    + json.dumps(PALETTE_POLICY)
+    + """;
                 if (palette && palette !== current) {
                     control.dispatch(control.build.palette(palette), status);
                 }
+            } else if (triggered.includes('control-fx-auto.n_clicks')
+                    || triggered.includes('control-fx-off.n_clicks')) {
+                // Every click goes out: the poll can be missing or stale, the show ignores a
+                // repeat.
+                const enabled = triggered.includes('control-fx-auto.n_clicks');
+                control.hold({fx_auto: enabled});
+                window.dash_clientside.set_props(
+                    'control-fx-auto', {className: enabled ? 'active' : ''});
+                window.dash_clientside.set_props(
+                    'control-fx-off', {className: enabled ? '' : 'active'});
+                control.dispatch(control.build.fxAuto(enabled), status, ['fx_auto']);
             } else if (triggered.includes('control-intensity-auto.n_clicks')) {
                 const enabled = !shown.intensity_auto;
                 control.hold({intensity_auto: enabled});
@@ -1440,7 +1501,14 @@ def _register_direct_auto_controls(app) -> None:
                 }
             }
             return [nu, nu];
-        }""",
+        }"""
+)
+
+
+def _register_direct_auto_controls(app) -> None:
+    # Visual state flips here at click time; the bridge round trip never gates it.
+    app.clientside_callback(
+        DIRECT_AUTO_JS,
         Output('control-toggle', 'children', allow_duplicate=True),
         Output('control-toggle', 'className', allow_duplicate=True),
         Input('control-toggle', 'n_clicks'),
@@ -1448,6 +1516,7 @@ def _register_direct_auto_controls(app) -> None:
         Input('control-palette', 'value'),
         Input('control-intensity', 'value'),
         Input('control-intensity-auto', 'n_clicks'),
+        *[Input(name, 'n_clicks') for name in FX_AUTO_IDS],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
@@ -1466,13 +1535,12 @@ def _register_direct_static_controls(app) -> None:
             const colour = args[ids.length];
             const target = args[ids.length + 1];
             const classes = args.slice(ids.length + 2, 2 * ids.length + 2);
-            const state = control.view(args[2 * ids.length + 2]) || {};
             const triggered = (window.dash_clientside.callback_context.triggered || [])
                 .map((t) => t.prop_id.split('.')[0]);
             const chip = ids.find((id) => triggered.includes(id));
             if (!chip) {
                 if (triggered.includes('static-colour')) {
-                    const look = control.build.static('static-colour', target, undefined, colour);
+                    const look = control.build.static('static-colour', target, colour);
                     if (look) {
                         control.dispatch(look, 'static-status');
                     }
@@ -1480,8 +1548,7 @@ def _register_direct_static_controls(app) -> None:
                 return classes.map(() => window.dash_clientside.no_update);
             }
             const before = classes[ids.indexOf(chip)] || '';
-            const strobing = before === 'active';
-            const command = control.build.static(chip, target, strobing);
+            const command = control.build.static(chip, target);
             if (command.kind === 'clear') {
                 control.hold({mode: 'auto'});
                 control.dispatch(command, 'static-status', ['mode']);
@@ -1492,29 +1559,13 @@ def _register_direct_static_controls(app) -> None:
                     window.dash_clientside.set_props(chip, {className: before});
                 }
             });
-            if (chip === 'static-strobe') {
-                const token = window.autoluxStrobeToken = (window.autoluxStrobeToken || 0) + 1;
-                const settings = state.settings || {};
-                const burst = (settings.strobe_max_burst_seconds || 0) * (settings.intensity || 0);
-                if (!strobing && burst > 0) {
-                    // The show ends the burst on its own; the chip follows it.
-                    setTimeout(() => {
-                        if (window.autoluxStrobeToken === token) {
-                            window.dash_clientside.set_props(chip, {className: ''});
-                        }
-                    }, burst * 1000);
-                }
-                return ids.map((id, i) => id === chip ? (strobing ? '' : 'active') : classes[i] || '');
-            }
-            return ids.map((id, i) => id === chip ? 'active'
-                : id === 'static-strobe' ? classes[i] || '' : '');
+            return ids.map((id) => id === chip ? 'active' : '');
         }""",
         *[Output(name, 'className') for name in STATIC_CHIP_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
         Input('static-colour', 'value'),
         State('static-target', 'value'),
         *[State(name, 'className') for name in STATIC_CHIP_IDS],
-        State('control-state', 'data'),
         prevent_initial_call=True,
     )
 
@@ -1599,7 +1650,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
     app.clientside_callback(
         STATIC_TARGETS_JS,
         Output('static-target', 'options'),
-        Output('static-blacklight', 'disabled'),
         Output('static-preset-uv', 'disabled'),
         Input('control-state', 'data'),
     )
@@ -1607,6 +1657,11 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         OVERLAY_BANNER_JS,
         Output('static-banner', 'style'),
         Output('static-banner-text', 'children'),
+        Input('control-state', 'data'),
+    )
+    app.clientside_callback(
+        CLEAR_GATE_JS,
+        Output('static-clear', 'disabled'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(
@@ -2533,7 +2588,9 @@ def build_app(
     def refresh(requested):
         if not requested or requested.get('tab') not in ('control', 'telemetry'):
             raise dash.exceptions.PreventUpdate
-        snap = expectations.apply(_with_base_palette(snapshot_source.snapshot()))
+        snap = expectations.apply(
+            with_control_flags(_with_base_palette(snapshot_source.snapshot()))
+        )
         now = time.time()
         sync = status = show_timing = decoder = cooldowns = dash.no_update
         timeline = dash.no_update
@@ -2558,10 +2615,11 @@ def build_app(
                         'mode',
                         'static',
                         'special_groups',
+                        'intensity_auto',
+                        'fx_auto',
                     )
                 }
                 settings = control['settings'] or {}
-                control['intensity_auto'] = bool(settings.get('intensity_auto'))
                 control['settings_text'] = settings_text(settings)
             if requested.get('timeline') or not on_control:
                 timeline = _build_timeline(snap)
@@ -2716,6 +2774,11 @@ def build_app(
         Output('control-intensity-set', 'className'),
         Input('control-state', 'data'),
     )
+    app.clientside_callback(
+        FX_SYNC_JS,
+        *[Output(name, 'className') for name in FX_AUTO_IDS],
+        Input('control-state', 'data'),
+    )
 
     operator_inputs = (
         []
@@ -2728,6 +2791,7 @@ def build_app(
             Input('control-brightness-live', 'data'),
             Input('control-intensity', 'value'),
             Input('control-intensity-auto', 'n_clicks'),
+            *[Input(name, 'n_clicks') for name in FX_AUTO_IDS],
         ]
     )
 
@@ -2769,7 +2833,6 @@ def build_app(
                     level,
                     settings,
                     palette=palette,
-                    intensity=intensity,
                     auto=bool(state.get('intensity_auto')),
                 )
         except ValueError as error:
