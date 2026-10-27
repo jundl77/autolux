@@ -99,7 +99,7 @@ message LoginReply {
 // Special axes at least one fixture in the group can express; energy always can.
 message GroupCapability {
   string name = 1;
-  uint32 fixture_count = 2;
+  uint32 cell_count = 2;
   bool colour = 3;
   bool speed = 4;
   bool pulse = 5;

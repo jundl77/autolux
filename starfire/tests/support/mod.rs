@@ -24,8 +24,24 @@ pub fn room() -> FixtureRig {
     FixtureRig::load(&rig_folder().join("room.rig.pb")).unwrap()
 }
 
-/// A shipped fixture type's GDTF description and mode, as the exported rigs carry them.
-pub fn catalogue_profile(fixture_type: &str) -> Option<(String, String)> {
+/// A synthetic GDTF test description's mode as Autolux compiles it, named `profile_id`.
+/// `source` is `<file stem>#<mode>` under autolux/tests/data/gdtf; regenerate the fixture with
+/// `python tools/compile_test_profiles.py`.
+pub fn compiled_profile(source: &str, profile_id: &str) -> wire::FixtureProfile {
+    let rig =
+        wire::RigDefinition::decode(include_bytes!("../data/compiled_profiles.pb").as_slice())
+            .unwrap();
+    let mut profile = rig
+        .profiles
+        .into_iter()
+        .find(|profile| profile.profile_id == source)
+        .unwrap_or_else(|| panic!("no compiled test profile {source}"));
+    profile.profile_id = profile_id.into();
+    profile
+}
+
+/// A shipped fixture type's compiled mode, as the exported rigs carry it, named `fixture_type`.
+pub fn catalogue_profile(fixture_type: &str) -> Option<wire::FixtureProfile> {
     let (_, spec) = SHIPPED_TYPES
         .iter()
         .find(|(name, _)| *name == fixture_type)?;
@@ -39,7 +55,10 @@ pub fn catalogue_profile(fixture_type: &str) -> Option<(String, String)> {
         rig.profiles
             .into_iter()
             .find(|profile| profile.profile_id.split_once('#').map(|(file, _)| file) == Some(spec))
-            .map(|profile| (profile.gdtf_xml, profile.dmx_mode))
+            .map(|profile| wire::FixtureProfile {
+                profile_id: fixture_type.into(),
+                ..profile
+            })
     })
 }
 
@@ -101,15 +120,12 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
             pan: range("pan"),
             tilt: range("tilt"),
             matrix: matrix(fixture),
+            cells: Vec::new(),
         });
         if !rig.profiles.iter().any(|known| known.profile_id == profile)
-            && let Some((gdtf_xml, dmx_mode)) = catalogue_profile(profile)
+            && let Some(found) = catalogue_profile(profile)
         {
-            rig.profiles.push(wire::FixtureProfile {
-                profile_id: profile.into(),
-                gdtf_xml,
-                dmx_mode,
-            });
+            rig.profiles.push(found);
         }
     }
     if let Some(groups) = spec.get("groups").and_then(Value::as_object) {

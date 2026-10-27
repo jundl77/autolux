@@ -14,7 +14,8 @@ when a fixture first uses it, so a rig rebuilt from the library exports the same
 Autolux is the only MVR reader (`autolux/lighting/mvr*.py`). It validates the archive and
 fills the `RigDefinition` proto: one `Fixture` per patched MVR Fixture (name,
 `GDTFSpec#GDTFMode` profile, universe/address, scene-space `matrix`, DMXInvertPan/Tilt
-and Autolux movement limits), classes as groups, embedded GDTF XML as profiles. Login
+and Autolux movement limits), classes as groups, each embedded GDTF's mode compiled to a
+typed `DmxMode` as profiles. Login
 carries it; the offline `starfire check`, `rig` and `replay` commands read the same
 message serialized to a file (`autolux starfire export-rig rig.mvr rig.rig.pb`; the
 Autolux CLI exports to a temporary file automatically). `FixtureRig::from_wire` is the

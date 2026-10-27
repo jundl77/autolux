@@ -43,7 +43,17 @@ def test_fixture_draft_integrity(tmp_path):
             for rotation in PARITY_ROTATIONS
         ],
         'patched': [
-            [fixture['name'], fixture['universe'], fixture['address']]
+            [
+                fixture['name'],
+                fixture['universe'],
+                fixture['address'],
+                [
+                    cell['geometry']
+                    for cell in mvr.gdtf_modes(mvr.gdtf_description(room, fixture['gdtf_spec']))[
+                        fixture['gdtf_mode']
+                    ]['cells']
+                ],
+            ]
             for fixture in mvr.patched_fixtures(room)
         ],
     }

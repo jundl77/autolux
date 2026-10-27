@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GDTF DataVersion="1.2">
+  <FixtureType Name="Test Pixel Bar" ShortName="Pixel Bar" LongName="Test Pixel Bar" Manufacturer="Generic" Description="Two RGB pixels under a master dimmer" FixtureTypeID="5e0f3c1a-9b7d-4c2e-8a61-2f4d9c7b1e03" CanHaveChildren="No">
+    <AttributeDefinitions>
+      <ActivationGroups><ActivationGroup Name="ColorRGB"/></ActivationGroups>
+      <FeatureGroups>
+        <FeatureGroup Name="Dimmer" Pretty="Dimmer"><Feature Name="Dimmer"/></FeatureGroup>
+        <FeatureGroup Name="Color" Pretty="Color"><Feature Name="RGB"/></FeatureGroup>
+      </FeatureGroups>
+      <Attributes>
+        <Attribute Name="Dimmer" Pretty="Dim" Feature="Dimmer.Dimmer" PhysicalUnit="None"/>
+        <Attribute Name="ColorAdd_R" Pretty="R" ActivationGroup="ColorRGB" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
+        <Attribute Name="ColorAdd_G" Pretty="G" ActivationGroup="ColorRGB" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
+        <Attribute Name="ColorAdd_B" Pretty="B" ActivationGroup="ColorRGB" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
+      </Attributes>
+    </AttributeDefinitions>
+    <Geometries>
+      <Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}">
+        <Beam Name="Pixel 1" Position="{1,0,0,-0.1}{0,1,0,0}{0,0,1,0}{0,0,0,1}" LampType="LED" BeamType="Wash"/>
+        <Beam Name="Pixel 2" Position="{1,0,0,0.1}{0,1,0,0}{0,0,1,0}{0,0,0,1}" LampType="LED" BeamType="Wash"/>
+      </Geometry>
+    </Geometries>
+    <DMXModes>
+      <DMXMode Name="Pixels" Description="Two RGB pixels" Geometry="Base">
+        <DMXChannels>
+          <DMXChannel DMXBreak="1" Offset="1" Geometry="Pixel 1" InitialFunction="Pixel 1_ColorAdd_R.ColorAdd_R.R" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_R" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="R" Attribute="ColorAdd_R" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="2" Geometry="Pixel 1" InitialFunction="Pixel 1_ColorAdd_G.ColorAdd_G.G" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_G" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="G" Attribute="ColorAdd_G" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="3" Geometry="Pixel 1" InitialFunction="Pixel 1_ColorAdd_B.ColorAdd_B.B" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_B" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="B" Attribute="ColorAdd_B" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="4" Geometry="Pixel 2" InitialFunction="Pixel 2_ColorAdd_R.ColorAdd_R.R" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_R" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="R" Attribute="ColorAdd_R" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="5" Geometry="Pixel 2" InitialFunction="Pixel 2_ColorAdd_G.ColorAdd_G.G" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_G" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="G" Attribute="ColorAdd_G" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="6" Geometry="Pixel 2" InitialFunction="Pixel 2_ColorAdd_B.ColorAdd_B.B" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_B" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="B" Attribute="ColorAdd_B" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+        </DMXChannels>
+      </DMXMode>
+      <DMXMode Name="Mastered" Description="A master dimmer then two RGB pixels" Geometry="Base">
+        <DMXChannels>
+          <DMXChannel DMXBreak="1" Offset="1" Geometry="Base" InitialFunction="Base_Dimmer.Dimmer.Dimmer" Highlight="None">
+            <LogicalChannel Attribute="Dimmer" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="Dimmer" Attribute="Dimmer" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="2" Geometry="Pixel 1" InitialFunction="Pixel 1_ColorAdd_R.ColorAdd_R.R" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_R" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="R" Attribute="ColorAdd_R" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="3" Geometry="Pixel 1" InitialFunction="Pixel 1_ColorAdd_G.ColorAdd_G.G" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_G" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="G" Attribute="ColorAdd_G" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="4" Geometry="Pixel 1" InitialFunction="Pixel 1_ColorAdd_B.ColorAdd_B.B" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_B" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="B" Attribute="ColorAdd_B" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="5" Geometry="Pixel 2" InitialFunction="Pixel 2_ColorAdd_R.ColorAdd_R.R" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_R" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="R" Attribute="ColorAdd_R" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="6" Geometry="Pixel 2" InitialFunction="Pixel 2_ColorAdd_G.ColorAdd_G.G" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_G" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="G" Attribute="ColorAdd_G" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+          <DMXChannel DMXBreak="1" Offset="7" Geometry="Pixel 2" InitialFunction="Pixel 2_ColorAdd_B.ColorAdd_B.B" Highlight="None">
+            <LogicalChannel Attribute="ColorAdd_B" Snap="No" Master="None" MibFade="0" DMXChangeTimeLimit="0"><ChannelFunction Name="B" Attribute="ColorAdd_B" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel>
+          </DMXChannel>
+        </DMXChannels>
+      </DMXMode>
+    </DMXModes>
+    <Revisions>
+      <Revision Text="1.0" Date="2026-10-27T00:00:00"/>
+    </Revisions>
+  </FixtureType>
+</GDTF>

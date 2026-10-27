@@ -45,8 +45,9 @@ Removing an effect reveals the continuing baseline. There is no blend-mode API.
 Autolux owns fixture configuration and scripts. `Login` supplies a complete snapshot:
 
 - `RigDefinition`: fixtures, addresses, movement calibration, ordered groups and
-  required profiles. Each profile carries complete GDTF description XML and an
-  exact DMX mode; fixtures reference it by ID. Rust compiles mappings at Login.
+  required profiles. Each profile carries its GDTF DMX mode as Autolux compiled it (a
+  typed `DmxMode`: channels, functions, sets, mode masters); fixtures reference it by ID.
+  Rust validates it once at Login and parses no GDTF.
 - `AutoloopDefinition` entries with globally unique autoloop IDs, bank grouping
   metadata and Lua source code, carried in `Login.autoloops`.
 - Initial parameters and the unicast Art-Net destination.

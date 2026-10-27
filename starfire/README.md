@@ -59,7 +59,9 @@ See the [design and diagrams](../docs/starfire-design.md) and
 [decision log](../docs/starfire/decisions.md).
 See [validation](../docs/starfire/validation.md) for tested behavior and hardware limits.
 
-Fixture types use standard GDTF XML and a selected DMX mode. Import a `.gdtf`
+Fixture types use standard GDTF and a selected DMX mode; Autolux compiles the mode
+(`autolux/lighting/gdtf_compile.py`, on pygdtf) and Starfire encodes from that typed
+`DmxMode`, parsing no XML itself. Import a `.gdtf`
 archive with `uv run autolux starfire import-fixture fixture.gdtf --mode "16ch"`.
 The renderer validates the mode before the archive is installed in `rig/library/`. Rigs are MVR files (`rig/room.mvr`) that embed the GDTF files they use.
 Autolux parses them; the native `check`, `rig` and `replay` commands take the exported

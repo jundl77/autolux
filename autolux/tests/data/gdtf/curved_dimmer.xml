@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GDTF DataVersion="1.2">
+  <FixtureType Name="Test Curved Dimmer" ShortName="Curved" LongName="Test Curved Dimmer" Manufacturer="Generic" Description="Square-law dimmer curve" FixtureTypeID="3a6c9e21-7f4b-4d58-9c02-6e1b8d4f7a95" CanHaveChildren="No">
+    <AttributeDefinitions>
+      <ActivationGroups/>
+      <FeatureGroups><FeatureGroup Name="Dimmer" Pretty="Dimmer"><Feature Name="Dimmer"/></FeatureGroup></FeatureGroups>
+      <Attributes><Attribute Name="Dimmer" Pretty="Dimmer" Feature="Dimmer.Dimmer" PhysicalUnit="Percent"/></Attributes>
+    </AttributeDefinitions>
+    <PhysicalDescriptions><DMXProfiles><DMXProfile Name="Square"><Point DMXPercentage="0" CFC0="0" CFC1="0" CFC2="1" CFC3="0"/></DMXProfile></DMXProfiles></PhysicalDescriptions>
+    <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
+    <DMXModes>
+      <DMXMode Name="8 bit" Description="One channel" Geometry="Base">
+        <DMXChannels>
+          <DMXChannel DMXBreak="1" Offset="1" InitialFunction="Base_Dimmer.Dimmer.Dimmer" Highlight="None" Geometry="Base">
+            <LogicalChannel Attribute="Dimmer" Snap="No" Master="Grand" MibFade="0" DMXChangeTimeLimit="0">
+              <ChannelFunction Name="Dimmer" Attribute="Dimmer" OriginalAttribute="Dimmer" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100" DMXProfile="Square" RealFade="0" RealAcceleration="0"/>
+            </LogicalChannel>
+          </DMXChannel>
+        </DMXChannels>
+      </DMXMode>
+      <DMXMode Name="16 bit" Description="Coarse and fine" Geometry="Base">
+        <DMXChannels>
+          <DMXChannel DMXBreak="1" Offset="1,2" InitialFunction="Base_Dimmer.Dimmer.Dimmer" Highlight="None" Geometry="Base">
+            <LogicalChannel Attribute="Dimmer" Snap="No" Master="Grand" MibFade="0" DMXChangeTimeLimit="0">
+              <ChannelFunction Name="Dimmer" Attribute="Dimmer" OriginalAttribute="Dimmer" DMXFrom="0/2" Default="0/2" PhysicalFrom="0" PhysicalTo="100" DMXProfile="Square" RealFade="0" RealAcceleration="0"/>
+            </LogicalChannel>
+          </DMXChannel>
+        </DMXChannels>
+      </DMXMode>
+    </DMXModes>
+    <Revisions>
+      <Revision Text="1.0" Date="2026-10-26T00:00:00"/>
+    </Revisions>
+  </FixtureType>
+</GDTF>

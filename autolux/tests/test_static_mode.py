@@ -385,7 +385,7 @@ async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
     assert selections(lighting)[-1]['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
 
 
-FX_GROUP = {'name': 'fx', 'fixture_count': 1, 'colour': True, 'speed': True, 'pulse': False}
+FX_GROUP = {'name': 'fx', 'cell_count': 1, 'colour': True, 'speed': True, 'pulse': False}
 
 
 def special_looks():
