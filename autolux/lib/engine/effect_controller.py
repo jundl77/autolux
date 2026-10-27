@@ -15,6 +15,7 @@ from autolux.lib.engine.autoloop_policy import (
     SelectionContext,
     look_intent,
     max_energy_for_intensity,
+    soft_drop,
 )
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -341,8 +342,6 @@ class EffectController:
     ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
-        # An unknown arrival is not soft, matching how intensity follow grades a drop.
-        soft = arrival_of_peak is not None and arrival_of_peak < MAXIMAL_ARRIVAL_OF_PEAK
         choice = self._special_policy.choose(
             intent,
             self.special_capabilities(),
@@ -350,7 +349,7 @@ class EffectController:
             soft_drop=(
                 f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
                 'of the track peak'
-                if soft
+                if soft_drop(arrival_of_peak)
                 else None
             ),
             now=now,
