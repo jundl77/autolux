@@ -925,19 +925,14 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
             for item in _build_show_status(snapshot, now=0.0)
         }
 
-    clock = VirtualClock()
-    buffer = EventBuffer(clock=clock)
+    strobe = {'group': 'all', 'strobe': True, 'remaining_seconds': 0.0}
+    buffer = EventBuffer(clock=VirtualClock())
     buffer.start()
-    buffer.set_control_state(
-        paused=False,
-        master_brightness=1.0,
-        settings={'drop_strobe_cooldown_seconds': 60.0, 'intensity': 0.7},
-    )
+    buffer.set_cooldown_source(lambda: [strobe])
     assert 'FX' not in items(buffer.snapshot())
     assert items(buffer.snapshot())['Strobe'] == 'ready'
     buffer.set_special('cold_spin', 'fx')
-    buffer.mark_intense()
-    clock.advance(19.0)
+    strobe['remaining_seconds'] = 41.0
     shown = items(buffer.snapshot())
     assert shown['FX'] == 'Cold spin · fx'
     assert shown['Strobe'] == 'in 41 s'

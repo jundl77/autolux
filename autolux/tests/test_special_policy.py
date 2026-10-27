@@ -349,6 +349,7 @@ def test_cooldowns_list_one_entry_per_group_and_the_strobe_on_the_shared_cooldow
             'cooldown_seconds': 60.0,
             'remaining_seconds': 20.0,
             'ready': False,
+            'strobe': True,
         },
     ]
     policy.record(spin, 1300.0)

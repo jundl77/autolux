@@ -238,7 +238,8 @@ class SpecialPolicy:
             total = last.cooldown_seconds if last else 0.0
             entries.append(_entry(group, last and last.name, total, total - (now - at)))
         for strobe in (s for s in self._specials if s.strobe_hz is not None):
-            entries.append(_entry(strobe.group, strobe.name, intense_total, intense_remaining))
+            entry = _entry(strobe.group, strobe.name, intense_total, intense_remaining)
+            entries.append({**entry, 'strobe': True})
         if ACCENT_ROLE in capabilities.roles.values():
             entries.append(self._venue_entry(now))
         return entries
