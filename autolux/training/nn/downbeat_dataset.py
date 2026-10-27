@@ -7,17 +7,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-
-from . import _TRAINING_DIR  # noqa: F401
-
-from raveform_fetch_annotations import (  # noqa: E402
+from raveform_fetch_annotations import (
     beat_csv_path,
     load_all_tracks,
     parse_beat_csv,
     parse_sections,
 )
 
-from .dataset import FRAME_SEC, WindowDataset, _take  # noqa: E402
+from . import _TRAINING_DIR  # noqa: F401
+from .dataset import FRAME_SEC, WindowDataset, _take
 
 DOWNBEAT_SIGMA_SEC = 0.070
 BEATS_PER_BAR = 4
@@ -310,8 +308,9 @@ def alignment_profile(
 
 
 def validate_tracks(data_dir, youtube_ids) -> list:
-    from .dataset import LABEL_POOL, load_sidecar, sidecar_shape
     from build_training_table import FEATURES_DIR
+
+    from .dataset import LABEL_POOL, load_sidecar, sidecar_shape
 
     data_dir = Path(data_dir)
     grids, missing = load_beat_grids(data_dir, youtube_ids)
@@ -339,7 +338,7 @@ def validate_tracks(data_dir, youtube_ids) -> list:
                 "beats": len(grid.times),
                 "bars": grid.bars,
                 "expected_bars": round(len(grid.times) / BEATS_PER_BAR, 2),
-                "phase_breaks": int(len(grid.phase_breaks)),
+                "phase_breaks": len(grid.phase_breaks),
                 "bpm": round(60.0 / beat_sec, 1) if beat_sec else 0.0,
                 "first_beat": round(float(grid.times[0]), 3),
                 "last_beat": round(float(grid.times[-1]), 2),

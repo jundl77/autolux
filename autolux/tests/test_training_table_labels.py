@@ -13,9 +13,8 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import build_training_table  # noqa: E402
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
-from build_training_table import (  # noqa: E402
+import build_training_table
+from build_training_table import (
     ANALYSER_RESET_SEC,
     BAR_POSITION_UNKNOWN,
     CACHE_VERSION,
@@ -23,30 +22,31 @@ from build_training_table import (  # noqa: E402
     CONTINUOUS_COLUMNS,
     FEATURES_DIR,
     NO_INTENT,
-    REPORTS_DIR,
-    SilenceBlocks,
     TABLE_FILE,
     TABLE_HEADER,
+    SilenceBlocks,
     Timeline,
-    count_silence_positions,
-    drop_silence_spans,
-    silence_triggered,
-    build_table,
-    cache_is_fresh,
-    label_coverage,
-    format_row,
-    join_track,
-    load_genres_by_track,
-    load_ok_rows,
-    realign_intents,
-    pipeline_sha,
-    report_path,
-    select_jobs,
-    song_time_intents,
-    zscores,
     _read_json_gz,
     _write_json_gz,
+    build_table,
+    cache_is_fresh,
+    count_silence_positions,
+    drop_silence_spans,
+    format_row,
+    join_track,
+    label_coverage,
+    load_genres_by_track,
+    load_ok_rows,
+    pipeline_sha,
+    realign_intents,
+    report_path,
+    select_jobs,
+    silence_triggered,
+    song_time_intents,
+    zscores,
 )
+
+from autolux.lib.label_space import SECTION_LABELS
 
 LOOK_AHEAD = 2.5
 
@@ -840,6 +840,7 @@ def test_two_different_uncommitted_edits_get_two_different_keys(tmp_path):
 
 def test_pipeline_hash_reads_unicode_git_diffs_without_system_locale(tmp_path, monkeypatch):
     import subprocess
+
     from build_training_table import _git
 
     staged_repo(tmp_path)
@@ -934,9 +935,11 @@ def test_same_path_model_changes_invalidate_cached_reports(tmp_path, dependency)
 def test_training_job_hash_and_simulation_use_the_selected_model_root(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
+
+    import build_training_table as training
+
     from autolux.lib import section_chain
     from autolux.simulate import runner
-    import build_training_table as training
 
     rows = stage_track(tmp_path, cached=False)
     for path in section_chain.artifacts(tmp_path):
@@ -955,7 +958,7 @@ def test_training_job_hash_and_simulation_use_the_selected_model_root(tmp_path, 
         return (
             client,
             SimpleNamespace(to_report=lambda _: {}),
-            SimpleNamespace(get_timing_log=lambda: []),
+            SimpleNamespace(get_timing_log=list),
         )
 
     monkeypatch.setattr(runner, '_SECTION_CHAIN', runner._UNBUILT)
@@ -971,6 +974,7 @@ def test_training_job_hash_and_simulation_use_the_selected_model_root(tmp_path, 
 def test_reused_simulation_model_is_rebuilt_when_the_corpus_changes(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
+
     from autolux.lib import section_chain
     from autolux.simulate import runner
 
@@ -1198,16 +1202,16 @@ def test_the_retention_flag_reaches_every_job(tmp_path):
 def _job_with(**over):
     from build_training_table import SimJob
 
-    fields = dict(
-        track_id="0001",
-        youtube_id="abc",
-        mp3_path="a.mp3",
-        report_path="c",
-        preexisting=(),
-        pipeline_sha="sha",
-        mp3_size=1,
-        mp3_mtime=1.0,
-    )
+    fields = {
+        "track_id": "0001",
+        "youtube_id": "abc",
+        "mp3_path": "a.mp3",
+        "report_path": "c",
+        "preexisting": (),
+        "pipeline_sha": "sha",
+        "mp3_size": 1,
+        "mp3_mtime": 1.0,
+    }
     fields.update(over)
     return SimJob(**fields)
 

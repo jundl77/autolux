@@ -20,7 +20,7 @@ from ng_common import CAMP, CORPUS, NEW_HAND_IDS, inject_repo_paths, relabel_ids
 
 inject_repo_paths()
 
-from nn.dataset import assign_split, make_splits  # noqa: E402
+from nn.dataset import assign_split, make_splits
 
 BACKUP_NAME = "splits.json.pre_nextgen.bak"
 

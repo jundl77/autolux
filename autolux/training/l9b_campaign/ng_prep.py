@@ -93,6 +93,7 @@ def admit(corpus: Path, track_id: str) -> None:
         cwd=str(REPO),
         creationflags=flags,
         timeout=1800,
+        check=False,
     )
     sys.stdout.write(result.stdout)
     if result.returncode != 0:

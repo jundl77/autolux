@@ -23,17 +23,16 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import tp_map_raw9 as mapper  # noqa: E402
-import tp_record  # noqa: E402
-from build_training_table import load_sections_by_track  # noqa: E402
-from raveform_fetch_annotations import load_all_tracks, load_hand_tracks  # noqa: E402
+import tp_map_raw9 as mapper
+import tp_record
+from build_training_table import load_sections_by_track
+from raveform_fetch_annotations import load_all_tracks, load_hand_tracks
 
-from autolux.tests.test_third_party_admission import (  # noqa: E402
+from autolux.tests.test_third_party_admission import (
     hand_record,
     make_corpus,
     published_record,
 )
-
 
 # --------------------------------------------------------------------------- #
 # Normalisation
@@ -73,7 +72,7 @@ def test_build_flavoured_labels_map_to_buildup():
 
 def test_chorus_family_routes_to_the_evidence_split():
     for canonical in ("chorus", "quietchorus", "instchorus", "refrain"):
-        rule, target = mapper.rule_for(canonical, final=False)
+        _rule, target = mapper.rule_for(canonical, final=False)
         assert target == "chorus"
 
 

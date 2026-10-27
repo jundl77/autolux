@@ -46,12 +46,11 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 import torch
+from build_training_table import default_data_dir
 
 from .dataset import WINDOW_FRAMES
 from .model import SectionCRNN, count_parameters
 from .train import MODEL_VERSION, MODELS_DIR, weight_hash
-
-from build_training_table import default_data_dir  # noqa: E402
 
 MODEL_FILE = "model.onnx"
 MODEL_META_FILE = "model.onnx.json"

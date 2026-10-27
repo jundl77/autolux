@@ -13,14 +13,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from autolux.lib.label_space import DROPPED_LABELS, SECTION_LABELS  # noqa: E402
-from raveform_fetch_annotations import (  # noqa: E402
+import itertools
+
+from raveform_fetch_annotations import (
     annotations_dir,
     genre_of,
     load_all_tracks,
     parse_sections,
     youtube_id,
 )
+
+from autolux.lib.label_space import DROPPED_LABELS, SECTION_LABELS
 
 MANIFEST_FILE = "manifest.csv"
 MANIFEST_HEADER = ("track_id", "youtube_id", "n_sections", "total_sec", "genre")
@@ -88,7 +91,7 @@ def label_stats(per_track_runs: list) -> dict:
 def transition_counts(per_track_runs: list) -> collections.Counter:
     pairs = collections.Counter()
     for runs in per_track_runs:
-        for before, after in zip(runs, runs[1:]):
+        for before, after in itertools.pairwise(runs):
             pairs[(before[2], after[2])] += 1
     return pairs
 
@@ -190,7 +193,7 @@ def report(data_dir: Path, tracks: list) -> None:
                 negatives.append((key, index + 1, len(sections), label, start, end))
             elif end - start < 0.5:
                 short_sections[label] += 1
-        for (_s0, end0, _l0), (start1, _e1, _l1) in zip(sections, sections[1:]):
+        for (_s0, end0, _l0), (start1, _e1, _l1) in itertools.pairwise(sections):
             if end0 != start1:
                 boundary_breaks += 1
 

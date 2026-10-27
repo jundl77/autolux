@@ -86,6 +86,7 @@ def verdict(core_share_pct: float, bar_pct: float = CORE_SHARE_BAR_PCT) -> str:
 
 
 async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
+    from autolux.lib import section_chain
     from autolux.lib.analyser.drift_watchdog import DriftWatchdog
     from autolux.lib.analyser.gpu_stage import reserved_bytes
     from autolux.lib.analyser.music_analyser import MusicAnalyser
@@ -94,7 +95,6 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
     from autolux.lib.engine.light_engine import LightEngine
     from autolux.lib.main import PLAYBACK_DELAY_SEC
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
-    from autolux.lib import section_chain
 
     watchdog = DriftWatchdog(BUFFER / SR)
     chain = section_chain.build_section_chain(watchdog=watchdog)
@@ -142,7 +142,7 @@ async def _paced_loop(audio: np.ndarray, out_rows: list) -> dict:
         slack = deadline - time.perf_counter()
         # An unpaced feed overruns the extractor's ring within four passes.
         if slack > 0:
-            time.sleep(slack)
+            time.sleep(slack)  # noqa: ASYNC251
         pacing_ms.append((time.perf_counter() - deadline) * 1000.0)
 
         buf = audio[index * BUFFER : (index + 1) * BUFFER]

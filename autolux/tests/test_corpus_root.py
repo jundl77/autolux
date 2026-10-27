@@ -2,9 +2,8 @@
 
 import json
 
-import pytest
-
 import corpus_root
+import pytest
 
 
 def _worktree(tmp_path, name):

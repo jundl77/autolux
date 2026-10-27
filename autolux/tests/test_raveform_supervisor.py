@@ -7,15 +7,15 @@ RAVEFORM_DIR = Path(__file__).resolve().parents[1] / "training" / "raveform"
 if str(RAVEFORM_DIR) not in sys.path:
     sys.path.insert(0, str(RAVEFORM_DIR))
 
-from raveform_supervisor import (  # noqa: E402
-    DOWNLOADER_FILE,
+from raveform_download import RETRYABLE_REASONS
+from raveform_supervisor import (
     _RETRY_REASONS_FALLBACK,
+    DOWNLOADER_FILE,
     _retry_reasons,
     parse_cooldowns,
     preflight_failed_state,
     terminal_state,
 )
-from raveform_download import RETRYABLE_REASONS  # noqa: E402
 
 
 def _downloader(data_dir: Path, body: str) -> Path:

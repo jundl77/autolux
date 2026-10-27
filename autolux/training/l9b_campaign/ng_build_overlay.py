@@ -33,7 +33,7 @@ from ng_common import (
 
 inject_repo_paths()
 
-from raveform_fetch_annotations import load_tracks  # noqa: E402
+from raveform_fetch_annotations import load_tracks
 
 DURATION_TOLERANCE = 0.05
 DEFAULT_CSV = (
@@ -136,11 +136,12 @@ def main(argv: list | None = None) -> int:
             track_id = section["id"]
             if section["mean_db"] >= threshold or track_id not in split_members:
                 continue
-            if track_id in test or track_id in val or track_id in eval_ids:
-                if split_members is train:
-                    raise SystemExit(
-                        f"{track_id}: train member also in test/val/eval -- splits are inconsistent"
-                    )
+            if split_members is train and (
+                track_id in test or track_id in val or track_id in eval_ids
+            ):
+                raise SystemExit(
+                    f"{track_id}: train member also in test/val/eval -- splits are inconsistent"
+                )
             if track_id in hand_ids:
                 overridden.add(track_id)
                 continue
@@ -152,7 +153,7 @@ def main(argv: list | None = None) -> int:
     val_kept, val_overridden = eligible(val, DEMOTION_THRESHOLD_DB)
 
     camp.mkdir(parents=True, exist_ok=True)
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now = datetime.datetime.now(datetime.UTC).isoformat()
     overlay = {
         "kind": "nextgen_drop_demotion",
         "threshold_db": DEMOTION_THRESHOLD_DB,

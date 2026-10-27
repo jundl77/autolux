@@ -50,16 +50,17 @@ sys.path.append(str(ROOT / "training"))
 # nowhere else, so every training.nn it reads must come from there too.
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
-from training.nn.decoder import (
-    DecodeParams,
-    bar_observations,  # noqa: E402
-    observation_knobs,
-)
-from training.nn.ceiling.decoder_frontier import (  # noqa: E402
+import rebirth as RB
+from training.nn.ceiling.decoder_frontier import (
     false_drop_entries,
     score_stream,
 )
-from training.nn.evaluate_v1 import (  # noqa: E402
+from training.nn.decoder import (
+    DecodeParams,
+    bar_observations,
+    observation_knobs,
+)
+from training.nn.evaluate_v1 import (
     DEFAULT_SPACE,
     UNDECODED,
     aggregate,
@@ -73,10 +74,8 @@ from training.nn.evaluate_v1 import (  # noqa: E402
     split_ids,
     write_json,
 )
-from training.nn.paired import CONTESTED  # noqa: E402
-from training.nn.priors import MODELS_DIR, PRIORS_FILE, Priors  # noqa: E402
-
-import rebirth as RB  # noqa: E402
+from training.nn.paired import CONTESTED
+from training.nn.priors import MODELS_DIR, PRIORS_FILE, Priors
 
 LAG_BARS = 2
 DRAWS = 2000

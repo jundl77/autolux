@@ -6,13 +6,13 @@ RAVEFORM_DIR = Path(__file__).resolve().parents[1] / "training" / "raveform"
 if str(RAVEFORM_DIR) not in sys.path:
     sys.path.insert(0, str(RAVEFORM_DIR))
 
-from raveform_download import (  # noqa: E402
+from raveform_download import (
+    _REASON_PATTERNS,
     BLOCK_REASONS,
     INTERRUPT_REASON,
     KNOWN_REASONS,
     RETRY_HINT,
     RETRYABLE_REASONS,
-    _REASON_PATTERNS,
     archive_path,
     build_command,
     classify_error,

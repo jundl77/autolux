@@ -12,22 +12,17 @@ Resumable: an existing WAV of the right sample count is kept.
 
 from __future__ import annotations
 
-import ctypes
 import json
 import subprocess
 import sys
 
 import numpy as np
-
 from ng_common import CAMP, CORPUS, NEW_HAND_IDS
 
-try:
-    _k32 = ctypes.windll.kernel32
-    _k32.GetCurrentProcess.restype = ctypes.c_void_p
-    _k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    _k32.SetPriorityClass(_k32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
+sys.path.insert(0, str(CORPUS.parents[1]))
+import module_source
+
+module_source.below_normal_priority()
 
 SAMPLE_RATE = 44100
 SHIFTS = (("m3", -3), ("m2", -2), ("m1", -1), ("p1", 1), ("p2", 2), ("p3", 3), ("p4", 4))

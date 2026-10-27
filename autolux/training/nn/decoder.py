@@ -13,9 +13,9 @@ from typing import NamedTuple
 
 import numpy as np
 
-from .priors import Priors
+from autolux.lib.label_space import check_class_space
 
-from autolux.lib.label_space import check_class_space  # noqa: E402
+from .priors import Priors
 
 # ~5.6 s at the corpus median bar of 1.875 s, inside the 8 s look-ahead budget.
 DEFAULT_LAG_BARS = 3
@@ -362,7 +362,7 @@ class FixedLagViterbi:
         """
         if carried is None or np.isfinite(self.priors.log_initial[carried]):
             return carried
-        logging.warning(
+        logging.getLogger(__name__).warning(
             f'[decoder] the priors give {self.classes[carried]!r} no way to '
             f'start a track, so a birth cannot carry it -- spreading the '
             f'start-of-track prior instead'
