@@ -84,8 +84,17 @@ function sf.on_beat(ctx_or_beats, width, period)
     return remaining * remaining * render_pulse_depth
 end
 
-local LEFT, RIGHT = -1, 1
-function sf.side(index) return index % 2 == 1 and LEFT or RIGHT end
+local LEFT, CENTRE, RIGHT = -1, 0, 1
+-- Group members run left to right (Autolux orders them by MVR position). With a count, the
+-- side is the member's half of the group, an odd middle at the centre; without one it
+-- alternates, which agrees for a pair.
+function sf.side(index, count)
+    if count == nil then return index % 2 == 1 and LEFT or RIGHT end
+    assert(math.type(index) == "integer" and math.type(count) == "integer"
+        and index >= 1 and index <= count, "side needs a member index within 1..count")
+    if 2 * index == count + 1 then return CENTRE end
+    return 2 * index <= count and LEFT or RIGHT
+end
 
 local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
 
@@ -144,6 +153,16 @@ function sf.scene(effects)
         end
     end
     for _, effect in ipairs(effects) do append(effect) end
+    return result
+end
+
+-- Mirror partners about the group's centre, outermost first: the i-th member from the left
+-- with the i-th from the right; an odd middle is its own partner.
+function sf.mirror(target)
+    local members, result = sf.members(target), {}
+    for index = 1, (#members + 1) // 2 do
+        result[index] = { sf.fixture(members[index]), sf.fixture(members[#members + 1 - index]) }
+    end
     return result
 end
 

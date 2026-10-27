@@ -60,6 +60,7 @@ PARAMETERS = {
     'set_strobe_max_burst_seconds': (wire.STROBE_MAX_BURST_SECONDS, 'seconds', 'number'),
     'set_palette': (wire.PALETTE, 'name', 'text'),
     'set_intensity': (wire.INTENSITY, 'level', 'number'),
+    'set_group_master': (wire.GROUP_MASTER, 'level', 'number'),
 }
 
 
@@ -99,6 +100,8 @@ def build_command(command: dict | Message) -> Message:
                 setting = wire.Parameter(type=parameter, **{value_type: value.pop(field)})
                 if kind == 'set_master':
                     setting.fade_seconds = value.pop('fade_seconds', 0.0)
+                if kind == 'set_group_master':
+                    setting.group = value.pop('group')
                 message = wire.SetParameter(parameter=setting)
                 if value:
                     raise ValueError('Parameter command contains unexpected fields')

@@ -522,3 +522,24 @@ Still refused, each with its reason (pinned per corpus mode in test_gdtf_compile
 Relations, sub-channel sets, wheel Filter slots, DMX breaks other than 1, GDTF versions
 outside 1.0..1.2, duplicate function names, and brightness functions that share their
 channel, carry presets, depend on a ModeMaster or run inverted.
+
+2026-10-27 Spatial group order: a rig group (MVR Class) lists its members left to right by
+the X of each fixture's placed MVR Matrix (scene space, layers and parents composed); equal X
+keeps file order, and a group whose members all share one X keeps file order with a warning
+naming the group. The exported RigDefinition carries that order, so `sf.group`/`sf.members`
+in Lua see it unchanged. Mirror pairs are by symmetry about the group's centre in that order:
+`sf.mirror(target)` returns `{left, right}` partners outermost first (an odd middle pairs
+with itself), and `sf.side(index, count)` gives each member's half (-1, 0 for an odd middle,
+1); `sf.side(index)` without a count keeps its alternating meaning, which agrees for pairs.
+The room's positions (washes at X -900/-300/300/900, spots at -300/300, mm) already match
+their names, so room.rig.pb and the goldens are unchanged.
+
+2026-10-27 Group masters: each rig group has an inhibitive submaster, 0..1 and full by default,
+kept in show.json as `settings.group_masters` (`{"wash": 0.5}`; an absent group is at full) and
+sent as the `GROUP_MASTER` parameter with its `group` (protocol minor 2). Starfire multiplies the
+group's cell intensity and attribute brightness by it right after the global master, so it
+caps the rendered look, specials included, and never raises it; a cell in several capped
+groups takes the product. The level is linear (0.5 halves the output), unlike the perceptual
+global master: it trims one group against the others rather than fading the room. Starfire
+refuses an unknown group; Autolux sends only the levels of groups in the logged-in rig, and
+only when one changes.

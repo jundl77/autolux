@@ -324,6 +324,7 @@ fn an_absent_group_renders_nothing_and_low_intensity_gates_pulse_but_only_slows_
                 r#type: wire::ParameterType::Intensity as i32,
                 value: Some(wire::parameter::Value::Number(0.2)),
                 fade_seconds: 0.0,
+                ..Default::default()
             }),
         }),
     );
@@ -481,6 +482,7 @@ fn parameter(kind: wire::ParameterType, value: f64) -> ClientMessage {
             r#type: kind as i32,
             value: Some(wire::parameter::Value::Number(value)),
             fade_seconds: 0.0,
+            ..Default::default()
         }),
     })
 }

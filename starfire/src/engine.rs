@@ -144,6 +144,8 @@ pub struct Engine {
     special_maps: BTreeMap<String, CellMap>,
     override_order: u64,
     master: MasterFade,
+    /// Levels below one only; a group at full is absent.
+    group_masters: BTreeMap<String, f64>,
     normalized_rms_level: Option<f64>,
     blackout: bool,
     script_error: Option<String>,
@@ -179,6 +181,7 @@ impl Engine {
             special_maps,
             override_order: 0,
             master: MasterFade::steady(1.0),
+            group_masters: BTreeMap::new(),
             normalized_rms_level: None,
             blackout: false,
             script_error: None,
@@ -298,6 +301,18 @@ impl Engine {
                 validate_unit(*level, "intensity")?;
                 self.intensity = *level;
             }
+            Command::SetGroupMaster { group, level } => {
+                validate_unit(*level, "group master")?;
+                ensure!(
+                    self.rig.groups().contains_key(group),
+                    "unknown fixture group {group}"
+                );
+                if *level < 1.0 {
+                    self.group_masters.insert(group.clone(), *level);
+                } else {
+                    self.group_masters.remove(group);
+                }
+            }
             Command::Stop => {
                 self.active = None;
                 self.fade = None;
@@ -336,10 +351,12 @@ impl Engine {
 
     pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
         use wire::{ParameterType, parameter::Value};
-        let command = match (
-            ParameterType::try_from(parameter.r#type),
-            parameter.value.as_ref(),
-        ) {
+        let kind = ParameterType::try_from(parameter.r#type);
+        ensure!(
+            parameter.group.is_empty() || kind == Ok(ParameterType::GroupMaster),
+            "only a group master names a group"
+        );
+        let command = match (kind, parameter.value.as_ref()) {
             (Ok(ParameterType::OutputBrightness), Some(Value::Number(value))) => {
                 Command::SetMaster {
                     intensity: *value,
@@ -376,6 +393,12 @@ impl Engine {
             (Ok(ParameterType::Intensity), Some(Value::Number(value))) => {
                 Command::SetIntensity { level: *value }
             }
+            (Ok(ParameterType::GroupMaster), Some(Value::Number(value))) => {
+                Command::SetGroupMaster {
+                    group: parameter.group.clone(),
+                    level: *value,
+                }
+            }
             _ => anyhow::bail!("unknown parameter type or incompatible value"),
         };
         self.apply(seconds, &command)
@@ -402,6 +425,15 @@ impl Engine {
             for state in states.values_mut() {
                 state.intensity = state.intensity.clamp(0.0, 1.0) * master;
                 state.attribute_brightness = master;
+            }
+            // A cell in several capped groups takes the product of their masters.
+            for (group, level) in &self.group_masters {
+                for cell in &self.rig.groups()[group] {
+                    if let Some(state) = states.get_mut(cell) {
+                        state.intensity *= level;
+                        state.attribute_brightness *= level;
+                    }
+                }
             }
         }
         self.limit_movement_speed(time_seconds, &mut states);
