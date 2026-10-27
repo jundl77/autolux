@@ -259,16 +259,17 @@
     // Covers the double pulse in control.css (600 ms).
     const FLASH_MS = 650;
 
-    // Whether a group fired between two polls of it ({last, remaining, ready}): a new special,
-    // a ready bar going busy, or the time left jumping back up. Polls only ever count down
-    // otherwise, so the 0.05 s slack only absorbs float noise.
+    // Whether a group fired between two polls of it ({last, remaining, ready, total}): a new
+    // special, a ready bar going busy, or the time left jumping back up. A changed total is the
+    // operator editing the cooldown, not a fire. Polls only ever count down otherwise, so the
+    // 0.05 s slack only absorbs float noise.
     function cooldownFired(previous, polled) {
         if (!previous) {
             return false;
         }
         return polled.last !== previous.last
             || (previous.ready && !polled.ready)
-            || polled.remaining > previous.remaining + 0.05;
+            || (polled.total === previous.total && polled.remaining > previous.remaining + 0.05);
     }
 
     // Per group, so a fire is told apart from Dash handing this element another group's entry.
@@ -285,6 +286,7 @@
                 last: data.last || '',
                 remaining: Number(data.remaining),
                 ready: data.ready === 'true',
+                total: Number(data.total),
             };
             const key = data.group + '|' + data.total + '|' + data.remaining + '|' + polled.last;
             const seen = cooldownSeen[data.group];
@@ -294,7 +296,7 @@
                 cooldownSeen[data.group] = {key, polled, polledAt: now, flashUntil};
             }
             const state = cooldownSeen[data.group];
-            const shown = cooldownView(Number(data.total), polled.remaining,
+            const shown = cooldownView(polled.total, polled.remaining,
                 (now - state.polledAt) / 1000);
             const fill = row.querySelector('.cooldown-fill');
             const caption = row.querySelector('.cooldown-caption');
