@@ -253,7 +253,7 @@ pub struct LuaAutoloop {
     render: Function,
     use_render_intensity: Function,
     instruction_budget: Arc<AtomicU32>,
-    rig: FixtureRig,
+    rig: Rc<FixtureRig>,
     identity: String,
     active_palette_slots: Vec<Table>,
 }
@@ -361,7 +361,7 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        // The closures outlive this call and the rig is large: share one copy, not one each.
+        // The closures outlive this call and the rig is large: they and the autoloop share one copy.
         let shared = Rc::new(rig.clone());
         let targets = Rc::clone(&shared);
         api.set(
@@ -421,11 +421,7 @@ impl LuaAutoloop {
         // MVR millimetres become metres here, at the Lua boundary only.
         let located = |rig: Rc<FixtureRig>| {
             move |value: &Value| -> mlua::Result<[f64; 3]> {
-                let id = cell_name(value)?;
-                let position = rig
-                    .spatial()
-                    .position(&id)
-                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                let (_, position) = cell_fact(value, |id| rig.spatial().position(id))?;
                 Ok(position.map(|mm| mm / MM_PER_METRE))
             }
         };
@@ -445,15 +441,11 @@ impl LuaAutoloop {
                 Ok((cell_x - x).hypot(cell_y - y))
             })?,
         )?;
-        let areas = shared;
+        let areas = Rc::clone(&shared);
         api.set(
             "zone",
             lua.create_function(move |_, cell: Value| {
-                let id = cell_name(&cell)?;
-                let area = areas
-                    .spatial()
-                    .area(&id)
-                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                let (id, area) = cell_fact(&cell, |id| areas.spatial().area(id))?;
                 area.placement().ok_or_else(|| {
                     mlua::Error::RuntimeError(format!("cell {id} has no stage area"))
                 })
@@ -476,7 +468,7 @@ impl LuaAutoloop {
             render,
             use_render_intensity,
             instruction_budget,
-            rig: rig.clone(),
+            rig: shared,
             identity,
             active_palette_slots,
         })
@@ -578,6 +570,13 @@ fn cell_name(value: &Value) -> mlua::Result<String> {
             "expected a cell name or sf.fixture target".to_owned(),
         )),
     }
+}
+
+/// What the rig knows about the cell Lua names, which must exist.
+fn cell_fact<T>(value: &Value, fact: impl FnOnce(&str) -> Option<T>) -> mlua::Result<(String, T)> {
+    let id = cell_name(value)?;
+    let found = fact(&id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+    Ok((id, found))
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

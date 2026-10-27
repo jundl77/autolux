@@ -235,10 +235,7 @@ impl FixtureRig {
                 profile.profile_id
             );
         }
-        Ok(Self {
-            accent_groups,
-            ..Self::from_parts(fixtures, groups, profiles)?
-        })
+        Self::from_parts(fixtures, groups, accent_groups, profiles)
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -252,6 +249,7 @@ impl FixtureRig {
     fn from_parts(
         mut fixtures: Vec<FixturePatch>,
         groups: BTreeMap<String, Vec<String>>,
+        accent_groups: BTreeSet<String>,
         profiles: BTreeMap<String, Vec<GdtfCell>>,
     ) -> Result<Self> {
         ensure!(
@@ -388,7 +386,7 @@ impl FixtureRig {
         Ok(Self {
             fixtures,
             groups: cell_groups,
-            accent_groups: BTreeSet::new(),
+            accent_groups,
             profiles,
             cells,
             spatial,
