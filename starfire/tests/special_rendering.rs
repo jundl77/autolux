@@ -401,6 +401,24 @@ fn a_cut_also_shortens_a_special_already_fading_under_its_id() {
     }
 }
 
+#[test]
+fn a_cut_longer_than_the_fade_left_never_lengthens_it() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let red = SCANNER.start + 2;
+    let level = |level: f64| (primary().red * level * 255.0).round() as u8;
+    let mut engine = engine(&rig);
+    let texture = wire::SpecialFx {
+        release_beats: 4.0,
+        ..steady("primary", 1.0, 0.0)
+    };
+    fire(&mut engine, 0.0, &special("scanners", texture));
+    unset(4.0, &mut engine);
+    // Two beats of fade remain; a four-beat cap leaves them as they were.
+    unset_within(6.0, &mut engine, Some(4.0), None);
+    assert_eq!(dmx(&mut engine, 7.0)[red], level(0.25));
+    assert_eq!(dmx(&mut engine, 8.0)[red], 0);
+}
+
 fn paused(value: bool) -> ClientMessage {
     ClientMessage::SetParameter(wire::SetParameter {
         command_id: 1,
