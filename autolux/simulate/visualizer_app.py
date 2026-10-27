@@ -63,7 +63,6 @@ NOW_CURSOR_LEFT = (
     f'{NOW_CURSOR_X:.6f} * {TIMELINE_MARGIN_L_PX + TIMELINE_MARGIN_R_PX}px)'
 )
 DARK_BG = '#0d1117'
-CARD_BG = '#111827'
 BORDER = '#1e2937'
 OK_COLOR = '#3fb950'
 WARN_COLOR = '#f0883e'
@@ -174,10 +173,6 @@ def _room_beats(snapshot: dict, horizon_sec: float = 0.0) -> list:
     return beats
 
 
-def _heard_beats(snapshot: dict) -> list:
-    return _room_beats(snapshot)
-
-
 def _clock_text(seconds: float) -> str:
     minutes, secs = divmod(int(seconds), 60)
     return f'{minutes}:{secs:02d}'
@@ -210,7 +205,7 @@ def _room_is_playing(snapshot: dict) -> bool:
 
 
 def _room_bpm(snapshot: dict) -> float:
-    heard = _heard_beats(snapshot)
+    heard = _room_beats(snapshot)
     return heard[-1]['bpm'] if heard else snapshot.get('bpm', 0.0)
 
 
@@ -1990,14 +1985,9 @@ _GATE_STATE_JS = '''
     const ds = window.dash_clientside = window.dash_clientside || {};
     const gate = ds.ss_gate = ds.ss_gate ||
         {inflight: {}, sent: null, behind: 0};
-    const streamOf = (outputs) => {
-        const list = Array.isArray(outputs) ? outputs : [outputs];
-        for (let i = 0; i < list.length; i++) {
-            if (!list[i]) continue;
-            if (list[i].id === 'sync') return 'anchor';
-        }
-        return null;
-    };
+    const streamOf = (outputs) =>
+        (Array.isArray(outputs) ? outputs : [outputs]).some((output) => output && output.id === 'sync')
+            ? 'anchor' : null;
 '''
 
 REQUEST_PRE_JS = (
@@ -2029,7 +2019,6 @@ CALLBACK_RESOLVED_JS = (
         gate.viewAt = gate.metricsAt = 0;
         return;
     }
-    if (stream !== 'anchor') return;
     const fresh = result.data && result.data.sync && result.data.sync.data;
     if (!fresh) return;
     const landed = ds.ss || {};
@@ -2116,8 +2105,7 @@ class SnapshotPoller:
         port: int = snapshot_port(DEFAULT_DASHBOARD_PORT),
         timeout: float = POLL_TIMEOUT_SEC,
     ):
-        self._host, self._port, self._timeout = host, port, timeout
-        self.port = port
+        self._host, self.port, self._timeout = host, port, timeout
         self._connection = None
         self._last = dict(BLANK_SNAPSHOT)
         self._answering = True
@@ -2125,7 +2113,7 @@ class SnapshotPoller:
 
     @property
     def url(self) -> str:
-        return f'http://{self._host}:{self._port}{SNAPSHOT_PATH}'
+        return f'http://{self._host}:{self.port}{SNAPSHOT_PATH}'
 
     def snapshot(self) -> dict:
         if not self._lock.acquire(blocking=False):
@@ -2135,7 +2123,7 @@ class SnapshotPoller:
                 connection = self._connection
                 if connection is None:
                     connection = self._connection = http.client.HTTPConnection(
-                        self._host, self._port, timeout=self._timeout
+                        self._host, self.port, timeout=self._timeout
                     )
                 connection.request('GET', SNAPSHOT_PATH)
                 self._last = json.loads(connection.getresponse().read())
@@ -2155,7 +2143,7 @@ class SnapshotPoller:
             self._lock.release()
 
     def control(self, command: dict) -> dict:
-        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        connection = http.client.HTTPConnection(self._host, self.port, timeout=self._timeout)
         try:
             connection.request(
                 'POST',
@@ -2528,18 +2516,16 @@ def build_app(
             notices = system_metrics.build_telemetry_notices(snap, now=now)
         return (
             sync,
-            *(
-                status,
-                show_timing,
-                decoder,
-                commands,
-                timeline,
-                notices,
-                performance,
-                renderer,
-                control,
-                charts,
-            ),
+            status,
+            show_timing,
+            decoder,
+            commands,
+            timeline,
+            notices,
+            performance,
+            renderer,
+            control,
+            charts,
         )
 
     setting_names = json.dumps(list(FORM_SETTINGS))

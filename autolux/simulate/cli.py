@@ -84,15 +84,6 @@ async def _run_file_fast(args):
     sys.exit(0 if passed else 1)
 
 
-def _session_buffer(look_ahead_sec: float, clock=None):
-    from autolux.lib.clock import SYSTEM_CLOCK
-    from autolux.lib.engine.event_buffer import EventBuffer
-
-    return EventBuffer(
-        window_sec=float('inf'), clock=clock or SYSTEM_CLOCK, look_ahead_sec=look_ahead_sec
-    )
-
-
 async def _with_viewer(event_buffer, port, run, enabled: bool = True):
     from autolux.lib import ui_bridge
 
@@ -126,19 +117,16 @@ def _open_monitor(output_device_index: int, delay_sec: float):
 
 
 async def _run_file_paced(args):
+    from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.simulate.fake_audio_client import FileAudioClient
     from autolux.simulate.runner import build_simulation, PLAYBACK_DELAY_SEC
 
     audio_client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, args.audio)
-    event_buffer = _session_buffer(PLAYBACK_DELAY_SEC)
+    event_buffer = EventBuffer(window_sec=float('inf'), look_ahead_sec=PLAYBACK_DELAY_SEC)
     speaker = monitor = None
     if args.output_device_index is not None:
         speaker, monitor = _open_monitor(args.output_device_index, PLAYBACK_DELAY_SEC)
-    components, command_queue = build_simulation(
-        audio_client,
-        event_buffer,
-        threaded=True,
-    )
+    components, command_queue = build_simulation(audio_client, event_buffer, threaded=True)
 
     try:
         import librosa
