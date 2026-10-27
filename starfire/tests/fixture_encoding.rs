@@ -498,15 +498,57 @@ fn each_channel_owning_geometry_is_a_cell_encoded_from_its_own_state() {
         &rig.encode(&states).unwrap()[&0][..7],
         [128, 64, 0, 0, 0, 255, 0]
     );
+}
 
+#[test]
+fn a_master_dimmer_follows_its_pixels_so_the_bar_shows_what_it_would_without_one() {
     let mastered = FixtureRig::from_wire(&pixel_bar("Mastered", Vec::new())).unwrap();
+    let pixels = ["bar/Pixel 1", "bar/Pixel 2"];
+    assert_eq!(
+        mastered.resolve(&Target::Group("strip".into())).unwrap(),
+        pixels
+    );
+    let plain = FixtureRig::from_wire(&pixel_bar("Pixels", Vec::new())).unwrap();
+    let net = |frame: &[u8]| -> Vec<f64> {
+        frame[1..7]
+            .iter()
+            .map(|&byte| f64::from(frame[0]) * f64::from(byte) / 255.0)
+            .collect()
+    };
+    let explicit = FixtureState {
+        attributes: BTreeMap::from([("ColorAdd_G".to_owned(), AttributeValue::Number(1.0))]),
+        attribute_brightness: 0.4,
+        ..lit(0.1, 1.0, 0.0, 0.0)
+    };
+    for (first, second) in [
+        (lit(0.25, 1.0, 0.5, 0.0), lit(0.5, 0.0, 0.0, 1.0)),
+        (lit(1.0, 1.0, 1.0, 1.0), lit(0.0, 1.0, 0.0, 0.0)),
+        (lit(0.0, 1.0, 0.0, 0.0), lit(0.0, 0.0, 1.0, 0.0)),
+        (explicit.clone(), lit(0.2, 0.0, 0.0, 1.0)),
+    ] {
+        let mut states = mastered.empty_states();
+        // The master cell's own state is ignored: its level comes from the pixels.
+        states.insert("bar/Base".into(), lit(0.9, 1.0, 1.0, 1.0));
+        states.insert(pixels[0].into(), first.clone());
+        states.insert(pixels[1].into(), second.clone());
+        let mut alone = plain.empty_states();
+        alone.insert(pixels[0].into(), first);
+        alone.insert(pixels[1].into(), second);
+        let expected = plain.encode(&alone).unwrap()[&0][..6].to_vec();
+        let shown = net(&mastered.encode(&states).unwrap()[&0][..7]);
+        for (shown, expected) in shown.iter().zip(&expected) {
+            assert!(
+                (shown - f64::from(*expected)).abs() <= 1.5,
+                "{shown:?} vs {expected:?}"
+            );
+        }
+    }
     let mut states = mastered.empty_states();
-    states.insert("bar/Base".into(), lit(0.5, 1.0, 1.0, 1.0));
-    states.insert("bar/Pixel 1".into(), lit(0.0, 1.0, 0.5, 0.0));
-    states.insert("bar/Pixel 2".into(), lit(0.0, 0.0, 0.0, 1.0));
+    states.insert(pixels[0].into(), lit(0.25, 1.0, 0.5, 0.0));
+    states.insert(pixels[1].into(), lit(0.5, 0.0, 0.0, 1.0));
     assert_eq!(
         &mastered.encode(&states).unwrap()[&0][..7],
-        [128, 255, 128, 0, 0, 0, 255]
+        [128, 128, 64, 0, 0, 0, 255]
     );
 }
 

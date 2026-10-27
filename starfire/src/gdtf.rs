@@ -192,6 +192,9 @@ pub struct GdtfCell {
     /// One-based DMX offsets of this geometry's channels within the fixture footprint, ascending.
     pub offsets: Vec<usize>,
     pub profile: GdtfProfile,
+    /// A master cell (a Dimmer above several pixel cells) lists the cells it scales; GDTF
+    /// multiplies the master's output into every pixel below it.
+    pub governed: Vec<usize>,
 }
 
 impl GdtfProfile {
@@ -342,9 +345,10 @@ impl GdtfProfile {
                 geometry: geometries.remove(0).1,
                 offsets: offsets(&self.channels),
                 profile: self,
+                governed: Vec::new(),
             }]);
         }
-        geometries
+        let mut cells = geometries
             .into_iter()
             .map(|(_, geometry)| {
                 let members: Vec<_> = (0..self.channels.len())
@@ -363,6 +367,23 @@ impl GdtfProfile {
                     }
                     channels.push(channel);
                 }
+                // Only a dimmer inside the cell gates its colour; a master's is applied by
+                // FixtureRig::encode, which divides the master level out of each pixel.
+                let own_dimmers: Vec<_> = channels
+                    .iter()
+                    .filter(|channel| {
+                        channel
+                            .functions
+                            .iter()
+                            .any(|function| function.attribute == "Dimmer")
+                    })
+                    .filter_map(|channel| channel.geometry_path.last().cloned())
+                    .collect();
+                for channel in &mut channels {
+                    channel.has_dimmer = own_dimmers
+                        .iter()
+                        .any(|geometry| channel.geometry_path.contains(geometry));
+                }
                 let order = dependency_order(&channels)?;
                 Ok(GdtfCell {
                     geometry,
@@ -372,9 +393,42 @@ impl GdtfProfile {
                         order,
                         footprint: self.footprint,
                     },
+                    governed: Vec::new(),
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        for master in 0..cells.len() {
+            let dims = cells[master].profile.channels.iter().any(|channel| {
+                channel.geometry_path.last() == Some(&cells[master].geometry)
+                    && channel
+                        .functions
+                        .iter()
+                        .any(|function| function.attribute == "Dimmer")
+            });
+            if !dims {
+                continue;
+            }
+            cells[master].governed =
+                (0..cells.len())
+                    .filter(|&cell| {
+                        cell != master
+                            && cells[cell].profile.channels.iter().any(|channel| {
+                                channel.geometry_path.contains(&cells[master].geometry)
+                            })
+                    })
+                    .collect();
+        }
+        for cell in 0..cells.len() {
+            ensure!(
+                cells
+                    .iter()
+                    .filter(|master| master.governed.contains(&cell))
+                    .count()
+                    <= 1,
+                "nested GDTF master dimmers are unsupported"
+            );
+        }
+        Ok(cells)
     }
 
     fn assemble(mut channels: Vec<Channel>) -> Result<Self> {

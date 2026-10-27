@@ -482,9 +482,13 @@ single-cell fixture's cell keeps the fixture ID, other cells are `fixture/geomet
 fixture target on a multi-cell fixture means all its cells. Groups list fixtures and expand
 to their cells. Each cell encodes its own channels from its own state; ModeMaster across
 cells is refused. The rig proto declares each fixture's cells as Autolux derives them, and
-Login fails if Starfire derives different ones. GeometryReference stays unsupported. Open:
-under a master-dimmer cell a pixel cell's own intensity does not dim it, and the master cell
-joins its fixture's group like any pixel.
+Login fails if Starfire derives different ones. GeometryReference stays unsupported.
+A cell whose own geometry carries a Dimmer above other cells is a master: GDTF multiplies
+its output into every pixel below it. It is not a group member; Starfire sets its level M
+to the largest light any of its pixels asks for (intensity, or attribute brightness when the
+pixel has explicit attributes) and divides M out of each pixel's intensity and attribute
+brightness, so M times the pixel equals the fixture without a master. Its own state's
+intensity is ignored; nested masters are refused.
 
 2026-10-27 GDTF compiler: Autolux compiles each patched mode with pygdtf 1.4.5
 (`autolux/lighting/gdtf_compile.py`) into the typed `DmxMode` of rig.proto; Starfire
