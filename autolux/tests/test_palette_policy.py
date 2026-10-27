@@ -12,6 +12,8 @@ from autolux.lib.engine.track_mood import (
     CENTROID_RANGE_HZ,
     DRIVE_LEVEL_RANGE,
     LEVEL_RANGE,
+    MAX_MEASURED_BARS,
+    MIN_MOOD_BEATS,
     TEMPO_RANGE_BPM,
     MeasuredBeat,
     TrackMoodMeter,
@@ -21,6 +23,7 @@ from autolux.lighting.palettes import (
     BREAKDOWN_PALETTES,
     DEFAULT_PALETTE,
     DROP_PALETTES,
+    DROP_SUFFIX,
     PALETTES,
     Mood,
     Palette,
@@ -376,6 +379,70 @@ async def test_the_opening_is_measured_until_the_first_buildup_and_committed_wit
     [_, (kind, palette)] = palette_kinds(lighting)
     assert kind == 'select' and palette in SUNSET_LIKE
     assert not light._track_mood.measuring
+
+
+def measure_beats(light, count, first_index=0):
+    for index in range(first_index, first_index + count):
+        light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, index % 4)
+
+
+async def enter(light, intent):
+    light._held_intent = intent
+    await light._switch_held_intent()
+
+
+async def test_a_drop_too_early_in_the_window_leaves_it_open_until_the_next_section():
+    # Joined mid-track: the drop 14 s in finds only a few measured beats in the window.
+    light, lighting = await engine_showing_an_intro()
+    measure_beats(light, MIN_MOOD_BEATS - 10)
+    await enter(light, LightIntent.DROP)
+    assert palette_kinds(lighting)[-1] == ('select', DEFAULT_PALETTE + DROP_SUFFIX)
+    assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
+    assert light._track_mood.measuring
+    measure_beats(light, 4)
+    await enter(light, LightIntent.ATMOSPHERIC)
+    (kind, palette) = palette_kinds(lighting)[-1]
+    assert kind == 'select' and palette in SUNSET_LIKE
+    assert not light._track_mood.measuring
+
+
+async def test_a_track_without_a_full_opening_before_a_section_commits_at_32_bars():
+    light, lighting = await engine_showing_an_intro()
+    measure_beats(light, 6)
+    await enter(light, LightIntent.DROP)
+    window = MAX_MEASURED_BARS * 4
+    measure_beats(light, window - 6, first_index=6)
+    assert 'set_palette' not in [kind for kind, _ in palette_kinds(lighting)]
+    measure_beats(light, 1, first_index=window)
+    (kind, palette) = palette_kinds(lighting)[-1]
+    assert (
+        kind == 'set_palette'
+        and palette == f'{light.effect_controller._palette_policy.track_palette}{DROP_SUFFIX}'
+    )
+    assert light.effect_controller._palette_policy.track_palette in SUNSET_LIKE
+
+
+async def test_a_drop_after_the_minimum_opening_commits_with_the_drop():
+    light, lighting = await engine_showing_an_intro()
+    measure_beats(light, MIN_MOOD_BEATS)
+    await enter(light, LightIntent.DROP)
+    (kind, palette) = palette_kinds(lighting)[-1]
+    assert kind == 'select' and palette.removesuffix(DROP_SUFFIX) in SUNSET_LIKE
+    assert not light._track_mood.measuring
+
+
+async def test_a_new_track_discards_a_window_left_open_by_an_early_drop():
+    light, _ = await engine_showing_an_intro()
+    measure_beats(light, 6)
+    await enter(light, LightIntent.DROP)
+    light._after_silence = True
+    await enter(light, LightIntent.ATMOSPHERIC)
+    assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
+    assert light._track_mood.measuring and light._track_mood.beats_measured == 0
+    measure_beats(light, 6)
+    await enter(light, LightIntent.BREAKDOWN)
+    assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
+    assert light._track_mood.measuring
 
 
 async def test_a_full_window_commits_its_palette_on_the_next_downbeat():
