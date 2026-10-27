@@ -20,7 +20,7 @@ return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
         local ramp = math.min(ctx.autoloop_elapsed_beats / RAMP_BEATS, 1)
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local period, width = pulse_period_and_width(ramp)

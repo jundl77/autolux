@@ -101,6 +101,9 @@ end
 
 local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
 
+-- The measured RMS, or a typical level before any is measured.
+function sf.energy(ctx) return ctx.normalized_rms_level or UNMEASURED_RMS end
+
 function sf.loudness_gain(rms)
     rms = rms or UNMEASURED_RMS
     return sf.lerp(LOUDNESS_FLOOR, 1, math.min(1, math.max(0, rms / LOUDNESS_FULL_RMS)))
