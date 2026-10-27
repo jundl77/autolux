@@ -1002,6 +1002,8 @@ async def test_an_operator_cut_reaches_the_renderer_now_not_at_the_audible_posit
         await control.apply_pending(light)
     elif cause == 'pause':
         light.pause()
+        kinds = [e['command']['kind'] for e in lighting.events[start:]]
+        assert kinds.index('set_paused') < kinds.index('clear_override'), 'cut on a paused clock'
     else:
         light.on_digital_silence()
     cuts = [e for e in lighting.events[start:] if e['command'] == CUT]
