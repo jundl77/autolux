@@ -2,6 +2,21 @@ syntax = "proto3";
 
 package autolux.starfire;
 
+// The nine-area stage grid, named from the audience (GDTF draws a device from the viewer):
+// LEFT is house left (-X), DOWN is downstage (-Y). Autolux derives it from the MVR positions.
+enum StageArea {
+  STAGE_AREA_UNSPECIFIED = 0;
+  STAGE_AREA_DOWN_LEFT = 1;
+  STAGE_AREA_DOWN_CENTRE = 2;
+  STAGE_AREA_DOWN_RIGHT = 3;
+  STAGE_AREA_CENTRE_LEFT = 4;
+  STAGE_AREA_CENTRE = 5;
+  STAGE_AREA_CENTRE_RIGHT = 6;
+  STAGE_AREA_UP_LEFT = 7;
+  STAGE_AREA_UP_CENTRE = 8;
+  STAGE_AREA_UP_RIGHT = 9;
+}
+
 // Autolux owns and sends the complete patch and the profiles it uses.
 message RigDefinition {
   repeated Fixture fixtures = 1;
@@ -21,6 +36,7 @@ message Fixture {
   // The mode's channel-owning geometries in order of first offset; empty lets Starfire derive
   // them, otherwise they must match the profile.
   repeated Cell cells = 10;
+  StageArea area = 11;  // Every cell lies in its fixture's area.
 
   // One addressable unit. A single-cell fixture's cell takes the fixture ID; otherwise the
   // cell ID is "fixture_id/geometry".

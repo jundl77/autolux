@@ -126,6 +126,10 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
             tilt: range("tilt"),
             matrix: matrix(fixture),
             cells: Vec::new(),
+            area: fixture.get("area").map_or(0, |area| {
+                let name = format!("STAGE_AREA_{}", area.as_str().unwrap());
+                wire::StageArea::from_str_name(&name).unwrap() as i32
+            }),
         });
         if !rig.profiles.iter().any(|known| known.profile_id == profile)
             && let Some(found) = catalogue_profile(profile)

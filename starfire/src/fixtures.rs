@@ -36,6 +36,7 @@ struct FixturePatch {
     declared_cells: Vec<wire::fixture::Cell>,
     cells: Vec<String>,
     position: Position,
+    area: wire::StageArea,
 }
 
 #[derive(Clone, Debug)]
@@ -193,6 +194,7 @@ impl FixtureRig {
                         .matrix
                         .get(9..12)
                         .map_or([0.0; 3], |o| [o[0], o[1], o[2]]),
+                    area: fixture.area(),
                 })
             })
             .collect::<Result<_>>()?;
@@ -363,15 +365,18 @@ impl FixtureRig {
                 .collect();
             cell_groups.insert(group.clone(), members);
         }
-        let positions = fixtures
-            .iter()
-            .flat_map(|fixture| {
+        let placed = || {
+            fixtures.iter().flat_map(|fixture| {
                 std::iter::once(&fixture.id)
                     .chain(&fixture.cells)
-                    .map(|id| (id.clone(), fixture.position))
+                    .map(move |id| (id.clone(), fixture))
             })
+        };
+        let positions = placed()
+            .map(|(id, fixture)| (id, fixture.position))
             .collect();
-        let spatial = Spatial::new(positions, &cell_groups, |cell| {
+        let areas = placed().map(|(id, fixture)| (id, fixture.area)).collect();
+        let spatial = Spatial::new(positions, areas, &cell_groups, |cell| {
             cells.get(cell).map_or(usize::MAX, |&(fixture, _)| fixture)
         });
         Ok(Self {
@@ -410,7 +415,7 @@ impl FixtureRig {
         &self.groups
     }
 
-    /// Cell positions, mirror partners and zones, derived once from the MVR matrices.
+    /// Cell positions, stage areas and mirror partners, derived once at rig load.
     pub fn spatial(&self) -> &Spatial {
         &self.spatial
     }

@@ -454,16 +454,18 @@ impl LuaAutoloop {
                 Ok((cell_x - x).hypot(cell_y - y))
             })?,
         )?;
-        let zones = shared;
+        let areas = shared;
         api.set(
             "zone",
             lua.create_function(move |_, cell: Value| {
                 let id = cell_name(&cell)?;
-                let (zone, depth, height) = zones
+                let area = areas
                     .spatial()
-                    .zone(&id)
+                    .area(&id)
                     .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
-                Ok((zone.name(), depth.name(), height / MM_PER_METRE))
+                area.placement().ok_or_else(|| {
+                    mlua::Error::RuntimeError(format!("cell {id} has no stage area"))
+                })
             })?,
         )?;
         globals.set("sf", api)?;

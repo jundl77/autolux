@@ -196,19 +196,26 @@ fn placed(id: &str, address: u32, x: f64, y: f64) -> String {
     )
 }
 
+/// `area` is a StageArea name without its prefix, as Autolux would derive it.
+fn placed_in(id: &str, address: u32, x: f64, y: f64, area: &str) -> String {
+    let fixture = placed(id, address, x, y);
+    format!(r#"{},"area":"{area}"}}"#, &fixture[..fixture.len() - 1])
+}
+
 /// Uneven spacing: the house-left members sit 100 mm off the house-right ones, the middle
 /// 40 mm off the centreline, and two rows of different depth interleave in X, so rank would
 /// pair across rows.
+/// Areas are the thirds of the box X -1000..1000, Y -2000..0.
 fn uneven_rig() -> FixtureRig {
     support::rig(
         serde_json::from_str(&format!(
             r#"{{"schema_version":1,"fixtures":[{},{},{},{},{}],
               "groups":{{"row":["a","b","m","c","d"]}}}}"#,
-            placed("a", 1, -1000.0, 0.0),
-            placed("b", 4, -900.0, -2000.0),
-            placed("m", 7, 40.0, -1000.0),
-            placed("c", 10, 900.0, 0.0),
-            placed("d", 13, 1000.0, -2000.0),
+            placed_in("a", 1, -1000.0, 0.0, "UP_LEFT"),
+            placed_in("b", 4, -900.0, -2000.0, "DOWN_LEFT"),
+            placed_in("m", 7, 40.0, -1000.0, "CENTRE"),
+            placed_in("c", 10, 900.0, 0.0, "UP_RIGHT"),
+            placed_in("d", 13, 1000.0, -2000.0, "DOWN_RIGHT"),
         ))
         .unwrap(),
     )
@@ -257,10 +264,11 @@ fn lua_reads_zone_position_and_distance_in_metres() {
     let mut autoloop = catalog(
         r#"return {render = function(ctx)
           return sf.each(sf.group("row"), function(fixture)
-            local zone, depth, height = sf.zone(fixture)
+            local zone, depth, area = sf.zone(fixture)
             local x, y, z = sf.position(fixture)
             local level = (zone == "house_left" and 0.1 or zone == "centre" and 0.2 or 0.3)
-              + (depth == "upstage" and 0.01 or 0) + height + z
+              + (depth == "upstage" and 0.01 or depth == "centre" and 0.02 or 0)
+              + (area == "centre" and 0.4 or 0) + z
             return {sf.dimmer(fixture, level),
                     sf.pan_tilt(fixture, x / 10 + 0.5, sf.distance(fixture, 0, -1) / 10)}
           end)
@@ -274,8 +282,7 @@ fn lua_reads_zone_position_and_distance_in_metres() {
         .filter_map(|effect| effect.values.intensity)
         .map(|level| (level * 100.0).round() / 100.0)
         .collect();
-    // Reach 1000 mm: centre within ±333; the y = 0 row is upstage (Y >= 0).
-    assert_eq!(levels, [0.11, 0.1, 0.2, 0.31, 0.3]);
+    assert_eq!(levels, [0.11, 0.1, 0.62, 0.31, 0.3]);
     let a = effects.iter().find_map(|effect| effect.values.pan).unwrap();
     assert!((a - 0.4).abs() < 1e-12, "{a}");
     let tilt_of_b = effects
@@ -284,6 +291,26 @@ fn lua_reads_zone_position_and_distance_in_metres() {
         .nth(1)
         .unwrap();
     assert!((tilt_of_b - 0.9f64.hypot(1.0) / 10.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_cell_without_a_stage_area_has_no_zone() {
+    let rig = support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{}],"groups":{{"row":["a"]}}}}"#,
+            placed("a", 1, 0.0, 0.0),
+        ))
+        .unwrap(),
+    );
+    let mut autoloop =
+        catalog(r#"return {render = function(ctx) sf.zone(sf.fixture("a")); return {} end}"#)
+            .instantiate("test", "autoloop", &rig, &support::palettes())
+            .unwrap();
+    let error = autoloop.render(&snapshot(0.0), &techno()).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("cell a has no stage area"),
+        "{error:#}"
+    );
 }
 
 #[test]

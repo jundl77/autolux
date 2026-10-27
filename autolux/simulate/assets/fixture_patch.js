@@ -620,7 +620,7 @@
     }
 
     // Plan view in standard plot orientation: MVR/GDTF -Y (downstage, toward the audience) at
-    // the bottom, so the SVG y is -Y; the scene's X = 0 is the stage centreline.
+    // the bottom, so the SVG y is -Y.
     function planMarks(draft, settings) {
         const classes = classNames(draft);
         const fixtures = [];
@@ -660,9 +660,27 @@
         return [5, 2, 1].map((unit) => unit * power).find((value) => value <= target);
     }
 
+    // The nine stage areas as Autolux derives them (cli/starfire_assets.py stage_areas): equal
+    // thirds of the fixtures' bounding box; an axis with no extent has no cuts.
+    function areaGrid(fixtures, n, r) {
+        if (!fixtures.length) return "";
+        const xs = fixtures.map((mark) => mark.x);
+        const ys = fixtures.map((mark) => -mark.y);
+        const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+        const cuts = (low, high) => (high > low ? [1, 2].map((k) => low + ((high - low) * k) / 3) : []);
+        const line = (ax, ay, bx, by) => `<line x1="${n(ax)}" y1="${n(ay)}" x2="${n(bx)}" y2="${n(by)}"/>`;
+        return [
+            `<g class="plan-areas" stroke-width="${n(r * 0.2)}" stroke-dasharray="${n(r)} ${n(r * 0.6)}" fill="none">`,
+            `<rect x="${n(x0)}" y="${n(y0)}" width="${n(x1 - x0)}" height="${n(y1 - y0)}"/>`,
+            ...cuts(x0, x1).map((x) => line(x, y0, x, y1)),
+            ...cuts(y0, y1).map((y) => line(x0, y, x1, y)),
+            "</g>"
+        ].join("");
+    }
+
     function planSvg({ fixtures, others }, settings) {
         const all = [...fixtures, ...others];
-        const xs = [0, ...all.map((mark) => mark.x)];
+        const xs = all.length ? all.map((mark) => mark.x) : [0];
         const ys = all.length ? all.map((mark) => -mark.y) : [0];
         const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
         const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, maxY - minY);
@@ -681,10 +699,7 @@
         const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
         const parts = [
             `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${n(left)} ${n(top)} ${n(width)} ${n(height)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}">`,
-            // Only a rig placed on both sides of X = 0 has a centreline, as Starfire reads it.
-            all.some((mark) => mark.x < 0) && all.some((mark) => mark.x > 0)
-                ? `<line class="plan-centreline" x1="0" y1="${n(top)}" x2="0" y2="${n(top + height)}" stroke-width="${n(r * 0.2)}" stroke-dasharray="${n(r)} ${n(r * 0.6)}"/>`
-                : "",
+            areaGrid(fixtures, n, r),
             // MVR has no stage edge; the plan draws it at the most downstage object.
             `<line class="plan-stage-edge" x1="${n(left)}" y1="${edge}" x2="${n(left + width)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
             `<text x="${n(left + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,

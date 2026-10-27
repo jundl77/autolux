@@ -62,7 +62,7 @@ FIXTURE_CSS = '''
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
-#mvr-plan .plan-centreline {stroke:#3b4d62;}
+#mvr-plan .plan-areas {stroke:#3b4d62;}
 #mvr-plan .plan-stage-edge {stroke:#6d7f95;}
 #mvr-plan .plan-scale line {stroke:#a9bbcf;}
 #mvr-plan text {fill:#a9bbcf;pointer-events:none;}

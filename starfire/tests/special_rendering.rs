@@ -136,9 +136,7 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
-        // Unplaced fixtures share the origin: one centre point, at Y = 0 so upstage.
-        zone: wire::StageZone::Centre as i32,
-        depth: wire::StageDepth::Upstage as i32,
+        // The synthetic rig carries no stage areas, so no group reports one.
         ..Default::default()
     };
     assert_eq!(
@@ -173,19 +171,19 @@ fn the_real_rig_reports_what_its_profiles_declare() {
             ("wash".to_owned(), 4, [true, false, false, false]),
         ]
     );
-    // Room reach 900 mm: centre within ±300 inclusive; only the spots hang at Y >= 0.
+    // The washes span three areas (CENTRE_LEFT, CENTRE, CENTRE_RIGHT), so they report none.
     let places: Vec<_> = capabilities(&rig)
         .into_iter()
-        .map(|group| (group.zone(), group.depth(), group.centre_x_metres))
+        .map(|group| (group.area.map(|_| group.area()), group.centre_x_metres))
         .collect();
-    use wire::{StageDepth as D, StageZone as Z};
+    use wire::StageArea as A;
     assert_eq!(
         places,
         [
-            (Z::Centre, D::Downstage, 0.0),
-            (Z::Centre, D::Upstage, 0.0),
-            (Z::Centre, D::Downstage, 0.0),
-            (Z::Mixed, D::Downstage, 0.0),
+            (Some(A::UpCentre), 0.0),
+            (Some(A::UpCentre), 0.0),
+            (Some(A::DownCentre), 0.0),
+            (None, 0.0),
         ]
     );
 }

@@ -185,7 +185,11 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     // Hung turned around (yaw 180): the local Y axis points downstage, toward the audience.
     assert.deepEqual(plain(byName.spot_left.facing.map(Math.round)), [0, -1]);
     const markup = model.planSvg(plan, settings);
-    assert.match(markup, /class="plan-centreline" x1="0"/);
+    // Nine-area grid over the fixtures' box (X -900..900, SVG y 0..2000), cut in thirds.
+    const grid = (markup) => markup.slice(markup.indexOf('class="plan-areas"'), markup.indexOf("</g>", markup.indexOf("plan-areas")));
+    assert.match(grid(markup), /<rect x="-900" y="0" width="1800" height="2000"\/>/);
+    const cuts = (markup) => [...grid(markup).matchAll(/<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"/g)].map((match) => match.slice(1).map(Number));
+    assert.deepEqual(cuts(markup), [[-300, 0, -300, 2000], [300, 0, 300, 2000], [-900, 667, 900, 667], [-900, 1333, 900, 1333]]);
     assert.match(markup, /class="plan-stage-edge"/);
     // A 2 m span gets the largest 1-2-5 step within a fifth of it.
     assert.match(markup, />0.2 m<\/text>/);
@@ -196,7 +200,9 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     assert.match(kinta.slice(0, kinta.indexOf("</g>")), /stroke-dasharray/);
     assert.match(markup, /fx · accent<\/span>/);
     const offCentre = { ...byName.kinta, x: 4000 };
-    assert.ok(!model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings).includes("plan-centreline"));
+    // One row: no depth extent, so only the X cuts (4000..9000 at 5667 and 7333).
+    const row = model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings);
+    assert.deepEqual(cuts(row).map(([x]) => x), [5667, 7333]);
 });
 
 test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", () => {

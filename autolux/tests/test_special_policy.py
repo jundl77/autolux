@@ -227,19 +227,22 @@ def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alon
     assert resting == {'fx': first.group == 'fx', 'laser': first.group == 'laser'}
 
 
-def test_a_zoned_role_row_plays_only_on_groups_lying_in_that_zone():
+def test_a_zoned_role_row_plays_only_on_groups_lying_in_one_area_of_that_zone():
     left = FX | {'name': 'left', 'zone': 'house_left', 'depth': 'upstage', 'x': -3.0}
-    spread = FX | {'name': 'spread', 'zone': None, 'depth': 'upstage', 'x': 0.0}
+    middle = FX | {'name': 'middle', 'zone': 'centre', 'depth': 'centre', 'x': 0.0}
+    # Members in several areas: the login reports no area, so neither zone nor depth.
+    spread = FX | {'name': 'spread', 'zone': None, 'depth': None, 'x': 0.0}
     right = FX | {'name': 'right', 'zone': 'house_right', 'depth': 'downstage', 'x': 3.0}
-    capabilities = SpecialCapabilities.from_groups([left, spread, right])
+    capabilities = SpecialCapabilities.from_groups([left, middle, spread, right])
     spin = dataclasses.replace(row('spin'), group='', role='accent')
     groups = lambda **narrowed: [
         r.group for r in capabilities.targets(dataclasses.replace(spin, **narrowed))
     ]
-    assert groups() == ['left', 'right', 'spread']
+    assert groups() == ['left', 'middle', 'right', 'spread']
     assert groups(zone='house_left') == ['left']
-    assert groups(zone='centre') == []
-    assert groups(depth='upstage') == ['left', 'spread']
+    assert groups(zone='centre') == ['middle']
+    assert groups(depth='centre') == ['middle']
+    assert groups(depth='upstage') == ['left']
     assert groups(zone='house_right', depth='upstage') == []
 
 
