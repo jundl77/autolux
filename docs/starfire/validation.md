@@ -15,7 +15,7 @@ Starfire and Radius have independent protobuf contracts and telemetry.
 - A fresh 30-second run also completed cleanly. The user confirmed that the first
   audible music and lighting started together.
 - Both runs recorded zero audio/device underruns, rebuffer events, capture
-  overruns, lost/concealed/overflow audio, and dropped DMX frames.
+  overruns, lost/overflow audio, and dropped DMX frames.
 - During the five-minute run the playing buffer ranged from 471 to 516 ms. The
   largest sampled audio delivery gap was 113 ms; buffering absorbed it without
   interrupting playback. The measurements do not identify the gap's cause.

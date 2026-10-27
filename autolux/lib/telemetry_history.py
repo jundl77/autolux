@@ -31,7 +31,6 @@ TELEMETRY_FIELD_SCALES = {
     'rx_dropped_frames': ('rx', 'overflow_frames_total', 1),
     'tx_dropped_frames': ('tx', 'queue_dropped_frames_total', 1),
     'dmx_frames': ('rx', 'dmx_frames_total', 1),
-    'dmx_dropped': ('rx', 'dmx_dropped_total', 1),
 }
 
 

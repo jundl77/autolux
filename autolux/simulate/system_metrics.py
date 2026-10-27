@@ -95,7 +95,7 @@ PANELS = (
         'USB frame updates',
         'Successful host writes to Enttec per second. Newer queued frames can replace older ones; the device refreshes the DMX wire independently.',
         'frames/s',
-        (('dmx_frames', 'USB updates', TEAL, True), ('dmx_dropped', 'Rejected packets', RED, True)),
+        (('dmx_frames', 'USB updates', TEAL, True),),
     ),
 )
 
