@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 from types import SimpleNamespace
 
@@ -13,6 +14,8 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
 )
 from autolux.lib.engine.intensity_follow import FollowMusic, level_for_drive
+from autolux.lib.engine.section_decoder import BEATS_PER_BAR
+from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat
 
 
 @pytest.mark.parametrize(
@@ -151,3 +154,78 @@ async def test_a_mood_that_commits_at_the_section_after_an_early_drop_still_sets
     assert light.follow_music.track_level == BALANCED
     [(level, why)] = asked
     assert level == INTENSITY_BALANCED and why.startswith('drive ')
+
+
+BREAKDOWN_BEAT = MeasuredBeat(90.0, 0.6, 1000.0, 0.0)
+DRIVING_BEAT = MeasuredBeat(160.0, 1.0, 3000.0, 0.0)
+MAXIMAL_ARRIVAL = 0.95
+WINDOW_BEATS = MAX_MEASURED_BARS * BEATS_PER_BAR
+
+
+async def engine_joined_in_a_breakdown(intensity_auto=True):
+    """Auto levels apply at once, as ShowControl does; the opening window reads calm."""
+    from autolux.tests.test_palette_policy import engine_showing_an_intro
+
+    light, _ = await engine_showing_an_intro()
+    light.settings = ShowSettings(intensity=INTENSITY_BALANCED, intensity_auto=intensity_auto)
+    light._settings = lambda: light.settings
+    light.asked = []
+
+    def apply(level, why):
+        light.asked.append((level, why))
+        light.settings = dataclasses.replace(light.settings, intensity=level)
+
+    light.on_auto_intensity = apply
+    # The full window commits on the downbeat after it.
+    feed(light, BREAKDOWN_BEAT, WINDOW_BEATS + 1)
+    return light
+
+
+def feed(light, beat, count):
+    for index in range(count):
+        light._measure_track_mood(beat, index % BEATS_PER_BAR)
+
+
+async def test_drops_move_the_level_one_step_at_a_time_from_every_beat_of_the_track():
+    light = await engine_joined_in_a_breakdown()
+    assert [level for level, _ in light.asked] == [INTENSITY_CALM]
+
+    feed(light, DRIVING_BEAT, 2 * WINDOW_BEATS)
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    assert light.asked[-1] == (INTENSITY_BALANCED, 'drive +1.00')
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    assert light.asked[-1] == (INTENSITY_WILD, 'drive +1.00')
+
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    assert len(light.asked) == 3, 'no change once the level is right'
+
+
+async def test_a_drop_keeps_a_level_the_whole_track_still_agrees_with():
+    light = await engine_joined_in_a_breakdown()
+    feed(light, BREAKDOWN_BEAT, 64)
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    assert len(light.asked) == 1
+
+
+async def test_manual_mode_ignores_drops():
+    light = await engine_joined_in_a_breakdown(intensity_auto=False)
+    feed(light, DRIVING_BEAT, 2 * WINDOW_BEATS)
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    assert light.asked == []
+    assert light.settings.intensity == INTENSITY_BALANCED
+
+
+async def test_a_new_track_measures_from_its_own_start():
+    from autolux.lib.engine.effect_definitions import LightIntent
+    from autolux.tests.test_palette_policy import enter
+
+    light = await engine_joined_in_a_breakdown()
+    feed(light, DRIVING_BEAT, 2 * WINDOW_BEATS)
+    light._after_silence = True
+    await enter(light, LightIntent.ATMOSPHERIC)
+    assert light._track_beats == []
+
+    feed(light, BREAKDOWN_BEAT, WINDOW_BEATS)
+    light._follow_drop(MAXIMAL_ARRIVAL)
+    assert [level for level, _ in light.asked] == [INTENSITY_CALM]
