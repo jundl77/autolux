@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::{GdtfCell, GdtfProfile};
@@ -388,6 +388,16 @@ impl FixtureRig {
         let spatial = Spatial::new(positions, areas, &cell_groups, |cell| {
             cells.get(cell).map_or(usize::MAX, |&(fixture, _)| fixture)
         });
+        for (group, members) in &cell_groups {
+            for accent in accent_groups.iter().filter(|accent| *accent != group) {
+                ensure!(
+                    !cell_groups[accent]
+                        .iter()
+                        .any(|cell| members.contains(cell)),
+                    "loop group {group} shares a fixture with accent group {accent}, which plays specials only"
+                );
+            }
+        }
         let accent_cells = accent_groups
             .iter()
             .flat_map(|group| &cell_groups[group])
@@ -444,29 +454,26 @@ impl FixtureRig {
         self.accent_cells.contains(cell_id)
     }
 
-    /// A loop that names an accent group or fixture is refused rather than silently dark.
-    pub fn refuse_accent(&self, target: &Target) -> Result<()> {
-        match target {
-            Target::Group(group) if self.is_accent(group) => {
-                bail!("accent group {group} plays specials only, never autoloops")
-            }
-            Target::Fixture(id)
-                if self
-                    .resolve(target)?
-                    .iter()
-                    .any(|cell| self.is_accent_cell(cell)) =>
-            {
-                bail!("accent fixture {id} plays specials only, never autoloops")
-            }
-            _ => Ok(()),
-        }
+    pub fn refuse_accent_group(&self, group: &str) -> Result<()> {
+        ensure!(
+            !self.is_accent(group),
+            "accent group {group} plays specials only, never autoloops"
+        );
+        Ok(())
     }
 
-    /// The cells an autoloop's target lights: `all` and loop groups pass over accent cells.
+    /// The cells an autoloop's target lights. Naming an accent group or fixture is refused;
+    /// `all` passes over accent cells, which rig load keeps out of loop groups.
     pub fn resolve_for_loop(&self, target: &Target) -> Result<Vec<String>> {
-        self.refuse_accent(target)?;
         let mut cells = self.resolve(target)?;
-        cells.retain(|cell| !self.is_accent_cell(cell));
+        match target {
+            Target::Group(group) => self.refuse_accent_group(group)?,
+            Target::Fixture(id) => ensure!(
+                !cells.iter().any(|cell| self.is_accent_cell(cell)),
+                "accent fixture {id} plays specials only, never autoloops"
+            ),
+            Target::All => cells.retain(|cell| !self.is_accent_cell(cell)),
+        }
         Ok(cells)
     }
 

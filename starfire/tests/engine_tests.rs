@@ -1290,34 +1290,20 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
 }
 
 #[test]
-fn a_loop_on_all_or_on_a_group_holding_an_accent_fixture_leaves_the_accent_dark() {
-    let mut definition = support::room_definition();
-    let fx = support::room().groups()["fx"].clone();
-    let wash = support::room().groups()["wash"][0].clone();
-    definition
-        .groups
-        .push(starfire::protocol::wire::FixtureGroup {
-            group_id: "house".into(),
-            fixture_ids: vec![wash.clone(), fx[0].clone()],
-            ..Default::default()
-        });
-    for target in ["sf.all()", "sf.group('house')"] {
-        let mut engine = engine_on(
-            FixtureRig::from_wire(&definition).unwrap(),
-            &[(
-                "lit",
-                &format!("return {{render=function(ctx) return {{sf.dimmer({target}, 1)}} end}}"),
-            )],
-        );
-        select(&mut engine, 0.0, "lit", Transition::Cut);
-        let states = engine
-            .render_at(0.0)
-            .unwrap()
-            .fixture_properties_before_strobe;
-        assert_eq!(states[&wash].intensity, 1.0, "{target}");
-        for cell in &fx {
-            assert_eq!(states[cell].intensity, 0.0, "{target} {cell}");
-        }
+fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
+    let room = support::room();
+    let mut engine = room_engine(&[(
+        "lit",
+        "return {render=function(ctx) return {sf.dimmer(sf.all(), 1)} end}",
+    )]);
+    select(&mut engine, 0.0, "lit", Transition::Cut);
+    let states = engine
+        .render_at(0.0)
+        .unwrap()
+        .fixture_properties_before_strobe;
+    assert_eq!(states[&room.groups()["wash"][0]].intensity, 1.0);
+    for cell in &room.groups()["fx"] {
+        assert_eq!(states[cell].intensity, 0.0, "{cell}");
     }
 }
 

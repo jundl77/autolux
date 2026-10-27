@@ -378,20 +378,17 @@ impl LuaAutoloop {
             "mirror",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
-                spatial
-                    .refuse_accent(&target)
-                    .map_err(mlua::Error::external)?;
                 let named: Vec<(String, String)> = match &target {
-                    Target::Group(group) => spatial
-                        .spatial()
-                        .mirror(group)
-                        .unwrap_or_default()
-                        .iter()
-                        .filter(|(left, right)| {
-                            !spatial.is_accent_cell(left) && !spatial.is_accent_cell(right)
-                        })
-                        .cloned()
-                        .collect(),
+                    Target::Group(group) => {
+                        spatial
+                            .refuse_accent_group(group)
+                            .map_err(mlua::Error::external)?;
+                        spatial
+                            .spatial()
+                            .mirror(group)
+                            .map(<[_]>::to_vec)
+                            .unwrap_or_default()
+                    }
                     // A fixture's cells share its position, so only their order can pair them.
                     _ => {
                         let members = spatial

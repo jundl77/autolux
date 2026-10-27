@@ -289,6 +289,24 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
 }
 
 #[test]
+fn a_loop_group_sharing_a_fixture_with_an_accent_group_is_refused_at_rig_load() {
+    let mut definition = support::room_definition();
+    let kinta = support::room().groups()["fx"][0].clone();
+    definition
+        .groups
+        .push(starfire::protocol::wire::FixtureGroup {
+            group_id: "house".into(),
+            fixture_ids: vec![kinta],
+            ..Default::default()
+        });
+    let error = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "loop group house shares a fixture with accent group fx, which plays specials only"
+    );
+}
+
+#[test]
 fn a_group_with_an_unknown_role_is_refused_rather_than_read_as_a_loop_group() {
     let mut definition = support::room_definition();
     definition.groups[0].role = 99;

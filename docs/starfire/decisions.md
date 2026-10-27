@@ -531,7 +531,8 @@ in Lua see it unchanged. Mirror pairs are by symmetry about the group's centre i
 `sf.mirror(target)` returns `{left, right}` partners outermost first (an odd middle pairs
 with itself), and `sf.side(index, count)` gives each member's half (-1, 0 for an odd middle,
 1); inside `sf.each`, `sf.side(index)` takes the group's size as the count, so it is -1 for
-the house-left half and 1 for the right.
+the house-left half and 1 for the right. sf.each counts cells, so a multi-cell mover's cells
+skew the halves toward its side.
 The room's positions (washes at X -900/-300/300/900, spots at -300/300, mm) already match
 their names, so room.rig.pb and the goldens are unchanged.
 
