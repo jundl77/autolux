@@ -3,17 +3,20 @@
 Drive alone misreads tracks: a loud pop ballad has the level of a peak-time drop. So each level
 needs evidence from the track's sections since its start:
 
-- wild: the drive is above WILD_ABOVE_DRIVE and at least one DROP arrived loud, at
-  LOUD_DROP_ARRIVAL of the track peak or more (the autoloop policy's maximal-arrival grade);
 - calm: the first CALM_OPENING_BARS are heard without a DROP, and the committed intents average
   CALM_MAX_MEAN_ENERGY or less on INTENT_ENERGY;
-- balanced otherwise.
+- wild: the drive is above WILD_ABOVE_DRIVE and at least one DROP arrived loud, at
+  LOUD_DROP_ARRIVAL of the track peak or more (the autoloop policy's maximal-arrival grade);
+- balanced: the drive is above BALANCED_ABOVE_DRIVE;
+- calm otherwise.
 
-The level is first chosen when the mood window closes, and that choice is never wild: no drop
-has been graded yet. Calm can follow once the opening is heard. At each drop the level is
-re-read from every beat since the track start, one step at a time, because the opening window
-alone depends on where in the track the show joined. A drop that arrives below the track's
-peak lowers wild to balanced once per track, so a soft drop never plays wild.
+Every step up happens at a DROP entry, so the room hears the reason for it: going up before
+the music does reads as jumpy. The mood commit and the check after CALM_OPENING_BARS only step
+down or hold; at the commit only calm evidence lowers balanced or wild, because the drive of
+an opening alone says little. At each drop the level is re-read from every beat since the
+track start and steps up at most once, because the opening window alone depends on where in
+the track the show joined. A drop that arrives below the track's peak lowers wild to balanced
+once per track, so a soft drop never plays wild.
 
 INTENT_ENERGY is the section's own energy, not the autoloop tier it played at: the tier
 depends on the level, and evidence that follows the level would hold any level it chose.
@@ -33,10 +36,9 @@ from autolux.lib.engine.effect_definitions import (
 )
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 
-# Drive spans about -0.6..+0.8 on the calibration set (track_mood.py).
+# Level drive spans about -0.6..+0.8 on the calibration set (track_mood.py).
+BALANCED_ABOVE_DRIVE = -0.3
 WILD_ABOVE_DRIVE = 0.4
-# Staying wild needs the drive to come back below the threshold by this much.
-DRIVE_HYSTERESIS = 0.1
 LOUD_DROP_ARRIVAL = MAXIMAL_ARRIVAL_OF_PEAK
 CALM_OPENING_BARS = 32
 CALM_OPENING_BEATS = CALM_OPENING_BARS * BEATS_PER_BAR
@@ -51,14 +53,13 @@ LEVEL_INTENSITIES = {CALM: INTENSITY_CALM, BALANCED: INTENSITY_BALANCED, WILD: I
 LEVELS = (CALM, BALANCED, WILD)
 
 
-def drive_is_wild(drive: float, current: str) -> bool:
-    threshold = WILD_ABOVE_DRIVE - DRIVE_HYSTERESIS if current == WILD else WILD_ABOVE_DRIVE
-    return drive > threshold
-
-
-def one_step_toward(target: str, current: str) -> str:
+def one_step_up_toward(target: str, current: str) -> str:
     here, there = LEVELS.index(current), LEVELS.index(target)
-    return LEVELS[here + (there > here) - (there < here)]
+    return LEVELS[here + 1] if there > here else current
+
+
+def no_higher_than(target: str, current: str) -> str:
+    return min(target, current, key=LEVELS.index)
 
 
 class FollowMusic:
@@ -93,16 +94,17 @@ class FollowMusic:
             and self.mean_energy <= CALM_MAX_MEAN_ENERGY
         )
 
-    def level_for(self, drive: float, current: str) -> str:
+    def level_at_drop(self, drive: float) -> str:
         if self.heard_calm():
             return CALM
-        if self.loud_drop and drive_is_wild(drive, current):
+        if self.loud_drop and drive > WILD_ABOVE_DRIVE:
             return WILD
-        return BALANCED
+        if drive > BALANCED_ABOVE_DRIVE:
+            return BALANCED
+        return CALM
 
-    def on_track_mood(self, drive: float, current: str) -> str:
-        level = self.level_for(drive, current)
-        self.track_level = BALANCED if level == WILD else level
+    def on_track_mood(self, current: str) -> str:
+        self.track_level = no_higher_than(CALM if self.heard_calm() else BALANCED, current)
         return self.track_level
 
     def on_opening_heard(self) -> str | None:
@@ -126,7 +128,7 @@ class FollowMusic:
         if self.track_level is None or self.capped:
             return None
         if drive is not None:
-            self.track_level = one_step_toward(self.level_for(drive, current), current)
+            self.track_level = one_step_up_toward(self.level_at_drop(drive), current)
         level = BALANCED if self.track_level == WILD and soft else self.track_level
         if level == current:
             return None

@@ -619,7 +619,7 @@ class LightEngine(IMusicAnalyserHandler):
 
     def _follow_track_mood(self) -> None:
         drive = level_drive(self._track_beats)
-        level = self.follow_music.on_track_mood(drive, self._intensity_level())
+        level = self.follow_music.on_track_mood(self._intensity_level())
         self._follow(level, f'drive {drive:+.2f}')
 
     def _follow_opening(self) -> None:

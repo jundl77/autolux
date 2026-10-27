@@ -14,7 +14,7 @@ from autolux.lib.engine.effect_definitions import (
     LightIntent,
     ShowSettings,
 )
-from autolux.lib.engine.intensity_follow import CALM_OPENING_BEATS, FollowMusic, drive_is_wild
+from autolux.lib.engine.intensity_follow import CALM_OPENING_BEATS, FollowMusic
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.track_mood import (
     MAX_MEASURED_BARS,
@@ -26,29 +26,40 @@ from autolux.lib.engine.track_mood import (
 
 
 @pytest.mark.parametrize(
-    ('drive', 'current', 'wild'),
+    ('drive', 'loud_drop', 'level'),
     [
-        (0.41, BALANCED, True),
-        (0.39, BALANCED, False),
-        # Hysteresis: wild holds until the drive is clearly below the threshold.
-        (0.35, WILD, True),
-        (0.25, WILD, False),
+        (0.41, True, WILD),
+        (0.41, False, BALANCED),
+        (0.39, True, BALANCED),
+        (-0.29, False, BALANCED),
+        (-0.31, False, CALM),
     ],
 )
-def test_the_drive_must_be_high_for_wild_with_hysteresis(drive, current, wild):
-    assert drive_is_wild(drive, current) == wild
+def test_a_drop_reads_the_level_from_the_drive_and_its_loudness(drive, loud_drop, level):
+    follow = FollowMusic()
+    follow.loud_drop = loud_drop
+    assert follow.level_at_drop(drive) == level
+
+
+@pytest.mark.parametrize(
+    ('current', 'level'), [(CALM, CALM), (BALANCED, BALANCED), (WILD, BALANCED)]
+)
+def test_the_mood_commit_only_steps_down_or_holds(current, level):
+    follow = FollowMusic()
+    follow.start_track(LightIntent.ATMOSPHERIC)
+    assert follow.on_track_mood(current) == level
 
 
 def test_a_soft_drop_caps_a_wild_track_once_and_never_flaps_back():
     follow = FollowMusic()
     assert follow.on_drop(0.5, BALANCED) is None, 'no level before the track is measured'
-    assert follow.on_track_mood(0.6, BALANCED) == BALANCED, 'the first reading is never wild'
+    assert follow.on_track_mood(BALANCED) == BALANCED, 'the first reading is never wild'
     assert follow.on_drop(0.95, BALANCED, drive=0.6) == WILD
     assert follow.on_drop(0.95, WILD) is None, 'a maximal drop keeps wild'
     assert follow.on_drop(0.6, WILD) == BALANCED
     assert follow.on_drop(0.95, BALANCED, drive=0.6) is None, 'one change per track'
     follow.start_track(LightIntent.ATMOSPHERIC)
-    assert follow.on_track_mood(0.6, WILD) == BALANCED, 'the next track starts afresh'
+    assert follow.on_track_mood(WILD) == BALANCED, 'the next track starts afresh'
     assert not follow.loud_drop and not follow.capped
 
 
@@ -316,16 +327,33 @@ async def test_a_loud_pop_ballad_with_a_doubled_tempo_reads_calm_and_never_wild(
 
 
 async def test_techno_with_loud_drops_commits_balanced_and_goes_wild_at_the_first_loud_drop():
-    light = await engine_at(INTENSITY_CALM)
+    light = await engine_at(INTENSITY_BALANCED)
     play_bars(light, alternating(130.0, 0.85, 0.90, 2), 16)
     await commit(light, LightIntent.BUILDUP)
-    assert levels(light) == [INTENSITY_BALANCED]
+    assert light.follow_music.track_level == BALANCED and levels(light) == []
     play_bars(light, alternating(130.0, 0.92, 0.96, 2), 8)
     await commit(light, LightIntent.DROP, MAXIMAL_ARRIVAL)
-    assert levels(light) == [INTENSITY_BALANCED, INTENSITY_WILD]
+    assert levels(light) == [INTENSITY_WILD]
 
 
-async def test_house_with_soft_drops_stays_balanced():
+async def test_every_step_up_waits_for_a_drop():
+    # Around the World live: calm before, commit at drive -0.10, a calm opening, drop at +0.18.
+    light = await engine_at(INTENSITY_CALM)
+    intro = alternating(121.0, 0.78, 0.82, 2)
+    play_bars(light, intro, 8)
+    await commit(light, LightIntent.BUILDUP)
+    assert light.follow_music.track_level == CALM, 'the commit holds calm'
+    play_bars(light, intro, 8)
+    await commit(light, LightIntent.BREAKDOWN)
+    play_bars(light, intro, 16)
+    assert light.follow_music.opening_heard and light.follow_music.track_level == CALM
+    assert levels(light) == []
+    play_bars(light, alternating(121.0, 0.85, 0.92, 2), 8)
+    await commit(light, LightIntent.DROP, MAXIMAL_ARRIVAL)
+    assert levels(light) == [INTENSITY_BALANCED], 'one step up, at the drop'
+
+
+async def test_house_with_soft_drops_steps_up_to_balanced_at_its_first_drop_and_no_further():
     light = await engine_at(INTENSITY_CALM)
     house = alternating(125.0, 0.80, 0.86, 2)
     play_bars(light, house, 16)
@@ -346,13 +374,13 @@ def test_a_drop_in_the_opening_rules_out_calm():
     for _ in range(4):
         follow.on_intent(LightIntent.BREAKDOWN)
     assert follow.mean_energy <= 1.5
-    assert follow.on_track_mood(-0.8, BALANCED) == BALANCED
+    assert follow.on_track_mood(BALANCED) == BALANCED
     assert follow.on_opening_heard() is None
 
 
 def test_the_opening_must_be_heard_before_calm():
     follow = FollowMusic()
     follow.start_track(LightIntent.ATMOSPHERIC)
-    assert follow.on_track_mood(-0.8, BALANCED) == BALANCED
+    assert follow.on_track_mood(BALANCED) == BALANCED
     assert follow.on_opening_heard() == CALM
     assert CALM_OPENING_BEATS == 32 * BEATS_PER_BAR
