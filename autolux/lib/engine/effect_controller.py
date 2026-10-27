@@ -50,8 +50,10 @@ DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 SPECIAL_PRIORITY = DROP_ACCENT_PRIORITY
 SPECIAL_ID = 'special'
-# FX off and standby must read at once, not after a texture's authored 64-beat fade.
-CUT_RELEASE_BEATS = 4.0
+# FX off and standby must read in the room within half a second, whatever the tempo: a
+# four-beat fade at 90 BPM still looked like nothing happened.
+CUT_RELEASE_BEATS = 1.0
+CUT_RELEASE_SECONDS = 0.5
 OPERATOR_FADE_SECONDS = 0.1
 
 
@@ -300,7 +302,7 @@ class EffectController:
 
     def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
-        self._forget_special(CUT_RELEASE_BEATS)
+        self._forget_special(cut=True)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
@@ -363,27 +365,39 @@ class EffectController:
             special.pulse_beats,
         )
 
-    def release_special(self, release_beats: float | None = None) -> None:
+    def release_special(self, *, cut: bool = False) -> None:
+        # Sent straight to the renderer, never through the delayed queue: a cut is the operator's,
+        # not the music's, so it belongs to the room's now.
         if not self._special_on:
             return
-        self.lighting_client.clear_override(SPECIAL_ID, release_beats=release_beats)
-        authored = self._special.release_beats
-        LOGGER.info(
-            '[lighting] special %s released over %g beats',
-            self._special.name,
-            authored if release_beats is None else min(authored, release_beats),
-        )
+        if cut:
+            self.lighting_client.clear_override(
+                SPECIAL_ID, release_beats=CUT_RELEASE_BEATS, release_seconds=CUT_RELEASE_SECONDS
+            )
+            LOGGER.info(
+                '[lighting] special %s cut over at most %g beats or %g s',
+                self._special.name,
+                CUT_RELEASE_BEATS,
+                CUT_RELEASE_SECONDS,
+            )
+        else:
+            self.lighting_client.clear_override(SPECIAL_ID)
+            LOGGER.info(
+                '[lighting] special %s released over %g beats',
+                self._special.name,
+                self._special.release_beats,
+            )
         self._special_on = False
         if self.event_buffer:
             self.event_buffer.set_special(None)
 
-    def _forget_special(self, release_beats: float | None = None) -> None:
-        self.release_special(release_beats)
+    def _forget_special(self, *, cut: bool = False) -> None:
+        self.release_special(cut=cut)
         self._special = None
 
     def cut_special(self) -> None:
         """Fade the running special out quickly; nothing returns before the next entry fires one."""
-        self._forget_special(CUT_RELEASE_BEATS)
+        self._forget_special(cut=True)
 
     def _restore_special(self) -> None:
         if not self._settings().fx_auto:

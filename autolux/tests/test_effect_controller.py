@@ -6,6 +6,7 @@ from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import (
     CUT_RELEASE_BEATS,
+    CUT_RELEASE_SECONDS,
     DROP_ACCENT_ID,
     SPECIAL_ID,
     SPECIAL_PRIORITY,
@@ -34,6 +35,12 @@ FULL_INTENSITY = ShowSettings(intensity=1.0)
 # Wild halves the intense cooldown; balanced keeps the setting as written.
 BALANCED = ShowSettings(intensity=0.7)
 BALANCED = ShowSettings(intensity=INTENSITY_BALANCED)
+CUT = {
+    'kind': 'clear_override',
+    'id': SPECIAL_ID,
+    'release_beats': CUT_RELEASE_BEATS,
+    'release_seconds': CUT_RELEASE_SECONDS,
+}
 
 
 async def test_applied_lighting_change_has_one_useful_info_line(effect_controller, caplog):
@@ -560,7 +567,7 @@ async def test_standby_releases_the_special_with_the_accent():
     controller.enter_standby(120.0)
     assert accents(lighting, start) == [
         {'kind': 'clear_override', 'id': DROP_ACCENT_ID},
-        {'kind': 'clear_override', 'id': SPECIAL_ID, 'release_beats': CUT_RELEASE_BEATS},
+        CUT,
     ]
 
 
@@ -879,12 +886,11 @@ async def test_fx_off_fades_a_running_texture_out_at_once_and_spares_the_drop_st
     start = len(lighting.events)
     control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
     await control.apply_pending(show)
-    cut = {'kind': 'clear_override', 'id': SPECIAL_ID, 'release_beats': CUT_RELEASE_BEATS}
-    assert accents(lighting, start) == [cut], 'the drop strobe keeps its own burst'
+    assert accents(lighting, start) == [CUT], 'the drop strobe keeps its own burst'
 
     control.commands.put_nowait({'action': 'fx_auto', 'enabled': True})
     await control.apply_pending(show)
-    assert accents(lighting, start) == [cut], 'FX on restarts nothing; the next entry picks'
+    assert accents(lighting, start) == [CUT], 'FX on restarts nothing; the next entry picks'
 
 
 async def test_standby_fades_a_running_texture_out_at_once_and_keeps_the_cooldown(tmp_path):
@@ -892,12 +898,48 @@ async def test_standby_fades_a_running_texture_out_at_once_and_keeps_the_cooldow
     await controller.change_effect(LightIntent.DROP)
     start = len(lighting.events)
     controller.enter_standby(120.0)
-    assert {'kind': 'clear_override', 'id': SPECIAL_ID, 'release_beats': CUT_RELEASE_BEATS} in (
-        accents(lighting, start)
-    )
+    assert CUT in accents(lighting, start)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
     assert accents(lighting, start) == [], 'the cooldown still holds both intense rows back'
+
+
+def _delayed_show(tmp_path, delay_sec=14.0):
+    from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
+    from autolux.lib.engine.light_engine import LightEngine
+
+    control, controller, lighting, clock = _long_texture_on_a_drop(tmp_path)
+    command_queue = DelayedCommandQueue(delay_sec, clock=clock)
+    light = LightEngine(
+        lighting, controller, command_queue, playback_delay_sec=delay_sec, clock=clock
+    )
+    return control, light, command_queue, lighting, clock
+
+
+async def _settle_audible_timeline(command_queue, clock, delay_sec=14.0):
+    clock.advance(delay_sec + 1.0)
+    await command_queue.drain()
+
+
+@pytest.mark.parametrize('cause', ['fx_off', 'standby'])
+async def test_an_operator_cut_reaches_the_renderer_now_not_at_the_audible_position(
+    tmp_path, cause
+):
+    control, light, command_queue, lighting, clock = _delayed_show(tmp_path)
+    await light.effect_controller.change_effect(LightIntent.DROP)
+    clock.advance(3.0)
+    start = len(lighting.events)
+    if cause == 'fx_off':
+        control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
+        await control.apply_pending(light)
+    else:
+        light.on_digital_silence()
+    cuts = [e for e in lighting.events[start:] if e['command'] == CUT]
+    assert [e['at_seconds'] for e in cuts] == [clock.monotonic()], 'sent on the cut, undelayed'
+    assert command_queue.pending == 0, 'nothing for the special waits on the delayed queue'
+    after = len(lighting.events)
+    await _settle_audible_timeline(command_queue, clock)
+    assert not [e for e in lighting.events[after:] if e['command']['kind'] == 'clear_override']
 
 
 async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_json(tmp_path):

@@ -249,19 +249,27 @@ impl Engine {
                 );
             }
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
-            Command::ClearOverride { id, release_beats } => {
+            Command::ClearOverride {
+                id,
+                release_beats,
+                release_seconds,
+            } => {
                 validate_identifier(id)?;
-                if let Some(cap) = release_beats {
+                for cap in [release_beats, release_seconds].into_iter().flatten() {
                     ensure!(
                         cap.is_finite() && *cap >= 0.0,
-                        "release beats must be finite and non-negative"
+                        "release caps must be finite and non-negative"
                     );
                 }
+                // Applied at this frame's beat, never deferred: an operator cut must read at once.
+                let seconds_cap = release_seconds.map(|cap| cap * self.clock.beats_per_second());
+                let cap = [*release_beats, seconds_cap]
+                    .into_iter()
+                    .flatten()
+                    .reduce(f64::min);
                 if let Some(mut removed) = self.overrides.remove(id) {
-                    if let (Some(cap), Some(special)) =
-                        (release_beats, removed.value.special_fx.as_mut())
-                    {
-                        special.release_beats = special.release_beats.min(*cap);
+                    if let (Some(cap), Some(special)) = (cap, removed.value.special_fx.as_mut()) {
+                        special.release_beats = special.release_beats.min(cap);
                     }
                     self.release(removed, time.elapsed_musical_beats);
                 }

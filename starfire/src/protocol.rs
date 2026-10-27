@@ -311,6 +311,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
             &Command::ClearOverride {
                 id: value.effect_id.clone(),
                 release_beats: value.release_beats.map(f64::from),
+                release_seconds: value.release_seconds.map(f64::from),
             },
         ),
     }
