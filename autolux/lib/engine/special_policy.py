@@ -103,6 +103,7 @@ class SpecialPolicy:
         intent: LightIntent,
         capabilities: SpecialCapabilities,
         intense_blocked: str | None = None,
+        soft_drop: str | None = None,
     ) -> SpecialChoice:
         rows = [
             special
@@ -116,6 +117,11 @@ class SpecialPolicy:
             suppressed = intense_blocked if strobes or len(calm) < len(selectable) else None
             chosen = self._least_recent(calm) if calm else None
             return SpecialChoice(chosen, suppressed=suppressed)
+        if soft_drop:
+            # A soft drop keeps its strobe burst but not an intense special on top of it.
+            suppressed = soft_drop if len(calm) < len(selectable) else None
+            chosen = self._least_recent(calm) if calm else None
+            return SpecialChoice(chosen, strobes, suppressed)
         chosen = self._least_recent(selectable) if selectable else None
         return SpecialChoice(chosen, strobes)
 

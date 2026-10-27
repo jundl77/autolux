@@ -50,11 +50,11 @@ def row(**sections) -> dict:
     return changed
 
 
-def test_the_shipped_specials_parse_and_serve_every_intent_but_breakdown():
+def test_the_shipped_specials_parse_and_serve_only_drops():
     specials = discover_specials()
     assert {path.stem for path in SPECIAL_DIRECTORY.glob('*.toml')} == {s.name for s in specials}
     served = {intent for special in specials for intent in special.intents}
-    assert served == {LightIntent.ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.DROP}
+    assert served == {LightIntent.DROP}
 
 
 def test_the_drop_strobe_row_is_the_built_in_strobe_burst():

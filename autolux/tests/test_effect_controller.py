@@ -482,27 +482,29 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
     ]
 
 
-async def test_each_intent_gets_its_catalogue_row_and_breakdown_releases_it():
+async def test_only_a_drop_plays_a_catalogue_row():
     controller, lighting, _ = with_specials(discover_specials())
-    sent = []
     for intent in (LightIntent.ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.BREAKDOWN):
-        start = len(lighting.events)
         await controller.change_effect(intent)
-        sent.append(accents(lighting, start))
-    [atmospheric], [buildup], [breakdown] = sent
-    assert atmospheric['value']['target'] == {'group': 'fx'}
-    assert atmospheric['value']['special_fx']['attack_beats'] == 32.0
-    assert buildup['value']['id'] == SPECIAL_ID
-    assert buildup['value']['special_fx']['attack_beats'] == 128.0
-    assert breakdown == {'kind': 'clear_override', 'id': SPECIAL_ID}
+    assert accents(lighting) == []
 
-    start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    spin, strobe = accents(lighting, start)
+    spin, strobe = accents(lighting)
     assert spin['value']['id'] == SPECIAL_ID
+    assert spin['value']['target'] == {'group': 'fx'}
     assert spin['value']['special_fx']['pulse_beats'] == 1
     assert strobe['value']['id'] == DROP_ACCENT_ID
     assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
+
+
+async def test_a_soft_drop_keeps_the_strobe_but_plays_no_intense_special(caplog):
+    controller, lighting, _ = with_specials([SPIN, DROP_STROBE])
+    soft = SelectionContext(LightIntent.DROP, arrival_of_peak=0.6)
+    with caplog.at_level(logging.INFO):
+        await controller.change_effect(LightIntent.DROP, context=soft)
+    [strobe] = accents(lighting)
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+    assert 'intense special suppressed | drop arrival 0.60 below 0.90' in caplog.text
 
 
 async def test_a_strobe_row_releases_the_running_special_before_it_bursts():

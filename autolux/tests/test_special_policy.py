@@ -8,6 +8,7 @@ from autolux.lib.engine.special_policy import (
     SpecialCapabilities,
     SpecialPolicy,
 )
+from autolux.lighting.special_catalogue import discover_specials
 
 DROP, ATMOSPHERIC = LightIntent.DROP, LightIntent.ATMOSPHERIC
 FX = {
@@ -110,3 +111,23 @@ def test_an_intent_without_rows_chooses_nothing_and_reports_no_suppression():
     policy = SpecialPolicy([row('calm', ATMOSPHERIC)], random.Random(0))
     choice = policy.choose(LightIntent.BREAKDOWN, SpecialCapabilities.from_groups([FX]), 'gate')
     assert choice.special is None and choice.suppressed is None
+
+
+def test_the_shipped_fx_rows_play_only_on_drops_outside_the_cooldown():
+    policy = SpecialPolicy(discover_specials(), random.Random(0))
+    capabilities = SpecialCapabilities.from_groups([FX])
+    for intent in (ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.BREAKDOWN):
+        assert policy.choose(intent, capabilities).special is None
+    assert policy.choose(DROP, capabilities).special.group == 'fx'
+    blocked = policy.choose(DROP, capabilities, 'cooldown 30s of 60s left')
+    assert (blocked.special, blocked.strobes) == (None, ())
+
+
+def test_a_soft_drop_keeps_the_strobe_and_a_calm_row_but_no_intense_one():
+    policy = SpecialPolicy([row('calm'), row('spin', pulse=1), DROP_STROBE], random.Random(0))
+    choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), soft_drop='soft')
+    assert (choice.special.name, choice.strobes, choice.suppressed) == (
+        'calm',
+        (DROP_STROBE,),
+        'soft',
+    )

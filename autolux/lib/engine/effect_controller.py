@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from autolux.lib.clients.starfire_client import StarfireClient, special_target
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import (
+    MAXIMAL_ARRIVAL_OF_PEAK,
     AutoloopChoice,
     AutoloopPolicy,
     SelectionContext,
@@ -206,7 +207,7 @@ class EffectController:
         self._announce('[lighting]', intent, choice, palette)
 
         if fresh:
-            self._enter_special(intent, bpm)
+            self._enter_special(intent, bpm, context.arrival_of_peak)
         else:
             self._restore_special()
         return True
@@ -320,11 +321,23 @@ class EffectController:
             return f'cooldown {cooldown - (now - last):.0f}s of {cooldown:.0f}s left'
         return None
 
-    def _enter_special(self, intent: LightIntent, bpm: float | None) -> None:
+    def _enter_special(
+        self, intent: LightIntent, bpm: float | None, arrival_of_peak: float | None = None
+    ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
+        # An unknown arrival is not soft, matching how intensity follow grades a drop.
+        soft = arrival_of_peak is not None and arrival_of_peak < MAXIMAL_ARRIVAL_OF_PEAK
         choice = self._special_policy.choose(
-            intent, self.special_capabilities(), self._intense_blocked(settings, now)
+            intent,
+            self.special_capabilities(),
+            self._intense_blocked(settings, now),
+            soft_drop=(
+                f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
+                'of the track peak'
+                if soft
+                else None
+            ),
         )
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)

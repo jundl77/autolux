@@ -88,8 +88,12 @@ it plays each one before repeating any, then favours the least recently used, se
 loops; strobe rows are not candidates and join whichever special is chosen. An intent with no
 playable special releases the one running.
 
-`breakdown` has none on purpose: the room falls back to the loop alone, and the next buildup's
-rise reads against that.
+Only `drop` has specials on purpose: the room is a living room, so the `fx` group stays dark
+through atmospheric, buildup and breakdown and the loops carry those alone. The drop rows are
+intense, so they share the drop strobe cooldown: the `fx` group plays at most once per cooldown,
+and an entry inside it releases the running special. A soft drop, one whose arrival is known and
+below 0.9 of the track peak (the autoloop policy's grading), keeps its strobe burst but plays no
+intense special.
 
 ## Adding a special
 
