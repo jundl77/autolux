@@ -9,7 +9,6 @@ for byte.
 
 import copy
 import io
-import logging
 import math
 import uuid
 import zipfile
@@ -23,7 +22,6 @@ import pymvr
 
 from autolux.lighting import mvr_schema as schema
 
-LOGGER = logging.getLogger(__name__)
 SCENE_ENTRY = 'GeneralSceneDescription.xml'
 GDTF_DESCRIPTION = 'description.xml'
 GDTF_SUFFIX = '.gdtf'
@@ -660,26 +658,26 @@ def _venue_x(fixture) -> float:
     return fixture['matrix'][POSITION_X]
 
 
-def groups(fixtures) -> dict[str, list[str]]:
+def groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
     """Each class's members left to right: ascending scene X of their placed positions.
 
     Equal positions keep file order; a group whose members all share one X (no positions, or
-    every fixture at the origin) has no spatial order, so it keeps file order and says so.
+    every fixture at the origin) has no spatial order, so it keeps file order and warns.
     """
     members = {}
     for fixture in fixtures:
         if fixture['class']:
             members.setdefault(fixture['class'], []).append(fixture)
-    result = {}
+    result, warnings = {}, []
     for group, placed in members.items():
         if len(placed) > 1 and len({_venue_x(fixture) for fixture in placed}) == 1:
-            LOGGER.warning(
-                'MVR group %s has no distinct X positions; its members keep file order', group
+            warnings.append(
+                f'Group {group} has no distinct X positions; its members keep file order.'
             )
         else:
             placed = sorted(placed, key=_venue_x)
         result[group] = [fixture['name'] for fixture in placed]
-    return result
+    return result, warnings
 
 
 def group_roles(fixtures) -> tuple[dict[str, str], list[str], list[str]]:
@@ -705,16 +703,6 @@ def group_roles(fixtures) -> tuple[dict[str, str], list[str], list[str]]:
                 f'treating it as {LOOP_ROLE}.'
             )
     return roles, errors, warnings
-
-
-def layer(scene: Scene, name: str) -> ElementTree.Element:
-    layers = scene.root.find('Scene/Layers')
-    for node in layers.findall('Layer'):
-        if node.get('name') == name:
-            return node
-    node = ElementTree.SubElement(layers, 'Layer', uuid=stable_uuid('layer', name), name=name)
-    ElementTree.SubElement(node, 'ChildList')
-    return node
 
 
 def _class_layer(scene: Scene, fixture_class: str) -> ElementTree.Element:

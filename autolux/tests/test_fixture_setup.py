@@ -240,7 +240,7 @@ def test_class_order_follows_positions_not_document_order_after_moving_a_fixture
     children['children'][first], children['children'][second] = spots[1], spots[0]
     store.save(draft, revision)
     fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
-    assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
+    assert mvr.groups(fixtures)[0]['movers'] == ['spot_left', 'spot_right']
 
 
 def test_config_names_the_library_folder_it_lists():
