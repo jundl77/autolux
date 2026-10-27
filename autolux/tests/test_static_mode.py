@@ -2,14 +2,12 @@ import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.effect_controller import (
-    DROP_ACCENT_ID,
     DROP_ACCENT_PRIORITY,
     EffectController,
 )
 from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
     LightIntent,
-    ShowSettings,
 )
 from autolux.lib.engine.special_policy import Special
 from autolux.lib.engine.static_mode import (
@@ -27,10 +25,9 @@ from autolux.tests.test_light_engine import FakeDecoder, beat_at_phase, engine, 
 ROOM = StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
 
 
-def static_engine(settings=ShowSettings, **options):
+def static_engine(**options):
     light, queue, clock, lighting = engine(**options)
-    light._settings = settings
-    light.static_looks = StaticLooks(lighting, ROOM, clock, settings)
+    light.static_looks = StaticLooks(lighting, ROOM)
     return light, queue, clock, lighting
 
 
@@ -81,10 +78,10 @@ async def test_a_static_look_reaches_starfire_at_once_above_automatic_accents():
     assert STATIC_PRIORITY > DROP_ACCENT_PRIORITY
 
 
-async def test_blacklight_drives_the_wash_uv_full_with_rgb_off_and_a_colour_replaces_it():
+async def test_the_uv_preset_drives_the_wash_uv_full_with_rgb_off_and_a_colour_replaces_it():
     light, _, _, lighting = static_engine()
     light.enter_static()
-    light.static_looks.blacklight()
+    light.static_looks.preset('uv')
     assert overrides(lighting)[-1]['value']['values'] == {
         'colour': {'red': 0.0, 'green': 0.0, 'blue': 0.0},
         'intensity': 1.0,
@@ -190,44 +187,6 @@ async def test_a_wash_look_lights_only_the_wash_and_darkens_the_other_groups():
     assert [c['value']['id'] for c in overrides(lighting)].count('static_floor') == 1
 
 
-async def test_static_strobe_obeys_the_caps_toggles_off_and_has_no_cooldown():
-    settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0, intensity=1.0)
-    light, _, clock, lighting = static_engine(settings=lambda: settings)
-    light.enter_static()
-    looks = light.static_looks
-    looks.strobe()
-    assert overrides(lighting)[-1]['value'] == {
-        'id': 'static_strobe',
-        'target': 'all',
-        'values': {'strobe_hz': 5.0},
-        'priority': STATIC_PRIORITY,
-        'lifetime': {'kind': 'seconds', 'duration_seconds': 2.0},
-    }
-    clock.advance(1.0)
-    looks.strobe()
-    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': 'static_strobe'}
-    looks.strobe()
-    clock.advance(2.5)
-    looks.strobe()
-    assert [c['kind'] for c in overrides(lighting)] == ['set_override', 'clear_override'] + [
-        'set_override'
-    ] * 2
-
-
-async def test_an_explicit_strobe_state_repeated_by_a_retry_changes_nothing():
-    settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0, intensity=1.0)
-    light, _, clock, lighting = static_engine(settings=lambda: settings)
-    light.enter_static()
-    looks = light.static_looks
-    looks.strobe(False)
-    looks.strobe(True)
-    clock.advance(0.5)
-    looks.strobe(True)
-    looks.strobe(False)
-    looks.strobe(False)
-    assert [c['kind'] for c in overrides(lighting)] == ['set_override', 'clear_override']
-
-
 async def test_leaving_static_clears_every_look_and_applies_the_current_intent_on_the_downbeat():
     decoder = FakeDecoder()
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
@@ -235,8 +194,7 @@ async def test_leaving_static_clears_every_look_and_applies_the_current_intent_o
     light.enter_static()
     looks = light.static_looks
     light.static_looks.look('all', dimmer=0.4)
-    looks.blacklight()
-    looks.strobe()
+    looks.look('wash', colour=(0.0, 0.0, 0.0), dimmer=1.0, uv=True)
     looks.set_blackout(True)
     await beat_at_phase(light, decoder, 1, decision='drop')
     lighting.events.clear()
@@ -246,7 +204,6 @@ async def test_leaving_static_clears_every_look_and_applies_the_current_intent_o
     assert sent(lighting, 'clear_override', 'set_blackout') == [
         (0.0, {'kind': 'clear_override', 'id': 'static_all'}),
         (0.0, {'kind': 'clear_override', 'id': 'static_wash'}),
-        (0.0, {'kind': 'clear_override', 'id': 'static_strobe'}),
         (0.0, {'kind': 'set_blackout', 'enabled': False}),
     ]
     await beat_at_phase(light, decoder, 2)
@@ -318,7 +275,7 @@ async def test_show_control_applies_static_commands_as_an_overlay_and_clears_it(
 async def test_a_group_look_outranks_all_and_a_colour_on_all_takes_the_groups_colour_back():
     light, _, _, lighting = static_engine()
     light.enter_static()
-    light.static_looks.blacklight()
+    light.static_looks.look('wash', colour=(0.0, 0.0, 0.0), dimmer=1.0, uv=True)
     light.static_looks.look('all', dimmer=0.3)
     wash, everything = overrides(lighting)[-2:]
     assert (wash['value']['priority'], everything['value']['priority']) == (
@@ -350,20 +307,6 @@ async def test_a_colour_look_carries_a_visible_dimmer_under_a_dark_loop():
     assert overrides(lighting)[-1]['value']['values']['intensity'] == 0.4
 
 
-async def test_the_drop_accent_and_the_static_strobe_share_one_capped_shape():
-    settings = ShowSettings(strobe_max_rate_hz=5.0, strobe_max_burst_seconds=2.0)
-    light, _, _, lighting = static_engine(settings=lambda: settings)
-    controller = EffectController(lighting, settings=lambda: settings)
-    await controller.change_effect(LightIntent.DROP, 120.0)
-    light.enter_static()
-    light.static_looks.strobe()
-    drop, operator = (c['value'] for c in overrides(lighting))
-    assert drop['id'] == DROP_ACCENT_ID
-    assert (drop['priority'], operator['priority']) == (DROP_ACCENT_PRIORITY, STATIC_PRIORITY)
-    assert drop['values'] == operator['values'] == {'strobe_hz': 5.0 * settings.intensity}
-    assert drop['target'] == operator['target'] == 'all'
-
-
 async def test_standby_during_static_keeps_the_operator_look_and_resends_it():
     decoder = FakeDecoder()
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
@@ -391,7 +334,7 @@ FX_GROUP = {'name': 'fx', 'cell_count': 1, 'colour': True, 'speed': True, 'pulse
 def special_looks():
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=[FX_GROUP])
-    return StaticLooks(lighting, ROOM, clock, ShowSettings), lighting
+    return StaticLooks(lighting, ROOM), lighting
 
 
 def test_a_static_special_is_the_same_dict_at_the_static_priority():
@@ -477,7 +420,7 @@ async def test_static_releases_the_auto_special_and_auto_brings_it_back():
     controller = EffectController(lighting, clock=clock, specials=[drift])
     light.lighting_client = lighting
     light.effect_controller = controller
-    light.static_looks = StaticLooks(lighting, ROOM, clock, ShowSettings)
+    light.static_looks = StaticLooks(lighting, ROOM)
     await beat_at_phase(light, decoder, 0, decision='breakdown')
     assert [c['value']['id'] for c in overrides(lighting)] == ['special']
 

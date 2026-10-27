@@ -83,12 +83,8 @@ def apply_static(light_engine, command: dict) -> None:
         looks.look(command['target'], colour=command['colour'], dimmer=command['dimmer'])
     elif kind == 'preset':
         looks.preset(command['preset'])
-    elif kind == 'blacklight':
-        looks.blacklight()
     elif kind == 'blackout':
         looks.set_blackout(command['enabled'])
-    elif kind == 'strobe':
-        looks.strobe(command.get('enabled'))
     elif kind == 'special_fx':
         looks.special(
             command['group'],

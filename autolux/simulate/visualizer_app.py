@@ -1075,7 +1075,7 @@ STATIC_PRESETS = {
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
 # Targets and UV come from the rig the show published; a rig without UV fixtures
-# greys both UV chips rather than offering commands the show would refuse.
+# greys the UV chip rather than offering commands the show would refuse.
 STATIC_TARGETS_JS = (
     '''function(state) {
     const all = '''
@@ -1085,12 +1085,10 @@ STATIC_TARGETS_JS = (
     const statics = ready ? state.static : {targets: [all], blacklight: false};
     const options = statics.targets.map((target) =>
         ({label: target === all ? 'All' : target, value: target}));
-    return [options, !statics.blacklight, !statics.blacklight];
+    return [options, !statics.blacklight];
 }'''
 )
 STATIC_BUTTONS = {
-    'static-blacklight': 'blacklight',
-    'static-strobe': 'strobe',
     'static-clear': 'clear',
     'static-banner-clear': 'clear',
 }
@@ -1281,13 +1279,6 @@ def _build_static_panel():
                 ],
                 className='control-row',
             ),
-            html.Div(
-                [
-                    html.Button('Blacklight', id='static-blacklight', title='UV ignores master'),
-                    html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
-                ],
-                className='control-row',
-            ),
             _build_static_fx(),
             html.P(id='static-status', role='status', className='control-status'),
         ],
@@ -1412,13 +1403,12 @@ def _register_direct_static_controls(app) -> None:
             const colour = args[ids.length];
             const target = args[ids.length + 1];
             const classes = args.slice(ids.length + 2, 2 * ids.length + 2);
-            const state = control.view(args[2 * ids.length + 2]) || {};
             const triggered = (window.dash_clientside.callback_context.triggered || [])
                 .map((t) => t.prop_id.split('.')[0]);
             const chip = ids.find((id) => triggered.includes(id));
             if (!chip) {
                 if (triggered.includes('static-colour')) {
-                    const look = control.build.static('static-colour', target, undefined, colour);
+                    const look = control.build.static('static-colour', target, colour);
                     if (look) {
                         control.dispatch(look, 'static-status');
                     }
@@ -1426,8 +1416,7 @@ def _register_direct_static_controls(app) -> None:
                 return classes.map(() => window.dash_clientside.no_update);
             }
             const before = classes[ids.indexOf(chip)] || '';
-            const strobing = before === 'active';
-            const command = control.build.static(chip, target, strobing);
+            const command = control.build.static(chip, target);
             if (command.kind === 'clear') {
                 control.hold({mode: 'auto'});
                 control.dispatch(command, 'static-status', ['mode']);
@@ -1438,29 +1427,13 @@ def _register_direct_static_controls(app) -> None:
                     window.dash_clientside.set_props(chip, {className: before});
                 }
             });
-            if (chip === 'static-strobe') {
-                const token = window.autoluxStrobeToken = (window.autoluxStrobeToken || 0) + 1;
-                const settings = state.settings || {};
-                const burst = (settings.strobe_max_burst_seconds || 0) * (settings.intensity || 0);
-                if (!strobing && burst > 0) {
-                    // The show ends the burst on its own; the chip follows it.
-                    setTimeout(() => {
-                        if (window.autoluxStrobeToken === token) {
-                            window.dash_clientside.set_props(chip, {className: ''});
-                        }
-                    }, burst * 1000);
-                }
-                return ids.map((id, i) => id === chip ? (strobing ? '' : 'active') : classes[i] || '');
-            }
-            return ids.map((id, i) => id === chip ? 'active'
-                : id === 'static-strobe' ? classes[i] || '' : '');
+            return ids.map((id) => id === chip ? 'active' : '');
         }""",
         *[Output(name, 'className') for name in STATIC_CHIP_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
         Input('static-colour', 'value'),
         State('static-target', 'value'),
         *[State(name, 'className') for name in STATIC_CHIP_IDS],
-        State('control-state', 'data'),
         prevent_initial_call=True,
     )
 
@@ -1545,7 +1518,6 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
     app.clientside_callback(
         STATIC_TARGETS_JS,
         Output('static-target', 'options'),
-        Output('static-blacklight', 'disabled'),
         Output('static-preset-uv', 'disabled'),
         Input('control-state', 'data'),
     )

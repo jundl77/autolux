@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import StarfireClient
-from autolux.lib.clock import Clock
-from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY, strobe_override
-from autolux.lib.engine.effect_definitions import ShowSettings
+from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 from autolux.lighting.special_catalogue import special_values
 
@@ -18,7 +15,6 @@ STATIC_FLOOR_PRIORITY = STATIC_PRIORITY - 1
 STATIC_FLOOR_ID = 'static_floor'
 STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
-STATIC_STROBE_ID = 'static_strobe'
 STATIC_SPECIAL_ID = 'static_special'
 STATIC_SPECIAL_RELEASE_BEATS = 4.0
 ALL_FIXTURES = 'all'
@@ -49,26 +45,16 @@ def colour_hex(colour: tuple[float, float, float]) -> str:
 
 
 class StaticLooks:
-    def __init__(
-        self,
-        lighting_client: StarfireClient,
-        rig: StaticRig,
-        clock: Clock,
-        settings: Callable[[], ShowSettings],
-    ):
+    def __init__(self, lighting_client: StarfireClient, rig: StaticRig):
         self._lighting = lighting_client
         self.rig = rig
-        self._clock = clock
-        self._settings = settings
         self._looks: dict[str, dict] = {}
-        self._strobe_until: float | None = None
         self._special: Special | None = None
         self._floor = False
         self.blackout = False
 
     @property
     def active(self) -> bool:
-        # A strobe burst alone ends by itself, so it does not hold the automatic show; an FX does.
         return bool(self._looks) or self._floor or self.blackout or self._special is not None
 
     def special(
@@ -135,12 +121,6 @@ class StaticLooks:
                 look[key] = value
         self._send(target)
 
-    def blacklight(self) -> None:
-        if not self.rig.uv_groups:
-            raise ValueError('the rig has no UV fixtures')
-        for group in self.rig.uv_groups:
-            self.look(group, colour=BLACK, dimmer=1.0, uv=True)
-
     def preset(self, name: str) -> None:
         if name not in PRESETS:
             raise ValueError(f'unknown static preset {name!r}')
@@ -151,8 +131,11 @@ class StaticLooks:
         if name in PRESET_COLOURS:
             self.look(ALL_FIXTURES, colour=PRESET_COLOURS[name], dimmer=1.0)
         elif name == 'uv':
+            if not self.rig.uv_groups:
+                raise ValueError('the rig has no UV fixtures')
             self.look(ALL_FIXTURES, dimmer=0.0)
-            self.blacklight()
+            for group in self.rig.uv_groups:
+                self.look(group, colour=BLACK, dimmer=1.0, uv=True)
         elif name == 'off':
             # Clearing alone would reveal the held automatic look (warm-white standby when idle).
             self._set_floor()
@@ -163,28 +146,7 @@ class StaticLooks:
         self.blackout = enabled
         self._lighting.set_blackout(enabled)
 
-    def strobe(self, enabled: bool | None = None) -> None:
-        now = self._clock.monotonic()
-        running = self._strobe_until is not None and now < self._strobe_until
-        if enabled is None:
-            enabled = not running
-        if not enabled:
-            if running:
-                self._strobe_until = None
-                self._lighting.clear_override(STATIC_STROBE_ID)
-            return
-        if running:
-            return
-        settings = self._settings()
-        # Starfire caps the burst at this scaled length; matching it keeps the toggle in step.
-        duration = settings.strobe_max_burst_seconds * settings.intensity
-        self._strobe_until = now + duration
-        self._lighting.set_override(
-            strobe_override(STATIC_STROBE_ID, STATIC_PRIORITY, duration, settings)
-        )
-
     def resend(self) -> None:
-        self._strobe_until = None
         if self._floor:
             self._send_floor()
         for target in self._looks:
@@ -200,9 +162,6 @@ class StaticLooks:
         if self._floor:
             self._floor = False
             self._lighting.clear_override(STATIC_FLOOR_ID)
-        if self._strobe_until is not None:
-            self._strobe_until = None
-            self._lighting.clear_override(STATIC_STROBE_ID)
         self.set_blackout(False)
 
     def state(self) -> dict:

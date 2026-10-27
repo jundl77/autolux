@@ -287,8 +287,6 @@ def static_show():
             {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.0},
         ),
         ('static-preset-uv', 'wash', None, {'action': 'static', 'kind': 'preset', 'preset': 'uv'}),
-        ('static-blacklight', 'wash', None, {'action': 'static', 'kind': 'blacklight'}),
-        ('static-strobe', 'wash', None, {'action': 'static', 'kind': 'strobe'}),
         (
             'static-colour',
             'wash',
@@ -355,7 +353,7 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
         ),
         ({'action': 'static', 'kind': 'preset', 'preset': 'party'}, 'unknown static preset'),
         ({'action': 'static', 'kind': 'blackout', 'enabled': 1}, 'true or false'),
-        ({'action': 'static', 'kind': 'strobe', 'enabled': 'on'}, 'true or false'),
+        ({'action': 'static', 'kind': 'strobe'}, 'unknown static command'),
     ],
 )
 def test_malformed_static_commands_return_the_reason_and_queue_nothing(
@@ -553,12 +551,12 @@ def _static_targets(state):
 def test_static_targets_and_uv_chips_follow_the_published_rig():
     # Group names a venue might use that the room rig does not have.
     venue = {'targets': ['all', 'truss_a', 'floor_pars'], 'blacklight': False}
-    options, blacklight_off, uv_off = _static_targets({'mode': 'static', 'static': venue})
+    options, uv_off = _static_targets({'mode': 'static', 'static': venue})
     assert [option['value'] for option in options] == venue['targets']
     assert options[0]['label'] == 'All'
-    assert blacklight_off and uv_off
+    assert uv_off
     uv_rig = {'targets': ['all', 'uv_bar'], 'blacklight': True}
-    assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False, False]
+    assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False]
 
 
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
@@ -737,18 +735,6 @@ def test_no_poll_output_writes_an_operator_control():
     app = build_app(_Recorder())
     owned = ('control-brightness.value', 'control-intensity.value', 'control-palette.value')
     assert not [key for key in app.callback_map for prop in owned if prop in key]
-
-
-@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_the_page_sends_the_strobe_state_it_wants_so_a_retry_cannot_flip_it(static_show):
-    poller, commands = static_show
-    start, stop = _run_control_js(
-        "console.log(JSON.stringify([control.build.static('static-strobe', 'all', false),"
-        " control.build.static('static-strobe', 'all', true)]));"
-    )
-    for command, enabled in ((start, True), (stop, False)):
-        assert poller.control(command) == {'accepted': 'static'}
-        assert commands.get_nowait() == {'action': 'static', 'kind': 'strobe', 'enabled': enabled}
 
 
 def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_poll():
@@ -1085,9 +1071,9 @@ globalThis.fetch = async (url) => {
     return {ok: true, status: 202, json: async () => ({accepted: 'static'})};
 };
 (async () => {
-    const early = await control.dispatch(control.build.static('static-colour', 'all', undefined, '#00ff00'));
+    const early = await control.dispatch(control.build.static('static-colour', 'all', '#00ff00'));
     control.operatorActs();
-    const late = await control.dispatch(control.build.static('static-colour', 'all', undefined, '#00ff00'));
+    const late = await control.dispatch(control.build.static('static-colour', 'all', '#00ff00'));
     console.log(JSON.stringify({early, late, urls}));
 })();
 """

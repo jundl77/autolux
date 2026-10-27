@@ -20,8 +20,7 @@
             document.addEventListener(type, operatorActs, {capture: true, once: true}));
     }
 
-    // strobeActive: whether the page shows the strobe running; omitted, the command toggles.
-    function staticCommand(trigger, target, strobeActive, colour) {
+    function staticCommand(trigger, target, colour) {
         const all = config().allFixtures || 'all';
         const colours = config().presetColours || {};
         if (trigger.startsWith('static-preset-')) {
@@ -46,14 +45,6 @@
                 action: 'static', kind: 'look', target: target,
                 colour: '#' + text.replace(/^#/, '').toLowerCase(),
             };
-        }
-        if (trigger === 'static-blacklight') {
-            return {action: 'static', kind: 'blacklight'};
-        }
-        if (trigger === 'static-strobe') {
-            return typeof strobeActive === 'boolean'
-                ? {action: 'static', kind: 'strobe', enabled: !strobeActive}
-                : {action: 'static', kind: 'strobe'};
         }
         return null;
     }

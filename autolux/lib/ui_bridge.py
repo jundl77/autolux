@@ -118,19 +118,11 @@ def _static_command(payload: dict) -> dict:
     from autolux.lib.engine.static_mode import PRESETS
 
     kind = payload.get('kind')
-    if kind in ('blacklight', 'clear', 'special_fx_clear'):
+    if kind in ('clear', 'special_fx_clear'):
         return {'kind': kind}
     if kind == 'special_fx':
         fields = ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
         return {'kind': kind, **{name: payload.get(name) for name in fields}}
-    if kind == 'strobe':
-        # The page sends the state it wants, so a retried request cannot flip the strobe twice.
-        enabled = payload.get('enabled')
-        if enabled is None:
-            return {'kind': kind}
-        if type(enabled) is not bool:
-            raise ValueError('strobe must be true or false')
-        return {'kind': kind, 'enabled': enabled}
     if kind == 'blackout':
         if type(payload.get('enabled')) is not bool:
             raise ValueError('blackout must be true or false')
