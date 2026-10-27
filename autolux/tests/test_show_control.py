@@ -1499,10 +1499,14 @@ console.log(JSON.stringify(seen));
     assert json.loads(result.stdout) == [False, False, True, True, False, False]
 
 
-# Just enough DOM for control.js's click listener: elements answer closest() by id or as a
-# level's label, and a click reaches the capture listener as the browser would hand it over.
+# Just enough DOM for control.js's press listeners: elements answer closest() by id or as a
+# level's label, events reach the capture listeners as the browser hands them over, and the
+# clock only moves by hand.
 FAKE_DOM = """
 const listeners = [];
+let now = 0;
+Object.defineProperty(globalThis, 'performance', {value: {now: () => now}});
+globalThis.setInterval = () => {};
 globalThis.Element = class {};
 globalThis.document = {
     addEventListener: (type, listener) => listeners.push([type, listener]),
@@ -1515,21 +1519,23 @@ const button = (id) => element(id, {
         return selector.split(',').some((s) => s.trim() === '#' + this.id) ? this : null;
     },
 });
-const level = (value, chosen) => element('', {
+const level = (value, chosen, disabled = false) => element('', {
     getAttribute: (name) => (name === 'aria-selected' ? String(chosen) : null),
-    querySelector: () => ({value}),
+    querySelector: () => ({value, matches: (s) => s === ':disabled' && disabled}),
     closest(selector) {
         return selector === '#control-intensity label' ? this : null;
     },
 });
-const clickOn = (target, isTrusted = true) => listeners
-    .filter(([type]) => type === 'click')
-    .forEach(([, listener]) => listener({type: 'click', isTrusted, target}));
+const deliver = (type, target, extra = {}) => listeners
+    .filter(([listened]) => listened === type)
+    .forEach(([, listener]) => listener({type, isTrusted: true, target, ...extra}));
+const clickOn = (target, isTrusted = true) => deliver('click', target, {isTrusted});
+const enterOn = (target) => deliver('keyup', target, {key: 'Enter'});
 """
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_one_click_sends_one_command_and_a_poll_echoing_it_sends_nothing():
+def test_only_a_recorded_click_sends_and_reruns_polls_and_stale_presses_send_nothing():
     body = f"""
 window.autoluxControlConfig = {{direct: true, bridgePort: 8766}};
 globalThis.location = {{protocol: 'http:', hostname: 'autolux.local'}};
@@ -1579,12 +1585,26 @@ const step = async (name, act) => {{
         clickOn(button('control-fx-auto'), false);
         return fire('control-fx-auto.n_clicks', 0.7, echoed);
     }});
+    // Levels still in the disabled fieldset before the first settings poll.
+    await step('click a disabled level, then the first poll', () => {{
+        clickOn(level('0.3', false, true));
+        return fire('control-intensity.value', 0.3, echoed);
+    }});
+    // A press whose own run never came, then a poll's run over a second later.
+    await step('stuck press, then a poll', () => {{
+        clickOn(level('1', false));
+        now += 1001;
+        return fire('control-intensity.value', 1.0, echoed);
+    }});
+    await step('Enter on a level', () => {{
+        enterOn(level('0.3', false));
+        return fire('control-intensity.value', 0.3, echoed);
+    }});
     await step('click Intensity Auto', () => {{
         clickOn(button('control-intensity-auto'));
         return fire('control-intensity-auto.n_clicks', 0.7, echoed);
     }});
     console.log(JSON.stringify(log));
-    process.exit(0);  // control.js's cooldown ticker would keep node alive
 }})();
 """
     script = (
@@ -1605,5 +1625,8 @@ const step = async (name, act) => {{
         ['re-run Intensity Auto', []],
         ['click the level already chosen', []],
         ['untrusted click', []],
+        ['click a disabled level, then the first poll', []],
+        ['stuck press, then a poll', []],
+        ['Enter on a level', [{'action': 'intensity', 'level': 0.3}]],
         ['click Intensity Auto', [{'action': 'intensity_auto', 'enabled': True}]],
     ]

@@ -25,16 +25,30 @@
     // callback with an input no click changed (the poll's set_props on the level radio,
     // merged requests); such a run finds no press and sends nothing.
     const presses = {};
+    // A press no run takes within this window (its callback never fired) must not be spent
+    // by a later poll's run.
+    const PRESS_TTL_MS = 1000;
     const press = (action, value) => {
-        presses[action] = value;
+        presses[action] = {value: value, at: performance.now()};
     };
     // One click, one command: the first callback run takes the press.
     const takePress = (action) => {
-        const value = presses[action];
+        const taken = presses[action];
         delete presses[action];
-        return value;
+        return taken && performance.now() - taken.at <= PRESS_TTL_MS ? taken.value : undefined;
     };
-    function pressOf(target) {
+    function pressOf(target, type) {
+        const level = target.closest('#control-intensity label');
+        const radio = level && level.querySelector('input');
+        // Before the first settings poll the levels sit in a disabled fieldset: no callback.
+        // A level already chosen changes nothing either.
+        if (radio && !radio.matches(':disabled')
+                && level.getAttribute('aria-selected') !== 'true') {
+            return ['intensity', Number(radio.value)];
+        }
+        if (type !== 'click') {
+            return null;
+        }
         const chip = target.closest('#control-fx-auto, #control-fx-off');
         if (chip) {
             return ['fx_auto', chip.id === 'control-fx-auto'];
@@ -44,23 +58,21 @@
             // What the operator sees lit, not the last poll, decides which way Auto flips.
             return ['intensity_auto', !follow.classList.contains('active')];
         }
-        const level = target.closest('#control-intensity label');
-        const radio = level && level.querySelector('input');
-        // A click on the level already chosen changes nothing, so no callback would take it.
-        if (radio && level.getAttribute('aria-selected') !== 'true') {
-            return ['intensity', Number(radio.value)];
-        }
         return null;
     }
     if (typeof document !== 'undefined') {
-        // Keyboard activation of a button or radio also arrives as a click.
-        document.addEventListener('click', (event) => {
+        // Space on a button or radio and arrow keys between levels arrive as a click, but
+        // Dash's RadioItems picks the focused level on Enter's keyup with no click.
+        const record = (event) => {
             const pressed = event.isTrusted && event.target instanceof Element
-                && pressOf(event.target);
+                && (event.type === 'click' || event.key === 'Enter')
+                && pressOf(event.target, event.type);
             if (pressed) {
                 press(...pressed);
             }
-        }, true);
+        };
+        document.addEventListener('click', record, true);
+        document.addEventListener('keyup', record, true);
     }
 
     function staticCommand(trigger, target, colour) {
