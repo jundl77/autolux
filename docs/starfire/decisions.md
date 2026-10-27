@@ -533,3 +533,13 @@ with itself), and `sf.side(index, count)` gives each member's half (-1, 0 for an
 1); `sf.side(index)` without a count keeps its alternating meaning, which agrees for pairs.
 The room's positions (washes at X -900/-300/300/900, spots at -300/300, mm) already match
 their names, so room.rig.pb and the goldens are unchanged.
+
+2026-10-27 Group masters: each rig group has an inhibitive submaster, 0..1 and full by default,
+kept in show.json as `settings.group_masters` (`{"wash": 0.5}`; an absent group is at full) and
+sent as the `GROUP_MASTER` parameter with its `group` (protocol minor 2). Starfire multiplies the
+group's cell intensity and attribute brightness by it right after the global master, so it
+caps the rendered look, specials included, and never raises it; a cell in several capped
+groups takes the product. The level is linear (0.5 halves the output), unlike the perceptual
+global master: it trims one group against the others rather than fading the room. Starfire
+refuses an unknown group; Autolux sends only the levels of groups in the logged-in rig, and
+only when one changes.

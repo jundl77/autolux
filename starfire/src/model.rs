@@ -245,6 +245,11 @@ pub enum Command {
     SetIntensity {
         level: f64,
     },
+    /// An inhibitive submaster: scales the group's rendered output, never raises it.
+    SetGroupMaster {
+        group: String,
+        level: f64,
+    },
     Stop,
 }
 

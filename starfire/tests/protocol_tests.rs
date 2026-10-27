@@ -64,6 +64,7 @@ fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation 
             r#type: kind as i32,
             value: Some(wire::parameter::Value::Number(value)),
             fade_seconds,
+            ..Default::default()
         }),
     })
 }
@@ -629,6 +630,7 @@ fn renderer_setting_parameters_round_trip_and_reject_fades_and_wrong_types() {
                 r#type: Kind::Paused as i32,
                 value: Some(Value::Boolean(true)),
                 fade_seconds: 1.0,
+                ..Default::default()
             }),
         }),
     ] {

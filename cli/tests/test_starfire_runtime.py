@@ -286,6 +286,15 @@ def test_master_fade_maps_to_brightness_parameter():
         protocol.build_command({'kind': 'set_speed', 'multiplier': 1.0, 'fade_seconds': 1.0})
 
 
+def test_a_group_master_names_its_group_on_the_wire():
+    command = protocol.build_command({'kind': 'set_group_master', 'group': 'wash', 'level': 0.5})
+    decoded = wire.SetParameter.FromString(command.SerializeToString())
+    assert decoded.parameter.type == wire.GROUP_MASTER
+    assert (decoded.parameter.group, decoded.parameter.number) == ('wash', 0.5)
+    with pytest.raises(ValueError):
+        protocol.build_command({'kind': 'set_group_master', 'level': 0.5})
+
+
 @pytest.mark.parametrize('bar_phase', [0, 3, None])
 def test_beat_facts_survive_the_wire_and_keep_downbeat_distinct_from_unknown(bar_phase):
     command = protocol.build_command(

@@ -32,10 +32,58 @@ from autolux.simulate.visualizer_app import (
     control_page_config,
     decimal_text,
     expected_control_values,
+    group_master_edit,
+    group_master_rows,
     setting_text,
     static_control_command,
 )
 from autolux.tests.test_static_mode import overrides, static_engine
+
+
+def test_group_masters_round_trip_through_show_json_and_reject_levels_outside_unit(tmp_path):
+    from autolux.lib.main import load_show_settings, save_show_settings
+
+    path = tmp_path / 'show.json'
+    saved = ShowSettings(quiet_brightness=0.3, group_masters={'wash': 0.5, 'movers': 0})
+    save_show_settings(path, saved)
+    assert json.loads(path.read_text(encoding='utf-8'))['settings']['group_masters'] == {
+        'movers': 0.0,
+        'wash': 0.5,
+    }
+    assert load_show_settings(path) == saved
+    assert ShowSettings.from_dict({}).group_masters == {}
+    for masters in ({'wash': 1.5}, {'wash': -0.1}, {'wash': True}, {'': 0.5}, ['wash']):
+        with pytest.raises((TypeError, ValueError)):
+            ShowSettings(group_masters=masters)
+
+
+def test_a_group_master_edit_changes_only_that_group_and_keeps_every_other_setting():
+    current = ShowSettings(crossfade_beats=4, group_masters={'movers': 0.25}).to_dict()
+    state = {'settings': current}
+    command = group_master_edit('wash', 0.5, state)
+    assert command == {
+        'action': 'settings',
+        'settings': {**current, 'group_masters': {'movers': 0.25, 'wash': 0.5}},
+    }
+    assert ShowSettings.from_dict(command['settings']).group_masters['wash'] == 0.5
+    assert group_master_edit('movers', 0.25, state) is None
+    assert group_master_edit('wash', 1.0, state) is None
+    assert group_master_edit('wash', 0.5, {}) is None
+
+
+def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group():
+    rows = group_master_rows(
+        {'wash': ['colour'], 'movers': []}, {'group_masters': {'wash': 0.4}}, disabled=False
+    )
+    sliders = [row.children[1].children[0].children for row in rows]
+    assert [slider.id for slider in sliders] == [
+        {'type': 'group-master', 'group': 'movers'},
+        {'type': 'group-master', 'group': 'wash'},
+    ]
+    assert [slider.value for slider in sliders] == [1.0, 0.4]
+    assert all(row.children[1].className == 'fader' for row in rows)
+    assert all(slider.min == 0 and slider.max == 1 for slider in sliders)
+    assert build_app(_Recorder()).layout['group-masters'].children is None
 
 
 @pytest.fixture
@@ -1152,14 +1200,14 @@ def test_a_settings_edit_keeps_follow_the_music_on():
 
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
     from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.simulate.visualizer_app import FORM_SETTINGS, setting_text
+    from autolux.simulate.visualizer_app import FORM_SETTINGS, settings_text
 
     source = _Recorder()
     app = build_app(source)
     output = next(key for key in app.callback_map if key.startswith('..control-status.children'))
     # More digits than the form shows: a resend of the rounded text would change the show.
     settings = ShowSettings(quiet_brightness=0.1234567, crossfade_beats=1.0).to_dict()
-    text = {name: setting_text(name, value) for name, value in settings.items()}
+    text = settings_text(settings)
     state = {'settings': settings, 'settings_text': text, 'master_brightness': 1.0}
     shown = {f'control-{name}': text[name] for name in FORM_SETTINGS}
     for name in FORM_SETTINGS:

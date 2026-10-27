@@ -11,7 +11,7 @@ from statistics import median
 
 import dash
 import plotly.graph_objects as go
-from dash import Input, Output, State, dcc, html
+from dash import ALL, Input, Output, State, dcc, html
 
 from autolux.lib.engine.effect_definitions import (
     BALANCED,
@@ -693,6 +693,8 @@ LIVE_FADER_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
 CONTROL_EXPECT_SECONDS = 2.0
 DIRECT_CONTROL_ENV = 'AUTOLUX_DIRECT_CONTROL'
+GROUP_MASTER_ID = 'group-master'
+GROUP_MASTER_STEP = 0.01
 RELAY_PATH = '/control-relay'
 
 
@@ -741,6 +743,15 @@ def decimal_text(value: float) -> str:
 
 def setting_text(name: str, value: float) -> str:
     return decimal_text(value * 100 if name in PERCENT_SETTINGS else value)
+
+
+def settings_text(settings: dict) -> dict:
+    """The text each numeric setting shows in its field."""
+    return {
+        name: setting_text(name, value)
+        for name, value in settings.items()
+        if name in SETTING_DISPLAY
+    }
 
 
 def parse_decimal(name: str, raw) -> float:
@@ -795,6 +806,43 @@ def settings_edit(name: str, raw, state: dict) -> dict | None:
     return {'action': 'settings', 'settings': {**current, name: value}}
 
 
+def group_master_edit(group: str, level, state: dict) -> dict | None:
+    """The settings command for one group's master, or None when it still shows the show's level."""
+    current = state.get('settings')
+    if not current or level is None:
+        return None
+    masters = current.get('group_masters') or {}
+    if abs(level - masters.get(group, 1.0)) < GROUP_MASTER_STEP / 2:
+        return None
+    return {
+        'action': 'settings',
+        'settings': {**current, 'group_masters': {**masters, group: float(level)}},
+    }
+
+
+def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
+    """One fader per rig group, styled like Master brightness."""
+    masters = (settings or {}).get('group_masters') or {}
+    return [
+        html.Div(
+            [
+                html.Span(f'{group} master', className='setting-name'),
+                html.Div(
+                    _fader(
+                        {'type': GROUP_MASTER_ID, 'group': group},
+                        {'type': f'{GROUP_MASTER_ID}-value', 'group': group},
+                        value=masters.get(group, 1.0),
+                        disabled=disabled,
+                    ),
+                    className='fader',
+                ),
+            ],
+            className='setting-row',
+        )
+        for group in sorted(groups)
+    ]
+
+
 def setting_range_text(name: str) -> str:
     low, high = SHOW_SETTING_RANGES[name]
     return f'{setting_text(name, low)}–{setting_text(name, high)}'
@@ -828,7 +876,10 @@ def _setting_input(name):
 
 def _build_settings():
     return html.Div(
-        [_setting_input(name) for name in SETTINGS_ORDER],
+        [
+            *[_setting_input(name) for name in SETTINGS_ORDER],
+            html.Div(id='group-masters', className='group-masters'),
+        ],
         id='settings-drawer',
         className='settings-form',
         style={'display': 'none'},
@@ -2506,9 +2557,7 @@ def build_app(
                 }
                 settings = control['settings'] or {}
                 control['intensity_auto'] = bool(settings.get('intensity_auto'))
-                control['settings_text'] = {
-                    name: setting_text(name, value) for name, value in settings.items()
-                }
+                control['settings_text'] = settings_text(settings)
             if requested.get('timeline') or not on_control:
                 timeline = _build_timeline(snap)
         if due:
@@ -2737,6 +2786,50 @@ def build_app(
         return '', dash.no_update
 
     _register_settings_drawer(app)
+
+    # Groups come from the rig Starfire logged in with; the faders are drawn as the drawer opens.
+    @app.callback(
+        Output('group-masters', 'children'),
+        Input('settings-toggle', 'n_clicks'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+    def show_group_masters(_clicks, state):
+        state = state or {}
+        return group_master_rows(
+            state.get('special_groups') or {},
+            state.get('settings'),
+            disabled=not can_control or not state.get('settings'),
+        )
+
+    app.clientside_callback(
+        '''function(level) {
+            return level === null || level === undefined ? '—' : Math.round(level * 100) + '%';
+        }''',
+        Output({'type': f'{GROUP_MASTER_ID}-value', 'group': dash.MATCH}, 'children'),
+        Input({'type': GROUP_MASTER_ID, 'group': dash.MATCH}, 'value'),
+    )
+
+    @app.callback(
+        Output('control-status', 'children', allow_duplicate=True),
+        Input({'type': GROUP_MASTER_ID, 'group': ALL}, 'value'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+    def send_group_master(_levels, state):
+        trigger = dash.ctx.triggered_id
+        if not can_control or not isinstance(trigger, dict):
+            raise dash.exceptions.PreventUpdate
+        level = dash.ctx.triggered[0]['value'] if dash.ctx.triggered else None
+        command = group_master_edit(trigger['group'], level, state or {})
+        if command is None:
+            raise dash.exceptions.PreventUpdate
+        reply = snapshot_source.control(command)
+        if 'error' in reply:
+            return f'Rejected: {reply["error"]}'
+        expectations.expect(**expected_control_values(command, reply))
+        return ''
+
     _register_static_callbacks(app, snapshot_source, expectations, can_control, direct)
 
     @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))

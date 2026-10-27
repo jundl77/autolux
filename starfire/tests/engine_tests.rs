@@ -1710,3 +1710,75 @@ fn intensity_outside_zero_to_one_is_rejected() {
         assert!(engine.apply(0.0, &Command::SetIntensity { level }).is_err());
     }
 }
+
+fn group_master(group: &str, level: f64) -> starfire::protocol::wire::Parameter {
+    use starfire::protocol::wire;
+    wire::Parameter {
+        r#type: wire::ParameterType::GroupMaster as i32,
+        value: Some(wire::parameter::Value::Number(level)),
+        group: group.into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_half_group_master_halves_only_that_groups_output_after_the_master() {
+    let mut engine = room_engine(&[(
+        "lit",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8), sf.colour(sf.all(), sf.rgb(1, 0.5, 0))} end}",
+    )]);
+    select(&mut engine, 0.0, "lit", Transition::Cut);
+    set_master_instantly(&mut engine, 0.5);
+    let before = engine.render_at(0.0).unwrap();
+    engine
+        .set_parameter(0.0, &group_master("wash", 0.5))
+        .unwrap();
+    let capped = engine.render_at(0.0).unwrap();
+    let wash = support::room().groups()["wash"].clone();
+    for (cell, state) in &before.fixture_properties_before_strobe {
+        let expected = if wash.contains(cell) {
+            state.intensity * 0.5
+        } else {
+            state.intensity
+        };
+        near(
+            capped.fixture_properties_before_strobe[cell].intensity,
+            expected,
+        );
+    }
+    assert!(
+        wash.iter()
+            .all(|cell| before.fixture_properties_before_strobe[cell].intensity > 0.0)
+    );
+    assert_ne!(capped.dmx_frames_by_universe, before.dmx_frames_by_universe);
+    engine
+        .set_parameter(0.0, &group_master("wash", 1.0))
+        .unwrap();
+    let restored = engine.render_at(0.0).unwrap();
+    assert_eq!(
+        restored.dmx_frames_by_universe,
+        before.dmx_frames_by_universe
+    );
+}
+
+#[test]
+fn group_masters_reject_unknown_groups_values_outside_unit_and_stray_groups() {
+    use starfire::protocol::wire;
+    let mut engine = room_engine(&[("empty", "return {render=function(ctx) return {} end}")]);
+    assert!(
+        engine
+            .set_parameter(0.0, &group_master("ceiling", 0.5))
+            .is_err()
+    );
+    assert!(
+        engine
+            .set_parameter(0.0, &group_master("wash", 1.5))
+            .is_err()
+    );
+    assert!(engine.set_parameter(0.0, &group_master("", 0.5)).is_err());
+    let stray = wire::Parameter {
+        group: "wash".into(),
+        ..palette_parameter("techno")
+    };
+    assert!(engine.set_parameter(0.0, &stray).is_err());
+}

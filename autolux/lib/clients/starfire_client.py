@@ -118,6 +118,9 @@ class StarfireClient:
     def set_intensity(self, level: float) -> None:
         self._send_command({'kind': 'set_intensity', 'level': level})
 
+    def set_group_master(self, group: str, level: float) -> None:
+        self._send_command({'kind': 'set_group_master', 'group': group, 'level': level})
+
     def set_blackout(self, enabled: bool) -> None:
         self._send_command({'kind': 'set_blackout', 'enabled': enabled})
 

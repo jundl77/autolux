@@ -21,7 +21,7 @@ import "proto/starfire/rig.proto";
 // Major changes are incompatible; minor additions are compatible.
 enum ProtocolVersion {
   PROTOCOL_VERSION_UNSPECIFIED = 0;
-  PROTOCOL_MINOR = 1;
+  PROTOCOL_MINOR = 2;
   PROTOCOL_MAJOR = 3;
 }
 
@@ -52,6 +52,7 @@ enum ParameterType {
   STROBE_MAX_BURST_SECONDS = 8;
   PALETTE = 9;
   INTENSITY = 10;
+  GROUP_MASTER = 11;  // Number, 0..1, for Parameter.group; caps that group after the master.
 }
 
 // [CLIENT -> SERVER]
@@ -228,6 +229,7 @@ message Parameter {
     string text = 5;
   }
   double fade_seconds = 4;
+  string group = 6;  // The rig group a GROUP_MASTER caps; empty for every other type.
 }
 
 message RgbColor {
