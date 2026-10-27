@@ -171,12 +171,11 @@
 #static-fx-set { display: grid; gap: 8px; }
 /* The row's own dimming already covers its segments. */
 #static-fx-set:disabled fieldset { opacity: 1; }
-.overlay-banner { display: flex; align-items: center; gap: 16px; min-height: 32px;
-                  padding: 0 12px; border-radius: 6px; background: #2a2418; color: #e8c58f;
+.overlay-banner { display: flex; align-items: center; gap: 12px; min-height: 32px;
+                  padding: 0 12px 0 4px; border-radius: 6px; background: #2a2418; color: #e8c58f;
                   font-size: 14px; }
-#show-control .overlay-banner button { height: 24px; padding: 0 8px; margin-left: auto;
-                                       background: transparent; color: #e8c58f;
-                                       border: 1px solid #6b5a3a; font-size: 12px; }
+/* Clear leads the banner as the Static tab's ghost button, only smaller. */
+#show-control .overlay-banner .ghost-button { height: 24px; padding: 0 8px; font-size: 12px; }
 
 .control-status { margin: 0; color: #ff7b72; font-size: 14px; }
 .control-status:empty { display: none; }

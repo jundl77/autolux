@@ -1377,8 +1377,8 @@ CLEAR_GATE_JS = '''function(state) {
 def _build_overlay_banner():
     return html.Div(
         [
+            html.Button('Clear', id='static-banner-clear', className='ghost-button'),
             html.Span(id='static-banner-text'),
-            html.Button('Clear', id='static-banner-clear'),
         ],
         id='static-banner',
         className='overlay-banner',
