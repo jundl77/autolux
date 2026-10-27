@@ -120,6 +120,9 @@ def test_login_groups_become_plain_capability_records():
                 speed=True,
                 pulse=True,
                 role=rig_wire.GROUP_ROLE_ACCENT,
+                zone=wire.STAGE_ZONE_HOUSE_LEFT,
+                depth=wire.STAGE_DEPTH_UPSTAGE,
+                centre_x_metres=-2.5,
             ),
             wire.GroupCapability(name='wash', cell_count=4, pulse=True),
         ]
@@ -133,6 +136,9 @@ def test_login_groups_become_plain_capability_records():
             'pulse': True,
             'pattern': False,
             'role': 'accent',
+            'zone': 'house_left',
+            'depth': 'upstage',
+            'x': -2.5,
         },
         {
             'name': 'wash',
@@ -142,6 +148,9 @@ def test_login_groups_become_plain_capability_records():
             'pulse': True,
             'pattern': False,
             'role': 'loop',
+            'zone': None,
+            'depth': None,
+            'x': 0.0,
         },
     ]
 
@@ -468,6 +477,9 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
                 'pulse': True,
                 'pattern': False,
                 'role': 'loop',
+                'zone': None,
+                'depth': None,
+                'x': 0.0,
             }
         ]
         runtime.send_command(

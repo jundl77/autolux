@@ -8,6 +8,9 @@ AUTOLUX_PROVIDER = 'Autolux'
 LOOP_ROLE = 'loop'
 ACCENT_ROLE = 'accent'
 ROLES = (LOOP_ROLE, ACCENT_ROLE)
+# Where a group lies, seen from the audience; Starfire derives both from MVR positions.
+ZONES = ('house_left', 'centre', 'house_right')
+DEPTHS = ('downstage', 'upstage')
 ONE, OPTIONAL, MANY = '1', '0..1', '0..n'
 OBJECT_TAGS = ('SceneObject', 'GroupObject', 'FocusPoint', 'Fixture')
 OBJECT_TAGS += ('Support', 'Truss', 'VideoScreen', 'Projector')

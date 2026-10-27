@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -18,6 +19,7 @@ use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
+use crate::spatial::MM_PER_METRE;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_CATALOGUE_BYTES: usize = 4 * 1024 * 1024;
@@ -370,7 +372,9 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        let targets = rig.clone();
+        // The closures outlive this call and the rig is large: share one copy, not one each.
+        let shared = Rc::new(rig.clone());
+        let targets = Rc::clone(&shared);
         api.set(
             "members",
             lua.create_function(move |lua, value: Value| {
@@ -386,6 +390,80 @@ impl LuaAutoloop {
                     ));
                 }
                 lua.create_sequence_from(members)
+            })?,
+        )?;
+        let spatial = Rc::clone(&shared);
+        api.set(
+            "mirror",
+            lua.create_function(move |lua, value: Value| {
+                let target: Target = lua.from_value(value)?;
+                let named: Vec<(String, String)> = match &target {
+                    Target::Group(group) => spatial
+                        .spatial()
+                        .mirror(group)
+                        .map(<[_]>::to_vec)
+                        .unwrap_or_default(),
+                    // A fixture's cells share its position, so only their order can pair them.
+                    _ => {
+                        let members = spatial.resolve(&target).map_err(mlua::Error::external)?;
+                        crate::spatial::rank_pairs(members.len())
+                            .into_iter()
+                            .map(|(left, right)| (members[left].clone(), members[right].clone()))
+                            .collect()
+                    }
+                };
+                let fixture = |id: &str| -> mlua::Result<Table> {
+                    let table = lua.create_table()?;
+                    table.set("fixture", id)?;
+                    Ok(table)
+                };
+                lua.create_sequence_from(
+                    named
+                        .iter()
+                        .map(|(left, right)| {
+                            lua.create_sequence_from([fixture(left)?, fixture(right)?])
+                        })
+                        .collect::<mlua::Result<Vec<_>>>()?,
+                )
+            })?,
+        )?;
+        // MVR millimetres become metres here, at the Lua boundary only.
+        let located = |rig: Rc<FixtureRig>| {
+            move |value: &Value| -> mlua::Result<[f64; 3]> {
+                let id = cell_name(value)?;
+                let position = rig
+                    .spatial()
+                    .position(&id)
+                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                Ok(position.map(|mm| mm / MM_PER_METRE))
+            }
+        };
+        let position = located(Rc::clone(&shared));
+        api.set(
+            "position",
+            lua.create_function(move |_, cell: Value| {
+                let [x, y, z] = position(&cell)?;
+                Ok((x, y, z))
+            })?,
+        )?;
+        let position = located(Rc::clone(&shared));
+        api.set(
+            "distance",
+            lua.create_function(move |_, (cell, x, y): (Value, f64, f64)| {
+                let [cell_x, cell_y, _] = position(&cell)?;
+                Ok((cell_x - x).hypot(cell_y - y))
+            })?,
+        )?;
+        let zones = shared;
+        api.set(
+            "zone",
+            lua.create_function(move |_, cell: Value| {
+                let id = cell_name(&cell)?;
+                let (zone, depth, height) = zones
+                    .spatial()
+                    .zone(&id)
+                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                Ok((zone.name(), depth.name(), height / MM_PER_METRE))
             })?,
         )?;
         globals.set("sf", api)?;
@@ -493,6 +571,17 @@ impl LuaAutoloop {
             validate_properties(&effect.values)?;
         }
         Ok(effects)
+    }
+}
+
+/// A cell (or fixture) name, given bare or as the `sf.fixture` target `sf.each` hands out.
+fn cell_name(value: &Value) -> mlua::Result<String> {
+    match value {
+        Value::String(id) => Ok(id.to_str()?.to_owned()),
+        Value::Table(target) => target.get::<String>("fixture"),
+        _ => Err(mlua::Error::RuntimeError(
+            "expected a cell name or sf.fixture target".to_owned(),
+        )),
     }
 }
 

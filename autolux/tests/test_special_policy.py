@@ -227,6 +227,56 @@ def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alon
     assert resting == {'fx': first.group == 'fx', 'laser': first.group == 'laser'}
 
 
+def test_a_zoned_role_row_plays_only_on_groups_lying_in_that_zone():
+    left = FX | {'name': 'left', 'zone': 'house_left', 'depth': 'upstage', 'x': -3.0}
+    spread = FX | {'name': 'spread', 'zone': None, 'depth': 'upstage', 'x': 0.0}
+    right = FX | {'name': 'right', 'zone': 'house_right', 'depth': 'downstage', 'x': 3.0}
+    capabilities = SpecialCapabilities.from_groups([left, spread, right])
+    spin = dataclasses.replace(row('spin'), group='', role='accent')
+    groups = lambda **narrowed: [
+        r.group for r in capabilities.targets(dataclasses.replace(spin, **narrowed))
+    ]
+    assert groups() == ['left', 'right', 'spread']
+    assert groups(zone='house_left') == ['left']
+    assert groups(zone='centre') == []
+    assert groups(depth='upstage') == ['left', 'spread']
+    assert groups(zone='house_right', depth='upstage') == []
+
+
+def three_accents():
+    places = {'left': -4.0, 'centre': 0.5, 'right': 4.0}
+    return SpecialCapabilities.from_groups(
+        [FX | {'name': name, 'x': x} for name, x in places.items()]
+    )
+
+
+@pytest.mark.parametrize('seed', range(5))
+def test_ready_accent_groups_alternate_across_the_room_by_x(seed):
+    capabilities = three_accents()
+    spin = dataclasses.replace(row('spin'), group='', role='accent')
+    policy = SpecialPolicy([spin], random.Random(seed), Venue(max_accent_events_per_minute=99))
+    fired = []
+    for now in range(4):
+        chosen = policy.choose(DROP, capabilities, now=float(now)).special
+        policy.record(chosen, float(now), capabilities)
+        fired.append(chosen.group)
+    # House left first, then always the ready group furthest away, whatever the seed.
+    assert fired == ['left', 'right', 'left', 'right']
+
+
+def test_a_resting_accent_group_lets_the_next_furthest_take_its_turn():
+    capabilities = three_accents()
+    spin = dataclasses.replace(row('spin', cooldown=25.0), group='', role='accent')
+    policy = SpecialPolicy([spin], random.Random(0), Venue(max_accent_events_per_minute=99))
+    fired = []
+    for now in (0.0, 10.0, 20.0, 30.0):
+        chosen = policy.choose(DROP, capabilities, now=now).special
+        policy.record(chosen, now, capabilities)
+        fired.append(chosen.group)
+    # At 20 s house left still rests, so the centre, furthest of the ready, plays.
+    assert fired == ['left', 'right', 'centre', 'left']
+
+
 def test_the_venue_caps_accent_specials_per_minute_across_accent_groups():
     capabilities = SpecialCapabilities.from_groups([FX, LASER, WASH])
     spin = dataclasses.replace(row('spin', pulse=1), group='', role='accent')

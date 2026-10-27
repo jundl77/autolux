@@ -165,6 +165,9 @@ impl LiveSession {
             radius::config::pin_worker(i32::try_from(core).context("invalid render CPU index")?)?;
         }
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
+        for warning in rig.spatial().warnings() {
+            eprintln!("starfire: warning: {warning}");
+        }
         let reply = wire::LoginReply {
             run_id: login.run_id,
             command_id: login.command_id,

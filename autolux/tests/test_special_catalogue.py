@@ -150,10 +150,20 @@ def test_a_row_selects_by_role_instead_of_naming_a_group():
     special = parse_special(groupless | {'role': 'accent'}, 'glow')
     assert (special.group, special.role) == ('', 'accent')
     assert parse_special(ROW, 'glow').role is None
+    zoned = parse_special(
+        groupless | {'role': 'accent', 'zone': 'house_left', 'depth': 'upstage'}, 'glow'
+    )
+    assert (zoned.zone, zoned.depth) == ('house_left', 'upstage')
     for document, message in [
         (ROW | {'role': 'accent'}, 'give exactly one of group, role'),
         (groupless, 'give exactly one of group, role'),
         (groupless | {'role': 'laser'}, "role 'laser' is not one of loop, accent"),
+        (ROW | {'zone': 'centre'}, 'zone and depth narrow a role row'),
+        (
+            groupless | {'role': 'accent', 'zone': 'left'},
+            "zone 'left' is not one of house_left, centre, house_right",
+        ),
+        (groupless | {'role': 'accent', 'depth': 'front'}, "depth 'front' is not one of"),
     ]:
         with pytest.raises(SpecialError, match=message):
             parse_special(document, 'glow')

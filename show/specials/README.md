@@ -39,6 +39,11 @@ Selection (top level):
 - `role`: `accent` or `loop`, instead of `group`: the row plays on every group of that role whose
   profiles can express it (below), so a new accent group inherits it. Each such group is a
   separate candidate and rests on its own. A strobe row always names a group.
+- `zone` (optional, role rows only): `house_left`, `centre` or `house_right`; the row plays only
+  on groups whose members all lie there, seen from the audience: centre is within a third of
+  the rig's half-width of the centreline X = 0.
+- `depth` (optional, role rows only): `downstage` or `upstage`, either side of the scene's Y = 0.
+  Both come from the fixtures' MVR positions (Starfire derives them), never from names.
 
 `[preset]`:
 
@@ -97,7 +102,10 @@ axis the special sets (colour, speed when above 0, pulse, pattern; energy always
 resting after its last special. Within those
 it plays each one before repeating any, then favours the least recently used, seeded like the
 loops; strobe rows are not candidates and join whichever special is chosen. An intent with no
-playable special releases the one running.
+playable special releases the one running. When the pick lands on an accent and several accent
+groups are ready, their MVR positions choose the group: house left-most first, then each time the
+ready group furthest in X from the last accent (equal reach: the one that waited longest), so
+accents alternate across the room instead of following the seed.
 
 The room is a living room, so the accent group `fx` plays two tiers and stays dark through
 buildup (the rows select `role = "accent"`, so a second accent group able to express them, such

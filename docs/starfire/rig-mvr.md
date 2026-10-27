@@ -47,8 +47,22 @@ reversed. This is how the room spots are entered. Standing on the floor: `Rx(180
 `{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` (Config: pitch 0, roll 180, yaw 180 as decomposed) →
 yaw 180 and reversed. The inspector shows the derived home under each Matrix.
 
-Sheared, mirrored or degenerate matrices are rejected. The Config plan is a top view
-(+Y up); each arrow is the object's local Y axis.
+Sheared, mirrored or degenerate matrices are rejected.
+
+## Plan and stage directions
+
+MVR fixes the frame ("Right-handed, Z-Up, 1 Distance Unit equals 1 mm") but names no audience
+side; Autolux reads the plan as GDTF draws a device, "X – from left (-X) to right (+X), Y – from
+the outside of the monitor (-Y) to the inside of the monitor (+Y)", with the audience as the
+viewer: -X house left, +X house right, -Y downstage, +Y upstage. The scene origin is the
+reference: X = 0 is the centreline and Y = 0 splits downstage from upstage (Y >= 0 upstage). The
+Config rig map is a standard plot from the same draft: plan view, audience at the bottom, the
+dashed centreline at X = 0, the stage edge at the most downstage object, a 1-2-5 metre scale
+bar, one ring per fixture coloured by group (golden-angle hues past the configured six) and
+dashed for an accent-layer group, an arrow along the local Y axis (yaw), and a legend. Names
+label the marks up to 48 fixtures; past that marks shrink with density and names move to the
+hover/tap title, which keeps a 500-fixture map under 200 KB. It redraws whenever the draft
+changes, and reads positions only; the MVR changes only through the Config editor's writer.
 
 ## Validation on save
 

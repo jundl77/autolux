@@ -156,15 +156,8 @@ function sf.scene(effects)
     return result
 end
 
--- Mirror partners about the group's centre, outermost first: the i-th member from the left
--- with the i-th from the right; an odd middle is its own partner.
-function sf.mirror(target)
-    local members, result = sf.members(target), {}
-    for index = 1, (#members + 1) // 2 do
-        result[index] = { sf.fixture(members[index]), sf.fixture(members[#members + 1 - index]) }
-    end
-    return result
-end
+-- sf.mirror(target) is native: partners by reflection about the stage centreline, derived
+-- once at rig load (starfire::spatial).
 
 function sf.each(target, make_effect)
     local result = {}
