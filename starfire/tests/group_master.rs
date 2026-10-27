@@ -1,6 +1,6 @@
 mod support;
 
-use starfire::engine::Engine;
+use starfire::engine::{Engine, perceptual_to_linear_master as curved};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::protocol::wire;
@@ -69,7 +69,7 @@ fn a_group_master_on_the_dimmerless_kinta_keeps_its_colour_and_at_zero_selects_b
     engine.set_parameter(0.0, &group_master("fx", 0.5)).unwrap();
     let half = engine.render_at(0.0).unwrap();
     let half_dmx = &half.dmx_frames_by_universe[&universe];
-    assert!((half.fixture_properties_before_strobe[&member].intensity - 0.5).abs() < 1e-9);
+    assert!((half.fixture_properties_before_strobe[&member].intensity - curved(0.5)).abs() < 1e-9);
     assert_eq!(half_dmx[colour], full_dmx[colour]);
     assert_eq!(half_dmx[shutter], full_dmx[shutter]);
 
@@ -113,7 +113,12 @@ fn a_cell_in_two_capped_groups_takes_the_product_of_their_masters() {
         .render_at(0.0)
         .unwrap()
         .fixture_properties_before_strobe;
-    for (cell, factor) in [(shared, 0.2), (wash_only, 0.5), (&fx, 0.4)] {
+    let (wash_master, house_master) = (curved(0.5), curved(0.4));
+    for (cell, factor) in [
+        (shared, wash_master * house_master),
+        (wash_only, wash_master),
+        (&fx, house_master),
+    ] {
         let expected = before[cell].intensity * factor;
         assert!(
             (capped[cell].intensity - expected).abs() < 1e-9,

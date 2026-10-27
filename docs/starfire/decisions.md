@@ -575,8 +575,9 @@ centre. The nine-area grid is the lighting convention for blocking and focus, so
 row's `zone` (column) and `depth` (row) speak the language of a plot. Cells inherit their
 fixture's area (the rig carries no GDTF geometry offsets). Starfire applies no geometry rule:
 `sf.zone(cell)` returns the area's column (house_left/centre/house_right), row
-(downstage/centre/upstage) and name (e.g. `up_centre`), and errors on an unspecified area;
-`sf.position(cell)` returns x, y, z and `sf.distance(cell, x, y)` the plan distance, in metres.
+(downstage/centre/upstage) and name (e.g. `up_centre`), and rig load refuses an unspecified area;
+`sf.position(cell)` returns x, y, z and `sf.distance(cell, x, y)` the plan distance, in metres;
+`sf.fixture_of(cell)` names the fixture a cell belongs to.
 Login reports a group's `area` only when every member shares it, plus its mean X
 (`centre_x_metres`, which accent alternation uses), so a role row with `zone` or `depth` plays
 only on groups lying in one area of that column or row; no MIXED value is needed.

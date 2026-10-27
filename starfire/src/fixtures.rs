@@ -211,6 +211,12 @@ impl FixtureRig {
             .collect();
         for group in &rig.groups {
             ensure!(
+                wire::GroupRole::try_from(group.role).is_ok(),
+                "fixture group {} has unknown role {}",
+                group.group_id,
+                group.role
+            );
+            ensure!(
                 groups
                     .insert(group.group_id.clone(), group.fixture_ids.clone())
                     .is_none(),
@@ -233,10 +239,7 @@ impl FixtureRig {
                 profile.profile_id
             );
         }
-        Ok(Self {
-            accent_groups,
-            ..Self::from_parts(fixtures, groups, profiles)?
-        })
+        Self::from_parts(fixtures, groups, accent_groups, profiles)
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -250,6 +253,7 @@ impl FixtureRig {
     fn from_parts(
         mut fixtures: Vec<FixturePatch>,
         groups: BTreeMap<String, Vec<String>>,
+        accent_groups: BTreeSet<String>,
         profiles: BTreeMap<String, Vec<GdtfCell>>,
     ) -> Result<Self> {
         ensure!(
@@ -386,7 +390,7 @@ impl FixtureRig {
         Ok(Self {
             fixtures,
             groups: cell_groups,
-            accent_groups: BTreeSet::new(),
+            accent_groups,
             profiles,
             cells,
             spatial,
@@ -442,6 +446,11 @@ impl FixtureRig {
     pub fn profile(&self, cell_id: &str) -> Option<&GdtfProfile> {
         let &(fixture, cell) = self.cells.get(cell_id)?;
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
+    }
+
+    pub fn fixture_of(&self, cell_id: &str) -> Option<&str> {
+        let &(fixture, _) = self.cells.get(cell_id)?;
+        Some(&self.fixtures[fixture].id)
     }
 
     pub fn fixture_ids(&self) -> Vec<String> {

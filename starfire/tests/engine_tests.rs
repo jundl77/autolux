@@ -1292,11 +1292,11 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
         ("empty", "return {render=function(ctx) return {} end}"),
         (
             "still",
-            "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
+            "return {render=function(ctx) return {sf.physical_attribute(sf.fixture('kinta'), 'Effects1PosRotate', 0)} end}",
         ),
         (
             "spin",
-            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
+            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.fixture('kinta'), 'Color1', 'Red'), sf.physical_attribute(sf.fixture('kinta'), 'Effects1PosRotate', 160)} end}",
         ),
     ]);
     let red = AttributeValue::Preset("Red".into());
@@ -1722,7 +1722,7 @@ fn group_master(group: &str, level: f64) -> starfire::protocol::wire::Parameter 
 }
 
 #[test]
-fn a_half_group_master_halves_only_that_groups_output_after_the_master() {
+fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
     let mut engine = room_engine(&[(
         "lit",
         "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8), sf.colour(sf.all(), sf.rgb(1, 0.5, 0))} end}",
@@ -1737,7 +1737,7 @@ fn a_half_group_master_halves_only_that_groups_output_after_the_master() {
     let wash = support::room().groups()["wash"].clone();
     for (cell, state) in &before.fixture_properties_before_strobe {
         let expected = if wash.contains(cell) {
-            state.intensity * 0.5
+            state.intensity * perceptual_to_linear_master(0.5)
         } else {
             state.intensity
         };

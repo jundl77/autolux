@@ -196,6 +196,37 @@ fn placed(id: &str, address: u32, x: f64, y: f64) -> String {
     )
 }
 
+#[test]
+fn side_without_a_count_parks_each_half_of_a_mover_row_on_its_own_side() {
+    let rig = support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{},{},{}],
+              "groups":{{"movers":["a","b","c","d"]}}}}"#,
+            placed("a", 1, -900.0, 0.0),
+            placed("b", 4, -300.0, 0.0),
+            placed("c", 7, 300.0, 0.0),
+            placed("d", 10, 900.0, 0.0),
+        ))
+        .unwrap(),
+    );
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          return sf.each(sf.group("movers"), function(mover, index)
+            return sf.pan_tilt(mover, 0.5 + sf.side(index) / 4, 0.5)
+          end)
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let pans: Vec<_> = autoloop
+        .render(&snapshot(0.0), &techno())
+        .unwrap()
+        .iter()
+        .map(|effect| effect.values.pan.unwrap())
+        .collect();
+    assert_eq!(pans, [0.25, 0.25, 0.75, 0.75]);
+}
+
 /// `area` is a StageArea name without its prefix, as Autolux would derive it.
 fn placed_in(id: &str, address: u32, x: f64, y: f64, area: &str) -> String {
     let fixture = placed(id, address, x, y);
@@ -563,31 +594,27 @@ fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
 }
 
 #[test]
-fn a_loop_naming_an_accent_group_is_refused_and_the_shipped_loops_name_none() {
-    let mut definition = support::room_definition();
-    let fx = definition
-        .groups
-        .iter()
-        .find(|group| group.group_id == "fx")
-        .unwrap();
-    assert_eq!(fx.role(), starfire::protocol::wire::GroupRole::Accent);
-    let room = FixtureRig::from_wire(&definition).unwrap();
-    support::show_catalog()
-        .require_no_accent_groups(&room)
-        .unwrap();
-    let named_fx =
-        catalog(r#"return {render = function(ctx) return {sf.dimmer(sf.group("fx"), 1)} end}"#);
-    assert_eq!(
-        named_fx
-            .require_no_accent_groups(&room)
-            .unwrap_err()
-            .to_string(),
-        "autoloops may not run on accent groups, which only play specials: test/autoloop names fx"
-    );
-    for group in &mut definition.groups {
-        group.role = 0;
+fn a_loop_reaching_an_accent_group_by_any_route_is_refused() {
+    let room = FixtureRig::from_wire(&support::room_definition()).unwrap();
+    assert!(room.is_accent("fx"));
+    for body in [
+        r#"return {sf.dimmer({ group = "fx" }, 1)}"#,
+        r#"local g = "fx"; return sf.each(sf.group(g), function(cell) return sf.dimmer(cell, 1) end)"#,
+        r#"return {sf.dimmer(sf.mirror({ group = "fx" })[1][1], 1)}"#,
+    ] {
+        let error = catalog(&format!("return {{render = function(ctx) {body} end}}"))
+            .instantiate("test", "autoloop", &room, &support::palettes())
+            .unwrap()
+            .render(&snapshot(0.0), &techno())
+            .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.starts_with("autoloop test/autoloop failed"),
+            "{error}"
+        );
+        assert!(
+            error.contains("accent group fx plays specials only, never autoloops"),
+            "{error}"
+        );
     }
-    named_fx
-        .require_no_accent_groups(&FixtureRig::from_wire(&definition).unwrap())
-        .unwrap();
 }

@@ -190,27 +190,6 @@ impl AutoloopCatalog {
             .collect()
     }
 
-    /// Accent groups play specials only; a loop naming one is refused at login.
-    pub fn require_no_accent_groups(&self, rig: &FixtureRig) -> Result<()> {
-        let named: Vec<String> = self
-            .sources
-            .iter()
-            .flat_map(|((bank, autoloop), source)| {
-                referenced_groups(source)
-                    .filter(|group| rig.is_accent(group))
-                    .map(move |group| format!("{bank}/{autoloop} names {group}"))
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        ensure!(
-            named.is_empty(),
-            "autoloops may not run on accent groups, which only play specials: {}",
-            named.join(", ")
-        );
-        Ok(())
-    }
-
     pub fn instantiate(
         &self,
         bank: &str,
@@ -244,6 +223,16 @@ fn referenced_groups(source: &str) -> impl Iterator<Item = String> + '_ {
     })
 }
 
+/// Checked wherever a loop resolves a target, so no way of naming an accent group escapes it.
+fn refuse_accent(rig: &FixtureRig, target: &Target) -> Result<()> {
+    match target {
+        Target::Group(group) if rig.is_accent(group) => {
+            bail!("accent group {group} plays specials only, never autoloops")
+        }
+        _ => Ok(()),
+    }
+}
+
 fn validate_identifier(value: &str) -> Result<()> {
     ensure!(
         !value.is_empty() && value.len() <= MAX_IDENTIFIER_BYTES,
@@ -264,7 +253,7 @@ pub struct LuaAutoloop {
     render: Function,
     use_render_intensity: Function,
     instruction_budget: Arc<AtomicU32>,
-    rig: FixtureRig,
+    rig: Rc<FixtureRig>,
     identity: String,
     active_palette_slots: Vec<Table>,
 }
@@ -372,13 +361,14 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        // The closures outlive this call and the rig is large: share one copy, not one each.
+        // The closures outlive this call and the rig is large: they and the autoloop share one copy.
         let shared = Rc::new(rig.clone());
         let targets = Rc::clone(&shared);
         api.set(
             "members",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
+                refuse_accent(&targets, &target).map_err(mlua::Error::external)?;
                 if matches!(&target, Target::Group(group) if !targets.groups().contains_key(group))
                 {
                     return lua.create_table();
@@ -397,6 +387,7 @@ impl LuaAutoloop {
             "mirror",
             lua.create_function(move |lua, value: Value| {
                 let target: Target = lua.from_value(value)?;
+                refuse_accent(&spatial, &target).map_err(mlua::Error::external)?;
                 let named: Vec<(String, String)> = match &target {
                     Target::Group(group) => spatial
                         .spatial()
@@ -430,11 +421,7 @@ impl LuaAutoloop {
         // MVR millimetres become metres here, at the Lua boundary only.
         let located = |rig: Rc<FixtureRig>| {
             move |value: &Value| -> mlua::Result<[f64; 3]> {
-                let id = cell_name(value)?;
-                let position = rig
-                    .spatial()
-                    .position(&id)
-                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                let position = cell_fact(value, |id| rig.spatial().position(id))?;
                 Ok(position.map(|mm| mm / MM_PER_METRE))
             }
         };
@@ -454,18 +441,19 @@ impl LuaAutoloop {
                 Ok((cell_x - x).hypot(cell_y - y))
             })?,
         )?;
-        let areas = shared;
+        let areas = Rc::clone(&shared);
         api.set(
             "zone",
             lua.create_function(move |_, cell: Value| {
-                let id = cell_name(&cell)?;
-                let area = areas
-                    .spatial()
-                    .area(&id)
-                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
-                area.placement().ok_or_else(|| {
-                    mlua::Error::RuntimeError(format!("cell {id} has no stage area"))
-                })
+                // Rig load refuses an unspecified area, so every known cell has a placement.
+                cell_fact(&cell, |id| areas.spatial().area(id)?.placement())
+            })?,
+        )?;
+        let fixtures = Rc::clone(&shared);
+        api.set(
+            "fixture_of",
+            lua.create_function(move |_, cell: Value| {
+                cell_fact(&cell, |id| fixtures.fixture_of(id).map(str::to_owned))
             })?,
         )?;
         globals.set("sf", api)?;
@@ -485,7 +473,7 @@ impl LuaAutoloop {
             render,
             use_render_intensity,
             instruction_budget,
-            rig: rig.clone(),
+            rig: shared,
             identity,
             active_palette_slots,
         })
@@ -566,6 +554,8 @@ impl LuaAutoloop {
             _ => true,
         });
         for effect in &effects {
+            refuse_accent(&self.rig, &effect.target)
+                .with_context(|| format!("autoloop {} failed", self.identity))?;
             for id in self.rig.resolve(&effect.target)? {
                 self.rig
                     .validate_attributes(&id, &effect.values.attributes)?;
@@ -585,6 +575,12 @@ fn cell_name(value: &Value) -> mlua::Result<String> {
             "expected a cell name or sf.fixture target".to_owned(),
         )),
     }
+}
+
+/// What the rig knows about the cell Lua names, which must exist.
+fn cell_fact<T>(value: &Value, fact: impl FnOnce(&str) -> Option<T>) -> mlua::Result<T> {
+    let id = cell_name(value)?;
+    fact(&id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

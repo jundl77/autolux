@@ -280,3 +280,15 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
         );
     }
 }
+
+#[test]
+fn a_group_with_an_unknown_role_is_refused_rather_than_read_as_a_loop_group() {
+    let mut definition = support::room_definition();
+    definition.groups[0].role = 99;
+    let name = definition.groups[0].group_id.clone();
+    let error = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("fixture group {name} has unknown role 99")
+    );
+}
