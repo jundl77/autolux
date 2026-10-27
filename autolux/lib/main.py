@@ -78,6 +78,9 @@ def save_show_settings(path: Path, settings: ShowSettings) -> None:
 
 def apply_static(light_engine, command: dict) -> None:
     looks = light_engine.static_looks
+    if command.get('action') == 'static_fx':
+        looks.special(command['row'], command['target'])
+        return
     kind = command['kind']
     if kind == 'look':
         looks.look(
@@ -90,14 +93,6 @@ def apply_static(light_engine, command: dict) -> None:
         looks.preset(command['preset'])
     elif kind == 'blackout':
         looks.set_blackout(command['enabled'])
-    elif kind == 'special_fx':
-        looks.special(
-            command['group'],
-            command['colour_slot'],
-            command['energy'],
-            command['speed'],
-            command['pulse_beats'],
-        )
     elif kind == 'special_fx_clear':
         looks.clear_special()
     elif kind == 'clear':
@@ -170,7 +165,7 @@ class ShowControl:
                 LOGGER.warning('[main] next autoloop refused: %s', error)
         elif action == 'master':
             light_engine.set_master_level(command['level'])
-        elif action == 'static':
+        elif action in ('static', 'static_fx'):
             try:
                 apply_static(light_engine, command)
             except ValueError as error:

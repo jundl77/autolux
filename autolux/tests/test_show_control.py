@@ -499,17 +499,13 @@ def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
 
 def test_the_static_special_command_reaches_the_controller_queue_as_parsed(static_show):
     poller, commands = static_show
-    command = {
-        'action': 'static',
-        'kind': 'special_fx',
-        'group': 'fx',
-        'colour_slot': 'cold',
-        'energy': 0.5,
-        'speed': 0.25,
-        'pulse_beats': 2,
-    }
-    assert poller.control(command) == {'accepted': 'static'}
+    command = {'action': 'static_fx', 'row': 'drift', 'target': 'fx'}
+    assert poller.control(command) == {'accepted': 'static_fx'}
     assert commands.get_nowait() == command
+    assert (
+        'needs a row and a target'
+        in poller.control({'action': 'static_fx', 'row': 'drift'})['error']
+    )
     assert poller.control({'action': 'static', 'kind': 'special_fx_clear'}) == {
         'accepted': 'static'
     }
@@ -878,87 +874,80 @@ def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_
         assert not [part for part in value if 'dot-auto' in (getattr(part, 'className', '') or '')]
 
 
+FX_ROWS = {'all': ['cold_drift', 'drift', 'spin'], 'fx': ['cold_drift', 'drift'], 'wash': []}
 FX_STATE = {
     **STATIC_STATE,
-    'special_groups': {'fx': ['colour', 'pulse', 'speed'], 'wash': ['colour'], 'par': []},
+    'static': {
+        **STATIC_STATE['static'],
+        'fx_rows': FX_ROWS,
+        'special_fx': {'name': 'drift', 'group': 'fx'},
+    },
 }
-FX_SEGMENTS = {'static-fx-energy': 0.9, 'static-fx-speed': 0.2, 'static-fx-pulse': 1}
-# (trigger, static target, control-state, the payload the show must receive)
-FX_CASES = [
-    (
-        'static-fx-cold',
-        'fx',
-        FX_STATE,
-        {'group': 'fx', 'colour_slot': 'cold', 'energy': 0.9, 'speed': 0.2, 'pulse_beats': 1},
-    ),
-    (
-        'static-fx-primary',
-        'wash',
-        FX_STATE,
-        {
-            'group': 'wash',
-            'colour_slot': 'primary',
-            'energy': 0.9,
-            'speed': 0.0,
-            'pulse_beats': None,
-        },
-    ),
-    (
-        'static-fx-speed',
-        'all',
-        {**FX_STATE, 'static': {**FX_STATE['static'], 'special_fx': {'colour_slot': 'accent'}}},
-        {'group': 'all', 'colour_slot': 'accent', 'energy': 0.9, 'speed': 0.2, 'pulse_beats': 1},
-    ),
+# (picked row, static target, the command the show must receive or None)
+FX_PICKS = [
+    ('cold_drift', 'fx', {'action': 'static_fx', 'row': 'cold_drift', 'target': 'fx'}),
+    ('drift', 'all', {'action': 'static_fx', 'row': 'drift', 'target': 'all'}),
+    # The row already held there: a poll syncing the picker must not re-fire it.
+    ('drift', 'fx', None),
+    (None, 'fx', None),
 ]
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_the_static_fx_chips_send_the_special_dict_from_python_and_the_browser_alike(static_show):
-    from autolux.simulate.visualizer_app import fx_axes
-
+def test_the_fx_picker_sends_the_row_from_python_and_the_browser_alike(static_show):
     source = _Recorder()
     app = build_app(source, direct_control=False)
     static_output = 'static-status.children'
-    for trigger, target, state, _ in FX_CASES:
-        values = {**FX_SEGMENTS, 'control-state': state, 'static-target': target}
-        kind = 'value' if trigger == 'static-fx-speed' else 'n_clicks'
-        _run_callback(app, static_output, values, f'{trigger}.{kind}')
+    for row, target, _ in FX_PICKS:
+        values = {'static-fx-row': row, 'control-state': FX_STATE, 'static-target': target}
+        _run_callback(app, static_output, values, 'static-fx-row.value')
     _run_callback(app, static_output, {'control-state': FX_STATE}, 'static-fx-clear.n_clicks')
-    expected = [{'action': 'static', 'kind': 'special_fx', **payload} for *_, payload in FX_CASES]
-    expected.append({'action': 'static', 'kind': 'special_fx_clear'})
-    assert source.commands == expected
+    expected = [command for *_, command in FX_PICKS if command]
+    clear = {'action': 'static', 'kind': 'special_fx_clear'}
+    assert source.commands == [*expected, clear]
 
     calls = [
-        f'control.build.fx({json.dumps(trigger)}, {json.dumps(target)}, 0.9, 0.2, 1, '
-        f'{json.dumps(fx_axes(state["special_groups"], target))}, '
-        f'{json.dumps((state["static"].get("special_fx") or {}).get("colour_slot"))})'
-        for trigger, target, state, _ in FX_CASES
+        f'control.build.staticFx({json.dumps(row)}, {json.dumps(target)}, {json.dumps(FX_STATE)})'
+        for row, target, _ in FX_PICKS
     ]
-    calls.append("control.build.fx('static-fx-clear', 'all', 0.6, 0.5, 0, [], null)")
-    assert _run_control_js(f'console.log(JSON.stringify([{", ".join(calls)}]));') == expected
+    built = _run_control_js(
+        f'console.log(JSON.stringify([{", ".join(calls)}, control.build.staticFxClear()]));'
+    )
+    assert built == [*(command for *_, command in FX_PICKS), clear]
 
     poller, commands = static_show
-    for command in expected:
-        assert poller.control(command) == {'accepted': 'static'}
+    for command in (*expected, clear):
+        assert poller.control(command) == {'accepted': command['action']}
         assert commands.get_nowait() == command
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_the_fx_row_is_disabled_with_a_note_for_a_target_that_cannot_render_one():
-    from autolux.simulate.visualizer_app import FX_GATE_JS
+def test_the_fx_picker_lists_only_the_rows_that_fit_the_target():
+    from autolux.simulate.visualizer_app import FX_ROWS_JS
 
-    gates = _run_control_js(
-        f'const gate = {FX_GATE_JS};\n'
+    shown = _run_control_js(
+        f'const rows = {FX_ROWS_JS};\n'
         f'const state = {json.dumps(FX_STATE)};\n'
-        "console.log(JSON.stringify([gate('fx', state), gate('wash', state), gate('par', state),"
-        " gate('all', state), gate('all', {special_groups: {}})]));"
+        "console.log(JSON.stringify([rows('fx', state), rows('all', state), rows('wash', state),"
+        " rows('all', {static: {}})]));"
     )
-    assert gates == [
-        [False, False, False, ''],
-        [False, True, True, ''],
-        [True, True, True, 'par cannot render FX'],
-        [False, False, False, ''],
-        [True, True, True, 'No group cannot render FX'],
+    assert shown == [
+        [
+            [{'label': 'Cold drift', 'value': 'cold_drift'}, {'label': 'Drift', 'value': 'drift'}],
+            'drift',
+            '',
+        ],
+        [
+            [
+                {'label': 'Cold drift', 'value': 'cold_drift'},
+                {'label': 'Drift', 'value': 'drift'},
+                {'label': 'Spin', 'value': 'spin'},
+            ],
+            None,
+            '',
+        ],
+        [[], None, 'wash has no FX that fits'],
+        [[], None, ''],
     ]
 
 
@@ -989,8 +978,8 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
     assert shown['Strobe'] == 'in 41 s'
     labels = [item.children[0].children for item in _build_show_status(buffer.snapshot(), 0.0)]
     assert labels.index('FX') == labels.index('Colors') + 1
-    static = {'static': {'special_fx': {'group': 'wash', 'colour_slot': 'cold'}}}
-    assert items(static)['FX'] == 'Static · wash'
+    static = {'static': {'special_fx': {'name': 'cold_drift', 'group': 'wash'}}}
+    assert items(static)['FX'] == 'Static · Cold drift · wash'
 
 
 def test_the_config_rig_area_lists_each_groups_fx_capabilities():
@@ -1014,36 +1003,31 @@ def test_the_config_rig_area_lists_each_groups_fx_capabilities():
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_a_clicked_fx_chip_lights_and_a_later_segment_change_refires_it_in_the_browser():
-    from autolux.simulate.visualizer_app import FX_DIRECT_JS, FX_SLOT_IDS
+def test_a_picked_fx_row_is_sent_once_and_clear_fx_empties_the_picker_in_the_browser():
+    from autolux.simulate.visualizer_app import FX_DIRECT_JS
 
-    chips = list(FX_SLOT_IDS)
-    blank = [''] * len(chips)
-    lit = ['active' if chip == 'static-fx-cold' else '' for chip in chips]
-    clicks = [None] * (len(chips) + 3)
-    sent, cold_lit, refired_lit, idle = _run_control_js(
+    sent, picked, synced, cleared = _run_control_js(
         'const sent = [];\n'
         'control.dispatch = (command) => { sent.push(command); return Promise.resolve({}); };\n'
-        'window.dash_clientside = {no_update: null, set_props: () => {},'
+        'window.dash_clientside = {no_update: "same", set_props: () => {},'
         ' callback_context: {triggered: []}};\n'
         f'const fx = {FX_DIRECT_JS};\n'
         f'const state = {json.dumps(FX_STATE)};\n'
-        'const run = (trigger, segments, classes) => {\n'
+        'const run = (trigger, row) => {\n'
         '  window.dash_clientside.callback_context.triggered = [{prop_id: trigger}];\n'
-        f'  return fx(...{json.dumps(clicks)}, ...segments, "fx", ...classes, state);\n'
+        '  return fx(row, 1, "fx", state);\n'
         '};\n'
-        f'const a = run("static-fx-cold.n_clicks", [0.6, 0.5, 0], {json.dumps(blank)});\n'
-        f'const b = run("static-fx-energy.value", [0.9, 0.5, 2], {json.dumps(lit)});\n'
-        f'const c = run("static-fx-speed.value", [0.9, 0.9, 2], {json.dumps(blank)});\n'
+        'const a = run("static-fx-row.value", "cold_drift");\n'
+        # The poll has not caught up, so the held pick is what the picker syncs back to.
+        'const b = run("static-fx-row.value", "cold_drift");\n'
+        'const c = run("static-fx-clear.n_clicks", "cold_drift");\n'
         'console.log(JSON.stringify([sent, a, b, c]));'
     )
-    special = {'action': 'static', 'kind': 'special_fx', 'group': 'fx', 'colour_slot': 'cold'}
     assert sent == [
-        {**special, 'energy': 0.6, 'speed': 0.5, 'pulse_beats': None},
-        {**special, 'energy': 0.9, 'speed': 0.5, 'pulse_beats': 2},
+        {'action': 'static_fx', 'row': 'cold_drift', 'target': 'fx'},
+        {'action': 'static', 'kind': 'special_fx_clear'},
     ]
-    assert cold_lit == refired_lit == lit
-    assert idle == [None] * len(chips), 'a segment change with no FX lit sends nothing'
+    assert (picked, synced, cleared) == ('same', 'same', None)
 
 
 @pytest.mark.parametrize('reported', ['techno', 'techno_breakdown', 'techno_drop'])
@@ -1432,6 +1416,52 @@ def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
     # The ticker in control.js reads these to count down between polls.
     props = rows[3].to_plotly_json()['props']
     assert (props['data-total'], props['data-remaining']) == (240, 179.5)
+    assert (props['data-group'], props['data-last'], props['data-ready']) == (
+        'fx',
+        'cold_drift',
+        'false',
+    )
+    # Every bar paints in the same page colour: no per-group tint on any row.
+    assert all('style' not in row.to_plotly_json()['props'] for row in rows)
+
+
+def test_an_fx_effects_bar_fills_to_full_in_a_colour_the_page_defines():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    def fill(total, remaining):
+        entry = {
+            'group': 'fx',
+            'last': 'drift',
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining <= 0,
+        }
+        [row] = _build_cooldowns({'special_cooldowns': [entry]})
+        return row.children[1].children.style['width']
+
+    # Empty as the group fires, 1 - remaining/cooldown on the way, full once ready.
+    assert [fill(240, r) for r in (240, 180, 60, 0)] == ['0.0%', '25.0%', '75.0%', '100.0%']
+
+    # The block sits outside #show-control, so every token the fill and the fire flash paint
+    # with must be set on .cooldowns or the row itself; an undefined var() would leave the bar
+    # transparent.
+    css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
+    css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
+    rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
+    scopes = [
+        body
+        for selector, body in rules.items()
+        if {'.cooldowns', '.cooldown-row'} & {part.strip() for part in selector.split(',')}
+    ]
+    defined = {name for body in scopes for name in re.findall(r'(--[\w-]+)\s*:', body)}
+    [paint] = [body for selector, body in rules.items() if selector.strip() == '.cooldown-fill']
+    background = re.search(r'background:\s*([^;]+);', paint).group(1)
+    assert 'transparent' not in background
+    assert 'var(' in background
+    assert set(re.findall(r'var\((--[\w-]+)\)', background)) <= defined
+    # The fire pulse paints only with tokens the block itself sets.
+    pulse = re.search(r'@keyframes cooldown-fire\s*\{(.*?)\n\}', css, re.DOTALL).group(1)
+    assert set(re.findall(r'var\((--[\w-]+)\)', pulse)) <= defined
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -1460,3 +1490,60 @@ def test_the_fx_effects_ticker_counts_a_bar_down_from_the_last_poll():
     ticked = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
     # Ticking e seconds after a poll shows what a poll e seconds later would have rendered.
     assert ticked == [rendered(t, max(0.0, r - e)) for t, r, e in cases]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routine_poll():
+    def poll(last, remaining, ready=False):
+        return {'last': last, 'remaining': remaining, 'ready': ready}
+
+    # (previous poll of the group, this poll)
+    cases = [
+        (None, poll('drift', 240)),  # first sight of the group: no history, no flash
+        (poll('drift', 180), poll('drift', 179)),  # counting down
+        (poll('drift', 0, True), poll('drift', 0, True)),  # staying ready
+        (poll('drift', 0, True), poll('drift', 240)),  # ready group fires the same special
+        (poll('drift', 30), poll('drift', 240)),  # fired again before it was ready
+        (poll('drift', 0, True), poll('spin', 90)),  # a different special fired
+    ]
+    calls = ', '.join(
+        f'control.cooldownFired({json.dumps(previous)}, {json.dumps(polled)})'
+        for previous, polled in cases
+    )
+    fired = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
+    assert fired == [False, False, False, True, True, True]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_fx_effects_ticker_holds_the_flash_class_through_the_pulse_after_a_fire():
+    # A fake document with one bar and a hand-driven clock and setInterval.
+    body = """
+const row = {
+    dataset: {group: 'fx', last: 'drift', total: '240', remaining: '0', ready: 'true'},
+    classes: new Set(['cooldown-row', 'ready']),
+    querySelector: () => null,
+};
+row.classList = {toggle: (name, on) => (on ? row.classes.add(name) : row.classes.delete(name))};
+let now = 0;
+let tick = null;
+Object.defineProperty(globalThis, 'performance', {value: {now: () => now}});
+globalThis.setInterval = (fn) => { tick = fn; };
+globalThis.document = {querySelectorAll: () => [row], addEventListener: () => {}};
+"""
+    script = (
+        body
+        + 'globalThis.window = {};\n'
+        + CONTROL_JS.read_text(encoding='utf8')
+        + """
+const seen = [];
+const at = (ms) => { now = ms; tick(); seen.push(row.classes.has('flash')); };
+at(0); at(100);
+Object.assign(row.dataset, {remaining: '240', ready: 'false'});  // the poll after a fire
+at(200); at(600); at(900);
+row.dataset.remaining = '239';  // the next routine poll
+at(1000);
+console.log(JSON.stringify(seen));
+"""
+    )
+    result = subprocess.run([NODE, '-e', script], capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout) == [False, False, True, True, False, False]

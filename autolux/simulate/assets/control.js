@@ -55,33 +55,13 @@
         return null;
     }
 
-    // Mirrors fx_axes: the whole rig can use any axis some group has.
-    function fxAxes(groups, target) {
-        if (target === (config().allFixtures || 'all')) {
-            return [...new Set(Object.values(groups).flat())].sort();
-        }
-        return [...(groups[target] || [])].sort();
-    }
-
-    // Mirrors static_fx_command; a segment trigger re-fires activeSlot.
-    function fxCommand(trigger, target, energy, speed, pulse, axes, activeSlot) {
-        if (trigger === 'static-fx-clear') {
-            return {action: 'static', kind: 'special_fx_clear'};
-        }
-        const slot = trigger.startsWith('static-fx-') && !trigger.match(/-(energy|speed|pulse)$/)
-            ? trigger.slice('static-fx-'.length) : activeSlot;
-        if (!slot) {
+    // Mirrors static_fx_command: the row already held on the target sends nothing.
+    function staticFxCommand(row, target, state) {
+        const active = ((state && state.static) || {}).special_fx || {};
+        if (!row || (active.name === row && active.group === target)) {
             return null;
         }
-        return {
-            action: 'static',
-            kind: 'special_fx',
-            group: target,
-            colour_slot: slot,
-            energy: energy,
-            speed: axes.includes('speed') ? speed : 0.0,
-            pulse_beats: pulse && axes.includes('pulse') ? pulse : null,
-        };
+        return {action: 'static_fx', row: row, target: target};
     }
 
     const build = {
@@ -93,7 +73,8 @@
         intensityAuto: (enabled) => ({action: 'intensity_auto', enabled: enabled}),
         fxAuto: (enabled) => ({action: 'fx_auto', enabled: enabled}),
         static: staticCommand,
-        fx: fxCommand,
+        staticFx: staticFxCommand,
+        staticFxClear: () => ({action: 'static', kind: 'special_fx_clear'}),
     };
 
     function post(url, command) {
@@ -212,7 +193,7 @@
     function cooldownView(total, remaining, elapsedSeconds) {
         const left = Math.max(0, remaining - elapsedSeconds);
         const ready = left <= 0;
-        const filled = ready || total <= 0 ? 1 : Math.max(0, 1 - left / total);
+        const filled = ready || total <= 0 ? 1 : 1 - Math.min(1, left / total);
         return {
             fill: (filled * 100).toFixed(1) + '%',
             caption: ready ? 'ready' : Math.ceil(left) + ' s',
@@ -220,18 +201,46 @@
         };
     }
 
-    // Ticks the FX Effects bars down between polls. Dash may reuse a bar's element for
-    // another entry, so a poll is spotted by its data attributes changing, not by the node.
+    // Covers the double pulse in control.css (600 ms).
+    const FLASH_MS = 650;
+
+    // Whether a group fired between two polls of it ({last, remaining, ready}): a new special,
+    // a ready bar going busy, or the time left jumping back up. Polls only ever count down
+    // otherwise, so the 0.05 s slack only absorbs float noise.
+    function cooldownFired(previous, polled) {
+        if (!previous) {
+            return false;
+        }
+        return polled.last !== previous.last
+            || (previous.ready && !polled.ready)
+            || polled.remaining > previous.remaining + 0.05;
+    }
+
+    // Per group, so a fire is told apart from Dash handing this element another group's entry.
+    const cooldownSeen = {};
+
+    // Fills the FX Effects bars up between polls and flashes a bar whose group just fired.
+    // Dash may reuse a bar's element for another entry, so a poll is spotted by its data
+    // attributes changing, not by the node.
     function tickCooldowns() {
         const now = performance.now();
         document.querySelectorAll('.cooldown-row').forEach((row) => {
-            const key = row.dataset.total + '|' + row.dataset.remaining;
-            if (row.autoluxPolled !== key) {
-                row.autoluxPolled = key;
-                row.autoluxPolledAt = now;
+            const data = row.dataset;
+            const polled = {
+                last: data.last || '',
+                remaining: Number(data.remaining),
+                ready: data.ready === 'true',
+            };
+            const key = data.group + '|' + data.total + '|' + data.remaining + '|' + polled.last;
+            const seen = cooldownSeen[data.group];
+            if (!seen || seen.key !== key) {
+                const flashUntil = cooldownFired(seen && seen.polled, polled)
+                    ? now + FLASH_MS : (seen ? seen.flashUntil : 0);
+                cooldownSeen[data.group] = {key, polled, polledAt: now, flashUntil};
             }
-            const shown = cooldownView(Number(row.dataset.total), Number(row.dataset.remaining),
-                (now - row.autoluxPolledAt) / 1000);
+            const state = cooldownSeen[data.group];
+            const shown = cooldownView(Number(data.total), polled.remaining,
+                (now - state.polledAt) / 1000);
             const fill = row.querySelector('.cooldown-fill');
             const caption = row.querySelector('.cooldown-caption');
             if (fill) {
@@ -241,7 +250,9 @@
             if (caption && caption.firstChild) {
                 caption.firstChild.nodeValue = shown.caption;
             }
+            // Re-applied every tick: a Dash render resets className.
             row.classList.toggle('ready', shown.ready);
+            row.classList.toggle('flash', now < state.flashUntil);
         });
     }
 
@@ -250,6 +261,7 @@
     }
 
     window.autoluxControl = {
-        build, send, dispatch, sendLatest, hold, view, fxAxes, operatorActs, cooldownView,
+        build, send, dispatch, sendLatest, hold, view, operatorActs, cooldownView,
+        cooldownFired,
     };
 })();

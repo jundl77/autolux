@@ -121,6 +121,7 @@ class EffectController:
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
+        self.specials = tuple(specials)
         self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'), venue)
         self._special: Special | None = None
         self._special_on = False

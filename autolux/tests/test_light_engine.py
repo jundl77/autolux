@@ -985,13 +985,9 @@ async def test_the_decoder_state_reaches_the_event_buffer():
     state = light.event_buffer.snapshot()['decoder']
     assert state['classes'] == list(FakeDecoder.classes)
     assert state['posterior'] == [0.05, 0.1, 0.1, 0.7, 0.05]
-    assert (state['observed_bar'], state['committed_bar']) == (7, 5)
-    assert state['committed_label'] == 'drop'
-    assert state['lag_bars'] == 2
-    assert state['chain_latency_sec'] == FakeDecoder.chain_latency_sec
 
 
-async def test_a_bar_with_no_evidence_says_so_rather_than_reading_as_silence():
+async def test_a_bar_with_no_evidence_publishes_no_posterior():
     decoder = FakeDecoder()
     light, _, clock, _ = engine(decoder=decoder, events=True)
     decoder.recent_observations.append(BarObservation(7, 13.2, 15.1, None, float('nan')))
@@ -1013,40 +1009,6 @@ async def test_the_decoder_state_stays_out_of_the_report():
     report = light.event_buffer.to_report()
     assert 'decoder' not in report
     assert 'decoder' not in report['metrics']
-
-
-async def test_a_song_boundary_forgets_the_commit_cursor():
-    decoder = FakeDecoder()
-    light, _, clock, _ = engine(decoder=decoder, events=True)
-    decoder.recent_observations.append(BarObservation(7, 13.2, 15.1, np.array([0.2] * 5), 0.1))
-    await elapse(light, clock, 20.0)
-    await commit(light, decoder, clock, 'drop', bar=5)
-
-    light.on_sound_start()
-    decoder.recent_observations.clear()
-    await light.on_beat(1, 128.0, False)
-
-    state = light.event_buffer.snapshot()['decoder']
-    assert state['committed_bar'] is None
-    assert state['lag_bars'] is None
-
-
-async def test_a_feature_gap_forgets_the_commit_cursor():
-    decoder = FakeDecoder()
-    chain = FakeChain()
-    light, _, clock, _ = engine(decoder=decoder, chain=chain, events=True)
-    decoder.recent_observations.append(BarObservation(34, 60.0, 62.0, np.array([0.2] * 5), 0.1))
-    await elapse(light, clock, 60.0)
-    await commit(light, decoder, clock, 'breakdown', bar=32)
-    assert light.event_buffer.snapshot()['decoder']['committed_bar'] == 32
-
-    chain.gap = True
-    decoder.recent_observations.clear()
-    await elapse(light, clock, 1.0)
-
-    state = light.event_buffer.snapshot()['decoder']
-    assert state['committed_bar'] is None
-    assert state['lag_bars'] is None
 
 
 async def test_a_song_boundary_keeps_the_intents_for_buffered_audio():
@@ -1215,7 +1177,7 @@ async def test_the_grid_is_published_on_the_clock_the_beats_are_stamped_on():
 
     beat_at = light.event_buffer.snapshot()['beats'][-1]['t']
     decoder._edges = [light.audio_sec - 4.0, light.audio_sec - 2.0]
-    light._publish_decoder_state(None)
+    light._publish_decoder_state()
 
     published = light.event_buffer.snapshot()['decoder']['bar_edges']
     assert published == [
@@ -1230,7 +1192,7 @@ async def test_the_grid_travels_with_the_bar_numbers_that_name_it():
     await elapse(light, clock, 20.0)
     decoder._edges = [light.audio_sec - 2.0, light.audio_sec]
     decoder._first_bar = 41
-    light._publish_decoder_state(None)
+    light._publish_decoder_state()
 
     state = light.event_buffer.snapshot()['decoder']
     assert state['first_bar'] == 41
@@ -1680,13 +1642,12 @@ async def test_telemetry_shows_standby_instead_of_the_last_intent_and_posterior(
     show.decoder.reset = reset
     await show.play(20.0, 0.2)
     show.decoder.recent_observations.append(BarObservation(3, 5.7, 7.6, np.ones(9) / 9, 0.5))
-    show.light._publish_decoder_state(None)
+    show.light._publish_decoder_state()
     before = show.events.snapshot()
     assert before['intent'] == 'atmospheric' and before['decoder']['posterior'] is not None
     await show.play(2.1, 0.0)
     snapshot = show.events.snapshot()
     assert snapshot['intent'] == 'standby'
-    assert snapshot['decoder']['committed_label'] is None
     assert snapshot['decoder']['posterior'] is None
     assert snapshot['intents'][-1]['trigger'] == SILENCE_TRIGGER
     assert 'standby/warm_white' in [e['name'] for e in snapshot['effects']]

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
-from autolux.lighting.special_catalogue import special_values
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,9 +46,13 @@ def colour_hex(colour: tuple[float, float, float]) -> str:
 
 
 class StaticLooks:
-    def __init__(self, lighting_client: StarfireClient, rig: StaticRig):
+    def __init__(
+        self, lighting_client: StarfireClient, rig: StaticRig, specials: Sequence[Special] = ()
+    ):
         self._lighting = lighting_client
         self.rig = rig
+        # Strobe rows stay the show's own drop accent; the operator never holds one.
+        self._rows = {row.name: row for row in specials if row.strobe_hz is None}
         self._looks: dict[str, dict] = {}
         self._special: Special | None = None
         self._floor = False
@@ -57,26 +62,34 @@ class StaticLooks:
     def active(self) -> bool:
         return bool(self._looks) or self._floor or self.blackout or self._special is not None
 
-    def special(
-        self,
-        group: str,
-        colour_slot: str,
-        energy: float,
-        speed: float,
-        pulse_beats: int | None = None,
-    ) -> None:
-        values = {
-            'colour_slot': colour_slot,
-            'energy': energy,
-            'speed': speed,
-            'pulse_beats': pulse_beats,
-            'attack_beats': 0.0,
-            'release_beats': STATIC_SPECIAL_RELEASE_BEATS,
-        }
-        special = Special('static', (), group, **special_values(values))
-        if not self.special_capabilities().allows(special):
-            raise ValueError(f'{group!r} cannot render this special')
-        self._special = special
+    def special_rows(self, target: str) -> list[str]:
+        """Catalogue rows the operator may hold on target: its own group's rows (any row on the
+        whole rig) that the target's fixtures can render."""
+        capabilities = self.special_capabilities()
+        return [
+            name
+            for name, row in self._rows.items()
+            if target in (row.group, ALL_FIXTURES)
+            and capabilities.allows(dataclasses.replace(row, group=target))
+        ]
+
+    def special(self, row: str, target: str) -> None:
+        """Hold a catalogue row on target until Clear FX or Clear all; cooldowns and the FX auto
+        toggle belong to the automatic show and never touch it."""
+        if target not in self.rig.targets:
+            raise ValueError(f'unknown static target {target!r}')
+        if row not in self._rows:
+            raise ValueError(f'unknown FX {row!r}')
+        if row not in self.special_rows(target):
+            raise ValueError(f'{target!r} cannot render {row!r}')
+        # Cut in at once and release short: the operator's hand, not the row's section pacing.
+        self._special = dataclasses.replace(
+            self._rows[row],
+            group=target,
+            attack_beats=0.0,
+            release_beats=STATIC_SPECIAL_RELEASE_BEATS,
+            cooldown_seconds=0.0,
+        )
         self._send_special()
 
     def clear_special(self) -> None:
@@ -168,13 +181,8 @@ class StaticLooks:
             'blackout': self.blackout,
             'special_fx': None
             if self._special is None
-            else {
-                'group': self._special.group,
-                'colour_slot': self._special.colour_slot,
-                'energy': self._special.energy,
-                'speed': self._special.speed,
-                'pulse_beats': self._special.pulse_beats,
-            },
+            else {'name': self._special.name, 'group': self._special.group},
+            'fx_rows': {target: self.special_rows(target) for target in self.rig.targets},
             'looks': {
                 target: {
                     'colour': None if 'colour' not in look else colour_hex(look['colour']),
