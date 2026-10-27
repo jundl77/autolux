@@ -9,8 +9,6 @@ use starfire::gdtf::GdtfProfile;
 use starfire::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb, Target};
 use starfire::protocol::wire;
 
-const PIXEL_BAR: &str = include_str!("../../autolux/tests/data/gdtf/pixel_bar.xml");
-
 const HALF_TURN: [f64; 12] = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
 
 fn fixture(profile: &str, address: usize) -> serde_json::Value {
@@ -429,11 +427,10 @@ fn pixel_bar(mode: &str, cells: Vec<wire::fixture::Cell>) -> wire::RigDefinition
             group_id: "strip".into(),
             fixture_ids: vec!["bar".into()],
         }],
-        profiles: vec![wire::FixtureProfile {
-            profile_id: "bar".into(),
-            gdtf_xml: PIXEL_BAR.into(),
-            dmx_mode: mode.into(),
-        }],
+        profiles: vec![support::compiled_profile(
+            &format!("pixel_bar#{mode}"),
+            "bar",
+        )],
     }
 }
 
@@ -455,11 +452,16 @@ fn lit(intensity: f64, red: f64, green: f64, blue: f64) -> FixtureState {
 #[test]
 fn each_channel_owning_geometry_is_a_cell_encoded_from_its_own_state() {
     let layout = |mode| {
-        GdtfProfile::cells_from_xml(PIXEL_BAR, mode)
-            .unwrap()
-            .into_iter()
-            .map(|cell| (cell.geometry, cell.offsets))
-            .collect::<Vec<_>>()
+        GdtfProfile::cells_from_wire(
+            support::compiled_profile(&format!("pixel_bar#{mode}"), "bar")
+                .mode
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap()
+        .into_iter()
+        .map(|cell| (cell.geometry, cell.offsets))
+        .collect::<Vec<_>>()
     };
     assert_eq!(
         layout("Pixels"),

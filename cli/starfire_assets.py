@@ -6,6 +6,7 @@ from pathlib import Path
 from autolux.lib.engine.static_mode import UV_ATTRIBUTE, StaticRig
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import load_rig
+from autolux.lighting.gdtf_compile import compile_mode
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
 from autolux.lighting.palettes import palette_table
 from cli.starfire_protocol import (
@@ -49,7 +50,11 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
             if len(description.encode('utf-8')) > MAX_DESCRIPTION_BYTES:
                 raise ValueError('GDTF description exceeds its size limit')
             cells[profile_id] = mvr.gdtf_modes(description, spec)[mode]['cells']
-            rig.profiles.add(profile_id=profile_id, gdtf_xml=description, dmx_mode=mode)
+            rig.profiles.add(
+                profile_id=profile_id,
+                dmx_mode=mode,
+                mode=compile_mode(description, mode),
+            )
         entry = rig.fixtures.add(
             fixture_id=fixture['name'],
             profile_id=profile_id,

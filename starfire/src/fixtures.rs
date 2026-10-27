@@ -199,7 +199,10 @@ impl FixtureRig {
         }
         let mut profiles = BTreeMap::new();
         for profile in &rig.profiles {
-            let converted = GdtfProfile::cells_from_xml(&profile.gdtf_xml, &profile.dmx_mode)
+            let mode = profile.mode.as_ref().with_context(|| {
+                format!("profile {} has no compiled DMX mode", profile.profile_id)
+            })?;
+            let converted = GdtfProfile::cells_from_wire(mode)
                 .with_context(|| format!("profile {}", profile.profile_id))?;
             ensure!(
                 profiles

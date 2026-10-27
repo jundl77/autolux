@@ -42,10 +42,57 @@ message FixtureGroup {
   repeated string fixture_ids = 2;
 }
 
-// One standard GDTF fixture type and the selected DMX mode.
-// Autolux imports and stores the source; Starfire validates it once during Login.
+// One GDTF fixture type's selected DMX mode, compiled by Autolux from its description.
+// Starfire parses no GDTF; it validates this compiled form once during Login.
 message FixtureProfile {
   string profile_id = 1;
-  string gdtf_xml = 2;  // Complete description.xml, containing exactly one FixtureType.
-  string dmx_mode = 3;  // Exact DMXMode name in that definition.
+  reserved 2;           // Formerly description.xml; Starfire parses no GDTF.
+  string dmx_mode = 3;  // The DMXMode name, for diagnostics.
+  DmxMode mode = 4;
+}
+
+// DMX values are at their channel's resolution, already widened by the GDTF byte rules.
+message DmxMode {
+  repeated DmxChannel channels = 1;  // In DMXChannels order, referenced geometries expanded.
+}
+
+message DmxChannel {
+  repeated string geometry_path = 1;       // From the mode's geometry down to the channel's.
+  repeated uint32 offsets = 2;             // One-based within the footprint, coarse byte first.
+  uint32 default = 3;                      // The initial function's Default.
+  repeated ChannelFunction functions = 4;  // Logical channels' functions, in order.
+}
+
+message ChannelFunction {
+  string path = 1;  // Channel.LogicalChannel.ChannelFunction names.
+  string attribute = 2;
+  string qualified_attribute = 3;  // Geometry.Attribute.
+  uint32 dmx_from = 4;
+  double physical_from = 5;
+  double physical_to = 6;
+  bool snap = 7;
+  repeated ChannelSet sets = 8;  // Ascending DMXFrom.
+  ModeMaster mode_master = 9;    // Unset when the function is always active.
+}
+
+message ChannelSet {
+  string name = 1;
+  uint32 dmx_from = 2;
+  uint32 dmx_to = 3;
+  double physical_from = 4;
+  double physical_to = 5;
+  CieColor wheel_slot_colour = 6;  // Unset unless the set selects a coloured wheel slot.
+}
+
+message ModeMaster {
+  uint32 channel = 1;            // Index into DmxMode.channels.
+  optional uint32 function = 2;  // Index into that channel's functions; unset for the channel.
+  uint32 dmx_from = 3;           // At the master channel's resolution.
+  uint32 dmx_to = 4;
+}
+
+message CieColor {
+  double x = 1;
+  double y = 2;
+  double luminance = 3;  // Y, 0..100.
 }

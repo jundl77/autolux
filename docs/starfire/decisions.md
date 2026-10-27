@@ -485,3 +485,12 @@ cells is refused. The rig proto declares each fixture's cells as Autolux derives
 Login fails if Starfire derives different ones. GeometryReference stays unsupported. Open:
 under a master-dimmer cell a pixel cell's own intensity does not dim it, and the master cell
 joins its fixture's group like any pixel.
+
+2026-10-27 GDTF compiler: Autolux compiles each patched mode with pygdtf 1.4.5
+(`autolux/lighting/gdtf_compile.py`) into the typed `DmxMode` of rig.proto; Starfire
+validates and encodes from it and has no GDTF parser (the gdtf and quick-xml crates are
+gone; this supersedes U32's "existing parsers compile at Login" and the gdtf 0.3 note).
+pygdtf drops DMXValue's byte-shifting flag, range checks and mirroring, so the compiler
+re-reads DMXFrom, Default, ModeFrom, ModeTo and set physical values from description.xml.
+Starfire's tests build modes directly; the synthetic test descriptions compile into the
+committed `starfire/tests/data/compiled_profiles.pb` (`tools/compile_test_profiles.py`).

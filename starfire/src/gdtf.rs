@@ -1,25 +1,16 @@
-//! Compile standard GDTF descriptions once, then encode physical attributes without XML work.
+//! Validate DMX modes Autolux compiled from GDTF once, then encode physical attributes.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::str::FromStr;
 
-use anyhow::{Context, Result, bail, ensure};
-use gdtf::Description;
-use gdtf::dmx_mode::{DmxBreak, DmxChannel, DmxMode, ModeMaster};
-use gdtf::fixture_type::FixtureType;
-use gdtf::geometry::{AnyGeometry, Geometry};
-use gdtf::values::{ColorCie, DmxValue};
-use gdtf::wheel::WheelSlotOptic;
-use quick_xml::{Reader, Writer, events::Event};
+use anyhow::{Context, Result, ensure};
 
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb};
+use crate::protocol::wire;
 
-pub const MAX_GDTF_XML_BYTES: usize = 1024 * 1024;
 const MAX_CHANNEL_BYTES: usize = 4;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
-const MAX_XML_DEPTH: usize = 128;
 const DMX_BYTE_BITS: usize = 8;
 const DMX_BYTE_MASK: u32 = 255;
 const CIE_LUMINANCE_SCALE: f64 = 100.0;
@@ -39,7 +30,7 @@ const XYZ_TO_SRGB: [[f64; 3]; 3] = [
     [0.055_643_4, -0.204_025_9, 1.057_225_2],
 ];
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct ChannelSet {
     name: String,
     first: u32,
@@ -49,7 +40,7 @@ struct ChannelSet {
     colour: Option<Rgb>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Function {
     path: String,
     attribute: String,
@@ -63,7 +54,7 @@ struct Function {
     condition: Option<ModeCondition>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct ModeCondition {
     channel: usize,
     function: Option<usize>,
@@ -71,7 +62,7 @@ struct ModeCondition {
     last: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Channel {
     /// The channel's geometry and its ancestors, root first.
     geometry_path: Vec<String>,
@@ -99,7 +90,7 @@ pub struct FunctionInfo {
 }
 
 /// Resolved mode: offsets, physical mappings and dependencies are validated before playback.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GdtfProfile {
     channels: Vec<Channel>,
     order: Vec<usize>,
@@ -116,13 +107,103 @@ pub struct GdtfCell {
 }
 
 impl GdtfProfile {
-    /// The mode's cells in order of their first DMX offset; a single-geometry mode is one cell.
-    pub fn cells_from_xml(xml: &str, mode_name: &str) -> Result<Vec<GdtfCell>> {
-        Self::from_xml(xml, mode_name)?.into_cells()
+    /// Validates a mode Autolux compiled from GDTF; Starfire reads no GDTF itself.
+    pub fn from_wire(mode: &wire::DmxMode) -> Result<Self> {
+        ensure!(
+            !mode.channels.is_empty() && mode.channels.len() <= DMX_CHANNELS,
+            "GDTF mode must contain 1..512 physical channels"
+        );
+        let mut occupied = BTreeSet::new();
+        let mut channels = Vec::with_capacity(mode.channels.len());
+        let mut function_count = 0;
+        for channel in &mode.channels {
+            ensure!(
+                !channel.geometry_path.is_empty(),
+                "GDTF channel has no geometry"
+            );
+            let width = channel.offsets.len();
+            ensure!(
+                (1..=MAX_CHANNEL_BYTES).contains(&width),
+                "GDTF channel resolution must be 8, 16, 24 or 32 bits"
+            );
+            let maximum =
+                (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32;
+            let mut offsets = Vec::with_capacity(width);
+            for &offset in &channel.offsets {
+                let offset = offset as usize;
+                ensure!(
+                    (1..=DMX_CHANNELS).contains(&offset),
+                    "GDTF channel offset outside 1..512"
+                );
+                ensure!(
+                    occupied.insert(offset - 1),
+                    "overlapping GDTF channel offsets"
+                );
+                offsets.push(offset - 1);
+            }
+            ensure!(
+                channel.default <= maximum,
+                "GDTF default exceeds its channel resolution"
+            );
+            ensure!(
+                !channel.functions.is_empty(),
+                "GDTF channel contains no functions"
+            );
+            let mut functions = Vec::with_capacity(channel.functions.len());
+            for function in &channel.functions {
+                functions.push(compile_wire_function(function, maximum, &mode.channels)?);
+            }
+            ensure!(
+                functions
+                    .iter()
+                    .map(|function| &function.path)
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    == functions.len(),
+                "duplicate GDTF channel-function path"
+            );
+            for function in functions
+                .iter()
+                .filter(|function| is_brightness_attribute(&function.attribute))
+            {
+                ensure!(
+                    functions.len() == 1
+                        && function.sets.is_empty()
+                        && function.condition.is_none()
+                        && function.first == 0
+                        && function.physical_from == 0.0
+                        && function.physical_to > 0.0,
+                    "GDTF brightness attribute {} requires one continuous zero-based function without ChannelSets or ModeMaster",
+                    function.path
+                );
+            }
+            function_count += functions.len();
+            ensure!(
+                function_count <= MAX_FUNCTIONS,
+                "GDTF channel-function limit exceeded"
+            );
+            let mut functions_by_dmx_start: Vec<_> = (0..functions.len()).collect();
+            functions_by_dmx_start.sort_by_key(|&index| functions[index].first);
+            channels.push(Channel {
+                geometry_path: channel.geometry_path.clone(),
+                offsets,
+                default: channel.default,
+                functions,
+                functions_by_dmx_start,
+                has_dimmer: false,
+                has_rgb: false,
+                has_white: false,
+                closes_when_dark: false,
+            });
+        }
+        Self::assemble(channels)
     }
 
-    // A geometry above exactly one channel-owning leaf belongs to that leaf's cell (a mover's
-    // yoke and head); one above several leaves is a cell of its own (a bar's master dimmer).
+    /// The compiled mode's cells in order of their first DMX offset.
+    pub fn cells_from_wire(mode: &wire::DmxMode) -> Result<Vec<GdtfCell>> {
+        Self::from_wire(mode)?.into_cells()
+    }
+
     fn into_cells(self) -> Result<Vec<GdtfCell>> {
         let owners: BTreeSet<&[String]> = self
             .channels
@@ -208,165 +289,36 @@ impl GdtfProfile {
             .collect()
     }
 
-    pub fn from_xml(xml: &str, mode_name: &str) -> Result<Self> {
-        ensure!(
-            xml.len() <= MAX_GDTF_XML_BYTES,
-            "GDTF description exceeds size limit"
-        );
-        ensure!(
-            !xml.contains("<!DOCTYPE") && !xml.contains("<!ENTITY"),
-            "GDTF DTD/entities are unsupported"
-        );
-        let description = Description::from_str(&materialize_parser_defaults(xml)?)
-            .context("parse GDTF description")?;
-        ensure!(
-            description.data_version.is_supported(),
-            "unsupported GDTF version"
-        );
-        ensure!(
-            description.fixture_types.len() == 1,
-            "GDTF definition must contain exactly one FixtureType"
-        );
-        let fixture = &description.fixture_types[0];
-        let mode = fixture
-            .dmx_modes
-            .iter()
-            .find(|mode| mode.name.as_deref() == Some(mode_name))
-            .with_context(|| format!("unknown GDTF DMX mode {mode_name}"))?;
-        ensure!(
-            mode.relations.is_empty(),
-            "GDTF channel relations are not supported"
-        );
-        ensure!(
-            mode.ft_macros.is_empty(),
-            "GDTF fixture macros are not supported"
-        );
-        ensure!(
-            !mode.dmx_channels.is_empty() && mode.dmx_channels.len() <= DMX_CHANNELS,
-            "GDTF mode must contain 1..512 physical channels"
-        );
-        let geometry = mode
-            .geometry(fixture)
-            .context("GDTF mode references missing geometry")?;
-        let mut geometries = BTreeMap::new();
-        collect_geometries(geometry, &[], &mut geometries)?;
-        ensure!(
-            mode.dmx_channels.iter().all(|channel| channel
-                .logical_channels
-                .iter()
-                .all(|logical| logical.attribute.len() == 1)),
-            "GDTF logical-channel attribute must be a single name"
-        );
-        let names: BTreeMap<_, _> = mode
-            .dmx_channels
-            .iter()
-            .enumerate()
-            .map(|(index, channel)| (channel.name().to_string(), index))
-            .collect();
-        ensure!(
-            names.len() == mode.dmx_channels.len(),
-            "duplicate GDTF channel name"
-        );
-        let mut occupied = BTreeSet::new();
-        let mut channels = Vec::new();
-        let mut function_count = 0;
-        for channel in &mode.dmx_channels {
-            ensure!(
-                channel.dmx_break == DmxBreak::Value(1),
-                "GDTF multiple/overwritten DMX breaks are not supported"
-            );
-            ensure!(
-                geometries.contains_key(&channel.geometry.to_string()),
-                "GDTF channel references geometry outside its selected mode"
-            );
-            let offsets = channel
-                .offset
-                .as_ref()
-                .context("GDTF virtual channels are not supported")?;
-            ensure!(
-                (1..=MAX_CHANNEL_BYTES).contains(&offsets.len()),
-                "GDTF channel resolution must be 8, 16, 24 or 32 bits"
-            );
-            let mut resolved_offsets = Vec::new();
-            for &offset in offsets {
-                ensure!(
-                    (1..=DMX_CHANNELS as i32).contains(&offset),
-                    "GDTF channel offset outside 1..512"
-                );
-                ensure!(
-                    occupied.insert(offset as usize - 1),
-                    "overlapping GDTF channel offsets"
-                );
-                resolved_offsets.push(offset as usize - 1);
-            }
-            let initial = channel
-                .initial_function()
-                .context("GDTF initial function is missing")?
-                .1;
-            let default = dmx_value(initial.default, offsets.len())?;
-            let functions = compile_functions(fixture, mode, channel, &names)?;
-            let mut functions_by_dmx_start: Vec<_> = (0..functions.len()).collect();
-            functions_by_dmx_start.sort_by_key(|&index| functions[index].first);
-            for function in functions
-                .iter()
-                .filter(|function| is_brightness_attribute(&function.attribute))
-            {
-                ensure!(
-                    functions.len() == 1
-                        && function.sets.is_empty()
-                        && function.condition.is_none()
-                        && function.first == 0
-                        && function.physical_from == 0.0
-                        && function.physical_to > 0.0,
-                    "GDTF brightness attribute {} requires one continuous zero-based function without ChannelSets or ModeMaster",
-                    function.path
-                );
-            }
-            function_count += functions.len();
-            ensure!(
-                function_count <= MAX_FUNCTIONS,
-                "GDTF channel-function limit exceeded"
-            );
-            channels.push(Channel {
-                geometry_path: geometries[&channel.geometry.to_string()].clone(),
-                offsets: resolved_offsets,
-                default,
-                functions,
-                functions_by_dmx_start,
-                has_dimmer: false,
-                has_rgb: false,
-                has_white: false,
-                closes_when_dark: false,
-            });
-        }
+    fn assemble(mut channels: Vec<Channel>) -> Result<Self> {
         // A dimmer controls its own geometry and descendants, never unrelated cells.
-        for (index, channel) in mode.dmx_channels.iter().enumerate() {
-            let geometry = channel.geometry.to_string();
-            let ancestors = &geometries[&geometry];
+        for index in 0..channels.len() {
+            let path = &channels[index].geometry_path;
+            let geometry = path.last().context("GDTF channel has no geometry")?;
             let mut attributes = BTreeSet::new();
             let mut has_dimmer = false;
-            for (other, compiled) in mode.dmx_channels.iter().zip(&channels) {
-                let other_geometry = other.geometry.to_string();
-                if ancestors.contains(&other_geometry) {
-                    has_dimmer |= compiled
+            for other in &channels {
+                let other_geometry = other.geometry_path.last();
+                if other_geometry.is_some_and(|name| path.contains(name)) {
+                    has_dimmer |= other
                         .functions
                         .iter()
                         .any(|function| function.attribute == "Dimmer");
                 }
-                if geometries[&other_geometry].contains(&geometry) {
+                if other.geometry_path.contains(geometry) {
                     attributes.extend(
-                        compiled
+                        other
                             .functions
                             .iter()
                             .map(|function| function.attribute.clone()),
                     );
                 }
             }
-            channels[index].has_dimmer = has_dimmer;
-            channels[index].has_rgb = ["ColorAdd_R", "ColorAdd_G", "ColorAdd_B"]
+            let channel = &mut channels[index];
+            channel.has_dimmer = has_dimmer;
+            channel.has_rgb = ["ColorAdd_R", "ColorAdd_G", "ColorAdd_B"]
                 .iter()
                 .all(|attribute| attributes.contains(*attribute));
-            channels[index].has_white = attributes.contains("ColorAdd_W");
+            channel.has_white = attributes.contains("ColorAdd_W");
         }
         let dark_slot = channels
             .iter()
@@ -379,8 +331,10 @@ impl GdtfProfile {
                 && !channel.has_rgb
                 && channel.functions.iter().any(is_gate_shutter);
         }
-        let footprint = occupied
-            .last()
+        let footprint = channels
+            .iter()
+            .flat_map(|channel| &channel.offsets)
+            .max()
             .copied()
             .context("GDTF mode has no DMX offsets")?
             + 1;
@@ -873,177 +827,104 @@ fn semantic_value(
     function.normalized(value, last)
 }
 
-fn compile_functions(
-    fixture: &FixtureType,
-    mode: &DmxMode,
-    channel: &DmxChannel,
-    names: &BTreeMap<String, usize>,
-) -> Result<Vec<Function>> {
-    let bytes = channel
-        .offset
+fn compile_wire_function(
+    function: &wire::ChannelFunction,
+    maximum: u32,
+    channels: &[wire::DmxChannel],
+) -> Result<Function> {
+    ensure!(
+        function.physical_from.is_finite() && function.physical_to.is_finite(),
+        "GDTF physical range must be finite"
+    );
+    ensure!(
+        !function.attribute.is_empty() && function.attribute.len() <= MAX_ATTRIBUTE_ID_BYTES,
+        "GDTF function attribute must be a single name"
+    );
+    ensure!(
+        function.dmx_from <= maximum,
+        "GDTF function start exceeds its channel resolution"
+    );
+    let mut sets = Vec::with_capacity(function.sets.len());
+    for (index, set) in function.sets.iter().enumerate() {
+        ensure!(
+            set.dmx_from >= function.dmx_from
+                && set.dmx_from <= set.dmx_to
+                && set.dmx_to <= maximum,
+            "GDTF channel set exceeds function range"
+        );
+        if let Some(next) = function.sets.get(index + 1) {
+            ensure!(
+                next.dmx_from > set.dmx_from && set.dmx_to == next.dmx_from - 1,
+                "GDTF channel sets must have increasing ranges"
+            );
+        } else {
+            ensure!(
+                set.dmx_to == maximum,
+                "GDTF channel sets must have increasing ranges"
+            );
+        }
+        ensure!(
+            set.physical_from.is_finite() && set.physical_to.is_finite(),
+            "nonfinite GDTF channel-set range"
+        );
+        sets.push(ChannelSet {
+            name: set.name.clone(),
+            first: set.dmx_from,
+            last: set.dmx_to,
+            physical_from: set.physical_from,
+            physical_to: set.physical_to,
+            colour: set.wheel_slot_colour.as_ref().map(cie_to_rgb).transpose()?,
+        });
+    }
+    let condition = function
+        .mode_master
         .as_ref()
-        .context("missing channel offsets")?
-        .len() as u8;
-    let maximum =
-        (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - usize::from(bytes)) * DMX_BYTE_BITS)) as u32;
-    let mut functions = Vec::new();
-    for logical in &channel.logical_channels {
-        ensure!(
-            logical.dmx_change_time_limit == 0.0 && logical.mib_fade == 0.0,
-            "GDTF timed logical-channel constraints are unsupported"
-        );
-        ensure!(
-            !logical.channel_functions.is_empty(),
-            "GDTF logical channel has no functions"
-        );
-        for (index, function) in logical.channel_functions.iter().enumerate() {
+        .map(|master| -> Result<_> {
+            let channel = master.channel as usize;
+            let linked = channels
+                .get(channel)
+                .context("GDTF ModeMaster references a missing channel/function")?;
+            let width = linked.offsets.len();
             ensure!(
-                function.dmx_profile.is_none() && function.sub_channel_sets.is_empty(),
-                "GDTF DMX profiles and sub-channel sets are unsupported"
+                (1..=MAX_CHANNEL_BYTES).contains(&width),
+                "virtual ModeMaster is unsupported"
             );
+            let limit =
+                (u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - width) * DMX_BYTE_BITS)) as u32;
             ensure!(
-                function.physical_from.is_finite() && function.physical_to.is_finite(),
-                "GDTF physical range must be finite"
+                master.dmx_from <= master.dmx_to && master.dmx_to <= limit,
+                "invalid GDTF ModeMaster interval"
             );
-            ensure!(
-                function.attribute.len() == 1,
-                "GDTF function attribute must be a single name"
-            );
-            let attribute = function.attribute[0].to_string();
-            ensure!(
-                attribute == "NoFeature" || function.attribute(fixture).is_some(),
-                "missing GDTF attribute definition {attribute}"
-            );
-            let first = dmx_value(function.dmx_from, usize::from(bytes))?;
-            let function_name = function
-                .name
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_else(|| format!("{attribute}{}", index + 1));
-            let path = format!("{}.{}.{}", channel.name(), logical.name(), function_name);
-            let condition = function
-                .mode_master
-                .as_ref()
-                .map(|condition| -> Result<_> {
-                    let linked = condition
-                        .mode_master(mode)
-                        .context("GDTF ModeMaster references a missing channel/function")?;
-                    let master_name = condition
-                        .node
-                        .first()
-                        .context("empty GDTF ModeMaster")?
-                        .to_string();
-                    let master = *names
-                        .get(&master_name)
-                        .context("missing GDTF ModeMaster channel")?;
-                    let width = mode.dmx_channels[master]
-                        .offset
-                        .as_ref()
-                        .context("virtual ModeMaster is unsupported")?
-                        .len() as u8;
-                    let from = dmx_value(condition.from, usize::from(width))?;
-                    let to = dmx_value(condition.to, usize::from(width))?;
-                    ensure!(from <= to, "invalid GDTF ModeMaster interval");
-                    let function = match linked {
-                        ModeMaster::DmxChannel(_) => None,
-                        ModeMaster::ChannelFunction(channel, _, function) => Some(
-                            channel
-                                .logical_channels
-                                .iter()
-                                .flat_map(|logical| &logical.channel_functions)
-                                .position(|candidate| std::ptr::eq(candidate, function))
-                                .context("GDTF ModeMaster function is missing")?,
-                        ),
-                    };
-                    Ok(ModeCondition {
-                        channel: master,
-                        function,
-                        first: from,
-                        last: to,
-                    })
+            let function = master
+                .function
+                .map(|index| -> Result<_> {
+                    ensure!(
+                        (index as usize) < linked.functions.len(),
+                        "GDTF ModeMaster function is missing"
+                    );
+                    Ok(index as usize)
                 })
                 .transpose()?;
-            let mut sets = Vec::new();
-            let mut ordered_sets = function
-                .channel_sets
-                .iter()
-                .map(|set| Ok((dmx_value(set.dmx_from, usize::from(bytes))?, set)))
-                .collect::<Result<Vec<_>>>()?;
-            ordered_sets.sort_by_key(|(first, _)| *first);
-            for (set_index, &(set_first, set)) in ordered_sets.iter().enumerate() {
-                let set_last = if let Some(&(next, _)) = ordered_sets.get(set_index + 1) {
-                    ensure!(
-                        next > set_first,
-                        "GDTF channel sets must have increasing ranges"
-                    );
-                    next - 1
-                } else {
-                    maximum
-                };
-                ensure!(
-                    set_first >= first && set_first <= set_last,
-                    "GDTF channel set exceeds function range"
-                );
-                let physical_from = set.physical_from(function);
-                let physical_to = set.physical_to(function);
-                ensure!(
-                    physical_from.is_finite() && physical_to.is_finite(),
-                    "nonfinite GDTF channel-set range"
-                );
-                let colour = if set.wheel_slot_index.is_some() {
-                    let wheel = function
-                        .wheel(fixture)
-                        .context("GDTF wheel link is missing")?;
-                    let slot = set
-                        .wheel_slot(wheel)
-                        .context("GDTF wheel slot is missing")?;
-                    match slot.optic {
-                        WheelSlotOptic::Color(colour) => Some(cie_to_rgb(colour)?),
-                        WheelSlotOptic::Filter(_) => {
-                            bail!("GDTF spectral wheel filters are unsupported")
-                        }
-                    }
-                } else {
-                    None
-                };
-                sets.push(ChannelSet {
-                    name: set
-                        .name
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_default(),
-                    first: set_first,
-                    last: set_last,
-                    physical_from,
-                    physical_to,
-                    colour,
-                });
-            }
-            functions.push(Function {
-                path,
-                attribute: attribute.clone(),
-                qualified_attribute: format!("{}.{attribute}", channel.geometry),
-                first,
-                maximum_dmx_value: maximum,
-                physical_from: function.physical_from,
-                physical_to: function.physical_to,
-                snap: logical.snap,
-                sets,
-                condition,
-            });
-        }
-    }
-    ensure!(!functions.is_empty(), "GDTF channel contains no functions");
-    ensure!(
-        functions
-            .iter()
-            .map(|function| &function.path)
-            .collect::<BTreeSet<_>>()
-            .len()
-            == functions.len(),
-        "duplicate GDTF channel-function path"
-    );
-    Ok(functions)
+            Ok(ModeCondition {
+                channel,
+                function,
+                first: master.dmx_from,
+                last: master.dmx_to,
+            })
+        })
+        .transpose()?;
+    Ok(Function {
+        path: function.path.clone(),
+        attribute: function.attribute.clone(),
+        qualified_attribute: function.qualified_attribute.clone(),
+        first: function.dmx_from,
+        maximum_dmx_value: maximum,
+        physical_from: function.physical_from,
+        physical_to: function.physical_to,
+        snap: function.snap,
+        sets,
+        condition,
+    })
 }
 
 fn dependency_order(channels: &[Channel]) -> Result<Vec<usize>> {
@@ -1082,93 +963,6 @@ fn is_brightness_attribute(attribute: &str) -> bool {
         || attribute.starts_with("ColorSub_")
 }
 
-fn collect_geometries(
-    geometry: &Geometry,
-    ancestors: &[String],
-    names: &mut BTreeMap<String, Vec<String>>,
-) -> Result<()> {
-    ensure!(
-        !matches!(geometry, Geometry::Reference(_)),
-        "GDTF geometry references require expansion and are unsupported"
-    );
-    let name = geometry
-        .name()
-        .context("GDTF geometry is missing a name")?
-        .to_string();
-    let mut path = ancestors.to_vec();
-    path.push(name.clone());
-    ensure!(
-        names.insert(name, path.clone()).is_none(),
-        "duplicate GDTF geometry name"
-    );
-    for child in geometry.children() {
-        collect_geometries(child, &path, names)?;
-    }
-    Ok(())
-}
-
-// gdtf 0.3 requires Highlight even though GDTF makes it optional. Keep this adapter
-// limited to the standard default; the library still owns description parsing.
-fn materialize_parser_defaults(xml: &str) -> Result<String> {
-    let mut reader = Reader::from_str(xml);
-    let mut writer = Writer::new(Vec::with_capacity(xml.len()));
-    let mut depth = 0;
-    loop {
-        let mut event = reader.read_event().context("read GDTF XML")?;
-        match &event {
-            Event::Start(_) => {
-                depth += 1;
-                ensure!(depth <= MAX_XML_DEPTH, "GDTF XML nesting exceeds limit");
-            }
-            Event::End(_) => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-        match &mut event {
-            Event::Start(element) | Event::Empty(element)
-                if element.name().as_ref() == b"DMXChannel" =>
-            {
-                if element.try_get_attribute("Highlight")?.is_none() {
-                    element.push_attribute(("Highlight", "None"));
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        writer.write_event(event)?;
-    }
-    Ok(String::from_utf8(writer.into_inner())?)
-}
-
-// gdtf 0.3's widening conversion skips the last mirrored byte and permits a
-// value one past its declared width. Validate and expand its parsed value here.
-fn dmx_value(value: DmxValue, width: usize) -> Result<u32> {
-    ensure!(
-        (1..=MAX_CHANNEL_BYTES).contains(&width),
-        "GDTF target resolution must be 1..4 bytes"
-    );
-    let source_width = usize::from(value.bytes().get());
-    ensure!(
-        (1..=MAX_CHANNEL_BYTES).contains(&source_width),
-        "GDTF DMX value resolution must be 1..4 bytes"
-    );
-    let maximum = u64::from(u32::MAX) >> ((MAX_CHANNEL_BYTES - source_width) * DMX_BYTE_BITS);
-    ensure!(
-        value.value() <= maximum,
-        "GDTF DMX value exceeds its declared resolution"
-    );
-    let mut output = 0;
-    for index in 0..width {
-        let byte = if value.shifting() && index >= source_width {
-            0
-        } else {
-            let shift = (source_width - 1 - index % source_width) * DMX_BYTE_BITS;
-            ((value.value() >> shift) & u64::from(DMX_BYTE_MASK)) as u32
-        };
-        output = (output << DMX_BYTE_BITS) | byte;
-    }
-    Ok(output)
-}
-
 fn physical_to_dmx(value: f64, from: f64, to: f64, first: u32, last: u32) -> Result<u32> {
     ensure!(
         (from.min(to)..=from.max(to)).contains(&value),
@@ -1182,16 +976,16 @@ fn physical_to_dmx(value: f64, from: f64, to: f64, first: u32, last: u32) -> Res
     Ok((f64::from(first) + f64::from(last - first) * amount).round() as u32)
 }
 
-fn cie_to_rgb(colour: ColorCie) -> Result<Rgb> {
+fn cie_to_rgb(colour: &wire::CieColor) -> Result<Rgb> {
     ensure!(
-        [colour.x, colour.y, colour.z]
+        [colour.x, colour.y, colour.luminance]
             .iter()
             .all(|value| value.is_finite())
             && colour.y > 0.0
-            && colour.z >= 0.0,
+            && colour.luminance >= 0.0,
         "invalid GDTF CIE wheel colour"
     );
-    let luminance = colour.z / CIE_LUMINANCE_SCALE;
+    let luminance = colour.luminance / CIE_LUMINANCE_SCALE;
     let xyz = [
         colour.x * luminance / colour.y,
         luminance,

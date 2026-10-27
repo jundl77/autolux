@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from autolux.lighting.gdtf_compile import compile_mode
 from cli import starfire
 from cli.starfire_assets import load_login
 from cli.starfire_runtime import StarfireRuntime
@@ -47,7 +48,7 @@ def test_imported_fixture_renders_from_login_without_rebuilding(
         receiver.settimeout(TEST_TIMEOUT_SECONDS)
         destination = f'127.0.0.1:{receiver.getsockname()[1]}'
         login = load_login(rig, autoloops, destination, run_id=1)
-        assert login.rig.profiles[0].gdtf_xml.encode('utf-8') == xml
+        assert login.rig.profiles[0].mode == compile_mode(xml.decode('utf-8'), mode)
         with StarfireRuntime(
             BINARY, rig, autoloops, destination, tmp_path / 'run', run_id=1
         ) as runtime:

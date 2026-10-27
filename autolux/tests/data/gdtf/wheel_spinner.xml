@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GDTF DataVersion="1.2"><FixtureType Name="wheel_spinner" ShortName="Spinner" LongName="Spinner" Manufacturer="Autolux" Description="Colour wheel, shutter and rotation" FixtureTypeID="0b8f3c1e-5d2a-4c7e-9a61-2f4d8e7b1c30">
+  <AttributeDefinitions><FeatureGroups><FeatureGroup Name="Color" Pretty="Color"><Feature Name="Color"/></FeatureGroup><FeatureGroup Name="Beam" Pretty="Beam"><Feature Name="Beam"/></FeatureGroup></FeatureGroups><Attributes>
+    <Attribute Name="Color1" Pretty="C1" Feature="Color.Color" PhysicalUnit="None"/>
+    <Attribute Name="Shutter1" Pretty="Sh1" Feature="Beam.Beam" PhysicalUnit="None"/>
+    <Attribute Name="Effects1PosRotate" Pretty="Rotate" Feature="Beam.Beam" PhysicalUnit="AngularSpeed"/>
+  </Attributes></AttributeDefinitions>
+  <Wheels><Wheel Name="Colours">
+    <Slot Name="Black" Color="0.3127,0.329,0"/>
+    <Slot Name="Red" Color="0.64,0.33,21.26"/>
+    <Slot Name="Green" Color="0.3,0.6,71.52"/>
+    <Slot Name="Blue" Color="0.15,0.06,7.22"/>
+  </Wheel></Wheels>
+  <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
+  <DMXModes><DMXMode Name="3ch" Geometry="Base"><DMXChannels>
+    <DMXChannel DMXBreak="1" Offset="1" Geometry="Base" InitialFunction="Base_Color1.Color1.Color1" Highlight="None"><LogicalChannel Attribute="Color1" Snap="Yes">
+      <ChannelFunction Name="Color1" Attribute="Color1" DMXFrom="0/1" Default="0/1" PhysicalFrom="1" PhysicalTo="4" Wheel="Colours">
+        <ChannelSet Name="Black" DMXFrom="0/1" PhysicalFrom="1" PhysicalTo="1" WheelSlotIndex="1"/>
+        <ChannelSet Name="Red" DMXFrom="64/1" PhysicalFrom="2" PhysicalTo="2" WheelSlotIndex="2"/>
+        <ChannelSet Name="Green" DMXFrom="128/1" PhysicalFrom="3" PhysicalTo="3" WheelSlotIndex="3"/>
+        <ChannelSet Name="Blue" DMXFrom="192/1" PhysicalFrom="4" PhysicalTo="4" WheelSlotIndex="4"/>
+      </ChannelFunction></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="2" Geometry="Base" InitialFunction="Base_Shutter1.Shutter1.Shutter1" Highlight="None"><LogicalChannel Attribute="Shutter1" Snap="Yes">
+      <ChannelFunction Name="Shutter1" Attribute="Shutter1" DMXFrom="0/1" Default="255/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="3" Geometry="Base" InitialFunction="Base_Effects1PosRotate.Effects1PosRotate.Effects1PosRotate" Highlight="None"><LogicalChannel Attribute="Effects1PosRotate" Snap="No">
+      <ChannelFunction Name="Effects1PosRotate" Attribute="Effects1PosRotate" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="180"/></LogicalChannel></DMXChannel>
+  </DMXChannels></DMXMode></DMXModes>
+</FixtureType></GDTF>

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from autolux.lighting import mvr
+from autolux.lighting.gdtf_compile import compile_mode
 from cli import starfire_assets as assets
 from cli import starfire_protocol as protocol
 from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG, ROOT
@@ -56,7 +57,7 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.rig.groups[0].group_id == 'movers'
     assert login.rig.groups[0].fixture_ids == ['front']
     [profile] = login.rig.profiles
-    assert profile.gdtf_xml == GDTF_XML
+    assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
     script = login.autoloops[0]
     assert script.autoloop_id == 'atmospheric/blue'
@@ -77,7 +78,7 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
     ]
     for profile in login.rig.profiles:
         spec, mode = profile.profile_id.split('#')
-        assert profile.gdtf_xml == mvr.gdtf_description(scene, spec)
+        assert profile.mode == compile_mode(mvr.gdtf_description(scene, spec), mode)
         assert profile.dmx_mode == mode
     assert {script.autoloop_id for script in login.autoloops} == {
         path.relative_to(DEFAULT_AUTOLOOPS).with_suffix('').as_posix()
