@@ -154,7 +154,12 @@ class LightEngine(IMusicAnalyserHandler):
         # Set by the show: applies an automatic level through the operator's path.
         self.on_auto_intensity: Callable[[float, str], None] | None = None
         self._static_mode = False
-        self.static_looks = StaticLooks(lighting_client, static_rig, effect_controller.specials)
+        self.static_looks = StaticLooks(
+            lighting_client,
+            static_rig,
+            effect_controller.specials,
+            effect_controller.special_capabilities,
+        )
         self._log_chain_latency()
 
     def set_analyser(self, analyser: MusicAnalyser):

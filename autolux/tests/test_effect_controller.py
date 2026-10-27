@@ -914,7 +914,9 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
 
     # The operator's Static FX row does not ask the policy, so it still plays.
     drift = Special('drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='primary', speed=0.5)
-    looks = StaticLooks(lighting, StaticRig(groups=('fx',)), [drift])
+    looks = StaticLooks(
+        lighting, StaticRig(groups=('fx',)), [drift], controller.special_capabilities
+    )
     looks.special('drift', 'fx')
     assert accents(lighting, start)[-1]['value']['id'] == STATIC_SPECIAL_ID
     looks.clear_special()
