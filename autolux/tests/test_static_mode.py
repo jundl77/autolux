@@ -255,11 +255,8 @@ async def test_show_control_applies_static_commands_as_an_overlay_and_clears_it(
         'blacklight': True,
         'blackout': True,
         'special_fx': None,
-        # This rig reports no group capabilities, so only the whole rig takes a row.
-        'fx_rows': {
-            'all': ['cold_drift', 'cold_spin', 'drift', 'spin'],
-            **{group: [] for group in ROOM.groups},
-        },
+        # This rig reports no group capabilities, so no target takes a row.
+        'fx_rows': {target: [] for target in ROOM.targets},
         'looks': {'wash': {'colour': '#ff8000', 'dimmer': 1.0, 'uv': False}},
     }
 
@@ -348,10 +345,10 @@ def special_looks():
 
 def test_the_fx_picker_offers_only_the_rows_that_fit_each_target():
     looks, _ = special_looks()
-    # fx renders colour and speed but no pulse, so the spins do not fit it; no row is a
-    # strobe, and the whole rig takes every row.
+    # fx renders colour and speed but no pulse, so the spins fit no group, not even the
+    # whole rig; no row is a strobe.
     assert looks.state()['fx_rows'] == {
-        'all': ['cold_drift', 'cold_spin', 'drift', 'spin'],
+        'all': ['cold_drift', 'drift'],
         'fx': ['cold_drift', 'drift'],
         'movers': [],
         'strip': [],
@@ -431,11 +428,12 @@ async def test_a_picked_row_survives_section_changes_and_fx_auto_off(tmp_path):
     decoder = FakeDecoder()
     control = ShowControl(tmp_path / 'show.json')
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
+    lighting.groups = lambda: [FX_GROUP]
     await beat_at_phase(light, decoder, 0, decision='breakdown')
-    control.commands.put_nowait({'action': 'static_fx', 'row': 'spin', 'target': 'all'})
+    control.commands.put_nowait({'action': 'static_fx', 'row': 'drift', 'target': 'all'})
     await control.apply_pending(light)
     assert light.mode == 'static'
-    assert light.static_looks.state()['special_fx'] == {'name': 'spin', 'group': 'all'}
+    assert light.static_looks.state()['special_fx'] == {'name': 'drift', 'group': 'all'}
 
     lighting.events.clear()
     for decision in ('drop', 'breakdown', 'drop'):
@@ -445,7 +443,7 @@ async def test_a_picked_row_survives_section_changes_and_fx_auto_off(tmp_path):
     await control.apply_pending(light)
     await beat_at_phase(light, decoder, 0, decision='buildup')
     assert {'kind': 'clear_override', 'id': STATIC_SPECIAL_ID} not in overrides(lighting)
-    assert light.static_looks.state()['special_fx'] == {'name': 'spin', 'group': 'all'}
+    assert light.static_looks.state()['special_fx'] == {'name': 'drift', 'group': 'all'}
 
     control.commands.put_nowait({'action': 'static', 'kind': 'special_fx_clear'})
     await control.apply_pending(light)
