@@ -35,8 +35,8 @@ prototype assumptions can change after an offline review and hardware audition.
 | U27 | Successful commands need no reply except Login. | ErrorReply identifies rejections; independent heartbeats show liveness and Metrics reports command progress. |
 | U28 | Autoloop IDs identify playback independently of banks. | Banks group supplied scripts; PlayAutoloop uses a globally unique ID only. |
 | U29 | Name the complete fixture setup RigDefinition and define it in rig.proto. | Login.rig contains fixtures, groups and their reusable DMX profiles. The name describes configuration rather than a running rig. starfire.proto imports the definition; both files share one generated contract. |
-| U30 | Store shared rig files and fixture profiles in root rigs/. | Autolux loads these assets into Login; native replay and validation use the same files. |
-| U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in root autoloops/. |
+| U30 | Store shared rig files and fixture profiles in root rig/. | Autolux loads these assets into Login; native replay and validation use the same files. |
+| U31 | Use autoloop throughout the API; name supplied programs AutoloopDefinition. | Login.autoloops carries each autoloop's ID, bank and Lua source; authored looks live in show/autoloops/. |
 | U32 | Use GDTF as the basis for generic fixture definitions and retain rig.proto. | Prefer reusable open-source GDTF schemas and parsers where suitable. GDTF describes device types; RigDefinition describes their installed instances. Profiles carry standard GDTF XML and the selected DMX mode; existing open-source parsers compile physical controls at Login. |
 | U33 | Radius follows the same protocol patterns as Starfire. | Standalone generated messages, Login/LoginReply, error-only replies, Metrics and independent heartbeats. Framing lives beside consumers. |
 | U34 | Both Login messages carry protocol major/minor versions. | Major mismatch rejects before output acquisition; minor additions remain compatible and the reply returns the lower supported minor. |
@@ -46,7 +46,7 @@ prototype assumptions can change after an offline review and hardware audition.
 | U38 | Name Radius media messages AudioFrame and LightFrame. | Their message-type values are AUDIO_FRAME and LIGHT_FRAME. |
 
 
-| U39 | Store authored autoloops in root autoloops/. | Directory paths are plural; the autoloop API concept remains singular. |
+| U39 | Store authored autoloops in show/autoloops/. | Directory paths are plural; the autoloop API concept remains singular. |
 | U40 | Use GDTF and MVR exclusively for fixture and rig assets. | Replace custom JSON fixture/patch storage; preserve standard archives and their resources. Implementation is pending. |
 | U41 | Keep the physical rig independent of scripts. | Fixture selection belongs to show programming. MVR scene organization must not require Lua-specific role names. The selection API is under discussion. |
 | U42 | Configure, save and load named fixture selections in the existing dashboard. | Store ordered, overlapping selections separately from the physical MVR scene. |
@@ -339,6 +339,9 @@ Starfire is the lighting backend. Its live contract is
   from the fixture Matrix, superseding the `pan_offset_degrees` fields. The
   `--profiles` catalogue is only the fixture library for import and Config; it no
   longer flows through replay, production or Login (supersedes P81's last clause).
+  2026-10-26: the library is `rig/library/`, real GDTF 1.2 archives named by their
+  GDTFSpec, replacing `rig/profiles.json` (XML in JSON); import installs the archive as is
+  and `--library` replaces `--profiles`.
 
 ## Open questions and defaults
 
@@ -441,3 +444,32 @@ no drop accent is sent; above it the rate and burst caps scale by `i`, and the d
 accent cooldown divides by `i`. Pan/tilt slew at most `0.6 / (1 - i)^2` of the
 normalised range per second, unlimited at 1.0. The selection policy caps energy at
 tier 1 below 0.35 and tier 2 below 0.7, then applies the nearest-tier fallback.
+
+2026-10-26 specials: `SetActiveEffect.special_fx` (a `SpecialFX`) renders a
+fixture-agnostic accent on its target group at the message priority, keyed only on GDTF
+attribute families.
+Colour slot: active palette colour, then ColorAdd/ColorSub mixing or the nearest
+coloured Color(n) wheel slot. Energy: semantic intensity (Dimmer, mixing gain, dark
+wheel slot). Speed: `*Rotate`/`*WheelSpin` over their physical range (from zero when
+the range is bidirectional), else a pan sweep centred on the beam. Pulse, on the bar
+grid: advance a Gobo(n) wheel, else a Color(n) wheel when the fixture cannot match
+colour, else gate a continuous Shutter(n) between its channel default (open) and
+PhysicalFrom (closed), else gate to a zero-luminance wheel slot. A plain dimmer blink is
+not a pulse. Shutter(n)Strobe is not used: its Hz free-runs off the beat grid and
+bypasses the software strobe caps. Pulses never exceed the strobe rate cap times the
+intensity strobe scale (the period lengthens by whole multiples); gating pulses also
+stop after the strobe burst cap, slot advances continue. Pattern selects a Gobo(n),
+else Prism(n), slot. Attack/release ease on elapsed musical beats; release runs when
+the effect is cleared, replaced or expires. Speed scales by intensity continuously
+(Starfire only; energy is never scaled by intensity) and the pan sweep accumulates its
+phase per frame, so intensity changes bend it without jumping; only pulse stops below
+the strobe gate. Whether a special is intense stays Autolux policy. An unknown colour
+slot leaves colour to the look. A group absent from the rig renders nothing. When two
+attribute keys address one DMX channel, the later (higher-priority) layer wins and the
+earlier key is dropped for that channel; this is not an error. The rule holds between
+layers only: two such keys inside one look stay a conflicting-GDTF-values fault, because
+that is a script authoring error. LoginReply reports per
+group which axes at least one member can express, and login fails if that reply
+exceeds the real-time message cap.
+A dimmerless wheel resolves to its zero-luminance slot at zero intensity or black
+colour; without such a slot it closes its continuous Shutter(n) instead.

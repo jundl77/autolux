@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <GDTF DataVersion="1.2">
-  <FixtureType Name="Test Dimmer" ShortName="Dimmer" LongName="Test Dimmer" Manufacturer="Autolux" Description="Import test · exact source" FixtureTypeID="85176e68-73d4-4217-9bfd-7791b08b01ef" CanHaveChildren="No">
+  <FixtureType Name="Test Dimmer" ShortName="Dimmer" LongName="Test Dimmer" Manufacturer="Generic" Description="Import test · exact source" FixtureTypeID="85176e68-73d4-4217-9bfd-7791b08b01ef" CanHaveChildren="No">
     <AttributeDefinitions>
       <ActivationGroups/>
       <FeatureGroups><FeatureGroup Name="Dimmer" Pretty="Dimmer"><Feature Name="Dimmer"/></FeatureGroup></FeatureGroups>
@@ -27,5 +27,8 @@
         </DMXChannels>
       </DMXMode>
     </DMXModes>
+    <Revisions>
+      <Revision Text="1.0" Date="2026-10-26T00:00:00"/>
+    </Revisions>
   </FixtureType>
 </GDTF>

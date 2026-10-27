@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import datetime
 import json
@@ -13,11 +14,22 @@ from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
     DEFAULT_AUTOLOOPS,
+    DEFAULT_INTENSITY,
     AutoloopMetaTable,
     AutoloopTable,
     ShowSettings,
+    intensity_level,
 )
+from autolux.lib.engine.intensity_follow import LEVEL_INTENSITIES
 from autolux.lib.engine.static_mode import StaticRig
+from autolux.lib.media_session import (
+    MEDIA_SESSION_SOURCE,
+    MediaEvent,
+    MediaSessionListener,
+    Playback,
+    TrackChanged,
+    TrackSource,
+)
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT, PALETTE_POLICY
 
 LOGGER = logging.getLogger(__name__)
@@ -29,6 +41,8 @@ _UI_ONLY_WINDOW_SEC = 60.0
 SHOW_CONFIG_PATH = Path(__file__).resolve().parents[2] / '.live' / 'show.json'
 CONTROL_QUEUE_SIZE = 16
 SETTINGS_SAVE_SETTLE_SECONDS = 1.0
+# One Starfire frame at 40 Hz: draining operator commands faster cannot reach the rig sooner.
+STARFIRE_FRAME_PERIOD_SEC = 1.0 / 40.0
 
 
 def load_show_settings(path: Path) -> ShowSettings:
@@ -76,7 +90,19 @@ def apply_static(light_engine, command: dict) -> None:
     elif kind == 'blackout':
         looks.set_blackout(command['enabled'])
     elif kind == 'strobe':
-        looks.strobe()
+        looks.strobe(command.get('enabled'))
+    elif kind == 'special_fx':
+        looks.special(
+            command['group'],
+            command['colour_slot'],
+            command['energy'],
+            command['speed'],
+            command['pulse_beats'],
+        )
+    elif kind == 'special_fx_clear':
+        looks.clear_special()
+    elif kind == 'clear':
+        looks.clear()
 
 
 class ShowControl:
@@ -87,6 +113,29 @@ class ShowControl:
         self._event_buffer = event_buffer
         self._clock = clock
         self._unsaved_change_at: float | None = None
+        # The operator's level, restored when follow-the-music is switched off.
+        self._manual_intensity = (
+            DEFAULT_INTENSITY if self.settings.intensity_auto else self.settings.intensity
+        )
+
+    def follow_music(self, light_engine) -> None:
+        light_engine.on_auto_intensity = lambda level, why: self.auto_intensity(
+            light_engine, level, why
+        )
+
+    def auto_intensity(self, light_engine, level: float, why: str) -> None:
+        if not self.settings.intensity_auto or level == self.settings.intensity:
+            return
+        LOGGER.info('[main] intensity auto → %s (%s)', intensity_level(level), why)
+        self._set_intensity(light_engine, dataclasses.replace(self.settings, intensity=level))
+        self.publish(light_engine)
+
+    def _set_intensity(self, light_engine, settings: ShowSettings) -> None:
+        if settings == self.settings:
+            return
+        self.settings = settings
+        light_engine.intensity_changed()
+        self._unsaved_change_at = self._clock.monotonic()
 
     async def apply_pending(self, light_engine) -> None:
         applied = False
@@ -96,46 +145,11 @@ class ShowControl:
             except queue.Empty:
                 break
             applied = True
-            action = command['action']
-            if action == 'pause':
-                light_engine.pause()
-            elif action == 'play':
-                await light_engine.resume()
-            elif action == 'next_autoloop':
-                try:
-                    light_engine.next_autoloop()
-                except ValueError as error:
-                    LOGGER.warning('[main] next autoloop refused: %s', error)
-            elif action == 'master':
-                light_engine.set_master_level(command['level'])
-            elif action == 'mode':
-                if command['mode'] == 'static':
-                    light_engine.enter_static()
-                else:
-                    await light_engine.leave_static()
-            elif action == 'static':
-                try:
-                    apply_static(light_engine, command)
-                except ValueError as error:
-                    LOGGER.warning('[main] static command refused: %s', error)
-            elif action == 'palette':
-                light_engine.effect_controller.pin_palette(
-                    None if command['name'] == PALETTE_POLICY else command['name']
-                )
-            elif action in ('settings', 'intensity'):
-                settings = (
-                    command['settings']
-                    if action == 'settings'
-                    else dataclasses.replace(self.settings, intensity=command['level'])
-                )
-                if settings == self.settings:
-                    continue
-                self.settings = settings
-                if action == 'intensity':
-                    light_engine.send_intensity()
-                else:
-                    light_engine.settings_changed()
-                self._unsaved_change_at = self._clock.monotonic()
+            try:
+                await self._apply(light_engine, command)
+            finally:
+                # Releases the bridge request waiting for this hand-off.
+                self.commands.task_done()
         if applied:
             self.publish(light_engine)
         if (
@@ -143,6 +157,67 @@ class ShowControl:
             and self._clock.monotonic() - self._unsaved_change_at >= SETTINGS_SAVE_SETTLE_SECONDS
         ):
             self.save_settings()
+
+    async def _apply(self, light_engine, command: dict) -> None:
+        action = command['action']
+        if action == 'pause':
+            light_engine.pause()
+        elif action == 'play':
+            await light_engine.resume()
+        elif action == 'next_autoloop':
+            try:
+                light_engine.next_autoloop()
+            except ValueError as error:
+                LOGGER.warning('[main] next autoloop refused: %s', error)
+        elif action == 'master':
+            light_engine.set_master_level(command['level'])
+        elif action == 'static':
+            try:
+                apply_static(light_engine, command)
+            except ValueError as error:
+                LOGGER.warning('[main] static command refused: %s', error)
+            await light_engine.sync_static()
+        elif action == 'palette':
+            light_engine.effect_controller.pin_palette(
+                None if command['name'] == PALETTE_POLICY else command['name']
+            )
+        elif action == 'intensity':
+            # Picking a level by hand takes the show off follow-the-music.
+            self._manual_intensity = command['level']
+            self._set_intensity(
+                light_engine,
+                dataclasses.replace(
+                    self.settings, intensity=command['level'], intensity_auto=False
+                ),
+            )
+        elif action == 'intensity_auto':
+            self._follow_music(light_engine, command['enabled'])
+        elif action == 'settings':
+            settings = command['settings']
+            if settings == self.settings:
+                return
+            self.settings = settings
+            light_engine.settings_changed()
+            self._unsaved_change_at = self._clock.monotonic()
+
+    def _follow_music(self, light_engine, enabled: bool) -> None:
+        if enabled == self.settings.intensity_auto:
+            return
+        if not enabled:
+            self._set_intensity(
+                light_engine,
+                dataclasses.replace(
+                    self.settings, intensity=self._manual_intensity, intensity_auto=False
+                ),
+            )
+            return
+        self._manual_intensity = self.settings.intensity
+        level = light_engine.follow_music.track_level
+        settings = dataclasses.replace(self.settings, intensity_auto=True)
+        if level is not None:
+            LOGGER.info('[main] intensity auto → %s (the measured track)', level)
+            settings = dataclasses.replace(settings, intensity=LEVEL_INTENSITIES[level])
+        self._set_intensity(light_engine, settings)
 
     def save_settings(self) -> None:
         if self._unsaved_change_at is None:
@@ -193,6 +268,7 @@ class AutoluxController:
         from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
         from autolux.lib.engine.effect_controller import EffectController
         from autolux.lib.engine.light_engine import LightEngine
+        from autolux.lighting.special_catalogue import discover_specials
 
         self.lighting_client = lighting_client
         self.enable_ui: bool = enable_ui
@@ -237,6 +313,8 @@ class AutoluxController:
                 '(beats and silence still run)'
             )
 
+        self.track_source = TrackSource()
+        self.media_session = MediaSessionListener(self._on_media_event)
         self.control = ShowControl(show_config_path, self.event_buffer)
         self.effect_controller: EffectController = EffectController(
             self.lighting_client,
@@ -245,6 +323,7 @@ class AutoluxController:
             autoloops=autoloops,
             autoloop_meta=autoloop_meta,
             seed=selection_seed,
+            specials=discover_specials(),
         )
         self.light_engine: LightEngine = LightEngine(
             self.lighting_client,
@@ -258,7 +337,9 @@ class AutoluxController:
             settings=lambda: self.control.settings,
             silence_monitor=self._monitor.silence,
             static_rig=static_rig,
+            media_session_live=lambda: self.track_source.media_session_live,
         )
+        self.control.follow_music(self.light_engine)
         self.control.publish(self.light_engine)
 
         self.music_analyser: MusicAnalyser = MusicAnalyser(
@@ -268,11 +349,37 @@ class AutoluxController:
             note_clicks=debug_mode,
             watchdog=self.drift_watchdog,
             settings=lambda: self.control.settings,
+            zeros_mark_tracks=lambda: not self.track_source.media_session_live,
         )
         self.light_engine.set_analyser(self.music_analyser)
 
     def _play_monitored(self, audio) -> None:
         self.audio_client.play(audio)
+
+    def _on_media_event(self, event: MediaEvent) -> None:
+        self.track_source.note(event)
+        self._publish_track()
+        if isinstance(event, TrackChanged):
+            self.light_engine.on_media_track(event)
+        elif isinstance(event, Playback):
+            if event.status == 'playing':
+                self.music_analyser.leave_standby()
+            else:
+                self.music_analyser.enter_standby(f'media session {event.status}')
+
+    def _publish_track(self) -> None:
+        if self.event_buffer is None:
+            return
+        source = self.track_source.name
+        track = self.track_source.track if source == MEDIA_SESSION_SOURCE else None
+        self.event_buffer.set_track(
+            {
+                'title': None if track is None else track.title,
+                'artist': None if track is None else track.artist,
+                'album': None if track is None else track.album,
+                'source': source,
+            }
+        )
 
     def list_devices(self):
         self.audio_client.list_devices()
@@ -304,14 +411,30 @@ class AutoluxController:
         LOGGER.info("[main] Autolux is ready, starting")
         self.control.start(self.light_engine)
 
+        self._monitor.arm()
+        self.media_session.start(asyncio.get_running_loop())
+        drain = asyncio.create_task(self._drain_operator_commands())
+        try:
+            await self._play(drain)
+        finally:
+            drain.cancel()
+
+    async def _drain_operator_commands(self) -> None:
+        while True:
+            await asyncio.sleep(STARFIRE_FRAME_PERIOD_SEC)
+            await self.control.apply_pending(self.light_engine)
+
+    async def _play(self, drain: asyncio.Task) -> None:
         last_100ms_callback_execution: datetime.datetime = datetime.datetime.now()
         last_1sec_callback_execution: datetime.datetime = datetime.datetime.now()
         last_10sec_callback_execution: datetime.datetime = datetime.datetime.now()
-        self._monitor.arm()
-
         while self.is_running:
             now = datetime.datetime.now()
             audio_signal = self.audio_client.read()
+            # The blocking read never yields; this lets the drain task run once its period is up.
+            await asyncio.sleep(0)
+            if drain.done():
+                drain.result()  # Surfaces a failed operator command instead of silently ignoring clicks.
             await self.light_engine.on_audio(audio_signal)
             new_audio_signal = await self.music_analyser.analyse(audio_signal)
             await self.command_queue.drain()
@@ -335,6 +458,7 @@ class AutoluxController:
         self.is_running = False
         for what, close in (
             ('show settings', self.control.save_settings),
+            ('media session', self.media_session.stop),
             ('visualizer', None if self._ui is None else self._ui.stop),
             ('audio', self.audio_client.close),
             ('section chain', None if self.section is None else self.section.stop),
@@ -355,10 +479,10 @@ class AutoluxController:
     async def _do_100ms_callback(self):
         if self.health_check is not None:
             self.health_check()
-        await self.control.apply_pending(self.light_engine)
         await self.light_engine.on_100ms_callback()
 
     async def _do_1s_callback(self):
+        self._publish_track()
         await self.light_engine.on_1sec_callback()
 
     async def _do_10s_callback(self):

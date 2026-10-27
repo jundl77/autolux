@@ -83,16 +83,15 @@ function sf.phrase_phase(ctx_or_beats, bars)
     return (ctx_or_beats / (bars * BEATS_PER_BAR)) % 1
 end
 
-local PULSE_GAIN_AT_ZERO_INTENSITY = 0.35
 local render_intensity = 1
+-- The depth curve lives in Rust (starfire::intensity) so pulse and movement share one table.
+local render_pulse_depth = 1
 
-local function use_render_intensity(intensity)
+local function use_render_intensity(intensity, pulse_depth)
     assert(finite(intensity) and intensity >= 0 and intensity <= 1, "intensity must be within 0..1")
+    assert(finite(pulse_depth) and pulse_depth >= 0 and pulse_depth <= 1, "pulse depth must be within 0..1")
     render_intensity = intensity
-end
-
-function sf.intensity_pulse_gain(intensity)
-    return sf.lerp(PULSE_GAIN_AT_ZERO_INTENSITY, 1, intensity)
+    render_pulse_depth = pulse_depth
 end
 
 function sf.on_beat(ctx_or_beats, width, period)
@@ -102,7 +101,7 @@ function sf.on_beat(ctx_or_beats, width, period)
     if type(ctx_or_beats) == "table" then ctx_or_beats = ctx_or_beats.beat_position end
     local decay_width = width * (2 - render_intensity)
     local remaining = math.max(0, 1 - (ctx_or_beats % period) / decay_width)
-    return remaining * remaining * sf.intensity_pulse_gain(render_intensity)
+    return remaining * remaining * render_pulse_depth
 end
 
 local LEFT, RIGHT = -1, 1

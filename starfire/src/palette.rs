@@ -23,14 +23,24 @@ pub struct PaletteSlots {
 }
 
 impl PaletteSlots {
+    pub const NAMES: [&'static str; 5] = ["primary", "secondary", "accent", "cold", "black"];
+
     pub fn named_slots(&self) -> [(&'static str, Rgb); 5] {
-        [
-            ("primary", self.primary),
-            ("secondary", self.secondary),
-            ("accent", self.accent),
-            ("cold", self.cold),
-            ("black", self.black),
-        ]
+        let colours = [
+            self.primary,
+            self.secondary,
+            self.accent,
+            self.cold,
+            self.black,
+        ];
+        std::array::from_fn(|index| (Self::NAMES[index], colours[index]))
+    }
+
+    pub fn slot(&self, name: &str) -> Option<Rgb> {
+        self.named_slots()
+            .into_iter()
+            .find(|(slot, _)| *slot == name)
+            .map(|(_, colour)| colour)
     }
 
     pub fn blend(&self, to: &Self, amount: f64) -> Self {

@@ -1266,3 +1266,40 @@ def test_the_benchmark_runs_serial_unless_a_human_asks_otherwise():
 
 def test_parallelism_is_still_reachable_for_a_machine_that_can_afford_it():
     assert build_parser().parse_args(["--workers", "4"]).workers == 4
+
+
+def test_a_cold_sidecar_is_named_with_its_kind_and_the_caches_own_reason(tmp_path, monkeypatch):
+    from autolux.simulate import runner
+
+    absent = tmp_path / 'song.mp3.librosa.mertcells.npz'
+    monkeypatch.setattr(runner, '_cell_cache_plan', lambda *_: (absent, {}))
+    monkeypatch.setattr(runner, '_tracker_cache_plan', lambda *_: None)
+    monkeypatch.setattr(runner, '_expected_samples', lambda _: None)
+    assert runner.cache_misses(object()) == [('mertcells', 'miss_new')]
+
+
+def test_check_cache_fails_on_a_miss_and_simulates_nothing(tmp_path, monkeypatch, capsys):
+    import run_eval_set
+    from autolux.lib import section_chain
+    from autolux.simulate import runner
+
+    monkeypatch.setattr(section_chain, 'artifacts_present', lambda *a, **k: True)
+    monkeypatch.setattr(
+        runner, 'cache_misses', lambda *a, **k: [('bartracker', 'miss_audio_changed')]
+    )
+
+    def never(*args, **kwargs):
+        raise AssertionError('--check-cache simulated a track')
+
+    monkeypatch.setattr(run_eval_set, 'run', never)
+    track_id = run_eval_set.shortest_track_ids(load_eval_set(EVAL_SET_FILE), 1)[0]
+    code = run_eval_set.main(['--data-dir', str(tmp_path), '--check-cache', '--only', track_id])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert f'{track_id}: bartracker sidecar miss_audio_changed' in err
+    assert f'run_eval_set.py --only {track_id}' in err
+
+    monkeypatch.setattr(runner, 'cache_misses', lambda *a, **k: [])
+    assert (
+        run_eval_set.main(['--data-dir', str(tmp_path), '--check-cache', '--only', track_id]) == 0
+    )

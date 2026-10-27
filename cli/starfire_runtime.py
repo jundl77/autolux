@@ -23,7 +23,7 @@ from cli.starfire import (
     DEFAULT_AUTOLOOPS,
     DEFAULT_BINARY,
     DEFAULT_FIXTURE_STORE,
-    PROFILE_CATALOGUE,
+    FIXTURE_LIBRARY,
     ROOT,
     saved_rig,
 )
@@ -35,6 +35,7 @@ from cli.starfire_protocol import (
     build_command,
     check_payload_size,
     encode_command,
+    login_groups,
     read_event,
 )
 from proto.starfire import starfire_pb2 as wire
@@ -54,21 +55,21 @@ def add_arguments(parser, *, include_artnet=False):
     parser.add_argument('--rig', type=Path, help='MVR rig; defaults to the saved room rig')
     parser.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
     parser.add_argument(
-        '--profiles', type=Path, default=PROFILE_CATALOGUE, help='Fixture library for Config'
+        '--library', type=Path, default=FIXTURE_LIBRARY, help='GDTF folder Config offers'
     )
     if include_artnet:
         parser.add_argument('--artnet', default=DEFAULT_ARTNET_DESTINATION)
 
 
-def selected_rig(path=None):
-    return Path(path) if path else saved_rig()
+def selected_rig(path=None, library=None):
+    return Path(path) if path else saved_rig(Path(library or FIXTURE_LIBRARY))
 
 
 def fixture_setup(args):
     return {
         'binary': Path(args.starfire_binary).resolve(),
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
-        'profiles': Path(getattr(args, 'profiles', PROFILE_CATALOGUE)).resolve(),
+        'library': Path(getattr(args, 'library', FIXTURE_LIBRARY)).resolve(),
     }
 
 
@@ -163,6 +164,7 @@ class StarfireRuntime:
         self._fault = None
         self._health = None
         self._health_at = None
+        self.groups = []
         self._heartbeat_at = None
         self._started_at = None
         self._threads = []
@@ -295,6 +297,7 @@ class StarfireRuntime:
                         or event.run_id != self.run_id
                     ):
                         raise ValueError('Unexpected Starfire login reply')
+                    self.groups = login_groups(event)
                     self._record_progress(event.command_id)
                     self._heartbeat_at = time.monotonic()
                     self._ready.set()

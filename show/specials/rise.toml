@@ -1,0 +1,14 @@
+name = "rise"
+intents = ["buildup"]
+group = "fx"
+
+[preset]
+colour = "secondary"
+
+[effect]
+rate = 0.5
+size = 0.6
+
+[playback]
+attack_beats = 128
+release_beats = 4

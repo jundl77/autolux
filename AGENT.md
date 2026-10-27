@@ -4,6 +4,7 @@
   `radius/` owns transport and hardware output; `starfire/` owns Rust/Lua lighting
   rendering; `proto/` owns shared protocol contracts. Keep tests with each component.
 - Keep READMEs and AGENT files brief, describing current intent and contracts.
+- Rig and GDTF file naming follows `rig/AGENTS.md`.
 - Fix discovered bugs and add meaningful regression tests.
 - Focus tests on transport, synchronization, lifecycle, model output and data
   integrity. Do not add UI, configuration snapshot or static source-shape tests.

@@ -18,8 +18,8 @@ use starfire::palette::PaletteTable;
 use starfire::replay::{Replay, dmx_digest, render_replay, write_capture};
 use starfire::script::{AutoloopCatalog, missing_groups_warning};
 
-const DEFAULT_RIG: &str = "rigs/room.rig.pb";
-const DEFAULT_AUTOLOOPS: &str = "autoloops";
+const DEFAULT_RIG: &str = "rig/room.rig.pb";
+const DEFAULT_AUTOLOOPS: &str = "show/autoloops";
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MIN_STROBE_SAMPLES_PER_CYCLE: f64 = 4.0;
 
@@ -362,7 +362,7 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+        let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();

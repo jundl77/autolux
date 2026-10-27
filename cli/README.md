@@ -32,16 +32,18 @@ Starfire uses an owned subprocess with framed protobuf over its pipes. Autolux
 loads the MVR rig, its embedded GDTF modes and Lua sources into Login; LoginReply
 confirms readiness. Model preparation precedes audio capture. Independent heartbeats
 run every ten seconds with a thirty-second deadline. `--rig`, `--autoloops` and
-`--starfire-binary` select the MVR rig, Lua catalogue and executable; `--profiles`
-selects the fixture library offered in Config. Starfire passes complete DMX frames directly to
+`--starfire-binary` select the MVR rig, Lua catalogue and executable; `--library`
+selects the GDTF folder offered in Config. Starfire passes complete DMX frames directly to
 its Radius TX worker. One TCP connection carries audio, lights and telemetry;
 RX uses a 500 ms buffer and schedules lighting against audible audio.
 Standalone Starfire can also output Art-Net.
 
-`autolux starfire import-fixture fixture.gdtf --profile-id my_fixture --mode "Standard"`
-validates and stores a GDTF mode in the `rigs/profiles.json` library. Config lists
-imported profiles for patching and embeds the GDTF in the MVR when a fixture uses it.
-Imports replace the selected profile ID atomically; no native rebuild is needed.
+`autolux starfire import-fixture fixture.gdtf --mode "Standard"` validates the mode
+with the real renderer, then installs the archive unchanged as
+`rig/library/Manufacturer@Fixture Name@Revision.gdtf`, the name its own FixtureType and
+newest Revision give it. Config lists that folder for patching
+and embeds the archive in the MVR when a fixture first uses it. An import replaces the
+same fixture type atomically; no native rebuild is needed.
 Unsupported modes are rejected before saving. A `.live/starfire/rig.json` is refused;
 the rig is `.live/starfire/rig.mvr`.
 

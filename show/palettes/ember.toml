@@ -1,0 +1,19 @@
+number = 7
+
+[slots]
+primary = "#ff2605"
+secondary = "#ff8000"
+accent = "#996600"
+cold = "#ffb266"
+black = "#000000"
+
+[mood]
+weight = -0.6
+drive = -0.2
+
+[breakdown]
+primary = "#ff664c"
+accent = "#8c6633"
+
+[drop]
+accent = "#ffaa00"

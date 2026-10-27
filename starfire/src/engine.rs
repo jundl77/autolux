@@ -7,13 +7,15 @@ use serde::Serialize;
 
 use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::fixtures::FixtureRig;
+use crate::intensity;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
-    OverrideLifetime, PropertyValues, RenderContext, Rgb, Transition,
+    OverrideLifetime, PropertyValues, RenderContext, Rgb, SpecialFx, Target, Transition,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
+use crate::special::{self, FixtureMap, Progress, SpecialFrame};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -21,8 +23,6 @@ const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
-pub const STROBE_GATE_INTENSITY: f64 = 0.3;
-pub const SLOWEST_GLIDE_RANGE_PER_SECOND: f64 = 0.6;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -91,12 +91,43 @@ struct ActiveOverride {
     order: u64,
     expires_seconds: Option<f64>,
     expires_beat: Option<f64>,
+    progress: Progress,
 }
 
 impl ActiveOverride {
     fn expired(&self, seconds: f64, beat: f64) -> bool {
         self.expires_seconds.is_some_and(|expiry| seconds >= expiry)
             || self.expires_beat.is_some_and(|expiry| beat >= expiry)
+    }
+
+    fn release(self, beat: f64) -> Option<ReleasingSpecial> {
+        let special = *self.value.special_fx?;
+        let from_level = special::attack_level(&special, beat - self.progress.started_beat);
+        (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
+            special,
+            fixture_ids: self.fixture_ids,
+            priority: self.value.priority,
+            order: self.order,
+            progress: self.progress,
+            released_beat: beat,
+            from_level,
+        })
+    }
+}
+
+struct ReleasingSpecial {
+    special: SpecialFx,
+    fixture_ids: Vec<String>,
+    priority: i32,
+    order: u64,
+    progress: Progress,
+    released_beat: f64,
+    from_level: f64,
+}
+
+impl ReleasingSpecial {
+    fn level(&self, beat: f64) -> f64 {
+        special::release_level(&self.special, self.from_level, beat - self.released_beat)
     }
 }
 
@@ -109,6 +140,8 @@ pub struct Engine {
     active: Option<ActiveAutoloop>,
     fade: Option<Crossfade>,
     overrides: BTreeMap<String, ActiveOverride>,
+    releasing: Vec<ReleasingSpecial>,
+    special_maps: BTreeMap<String, FixtureMap>,
     override_order: u64,
     master: MasterFade,
     normalized_rms_level: Option<f64>,
@@ -128,6 +161,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(rig: FixtureRig, catalog: AutoloopCatalog, palettes: PaletteTable) -> Result<Self> {
         let last_output_states = rig.empty_states();
+        let special_maps = special::fixture_maps(&rig);
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
         let palette =
@@ -141,6 +175,8 @@ impl Engine {
             active: None,
             fade: None,
             overrides: BTreeMap::new(),
+            releasing: Vec::new(),
+            special_maps,
             override_order: 0,
             master: MasterFade::steady(1.0),
             normalized_rms_level: None,
@@ -215,7 +251,9 @@ impl Engine {
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
             Command::ClearOverride { id } => {
                 validate_identifier(id)?;
-                self.overrides.remove(id);
+                if let Some(removed) = self.overrides.remove(id) {
+                    self.release(removed, time.elapsed_musical_beats);
+                }
             }
             Command::SetMaster {
                 intensity,
@@ -264,6 +302,7 @@ impl Engine {
                 self.active = None;
                 self.fade = None;
                 self.overrides.clear();
+                self.releasing.clear();
                 self.script_error = None;
                 extinguish(&mut self.last_output_states);
             }
@@ -358,7 +397,7 @@ impl Engine {
         };
 
         if self.script_error.is_none() {
-            self.compose_overrides(time_seconds, time.elapsed_musical_beats, &mut states);
+            self.compose_overrides(time_seconds, time, &mut states);
             let master = perceptual_to_linear_master(self.master.level_at(time_seconds));
             for state in states.values_mut() {
                 state.intensity = state.intensity.clamp(0.0, 1.0) * master;
@@ -428,7 +467,7 @@ impl Engine {
 
     fn limit_strobes(&mut self, seconds: f64, states: &mut FixtureStates) {
         let paused = self.clock.paused();
-        let strobe_scale = intensity_strobe_scale(self.intensity);
+        let strobe_scale = intensity::strobe_scale(self.intensity);
         let (max_rate_hz, max_burst_seconds) = if strobe_scale > 0.0 {
             (
                 self.strobe_max_rate_hz * strobe_scale,
@@ -460,11 +499,10 @@ impl Engine {
         let Some(previous_seconds) = self.last_render_seconds else {
             return;
         };
-        if self.intensity >= 1.0 {
+        let Some(range_per_second) = intensity::movement_range_per_second(self.intensity) else {
             return;
-        }
-        let max_step =
-            intensity_movement_range_per_second(self.intensity) * (seconds - previous_seconds);
+        };
+        let max_step = range_per_second * (seconds - previous_seconds);
         for (id, state) in states.iter_mut() {
             if let Some(previous) = self.last_output_states.get(id) {
                 state.pan = step_toward(previous.pan, state.pan, max_step);
@@ -596,6 +634,9 @@ impl Engine {
     ) -> Result<()> {
         validate_identifier(&value.id)?;
         validate_properties(&value.values)?;
+        if let Some(special) = &value.special_fx {
+            special::validate(special)?;
+        }
         if let Some(multiplier) = value.intensity_multiplier {
             ensure!(
                 multiplier.is_finite() && (0.0..=MAX_INTENSITY_MULTIPLIER).contains(&multiplier),
@@ -614,7 +655,14 @@ impl Engine {
             other_active_count < MAX_ACTIVE_OVERRIDES,
             "too many active lighting overrides"
         );
-        let fixture_ids = self.rig.resolve(&value.target)?;
+        let fixture_ids = match &value.target {
+            Target::Group(group)
+                if value.special_fx.is_some() && !self.rig.groups().contains_key(group) =>
+            {
+                Vec::new()
+            }
+            target => self.rig.resolve(target)?,
+        };
         for id in &fixture_ids {
             self.rig.validate_attributes(id, &value.values.attributes)?;
         }
@@ -632,9 +680,8 @@ impl Engine {
             .override_order
             .checked_add(1)
             .context("override ordering exhausted")?;
-        self.overrides
-            .retain(|_, existing| !existing.expired(seconds, time.elapsed_musical_beats));
-        self.overrides.insert(
+        self.retire_expired(seconds, time.elapsed_musical_beats);
+        let replaced = self.overrides.insert(
             value.id.clone(),
             ActiveOverride {
                 value: value.clone(),
@@ -642,26 +689,127 @@ impl Engine {
                 order,
                 expires_seconds,
                 expires_beat,
+                progress: Progress::new(time.elapsed_musical_beats, seconds),
             },
         );
+        if let Some(replaced) = replaced {
+            if let Some(current) = self.overrides.get_mut(&value.id) {
+                current.progress.continue_scan(&replaced.progress);
+            }
+            self.release(replaced, time.elapsed_musical_beats);
+        }
         self.override_order = order;
         Ok(())
     }
 
-    fn compose_overrides(&mut self, seconds: f64, beat: f64, states: &mut FixtureStates) {
-        self.overrides
-            .retain(|_, value| !value.expired(seconds, beat));
-        let mut ordered: Vec<_> = self.overrides.values().collect();
-        ordered.sort_by_key(|value| (value.value.priority, value.order));
-        for value in ordered {
-            for id in &value.fixture_ids {
-                if let Some(state) = states.get_mut(id) {
-                    apply_properties(state, &value.value.values);
-                    if let Some(multiplier) = value.value.intensity_multiplier {
+    fn release(&mut self, value: ActiveOverride, beat: f64) {
+        if let Some(releasing) = value.release(beat) {
+            if self.releasing.len() >= MAX_ACTIVE_OVERRIDES {
+                self.releasing.remove(0);
+            }
+            self.releasing.push(releasing);
+        }
+    }
+
+    fn retire_expired(&mut self, seconds: f64, beat: f64) {
+        let expired: Vec<_> = self
+            .overrides
+            .iter()
+            .filter(|(_, value)| value.expired(seconds, beat))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            if let Some(value) = self.overrides.remove(&id) {
+                self.release(value, beat);
+            }
+        }
+        self.releasing
+            .retain(|releasing| releasing.level(beat) > 0.0);
+    }
+
+    fn compose_overrides(&mut self, seconds: f64, time: ClockSample, states: &mut FixtureStates) {
+        let beat = time.elapsed_musical_beats;
+        self.retire_expired(seconds, beat);
+        let palette = self.palette.slots_at(beat);
+        let strobe_scale = intensity::strobe_scale(self.intensity);
+        let max_pulse_hz = self.strobe_max_rate_hz * strobe_scale;
+        let max_gate_seconds = self.strobe_max_burst_seconds * strobe_scale;
+        let beats_per_second = self.clock.beats_per_second();
+        for value in self.overrides.values_mut() {
+            if let Some(special) = &value.value.special_fx {
+                value.progress.advance(special, beat, self.intensity);
+            }
+        }
+        for releasing in &mut self.releasing {
+            releasing
+                .progress
+                .advance(&releasing.special, beat, self.intensity);
+        }
+        let layers = self
+            .overrides
+            .values()
+            .map(|value| {
+                let special = value.value.special_fx.as_deref().map(|special| {
+                    (
+                        special,
+                        special::attack_level(special, beat - value.progress.started_beat),
+                        value.progress,
+                    )
+                });
+                (
+                    (value.value.priority, value.order),
+                    &value.fixture_ids,
+                    Some(&value.value),
+                    special,
+                )
+            })
+            .chain(self.releasing.iter().map(|releasing| {
+                (
+                    (releasing.priority, releasing.order),
+                    &releasing.fixture_ids,
+                    None,
+                    Some((
+                        &releasing.special,
+                        releasing.level(beat),
+                        releasing.progress,
+                    )),
+                )
+            }));
+        let mut ordered: Vec<_> = layers.collect();
+        ordered.sort_by_key(|(rank, ..)| *rank);
+        for (_, fixture_ids, value, special) in ordered {
+            for id in fixture_ids {
+                let Some(state) = states.get_mut(id) else {
+                    continue;
+                };
+                if let Some(value) = value {
+                    overlay_properties(&self.rig, id, state, &value.values);
+                    if let Some(multiplier) = value.intensity_multiplier {
                         state.intensity *= multiplier;
                     }
-                    state.intensity = state.intensity.clamp(0.0, 1.0);
                 }
+                if let Some((special, level, progress)) = special
+                    && let (Some(map), Some(profile)) =
+                        (self.special_maps.get(id), self.rig.profile(id))
+                {
+                    special::apply(
+                        state,
+                        map,
+                        profile,
+                        special,
+                        &SpecialFrame {
+                            level,
+                            beat_position: time.beat_position,
+                            progress,
+                            palette: &palette,
+                            speed_scale: self.intensity,
+                            beats_per_second,
+                            max_pulse_hz,
+                            gate_allowed: seconds - progress.started_seconds < max_gate_seconds,
+                        },
+                    );
+                }
+                state.intensity = state.intensity.clamp(0.0, 1.0);
             }
         }
     }
@@ -684,6 +832,7 @@ impl Engine {
         self.script_error = Some(diagnostic);
         self.fade = None;
         self.overrides.clear();
+        self.releasing.clear();
     }
 }
 
@@ -845,8 +994,28 @@ fn validate_properties(values: &PropertyValues) -> Result<()> {
     Ok(())
 }
 
+/// Between layers the later one owns every channel it addresses.
+fn overlay_properties(
+    rig: &FixtureRig,
+    id: &str,
+    state: &mut FixtureState,
+    values: &PropertyValues,
+) {
+    match rig.profile(id) {
+        Some(profile) => profile.overlay_attributes(&mut state.attributes, &values.attributes),
+        None => state.attributes.extend(values.attributes.clone()),
+    }
+    apply_scalar_properties(state, values);
+}
+
+/// Within one look two keys on a channel must both survive so the encoder reports the
+/// authoring conflict instead of silently picking one.
 fn apply_properties(state: &mut FixtureState, values: &PropertyValues) {
     state.attributes.extend(values.attributes.clone());
+    apply_scalar_properties(state, values);
+}
+
+fn apply_scalar_properties(state: &mut FixtureState, values: &PropertyValues) {
     if let Some(value) = values.intensity {
         state.intensity = value;
     }
@@ -891,7 +1060,11 @@ fn blend_states(
                 if let Some(destination) = to.attributes.get(key) {
                     let blended = rig.interpolate_attribute(id, key, value, destination, amount);
                     to.attributes.insert(key.clone(), blended);
-                } else if amount < 1.0 {
+                } else if amount < 1.0
+                    && rig
+                        .profile(id)
+                        .is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
+                {
                     to.attributes.insert(key.clone(), value.clone());
                 }
             }
@@ -913,18 +1086,6 @@ fn blend_states(
 
 fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
     from + (to - from) * amount
-}
-
-pub fn intensity_strobe_scale(intensity: f64) -> f64 {
-    if intensity < STROBE_GATE_INTENSITY {
-        0.0
-    } else {
-        intensity
-    }
-}
-
-pub fn intensity_movement_range_per_second(intensity: f64) -> f64 {
-    SLOWEST_GLIDE_RANGE_PER_SECOND / (1.0 - intensity).powi(2)
 }
 
 fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {

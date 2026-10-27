@@ -115,6 +115,7 @@ fn mixed_show() -> Replay {
                         duration_seconds: 1.0,
                     },
                     priority: 100,
+                    special_fx: None,
                 },
             },
         );
@@ -174,7 +175,7 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
         .arg("--rig")
         .arg(rig_path)
         .arg("--autoloops")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops"))
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops"))
         .output()
         .unwrap();
     assert!(
@@ -203,7 +204,7 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig = include_bytes!("../../rigs/room.rig.pb");
+    let rig = include_bytes!("../../rig/room.rig.pb");
     assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
 }
 

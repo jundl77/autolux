@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import tempfile
 import threading
@@ -14,6 +15,7 @@ MAX_ARTNET_UNIVERSE = 32767
 MAX_FIXTURES = 512
 MAX_NAME_BYTES = 128
 ONE_ADDRESS_RULE = 'Starfire renders one Address on break 0 per fixture'
+LOGGER = logging.getLogger(__name__)
 
 
 def rig_modes(scene: mvr.Scene) -> dict[str, dict]:
@@ -94,19 +96,92 @@ def load_rig(path: Path) -> tuple[mvr.Scene, list[dict]]:
     return scene, require_renderable(scene)
 
 
+def _fixture_type_id(scene: mvr.Scene, spec: str) -> str:
+    fixture_type = mvr.gdtf_root(mvr.gdtf_description(scene, spec), spec).find('FixtureType')
+    return (fixture_type.get('FixtureTypeID') or '').upper()
+
+
+def refresh_profiles(rig_path: Path, library_path: Path) -> list[str]:
+    """Bring the store's embedded GDTF up to the library's; the store keeps only the patch.
+
+    A stored profile is the library's fixture type when their FixtureTypeIDs match; it takes
+    the library archive and name, and the patch's GDTFSpec references follow the name.
+    Returns the refreshed specs; the store is rewritten only when one changed.
+    """
+    rig_path = Path(rig_path)
+    scene = mvr.read(read_bounded(rig_path, mvr.MAX_MVR_BYTES))
+    library = {
+        entry['fixture_type_id'].upper(): (spec, entry['archive'], entry['modes'])
+        for spec, entry in fixture_library(library_path).items()
+    }
+    patched = mvr.patched_fixtures(scene)
+    renames = {}
+    for spec in sorted(mvr.referenced_specs(scene.root) & set(scene.entries)):
+        guid = _fixture_type_id(scene, spec)
+        if guid not in library:
+            LOGGER.warning(
+                '[rig] %s (FixtureTypeID %s) is not in the library; keeping the stored profile',
+                spec,
+                guid or 'missing',
+            )
+            continue
+        current, archive, modes = library[guid]
+        if current == spec and scene.entries[spec][1] == archive:
+            continue
+        used = {fixture['gdtf_mode'] for fixture in patched if fixture['gdtf_spec'] == spec}
+        if missing := sorted(used - set(modes)):
+            LOGGER.warning(
+                '[rig] %s lacks the patched mode(s) %s; keeping the stored %s',
+                current,
+                ', '.join(missing),
+                spec,
+            )
+            continue
+        renames[spec] = current, archive
+    if not renames:
+        return []
+    for node in scene.root.iter('GDTFSpec'):
+        node.text = renames[node.text][0] if node.text in renames else node.text
+    refreshed = mvr.Scene(
+        scene.root, {name: entry for name, entry in scene.entries.items() if name not in renames}
+    )
+    for spec, archive in renames.values():
+        mvr.embed_archive(refreshed, spec, archive)
+    require_renderable(refreshed)
+    _replace(rig_path, mvr.write(refreshed))
+    for old, (new, _) in renames.items():
+        LOGGER.info(
+            '[rig] refreshed %s from the library%s', old, '' if new == old else f' as {new}'
+        )
+    return sorted(renames)
+
+
+def _replace(path: Path, content: bytes) -> None:
+    with tempfile.NamedTemporaryFile(
+        mode='wb', prefix='.rig-', suffix='.mvr', dir=path.parent, delete=False
+    ) as staged:
+        staged.write(content)
+        staged.flush()
+        os.fsync(staged.fileno())
+    try:
+        os.replace(staged.name, path)
+    finally:
+        Path(staged.name).unlink(missing_ok=True)
+
+
 def _revision(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
 class FixtureStore:
-    def __init__(self, rig_path: Path, profiles_path: Path, validate: Callable[[Path], None]):
+    def __init__(self, rig_path: Path, library_path: Path, validate: Callable[[Path], None]):
         self.rig_path = Path(rig_path)
-        self.profiles_path = Path(profiles_path)
+        self.library_path = Path(library_path)
         self._validate = validate
         self._lock = threading.Lock()
 
     def library(self) -> dict:
-        return fixture_library(self.profiles_path)
+        return fixture_library(self.library_path)
 
     def load(self) -> tuple[dict, str]:
         with self._lock:

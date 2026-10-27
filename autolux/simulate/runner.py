@@ -43,7 +43,7 @@ def build_simulation(
             watchdog=watchdog, audio_client=audio_client, data_dir=data_dir
         )
 
-    effect_controller = EffectController(lighting_client, event_buffer=event_buffer)
+    effect_controller = EffectController(lighting_client, event_buffer=event_buffer, clock=clock)
     light_engine = LightEngine(
         lighting_client,
         effect_controller,
@@ -129,7 +129,12 @@ def load_section_chain(watchdog=None, audio_client=None, data_dir=None):
     _SECTION_CHAIN.decoder.reset()
     if plan is None:
         return _SECTION_CHAIN
-    return cell_cache.recording_chain(_SECTION_CHAIN, *plan, tracker_plan=tracker_plan)
+    return cell_cache.recording_chain(
+        _SECTION_CHAIN,
+        *plan,
+        tracker_plan=tracker_plan,
+        source_samples=lambda: audio_client.samples_read,
+    )
 
 
 def _artifacts_or_degrade(data_dir=None) -> bool:
@@ -183,6 +188,31 @@ def _tracker_cache_plan(audio_client, data_dir=None):
             record, source_rate=SAMPLE_RATE, audio_path=path, decode_path=decode
         ),
     )
+
+
+def cache_misses(audio_client, data_dir=None) -> list[tuple[str, str]]:
+    """The sidecars a run of this client would recompute rather than replay, as (kind, reason).
+
+    Same plans and lookups as load_section_chain, so an empty result means the run replays
+    every stage this machine would otherwise compute.
+    """
+    plan = _cell_cache_plan(audio_client, data_dir)
+    tracker_plan = _tracker_cache_plan(audio_client, data_dir)
+    if plan is None and tracker_plan is None:
+        return []
+    expected = _expected_samples(audio_client)
+    misses = []
+    if plan is not None:
+        _, reason = cell_cache.open_replay(*plan, expected_samples=expected)
+        if reason != 'hit':
+            misses.append(('mertcells', reason))
+    if tracker_plan is not None:
+        from autolux.simulate import tracker_cache
+
+        _, reason = tracker_cache.open_replay(*tracker_plan, expected_samples=expected)
+        if reason != 'hit':
+            misses.append(('bartracker', reason))
+    return misses
 
 
 _UNBUILT = object()

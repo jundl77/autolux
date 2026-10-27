@@ -7,5 +7,7 @@ autolux/training/data/raveform/annotations/*.hand.json text eol=lf
 autolux/training/eval_audio/*.mp3 binary
 
 # Keep calibrated program and rig hashes stable across checkouts.
-autoloops/**/*.lua text eol=lf
-rigs/*.json text eol=lf
+show/autoloops/**/*.lua text eol=lf
+rig/library/*.gdtf binary
+autolux/tests/data/generic_rig/*.gdtf binary
+show/**/*.toml text eol=lf

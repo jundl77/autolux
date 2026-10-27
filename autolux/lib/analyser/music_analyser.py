@@ -3,8 +3,9 @@ import logging
 import math
 import numpy as np
 from collections import deque
+from dataclasses import dataclass
 from autolux.lib.analyser.drift_watchdog import DriftWatchdog
-from autolux.lib.analyser.madmom_rhythm import MadmomRhythm
+from autolux.lib.analyser.madmom_rhythm import FRAME_SIZE, SAMPLE_RATE, MadmomRhythm
 from autolux.lib.analyser.music_analyser_handler import IMusicAnalyserHandler
 from autolux.lib.clock import Clock, SYSTEM_CLOCK
 from autolux.lib.engine.effect_definitions import ShowSettings
@@ -26,8 +27,38 @@ _SILENCE_RMS = 1.5e-4
 # clears that yet sits below any audible quiet passage, unlike _SILENCE_RMS,
 # which judges a song's end from mean energy.
 _DIGITAL_SILENCE_PEAK = 1e-4
+# A DJ's track change can leave a short run of exact zeros; shorter runs are dropouts.
+TRACK_GAP_MIN_SECONDS = 0.05
+TRACK_GAP_IGNORED_AFTER_START_SECONDS = 2.0
 
 _SONG_CLOCK_HORIZON = datetime.timedelta(minutes=15)
+
+BASS_CEILING_HZ = 250.0
+TREBLE_FLOOR_HZ = 4000.0
+_SPECTRUM_WINDOW = np.hanning(FRAME_SIZE)
+_SPECTRUM_HZ = np.fft.rfftfreq(FRAME_SIZE, 1.0 / SAMPLE_RATE)
+_BASS_BINS = _SPECTRUM_HZ < BASS_CEILING_HZ
+_TREBLE_BINS = _SPECTRUM_HZ >= TREBLE_FLOOR_HZ
+_SILENT_POWER = 1e-12
+
+
+@dataclass(frozen=True)
+class SpectralBalance:
+    centroid_hz: float
+    bass_over_treble_db: float
+
+
+def spectral_balance(frame: np.ndarray) -> SpectralBalance:
+    power = np.abs(np.fft.rfft(frame * _SPECTRUM_WINDOW)) ** 2
+    total = float(power.sum())
+    if total <= _SILENT_POWER:
+        return SpectralBalance(0.0, 0.0)
+    bass = float(power[_BASS_BINS].sum()) + _SILENT_POWER
+    treble = float(power[_TREBLE_BINS].sum()) + _SILENT_POWER
+    return SpectralBalance(
+        centroid_hz=float((_SPECTRUM_HZ * power).sum() / total),
+        bass_over_treble_db=10.0 * math.log10(bass / treble),
+    )
 
 
 class MusicAnalyser:
@@ -40,9 +71,11 @@ class MusicAnalyser:
         note_clicks: bool = False,
         watchdog: DriftWatchdog | None = None,
         settings: Callable[[], ShowSettings] = ShowSettings,
+        zeros_mark_tracks: Callable[[], bool] = lambda: True,
     ):
         self._clock: Clock = clock
         self._settings = settings
+        self._zeros_mark_tracks = zeros_mark_tracks
         self.sample_rate: int = sample_rate
         self.buffer_size: int = buffer_size
         self.handler: IMusicAnalyserHandler = handler
@@ -61,6 +94,8 @@ class MusicAnalyser:
         self._last_beat_activation: float = 0.0
         self._audio_started = False
         self._digital_silence_samples: int = 0
+        self._sample_clock: int = 0
+        self._track_start_sample: int | None = None
         self.in_standby: bool = False
         self._reset_state()
 
@@ -88,6 +123,7 @@ class MusicAnalyser:
         self.song_current_time: datetime.datetime = self._clock.now()
         self.silence_period_start: datetime.datetime = self._clock.now()
         self._rms_window: deque = deque(maxlen=_ENERGY_WINDOW_BUFFERS)
+        self._spectrum_frame: np.ndarray = np.zeros(FRAME_SIZE)
 
     def get_song_current_duration(self) -> datetime.timedelta:
         if self.is_playing:
@@ -139,12 +175,18 @@ class MusicAnalyser:
             return 0.0
         return sum(self._rms_window) / len(self._rms_window)
 
+    def get_spectral_balance(self) -> SpectralBalance:
+        return spectral_balance(self._spectrum_frame)
+
     async def analyse(self, audio_signal: np.ndarray) -> np.ndarray:
-        if self._track_digital_silence(audio_signal):
+        silent = self._track_digital_silence(audio_signal)
+        self._sample_clock += len(audio_signal)
+        if silent:
             self._drift.observe()
             return audio_signal
         now = self._clock.now()
         if not self._audio_started:
+            self._track_start_sample = self._sample_clock - len(audio_signal)
             # The first buffer covers audio captured before this callback.
             started = now - datetime.timedelta(seconds=self.buffer_size / self.sample_rate)
             self.song_start_time = self.silence_period_start = started
@@ -156,6 +198,7 @@ class MusicAnalyser:
 
         rms = float(np.sqrt(np.mean(audio_signal**2)))
         self._rms_window.append(rms)
+        self._spectrum_frame = np.concatenate((self._spectrum_frame, audio_signal))[-FRAME_SIZE:]
         self._track_song_duration(rms, now)
 
         rhythm = self._rhythm.process(audio_signal)
@@ -176,24 +219,46 @@ class MusicAnalyser:
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
         if np.max(np.abs(audio_signal), initial=0.0) >= _DIGITAL_SILENCE_PEAK:
-            self._digital_silence_samples = 0
+            gap, self._digital_silence_samples = self._digital_silence_samples, 0
+            if not self._zeros_mark_tracks():
+                return self.in_standby
             if self.in_standby:
-                self._leave_standby()
+                self.leave_standby()
+            elif gap:
+                self._note_gap(gap)
             return False
         self._digital_silence_samples += len(audio_signal)
         threshold = self._settings().digital_silence_seconds * self.sample_rate
-        if not self.in_standby and self._digital_silence_samples >= threshold:
-            self._enter_standby()
+        if self._digital_silence_samples >= threshold and self._zeros_mark_tracks():
+            seconds = self._digital_silence_samples / self.sample_rate
+            self.enter_standby(f'{seconds:.1f}s of digital silence')
         return self.in_standby
 
-    def _enter_standby(self) -> None:
-        seconds = self._digital_silence_samples / self.sample_rate
-        logging.info(f'[rhythm] {seconds:.1f}s of digital silence — standby')
+    def _note_gap(self, gap_samples: int) -> None:
+        started = self._sample_clock - gap_samples
+        if (
+            gap_samples < TRACK_GAP_MIN_SECONDS * self.sample_rate
+            or self._track_start_sample is None
+            or started - self._track_start_sample
+            < TRACK_GAP_IGNORED_AFTER_START_SECONDS * self.sample_rate
+        ):
+            return
+        self._track_start_sample = self._sample_clock
+        seconds = gap_samples / self.sample_rate
+        logging.info(f'[rhythm] {seconds * 1000:.0f} ms of digital silence — new-track cue')
+        self.handler.on_digital_gap(started / self.sample_rate, seconds)
+
+    def enter_standby(self, reason: str) -> None:
+        if self.in_standby:
+            return
+        logging.info(f'[rhythm] {reason} — standby')
         self.in_standby = True
         self._on_sound_stop()
         self.handler.on_digital_silence()
 
-    def _leave_standby(self) -> None:
+    def leave_standby(self) -> None:
+        if not self.in_standby:
+            return
         logging.info('[rhythm] signal returned — analysis restarts from scratch')
         self.in_standby = False
         self._reset_state()

@@ -30,17 +30,11 @@ def test_imported_fixture_renders_from_login_without_rebuilding(
     xml = DESCRIPTION.read_bytes()
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as package:
         package.writestr('description.xml', xml)
-    profiles = tmp_path / 'profiles.json'
+    library = tmp_path / 'library'
     starfire.run_import(
-        argparse.Namespace(
-            binary=BINARY,
-            input=archive,
-            profiles=profiles,
-            profile_id='imported',
-            mode=mode,
-        )
+        argparse.Namespace(binary=BINARY, input=archive, library=library, mode=mode)
     )
-    rig = write_rig(profiles, 'lamp')
+    rig = write_rig(library, 'lamp', mode=mode)
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'test'
     bank.mkdir(parents=True)

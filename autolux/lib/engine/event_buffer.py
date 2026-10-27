@@ -46,6 +46,10 @@ class EventBuffer:
             'static': None,
         }
         self._palette: dict | None = None
+        self._special: dict | None = None
+        self._special_groups: dict[str, list[str]] = {}
+        self._intense_at: float | None = None
+        self._track: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -181,6 +185,42 @@ class EventBuffer:
         with self._lock:
             self._palette = {'name': name, 'pinned': pinned}
 
+    def set_special(
+        self, name: str | None, group: str | None = None, duration_seconds: float | None = None
+    ) -> None:
+        with self._lock:
+            if name is None:
+                self._special = None
+                return
+            self._special = {'name': name, 'group': group}
+            if duration_seconds is not None:
+                self._special['end'] = self._now() + duration_seconds
+
+    def set_special_groups(self, groups: dict[str, list[str]]) -> None:
+        with self._lock:
+            self._special_groups = copy.deepcopy(groups)
+
+    def mark_intense(self) -> None:
+        with self._lock:
+            self._intense_at = self._now()
+
+    def _strobe_cooldown_seconds(self, now: float) -> float | None:
+        from autolux.lib.engine.effect_controller import drop_strobe_cooldown_seconds
+        from autolux.lib.engine.effect_definitions import ShowSettings
+
+        # From the live settings, so a new intensity level shows at once.
+        try:
+            settings = ShowSettings.from_dict(self._control_state['settings'])
+        except (TypeError, ValueError):
+            return None
+        if self._intense_at is None:
+            return 0.0
+        return max(0.0, drop_strobe_cooldown_seconds(settings) - (now - self._intense_at))
+
+    def set_track(self, track: dict) -> None:
+        with self._lock:
+            self._track = dict(track)
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
@@ -253,6 +293,14 @@ class EventBuffer:
                 'shed': dict(self._shed_state),
                 **copy.deepcopy(self._control_state),
                 'palette': copy.deepcopy(self._palette),
+                'special': (
+                    None
+                    if self._special is None or self._special.get('end', now) < now
+                    else dict(self._special)
+                ),
+                'special_groups': copy.deepcopy(self._special_groups),
+                'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
+                'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

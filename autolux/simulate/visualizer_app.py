@@ -2,18 +2,29 @@ import argparse
 import http.client
 import json
 import logging
+import os
 import re
 import threading
 import time
 from statistics import median
-from typing import NamedTuple
 
 import dash
 import plotly.graph_objects as go
 from dash import Input, Output, State, dcc, html
 
-from autolux.lib.engine.effect_definitions import DEFAULT_INTENSITY, SHOW_SETTING_RANGES
+from autolux.lib.engine.effect_definitions import (
+    BALANCED,
+    CALM,
+    DEFAULT_INTENSITY,
+    INTENSITY_BALANCED,
+    INTENSITY_CALM,
+    INTENSITY_WILD,
+    SHOW_SETTING_RANGES,
+    WILD,
+)
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
+from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
+from autolux.lib.media_session import MEDIA_SESSION_SOURCE
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
@@ -28,7 +39,7 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.palettes import PALETTE_NAMES
+from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
@@ -473,77 +484,163 @@ def _build_decoder(snapshot: dict) -> list:
     ]
 
 
+def _dot(colour: str):
+    return html.Span(className='dot', style={'background': colour})
+
+
 def _build_legend() -> list:
     return [
-        html.Span(
-            f'■ {cfg["label"]}',
-            style={'color': cfg['primary'], 'marginRight': '14px', 'fontSize': '12px'},
-        )
+        html.Span([_dot(cfg['primary']), cfg['label'].capitalize()])
         for cfg in INTENT_CONFIG.values()
     ]
-
-
-def _build_stat_card(label, value):
-    return html.Div(
-        [html.Div(label, className='stat-label'), html.Div(value, className='stat-value')],
-        className='show-stat',
-    )
 
 
 def _selection_tags(effect: dict) -> str:
     selection = effect.get('selection') or {}
     tags = [f'E{selection["energy"]}'] if 'energy' in selection else []
-    tags += [selection[key] for key in ('family', 'movement') if selection.get(key)]
+    tags += [selection[key] for key in ('movement', 'texture') if selection.get(key)]
     return ' · '.join(tags)
 
 
-def _build_show_overview(snapshot: dict) -> list:
-    bpm = _room_bpm(snapshot)
-    cfg = _intent_config(snapshot.get('intent'))
-    if snapshot.get('paused'):
-        playback, playback_color = 'PAUSED', WARN_COLOR
-    elif _room_is_playing(snapshot):
-        playback, playback_color = 'PLAYING', OK_COLOR
-    else:
-        playback, playback_color = 'IDLE', MUTED
+HEALTH_COLORS = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}
+
+
+def _health(snapshot: dict) -> str:
     health = health_summary(snapshot)['state']
     timing = (snapshot.get('timing_stats') or {}).get('by_label') or {}
     if health == 'healthy' and any(
         stream['mean_error_ms'] > TIMING_TOLERANCE_SEC * 1000 for stream in timing.values()
     ):
-        health = 'degraded'
-    health_color = {'healthy': OK_COLOR, 'degraded': WARN_COLOR, 'down': system_metrics.RED}[health]
+        return 'degraded'
+    return health
+
+
+def _status_item(caption: str, value, className='status-item', **props):
+    return html.Div(
+        [html.Span(caption, className='control-label'), html.Span(value, className='status-text')],
+        className=className,
+        **props,
+    )
+
+
+def _fx_text(snapshot: dict) -> str | None:
+    special = snapshot.get('special') or ((snapshot.get('static') or {}).get('special_fx'))
+    if not special:
+        return None
+    # A static special is the operator's own and has no catalogue name.
+    name = special.get('name', 'static').replace('_', ' ').capitalize()
+    return f'{name} · {special["group"]}'
+
+
+TRACK_TITLE_CHARS = 40
+TRACK_MARQUEE_SECONDS_PER_CHAR = 0.3
+RENDER_WINDOW_SECONDS = 3.0
+RENDERED_RATE = 'starfire_measured_render_frames_per_second'
+MISSED_RATE = 'starfire_missed_render_deadlines_per_second'
+
+
+def render_window(history: list, now: float) -> tuple[float | None, int]:
+    """Rendered frames per second and missed deadlines over the last few seconds of samples."""
+    if not history or not 0 <= now - history[-1]['at'] < TELEMETRY_STALE_SECONDS:
+        return None, 0
+    recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
+    span = frames = missed = 0.0
+    for before, sample in zip(recent, recent[1:]):
+        interval = sample['at'] - before['at']
+        rendered, skipped = sample.get(RENDERED_RATE), sample.get(MISSED_RATE)
+        if interval > 0 and finite(rendered) and finite(skipped):
+            span += interval
+            frames += rendered * interval
+            missed += skipped * interval
+    if span == 0:
+        rendered = history[-1].get(RENDERED_RATE)
+        return (rendered if finite(rendered) else None), 0
+    return frames / span, round(missed)
+
+
+def render_rate_text(fps: float | None) -> str:
+    return '—' if fps is None else f'{fps:.1f}'
+
+
+def _track_status(snapshot: dict) -> list:
+    track = snapshot.get('track') or {}
+    title = track.get('title')
+    if track.get('source') != MEDIA_SESSION_SOURCE or not title:
+        return []
+    artist = track.get('artist')
+    text = f'{artist} – {title}' if artist else title
+    if len(text) <= TRACK_TITLE_CHARS:
+        value = text
+    else:
+        # Two copies scroll by half their width, so the loop has no seam.
+        value = html.Span(
+            [html.Span(text), html.Span(text, **{'aria-hidden': 'true'})],
+            className='marquee',
+            style={'animationDuration': f'{len(text) * TRACK_MARQUEE_SECONDS_PER_CHAR:.1f}s'},
+        )
+    return [_status_item('Track', value, className='status-item status-track')]
+
+
+def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
+    if snapshot.get('mode') == 'static':
+        looks = ((snapshot.get('static') or {}).get('looks') or {}).keys()
+        return _status_item('Autoloop', f'Static · {", ".join(looks) or "off"}')
+    selection = (snapshot.get('current_effect') or {}).get('selection') or {}
+    tag = selection.get('intent') or cfg['label'].lower()
+    if selection.get('look') not in (None, selection.get('intent')):
+        tag = f'{tag} · {selection.get("level")}'
+    value = [
+        _dot(cfg['primary']),
+        name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
+        html.Span(tag, className='status-tag'),
+    ]
+    return _status_item('Autoloop', value, title=detail)
+
+
+def _build_show_status(snapshot: dict, now: float) -> list:
+    cfg = _intent_config(snapshot.get('intent'))
     effect = snapshot.get('current_effect') or {}
-    effect_name = effect.get('name', '—')
-    autoloop_name = effect_name.rsplit('/', 1)[-1].replace('_', ' ').title()
-    reason = (effect.get('selection') or {}).get('reason')
+    name = effect.get('name')
+    detail = ' · '.join(
+        part
+        for part in (name, _selection_tags(effect), (effect.get('selection') or {}).get('reason'))
+        if part
+    )
     palette = snapshot.get('palette') or {}
-    palette_name = palette.get('name') or '—'
-    palette_text = f'{palette_name} (pinned)' if palette.get('pinned') else palette_name
-    return [
-        _build_stat_card(
-            'Health',
-            html.Span(f'● {health.title()}', id='health-indicator', style={'color': health_color}),
+    bpm = _room_bpm(snapshot)
+    health = _health(snapshot)
+    fps, _ = render_window(snapshot.get('system_history') or [], now)
+    palette_name = palette.get('name')
+    items = [
+        _status_item(
+            'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
         ),
-        _build_stat_card(
-            'Playback',
-            html.Span(playback, id='playback-state', style={'color': playback_color}),
-        ),
-        _build_stat_card(
-            'Tempo', html.Span(f'{bpm:.0f} BPM' if bpm else '— BPM', style={'color': '#73b6ff'})
-        ),
-        _build_stat_card('Section', html.Span(cfg['label'], style={'color': cfg['primary']})),
-        _build_stat_card(
-            'Autoloop',
+        *_track_status(snapshot),
+        _autoloop_status(snapshot, cfg, name, detail),
+        _status_item(
+            'Colors',
             [
-                html.Span(
-                    autoloop_name, title=f'{effect_name} · {reason}' if reason else effect_name
+                *(_palette_marks(palette_name) if palette_name in PALETTES_BY_NAME else []),
+                palette_name or '—',
+                *(
+                    [html.Span('auto', className='status-tag')]
+                    if palette_name and not palette.get('pinned')
+                    else []
                 ),
-                html.Span(_selection_tags(effect), className='stat-tags'),
             ],
         ),
-        _build_stat_card('Palette', html.Span(palette_text, id='palette-name')),
     ]
+    fx = _fx_text(snapshot)
+    if fx:
+        items.append(_status_item('FX', fx, id='status-fx'))
+    items += [
+        _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
+        _status_item('Render FPS', render_rate_text(fps)),
+    ]
+    cooldown = snapshot.get('strobe_cooldown_seconds')
+    if finite(cooldown):
+        items.append(_status_item('Strobe', f'in {cooldown:.0f} s' if cooldown > 0 else 'ready'))
+    return items
 
 
 def _build_show_timing(snapshot: dict) -> list:
@@ -565,7 +662,6 @@ SETTING_DISPLAY = {
     'digital_silence_seconds': ('Standby after silence', 's'),
     'strobe_max_rate_hz': ('Max strobe rate', 'Hz'),
     'strobe_max_burst_seconds': ('Max strobe burst', 's'),
-    'palette_temperature_bias': ('Palette warmth (cold −1 … warm +1)', ''),
     'intensity': ('Intensity', '%'),
 }
 SETTING_LABELS = {
@@ -573,51 +669,34 @@ SETTING_LABELS = {
     for name, (label, unit) in SETTING_DISPLAY.items()
 }
 PERCENT_SETTINGS = frozenset(name for name, (_, unit) in SETTING_DISPLAY.items() if unit == '%')
-TRANSITION_SETTINGS = ('crossfade_beats', 'quiet_brightness', 'digital_silence_seconds')
-STROBE_SETTINGS = (
+FORM_SETTINGS = tuple(name for name in SHOW_SETTING_RANGES if name != 'intensity')
+SETTINGS_ORDER = (
+    'crossfade_beats',
+    'quiet_brightness',
+    'digital_silence_seconds',
     'strobe_max_rate_hz',
     'strobe_max_burst_seconds',
     'strobe_burst_seconds',
     'drop_strobe_cooldown_seconds',
 )
-PALETTE_SETTINGS = ('palette_temperature_bias', 'intensity')
-SETTING_SUMMARY = {
-    'crossfade_beats': '{} beats',
-    'quiet_brightness': 'quiet {} %',
-    'digital_silence_seconds': 'standby {} s',
-    'strobe_max_rate_hz': '{} Hz',
-    'strobe_max_burst_seconds': 'burst {} s',
-    'strobe_burst_seconds': 'drop burst {} s',
-    'drop_strobe_cooldown_seconds': 'cooldown {} s',
-    'palette_temperature_bias': 'warmth {}',
-    'intensity': 'intensity {} %',
-}
-
-
-class SettingsGroup(NamedTuple):
-    key: str
-    title: str
-    names: tuple[str, ...]
-    default_open: bool
-    marker: str | None = None
-
-
-SETTINGS_GROUPS = (
-    SettingsGroup('transitions', 'Transitions & standby', TRANSITION_SETTINGS, True),
-    SettingsGroup('strobe', 'Strobe limits', STROBE_SETTINGS, False, 'Intense effects'),
-    SettingsGroup('palette', 'Palette & intensity', PALETTE_SETTINGS, False),
-)
-SETTINGS_GROUPS_STORAGE_KEY = 'autolux.settings-groups'
-FORM_SETTINGS = tuple(name for name in SHOW_SETTING_RANGES if name != 'intensity')
 SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
 BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
-INTENSITY_TRIGGERS = ('control-intensity', 'control-intensity-live')
+INTENSITY_TRIGGERS = ('control-intensity',)
+INTENSITY_LEVELS = (
+    (CALM, INTENSITY_CALM),
+    (BALANCED, INTENSITY_BALANCED),
+    (WILD, INTENSITY_WILD),
+)
+PALETTE_SWATCH_SLOTS = ('primary', 'secondary', 'accent', 'cold')
+ACCENT = '#73b6ff'
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 NEEDS_A_NUMBER = '{label} needs a number'
 NOT_A_NUMBER = '{label}: "{raw}" is not a number'
 LIVE_FADER_INTERVAL_MS = 50
 CONTROL_SYNC_HOLD_MS = 1000
 CONTROL_EXPECT_SECONDS = 2.0
+DIRECT_CONTROL_ENV = 'AUTOLUX_DIRECT_CONTROL'
+RELAY_PATH = '/control-relay'
 
 
 class ControlExpectations:
@@ -652,6 +731,8 @@ def expected_control_values(command: dict, reply: dict) -> dict:
         return {'master_brightness': command['level']}
     if action == 'settings':
         return {'settings': command['settings']}
+    if action == 'intensity_auto':
+        return {'intensity_auto': command['enabled']}
     if action == 'palette' and command['name'] != PALETTE_POLICY:
         return {'palette': {'name': command['name'], 'pinned': True}}
     return {}
@@ -675,8 +756,10 @@ def parse_decimal(name: str, raw) -> float:
 
 
 def control_command(
-    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY
+    trigger, paused, level, settings, *, palette=None, intensity=DEFAULT_INTENSITY, auto=False
 ) -> dict | None:
+    if trigger == 'control-intensity-auto':
+        return {'action': 'intensity_auto', 'enabled': not auto}
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger == 'control-next':
@@ -693,19 +776,26 @@ def control_command(
             'settings': {
                 **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
                 'intensity': intensity,
+                'intensity_auto': auto,
             },
         }
     return None
 
 
-def settings_group_summary(names, settings) -> str:
-    settings = settings or {}
-    return ' · '.join(
-        SETTING_SUMMARY[name].format(
-            '—' if settings.get(name) is None else setting_text(name, settings[name])
-        )
-        for name in names
-    )
+def settings_edit(name: str, raw, state: dict) -> dict | None:
+    """The settings command for one edited field, or None when it still shows the show's value.
+
+    A field the poll filled (or the browser restored) reads exactly the show's own text, so
+    only an operator's change goes out; every other setting is sent as the show reported it,
+    not as its rounded text.
+    """
+    current = state.get('settings')
+    if not current or str(raw).strip() == (state.get('settings_text') or {}).get(name):
+        return None
+    value = parse_decimal(name, raw)
+    if value == current.get(name):
+        return None
+    return {'action': 'settings', 'settings': {**current, name: value}}
 
 
 def setting_range_text(name: str) -> str:
@@ -730,12 +820,8 @@ def _setting_input(name):
                     ),
                     html.Span(unit, className='setting-unit'),
                 ],
+                title=f'{setting_range_text(name)} {unit}'.strip(),
                 className='setting-value',
-            ),
-            html.Span(
-                setting_range_text(name),
-                title=f'Allowed {setting_range_text(name)} {unit}',
-                className='setting-range',
             ),
             html.Span(id=f'control-{name}-error', role='alert', className='setting-error'),
         ],
@@ -743,84 +829,26 @@ def _setting_input(name):
     )
 
 
-def _settings_group(group: SettingsGroup, rows: list):
-    header = [html.Span(group.title, className='settings-group-title')]
-    if group.marker:
-        header.append(html.Span(group.marker, className='settings-group-marker'))
-    header.append(html.Span(id=f'settings-summary-{group.key}', className='settings-group-summary'))
-    return html.Details(
-        [
-            html.Summary(header, className='settings-group-header'),
-            html.Div(rows, className='settings-group-body'),
-        ],
-        id=f'settings-group-{group.key}',
-        open=group.default_open,
-        className=f'settings-group settings-group-{group.key}',
-        **{'data-settings-group': group.key},
-    )
-
-
-def _build_settings_drawer():
+def _build_settings():
     return html.Div(
-        [
-            html.Div('Show settings', className='stat-label control-heading'),
-            *[
-                _settings_group(
-                    group, [_setting_input(name) for name in group.names if name in FORM_SETTINGS]
-                )
-                for group in SETTINGS_GROUPS
-            ],
-        ],
+        [_setting_input(name) for name in SETTINGS_ORDER],
         id='settings-drawer',
-        className='control-group settings-drawer',
+        className='settings-form',
+        style={'display': 'none'},
     )
 
 
 def _register_settings_drawer(app) -> None:
     app.clientside_callback(
-        '''function() {
-            const key = '''
-        + json.dumps(SETTINGS_GROUPS_STORAGE_KEY)
-        + ''';
-            const read = () => {
-                try {
-                    return JSON.parse(window.localStorage.getItem(key) || '{}') || {};
-                } catch (error) {
-                    return {};
-                }
-            };
-            if (!window.autoluxSettingsGroupsWatched) {
-                window.autoluxSettingsGroupsWatched = true;
-                document.addEventListener('toggle', (event) => {
-                    const group = event.target.dataset && event.target.dataset.settingsGroup;
-                    if (!group) {
-                        return;
-                    }
-                    try {
-                        const saved = read();
-                        saved[group] = event.target.open;
-                        window.localStorage.setItem(key, JSON.stringify(saved));
-                    } catch (error) {}
-                }, true);
-            }
-            const saved = read();
-            return '''
-        + json.dumps([[group.key, group.default_open] for group in SETTINGS_GROUPS])
-        + '''.map(([group, open]) => typeof saved[group] === 'boolean' ? saved[group] : open);
+        '''function(clicks) {
+            const open = (clicks || 0) % 2 === 1;
+            return [open ? {} : {display: 'none'}, open ? 'settings-toggle open' : 'settings-toggle'];
         }''',
-        *[Output(f'settings-group-{group.key}', 'open') for group in SETTINGS_GROUPS],
-        Input('settings-drawer', 'id'),
+        Output('settings-drawer', 'style'),
+        Output('settings-toggle', 'className'),
+        Input('settings-toggle', 'n_clicks'),
+        prevent_initial_call=True,
     )
-
-    @app.callback(
-        *[Output(f'settings-summary-{group.key}', 'children') for group in SETTINGS_GROUPS],
-        Input('control-state', 'data'),
-    )
-    def summarize_settings(state):
-        if not state or not state.get('settings'):
-            raise dash.exceptions.PreventUpdate
-        return [settings_group_summary(group.names, state['settings']) for group in SETTINGS_GROUPS]
-
     limits = [
         [
             setting_text(name, low),
@@ -862,91 +890,179 @@ def _register_settings_drawer(app) -> None:
     )
 
 
-def _build_control_card() -> list:
+def _with_base_palette(snapshot: dict) -> dict:
+    palette = snapshot.get('palette') or {}
+    if not palette.get('name'):
+        return snapshot
+    # The show reports the section's variant (ice_breakdown); the dropdown and the pin speak base names.
+    return {
+        **snapshot,
+        'palette': {**palette, 'name': base_palette_name(palette['name'])},
+    }
+
+
+# The dropdown is the operator's: a poll writes it only when the show reports a different pin
+# than the last poll did, so a pick survives the stale polls before its pin lands.
+# Poll-driven writes to operator controls go through set_props rather than Outputs: an Output
+# would make the control's own callback wait for every in-flight poll before it may run.
+PALETTE_SYNC_JS = (
+    """function(state) {
+    const palette = state && state.palette;
+    if (!palette) {
+        return true;
+    }
+    const shown = palette.pinned ? palette.name : """
+    + json.dumps(PALETTE_POLICY)
+    + """;
+    if (shown !== window.autoluxPaletteSynced) {
+        window.autoluxPaletteSynced = shown;
+        window.dash_clientside.set_props('control-palette', {value: shown});
+    }
+    return false;
+}"""
+)
+
+
+def _rgb_css(rgb) -> str:
+    return 'rgb({}, {}, {})'.format(*(round(channel * 255) for channel in rgb))
+
+
+PALETTES_BY_NAME = {palette.name: palette for palette in PALETTES}
+
+
+def _palette_marks(name: str | None) -> list:
+    palette = PALETTES_BY_NAME.get(name)
+    if palette is None:
+        return [html.Span(className='dot dot-auto')]
+    return [_dot(_rgb_css(getattr(palette, slot))) for slot in PALETTE_SWATCH_SLOTS]
+
+
+def _palette_options() -> list:
+    def option(name, marks):
+        return html.Span([*marks, html.Span(name)], className='palette-option')
+
+    return [{'label': option('auto', _palette_marks(None)), 'value': PALETTE_POLICY}] + [
+        {'label': option(palette.name, _palette_marks(palette.name)), 'value': palette.name}
+        for palette in PALETTES
+    ]
+
+
+def _fader(slider_id: str, value_id: str, **slider):
     return [
         html.Div(
-            [
-                html.H2('Show control'),
-                html.P('Applies to the live show at once · settings are saved'),
-            ],
-            className='section-heading',
+            dcc.Slider(
+                id=slider_id,
+                min=0,
+                max=1,
+                step=0.01,
+                marks=None,
+                updatemode='mouseup',
+                allow_direct_input=False,
+                **slider,
+            ),
+            className='fader-track',
         ),
+        html.Span('—', id=value_id, className='fader-value'),
+    ]
+
+
+def _build_control_card() -> list:
+    return [
+        html.Div(id='show-status', className='show-status'),
+        html.Div('Show control', className='section-label'),
         html.Section(
             [
                 html.Div(
                     [
                         html.Button(
-                            'Pause', id='control-toggle', className='control-toggle', disabled=True
+                            '\u23f8\ufe0e',
+                            id='control-toggle',
+                            className='icon-button',
+                            title='Play / pause',
+                            disabled=True,
                         ),
                         html.Button(
-                            'Next autoloop ⏭',
+                            'Autoloop \u23ed\ufe0e',
                             id='control-next',
-                            className='control-next',
-                            title='Jump to the next autoloop for this section',
+                            className='transport-button',
+                            title='Next autoloop',
                             disabled=True,
                         ),
-                        dcc.Dropdown(
-                            id='control-palette',
-                            options=[{'label': 'Palette: auto', 'value': PALETTE_POLICY}]
-                            + [{'label': name, 'value': name} for name in PALETTE_NAMES],
-                            clearable=False,
-                            searchable=False,
-                            disabled=True,
+                        html.Span('Master brightness', className='control-label'),
+                        html.Div(
+                            _fader('control-brightness', 'control-brightness-value', disabled=True),
+                            className='fader',
                         ),
+                        dcc.Store(id='control-brightness-live'),
                     ],
-                    className='control-transport',
+                    className='control-row control-transport',
+                ),
+                dcc.Tabs(
+                    id='control-mode',
+                    value='auto',
+                    className='mode-tabs',
+                    children=[
+                        dcc.Tab(
+                            label=mode.upper(),
+                            value=mode,
+                            style=STATIC_TAB_STYLE,
+                            selected_style=STATIC_SELECTED_TAB_STYLE,
+                        )
+                        for mode in ('auto', 'static')
+                    ],
                 ),
                 html.Div(
                     [
+                        _build_overlay_banner(),
                         html.Div(
                             [
-                                html.Span('Master brightness'),
-                                html.Span('—', id='control-brightness-value'),
+                                html.Span('Intensity', className='control-label'),
+                                html.Button(
+                                    'Auto',
+                                    id='control-intensity-auto',
+                                    title='Follow the music: the show picks the level per track',
+                                ),
+                                html.Fieldset(
+                                    dcc.RadioItems(
+                                        id='control-intensity',
+                                        options=[
+                                            {'label': word, 'value': level}
+                                            for word, level in INTENSITY_LEVELS
+                                        ],
+                                        inline=True,
+                                        className='segmented',
+                                    ),
+                                    id='control-intensity-set',
+                                    disabled=True,
+                                ),
+                                html.Span(id='control-intensity-value', className='fader-value'),
+                                html.Span('Colors', className='control-label'),
+                                dcc.Dropdown(
+                                    id='control-palette',
+                                    options=_palette_options(),
+                                    clearable=False,
+                                    searchable=False,
+                                    disabled=True,
+                                    className='palette-select',
+                                ),
+                                html.Button(
+                                    'Settings', id='settings-toggle', className='settings-toggle'
+                                ),
                             ],
-                            className='stat-label control-heading',
+                            className='control-row',
                         ),
-                        dcc.Slider(
-                            id='control-brightness',
-                            min=0,
-                            max=1,
-                            step=0.01,
-                            marks=None,
-                            updatemode='mouseup',
-                            allow_direct_input=False,
-                            disabled=True,
-                        ),
-                        html.Div([html.Span('0%'), html.Span('100%')], className='control-scale'),
-                        dcc.Store(id='control-brightness-live'),
-                        html.Div(
-                            [
-                                html.Span('Intensity'),
-                                html.Span('—', id='control-intensity-value'),
-                            ],
-                            className='stat-label control-heading control-intensity-heading',
-                        ),
-                        dcc.Slider(
-                            id='control-intensity',
-                            min=0,
-                            max=1,
-                            step=0.01,
-                            marks=None,
-                            updatemode='mouseup',
-                            allow_direct_input=False,
-                            disabled=True,
-                        ),
-                        html.Div([html.Span('0%'), html.Span('100%')], className='control-scale'),
-                        dcc.Store(id='control-intensity-live'),
+                        _build_settings(),
                     ],
-                    className='control-group control-master',
+                    id='auto-mode-panel',
                 ),
-                _build_settings_drawer(),
+                html.Div(_build_static_panel(), id='static-mode-panel', style={'display': 'none'}),
                 html.P(id='control-status', role='status', className='control-status'),
                 dcc.Store(id='control-state'),
                 dcc.Store(id='control-synced'),
                 dcc.Store(id='control-touched'),
+                dcc.Store(id='control-mode-synced'),
             ],
             id='show-control',
-            className='overview-panel',
         ),
     ]
 
@@ -961,54 +1077,64 @@ STATIC_PRESETS = {
     'off': 'Off',
 }
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
-STATIC_BUTTONS = {'static-blacklight': 'blacklight', 'static-strobe': 'strobe'}
-STATIC_DIMMER_IDS = ('static-dimmer', 'static-dimmer-live')
+# Targets and UV come from the rig the show published; a rig without UV fixtures
+# greys both UV chips rather than offering commands the show would refuse.
+STATIC_TARGETS_JS = '''function(state) {
+    const all = %s;
+    const ready = !!state && !!state.mode && !!state.static;
+    const statics = ready ? state.static : {targets: [all], blacklight: false};
+    const options = statics.targets.map((target) =>
+        ({label: target === all ? 'All' : target, value: target}));
+    return [options, !statics.blacklight, !statics.blacklight];
+}''' % json.dumps(ALL_FIXTURES)
+STATIC_BUTTONS = {
+    'static-blacklight': 'blacklight',
+    'static-strobe': 'strobe',
+    'static-clear': 'clear',
+    'static-banner-clear': 'clear',
+}
+FX_SLOT_IDS = {f'static-fx-{slot}': slot for slot in PALETTE_SWATCH_SLOTS}
+FX_CLEAR_ID = 'static-fx-clear'
+FX_ENERGY_LEVELS = (('low', 0.3), ('mid', 0.6), ('high', 0.9))
+FX_SPEED_LEVELS = (('slow', 0.2), ('mid', 0.5), ('fast', 0.9))
+# 0 stands for no pulse: a segmented control cannot hold None.
+FX_PULSE_LEVELS = (('off', 0), ('1 beat', 1), ('2 beats', 2))
+FX_SEGMENT_IDS = ('static-fx-energy', 'static-fx-speed', 'static-fx-pulse')
 HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
 STATIC_TAB_STYLE = {
     'backgroundColor': 'transparent',
     'color': '#8293a6',
     'border': '0',
     'borderBottom': '2px solid transparent',
-    'padding': '8px 18px',
-    'fontSize': '12px',
-    'fontWeight': '600',
+    'padding': '0 16px',
+    'lineHeight': '40px',
+    'fontSize': '11px',
+    'letterSpacing': '.08em',
     'flex': 'none',
 }
 STATIC_SELECTED_TAB_STYLE = {
     **STATIC_TAB_STYLE,
     'color': '#e6edf3',
-    'borderBottomColor': '#73b6ff',
+    'borderBottomColor': ACCENT,
 }
-STATIC_CSS = '''
-.mode-tabs { gap: 4px; border-bottom: 1px solid #273344; }
-#static-control { display: grid; gap: 14px; padding: 14px 16px 16px; }
-#static-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
-                         border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
-#static-control button:disabled { opacity: .4; cursor: default; }
-.static-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.static-look { display: grid; grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1.5fr);
-               gap: 16px; align-items: center; }
-.static-target label { margin-right: 12px; color: #9baabb; font-size: 12px; }
-#static-colour { width: 100%; background: #0b121c; color: #e6edf3; border: 1px solid #344256;
-                 border-radius: 4px; padding: 6px 8px; font: inherit; font-size: 12px; }
-#static-colour:invalid { border-color: #e8b56d; }
-#static-dimmer-value { color: #e6edf3; font-size: 14px; font-weight: 600;
-                       font-variant-numeric: tabular-nums; }
-#static-control .static-blackout-on { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
-#static-control .static-auto { margin-left: auto; }
-@media (max-width: 720px) { .static-look { grid-template-columns: 1fr; } }
-'''
 
 
-def static_control_command(trigger, target, colour, dimmer, blackout) -> dict | None:
+def static_control_command(trigger, target, colour) -> dict | None:
     if trigger in STATIC_PRESET_IDS:
-        return {'action': 'static', 'kind': 'preset', 'preset': STATIC_PRESET_IDS[trigger]}
+        preset = STATIC_PRESET_IDS[trigger]
+        # Presets always light the whole rig, so a chosen group gets the chip as a look instead.
+        if target != ALL_FIXTURES and preset in PRESET_COLOURS:
+            return {
+                'action': 'static',
+                'kind': 'look',
+                'target': target,
+                'colour': colour_hex(PRESET_COLOURS[preset]),
+            }
+        if target != ALL_FIXTURES and preset == 'off':
+            return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': 0.0}
+        return {'action': 'static', 'kind': 'preset', 'preset': preset}
     if trigger in STATIC_BUTTONS:
         return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
-    if trigger == 'static-blackout':
-        return {'action': 'static', 'kind': 'blackout', 'enabled': not blackout}
-    if trigger == 'static-auto':
-        return {'action': 'mode', 'mode': 'auto'}
     if trigger == 'static-colour':
         text = (colour or '').strip()
         if not HEX_COLOUR_TEXT.fullmatch(text):
@@ -1019,9 +1145,99 @@ def static_control_command(trigger, target, colour, dimmer, blackout) -> dict | 
             'target': target,
             'colour': '#' + text.lstrip('#').lower(),
         }
-    if trigger in STATIC_DIMMER_IDS:
-        return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': dimmer}
     return None
+
+
+def fx_axes(groups: dict, target: str) -> list:
+    if target == ALL_FIXTURES:
+        return sorted({axis for axes in groups.values() for axis in axes})
+    return sorted(groups.get(target) or [])
+
+
+def static_fx_command(trigger, target, energy, speed, pulse, axes, active_slot=None):
+    """The FX payload; control.js build.fx mirrors it. A segment change re-fires the active slot."""
+    if trigger == FX_CLEAR_ID:
+        return {'action': 'static', 'kind': 'special_fx_clear'}
+    slot = FX_SLOT_IDS.get(trigger) or (active_slot if trigger in FX_SEGMENT_IDS else None)
+    if slot is None:
+        return None
+    # A disabled segment still holds a value; the group could not render that axis.
+    return {
+        'action': 'static',
+        'kind': 'special_fx',
+        'group': target,
+        'colour_slot': slot,
+        'energy': energy,
+        'speed': speed if 'speed' in axes else 0.0,
+        'pulse_beats': pulse if pulse and 'pulse' in axes else None,
+    }
+
+
+def _fx_segment(segment_id: str, levels: tuple, value):
+    return html.Fieldset(
+        dcc.RadioItems(
+            id=segment_id,
+            options=[{'label': word, 'value': level} for word, level in levels],
+            value=value,
+            inline=True,
+            className='segmented',
+        ),
+        id=f'{segment_id}-set',
+    )
+
+
+def special_groups_view(groups: dict) -> list:
+    if not groups:
+        return ['FX: Starfire reported no groups']
+    return [
+        html.Span('FX', className='control-label'),
+        *[
+            part
+            for name, axes in sorted(groups.items())
+            for part in (
+                '  ',
+                name,
+                ' ',
+                html.Span(' · '.join(axes) or 'none', className='status-tag'),
+            )
+        ],
+    ]
+
+
+def _build_static_fx():
+    return html.Div(
+        [
+            html.Fieldset(
+                [
+                    html.Div(
+                        [
+                            html.Span('FX', className='control-label'),
+                            *[
+                                html.Button(slot.capitalize(), id=chip)
+                                for chip, slot in FX_SLOT_IDS.items()
+                            ],
+                            html.Button('Clear FX', id=FX_CLEAR_ID),
+                        ],
+                        className='control-row',
+                    ),
+                    html.Div(
+                        [
+                            html.Span('Energy', className='control-label'),
+                            _fx_segment('static-fx-energy', FX_ENERGY_LEVELS, 0.6),
+                            html.Span('Speed', className='control-label'),
+                            _fx_segment('static-fx-speed', FX_SPEED_LEVELS, 0.5),
+                            html.Span('Pulse', className='control-label'),
+                            _fx_segment('static-fx-pulse', FX_PULSE_LEVELS, 0),
+                        ],
+                        className='control-row',
+                    ),
+                ],
+                id='static-fx-set',
+            ),
+            html.Span(id='static-fx-note', className='control-note'),
+        ],
+        id='static-fx',
+    )
 
 
 def _build_static_panel():
@@ -1029,94 +1245,293 @@ def _build_static_panel():
         [
             html.Div(
                 [
-                    html.Button(label, id=f'static-preset-{name}')
-                    for name, label in STATIC_PRESETS.items()
-                ],
-                className='static-row',
-            ),
-            html.Div(
-                [
-                    dcc.RadioItems(
-                        id='static-target',
-                        options=[{'label': 'All', 'value': 'all'}],
-                        value='all',
-                        inline=True,
-                        className='static-target',
-                    ),
+                    *[
+                        html.Button(label, id=f'static-preset-{name}')
+                        for name, label in STATIC_PRESETS.items()
+                    ],
                     dcc.Input(
                         id='static-colour',
-                        type='text',
-                        placeholder='#ffffff',
-                        pattern=r'#?[0-9a-fA-F]{6}',
+                        type='color',
+                        value=colour_hex(PRESET_COLOURS['warm']),
                         debounce=0.3,
+                        # Restoring the last chosen colour sends nothing: the callback skips initial calls.
+                        persistence=True,
+                        persistence_type='local',
                     ),
-                    html.Div(
-                        [
-                            html.Div(
-                                [html.Span('Dimmer'), html.Span('—', id='static-dimmer-value')],
-                                className='stat-label control-heading',
-                            ),
-                            dcc.Slider(
-                                id='static-dimmer',
-                                min=0,
-                                max=1,
-                                step=0.01,
-                                value=1,
-                                marks=None,
-                                updatemode='mouseup',
-                                allow_direct_input=False,
-                            ),
-                            html.Div(
-                                [html.Span('0%'), html.Span('100%')], className='control-scale'
-                            ),
-                            dcc.Store(id='static-dimmer-live'),
-                        ],
-                        className='control-master',
+                    html.Button(
+                        'Clear all',
+                        id='static-clear',
+                        title='Remove every static look and show the automatic show again',
+                        style={'marginLeft': 'auto'},
                     ),
                 ],
-                className='static-look',
+                className='control-row',
             ),
             html.Div(
                 [
-                    html.Button('Blacklight', id='static-blacklight'),
-                    html.Span('UV ignores master', className='control-unit'),
-                    html.Button('Blackout', id='static-blackout'),
-                    html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
-                    html.Button('Back to Auto', id='static-auto', className='static-auto'),
+                    html.Span('Target', className='control-label'),
+                    dcc.RadioItems(
+                        id='static-target',
+                        options=[{'label': 'All', 'value': ALL_FIXTURES}],
+                        value=ALL_FIXTURES,
+                        inline=True,
+                        className='segmented',
+                    ),
                 ],
-                className='static-row',
+                className='control-row',
             ),
+            html.Div(
+                [
+                    html.Button('Blacklight', id='static-blacklight', title='UV ignores master'),
+                    html.Button('Strobe', id='static-strobe', title='Capped burst; press to stop'),
+                ],
+                className='control-row',
+            ),
+            _build_static_fx(),
             html.P(id='static-status', role='status', className='control-status'),
         ],
         id='static-control',
-        className='overview-panel',
     )
 
 
-def _with_static_mode(card: list) -> list:
-    heading, auto = card
-    return [
-        heading,
-        dcc.Tabs(
-            id='control-mode',
-            value='auto',
-            className='mode-tabs',
-            children=[
-                dcc.Tab(
-                    label=label,
-                    value=label.lower(),
-                    style=STATIC_TAB_STYLE,
-                    selected_style=STATIC_SELECTED_TAB_STYLE,
-                )
-                for label in ('Auto', 'Static')
-            ],
-        ),
-        html.Div(auto, id='auto-mode-panel'),
-        html.Div(_build_static_panel(), id='static-mode-panel', style={'display': 'none'}),
-    ]
+OVERLAY_BANNER_JS = (
+    '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    if (!state || state.mode !== 'static') {
+        return [{display: 'none'}, ''];
+    }
+    // The UV preset darkens everything under the blacklit groups; that is not a look of its own.
+    const looks = Object.entries((state.static || {}).looks || {}).filter(([target, look]) =>
+        !(target === '''
+    + json.dumps(ALL_FIXTURES)
+    + ''' && look.dimmer === 0
+          && !look.colour && !look.uv)).length;
+    return [{}, 'Static overlay active'
+        + (looks ? ' · ' + looks + (looks === 1 ? ' look' : ' looks') : '')];
+}'''
+)
 
 
-def _register_static_callbacks(app, snapshot_source, expectations, can_control) -> None:
+def _build_overlay_banner():
+    return html.Div(
+        [
+            html.Span(id='static-banner-text'),
+            html.Button('Clear', id='static-banner-clear'),
+        ],
+        id='static-banner',
+        className='overlay-banner',
+        style={'display': 'none'},
+    )
+
+
+# While the show follows the music the segments grey out, but the level it chose stays lit.
+FOLLOW_SYNC_JS = '''function(state) {
+    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    const on = !!(state && state.intensity_auto);
+    return [on ? 'active' : '', on ? 'following' : ''];
+}'''
+
+
+def _register_direct_auto_controls(app) -> None:
+    # Visual state flips here at click time; the bridge round trip never gates it.
+    app.clientside_callback(
+        """function(toggles, nexts, palette, intensity, follows, state) {
+            const control = window.autoluxControl;
+            const nu = window.dash_clientside.no_update;
+            const triggered = (window.dash_clientside.callback_context.triggered || [])
+                .map((t) => t.prop_id);
+            const shown = control.view(state) || {};
+            const status = 'control-status';
+            const showFollowing = (on) => {
+                window.dash_clientside.set_props(
+                    'control-intensity-auto', {className: on ? 'active' : ''});
+                window.dash_clientside.set_props(
+                    'control-intensity-set', {className: on ? 'following' : ''});
+            };
+            if (triggered.includes('control-toggle.n_clicks')) {
+                const paused = !!shown.paused;
+                control.hold({paused: !paused});
+                control.dispatch(control.build.toggle(paused), status, ['paused']);
+                return paused
+                    ? ['\u23f8\ufe0e', 'icon-button playing']
+                    : ['\u25b6\ufe0e', 'icon-button paused'];
+            }
+            if (triggered.includes('control-next.n_clicks')) {
+                control.dispatch(control.build.next(), status);
+            } else if (triggered.includes('control-palette.value')) {
+                const pin = shown.palette || {};
+                const current = pin.pinned ? pin.name : """
+        + json.dumps(PALETTE_POLICY)
+        + """;
+                if (palette && palette !== current) {
+                    control.dispatch(control.build.palette(palette), status);
+                }
+            } else if (triggered.includes('control-intensity-auto.n_clicks')) {
+                const enabled = !shown.intensity_auto;
+                control.hold({intensity_auto: enabled});
+                showFollowing(enabled);
+                control.dispatch(
+                    control.build.intensityAuto(enabled), status, ['intensity_auto']);
+            } else if (triggered.includes('control-intensity.value')) {
+                const current = (shown.settings || {}).intensity;
+                if (intensity !== null && intensity !== undefined
+                        && (current === undefined || Math.abs(intensity - current) >= 0.005)) {
+                    // A level picked by hand takes the show off follow-the-music.
+                    if (shown.intensity_auto) {
+                        control.hold({intensity_auto: false});
+                        showFollowing(false);
+                    }
+                    control.dispatch(control.build.intensity(intensity), status);
+                }
+            }
+            return [nu, nu];
+        }""",
+        Output('control-toggle', 'children', allow_duplicate=True),
+        Output('control-toggle', 'className', allow_duplicate=True),
+        Input('control-toggle', 'n_clicks'),
+        Input('control-next', 'n_clicks'),
+        Input('control-palette', 'value'),
+        Input('control-intensity', 'value'),
+        Input('control-intensity-auto', 'n_clicks'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+
+
+STATIC_CHIP_IDS = (*STATIC_PRESET_IDS, *STATIC_BUTTONS)
+
+
+def _register_direct_static_controls(app) -> None:
+    app.clientside_callback(
+        """function(...args) {
+            const control = window.autoluxControl;
+            const ids = """
+        + json.dumps(list(STATIC_CHIP_IDS))
+        + """;
+            const colour = args[ids.length];
+            const target = args[ids.length + 1];
+            const classes = args.slice(ids.length + 2, 2 * ids.length + 2);
+            const state = control.view(args[2 * ids.length + 2]) || {};
+            const triggered = (window.dash_clientside.callback_context.triggered || [])
+                .map((t) => t.prop_id.split('.')[0]);
+            const chip = ids.find((id) => triggered.includes(id));
+            if (!chip) {
+                if (triggered.includes('static-colour')) {
+                    const look = control.build.static('static-colour', target, undefined, colour);
+                    if (look) {
+                        control.dispatch(look, 'static-status');
+                    }
+                }
+                return classes.map(() => window.dash_clientside.no_update);
+            }
+            const before = classes[ids.indexOf(chip)] || '';
+            const strobing = before === 'active';
+            const command = control.build.static(chip, target, strobing);
+            if (command.kind === 'clear') {
+                control.hold({mode: 'auto'});
+                control.dispatch(command, 'static-status', ['mode']);
+                return ids.map(() => '');
+            }
+            control.dispatch(command, 'static-status').then((reply) => {
+                if (reply && reply.error) {
+                    window.dash_clientside.set_props(chip, {className: before});
+                }
+            });
+            if (chip === 'static-strobe') {
+                const token = window.autoluxStrobeToken = (window.autoluxStrobeToken || 0) + 1;
+                const settings = state.settings || {};
+                const burst = (settings.strobe_max_burst_seconds || 0) * (settings.intensity || 0);
+                if (!strobing && burst > 0) {
+                    // The show ends the burst on its own; the chip follows it.
+                    setTimeout(() => {
+                        if (window.autoluxStrobeToken === token) {
+                            window.dash_clientside.set_props(chip, {className: ''});
+                        }
+                    }, burst * 1000);
+                }
+                return ids.map((id, i) => id === chip ? (strobing ? '' : 'active') : classes[i] || '');
+            }
+            return ids.map((id, i) => id === chip ? 'active'
+                : id === 'static-strobe' ? classes[i] || '' : '');
+        }""",
+        *[Output(name, 'className') for name in STATIC_CHIP_IDS],
+        *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
+        Input('static-colour', 'value'),
+        State('static-target', 'value'),
+        *[State(name, 'className') for name in STATIC_CHIP_IDS],
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+
+
+# Every special drives colour, so a target without it can render none.
+FX_GATE_JS = (
+    """function(target, state) {
+    const groups = (state && state.special_groups) || {};
+    const axes = window.autoluxControl.fxAxes(groups, target);
+    if (!axes.includes('colour')) {
+        const name = target === """
+    + json.dumps(ALL_FIXTURES)
+    + """ ? 'No group' : target;
+        return [true, true, true, name + ' cannot render FX'];
+    }
+    return [false, !axes.includes('speed'), !axes.includes('pulse'), ''];
+}"""
+)
+
+
+FX_DIRECT_JS = (
+    """function(...args) {
+        const control = window.autoluxControl;
+        const chips = """
+    + json.dumps(list(FX_SLOT_IDS))
+    + """;
+        const n = chips.length;
+        const [energy, speed, pulse, target] = args.slice(n + 3, n + 7);
+        const classes = args.slice(n + 7, 2 * n + 7);
+        const state = control.view(args[2 * n + 7]) || {};
+        const trigger = ((window.dash_clientside.callback_context.triggered || [])[0] || {})
+            .prop_id.split('.')[0];
+        if (trigger === 'static-clear' || trigger === 'static-banner-clear') {
+            // Clear all releases the special with the rest of the overlay.
+            return chips.map(() => '');
+        }
+        const active = chips.find((id, i) => classes[i] === 'active');
+        if (!chips.includes(trigger) && trigger !== """
+    + json.dumps(FX_CLEAR_ID)
+    + """ && !active) {
+            return classes.map(() => window.dash_clientside.no_update);
+        }
+        const axes = control.fxAxes(state.special_groups || {}, target);
+        const slot = active ? active.slice('static-fx-'.length) : null;
+        const command = control.build.fx(trigger, target, energy, speed, pulse, axes, slot);
+        control.dispatch(command, 'static-status').then((reply) => {
+            if (reply && reply.error) {
+                chips.forEach((id, i) => window.dash_clientside.set_props(
+                    id, {className: classes[i] || ''}));
+            }
+        });
+        const lit = command.kind === 'special_fx' ? 'static-fx-' + command.colour_slot : null;
+        return chips.map((id) => id === lit ? 'active' : '');
+    }"""
+)
+
+
+def _register_direct_fx_controls(app) -> None:
+    app.clientside_callback(
+        FX_DIRECT_JS,
+        *[Output(chip, 'className') for chip in FX_SLOT_IDS],
+        *[Input(chip, 'n_clicks') for chip in (*FX_SLOT_IDS, FX_CLEAR_ID)],
+        *[Input(chip, 'n_clicks') for chip in ('static-clear', 'static-banner-clear')],
+        *[Input(segment, 'value') for segment in FX_SEGMENT_IDS],
+        State('static-target', 'value'),
+        *[State(chip, 'className') for chip in FX_SLOT_IDS],
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+
+
+def _register_static_callbacks(app, snapshot_source, expectations, can_control, direct) -> None:
     app.clientside_callback(
         '''function(mode) {
             return [{display: mode === 'static' ? 'none' : 'block'},
@@ -1127,94 +1542,91 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control) 
         Input('control-mode', 'value'),
     )
     app.clientside_callback(
-        '''function(state) {
-            const ready = !!state && !!state.mode && !!state.static;
-            const mode = ready ? state.mode : window.dash_clientside.no_update;
-            const statics = ready ? state.static : {targets: ['all'], blacklight: false};
-            const options = statics.targets.map((target) =>
-                ({label: target === 'all' ? 'All' : target, value: target}));
-            const blackout = !!statics.blackout;
-            return [mode, options, blackout ? 'static-blackout-on' : '',
-                    blackout ? 'Blackout on' : 'Blackout', !statics.blacklight];
-        }''',
-        Output('control-mode', 'value'),
+        STATIC_TARGETS_JS,
         Output('static-target', 'options'),
-        Output('static-blackout', 'className'),
-        Output('static-blackout', 'children'),
         Output('static-blacklight', 'disabled'),
+        Output('static-preset-uv', 'disabled'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(
-        '''function(level) {
-            const label = level === null || level === undefined
-                ? '—' : Math.round(level * 100) + '%';
-            const now = Date.now();
-            if (level === null || level === undefined
-                    || now - (window.autoluxStaticDimmerSentAt || 0) < '''
-        + str(LIVE_FADER_INTERVAL_MS)
-        + ''') {
-                return [label, window.dash_clientside.no_update];
-            }
-            window.autoluxStaticDimmerSentAt = now;
-            return [label, level];
-        }''',
-        Output('static-dimmer-value', 'children'),
-        Output('static-dimmer-live', 'data'),
-        Input('static-dimmer', 'drag_value'),
+        OVERLAY_BANNER_JS,
+        Output('static-banner', 'style'),
+        Output('static-banner-text', 'children'),
+        Input('control-state', 'data'),
     )
-    sent_dimmer = {}
+    app.clientside_callback(
+        FX_GATE_JS,
+        Output('static-fx-set', 'disabled'),
+        Output('static-fx-speed-set', 'disabled'),
+        Output('static-fx-pulse-set', 'disabled'),
+        Output('static-fx-note', 'children'),
+        Input('static-target', 'value'),
+        Input('control-state', 'data'),
+    )
+
+    @app.callback(
+        Output('control-mode-synced', 'data'),
+        Input('control-state', 'data'),
+        State('control-mode-synced', 'data'),
+        prevent_initial_call=True,
+    )
+    def show_mode_on_load(state, synced):
+        mode = (state or {}).get('mode')
+        if synced or mode is None:
+            raise dash.exceptions.PreventUpdate
+        dash.set_props('control-mode', {'value': mode})
+        return True
+
+    if direct:
+        _register_direct_static_controls(app)
+        _register_direct_fx_controls(app)
+        return
+
+    def _fx_command(trigger, target, state):
+        inputs = dash.ctx.inputs
+        active = ((state.get('static') or {}).get('special_fx') or {}).get('colour_slot')
+        return static_fx_command(
+            trigger,
+            target,
+            *(inputs.get(f'{segment}.value') for segment in FX_SEGMENT_IDS),
+            fx_axes(state.get('special_groups') or {}, target),
+            active,
+        )
 
     @app.callback(
         Output('static-status', 'children'),
-        Output('control-mode', 'value', allow_duplicate=True),
-        Input('control-mode', 'value'),
         *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
-        *[Input(name, 'n_clicks') for name in (*STATIC_BUTTONS, 'static-blackout')],
-        Input('static-auto', 'n_clicks'),
+        *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
+        *[Input(name, 'n_clicks') for name in (*FX_SLOT_IDS, FX_CLEAR_ID)],
+        *[Input(name, 'value') for name in FX_SEGMENT_IDS],
         Input('static-colour', 'value'),
-        Input('static-dimmer', 'value'),
-        Input('static-dimmer-live', 'data'),
         State('static-target', 'value'),
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_static(mode, *values):
-        *_, colour, released, live, target, state = values
-        state = state or {}
+    def send_static(*_):
+        colour = dash.ctx.inputs['static-colour.value']
+        target = dash.ctx.states['static-target.value']
+        state = dash.ctx.states.get('control-state.data') or {}
         trigger = dash.ctx.triggered_id
         if not can_control:
             raise dash.exceptions.PreventUpdate
-        if trigger == 'control-mode':
-            if mode == state.get('mode'):
-                raise dash.exceptions.PreventUpdate
-            command = {'action': 'mode', 'mode': mode}
-        else:
-            dimmer = live if trigger == 'static-dimmer-live' else released
-            if trigger in STATIC_DIMMER_IDS and (
-                dimmer is None or sent_dimmer.get(target) == dimmer
-            ):
-                raise dash.exceptions.PreventUpdate
-            if trigger == 'static-colour' and not colour:
-                raise dash.exceptions.PreventUpdate
-            blackout = (state.get('static') or {}).get('blackout', False)
-            try:
-                command = static_control_command(trigger, target, colour, dimmer, blackout)
-            except ValueError as error:
-                return f'Rejected: {error}', dash.no_update
-            if command is None:
-                raise dash.exceptions.PreventUpdate
+        if trigger == 'static-colour' and not colour:
+            raise dash.exceptions.PreventUpdate
+        try:
+            command = static_control_command(trigger, target, colour) or _fx_command(
+                trigger, target, state
+            )
+        except ValueError as error:
+            return f'Rejected: {error}'
+        if command is None:
+            raise dash.exceptions.PreventUpdate
         reply = snapshot_source.control(command)
         if 'error' in reply:
-            return f'Rejected: {reply["error"]}', dash.no_update
-        if command.get('kind') == 'look' and 'dimmer' in command:
-            sent_dimmer[target] = command['dimmer']
-        if command['action'] == 'mode':
-            sent_dimmer.clear()
-            expectations.expect(mode=command['mode'])
-            return '', command['mode']
-        if command.get('kind') == 'preset':
-            sent_dimmer.clear()
-        return '', dash.no_update
+            return f'Rejected: {reply["error"]}'
+        if command['kind'] == 'clear' and state:
+            expectations.expect(mode='auto')
+        return ''
 
 
 def _metric_card(label, value, detail):
@@ -1355,20 +1767,12 @@ body { margin: 0; background: #0b1018; color: #e6edf3; font-family: 'Segoe UI', 
 .subtitle, .section-heading p { color: #9baabb; font-size: 12px; margin: 0; }
 .section-heading { margin: 22px 0 12px; }
 h2 { font-size: 14px; font-weight: 600; margin: 0; }
-.overview-panel { border: 1px solid #273344; border-radius: 8px; background: #111923; }
-.status-strip { font-variant-numeric: tabular-nums; }
-.show-overview { display: grid;
-                 grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.6fr); }
-.show-stat { padding: 12px 16px; min-width: 0; border-right: 1px solid #1b2735; }
-.show-stat:last-child { border-right: 0; }
 .stat-label { font-size: 10px; color: #9baabb; margin-bottom: 6px; }
 .stat-value { display: flex; align-items: baseline; gap: 10px; font-size: 15px; font-weight: 600;
               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stat-tags { color: #8293a6; font-size: 11px; font-weight: 500; }
-.show-stat:nth-child(4) .stat-value span { filter: brightness(1.7); }
 .status-secondary { display: flex; justify-content: space-between; align-items: baseline;
-                    flex-wrap: wrap; gap: 8px 24px; padding: 9px 16px;
-                    border-top: 1px solid #1b2735; color: #9baabb; font-size: 12px; }
+                    flex-wrap: wrap; gap: 8px 24px; padding: 8px 0;
+                    border-bottom: 1px solid #1b2735; color: #9baabb; font-size: 12px; }
 .show-timing span:nth-child(even) { color: #e6edf3; font-weight: 600; }
 .status-metrics { display: flex; flex-wrap: wrap; gap: 6px 22px; }
 .status-metric { display: inline-flex; align-items: baseline; gap: 7px; cursor: help; }
@@ -1381,9 +1785,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .performance-stat .stat-value { font-size: 20px; }
 .metric-detail { margin-top: 5px; color: #8293a6; font-size: 11px; }
 .show-panel { border: 1px solid #273344; border-radius: 8px; overflow: hidden; background: #0d1117; }
-.show-panel .section-heading { margin: 0; padding: 14px 18px 6px; }
-.legend { padding: 12px 18px 0; }
-.legend > span { display: inline-block; white-space: nowrap; filter: brightness(1.7); }
 .charts-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .chart-panel { min-width: 0; background: #111923; border: 1px solid #273344; border-radius: 8px; overflow: hidden; }
 .chart-panel h3 { margin: 16px 16px 7px; font-size: 13px; font-weight: 600; }
@@ -1403,73 +1804,6 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .command-diagnostics td { padding: 4px 0; }
 .command-diagnostics th, .command-diagnostics td { text-align: right; }
 .command-diagnostics th:first-child, .command-diagnostics td:first-child { text-align: left; }
-#show-control { display: grid;
-                grid-template-columns: minmax(220px, 1fr) minmax(0, 1.5fr) minmax(0, 1.5fr); }
-.control-transport { grid-column: 1 / -1; display: flex; gap: 10px; padding: 12px 16px;
-                     border-bottom: 1px solid #273344; }
-.control-group { padding: 14px 16px 16px; min-width: 0; }
-.control-group + .control-group { border-left: 1px solid #273344; }
-.control-heading { display: flex; justify-content: space-between; align-items: baseline;
-                   min-height: 16px; margin-bottom: 12px; }
-.control-intensity-heading { margin-top: 18px; }
-#control-brightness-value, #control-intensity-value { color: #e6edf3; font-size: 18px; font-weight: 600;
-                            text-align: right; font-variant-numeric: tabular-nums; }
-.control-master .dash-slider-track { height: 10px; background: #1e2c3d; border-radius: 3px; }
-.control-master .dash-slider-range { background: #73b6ff; border-radius: 3px; }
-.control-scale { display: flex; justify-content: space-between; margin-top: 8px;
-                 color: #8293a6; font-size: 10px; }
-.settings-drawer { grid-column: span 2; display: grid; gap: 8px; align-content: start; }
-.settings-drawer .control-heading { margin-bottom: 4px; }
-.settings-group { border: 1px solid #273344; border-radius: 4px; background: #0e151f; }
-.settings-group-header { display: flex; align-items: baseline; gap: 8px; padding: 9px 12px;
-                         cursor: pointer; list-style: none; user-select: none; }
-.settings-group-header::-webkit-details-marker { display: none; }
-.settings-group-header::before { content: '▸'; color: #8293a6; font-size: 10px;
-                                 transition: transform .12s; }
-.settings-group[open] > .settings-group-header::before { transform: rotate(90deg); }
-.settings-group-header:hover { background: #162130; }
-.settings-group-header:focus-visible { outline: 1px solid #73b6ff; outline-offset: -1px; }
-.settings-group-title { color: #dce8f5; font-size: 12px; font-weight: 600; }
-.settings-group-marker { color: #f0883e; font-size: 10px; text-transform: uppercase;
-                         letter-spacing: .04em; }
-.settings-group-summary { margin-left: auto; color: #8293a6; font-size: 11px; white-space: nowrap;
-                          overflow: hidden; text-overflow: ellipsis; min-width: 0;
-                          font-variant-numeric: tabular-nums; }
-.settings-group[open] .settings-group-summary { visibility: hidden; }
-.settings-group-body { display: grid; gap: 2px; padding: 2px 12px 10px 28px; }
-.settings-group-strobe { box-shadow: inset 3px 0 0 #f0883e; }
-.settings-group-strobe .settings-group-title { color: #f0883e; }
-.setting-row { display: grid; grid-template-columns: minmax(0, 1fr) 118px 64px;
-               column-gap: 10px; align-items: center; min-height: 30px; }
-.setting-name { color: #9baabb; font-size: 12px; overflow: hidden; text-overflow: ellipsis;
-                white-space: nowrap; }
-.setting-value { display: flex; align-items: center; background: #0b121c;
-                 border: 1px solid #344256; border-radius: 4px; }
-.setting-value:focus-within { border-color: #73b6ff; }
-.setting-value:has(input:invalid),
-.setting-row:has(.setting-error:not(:empty)) .setting-value { border-color: #e8b56d; }
-.setting-value:has(input:disabled) { opacity: .4; }
-.setting-value input { flex: 1; min-width: 0; width: 100%; background: transparent; color: #e6edf3;
-                       border: 0; padding: 5px 4px 5px 8px; font: inherit; font-size: 12px;
-                       text-align: right; font-variant-numeric: tabular-nums; }
-.setting-value input:focus { outline: none; }
-.setting-unit { flex: 0 0 38px; padding-right: 8px; color: #8293a6; font-size: 11px; }
-.setting-range { color: #8293a6; font-size: 10px; text-align: right;
-                 font-variant-numeric: tabular-nums; white-space: nowrap; }
-.setting-error { grid-column: 1 / -1; color: #ff7b72; font-size: 11px; padding: 2px 0 4px; }
-.setting-error:empty { display: none; }
-#show-control button { background: #1e2c3d; color: #dce8f5; border: 1px solid #3b4d62;
-                       border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 12px; }
-#show-control button:disabled { opacity: .4; cursor: default; }
-#show-control .control-toggle { flex: 0 0 180px; padding: 12px 14px; font-size: 14px;
-                                font-weight: 600; }
-#control-palette { flex: 1 1 180px; align-self: center; font-size: 12px; color: #0b121c; }
-#show-control .control-toggle.playing { background: #1b3324; border-color: #3fb950; color: #aff5b4; }
-#show-control .control-toggle.paused { background: #3a2a18; border-color: #f0883e; color: #ffd8b5; }
-#show-control .control-next { padding: 12px 16px; font-size: 13px; font-weight: 600; }
-.control-status { grid-column: 1 / -1; margin: 0; padding: 9px 16px;
-                  border-top: 1px solid #273344; color: #ff7b72; font-size: 12px; }
-.control-status:empty { display: none; }
 .footer { display: flex; justify-content: flex-end; color: #8293a6; font-size: 11px; margin-top: 18px; }
 .footer a { color: #9baabb; }
 .ss-beat { position: absolute; width: 2px; margin-left: -1px;
@@ -1783,6 +2117,7 @@ class SnapshotPoller:
         timeout: float = POLL_TIMEOUT_SEC,
     ):
         self._host, self._port, self._timeout = host, port, timeout
+        self.port = port
         self._connection = None
         self._last = dict(BLANK_SNAPSHOT)
         self._answering = True
@@ -1843,7 +2178,26 @@ class SnapshotPoller:
         return reply
 
 
-def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
+def direct_control_default() -> bool:
+    return os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
+
+
+def control_page_config(snapshot_source, direct: bool) -> dict:
+    return {
+        'direct': direct,
+        'bridgePort': getattr(snapshot_source, 'port', None),
+        'relayPath': RELAY_PATH,
+        'holdMs': int(CONTROL_EXPECT_SECONDS * 1000),
+        'allFixtures': ALL_FIXTURES,
+        'presetColours': {name: colour_hex(rgb) for name, rgb in PRESET_COLOURS.items()},
+    }
+
+
+def build_app(
+    snapshot_source,
+    fixture_store: FixtureStore | None = None,
+    direct_control: bool | None = None,
+) -> dash.Dash:
     app = dash.Dash(
         __name__,
         title=TITLE,
@@ -1851,8 +2205,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + STATIC_CSS + '</style>')
-    from flask import request
+    can_control = callable(getattr(snapshot_source, 'control', None))
+    direct = can_control and (
+        direct_control_default() if direct_control is None else direct_control
+    )
+    app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
+        '{%css%}',
+        '{%css%}<script>window.autoluxControlConfig = '
+        + json.dumps(control_page_config(snapshot_source, direct))
+        + ';</script>',
+    )
+    from flask import jsonify, request
     from prometheus_client import make_wsgi_app
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
@@ -1882,7 +2245,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         'fontWeight': '500',
         'flex': 'none',
     }
-    can_control = callable(getattr(snapshot_source, 'control', None))
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
         build_fixture_panel(app, fixture_store)
@@ -1891,6 +2253,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             [
                 html.Div(html.H2('Fixture setup'), className='section-heading'),
                 html.P('Fixture setup is unavailable in this session.', className='subtitle'),
+                html.P(id='special-groups', className='subtitle'),
             ],
             id='config-panel',
             style={'display': 'none'},
@@ -1923,27 +2286,16 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             html.Div(id='telemetry-alerts'),
             html.Section(
                 [
-                    html.Section(
-                        [
-                            html.Div(id='metrics', className='show-overview'),
-                            html.Div(
-                                [
-                                    html.Div(id='show-timing', className='show-timing'),
-                                    html.Div(id='performance-metrics', className='status-metrics'),
-                                ],
-                                className='status-secondary',
-                            ),
-                        ],
-                        className='overview-panel status-strip',
-                    ),
-                    *_with_static_mode(_build_control_card()),
+                    *_build_control_card(),
                     html.Div(
-                        [html.H2('Show timeline'), html.P('Room playback · last 30 seconds')],
-                        className='section-heading',
+                        [
+                            html.Span('Show timeline', className='section-label'),
+                            html.Div(_build_legend(), className='legend'),
+                        ],
+                        className='section-row',
                     ),
                     html.Section(
                         [
-                            html.Div(_build_legend(), className='legend'),
                             html.Div(
                                 [
                                     html.Div(
@@ -2017,6 +2369,13 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             html.Section(
                 [
                     html.Div(
+                        [
+                            html.Div(id='show-timing', className='show-timing'),
+                            html.Div(id='performance-metrics', className='status-metrics'),
+                        ],
+                        className='status-secondary',
+                    ),
+                    html.Div(
                         [html.H2('Starfire'), html.P('Measured rendering performance')],
                         className='section-heading',
                     ),
@@ -2074,7 +2433,12 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     )
     app.clientside_callback(
         '''function(figures, selected) {
-            if (selected !== 'telemetry' || !figures) throw window.dash_clientside.PreventUpdate;
+            // The first figures build the charts while hidden, so the tab opens populated;
+            // after that they redraw only while the tab is shown.
+            if (!figures || (selected !== 'telemetry' && window.autoluxTelemetryPrimed)) {
+                throw window.dash_clientside.PreventUpdate;
+            }
+            window.autoluxTelemetryPrimed = true;
             return figures;
         }''',
         [Output(f'metric-{panel}', 'figure') for panel, *_ in system_metrics.PANELS],
@@ -2091,10 +2455,22 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     expectations = ControlExpectations()
 
+    @app.server.route(RELAY_PATH, methods=['POST'])
+    def relay_control():
+        command = request.get_json(silent=True)
+        if not can_control:
+            return jsonify({'error': 'this dashboard cannot control the show'}), 403
+        if not isinstance(command, dict):
+            return jsonify({'error': 'a command must be a JSON object'}), 400
+        reply = snapshot_source.control(command)
+        if 'error' not in reply:
+            expectations.expect(**expected_control_values(command, reply))
+        return jsonify(reply)
+
     @app.callback(
         [
             Output('sync', 'data'),
-            Output('metrics', 'children'),
+            Output('show-status', 'children'),
             Output('show-timing', 'children'),
             Output('decoder', 'children'),
             Output('command-diagnostics', 'children'),
@@ -2111,15 +2487,16 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     def refresh(requested):
         if not requested or requested.get('tab') not in ('control', 'telemetry'):
             raise dash.exceptions.PreventUpdate
-        snap = expectations.apply(snapshot_source.snapshot())
+        snap = expectations.apply(_with_base_palette(snapshot_source.snapshot()))
         now = time.time()
-        sync = metrics = show_timing = decoder = commands = timeline = dash.no_update
+        sync = status = show_timing = decoder = commands = dash.no_update
+        timeline = dash.no_update
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
         due = requested.get('metrics')
         if on_control or due:
             sync = _anchor(snap)
-            metrics = _build_show_overview(snap)
+            status = _build_show_status(snap, now)
             show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
             commands = _build_command_diagnostics(snap)
@@ -2134,9 +2511,11 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                         'palette',
                         'mode',
                         'static',
+                        'special_groups',
                     )
                 }
                 settings = control['settings'] or {}
+                control['intensity_auto'] = bool(settings.get('intensity_auto'))
                 control['settings_text'] = {
                     name: setting_text(name, value) for name, value in settings.items()
                 }
@@ -2150,7 +2529,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         return (
             sync,
             *(
-                metrics,
+                status,
                 show_timing,
                 decoder,
                 commands,
@@ -2166,12 +2545,13 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     setting_names = json.dumps(list(FORM_SETTINGS))
     app.clientside_callback(
         '''function(state) {
+            state = window.autoluxControl ? window.autoluxControl.view(state) : state;
             const ready = !!state && state.paused !== null && state.paused !== undefined;
-            const mode = !ready ? '' : state.paused ? ' paused' : ' playing';
             const settable = !ready || !state.settings;
             const skippable = ready && !state.paused && !!state.intent
                 && state.intent !== 'standby';
-            return [ready && state.paused ? 'Play ▶' : 'Pause ❚❚', 'control-toggle' + mode, !ready,
+            return [ready && state.paused ? '\u25b6\ufe0e' : '\u23f8\ufe0e',
+                    'icon-button' + (!ready ? '' : state.paused ? ' paused' : ' playing'), !ready,
                     !skippable, !ready || state.master_brightness === null, settable,
                     ...'''
         + setting_names
@@ -2182,12 +2562,12 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('control-toggle', 'disabled'),
         Output('control-next', 'disabled'),
         Output('control-brightness', 'disabled'),
-        Output('control-intensity', 'disabled'),
+        Output('control-intensity-set', 'disabled'),
         *[Output(f'control-{name}', 'disabled') for name in FORM_SETTINGS],
         Input('control-state', 'data'),
     )
     app.clientside_callback(
-        '''function(state, drag, value, intensityDrag, intensityValue, synced) {
+        '''function(state, drag, value, synced) {
             const nu = window.dash_clientside.no_update;
             if (!state || state.master_brightness === null || !state.settings) {
                 throw window.dash_clientside.PreventUpdate;
@@ -2203,16 +2583,14 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             const dragging = drag !== null && drag !== undefined && drag !== value;
             const focused = document.activeElement ? document.activeElement.id : '';
             const next = {...synced};
-            let level = nu;
+            const set = window.dash_clientside.set_props;
             if (!touched && !dragging && state.master_brightness !== synced.master) {
-                level = next.master = state.master_brightness;
+                next.master = state.master_brightness;
+                set('control-brightness', {value: next.master});
             }
-            const intensityDragging = intensityDrag !== null && intensityDrag !== undefined
-                && intensityDrag !== intensityValue;
-            let intensity = nu;
-            if (!touched && !intensityDragging
-                    && state.settings.intensity !== synced.intensity) {
-                intensity = next.intensity = state.settings.intensity;
+            if (!touched && state.settings.intensity !== synced.intensity) {
+                next.intensity = state.settings.intensity;
+                set('control-intensity', {value: next.intensity});
             }
             const fields = names.map((name) => {
                 if (touched || focused === 'control-' + name || text[name] === synced[name]) {
@@ -2221,96 +2599,118 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 next[name] = text[name];
                 return text[name];
             });
-            return [level, intensity, ...fields, next];
+            return [...fields, next];
         }''',
-        Output('control-brightness', 'value'),
-        Output('control-intensity', 'value'),
         *[Output(f'control-{name}', 'value') for name in FORM_SETTINGS],
         Output('control-synced', 'data'),
         Input('control-state', 'data'),
         State('control-brightness', 'drag_value'),
         State('control-brightness', 'value'),
-        State('control-intensity', 'drag_value'),
-        State('control-intensity', 'value'),
         State('control-synced', 'data'),
     )
-    for fader in ('brightness', 'intensity'):
+    if direct:
+        app.clientside_callback(
+            '''function(drag, released, state) {
+                const level = drag === null || drag === undefined ? released : drag;
+                if (level === null || level === undefined) {
+                    return '—';
+                }
+                const shown = window.autoluxControl.view(state) || {};
+                if (level !== shown.master_brightness && level !== window.autoluxMasterSent) {
+                    window.autoluxControlTouchedAt = Date.now();
+                    window.autoluxMasterSent = level;
+                    window.autoluxControl.hold({master_brightness: level});
+                    window.autoluxControl.sendLatest(
+                        'master', window.autoluxControl.build.master(level), 'control-status');
+                }
+                return Math.round(level * 100) + '%';
+            }''',
+            Output('control-brightness-value', 'children'),
+            Input('control-brightness', 'drag_value'),
+            Input('control-brightness', 'value'),
+            State('control-state', 'data'),
+            prevent_initial_call=True,
+        )
+        _register_direct_auto_controls(app)
+    else:
         app.clientside_callback(
             '''function(level) {
                 window.autoluxControlTouchedAt = Date.now();
                 const label = level === null || level === undefined
                     ? '—' : Math.round(level * 100) + '%';
                 const now = Date.now();
-                const sentAt = window.autoluxFaderSentAt = window.autoluxFaderSentAt || {};
                 if (level === null || level === undefined
-                        || now - (sentAt.FADER || 0) < INTERVAL_MS) {
+                        || now - (window.autoluxFaderSentAt || 0) < '''
+            + str(LIVE_FADER_INTERVAL_MS)
+            + ''') {
                     return [label, window.dash_clientside.no_update];
                 }
-                sentAt.FADER = now;
+                window.autoluxFaderSentAt = now;
                 return [label, level];
-            }'''.replace('FADER', fader).replace('INTERVAL_MS', str(LIVE_FADER_INTERVAL_MS)),
-            Output(f'control-{fader}-value', 'children'),
-            Output(f'control-{fader}-live', 'data'),
-            Input(f'control-{fader}', 'drag_value'),
+            }''',
+            Output('control-brightness-value', 'children'),
+            Output('control-brightness-live', 'data'),
+            Input('control-brightness', 'drag_value'),
         )
     app.clientside_callback(
-        '''function() {
-            window.autoluxControlTouchedAt = Date.now();
-            return window.dash_clientside.no_update;
+        '''function(level) {
+            const presets = '''
+        + json.dumps([level for _, level in INTENSITY_LEVELS])
+        + ''';
+            return level === null || level === undefined || presets.includes(level)
+                ? '' : Math.round(level * 100) + '%';
         }''',
-        Output('control-touched', 'data'),
-        *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
-        prevent_initial_call=True,
+        Output('control-intensity-value', 'children'),
+        Input('control-intensity', 'value'),
     )
-
     app.clientside_callback(
-        '''function(state) {
-            const palette = state && state.palette;
-            if (!palette) {
-                return [window.dash_clientside.no_update, true];
-            }
-            return [palette.pinned ? palette.name : '''
-        + json.dumps(PALETTE_POLICY)
-        + ''', false];
-        }''',
-        Output('control-palette', 'value'),
+        PALETTE_SYNC_JS,
         Output('control-palette', 'disabled'),
         Input('control-state', 'data'),
+    )
+    app.clientside_callback(
+        FOLLOW_SYNC_JS,
+        Output('control-intensity-auto', 'className'),
+        Output('control-intensity-set', 'className'),
+        Input('control-state', 'data'),
+    )
+
+    operator_inputs = (
+        []
+        if direct
+        else [
+            Input('control-toggle', 'n_clicks'),
+            Input('control-next', 'n_clicks'),
+            Input('control-palette', 'value'),
+            Input('control-brightness', 'value'),
+            Input('control-brightness-live', 'data'),
+            Input('control-intensity', 'value'),
+            Input('control-intensity-auto', 'n_clicks'),
+        ]
     )
 
     @app.callback(
         Output('control-status', 'children'),
         Output('control-state', 'data', allow_duplicate=True),
-        Input('control-toggle', 'n_clicks'),
-        Input('control-next', 'n_clicks'),
-        Input('control-palette', 'value'),
-        Input('control-brightness', 'value'),
-        Input('control-brightness-live', 'data'),
-        Input('control-intensity', 'value'),
-        Input('control-intensity-live', 'data'),
+        *operator_inputs,
         *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
         State('control-state', 'data'),
         prevent_initial_call=True,
     )
-    def send_control(
-        _toggle,
-        _next,
-        palette,
-        released,
-        live,
-        intensity_released,
-        intensity_live,
-        *settings_and_state,
-    ):
-        *settings, state = settings_and_state
-        state = state or {}
+    def send_control(*_):
+        values = dash.ctx.inputs
+        state = dash.ctx.states.get('control-state.data') or {}
+        palette = values.get('control-palette.value')
+        released = values.get('control-brightness.value')
+        live = values.get('control-brightness-live.data')
+        intensity_picked = values.get('control-intensity.value')
+        settings = [values[f'control-{name}.value'] for name in FORM_SETTINGS]
         intensity = (state.get('settings') or {}).get('intensity', DEFAULT_INTENSITY)
         trigger = dash.ctx.triggered_id
         faders = {
             'control-brightness': (released, state.get('master_brightness')),
             'control-brightness-live': (live, state.get('master_brightness')),
-            'control-intensity': (intensity_released, intensity),
-            'control-intensity-live': (intensity_live, intensity),
+            'control-intensity': (intensity_picked, intensity),
         }
         level, current = faders.get(trigger, (None, None))
         if trigger in faders and (
@@ -2318,14 +2718,21 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         ):
             raise dash.exceptions.PreventUpdate
         try:
-            command = control_command(
-                trigger, state.get('paused'), level, settings, palette=palette, intensity=intensity
-            )
+            if trigger in SETTING_IDS:
+                command = settings_edit(SETTING_IDS[trigger], values[f'{trigger}.value'], state)
+            else:
+                command = control_command(
+                    trigger,
+                    state.get('paused'),
+                    level,
+                    settings,
+                    palette=palette,
+                    intensity=intensity,
+                    auto=bool(state.get('intensity_auto')),
+                )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update
         if command is None or not can_control:
-            raise dash.exceptions.PreventUpdate
-        if command['action'] == 'settings' and command['settings'] == state.get('settings'):
             raise dash.exceptions.PreventUpdate
         shown = state.get('palette') or {}
         if command['action'] == 'palette' and palette == (
@@ -2342,7 +2749,13 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         return '', dash.no_update
 
     _register_settings_drawer(app)
-    _register_static_callbacks(app, snapshot_source, expectations, can_control)
+    _register_static_callbacks(app, snapshot_source, expectations, can_control, direct)
+
+    @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))
+    def show_special_groups(selected):
+        if selected != 'config':
+            raise dash.exceptions.PreventUpdate
+        return special_groups_view(snapshot_source.snapshot().get('special_groups') or {})
 
     app.clientside_callback(
         ANIMATION_JS,

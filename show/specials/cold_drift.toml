@@ -1,0 +1,14 @@
+name = "cold_drift"
+intents = ["atmospheric"]
+group = "fx"
+
+[preset]
+colour = "cold"
+
+[effect]
+rate = 0.05
+size = 0.15
+
+[playback]
+attack_beats = 32
+release_beats = 32

@@ -60,11 +60,11 @@ fn root() -> PathBuf {
 }
 
 fn room() -> FixtureRig {
-    FixtureRig::load(&root().join("../rigs/room.rig.pb")).unwrap()
+    FixtureRig::load(&root().join("../rig/room.rig.pb")).unwrap()
 }
 
 fn catalog() -> AutoloopCatalog {
-    AutoloopCatalog::load(&root().join("../autoloops")).unwrap()
+    AutoloopCatalog::load(&root().join("../show/autoloops")).unwrap()
 }
 
 fn looks() -> Vec<Look> {
@@ -73,7 +73,7 @@ fn looks() -> Vec<Look> {
         .into_iter()
         .map(|entry| {
             let path = root().join(format!(
-                "../autoloops/{}/{}.lua",
+                "../show/autoloops/{}/{}.lua",
                 entry.bank, entry.autoloop
             ));
             let source = fs::read_to_string(path).unwrap();
@@ -101,8 +101,8 @@ fn looks() -> Vec<Look> {
 
 const META_KEYS: [(&str, &[&str]); 3] = [
     ("energy", &["1", "2", "3"]),
-    ("family", &["cold", "warm", "accent"]),
     ("movement", &["still", "sweep", "snap"]),
+    ("texture", &["wash", "beam", "pixel", "mixed"]),
 ];
 
 fn metadata(look: &Look) -> Result<[String; 3], String> {
@@ -663,7 +663,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     "#,
     );
     assert_eq!(
-        frame.fixture_properties_before_strobe["cf805_pixel_1"].colour,
+        frame.fixture_properties_before_strobe["zq06017_pixel_1"].colour,
         Rgb {
             red: 0.0,
             green: 0.85,
@@ -674,7 +674,8 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
 
 #[test]
 fn the_same_autoloops_work_on_a_different_rig_through_named_groups() {
-    let rig = FixtureRig::load(&root().join("../rigs/generic.rig.pb")).unwrap();
+    let rig =
+        FixtureRig::load(&root().join("../autolux/tests/data/generic_rig/generic.rig.pb")).unwrap();
     for look in looks() {
         let mut replay = replay_for(&look);
         replay.duration_seconds = 8.0;

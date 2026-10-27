@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from pathlib import Path
@@ -19,7 +20,9 @@ EVAL_SET = load_eval_set(EVAL_SET_FILE)
 DATA_DIR = run_eval_set.corpus_dir()
 
 SAMPLE_TRACK_ID = run_eval_set.shortest_track_ids(EVAL_SET, 1)[0]
-BENCH_TRACK_IDS = run_eval_set.shortest_track_ids(EVAL_SET, 3)
+# Two D&B tracks and one tech house track at 122 BPM, none with a digital-silence
+# standby. 0834 (the third shortest) stopped on silence and used to be unwarmable.
+BENCH_TRACK_IDS = ["0096.PNpXKsge4xM", "0434.SBnxzXkc_qw", "0911.hSCcLy_OBLM"]
 
 
 def _require_audio(track_ids: list) -> list:
@@ -93,6 +96,10 @@ async def test_report_duration_matches_song_not_flush_tail():
 
 
 @pytest.mark.integration
+# Wall-clock speed depends on machine load, so it stays out of the deterministic run.
+@pytest.mark.skipif(
+    os.environ.get('AUTOLUX_TIMING_TESTS') != '1', reason='set AUTOLUX_TIMING_TESTS=1 to time runs'
+)
 async def test_runs_much_faster_than_real_time():
     # 2x, not 4x: madmom's online nets measure ~3.8x real time here (aubio was ~46x).
     run = await _sample_run()
@@ -138,3 +145,43 @@ def test_eval_set_head_matches_the_committed_baseline(nn_artifacts):
         f"a run that degraded moves every checksum and zeroes every score, and "
         f"re-cutting that blesses a dark show as the benchmark"
     )
+
+
+def test_every_simulated_component_runs_on_the_simulation_clock():
+    """A component left on the wall clock makes the report depend on how fast the machine ran.
+
+    The drop-strobe cooldown once measured wall time while the music ran on the virtual
+    clock, so a warm eval track strobed or not depending on load.
+    """
+    from types import SimpleNamespace
+
+    from autolux.lib.clock import VirtualClock
+    from autolux.simulate.runner import build_simulation
+
+    clock = VirtualClock()
+    components, command_queue = build_simulation(
+        object(), clock=clock, section=SimpleNamespace(stream=None, decoder=None)
+    )
+    engine = components['light_engine']
+    assert engine._clock is clock
+    assert engine.effect_controller.clock is clock
+    assert components['lighting_client']._clock is clock
+    assert command_queue._clock is clock
+    assert components['music_analyser']._clock is clock
+    # The eval never attaches a live track source; only lib/main.py wires the media session.
+    assert engine._media_session_live() is False
+
+
+@pytest.mark.integration
+async def test_two_simulated_runs_of_one_warm_track_give_identical_reports(nn_artifacts):
+    from autolux.simulate.evaluator import report_checksum
+
+    track = _require_audio([SAMPLE_TRACK_ID])[0]
+    mp3 = str(run_eval_set.audio_path(DATA_DIR, track["youtube_id"]))
+    checksums = []
+    for _ in range(2):
+        _, event_buffer, command_queue = await run_fast_simulation(
+            FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, mp3), data_dir=DATA_DIR
+        )
+        checksums.append(report_checksum(event_buffer.to_report(command_queue.get_timing_log())))
+    assert checksums[0] == checksums[1]

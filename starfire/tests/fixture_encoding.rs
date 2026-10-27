@@ -50,7 +50,7 @@ fn rgb_and_rgbw_scale_intensity_without_a_master_channel() {
 
 #[test]
 fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
-    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
     let mut states = rig.empty_states();
     for state in states.values_mut() {
         *state = FixtureState {
@@ -67,6 +67,9 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         };
     }
     let frame = &rig.encode(&states).unwrap()[&0];
+    let wheel_fixture = 39..43;
+    let magenta_slot = 81;
+    assert_eq!(&frame[wheel_fixture.clone()], &[magenta_slot, 0, 0, 0]);
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
@@ -77,8 +80,9 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         assert_eq!(&frame[start..start + 8], &[255, 0, 255, 0, 191, 0, 0, 0]);
     }
     assert!(
-        frame[24..64]
+        frame[24..wheel_fixture.start]
             .iter()
+            .chain(&frame[wheel_fixture.end..64])
             .chain(frame[120..].iter())
             .all(|byte| *byte == 0)
     );
@@ -234,13 +238,13 @@ fn rotated_fixed_fixtures_are_accepted_and_non_rotations_rejected() {
 }
 
 #[test]
-fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() {
+fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_the_fx_derby_dark() {
     const STRIP_START: usize = 96;
     const RGB_CHANNELS: usize = 3;
     const PIXEL_COUNT: usize = 8;
-    const MINI_KINTA_START: usize = 39;
-    const MINI_KINTA_CHANNELS: usize = 4;
-    let rig = FixtureRig::decode(include_bytes!("../../rigs/room.rig.pb")).unwrap();
+    const FX_DERBY_START: usize = 39;
+    const FX_DERBY_CHANNELS: usize = 4;
+    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
     for (selected, id) in strip.iter().enumerate() {
@@ -265,7 +269,7 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_kinta_dark() 
             );
         }
         assert_eq!(
-            &frame[MINI_KINTA_START..MINI_KINTA_START + MINI_KINTA_CHANNELS],
+            &frame[FX_DERBY_START..FX_DERBY_START + FX_DERBY_CHANNELS],
             &[0, 0, 0, 0]
         );
         assert!(

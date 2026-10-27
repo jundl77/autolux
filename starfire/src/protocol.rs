@@ -7,8 +7,8 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target,
-    Transition,
+    AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, SpecialFx,
+    Target, Transition,
 };
 
 pub const MAX_LOGIN_BYTES: usize = 4 * 1024 * 1024;
@@ -269,8 +269,19 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                     })
                     .collect::<Result<_>>()?,
             };
+            let special = value.special_fx.as_ref().map(|special| {
+                Box::new(SpecialFx {
+                    colour_slot: special.colour_slot.clone(),
+                    energy: f64::from(special.energy),
+                    speed: f64::from(special.speed),
+                    pulse_beats: special.pulse_beats,
+                    attack_beats: f64::from(special.attack_beats),
+                    release_beats: f64::from(special.release_beats),
+                    pattern: special.pattern.map(f64::from),
+                })
+            });
             ensure!(
-                values != PropertyValues::default(),
+                values != PropertyValues::default() || special.is_some(),
                 "effect must set at least one property"
             );
             let target = match &value.target {
@@ -294,6 +305,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                         intensity_multiplier: None,
                         lifetime,
                         priority: value.priority,
+                        special_fx: special,
                     },
                 },
             )

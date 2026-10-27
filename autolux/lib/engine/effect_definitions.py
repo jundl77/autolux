@@ -11,7 +11,7 @@ class LightIntent(Enum):
     DROP = 'drop'
 
 
-# Nine musical sections share four lighting families.
+# Nine musical sections map onto four lighting intents.
 SECTION_CLASS_INTENTS: dict[str, LightIntent] = {
     'intro': LightIntent.ATMOSPHERIC,
     'altintro': LightIntent.ATMOSPHERIC,
@@ -42,17 +42,16 @@ DEFAULT_AUTOLOOPS: AutoloopTable = {
 
 AUTOLOOP_META_VALUES: dict[str, tuple[str, ...]] = {
     'energy': ('1', '2', '3'),
-    'family': ('cold', 'warm', 'accent'),
     'movement': ('still', 'sweep', 'snap'),
+    'texture': ('wash', 'beam', 'pixel', 'mixed'),
 }
-FAMILIES = AUTOLOOP_META_VALUES['family']
 
 
 @dataclass(frozen=True)
 class AutoloopMeta:
     energy: int
-    family: str
     movement: str
+    texture: str
 
     def __post_init__(self):
         if type(self.energy) is not int:
@@ -67,10 +66,10 @@ class AutoloopMeta:
 AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
 
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
-    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'cold', 'sweep'),
-    ('breakdown', 'wide_space'): AutoloopMeta(1, 'accent', 'sweep'),
-    ('buildup', 'ramp'): AutoloopMeta(2, 'warm', 'sweep'),
-    ('drop', 'kick'): AutoloopMeta(3, 'warm', 'snap'),
+    ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('buildup', 'ramp'): AutoloopMeta(2, 'sweep', 'mixed'),
+    ('drop', 'kick'): AutoloopMeta(3, 'snap', 'wash'),
 }
 
 
@@ -91,8 +90,30 @@ MAX_STROBE_COOLDOWN_SECONDS = 600.0
 DIGITAL_SILENCE_SECONDS = 2.0
 MAX_DIGITAL_SILENCE_SECONDS = 10.0
 MAX_CROSSFADE_BEATS = 16.0
-DEFAULT_INTENSITY = 0.7
-STROBE_GATE_INTENSITY = 0.3
+# The dashboard's three intensity levels. They differ in kind, not just degree: calm
+# re-maps drops and builds to quiet banks and drops strobes, wild leans on energy 3 and
+# strobes more often. Starfire's pulse/movement curve (starfire::intensity) keys off the
+# same three values.
+INTENSITY_CALM = 0.3
+INTENSITY_BALANCED = 0.7
+INTENSITY_WILD = 1.0
+DEFAULT_INTENSITY = INTENSITY_BALANCED
+CALM, BALANCED, WILD = 'calm', 'balanced', 'wild'
+# Strobes (and starfire's intense-special gate) are off at or below calm.
+STROBE_GATE_INTENSITY = INTENSITY_CALM
+# Calm stretches every look change; wild snaps between them.
+CROSSFADE_SCALE = {CALM: 2.0, BALANCED: 1.0, WILD: 0.5}
+DROP_STROBE_COOLDOWN_SCALE = {CALM: 1.0, BALANCED: 1.0, WILD: 0.5}
+
+
+def intensity_level(intensity: float) -> str:
+    """Continuous intensities between calm and wild behave as balanced."""
+    if intensity <= INTENSITY_CALM:
+        return CALM
+    if intensity >= INTENSITY_WILD:
+        return WILD
+    return BALANCED
+
 
 SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'drop_strobe_cooldown_seconds': (0.0, MAX_STROBE_COOLDOWN_SECONDS),
@@ -102,9 +123,10 @@ SHOW_SETTING_RANGES: dict[str, tuple[float, float]] = {
     'digital_silence_seconds': (0.5, MAX_DIGITAL_SILENCE_SECONDS),
     'strobe_max_rate_hz': (0.0, STARFIRE_MAX_STROBE_HZ),
     'strobe_max_burst_seconds': (0.1, STARFIRE_MAX_STROBE_BURST_SECONDS),
-    'palette_temperature_bias': (-1.0, 1.0),
     'intensity': (0.0, 1.0),
 }
+
+RETIRED_SETTINGS = frozenset({'palette_temperature_bias'})
 
 
 @dataclass(frozen=True)
@@ -116,10 +138,12 @@ class ShowSettings:
     digital_silence_seconds: float = DIGITAL_SILENCE_SECONDS
     strobe_max_rate_hz: float = STROBE_RATE_HZ
     strobe_max_burst_seconds: float = STROBE_MAX_BURST_SECONDS
-    palette_temperature_bias: float = 0.0
     intensity: float = DEFAULT_INTENSITY
+    intensity_auto: bool = False
 
     def __post_init__(self):
+        if type(self.intensity_auto) is not bool:
+            raise ValueError('intensity_auto must be true or false')
         for name, (low, high) in SHOW_SETTING_RANGES.items():
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value):
@@ -132,6 +156,7 @@ class ShowSettings:
     def from_dict(cls, data: dict) -> 'ShowSettings':
         if not isinstance(data, dict):
             raise TypeError('settings must be an object')
+        data = {name: value for name, value in data.items() if name not in RETIRED_SETTINGS}
         unknown = set(data) - {field.name for field in fields(cls)}
         if unknown:
             raise ValueError(f'unknown settings: {", ".join(sorted(unknown))}')
@@ -139,6 +164,11 @@ class ShowSettings:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def live_crossfade_beats(settings: ShowSettings) -> float:
+    """The renderer's default crossfade: the saved setting scaled by the intensity level."""
+    return settings.crossfade_beats * CROSSFADE_SCALE[intensity_level(settings.intensity)]
 
 
 def transition_for(intent: LightIntent) -> dict | None:

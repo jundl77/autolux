@@ -10,7 +10,7 @@ exclude = ["*.tests*", "autolux.training.data*"]
 build_py = "tools.build_proto.BuildPy"
 
 [tool.setuptools.package-data]
-"autolux.simulate" = ["assets/*.js"]
+"autolux.simulate" = ["assets/*.js", "assets/*.css"]
 
 [project.scripts]
 autolux = "cli.main:run_sync"
@@ -54,6 +54,11 @@ dev = [
 visualizer = [
     "dash>=2.14",
     "sounddevice",
+]
+media = [
+    "winrt-runtime; sys_platform == 'win32'",
+    "winrt-Windows.Foundation; sys_platform == 'win32'",
+    "winrt-Windows.Media.Control; sys_platform == 'win32'",
 ]
 # Training the acoustic model only -- the show imports nn.decoder, so training/nn/
 # is not offline-only. torch and onnxruntime are base deps and are not repeated here.

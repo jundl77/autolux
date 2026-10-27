@@ -1,3 +1,5 @@
+mod support;
+
 use std::io::Write;
 use std::net::UdpSocket;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -97,13 +99,8 @@ impl Renderer {
                 }],
                 groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()] }],
                 profiles: vec![{
-                    let profiles: serde_json::Value = serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
-                    let profile = &profiles["profiles"]["generic_rgb"];
-                    wire::FixtureProfile {
-                        profile_id: "rgb".into(),
-                        gdtf_xml: profile["gdtf_xml"].as_str().unwrap().into(),
-                        dmx_mode: profile["dmx_mode"].as_str().unwrap().into(),
-                    }
+                    let (gdtf_xml, dmx_mode) = support::catalogue_profile("generic_rgb").unwrap();
+                    wire::FixtureProfile { profile_id: "rgb".into(), gdtf_xml, dmx_mode }
                 }],
             }),
             autoloops: vec![
@@ -135,6 +132,10 @@ impl Renderer {
         assert_eq!(reply.frame_rate_hz, 40);
         assert_eq!(reply.max_message_bytes, 4 * 1024);
         assert_eq!(reply.run_id, renderer.login.run_id);
+        let rig = starfire::fixtures::FixtureRig::from_wire(renderer.login.rig.as_ref().unwrap())
+            .unwrap();
+        assert!(!reply.groups.is_empty());
+        assert_eq!(reply.groups, starfire::special::capabilities(&rig));
         let metrics = renderer.next_metrics();
         assert_eq!(metrics.run_id, renderer.login.run_id);
         assert_eq!(metrics.last_processed_command_id, renderer.command_id);
@@ -317,6 +318,25 @@ fn radius_login_owns_receiver_connection_and_writes_separate_transport_health() 
         result.is_ok(),
         "receiver did not exit when owned TX stopped"
     );
+}
+
+#[test]
+fn login_rejects_a_capability_reply_over_the_real_time_cap() {
+    let mut renderer = Renderer::start();
+    let mut login = renderer.login.clone();
+    let rig = login.rig.as_mut().unwrap();
+    let member = rig.fixtures[0].fixture_id.clone();
+    rig.groups = (0..64)
+        .map(|index| wire::FixtureGroup {
+            group_id: format!("{index:0>100}"),
+            fixture_ids: vec![member.clone()],
+        })
+        .collect();
+    assert!(matches!(
+        renderer.reply(Operation::Login(login)),
+        Event::ErrorReply(value) if value.message.contains("real-time cap")
+    ));
+    renderer.assert_no_output();
 }
 
 #[test]

@@ -1,0 +1,15 @@
+name = "cold_spin"
+intents = ["drop"]
+group = "fx"
+
+[preset]
+colour = "cold"
+
+[effect]
+rate = 0.8
+size = 0.8
+form = { pulse_beats = 1 }
+
+[playback]
+attack_beats = 0
+release_beats = 4

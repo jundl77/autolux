@@ -9,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
+use prost::Message;
 
 use crate::artnet::ArtNetOutput;
 use crate::engine::Engine;
@@ -20,6 +21,7 @@ use crate::protocol::{
     read_session_control, wire, write_event,
 };
 use crate::script::{AutoloopCatalog, missing_groups_warning};
+use crate::special;
 
 const MAX_QUEUED_CONTROLS: usize = 1024;
 const MAX_CONTROLS_PER_FRAME: usize = 32;
@@ -142,6 +144,7 @@ impl LiveOutput {
 
 struct LiveSession {
     run_id: u64,
+    reply: wire::LoginReply,
     rig: FixtureRig,
     engine: Engine,
     output: Option<LiveOutput>,
@@ -162,6 +165,21 @@ impl LiveSession {
             radius::config::pin_worker(i32::try_from(core).context("invalid render CPU index")?)?;
         }
         let rig = FixtureRig::from_wire(login.rig.as_ref().context("login requires a rig")?)?;
+        let reply = wire::LoginReply {
+            run_id: login.run_id,
+            command_id: login.command_id,
+            frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
+            max_message_bytes: MAX_MESSAGE_BYTES as u32,
+            protocol_major: PROTOCOL_MAJOR,
+            protocol_minor: login.protocol_minor.min(PROTOCOL_MINOR),
+            groups: special::capabilities(&rig),
+        };
+        ensure!(
+            reply.encoded_len() <= MAX_MESSAGE_BYTES,
+            "the rig's {} group capabilities need a {}-byte login reply, over the {MAX_MESSAGE_BYTES}-byte real-time cap; use fewer or shorter group names",
+            reply.groups.len(),
+            reply.encoded_len()
+        );
         let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
         if let Some(warning) = missing_groups_warning(&catalog.groups_missing_from(&rig)) {
             eprintln!("starfire: warning: {warning}");
@@ -197,6 +215,7 @@ impl LiveSession {
         let last_states = rig.empty_states();
         Ok(Self {
             run_id: login.run_id,
+            reply,
             rig,
             engine,
             output: Some(output),
@@ -414,26 +433,14 @@ pub fn run_live(
                         };
                         match result {
                             Ok(created) => {
+                                let reply = created.reply.clone();
                                 metrics.run_id = created.run_id;
                                 session = Some(created);
                                 logged_in.store(true, Ordering::Release);
                                 last_client_heartbeat = Instant::now();
                                 last_server_heartbeat = Instant::now();
                                 report_metrics = true;
-                                // Preserve negotiation as compatible minor versions are added.
-                                #[allow(clippy::unnecessary_min_or_max)]
-                                let protocol_minor = login.protocol_minor.min(PROTOCOL_MINOR);
-                                send_event(
-                                    &events,
-                                    ServerMessage::LoginReply(wire::LoginReply {
-                                        run_id: login.run_id,
-                                        command_id: login.command_id,
-                                        frame_rate_hz: DEFAULT_FRAME_RATE_HZ,
-                                        max_message_bytes: MAX_MESSAGE_BYTES as u32,
-                                        protocol_major: PROTOCOL_MAJOR,
-                                        protocol_minor,
-                                    }),
-                                )?;
+                                send_event(&events, ServerMessage::LoginReply(reply))?;
                             }
                             Err(error) => send_event(
                                 &events,
@@ -564,12 +571,18 @@ mod tests {
                     ..Default::default()
                 }],
                 profiles: vec![{
-                    let profiles: serde_json::Value = serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
-                    let profile = &profiles["profiles"]["generic_rgb"];
+                    let generic = wire::RigDefinition::decode(
+                        include_bytes!("../../autolux/tests/data/generic_rig/generic.rig.pb").as_slice(),
+                    )
+                    .unwrap();
+                    let profile = generic
+                        .profiles
+                        .into_iter()
+                        .find(|profile| profile.profile_id.starts_with("Generic@RGB@"))
+                        .unwrap();
                     wire::FixtureProfile {
                         profile_id: "rgb".into(),
-                        gdtf_xml: profile["gdtf_xml"].as_str().unwrap().into(),
-                        dmx_mode: profile["dmx_mode"].as_str().unwrap().into(),
+                        ..profile
                     }
                 }],
                 ..Default::default()

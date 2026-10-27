@@ -36,19 +36,17 @@ fn rig() -> wire::RigDefinition {
 }
 
 fn profile(id: &str) -> wire::FixtureProfile {
-    let profiles: serde_json::Value =
-        serde_json::from_str(include_str!("../../rigs/profiles.json")).unwrap();
-    let value = &profiles["profiles"][id];
+    let (gdtf_xml, dmx_mode) = support::catalogue_profile(id).unwrap();
     wire::FixtureProfile {
         profile_id: id.into(),
-        gdtf_xml: value["gdtf_xml"].as_str().unwrap().into(),
-        dmx_mode: value["dmx_mode"].as_str().unwrap().into(),
+        gdtf_xml,
+        dmx_mode,
     }
 }
 
 #[test]
 fn supplied_rig_and_scripts_match_file_loaded_dmx_and_repeated_selection_keeps_phase() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../autoloops");
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops");
     let offline_catalog = AutoloopCatalog::load(&directory).unwrap();
     let scripts: Vec<_> = offline_catalog
         .list()

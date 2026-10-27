@@ -16,11 +16,11 @@ from cli.starfire_assets import native_rig, rig_definition
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
-DEFAULT_RIG = ROOT / 'rigs' / 'room.mvr'
-DEFAULT_AUTOLOOPS = ROOT / 'autoloops'
+DEFAULT_RIG = ROOT / 'rig' / 'room.mvr'
+DEFAULT_AUTOLOOPS = ROOT / 'show' / 'autoloops'
 DEFAULT_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.mvr'
 LEGACY_FIXTURE_STORE = ROOT / '.live' / 'starfire' / 'rig.json'
-PROFILE_CATALOGUE = ROOT / 'rigs' / 'profiles.json'
+FIXTURE_LIBRARY = ROOT / 'rig' / 'library'
 CHILD_STOP_TIMEOUT_SEC = 5.0
 PATCH_VALIDATION_TIMEOUT_SEC = 10.0
 MAX_REPORT_BYTES = 32 * 1024 * 1024
@@ -28,8 +28,12 @@ MAX_TCP_PORT = 65535
 LOGGER = logging.getLogger(__name__)
 
 
-def saved_rig() -> Path:
+def saved_rig(library: Path = FIXTURE_LIBRARY) -> Path:
     if DEFAULT_FIXTURE_STORE.is_file():
+        from autolux.lighting.fixture_setup import refresh_profiles
+
+        # The store was seeded once; profiles fixed in the library since must still reach it.
+        refresh_profiles(DEFAULT_FIXTURE_STORE, library)
         return DEFAULT_FIXTURE_STORE
     if LEGACY_FIXTURE_STORE.is_file():
         raise RuntimeError(f'rig.json is no longer supported; the rig is {DEFAULT_FIXTURE_STORE}')
@@ -65,11 +69,12 @@ def add_subparser(subparsers) -> None:
     export.add_argument('output', type=Path)
     export.set_defaults(func=export_rig)
 
-    importer = actions.add_parser('import-fixture', help='Import a GDTF fixture mode for Starfire')
+    importer = actions.add_parser(
+        'import-fixture', help='Install a GDTF archive once Starfire renders one of its modes'
+    )
     importer.add_argument('input', type=Path)
-    importer.add_argument('--profile-id', required=True)
-    importer.add_argument('--mode', required=True, help='Exact DMX mode name in the GDTF file')
-    importer.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
+    importer.add_argument('--mode', required=True, help='Exact DMX mode name to validate')
+    importer.add_argument('--library', type=Path, default=FIXTURE_LIBRARY)
     importer.set_defaults(func=run_import)
 
     convert = actions.add_parser(
@@ -84,7 +89,7 @@ def add_subparser(subparsers) -> None:
     ui = actions.add_parser('ui', help='Open the existing dashboard with fixture setup')
     ui.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT)
     ui.add_argument('--rig-store', type=Path, default=DEFAULT_FIXTURE_STORE)
-    ui.add_argument('--profiles', type=Path, default=PROFILE_CATALOGUE)
+    ui.add_argument('--library', type=Path, default=FIXTURE_LIBRARY)
     ui.add_argument('--snapshot-port', type=int, help='Read the running controller snapshot')
     ui.set_defaults(func=run_ui)
 
@@ -206,24 +211,23 @@ def run_import(args: argparse.Namespace) -> None:
     binary = _binary(args.binary)
     metadata = import_fixture(
         args.input.resolve(),
-        args.profiles.resolve(),
-        args.profile_id,
+        args.library.resolve(),
         args.mode,
-        lambda patch, _profiles: _validate_patch(binary, patch),
+        lambda patch: _validate_patch(binary, patch),
     )
-    print(f'Imported {args.profile_id}: {metadata["notes"]}')
+    print(f'Installed {metadata["manufacturer"]} {metadata["name"]}: {metadata["notes"]}')
 
 
 def run_ui(args: argparse.Namespace) -> None:
     from autolux.lib.engine.event_buffer import EventBuffer
-    from autolux.lighting.fixture_setup import FixtureStore
+    from autolux.lighting.fixture_setup import FixtureStore, refresh_profiles
     from autolux.simulate.visualizer_app import run_app
 
     if not 1 <= args.port <= MAX_TCP_PORT:
         raise ValueError(f'Dashboard port must be in 1..{MAX_TCP_PORT}')
     binary = _binary(args.binary)
     patch = args.rig_store.resolve()
-    profiles = getattr(args, 'profiles', PROFILE_CATALOGUE).resolve()
+    library = getattr(args, 'library', FIXTURE_LIBRARY).resolve()
     if not patch.exists():
         if patch == DEFAULT_FIXTURE_STORE:
             saved_rig()
@@ -234,8 +238,9 @@ def run_ui(args: argparse.Namespace) -> None:
                 target.write(DEFAULT_RIG.read_bytes())
         except FileExistsError:
             pass
+    refresh_profiles(patch, library)
     _validate_patch(binary, patch)
-    store = FixtureStore(patch, profiles, lambda candidate: _validate_patch(binary, candidate))
+    store = FixtureStore(patch, library, lambda candidate: _validate_patch(binary, candidate))
     source = EventBuffer()
     if getattr(args, 'snapshot_port', None) is not None:
         from autolux.simulate.visualizer_app import SnapshotPoller

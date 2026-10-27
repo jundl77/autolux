@@ -1,0 +1,14 @@
+name = "drift"
+intents = ["atmospheric"]
+group = "fx"
+
+[preset]
+colour = "secondary"
+
+[effect]
+rate = 0.1
+size = 0.2
+
+[playback]
+attack_beats = 32
+release_beats = 32

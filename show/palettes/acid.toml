@@ -1,0 +1,19 @@
+number = 4
+
+[slots]
+primary = "#99ff00"
+secondary = "#ff00bf"
+accent = "#ffffff"
+cold = "#cce6ff"
+black = "#000000"
+
+[mood]
+weight = 0.7
+drive = 0.8
+
+[breakdown]
+primary = "#bfff80"
+accent = "#ccf2e6"
+
+[drop]
+accent = "#ccff4c"

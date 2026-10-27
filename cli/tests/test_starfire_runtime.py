@@ -67,6 +67,75 @@ def test_discarding_delayed_audio_frames_as_its_own_standalone_command():
         protocol.build_command({'kind': 'discard_delayed_audio', 'seconds': 1.0})
 
 
+def test_control_adapter_translates_a_special_one_to_one():
+    special = {
+        'colour_slot': 'secondary',
+        'energy': 0.25,
+        'speed': 0.5,
+        'pulse_beats': 2,
+        'attack_beats': 8.0,
+        'release_beats': 4.0,
+        'pattern': 0.75,
+    }
+    command = {
+        'kind': 'set_override',
+        'value': {'id': 'accent', 'target': {'group': 'fx'}, 'special_fx': special, 'priority': 50},
+    }
+    effect = protocol.build_command(command)
+    assert (effect.group, effect.priority, effect.HasField('intensity')) == ('fx', 50, False)
+    assert {field.name: value for field, value in effect.special_fx.ListFields()} == special
+    effect.command_id = 1
+    encoded = protocol.encode_command(effect)
+    assert wire.SetActiveEffect.FromString(encoded[protocol.FRAME_HEADER.size :]) == effect
+
+    continuous = protocol.build_command(
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': 'accent',
+                'target': {'group': 'fx'},
+                'special_fx': {**special, 'pulse_beats': None, 'pattern': None},
+            },
+        }
+    )
+    assert not continuous.special_fx.HasField('pulse_beats')
+    assert not continuous.special_fx.HasField('pattern')
+    with pytest.raises(ValueError, match='special'):
+        protocol.build_command(
+            {
+                'kind': 'set_override',
+                'value': {'id': 'accent', 'target': 'all', 'special_fx': {'strobe_hz': 4.0}},
+            }
+        )
+
+
+def test_login_groups_become_plain_capability_records():
+    reply = wire.LoginReply(
+        groups=[
+            wire.GroupCapability(name='fx', fixture_count=1, colour=True, speed=True, pulse=True),
+            wire.GroupCapability(name='wash', fixture_count=4, pulse=True),
+        ]
+    )
+    assert protocol.login_groups(reply) == [
+        {
+            'name': 'fx',
+            'fixture_count': 1,
+            'colour': True,
+            'speed': True,
+            'pulse': True,
+            'pattern': False,
+        },
+        {
+            'name': 'wash',
+            'fixture_count': 4,
+            'colour': False,
+            'speed': False,
+            'pulse': True,
+            'pattern': False,
+        },
+    ]
+
+
 def test_control_adapter_preserves_gdtf_physical_values_and_named_presets():
     effect = protocol.build_command(
         {
@@ -334,7 +403,8 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
                 run_id=run_id if mode != 'wrong_login_run' else 1,
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
                 protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
-                protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply')
+                protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply'),
+                groups=[wire.GroupCapability(name='fx', fixture_count=1, colour=True, pulse=True)],
             ))
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
@@ -367,8 +437,19 @@ def _fake_runtime(tmp_path, mode='normal', **kwargs):
 
 def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
     runtime = _fake_runtime(tmp_path)
+    assert runtime.groups == []
     with runtime:
         child = runtime.process
+        assert runtime.groups == [
+            {
+                'name': 'fx',
+                'fixture_count': 1,
+                'colour': True,
+                'speed': False,
+                'pulse': True,
+                'pattern': False,
+            }
+        ]
         runtime.send_command(
             {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'palette': 'techno'}
         )
@@ -644,8 +725,8 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         receiver.settimeout(3)
         runtime = starfire_runtime.StarfireRuntime(
             binary,
-            root / 'rigs/room.mvr',
-            root / 'autoloops',
+            root / 'rig/room.mvr',
+            root / 'show/autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
             run_id=(1 << 64) - 1,
@@ -662,7 +743,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             runtime.send_command(
                 wire.SetActiveEffect(
                     effect_id='held_red',
-                    fixture='cf805_pixel_1',
+                    fixture='zq06017_pixel_1',
                     intensity=0.75,
                     colour=wire.RgbColor(red=1.0),
                 )
@@ -709,12 +790,12 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     rig = edited_room(
         tmp_path / 'multi-universe.mvr', '<Address break="0">1<', '<Address break="0">513<'
     )
-    autoloops = root / 'autoloops'
+    autoloops = root / 'show/autoloops'
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
     starfire_runtime.validate_starfire(
-        binary, root / 'rigs/room.mvr', autoloops, expected_universe=0
+        binary, root / 'rig/room.mvr', autoloops, expected_universe=0
     )
 
 
@@ -725,7 +806,7 @@ def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path, caplog
         pytest.skip('Build Starfire to exercise native autoloop validation')
     rig = edited_room(tmp_path / 'missing-strip.mvr', 'name="strip"', 'name="pixels"')
     with caplog.at_level('WARNING'):
-        starfire_runtime.validate_starfire(binary, rig, root / 'autoloops')
+        starfire_runtime.validate_starfire(binary, rig, root / 'show/autoloops')
     assert 'groups not in this rig: strip' in caplog.text
 
 
@@ -745,7 +826,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
-        starfire_runtime.validate_starfire(binary, root / 'rigs/room.mvr', tmp_path)
+        starfire_runtime.validate_starfire(binary, root / 'rig/room.mvr', tmp_path)
 
 
 def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
@@ -788,7 +869,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
 def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
-    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    header = '-- 8-beat loop.\n-- energy: 2\n-- movement: snap\n-- texture: wash\nreturn {}\n'
     loops = [
         ('atmospheric', 'cold_breathe'),
         ('breakdown', 'wide_space'),
@@ -798,7 +879,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
     ]
     for bank, name in loops:
         (tmp_path / bank).mkdir()
-        source = header.replace('family: warm', 'family: neon') if bank == 'drop' else header
+        source = header.replace('texture: wash', 'texture: neon') if bank == 'drop' else header
         (tmp_path / bank / f'{name}.lua').write_text(source)
     checked = [{'bank': bank, 'autoloop': name} for bank, name in loops]
     report = json.dumps({'universes': [0], 'checked_autoloops': checked})
@@ -809,14 +890,14 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         'run',
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
-    with pytest.raises(RuntimeError, match="cannot select.*drop/kick: family 'neon'"):
+    with pytest.raises(RuntimeError, match="cannot select.*drop/kick: texture 'neon'"):
         starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
 
 
 def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplog):
     from types import SimpleNamespace
 
-    header = '-- 8-beat loop.\n-- energy: 2\n-- family: warm\n-- movement: snap\nreturn {}\n'
+    header = '-- 8-beat loop.\n-- energy: 2\n-- movement: snap\n-- texture: wash\nreturn {}\n'
     loops = [
         ('atmospheric', 'cold_breathe'),
         ('breakdown', 'wide_space'),

@@ -181,9 +181,33 @@ def embed_gdtf(scene: Scene, spec: str, description: str, other: dict | None = N
     scene.entries[spec] = (_info(spec), gdtf_package(description, other))
 
 
-def gdtf_spec_name(manufacturer: str, fixture_type: str) -> str:
-    name = f'{manufacturer}@{fixture_type}{GDTF_SUFFIX}'
+def embed_archive(scene: Scene, spec: str, archive: bytes) -> None:
+    """Carry a library GDTF archive into the MVR byte for byte, resources included."""
+    _archive(archive, f'GDTF {spec}', GDTF_DESCRIPTION)
+    scene.entries[spec] = (_info(spec), archive)
+
+
+def gdtf_spec_name(manufacturer: str, fixture_type: str, revision: str) -> str:
+    """GDTF Share form, each part as its archive writes it: Manufacturer@Fixture Name@Revision."""
+    parts = (manufacturer, fixture_type, revision)
+    if any(not part or not part.strip() or '@' in part for part in parts):
+        raise ValueError(f'GDTF names need a manufacturer, fixture and revision without @: {parts}')
+    name = '@'.join(parts) + GDTF_SUFFIX
     return ''.join('_' if char in '<>:"/\\|?*' or ord(char) < 32 else char for char in name)
+
+
+def parse_spec_name(spec: str) -> tuple[str, str, str]:
+    """Manufacturer, fixture name and revision from a GDTF Share file name."""
+    parts = spec.removesuffix(GDTF_SUFFIX).split('@')
+    if not spec.endswith(GDTF_SUFFIX) or len(parts) != 3 or not all(parts):
+        raise ValueError(f'{spec} is not named Manufacturer@Fixture Name@Revision{GDTF_SUFFIX}')
+    return parts[0], parts[1], parts[2]
+
+
+def gdtf_revision(description: str, label: str = 'GDTF') -> str | None:
+    """The newest Revision's Text; GDTF lists revisions oldest first."""
+    revisions = gdtf_root(description, label).findall('FixtureType/Revisions/Revision')
+    return revisions[-1].get('Text') if revisions else None
 
 
 def gdtf_root(description: str, label: str) -> ElementTree.Element:
@@ -324,7 +348,12 @@ def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
                 if name != GDTF_DESCRIPTION
             }
         elif spec in library:
-            original, other = library[spec]['gdtf_xml'], {}
+            original = library[spec]['gdtf_xml']
+            other = {
+                name: entry
+                for name, entry in _archive(library[spec]['archive'], f'GDTF {spec}').items()
+                if name != GDTF_DESCRIPTION
+            }
         else:
             errors.append(f'GDTFSpec {spec} is neither in the MVR archive nor installed')
             continue
@@ -334,7 +363,7 @@ def apply_draft(scene: Scene, edited: dict, library: dict) -> Scene:
             if spec in scene.entries:
                 result.entries[spec] = scene.entries[spec]
             else:
-                embed_gdtf(result, spec, original)
+                embed_archive(result, spec, library[spec]['archive'])
         elif problems := _gdtf_edit_errors(before, _without_keys(tree), spec):
             errors.extend(problems)
         else:

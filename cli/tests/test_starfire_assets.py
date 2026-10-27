@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -13,22 +12,15 @@ from proto.starfire import starfire_pb2 as wire
 GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').read_text(
     encoding='utf-8'
 )
-SPEC = 'Autolux@Test Dimmer.gdtf'
+SPEC = 'Generic@Test Dimmer@1.0.gdtf'
 
 
 @pytest.fixture
 def login_assets(tmp_path, write_rig):
-    profiles = tmp_path / 'profiles.json'
-    profiles.write_text(
-        json.dumps(
-            {
-                'schema_version': 1,
-                'profiles': {'test_mover': {'gdtf_xml': GDTF_XML, 'dmx_mode': '16 bit'}},
-            }
-        ),
-        encoding='utf-8',
-    )
-    rig = write_rig(profiles, 'front', 'movers', (180.0, 0.0, 0.0), invert_pan=True)
+    library = tmp_path / 'library'
+    library.mkdir()
+    (library / SPEC).write_bytes(mvr.gdtf_package(GDTF_XML))
+    rig = write_rig(library, 'front', 'movers', (180.0, 0.0, 0.0), invert_pan=True, mode='16 bit')
     autoloops = tmp_path / 'autoloops'
     bank = autoloops / 'atmospheric'
     bank.mkdir(parents=True)
@@ -156,14 +148,16 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
         assets.load_login(rig, autoloops, '127.0.0.1:6454', run_id=1)
 
 
-@pytest.mark.parametrize('name', ['room', 'generic'])
-def test_committed_native_rig_is_the_exported_login_rig(name):
-    rig = ROOT / f'rigs/{name}.mvr'
+@pytest.mark.parametrize(
+    'rig', [ROOT / 'rig/room.mvr', ROOT / 'autolux/tests/data/generic_rig/generic.mvr']
+)
+def test_committed_native_rig_is_the_exported_login_rig(rig):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     with assets.native_rig(rig) as exported:
         content = exported.read_bytes()
-    assert content == (ROOT / f'rigs/{name}.rig.pb').read_bytes(), (
-        f'Regenerate with: uv run autolux starfire export-rig rigs/{name}.mvr rigs/{name}.rig.pb'
+    committed = rig.with_suffix('.rig.pb')
+    assert content == committed.read_bytes(), (
+        f'Regenerate with: uv run autolux starfire export-rig {rig} {committed}'
     )
     assert rig_wire.RigDefinition.FromString(content) == login.rig
 
@@ -172,10 +166,11 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
     login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
     techno = login.palettes[0]
+    # show/palettes/techno.toml: secondary = "#ff8c1a".
     assert (techno.secondary.red, techno.secondary.green, techno.secondary.blue) == (
         1.0,
-        0.55,
-        0.1,
+        140 / 255,
+        26 / 255,
     )
     commands = [
         protocol.build_command({'kind': 'set_palette', 'name': 'ice'}),
@@ -224,3 +219,30 @@ def test_static_looks_for_the_room_rig_build_small_wire_accents():
         'static_fx',
         'static_strobe',
     }
+
+
+SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
+
+
+@pytest.mark.parametrize(
+    ('folder', 'name', 'libraries'),
+    [
+        (ROOT / 'rig', 'room', [ROOT / 'rig/library']),
+        (SAMPLE_RIG, 'generic', [ROOT / 'rig/library', SAMPLE_RIG]),
+    ],
+)
+def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
+    tmp_path, folder, name, libraries
+):
+    from autolux.lighting.gdtf import fixture_library
+
+    shipped = folder / f'{name}.mvr'
+    scene = mvr.read(shipped.read_bytes())
+    without_gdtf = {k: v for k, v in scene.entries.items() if not k.endswith(mvr.GDTF_SUFFIX)}
+    bare = mvr.Scene(scene.root, without_gdtf)
+    library = {spec: entry for path in libraries for spec, entry in fixture_library(path).items()}
+    rebuilt = tmp_path / f'{name}.mvr'
+    rebuilt.write_bytes(mvr.write(mvr.apply_draft(bare, mvr.draft(scene), library)))
+    assert rebuilt.read_bytes() == shipped.read_bytes()
+    exported = assets.rig_definition(rebuilt).SerializeToString()
+    assert exported == (folder / f'{name}.rig.pb').read_bytes()

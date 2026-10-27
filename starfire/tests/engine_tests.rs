@@ -74,6 +74,7 @@ fn lighting_override(id: &str, values: PropertyValues) -> LightingOverride {
         intensity_multiplier: None,
         lifetime: OverrideLifetime::UntilCleared,
         priority: 0,
+        special_fx: None,
     }
 }
 
@@ -1286,6 +1287,7 @@ fn room_engine(scripts: &[(&str, &str)]) -> Engine {
 #[test]
 fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
+    let fx_fixture = support::room().groups()["fx"][0].clone();
     let mut engine = room_engine(&[
         ("empty", "return {render=function(ctx) return {} end}"),
         (
@@ -1311,7 +1313,7 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
         let attributes = &engine
             .render_at(time)
             .unwrap()
-            .fixture_properties_before_strobe["kinta"]
+            .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
         assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
         assert_eq!(
@@ -1333,7 +1335,7 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
         let attributes = &engine
             .render_at(time)
             .unwrap()
-            .fixture_properties_before_strobe["kinta"]
+            .fixture_properties_before_strobe[&fx_fixture]
             .attributes;
         assert_eq!(attributes.get("Color1"), Some(&red), "{time}");
         let AttributeValue::Number(rotation) = attributes["Effects1PosRotate"] else {
@@ -1637,7 +1639,8 @@ fn pan_after_snap(intensity: f64) -> Vec<f64> {
             },
         ),
     );
-    (1..=40)
+    // Three seconds: calm's glide needs under one to cross half the range.
+    (1..=120)
         .map(|frame| {
             let state = &engine
                 .render_at(frame as f64 * FRAME_SECONDS)
@@ -1664,6 +1667,40 @@ fn a_snap_at_low_intensity_glides_to_its_target_without_overshooting() {
             .all(|pair| pair[0] <= pair[1] && pair[1] <= 1.0)
     );
     assert!(pans[frames_to_target..].iter().all(|pan| *pan == 1.0));
+}
+
+#[test]
+fn low_and_mid_intensity_move_at_clearly_different_speeds() {
+    let frames_to_target = |intensity| {
+        pan_after_snap(intensity)
+            .iter()
+            .position(|pan| *pan == 1.0)
+            .unwrap()
+            + 1
+    };
+    let (low, mid) = (frames_to_target(0.3), frames_to_target(0.7));
+    // Calm moves at 0.3 of full and balanced at 0.7: 7/3 as many frames.
+    assert!(low > 2 * mid, "0.3 took {low} frames, 0.7 took {mid}");
+}
+
+#[test]
+fn pulse_depth_and_movement_follow_the_three_level_table() {
+    use starfire::intensity::{
+        INTENSITY_BALANCED, INTENSITY_CALM, INTENSITY_WILD, movement_range_per_second,
+        movement_speed, pulse_depth,
+    };
+    for (level, depth, speed) in [
+        (INTENSITY_CALM, 0.25, 0.3),
+        (INTENSITY_BALANCED, 0.8, 0.7),
+        (INTENSITY_WILD, 1.0, 1.0),
+        (0.5, 0.525, 0.5),
+        (0.0, 0.25, 0.3),
+    ] {
+        near(pulse_depth(level), depth);
+        near(movement_speed(level), speed);
+    }
+    near(movement_range_per_second(INTENSITY_CALM).unwrap(), 0.6);
+    assert_eq!(movement_range_per_second(INTENSITY_WILD), None);
 }
 
 #[test]

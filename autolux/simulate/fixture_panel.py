@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import dash
 from dash import ClientsideFunction, Input, Output, State, dcc, html
 
 from autolux.lighting import mvr, mvr_schema
 from autolux.lighting.fixture_setup import DMX_UNIVERSE_SIZE, MAX_ARTNET_UNIVERSE
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 MAP_COLUMNS = 32
 MAX_ADD_QUANTITY = 64
 FIXTURE_COLORS = ('#527eaa', '#8664ae', '#408e83', '#b38449', '#a75c80', '#667cb2')
@@ -101,11 +104,21 @@ def browser_library(library: dict) -> dict:
     }
 
 
+def library_folder(path: Path) -> str:
+    try:
+        return Path(path).resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def build_fixture_panel(app, store):
     draft, revision = store.load()
     library = browser_library(store.library())
     profile_options = [
-        {'label': f'{entry["name"].replace("_", " ")} · {entry["default_mode"]}', 'value': spec}
+        {
+            'label': f'{entry["manufacturer"]} {entry["name"]} · {entry["default_mode"]}',
+            'value': spec,
+        }
         for spec, entry in library.items()
     ]
     first_profile = next(iter(library), None)
@@ -171,7 +184,9 @@ def build_fixture_panel(app, store):
                                 'Add to patch', id='fixture-add', className='patch-primary'
                             ),
                             html.P(
-                                'Only installed, validated fixture modes are listed.',
+                                f'GDTF archives in {library_folder(store.library_path)}; '
+                                'drop one in and reload to offer it.',
+                                id='fixture-library-folder',
                                 className='patch-muted',
                             ),
                         ],
@@ -264,6 +279,7 @@ def build_fixture_panel(app, store):
                                 ],
                                 className='patch-heading',
                             ),
+                            html.P(id='special-groups', className='patch-muted'),
                             html.Div(
                                 [
                                     html.Div(id='mvr-plan'),
@@ -283,7 +299,7 @@ def build_fixture_panel(app, store):
                 id='fixture-workspace',
                 className='patch-workspace',
             ),
-            html.P('Changes are saved for the next session.', id='fixture-status', role='status'),
+            html.P(id='fixture-status', role='status'),
             dcc.Store(id='fixture-draft', data=draft),
             dcc.Store(id='fixture-selection', data=None),
             dcc.Store(id='fixture-grid-action'),

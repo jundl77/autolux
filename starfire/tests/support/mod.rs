@@ -8,8 +8,6 @@ use starfire::fixtures::FixtureRig;
 use starfire::palette::{PaletteDefinition, PaletteTable};
 use starfire::protocol::wire;
 
-pub const PROFILES: &str = include_str!("../../../rigs/profiles.json");
-
 pub fn palette_definitions() -> Vec<PaletteDefinition> {
     serde_json::from_str(include_str!("../palettes.json")).unwrap()
 }
@@ -18,21 +16,55 @@ pub fn palettes() -> PaletteTable {
     PaletteTable::new(&palette_definitions()).unwrap()
 }
 
-pub fn rigs() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rigs")
+pub fn rig_folder() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rig")
 }
 
 pub fn room() -> FixtureRig {
-    FixtureRig::load(&rigs().join("room.rig.pb")).unwrap()
+    FixtureRig::load(&rig_folder().join("room.rig.pb")).unwrap()
 }
 
-fn catalogue_profile(profile: &str) -> Option<(String, String)> {
-    let catalogue: Value = serde_json::from_str(PROFILES).unwrap();
-    let source = catalogue["profiles"].get(profile)?;
-    Some((
-        source["gdtf_xml"].as_str().unwrap().into(),
-        source["dmx_mode"].as_str().unwrap().into(),
-    ))
+/// A shipped fixture type's GDTF description and mode, as the exported rigs carry them.
+pub fn catalogue_profile(fixture_type: &str) -> Option<(String, String)> {
+    let (_, spec) = SHIPPED_TYPES
+        .iter()
+        .find(|(name, _)| *name == fixture_type)?;
+    [
+        sample_rig().join("generic.rig.pb"),
+        rig_folder().join("room.rig.pb"),
+    ]
+    .into_iter()
+    .find_map(|file| {
+        let rig = wire::RigDefinition::decode(std::fs::read(file).unwrap().as_slice()).unwrap();
+        rig.profiles
+            .into_iter()
+            .find(|profile| profile.profile_id.split_once('#').map(|(file, _)| file) == Some(spec))
+            .map(|profile| (profile.gdtf_xml, profile.dmx_mode))
+    })
+}
+
+/// The short profile names these tests patch, and the GDTFSpec each one is shipped as.
+const SHIPPED_TYPES: [(&str, &str); 6] = [
+    ("generic_dimmer", "Generic@Dimmer@1.0.gdtf"),
+    ("generic_rgb", "Generic@RGB@1.0.gdtf"),
+    ("generic_rgbw", "Generic@RGBW@1.0.gdtf"),
+    (
+        "chauvet_intimidator_spot_110_12ch",
+        "Chauvet DJ@Intimidator Spot 110@1.0.gdtf",
+    ),
+    (
+        "chauvet_mini_kinta_irc_4ch",
+        "Chauvet DJ@Mini Kinta IRC@1.0.gdtf",
+    ),
+    (
+        "fun_generation_separ_quad_uv_8ch",
+        "Fun Generation@SePar Quad LED RGB UV IR@1.0.gdtf",
+    ),
+];
+
+/// The synthetic sample rig, kept with the test data rather than the venue rigs.
+pub fn sample_rig() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../autolux/tests/data/generic_rig")
 }
 
 fn number(fixture: &Value, key: &str) -> u32 {
@@ -106,7 +138,7 @@ pub fn rig(spec: Value) -> FixtureRig {
 
 pub fn room_definition() -> wire::RigDefinition {
     wire::RigDefinition::decode(
-        std::fs::read(rigs().join("room.rig.pb"))
+        std::fs::read(rig_folder().join("room.rig.pb"))
             .unwrap()
             .as_slice(),
     )

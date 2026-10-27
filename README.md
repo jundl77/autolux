@@ -12,8 +12,8 @@ One command runs analysis, deploys the receiver and monitors the complete show.
 | `autolux/training/` | Data, models, labeling, training and backtests |
 | `radius/` | Rust audiovisual transport: embedded TX and remote `radius_rx` |
 | `starfire/` | Rust/Lua lighting renderer, fixture setup and deterministic replay |
-| `autoloops/` | Banked Lua lighting programs |
-| `rigs/` | Shared fixture patches and DMX profiles |
+| `show/` | Show content: `autoloops/` (banked Lua looks), `specials/`, `palettes/` |
+| `rig/` | Shared fixture patches and DMX profiles |
 | `proto/` | Starfire control and Radius transport protobuf contracts |
 | `tools/` | Development checks and diagnostics |
 | `docs/` | Architecture, decisions and operations |
@@ -36,9 +36,9 @@ Keep models and music under `autolux/training/data/raveform/`, or set
 
 Route music to **CABLE Input**; analysis and Radius both capture **CABLE Output**.
 The receiver needs speakers, the Enttec USB device and key-based Windows SSH.
-See [receiver setup](cli/README.md). The rig is `rigs/room.mvr` (MVR with
+See [receiver setup](cli/README.md). The rig is `rig/room.mvr` (MVR with
 embedded GDTF, see [rig-mvr](docs/starfire/rig-mvr.md)); the fixture library is
-`rigs/profiles.json`; named Lua autoloops live in `autoloops/`. Saved fixture
+the GDTF 1.2 archives in `rig/library/`; named Lua autoloops live in `show/autoloops/`. Saved fixture
 edits apply on the next session.
 
 The dashboard's **Config** tab provides a fixture library, a 512-channel DMX map

@@ -8,15 +8,17 @@ from autolux.lighting.gdtf import fixture_library
 
 @pytest.fixture
 def write_rig(tmp_path):
-    def write(profiles, name, fixture_class='', rotation=(0.0, 0.0, 0.0), invert_pan=False):
-        [(spec, profile)] = fixture_library(profiles).items()
+    def write(
+        library, name, fixture_class='', rotation=(0.0, 0.0, 0.0), invert_pan=False, mode=None
+    ):
+        [(spec, profile)] = fixture_library(library).items()
         scene = mvr.new_scene()
-        mvr.embed_gdtf(scene, spec, profile['gdtf_xml'])
+        mvr.embed_archive(scene, spec, profile['archive'])
         node = mvr.add_fixture(
             scene,
             name=name,
             gdtf_spec=spec,
-            gdtf_mode=profile['default_mode'],
+            gdtf_mode=mode or profile['default_mode'],
             universe=0,
             address=1,
             fixture_id=1,

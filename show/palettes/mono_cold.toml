@@ -1,0 +1,19 @@
+number = 8
+
+[slots]
+primary = "#e6f2ff"
+secondary = "#99a6b2"
+accent = "#59616b"
+cold = "#bfd9ff"
+black = "#000000"
+
+[mood]
+weight = 0.6
+drive = 0.5
+
+[breakdown]
+primary = "#f0f7ff"
+accent = "#667080"
+
+[drop]
+accent = "#4c73b2"

@@ -8,14 +8,14 @@ import os
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from contextlib import contextmanager
-import socket
 
 DEFAULT_DASHBOARD_PORT = 8765
 DASHBOARD_MDNS_HOSTNAME = 'autolux.local.'
@@ -25,6 +25,12 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
+# A refused body up to this size is read and discarded so the refusal arrives intact.
+MAX_DRAINED_BYTES = 16 * MAX_CONTROL_BYTES
+DRAIN_TIMEOUT_SEC = 1.0
+# The engine takes commands every Starfire frame (25 ms); ten frames means its loop is stalled.
+HANDOFF_TIMEOUT_SEC = 0.25
+CORS_MAX_AGE_SEC = 600
 HEX_COLOUR = re.compile(r'#[0-9a-fA-F]{6}')
 VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -97,11 +103,10 @@ def parse_control_command(payload) -> dict:
                 f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
             )
         return {'action': action, 'name': name}
-    if action == 'mode':
-        mode = payload.get('mode')
-        if mode not in ('auto', 'static'):
-            raise ValueError('mode must be auto or static')
-        return {'action': action, 'mode': mode}
+    if action == 'intensity_auto':
+        if type(payload.get('enabled')) is not bool:
+            raise ValueError('intensity_auto must be true or false')
+        return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
     raise ValueError(f'unknown control action {action!r}')
@@ -111,8 +116,18 @@ def _static_command(payload: dict) -> dict:
     from autolux.lib.engine.static_mode import PRESETS
 
     kind = payload.get('kind')
-    if kind in ('blacklight', 'strobe'):
+    if kind in ('blacklight', 'clear', 'special_fx_clear'):
         return {'kind': kind}
+    if kind == 'special_fx':
+        return {'kind': kind, **_static_special_fx(payload)}
+    if kind == 'strobe':
+        # The page sends the state it wants, so a retried request cannot flip the strobe twice.
+        enabled = payload.get('enabled')
+        if enabled is None:
+            return {'kind': kind}
+        if type(enabled) is not bool:
+            raise ValueError('strobe must be true or false')
+        return {'kind': kind, 'enabled': enabled}
     if kind == 'blackout':
         if type(payload.get('enabled')) is not bool:
             raise ValueError('blackout must be true or false')
@@ -142,26 +157,46 @@ def _static_command(payload: dict) -> dict:
     }
 
 
+def _static_special_fx(payload: dict) -> dict:
+    return {
+        name: payload.get(name)
+        for name in ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
+    }
+
+
 def command_refusal(
     command: dict, intent: str | None, paused: bool | None, mode: str | None = None
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
-    if command['action'] == 'static' and mode != 'static':
-        return 'the show is in auto mode'
     if command['action'] != 'next_autoloop':
         return None
     if paused:
         return 'the show is paused'
     if mode == 'static':
-        return 'the show is in static mode'
+        return 'a static overlay is active'
     if intent in (None, STANDBY_INTENT):
         return 'no section is playing yet'
     return None
 
 
+def _dashboard_origin(origin: str | None, dashboard_port: int | None) -> bool:
+    # Any host name: phones reach the dashboard by IP or by the mDNS name.
+    if origin is None or dashboard_port is None:
+        return False
+    return re.fullmatch(rf'http://[^/:\s]+:{dashboard_port}', origin) is not None
+
+
+def _await_handoff(commands: queue.Queue, timeout: float) -> bool:
+    # The engine calls task_done once it has applied each command; it drains them all at once.
+    with commands.all_tasks_done:
+        return commands.all_tasks_done.wait_for(lambda: commands.unfinished_tasks == 0, timeout)
+
+
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
+    # Headers and body go out as two writes; Nagle would hold the body for the client's delayed ACK.
+    disable_nagle_algorithm = True
 
     def handle(self) -> None:
         try:
@@ -172,6 +207,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == '/metrics':
             from prometheus_client import CONTENT_TYPE_LATEST
+
             from autolux.lib.system_health import metrics
 
             body = metrics(self.server.event_buffer)
@@ -191,17 +227,35 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_OPTIONS(self) -> None:
+        if self.path != CONTROL_PATH or self.server.commands is None or not self._cross_origin():
+            self.send_error(404 if self.path != CONTROL_PATH else 403)
+            return
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Methods', 'POST')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Max-Age', str(CORS_MAX_AGE_SEC))
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def do_POST(self) -> None:
         commands = self.server.commands
-        if self.path != CONTROL_PATH or commands is None:
-            self.send_error(404)
-            return
         try:
             length = int(self.headers.get('Content-Length', 0))
         except ValueError:
             length = -1
+        if self.path != CONTROL_PATH or commands is None:
+            self._refuse(404, length)
+            return
+        if 'Origin' in self.headers and not self._cross_origin():
+            self._refuse(403, length)
+            return
+        if self.headers.get_content_type() != 'application/json':
+            # Forces a preflight for any cross-site page, so the origin check above cannot be skipped.
+            self._refuse(415, length)
+            return
         if not 0 < length <= MAX_CONTROL_BYTES:
-            self.send_error(413 if length > MAX_CONTROL_BYTES else 400)
+            self._refuse(413 if length > MAX_CONTROL_BYTES else 400, length)
             return
         try:
             command = parse_control_command(json.loads(self.rfile.read(length)))
@@ -217,7 +271,36 @@ class _Handler(BaseHTTPRequestHandler):
         except queue.Full:
             self._reply(503, {'error': 'the show is busy; try again'})
             return
+        timeout = self.server.handoff_timeout
+        if timeout is not None and not _await_handoff(commands, timeout):
+            self._reply(504, {'error': 'the show has not taken the command yet'})
+            return
         self._reply(202, {'accepted': command['action']})
+
+    def _refuse(self, status: int, length: int) -> None:
+        # Closing with the body unread resets the socket, and the client can lose the reply.
+        if 0 < length <= MAX_DRAINED_BYTES:
+            self.connection.settimeout(DRAIN_TIMEOUT_SEC)
+            try:
+                self.rfile.read(length)
+            except OSError:
+                pass
+            finally:
+                self.connection.settimeout(None)
+        self.send_error(status)
+
+    def _cross_origin(self) -> bool:
+        return _dashboard_origin(self.headers.get('Origin'), self.server.dashboard_port)
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        super().send_response(code, message)
+        # Every reply, errors included: without these the page sees a network error, not the status.
+        self._cors_headers()
+
+    def _cors_headers(self) -> None:
+        if getattr(self, 'headers', None) is not None and self._cross_origin():
+            self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
+            self.send_header('Vary', 'Origin')
 
     def _reply(self, status: int, body: dict) -> None:
         content = json.dumps(body).encode()
@@ -238,10 +321,21 @@ class _Http(ThreadingHTTPServer):
 
 
 class SnapshotServer:
-    def __init__(self, event_buffer, port: int, commands: queue.Queue | None = None):
-        self._http = _Http((SNAPSHOT_HOST, port), _Handler)
+    def __init__(
+        self,
+        event_buffer,
+        port: int,
+        commands: queue.Queue | None = None,
+        *,
+        host: str = SNAPSHOT_HOST,
+        dashboard_port: int | None = None,
+        handoff_timeout: float | None = None,
+    ):
+        self._http = _Http((host, port), _Handler)
         self._http.event_buffer = event_buffer
         self._http.commands = commands
+        self._http.dashboard_port = dashboard_port
+        self._http.handoff_timeout = handoff_timeout
         self._thread = threading.Thread(
             target=self._http.serve_forever, name='snapshot-server', daemon=True
         )
@@ -276,8 +370,8 @@ def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
             '--rig-store',
             str(fixture_setup['rig_store']),
         ]
-        if fixture_setup.get('profiles') is not None:
-            command.extend(['--profiles', str(fixture_setup['profiles'])])
+        if fixture_setup.get('library') is not None:
+            command.extend(['--library', str(fixture_setup['library'])])
     return command + [
         '--port',
         str(ui_port),
@@ -352,7 +446,15 @@ def start(
     commands: queue.Queue | None = None,
 ) -> UiBridge | None:
     try:
-        server = SnapshotServer(event_buffer, snapshot_port(ui_port), commands)
+        # Bound like the dashboard so its page can POST controls here directly.
+        server = SnapshotServer(
+            event_buffer,
+            snapshot_port(ui_port),
+            commands,
+            host=DASHBOARD_BIND_ADDRESS,
+            dashboard_port=ui_port,
+            handoff_timeout=HANDOFF_TIMEOUT_SEC,
+        )
         server.start()
     except OSError as error:
         logging.warning(

@@ -265,7 +265,7 @@ async def _run_session(args, *, checking=False):
                 'The shipped neural model is missing; refusing a degraded production show.'
             )
         input_index = resolve_devices(args.input_device, tx)
-        rig = selected_rig(args.rig)
+        rig = selected_rig(args.rig, getattr(args, 'library', None))
         validate_starfire(
             args.starfire_binary,
             rig,
@@ -310,7 +310,7 @@ async def _run_session(args, *, checking=False):
 
         logging.getLogger(__name__).info('[prod] preparing analysis models before starting audio')
         app = main.AutoluxController(
-            lighting_client=StarfireClient(send_lighting_command),
+            lighting_client=StarfireClient(send_lighting_command, groups=lambda: renderer.groups),
             input_device_index=input_index,
             enable_ui=not args.no_ui,
             ui_port=args.ui_port,
@@ -343,6 +343,9 @@ async def _run_session(args, *, checking=False):
                 renderer.check_health()
                 state = monitor.snapshot()
                 state['starfire'] = renderer.snapshot()
+                app.light_engine.note_capture_discontinuities(
+                    (state.get('tx') or {}).get('capture_discontinuities_total')
+                )
                 app.event_buffer.set_system_health(state)
                 health_log.update(
                     state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)

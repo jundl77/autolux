@@ -34,7 +34,7 @@ async def run_cmd(args: argparse.Namespace):
     input_device_index = int(args.input_device) if args.input_device is not None else None
     output_device_index = int(args.output_device) if args.output_device is not None else None
     run_id = secrets.randbits(64) or 1
-    rig = selected_rig(args.rig)
+    rig = selected_rig(args.rig, getattr(args, 'library', None))
     with StarfireRuntime(
         args.starfire_binary,
         rig,
@@ -44,7 +44,7 @@ async def run_cmd(args: argparse.Namespace):
         run_id=run_id,
     ) as renderer:
         global_app = AutoluxController(
-            lighting_client=StarfireClient(renderer.send_command),
+            lighting_client=StarfireClient(renderer.send_command, groups=lambda: renderer.groups),
             input_device_index=input_device_index,
             output_device_index=output_device_index,
             debug_mode=debug_mode,
