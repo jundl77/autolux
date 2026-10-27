@@ -82,8 +82,8 @@ def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group()
     ]
     assert [slider.value for slider in sliders] == [1.0, 0.4]
     assert [row.children[0].children for row in rows] == [
-        'movers group master (linear)',
-        'wash group master (linear)',
+        'movers group master',
+        'wash group master',
     ]
     assert all(row.children[1].className == 'fader' for row in rows)
     assert all(slider.min == 0 and slider.max == 1 for slider in sliders)

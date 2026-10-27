@@ -823,12 +823,12 @@ def group_master_edit(group: str, level, state: dict) -> dict | None:
 
 
 def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
-    """One linear fader per rig group, styled like the perceptual Master brightness."""
+    """One fader per rig group, styled like Master brightness."""
     masters = (settings or {}).get('group_masters') or {}
     return [
         html.Div(
             [
-                html.Span(f'{group} group master (linear)', className='setting-name'),
+                html.Span(f'{group} group master', className='setting-name'),
                 html.Div(
                     _fader(
                         {'type': GROUP_MASTER_ID, 'group': group},
