@@ -152,16 +152,18 @@ def test_dashboard_http_readiness_and_bounded_shutdown(tmp_path, shutdown):
     if shutdown == 'keyboard_interrupt':
         entry = [
             '-c',
-            'import _thread, sys, threading, time\n'
-            'from pathlib import Path\n'
-            'from cli.main import run_sync\n'
-            'interrupt_file = Path(sys.argv.pop(1))\n'
-            'def interrupt():\n'
-            '    while not interrupt_file.exists():\n'
-            '        time.sleep(0.05)\n'
-            '    _thread.interrupt_main()\n'
-            'threading.Thread(target=interrupt, daemon=True).start()\n'
-            'run_sync()\n',
+            (
+                'import _thread, sys, threading, time\n'
+                'from pathlib import Path\n'
+                'from cli.main import run_sync\n'
+                'interrupt_file = Path(sys.argv.pop(1))\n'
+                'def interrupt():\n'
+                '    while not interrupt_file.exists():\n'
+                '        time.sleep(0.05)\n'
+                '    _thread.interrupt_main()\n'
+                'threading.Thread(target=interrupt, daemon=True).start()\n'
+                'run_sync()\n'
+            ),
             str(interrupt_file),
         ]
     try:

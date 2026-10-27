@@ -227,7 +227,7 @@ def run_ui(args: argparse.Namespace) -> None:
         raise ValueError(f'Dashboard port must be in 1..{MAX_TCP_PORT}')
     binary = _binary(args.binary)
     patch = args.rig_store.resolve()
-    library = getattr(args, 'library', FIXTURE_LIBRARY).resolve()
+    library = args.library.resolve()
     if not patch.exists():
         if patch == DEFAULT_FIXTURE_STORE:
             saved_rig()
@@ -242,7 +242,7 @@ def run_ui(args: argparse.Namespace) -> None:
     _validate_patch(binary, patch)
     store = FixtureStore(patch, library, lambda candidate: _validate_patch(binary, candidate))
     source = EventBuffer()
-    if getattr(args, 'snapshot_port', None) is not None:
+    if args.snapshot_port is not None:
         from autolux.simulate.visualizer_app import SnapshotPoller
 
         if not 1 <= args.snapshot_port <= MAX_TCP_PORT:
