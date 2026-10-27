@@ -23,6 +23,9 @@ class Special:
     # its role, so a new fixture group inherits the rows its layer and profiles allow.
     group: str = ''
     role: str | None = None
+    # A role row narrowed to the groups whose members all lie in this zone or depth.
+    zone: str | None = None
+    depth: str | None = None
     colour_slot: str | None = None
     energy: float = 0.0
     speed: float = 0.0
@@ -69,6 +72,8 @@ class Special:
 class SpecialCapabilities:
     groups: Mapping[str, frozenset[str]] = field(default_factory=dict)
     roles: Mapping[str, str] = field(default_factory=dict)
+    # group -> (zone, depth, centre X in metres) as Starfire derived them; None is mixed.
+    places: Mapping[str, tuple[str | None, str | None, float]] = field(default_factory=dict)
 
     @classmethod
     def from_groups(cls, groups: Iterable[Mapping]) -> SpecialCapabilities:
@@ -81,10 +86,21 @@ class SpecialCapabilities:
                 for group in populated
             },
             {group['name']: group.get('role') or LOOP_ROLE for group in populated},
+            {
+                group['name']: (group.get('zone'), group.get('depth'), group.get('x') or 0.0)
+                for group in populated
+            },
         )
 
     def role(self, group: str) -> str:
         return self.roles.get(group, LOOP_ROLE)
+
+    def x(self, group: str) -> float:
+        return self.places.get(group, (None, None, 0.0))[2]
+
+    def _lies_in(self, group: str, special: Special) -> bool:
+        zone, depth, _ = self.places.get(group, (None, None, 0.0))
+        return special.zone in (None, zone) and special.depth in (None, depth)
 
     def allows(self, special: Special) -> bool:
         if special.group == WHOLE_RIG:
@@ -99,7 +115,7 @@ class SpecialCapabilities:
         placed = (
             dataclasses.replace(special, group=group)
             for group in sorted(self.groups)
-            if self.role(group) == special.role
+            if self.role(group) == special.role and self._lies_in(group, special)
         )
         return [row for row in placed if self.allows(row)]
 

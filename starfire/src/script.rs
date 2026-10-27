@@ -29,6 +29,7 @@ const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
 const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
+const MM_PER_METRE: f64 = 1000.0;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AutoloopInfo {
@@ -423,6 +424,45 @@ impl LuaAutoloop {
                 )
             })?,
         )?;
+        // MVR millimetres become metres here, at the Lua boundary only.
+        let located = |rig: FixtureRig| {
+            move |value: &Value| -> mlua::Result<[f64; 3]> {
+                let id = cell_name(value)?;
+                let position = rig
+                    .spatial()
+                    .position(&id)
+                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                Ok(position.map(|mm| mm / MM_PER_METRE))
+            }
+        };
+        let position = located(rig.clone());
+        api.set(
+            "position",
+            lua.create_function(move |_, cell: Value| {
+                let [x, y, z] = position(&cell)?;
+                Ok((x, y, z))
+            })?,
+        )?;
+        let position = located(rig.clone());
+        api.set(
+            "distance",
+            lua.create_function(move |_, (cell, x, y): (Value, f64, f64)| {
+                let [cell_x, cell_y, _] = position(&cell)?;
+                Ok((cell_x - x).hypot(cell_y - y))
+            })?,
+        )?;
+        let zones = rig.clone();
+        api.set(
+            "zone",
+            lua.create_function(move |_, cell: Value| {
+                let id = cell_name(&cell)?;
+                let (zone, depth, height) = zones
+                    .spatial()
+                    .zone(&id)
+                    .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))?;
+                Ok((zone.name(), depth.name(), height / MM_PER_METRE))
+            })?,
+        )?;
         globals.set("sf", api)?;
         let identity = format!("{bank}/{autoloop}");
         instruction_budget.store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);
@@ -528,6 +568,17 @@ impl LuaAutoloop {
             validate_properties(&effect.values)?;
         }
         Ok(effects)
+    }
+}
+
+/// A cell (or fixture) name, given bare or as the `sf.fixture` target `sf.each` hands out.
+fn cell_name(value: &Value) -> mlua::Result<String> {
+    match value {
+        Value::String(id) => Ok(id.to_str()?.to_owned()),
+        Value::Table(target) => target.get::<String>("fixture"),
+        _ => Err(mlua::Error::RuntimeError(
+            "expected a cell name or sf.fixture target".to_owned(),
+        )),
     }
 }
 

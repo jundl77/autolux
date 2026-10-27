@@ -106,6 +106,25 @@ message GroupCapability {
   bool pulse = 5;
   bool pattern = 6;
   GroupRole role = 7;  // Echoed from the rig's FixtureGroup.
+  // Where the members lie, from their MVR positions: a zone or depth only when all share it.
+  StageZone zone = 8;
+  StageDepth depth = 9;
+  double centre_x_metres = 10;  // Mean member X; negative is house left.
+}
+
+// Thirds of the rig's X span, seen from the audience (MVR/GDTF: -X left, +X right).
+enum StageZone {
+  STAGE_ZONE_MIXED = 0;
+  STAGE_ZONE_HOUSE_LEFT = 1;
+  STAGE_ZONE_CENTRE = 2;
+  STAGE_ZONE_HOUSE_RIGHT = 3;
+}
+
+// Either half of the rig's Y span (GDTF: -Y toward the viewer, the audience).
+enum StageDepth {
+  STAGE_DEPTH_MIXED = 0;
+  STAGE_DEPTH_DOWNSTAGE = 1;
+  STAGE_DEPTH_UPSTAGE = 2;
 }
 
 // [SERVER -> CLIENT]

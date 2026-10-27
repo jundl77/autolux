@@ -556,3 +556,17 @@ Starfire derives the pairs once at rig load (`starfire::spatial`, O(n log n) per
 `Fixture.matrix`, which the rig already carries; a cell takes its fixture's position since the
 rig carries no GDTF geometry offsets, so the RigDefinition is unchanged. The room is symmetric
 about X = 0, so its pairs equal the rank pairs and the goldens are unchanged.
+
+2026-10-27 Zones from positions: Starfire places every cell from its fixture's MVR position
+(MVR: "Right-handed, Z-Up, 1 Distance Unit equals 1 mm"). The plan axes follow GDTF (DIN SPEC
+15800): "X – from left (-X) to right (+X), Y – from the outside of the monitor (-Y) to the
+inside of the monitor (+Y)", read from the audience, since MVR itself names no audience side:
+-X is house left, -Y downstage. `zone` is the third of the rig's X span (house_left, centre,
+house_right; the centre third is open, so a member on a boundary is house left or right),
+`depth` the half of its Y span (upstage strictly beyond the middle), `height` is Z. Lua:
+`sf.zone(cell)` returns zone, depth, height; `sf.position(cell)` x, y, z; `sf.distance(cell,
+x, y)` the plan distance; all in metres, converted only at the Lua boundary, and `cell` is a
+cell name or an `sf.fixture` target. Login echoes each group's shared zone and depth (MIXED
+when its members differ) and mean X in GroupCapability (protocol minor 2, still unreleased), so
+a special role row may add `zone` or `depth` and play only on groups lying there. No new rig
+field: `Fixture.matrix` already carries the position, so room.rig.pb is unchanged.

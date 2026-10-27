@@ -136,6 +136,9 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
+        // Unplaced fixtures share the origin: the whole rig is one centre point.
+        zone: wire::StageZone::Centre as i32,
+        depth: wire::StageDepth::Downstage as i32,
         ..Default::default()
     };
     assert_eq!(
@@ -168,6 +171,21 @@ fn the_real_rig_reports_what_its_profiles_declare() {
             ("movers".to_owned(), 2, [true, true, true, false]),
             ("strip".to_owned(), 8, [true, false, false, false]),
             ("wash".to_owned(), 4, [true, false, false, false]),
+        ]
+    );
+    // Room X span -900..900 (thirds at ±300), Y span -2000..0 (middle -1000).
+    let places: Vec<_> = capabilities(&rig)
+        .into_iter()
+        .map(|group| (group.zone(), group.depth(), group.centre_x_metres))
+        .collect();
+    use wire::{StageDepth as D, StageZone as Z};
+    assert_eq!(
+        places,
+        [
+            (Z::Centre, D::Upstage, 0.0),
+            (Z::Mixed, D::Upstage, 0.0),
+            (Z::Centre, D::Downstage, 0.0),
+            (Z::Mixed, D::Downstage, 0.0),
         ]
     );
 }

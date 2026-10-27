@@ -5,7 +5,7 @@ from pathlib import Path
 
 from autolux.lib.engine.effect_definitions import STARFIRE_MAX_STROBE_HZ, LightIntent
 from autolux.lib.engine.special_policy import Special, Venue
-from autolux.lighting.mvr_schema import ROLES
+from autolux.lighting.mvr_schema import DEPTHS, ROLES, ZONES
 from autolux.lighting.palettes import SLOTS
 
 SPECIAL_DIRECTORY = Path(__file__).resolve().parents[2] / 'show' / 'specials'
@@ -18,6 +18,8 @@ FILE_FIELDS = {
     ('intents',): 'intents',
     ('group',): 'group',
     ('role',): 'role',
+    ('zone',): 'zone',
+    ('depth',): 'depth',
     ('preset', 'colour'): 'colour_slot',
     ('effect', 'rate'): 'speed',
     ('effect', 'size'): 'energy',
@@ -37,7 +39,7 @@ STROBE_KEYS = frozenset({'name', 'intents', 'group', 'strobe_hz'})
 # A special row plays on one named group or on every group of a role; the strobe on a group.
 TARGET_KEYS = {SPECIAL_KEYS: ('group', 'role'), STROBE_KEYS: ()}
 OPTIONAL_KEYS = {
-    SPECIAL_KEYS: {'pulse_beats', 'pattern', 'cooldown_seconds', 'group', 'role'},
+    SPECIAL_KEYS: {'pulse_beats', 'pattern', 'cooldown_seconds', 'group', 'role', 'zone', 'depth'},
     STROBE_KEYS: set(),
 }
 
@@ -128,6 +130,13 @@ def parse_special(document, stem: str) -> Special:
         if data['role'] not in ROLES:
             raise SpecialError(f'role {data["role"]!r} is not one of {", ".join(ROLES)}')
         common['role'] = data['role']
+        for key, names in (('zone', ZONES), ('depth', DEPTHS)):
+            if key in data:
+                if data[key] not in names:
+                    raise SpecialError(f'{key} {data[key]!r} is not one of {", ".join(names)}')
+                common[key] = data[key]
+    elif data.keys() & {'zone', 'depth'}:
+        raise SpecialError('zone and depth narrow a role row; a group row names its group')
     else:
         group = data['group']
         if not isinstance(group, str) or not NAME.fullmatch(group):

@@ -16,10 +16,55 @@ const MIRROR_TOLERANCE_MM: f64 = 300.0;
 
 pub type Position = [f64; 3];
 
+/// Thirds of the rig's X span, named from the audience.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zone {
+    HouseLeft,
+    Centre,
+    HouseRight,
+}
+
+/// Either side of the middle of the rig's Y span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Depth {
+    Downstage,
+    Upstage,
+}
+
+impl Zone {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::HouseLeft => "house_left",
+            Self::Centre => "centre",
+            Self::HouseRight => "house_right",
+        }
+    }
+}
+
+impl Depth {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Downstage => "downstage",
+            Self::Upstage => "upstage",
+        }
+    }
+}
+
+/// Where a group's members lie: a zone or depth only when every member shares it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GroupPlace {
+    pub zone: Option<Zone>,
+    pub depth: Option<Depth>,
+    pub centre_x_mm: f64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Spatial {
     positions: BTreeMap<String, Position>,
     mirrors: BTreeMap<String, Vec<(String, String)>>,
+    places: BTreeMap<String, GroupPlace>,
+    // min X, max X, min Y, max Y over every cell.
+    bounds: [f64; 4],
     warnings: Vec<String>,
 }
 
@@ -40,8 +85,30 @@ impl Spatial {
                     .to_owned(),
             );
         }
+        let bounds = positions.values().fold(
+            [f64::MAX, f64::MIN, f64::MAX, f64::MIN],
+            |[x0, x1, y0, y1], p| [x0.min(p[0]), x1.max(p[0]), y0.min(p[1]), y1.max(p[1])],
+        );
+        let mut spatial = Self {
+            bounds,
+            ..Self::default()
+        };
         let mut mirrors = BTreeMap::new();
         for (group, members) in groups {
+            let zones: Vec<_> = members
+                .iter()
+                .map(|id| spatial.place(positions[id]))
+                .collect();
+            let centre_x_mm =
+                members.iter().map(|id| positions[id][0]).sum::<f64>() / members.len() as f64;
+            spatial.places.insert(
+                group.clone(),
+                GroupPlace {
+                    zone: shared(zones.iter().map(|place| place.0)),
+                    depth: shared(zones.iter().map(|place| place.1)),
+                    centre_x_mm,
+                },
+            );
             let placed: Vec<Position> = members.iter().map(|id| positions[id]).collect();
             let axis = if straddles {
                 0.0
@@ -70,7 +137,41 @@ impl Spatial {
             positions,
             mirrors,
             warnings,
+            ..spatial
         }
+    }
+
+    /// X thirds of the rig's span, the centre third open so a boundary member counts as
+    /// house left or right; Y above the middle of the span is upstage.
+    fn place(&self, position: Position) -> (Zone, Depth) {
+        let [x0, x1, y0, y1] = self.bounds;
+        let third = (x1 - x0) / 3.0;
+        let zone = if third <= 0.0 {
+            Zone::Centre
+        } else if position[0] <= x0 + third {
+            Zone::HouseLeft
+        } else if position[0] >= x1 - third {
+            Zone::HouseRight
+        } else {
+            Zone::Centre
+        };
+        let depth = if position[1] > (y0 + y1) / 2.0 {
+            Depth::Upstage
+        } else {
+            Depth::Downstage
+        };
+        (zone, depth)
+    }
+
+    /// A cell's (or fixture's) zone, depth and height (Z, mm).
+    pub fn zone(&self, id: &str) -> Option<(Zone, Depth, f64)> {
+        let position = self.position(id)?;
+        let (zone, depth) = self.place(position);
+        Some((zone, depth, position[2]))
+    }
+
+    pub fn group_place(&self, group: &str) -> Option<GroupPlace> {
+        self.places.get(group).copied()
     }
 
     pub fn position(&self, id: &str) -> Option<Position> {
@@ -93,6 +194,11 @@ pub fn rank_pairs(count: usize) -> Vec<(usize, usize)> {
     (0..count.div_ceil(2))
         .map(|index| (index, count - 1 - index))
         .collect()
+}
+
+fn shared<T: PartialEq>(mut values: impl Iterator<Item = T>) -> Option<T> {
+    let first = values.next()?;
+    values.all(|value| value == first).then_some(first)
 }
 
 fn distance(a: Position, b: Position) -> f64 {
@@ -187,6 +293,33 @@ mod tests {
         assert_eq!(
             reflected_pairs(&placed, 0.0),
             Some(vec![(0, 4), (1, 3), (2, 2)])
+        );
+    }
+
+    #[test]
+    fn zones_are_thirds_of_the_rig_span_and_depth_halves_it() {
+        // Span -3000..3000: house left to -1000, house right from 1000; Y middle is 0.
+        let positions = BTreeMap::from([
+            ("l".to_owned(), at(-3000.0, 0.0)),
+            ("c".to_owned(), at(0.0, -2000.0)),
+            ("r".to_owned(), at(3000.0, 0.0)),
+            ("b".to_owned(), at(-1000.0, 2000.0)),
+        ]);
+        let groups = BTreeMap::from([
+            ("front".to_owned(), vec!["c".to_owned()]),
+            ("sides".to_owned(), vec!["l".to_owned(), "r".to_owned()]),
+        ]);
+        let spatial = Spatial::new(positions, &groups, |_| 0);
+        let zone = |id| spatial.zone(id).map(|(zone, depth, _)| (zone, depth));
+        assert_eq!(zone("l"), Some((Zone::HouseLeft, Depth::Downstage)));
+        assert_eq!(zone("c"), Some((Zone::Centre, Depth::Downstage)));
+        assert_eq!(zone("r"), Some((Zone::HouseRight, Depth::Downstage)));
+        assert_eq!(zone("b"), Some((Zone::HouseLeft, Depth::Upstage)));
+        let sides = spatial.group_place("sides").unwrap();
+        assert_eq!((sides.zone, sides.depth), (None, Some(Depth::Downstage)));
+        assert_eq!(
+            spatial.group_place("front").unwrap().zone,
+            Some(Zone::Centre)
         );
     }
 

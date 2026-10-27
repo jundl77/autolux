@@ -5,11 +5,20 @@ import struct
 
 from google.protobuf.message import Message
 
-from autolux.lighting.mvr_schema import ACCENT_ROLE, LOOP_ROLE
+from autolux.lighting.mvr_schema import ACCENT_ROLE, DEPTHS, LOOP_ROLE, ZONES
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 ROLE_NAMES = {rig_wire.GROUP_ROLE_LOOP: LOOP_ROLE, rig_wire.GROUP_ROLE_ACCENT: ACCENT_ROLE}
+# MIXED (members in several zones) has no name.
+ZONE_NAMES = dict(
+    zip(
+        (wire.STAGE_ZONE_HOUSE_LEFT, wire.STAGE_ZONE_CENTRE, wire.STAGE_ZONE_HOUSE_RIGHT),
+        ZONES,
+        strict=True,
+    )
+)
+DEPTH_NAMES = dict(zip((wire.STAGE_DEPTH_DOWNSTAGE, wire.STAGE_DEPTH_UPSTAGE), DEPTHS, strict=True))
 MAX_LOGIN_BYTES = 4 * 1024 * 1024
 MAX_MESSAGE_BYTES = 4 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
@@ -212,6 +221,9 @@ def login_groups(reply) -> list[dict]:
             'pulse': group.pulse,
             'pattern': group.pattern,
             'role': ROLE_NAMES[group.role],
+            'zone': ZONE_NAMES.get(group.zone),
+            'depth': DEPTH_NAMES.get(group.depth),
+            'x': group.centre_x_metres,
         }
         for group in reply.groups
     ]

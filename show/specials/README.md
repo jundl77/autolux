@@ -39,6 +39,10 @@ Selection (top level):
 - `role`: `accent` or `loop`, instead of `group`: the row plays on every group of that role whose
   profiles can express it (below), so a new accent group inherits it. Each such group is a
   separate candidate and rests on its own. A strobe row always names a group.
+- `zone` (optional, role rows only): `house_left`, `centre` or `house_right`; the row plays only
+  on groups whose members all lie in that third of the rig's width, seen from the audience.
+- `depth` (optional, role rows only): `downstage` or `upstage`, the half of the rig's depth.
+  Both come from the fixtures' MVR positions (Starfire derives them), never from names.
 
 `[preset]`:
 
