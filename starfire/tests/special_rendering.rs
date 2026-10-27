@@ -378,6 +378,29 @@ fn pausing_within_a_cut_fade_leaves_the_special_gone_on_play() {
     assert_eq!(dmx(&mut engine, 6.0)[red], 0);
 }
 
+#[test]
+fn a_cut_also_shortens_a_special_already_fading_under_its_id() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let red = SCANNER.start + 2;
+    let texture = wire::SpecialFx {
+        release_beats: 64.0,
+        ..steady("primary", 1.0, 0.0)
+    };
+    // A plain release, and a replacement that leaves the first special fading beneath it.
+    for replace in [false, true] {
+        let mut engine = engine(&rig);
+        fire(&mut engine, 0.0, &special("scanners", texture.clone()));
+        if replace {
+            fire(&mut engine, 4.0, &special("scanners", texture.clone()));
+        } else {
+            unset(4.0, &mut engine);
+        }
+        unset_within(4.0, &mut engine, Some(1.0), None);
+        assert_ne!(dmx(&mut engine, 4.5)[red], 0, "replace {replace}");
+        assert_eq!(dmx(&mut engine, 5.0)[red], 0, "replace {replace}");
+    }
+}
+
 fn paused(value: bool) -> ClientMessage {
     ClientMessage::SetParameter(wire::SetParameter {
         command_id: 1,
