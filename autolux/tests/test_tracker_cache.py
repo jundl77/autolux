@@ -20,7 +20,7 @@ RECORD = {
 
 class _FakeTracker:
     alive = True
-    pass_sec = []
+    pass_sec = ()
 
     def __init__(self):
         self.fed = 0
@@ -136,7 +136,7 @@ def test_a_run_that_skipped_audio_in_standby_still_records_the_whole_file(tmp_pa
 
 
 def test_the_archive_bytes_are_reproducible(tmp_path):
-    audio, key = _key(tmp_path)
+    _audio, key = _key(tmp_path)
     path_a = tmp_path / "a.npz"
     path_b = tmp_path / "b.npz"
     _record_session(path_a, key)

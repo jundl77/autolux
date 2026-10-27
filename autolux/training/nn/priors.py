@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import itertools
 import json
 import logging
 from pathlib import Path
@@ -51,9 +52,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from . import _TRAINING_DIR  # noqa: F401  (puts training/ on sys.path for the
 # lazy imports below)
-
 # **Nothing heavy at module scope.**  ``decoder`` imports this module, and the
 # decoder is the object that runs live at showtime -- so the import that a show
 # pays for must be numpy and nothing else.  ``nn.dataset`` alone pulls torch
@@ -63,7 +62,9 @@ from . import _TRAINING_DIR  # noqa: F401  (puts training/ on sys.path for the
 # ``autolux.lib.label_space`` is the exception, and is why it lives outside the training
 # tree at all: the vocabulary is stdlib-only, so the one definition of it costs
 # the show nothing and never has to be copied into a second place.
-from autolux.lib.label_space import SECTION_LABELS, check_class_space  # noqa: E402
+from autolux.lib.label_space import SECTION_LABELS, check_class_space
+
+from . import _TRAINING_DIR  # noqa: F401  (puts training/ on sys.path for the
 
 PRIORS_FILE = "priors.json"
 MODELS_DIR = "models"
@@ -199,7 +200,7 @@ class Priors(NamedTuple):
         }
 
     @classmethod
-    def from_dict(cls, document: dict, source: str = "priors document") -> "Priors":
+    def from_dict(cls, document: dict, source: str = "priors document") -> Priors:
         version = int(document.get("version", 0))
         if version != PRIORS_VERSION:
             raise RuntimeError(
@@ -238,7 +239,7 @@ class Priors(NamedTuple):
         tmp.replace(path)
 
     @classmethod
-    def load(cls, path) -> "Priors":
+    def load(cls, path) -> Priors:
         with open(path, "r", encoding="utf-8") as handle:
             return cls.from_dict(json.load(handle), str(path))
 
@@ -252,29 +253,6 @@ def _log(values: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------- #
 # Corpus -> run sequences
 # --------------------------------------------------------------------------- #
-
-
-def label_runs(sections: list) -> list:
-    """Published sections -> merged runs ``[(start, end, label)]``.
-
-    The ``end`` sentinel is dropped and a merge across it joins the runs on
-    either side -- consistent with ``section_runs`` -- but the sentinel's own
-    time is never re-attributed, which is why bar counts are summed per member
-    rather than taken from the merged span.
-    """
-    from build_training_table import label_coverage
-
-    spans = sorted(
-        ((float(start), float(end), label) for start, end, label in label_coverage(sections)),
-        key=lambda span: span[0],
-    )
-    runs: list = []
-    for start, end, label in spans:
-        if runs and runs[-1][2] == label:
-            runs[-1][1] = max(runs[-1][1], end)
-        else:
-            runs.append([start, end, label])
-    return [tuple(run) for run in runs]
 
 
 def bar_runs(sections: list, downbeats: np.ndarray) -> list:
@@ -337,7 +315,7 @@ def corpus_bar_runs_by_cause(data_dir, youtube_ids) -> tuple:
     )
 
     data_dir = Path(data_dir)
-    wanted = set(str(i) for i in youtube_ids)
+    wanted = {str(i) for i in youtube_ids}
     by_id = {str(track.get("id")): track for track in load_all_tracks(data_dir)}
 
     sequences: list = []
@@ -430,7 +408,7 @@ def fit_runs(
         initial_counts[index[pairs[0][0]]] += 1.0
         for label, bars in pairs:
             durations[label].append(bars)
-        for (src, _bars), (dst, _next) in zip(pairs, pairs[1:]):
+        for (src, _bars), (dst, _next) in itertools.pairwise(pairs):
             i, j = index[src], index[dst]
             if legal[i, j]:
                 counts[i, j] += 1.0
@@ -533,7 +511,7 @@ def _duration_model(durations: dict, classes, floor_percentile: float) -> tuple:
             floors[i], hazards[i] = 1, 0.5
             stats[label] = {"n": 0}
             continue
-        floor = max(1, int(round(float(np.percentile(values, floor_percentile)))))
+        floor = max(1, round(float(np.percentile(values, floor_percentile))))
         median = float(np.median(values))
         # At least one bar of tail: a class whose median equals its floor still
         # has to be able to end.
@@ -611,7 +589,7 @@ def fit(
                 f"ids it no longer holds -- decide which before shipping priors "
                 f"that quietly describe fewer tracks than they claim."
             )
-        logging.warning(report)
+        logging.getLogger(__name__).warning(report)
     provenance = {
         "split": split,
         "split_size": len(ids),

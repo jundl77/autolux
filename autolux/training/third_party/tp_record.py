@@ -11,8 +11,11 @@ this module is what makes the file trustworthy once it is opened.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import math
+import shutil
 import sys
 from pathlib import Path
 
@@ -26,7 +29,9 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from raveform_fetch_annotations import BEATS_DIR, annotations_dir  # noqa: E402
+import itertools
+
+from raveform_fetch_annotations import BEATS_DIR, annotations_dir
 
 RECORD_SCHEMA = 1
 THIRD_PARTY_SOURCES = ("rwc", "salami", "harmonix")
@@ -75,13 +80,6 @@ def beat_csv_path(corpus: Path, record: dict) -> Path:
     return annotations_dir(Path(corpus)) / BEATS_DIR / f"{record['id']}.beat.csv"
 
 
-def labelled_span(record: dict) -> tuple:
-    sections = record.get("sections") or []
-    if not sections:
-        return 0.0, 0.0
-    return float(sections[0]["start"]), float(sections[-1]["end"])
-
-
 def _number(value, what: str) -> float:
     try:
         number = float(value)
@@ -94,7 +92,7 @@ def _number(value, what: str) -> float:
 
 def _span(entry, what: str, duration: float) -> tuple:
     if not isinstance(entry, dict):
-        raise ValueError(f"{what}: expected an object, got {type(entry).__name__}")
+        raise ValueError(f"{what}: expected an object, got {type(entry).__name__}")  # noqa: TRY004
     start = _number(entry.get("start"), f"{what} start")
     end = _number(entry.get("end"), f"{what} end")
     if start < 0.0:
@@ -107,7 +105,7 @@ def _span(entry, what: str, duration: float) -> tuple:
 
 
 def _check_order(spans: list, what: str) -> None:
-    for index, (before, after) in enumerate(zip(spans, spans[1:])):
+    for index, (before, after) in enumerate(itertools.pairwise(spans)):
         if after[0] < before[0]:
             raise ValueError(
                 f"{what} {index + 1} starts at {after[0]!r}, before {what} "
@@ -122,7 +120,7 @@ def _check_order(spans: list, what: str) -> None:
 
 def _check_id(track_id, source: str) -> None:
     if not isinstance(track_id, str):
-        raise ValueError(f"id: expected a str, got {type(track_id).__name__}")
+        raise ValueError(f"id: expected a str, got {type(track_id).__name__}")  # noqa: TRY004
     prefix = ID_PREFIXES[source]
     if not track_id.startswith(prefix):
         raise ValueError(f"id {track_id!r}: a {source} id must start with {prefix!r}")
@@ -136,7 +134,7 @@ def _check_id(track_id, source: str) -> None:
 
 def validate_record(record: dict) -> None:
     if not isinstance(record, dict):
-        raise ValueError(f"expected a JSON object, got {type(record).__name__}")
+        raise ValueError(f"expected a JSON object, got {type(record).__name__}")  # noqa: TRY004
     missing = [field for field in REQUIRED_FIELDS if field not in record]
     if missing:
         raise ValueError(f"record lacks {', '.join(missing)}")
@@ -153,7 +151,7 @@ def validate_record(record: dict) -> None:
 
     sections = record["sections"]
     if not isinstance(sections, list):
-        raise ValueError(f"sections: expected a list, got {type(sections).__name__}")
+        raise ValueError(f"sections: expected a list, got {type(sections).__name__}")  # noqa: TRY004
     if not sections:
         raise ValueError("sections: empty -- the record labels nothing")
     spans = []
@@ -164,7 +162,7 @@ def validate_record(record: dict) -> None:
         # No vocabulary check anywhere: a source's labels are its own ground
         # truth, and mapping them into ours is a later training decision.
         if not isinstance(name, str):
-            raise ValueError(f"{what}: name is not a str ({name!r})")
+            raise ValueError(f"{what}: name is not a str ({name!r})")  # noqa: TRY004
         if not name:
             raise ValueError(f"{what}: name is empty")
         if name != name.strip():
@@ -185,7 +183,7 @@ def validate_record(record: dict) -> None:
 
     provenance = record["provenance"]
     if not isinstance(provenance, dict):
-        raise ValueError(f"provenance: expected an object, got {type(provenance).__name__}")
+        raise ValueError(f"provenance: expected an object, got {type(provenance).__name__}")  # noqa: TRY004
     absent = [field for field in PROVENANCE_FIELDS if not provenance.get(field)]
     if absent:
         raise ValueError(f"provenance lacks {', '.join(absent)}")
@@ -238,3 +236,58 @@ def load_all_third_party(corpus: Path) -> list:
     records = [record for source in THIRD_PARTY_SOURCES for record in load_records(corpus, source)]
     records.sort(key=lambda record: str(record["id"]))
     return records
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def copy_audio(source: Path, target: Path) -> str:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and target.stat().st_size == source.stat().st_size:
+        return "kept"
+    shutil.copy2(source, target)
+    return "copied"
+
+
+def carry_timestamp(path: Path, record: dict) -> dict:
+    """Keep an unchanged record's original stamp, so a re-run rewrites nothing.
+
+    A per-run timestamp is the one field that differs when nothing has: without
+    this, a second conversion rewrites every file and no diff can say whether
+    the corpus actually moved.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            existing = json.load(handle)
+    except (OSError, ValueError):
+        return record
+    if not isinstance(existing, dict):
+        return record
+    stamp = (existing.get("provenance") or {}).get("converted_utc")
+    if not isinstance(stamp, str) or not stamp:
+        return record
+    probe = copy.deepcopy(record)
+    probe["provenance"]["converted_utc"] = stamp
+    if probe == existing:
+        record["provenance"]["converted_utc"] = stamp
+    return record
+
+
+def write_report(corpus: Path, report: dict) -> Path:
+    path = third_party_dir(corpus) / report["report_file"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".part")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as handle:
+            json.dump(report, handle, indent=2)
+            handle.write("\n")
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return path

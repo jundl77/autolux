@@ -9,6 +9,12 @@ repos:
         files: ^(autolux|cli|proto|tools)/
         exclude: ^autolux/training/data/
         require_serial: true
+      - id: python-lint
+        name: Python lint (Ruff)
+        entry: uv run --locked --extra dev ruff check --force-exclude
+        language: system
+        types: [python]
+        require_serial: true
       - id: proto-format
         name: Protobuf formatting (clang-format)
         entry: uv run --locked --extra dev clang-format -i --style=file

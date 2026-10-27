@@ -25,22 +25,15 @@ writes CAMP/mask_proof.json.  Any violation exits nonzero and the arm holds.
 """
 
 import copy
-import ctypes
 import datetime
 import json
 import sys
 from pathlib import Path
 
-try:
-    _k32 = ctypes.windll.kernel32
-    _k32.GetCurrentProcess.restype = ctypes.c_void_p
-    _k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    _k32.SetPriorityClass(_k32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import module_source
+
+module_source.below_normal_priority()
 
 PHASE_B = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
 DATA = Path(__file__).resolve().parents[1] / "data" / "raveform"
@@ -54,11 +47,10 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 # first -- the two disagree, and nothing downstream would say which ran.
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
-import numpy as np  # noqa: E402
-
-from training.nn.ceiling import demote as DD  # noqa: E402
-from training.nn.ceiling import mask as MK  # noqa: E402
-from training.nn.dataset import (  # noqa: E402
+import numpy as np
+from training.nn.ceiling import demote as DD
+from training.nn.ceiling import mask as MK
+from training.nn.dataset import (
     FEATURES_DIR,
     FRAME_SEC,
     LABEL_POOL,
@@ -66,7 +58,7 @@ from training.nn.dataset import (  # noqa: E402
     sidecar_shape,
     track_targets,
 )
-from training.nn.infer import usable_frames  # noqa: E402
+from training.nn.infer import usable_frames
 
 FEATURE_DIR = DATA / "features_stream" / "MERT-v1-330M_L6-22_F3_hop1"
 
@@ -157,7 +149,7 @@ def main() -> int:
     overlay_sec = sum(float(e["end"]) - float(e["start"]) for e in overlay["sections"])
     masked_sec = masked_frames * FRAME_SEC
     proof = {
-        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "overlay": str(CAMP / "supervision_mask_overlay.json"),
         "applied_stats": stats,
         "hand_excluded": overlay.get("hand_excluded"),

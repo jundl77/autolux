@@ -41,10 +41,6 @@ FIXTURE_CSS = '''
 .patch-field input {box-sizing:border-box;width:100%;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:8px;font:inherit;font-size:12px;}
 #config-panel .mvr-editor input,#config-panel .mvr-editor select {box-sizing:border-box;width:100%;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:6px 8px;font:inherit;font-size:12px;}
 .patch-pair {display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-#config-panel .Select-control,#config-panel .Select-menu-outer {background:#0b121c;border-color:#344256;}
-#config-panel .Select-value-label,#config-panel .Select-input input {color:#e6edf3!important;}
-#config-panel .Select-option {background:#0b121c;color:#d5e0ec;}
-#config-panel .Select-option.is-focused,#config-panel .Select-option.is-selected {background:#273b51;}
 #config-panel button {background:#1e2c3d;color:#dce8f5;border:1px solid #3b4d62;border-radius:4px;padding:8px 12px;cursor:pointer;font-size:12px;}
 #config-panel button:disabled {opacity:.4;cursor:default;}
 #config-panel .patch-primary {background:#284d71;border-color:#4a7fab;}

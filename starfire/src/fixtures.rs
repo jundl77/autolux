@@ -394,19 +394,6 @@ impl FixtureRig {
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
     }
 
-    pub fn interpolate_attribute(
-        &self,
-        cell_id: &str,
-        key: &str,
-        from: &AttributeValue,
-        to: &AttributeValue,
-        amount: f64,
-    ) -> AttributeValue {
-        self.profile(cell_id)
-            .expect("validated cell state")
-            .interpolate_attribute(key, from, to, amount)
-    }
-
     pub fn fixture_ids(&self) -> Vec<String> {
         self.fixtures
             .iter()

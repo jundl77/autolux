@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+LOGGER = logging.getLogger(__name__)
+
 DEFAULT_DASHBOARD_PORT = 8765
 DASHBOARD_MDNS_HOSTNAME = 'autolux.local.'
 DASHBOARD_BIND_ADDRESS = '0.0.0.0'
@@ -61,7 +63,7 @@ def advertise_dashboard_mdns(port: int):
                 )
             )
         except (OSError, NonUniqueNameException) as error:
-            logging.warning('[dashboard] local hostname unavailable; use the PC IP: %s', error)
+            LOGGER.warning('[dashboard] local hostname unavailable; use the PC IP: %s', error)
         yield
     finally:
         if discovery is not None:
@@ -119,7 +121,8 @@ def _static_command(payload: dict) -> dict:
     if kind in ('blacklight', 'clear', 'special_fx_clear'):
         return {'kind': kind}
     if kind == 'special_fx':
-        return {'kind': kind, **_static_special_fx(payload)}
+        fields = ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
+        return {'kind': kind, **{name: payload.get(name) for name in fields}}
     if kind == 'strobe':
         # The page sends the state it wants, so a retried request cannot flip the strobe twice.
         enabled = payload.get('enabled')
@@ -157,15 +160,8 @@ def _static_command(payload: dict) -> dict:
     }
 
 
-def _static_special_fx(payload: dict) -> dict:
-    return {
-        name: payload.get(name)
-        for name in ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
-    }
-
-
 def command_refusal(
-    command: dict, intent: str | None, paused: bool | None, mode: str | None = None
+    command: dict, intent: str | None, paused: bool | None, mode: str | None
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
@@ -210,22 +206,12 @@ class _Handler(BaseHTTPRequestHandler):
 
             from autolux.lib.system_health import metrics
 
-            body = metrics(self.server.event_buffer)
-            self.send_response(200)
-            self.send_header('Content-Type', CONTENT_TYPE_LATEST)
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send(200, CONTENT_TYPE_LATEST, metrics(self.server.event_buffer))
             return
         if self.path != SNAPSHOT_PATH:
             self.send_error(404)
             return
-        body = json.dumps(self.server.event_buffer.snapshot()).encode()
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._reply(200, self.server.event_buffer.snapshot())
 
     def do_OPTIONS(self) -> None:
         if self.path != CONTROL_PATH or self.server.commands is None or not self._cross_origin():
@@ -295,17 +281,16 @@ class _Handler(BaseHTTPRequestHandler):
     def send_response(self, code: int, message: str | None = None) -> None:
         super().send_response(code, message)
         # Every reply, errors included: without these the page sees a network error, not the status.
-        self._cors_headers()
-
-    def _cors_headers(self) -> None:
         if getattr(self, 'headers', None) is not None and self._cross_origin():
             self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
             self.send_header('Vary', 'Origin')
 
     def _reply(self, status: int, body: dict) -> None:
-        content = json.dumps(body).encode()
+        self._send(status, 'application/json', json.dumps(body).encode())
+
+    def _send(self, status: int, content_type: str, content: bytes) -> None:
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -353,11 +338,7 @@ class SnapshotServer:
 
 
 def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
-    command = [
-        sys.executable,
-        '-m',
-        VIEWER_MODULE,
-    ]
+    command = [sys.executable, '-m', VIEWER_MODULE]
     if fixture_setup is not None:
         command = [
             sys.executable,
@@ -372,12 +353,7 @@ def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
         ]
         if fixture_setup.get('library') is not None:
             command.extend(['--library', str(fixture_setup['library'])])
-    return command + [
-        '--port',
-        str(ui_port),
-        '--snapshot-port',
-        str(snapshot_port(ui_port)),
-    ]
+    return command + ['--port', str(ui_port), '--snapshot-port', str(snapshot_port(ui_port))]
 
 
 def _spawn(command: list) -> subprocess.Popen:
@@ -395,11 +371,13 @@ def kill_tree(process: subprocess.Popen) -> None:
         return
     try:
         if os.name == 'nt':
-            subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
+            subprocess.run(
+                ['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True, check=False
+            )
         else:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
     except OSError as error:
-        logging.warning(f'[ui] could not signal the viewer ({error!r})')
+        LOGGER.warning(f'[ui] could not signal the viewer ({error!r})')
     try:
         process.wait(timeout=_KILL_GRACE_SEC)
     except subprocess.TimeoutExpired:
@@ -415,14 +393,10 @@ class UiBridge:
         self._watcher = threading.Thread(target=self._watch, name='viewer-watch', daemon=True)
         self._watcher.start()
 
-    @property
-    def viewer(self) -> subprocess.Popen:
-        return self._viewer
-
     def _watch(self) -> None:
         code = self._viewer.wait()
         if not self._stopping:
-            logging.warning(
+            LOGGER.warning(
                 f'[ui] the viewer process exited ({code}) — the '
                 f'show is unaffected; relaunch it with '
                 f'`python -m {VIEWER_MODULE} --port {self._ui_port}`'
@@ -457,7 +431,7 @@ def start(
         )
         server.start()
     except OSError as error:
-        logging.warning(
+        LOGGER.warning(
             f'[ui] no snapshot endpoint on port '
             f'{snapshot_port(ui_port)} ({error!r}) — the show runs '
             f'without a viewer'
@@ -466,12 +440,12 @@ def start(
     try:
         viewer = _spawn(viewer_command(ui_port, fixture_setup))
     except OSError as error:
-        logging.warning(
+        LOGGER.warning(
             f'[ui] the viewer process did not start ({error!r}) — the show runs without it'
         )
         server.stop()
         return None
-    logging.info(
+    LOGGER.info(
         f'[ui] dashboard → http://{DASHBOARD_MDNS_HOSTNAME.rstrip(".")}:{ui_port} '
         f'(pid {viewer.pid}, reading :{server.port}{SNAPSHOT_PATH})'
     )

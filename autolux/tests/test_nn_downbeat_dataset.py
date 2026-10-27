@@ -9,9 +9,8 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from build_training_table import write_feature_sidecar  # noqa: E402
-from nn.dataset import FRAME_SEC, LABEL_POOL, WINDOW_FRAMES  # noqa: E402
-from nn.downbeat_dataset import (  # noqa: E402
+from nn.dataset import FRAME_SEC, LABEL_POOL, WINDOW_FRAMES
+from nn.downbeat_dataset import (
     BEATS_PER_BAR,
     DOWNBEAT_SIGMA_SEC,
     GAP_FACTOR,
@@ -24,7 +23,7 @@ from nn.downbeat_dataset import (  # noqa: E402
     track_downbeat_targets,
 )
 
-from autolux.tests.test_nn_dataset import corpus_tracks, fake_corpus  # noqa: E402
+from autolux.tests.test_nn_dataset import corpus_tracks, fake_corpus
 
 
 def grid_rows(bpm=120.0, bars=16, start=0.5, start_phase=1, section="drop"):
@@ -47,7 +46,7 @@ def write_grid(path, rows, header="time,downbeat,section"):
 
 
 def frame_of(song_time):
-    return int(round(song_time / FRAME_SEC)) - 1
+    return round(song_time / FRAME_SEC) - 1
 
 
 def targets_for(rows, duration=120.0):
@@ -236,7 +235,7 @@ def test_a_hole_in_the_grid_is_masked_rather_than_taught_as_silence():
     rows = grid_rows(bpm=120.0, bars=8, start=1.0)
     two_bars = 2 * BEATS_PER_BAR
     kept = rows[:12] + rows[12 + two_bars :]
-    grid, targets = targets_for(kept)
+    _grid, targets = targets_for(kept)
 
     hole_start = kept[11][0]
     hole_end = kept[12][0]
@@ -270,7 +269,7 @@ def test_the_mask_stops_at_the_first_beat_even_next_to_a_downbeat():
 
 
 def test_beats_past_the_end_of_the_mel_are_marked_not_clipped():
-    grid, targets = targets_for(grid_rows(bpm=120.0, bars=16, start=1.0), duration=10.0)
+    _grid, targets = targets_for(grid_rows(bpm=120.0, bars=16, start=1.0), duration=10.0)
 
     inside = targets.beat_frame >= 0
     assert inside.any() and not inside.all()

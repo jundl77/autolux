@@ -35,14 +35,12 @@ sys.path.append(str(HERE.parent))
 
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
-import training.nn.decoder  # noqa: E402
-from training.nn.evaluate_v1 import split_ids, write_json  # noqa: E402
-from training.nn.priors import MODELS_DIR  # noqa: E402
-from raveform_fetch_annotations import BEATS_DIR, annotations_dir  # noqa: E402
-from build_training_table import TABLE_FILE  # noqa: E402
-from evaluate_against_labels import load_tracks  # noqa: E402
-
-import phase_tracking as pt  # noqa: E402
+import phase_tracking as pt
+from build_training_table import TABLE_FILE
+from evaluate_against_labels import load_tracks
+from raveform_fetch_annotations import BEATS_DIR, annotations_dir
+from training.nn.evaluate_v1 import split_ids, write_json
+from training.nn.priors import MODELS_DIR
 
 PLACEMENT_TOL = 0.5
 WINDOWS = (4, 8, 16)
@@ -141,7 +139,7 @@ def stat(values) -> dict | None:
 
 def signature(track, k: int) -> dict:
     """What the live stream looks like across one slip's span."""
-    js, live = track["js"], track["live"]
+    js = track["js"]
     lo, hi = int(js[k - 1]), int(js[k])
     local = track["ratios"][8][lo + 1 : hi + 1]
     finite = local[np.isfinite(local)]
@@ -419,12 +417,9 @@ def main(argv=None) -> int:
             )
             return positions, advances, config["interpolate"]
 
-        name = "A|del%.2f|ins%.2f|w%d|max%d|%s" % (
-            config["del_lo"],
-            config["ins_hi"],
-            config["window"],
-            config["max_advance"],
-            "interp" if config["interpolate"] else "plain",
+        name = (
+            f"A|del{config['del_lo']:.2f}|ins{config['ins_hi']:.2f}|w{config['window']:d}"
+            f"|max{config['max_advance']:d}|{'interp' if config['interpolate'] else 'plain'}"
         )
         results.extend(evaluate(name, positions_fn, anchors=ANCHORS, config=config))
     print(f"swept {len(a_grid)} A configs x {len(ANCHORS)} anchors", flush=True)
@@ -530,14 +525,10 @@ def main(argv=None) -> int:
         for b in (0.0, 2.0)
     ]
     for config in b_grid:
-        name = "B|lag%d|sig%.2f|eta%.3f|beta%.1f|%s|%s%s" % (
-            config["lag"],
-            config["sigma"],
-            config["eta"],
-            config["beta"],
-            config["read"],
-            config["prior"],
-            "|flat%.3f" % config["slip_rate"] if "slip_rate" in config else "",
+        flat = f"|flat{config['slip_rate']:.3f}" if "slip_rate" in config else ""
+        name = (
+            f"B|lag{config['lag']:d}|sig{config['sigma']:.2f}|eta{config['eta']:.3f}"
+            f"|beta{config['beta']:.1f}|{config['read']}|{config['prior']}{flat}"
         )
         results.extend(evaluate(name, make_b(config), config=config))
     print(f"swept {len(b_grid)} B configs", flush=True)
@@ -560,10 +551,9 @@ def main(argv=None) -> int:
         for p in (True, False)
     ]
     for config in c_grid:
-        name = "C|lag%d|beta%.1f|%s" % (
-            config["lag"],
-            config["beta"],
-            "interp" if config["interpolate"] else "plain",
+        name = (
+            f"C|lag{config['lag']:d}|beta{config['beta']:.1f}"
+            f"|{'interp' if config['interpolate'] else 'plain'}"
         )
         results.extend(evaluate(name, make_b(config), config=config))
     print(f"swept {len(c_grid)} C configs", flush=True)

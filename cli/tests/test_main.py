@@ -1,12 +1,12 @@
-import io
 import argparse
 import asyncio
+import io
 import threading
 
 import pytest
 
-from cli import main
 from autolux.simulate.evaluator import print_evaluation
+from cli import main
 
 
 def test_report_printing_supports_redirected_windows_output(monkeypatch):

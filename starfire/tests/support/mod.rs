@@ -7,6 +7,7 @@ use serde_json::Value;
 use starfire::fixtures::FixtureRig;
 use starfire::palette::{PaletteDefinition, PaletteTable};
 use starfire::protocol::wire;
+use starfire::script::AutoloopCatalog;
 
 pub fn palette_definitions() -> Vec<PaletteDefinition> {
     serde_json::from_str(include_str!("../palettes.json")).unwrap()
@@ -22,6 +23,10 @@ pub fn rig_folder() -> PathBuf {
 
 pub fn room() -> FixtureRig {
     FixtureRig::load(&rig_folder().join("room.rig.pb")).unwrap()
+}
+
+pub fn show_catalog() -> AutoloopCatalog {
+    AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops")).unwrap()
 }
 
 /// A synthetic GDTF test description's mode as Autolux compiles it, named `profile_id`.

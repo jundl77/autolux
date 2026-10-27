@@ -17,11 +17,11 @@ from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from raveform_manifest import (  # noqa: E402
+from raveform_fetch_annotations import load_all_tracks
+from raveform_manifest import (
     MANIFEST_FILE,
     build_manifest_rows,
 )
-from raveform_fetch_annotations import load_all_tracks  # noqa: E402
 
 AUDIO_DIR = "audio"
 CLEAN_MANIFEST_FILE = "clean_manifest.csv"
@@ -106,18 +106,22 @@ def classify(
     if abs(shortfall) > tolerance:
         return (
             STATUS_CORRUPT,
-            f"truncated: header claims {header_duration_sec:.3f} s but the decoder "
-            f"produced {decoded_duration_sec:.3f} s ({shortfall:+.3f} s, "
-            f"tolerance {tolerance:.3f} s)",
+            (
+                f"truncated: header claims {header_duration_sec:.3f} s but the decoder "
+                f"produced {decoded_duration_sec:.3f} s ({shortfall:+.3f} s, "
+                f"tolerance {tolerance:.3f} s)"
+            ),
         )
 
     delta = decoded_duration_sec - annotation_duration_sec
     if abs(delta) > tolerance:
         return (
             STATUS_MISMATCH,
-            f"decoded {decoded_duration_sec:.3f} s vs annotation "
-            f"{annotation_duration_sec:.3f} s (delta {delta:+.3f} s, "
-            f"tolerance {tolerance:.3f} s)",
+            (
+                f"decoded {decoded_duration_sec:.3f} s vs annotation "
+                f"{annotation_duration_sec:.3f} s (delta {delta:+.3f} s, "
+                f"tolerance {tolerance:.3f} s)"
+            ),
         )
     return STATUS_OK, ""
 
@@ -133,6 +137,7 @@ def _run(command: list) -> subprocess.CompletedProcess:
         errors="replace",
         stdin=subprocess.DEVNULL,
         timeout=FFMPEG_TIMEOUT_SEC,
+        check=False,
     )
 
 

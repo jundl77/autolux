@@ -14,6 +14,8 @@ from autolux.lib.analyser.mert_stream import RingOverrun
 from autolux.lib.analyser.section_model import Drained
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 
+LOGGER = logging.getLogger(__name__)
+
 _QUEUE_PASSES = 4
 _IDLE_WAIT_SEC = 0.05
 
@@ -36,7 +38,7 @@ def reserved_bytes():
         if not torch.cuda.is_available():
             return None
         return int(torch.cuda.memory_reserved())
-    except Exception:
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -96,7 +98,7 @@ class GpuStage:
             return
         thread.join(_STOP_JOIN_SEC)
         if thread.is_alive():
-            logging.warning(
+            LOGGER.warning(
                 '[gpu] the pass thread is still inside a pass and was left to exit on its own'
             )
 
@@ -156,7 +158,7 @@ class GpuStage:
         while self._running:
             try:
                 self._tick()
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001
                 self._fault('stage_error', error)
                 self._sleep()
 
@@ -225,7 +227,7 @@ class GpuStage:
         except RingOverrun as overrun:
             self._fault('ring_overrun', overrun)
             return
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             self._fault('pass_failed', error)
             return
         finally:
@@ -290,7 +292,7 @@ class GpuStage:
         self.reinits += 1
         try:
             self.posteriors.set_encoder(self._reinit())
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             self._say(
                 'reinit_failed',
                 f'[gpu] reinit_failed: {error} — the show holds its '
@@ -312,7 +314,7 @@ class GpuStage:
             return
         self._said[kind] = now
         more = self._suppressed.pop(kind, 0)
-        logging.warning(message + (f' [+{more} more since the last line]' if more else ''))
+        LOGGER.warning(message + (f' [+{more} more since the last line]' if more else ''))
 
     def _status(self) -> None:
         now = self._clock.monotonic()
@@ -323,7 +325,7 @@ class GpuStage:
             return
         took = np.asarray(self._pass_sec, dtype=np.float64) * 1000.0
         reserved = reserved_bytes()
-        logging.info(
+        LOGGER.info(
             f'[gpu] {self.passes} passes | last {len(took)}: mean '
             f'{took.mean():.0f}ms max {took.max():.0f}ms | queue '
             f'{len(self._queue)}/{self._queue_passes}'

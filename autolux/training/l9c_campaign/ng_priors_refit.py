@@ -12,7 +12,6 @@ proves the whole import graph agrees on the fit).
 from __future__ import annotations
 
 import argparse
-import ctypes
 import os
 import subprocess
 import sys
@@ -26,13 +25,10 @@ VENV_PY = MAIN.parent / ".venv" / "Scripts" / "python.exe"
 W = str(MAIN)
 sys.path[:0] = [W, W + r"\training"]
 
-try:
-    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
+from autolux.lib.label_space import check_class_space
 from autolux.training import module_source
-from autolux.lib.label_space import check_class_space  # noqa: E402
+
+module_source.below_normal_priority()
 
 
 def run_priors_cli(tree: Path, out: Path, split: str) -> None:
@@ -55,6 +51,7 @@ def run_priors_cli(tree: Path, out: Path, split: str) -> None:
         env=env,
         cwd=str(tree),
         timeout=3600,
+        check=False,
     )
     if result.returncode != 0:
         sys.stderr.write(result.stdout[-2000:] + result.stderr[-2000:])
@@ -107,7 +104,7 @@ def main() -> int:
 
     run_priors_cli(MAIN, args.out, args.split)
 
-    from nn.priors import Priors  # noqa: PLC0415
+    from nn.priors import Priors
 
     priors = Priors.load(args.out)
     check_class_space(priors.classes, str(args.out))

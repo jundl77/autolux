@@ -6,7 +6,6 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
@@ -20,10 +19,7 @@ ENCODER_RECEPTIVE_FIELD = 400
 
 
 def encoder_samples(seconds: float, sample_rate: int = ENCODER_SAMPLE_RATE) -> int:
-    return (
-        int(math.floor(seconds * sample_rate / ENCODER_SAMPLES_PER_FRAME))
-        * ENCODER_SAMPLES_PER_FRAME
-    )
+    return math.floor(seconds * sample_rate / ENCODER_SAMPLES_PER_FRAME) * ENCODER_SAMPLES_PER_FRAME
 
 
 def encoder_frames(n_samples: int) -> int:
@@ -94,7 +90,7 @@ class StreamingResampler:
             self._flushed = True
             return np.zeros(0, dtype=np.float32)
         remaining = len(self._pending) - self._context
-        take = int(math.ceil(remaining / self.down)) * self.down
+        take = math.ceil(remaining / self.down) * self.down
         pad = take - remaining + self._context
         self._pending = np.concatenate([self._pending, np.zeros(max(pad, 0), dtype=np.float32)])
         out = self._emit(self.down, exact=remaining)
@@ -110,9 +106,7 @@ class StreamingResampler:
         filtered = resample_poly(window, self.up, self.down)
         head = self._context * self.up // self.down
         count = (
-            take * self.up // self.down
-            if exact is None
-            else int(math.ceil(exact * self.up / self.down))
+            take * self.up // self.down if exact is None else math.ceil(exact * self.up / self.down)
         )
         self._pending = self._pending[take:]
         return np.ascontiguousarray(filtered[head : head + count], dtype=np.float32)
@@ -265,7 +259,7 @@ class CellAccumulator:
         if final:
             limit = (max(self._sums) + 1) if self._sums else self._next
         else:
-            limit = int(math.floor(hi_sec / self._label_frame_sec))
+            limit = math.floor(hi_sec / self._label_frame_sec)
         out = []
         while self._next < limit:
             index = self._next
@@ -319,10 +313,6 @@ class StreamGeometry:
     @property
     def buffer_samples(self) -> int:
         return encoder_samples(self.buffer_sec)
-
-    @property
-    def worst_case_future_sec(self) -> float:
-        return self.margin_sec + self.hop_sec
 
 
 def load_stream_geometry(

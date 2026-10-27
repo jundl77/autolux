@@ -15,7 +15,6 @@ train-split, and that is asserted (annotations/*.hand.json vs the val ids)
 rather than assumed.
 """
 
-import ctypes
 import dataclasses
 import datetime
 import hashlib
@@ -26,22 +25,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import module_source
 
+module_source.below_normal_priority()
+
 W = str(module_source.experiment_checkout("AUTOLUX_LABEL9_CHECKOUT"))
 sys.path[:0] = [W, str(Path(W) / "training")]
 module_source.require_imported_package_under_root("nn", Path(W))
 
-try:
-    _kernel32 = ctypes.windll.kernel32
-    _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-    _kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    _kernel32.SetPriorityClass(_kernel32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
-import psutil  # noqa: E402
-
-from nn.decoder import decoder_config_classes, load_decoder_config  # noqa: E402
-from nn.evaluate_v1 import (  # noqa: E402
+import psutil
+from evaluate_against_labels import aggregate
+from nn.decoder import decoder_config_classes, load_decoder_config
+from nn.evaluate_v1 import (
     UNDECODED,
     beat_classes,
     build_decoder,
@@ -53,10 +46,9 @@ from nn.evaluate_v1 import (  # noqa: E402
     split_ids,
     write_json,
 )
-from nn.priors import Priors  # noqa: E402
+from nn.priors import Priors
 
-from evaluate_against_labels import aggregate  # noqa: E402
-from autolux.lib.label_space import SECTION_LABELS, check_class_space  # noqa: E402
+from autolux.lib.label_space import SECTION_LABELS, check_class_space
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "raveform"
 MAIN = Path(__file__).resolve().parents[2]
@@ -82,7 +74,7 @@ OWNER_RULING = (
 MIN_AVAILABLE_MB = 700
 
 sys.path.insert(0, str(L9_CAMPAIGN))
-from l9_decoder_reference import decoded_drop_deficit, drop_spans_by_id  # noqa: E402
+from l9_decoder_reference import decoded_drop_deficit, drop_spans_by_id
 
 RUNS = {
     "l9_w128_s1234": {
@@ -319,8 +311,10 @@ def markdown(rows: dict, genre_rows: dict, skipped: dict, ceiling: float) -> str
         )
     lines += [
         "",
-        f"Flicker ceiling: {ceiling:.6f}/min (5-class decoded "
-        f"reference).  Deficit caveat -- {DEFICIT_CAVEAT}.",
+        (
+            f"Flicker ceiling: {ceiling:.6f}/min (5-class decoded "
+            f"reference).  Deficit caveat -- {DEFICIT_CAVEAT}."
+        ),
         "",
     ]
     for run, per_genre in genre_rows.items():
@@ -489,7 +483,7 @@ def main() -> int:
         )
 
     verdict = {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "label": "the l9b campaign decoded raveform-val verdict (#341): "
         "shipped l9_w128_s1234 under the frozen committed config vs "
         "the H and HD arms, EACH under its own swept config + refit "

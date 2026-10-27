@@ -32,15 +32,6 @@ def special_target(group: str) -> str | dict:
     return WHOLE_RIG if group == WHOLE_RIG else {'group': group}
 
 
-def special_override(override_id: str, group: str, special: dict, *, priority: int) -> dict:
-    return {
-        'id': override_id,
-        'target': special_target(group),
-        'special_fx': dict(special),
-        'priority': priority,
-    }
-
-
 class StarfireClient:
     """Submit commands to a bounded nonblocking transport or simulation recorder."""
 
@@ -96,7 +87,14 @@ class StarfireClient:
         self._send_command({'kind': 'set_override', 'value': override})
 
     def set_special(self, override_id: str, group: str, special: dict, *, priority: int) -> None:
-        self.set_override(special_override(override_id, group, special, priority=priority))
+        self.set_override(
+            {
+                'id': override_id,
+                'target': special_target(group),
+                'special_fx': dict(special),
+                'priority': priority,
+            }
+        )
 
     def clear_override(self, override_id: str) -> None:
         self._send_command({'kind': 'clear_override', 'id': override_id})
@@ -119,9 +117,6 @@ class StarfireClient:
 
     def set_intensity(self, level: float) -> None:
         self._send_command({'kind': 'set_intensity', 'level': level})
-
-    def set_speed(self, multiplier: float) -> None:
-        self._send_command({'kind': 'set_speed', 'multiplier': multiplier})
 
     def set_blackout(self, enabled: bool) -> None:
         self._send_command({'kind': 'set_blackout', 'enabled': enabled})

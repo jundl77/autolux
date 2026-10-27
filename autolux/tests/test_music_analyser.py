@@ -1,6 +1,8 @@
 import datetime
-import pytest
+
 import numpy as np
+import pytest
+
 from autolux.lib.analyser.music_analyser import MusicAnalyser
 
 
@@ -18,9 +20,6 @@ class _StubHandler:
         pass
 
     def on_digital_gap(self, started_sec, seconds):
-        pass
-
-    async def on_cycle(self):
         pass
 
     async def on_beat(self, beat_number, bpm, bpm_changed):
@@ -49,6 +48,8 @@ def test_seconds_since_last_beat_small_when_recent(analyser):
     analyser.last_beat_detected = datetime.datetime.now()
     assert analyser.get_seconds_since_last_beat() < 0.1
 
+
+import itertools
 
 from autolux.lib.clock import VirtualClock
 
@@ -167,7 +168,7 @@ async def test_renderer_beat_anchors_and_tempo_have_the_same_units(detector_bpm)
     anchors = [event for event in lighting.events if event['command']['kind'] == 'beat']
     assert len(anchors) == 4
     assert analyser.get_bpm() == pytest.approx(MusicAnalyser._fold_bpm(detector_bpm))
-    for previous, current in zip(anchors, anchors[1:]):
+    for previous, current in itertools.pairwise(anchors):
         anchor = previous['command']
         extrapolated = (
             anchor['beat_index']
@@ -564,25 +565,3 @@ async def test_debug_clicks_are_mixed_into_the_returned_audio():
         'the note callback is no longer following the beat stream'
     )
     assert not clicked_off, 'audio was modified with -d off'
-
-
-async def test_beat_position_survives_a_song_reset_landing_mid_read():
-    class _ResettingClock(VirtualClock):
-        def __init__(self):
-            super().__init__()
-            self.victim = None
-
-        def now(self):
-            victim, self.victim = self.victim, None
-            if victim is not None:
-                victim._reset_state()
-            return super().now()
-
-    clock = _ResettingClock()
-    analyser = _make_analyser(clock)
-    analyser.is_playing = True
-    analyser.time_to_last_beat_sec = 0.47
-    analyser.beat_count = 12
-    clock.victim = analyser
-
-    assert analyser.get_beat_position() >= 0

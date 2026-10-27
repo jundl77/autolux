@@ -6,9 +6,10 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+from build_training_table import default_data_dir
+from raveform_fetch_annotations import load_tracks, parse_sections
 
 from . import _TRAINING_DIR  # noqa: F401
-
 from .dataset import FRAME_SEC, candidate_tracks, make_splits
 from .downbeat_dataset import (
     BEATS_PER_BAR,
@@ -29,9 +30,6 @@ from .downbeat_train import (
     stitch,
     sweep_peak_f1,
 )
-
-from build_training_table import default_data_dir  # noqa: E402
-from raveform_fetch_annotations import load_tracks, parse_sections  # noqa: E402
 
 
 def gaussian_at(
@@ -221,7 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list | None = None) -> int:
     args = build_parser().parse_args(argv)
     dataset = build_dataset(args.data_dir, args.split, args.tracks, args.seed)
-    min_distance = max(1, int(round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC)))
+    min_distance = max(1, round(MIN_PEAK_DISTANCE_SEC / FRAME_SEC))
     print(f"{args.split}: {len(dataset.track_ids())} tracks, {len(dataset)} windows")
 
     rng = np.random.default_rng(args.seed)

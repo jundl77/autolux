@@ -17,9 +17,10 @@ for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training"))
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from eval_assets import committed_audio_path  # noqa: E402
-from select_eval_set import EVAL_SET_FILE, load_eval_set  # noqa: E402
-from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT  # noqa: E402
+from eval_assets import committed_audio_path
+from select_eval_set import EVAL_SET_FILE, load_eval_set
+
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 SAMPLE_INTERVAL_SEC = 1.0
 BUCKET_SEC = 60.0
@@ -82,6 +83,7 @@ def buckets(stamps, values, width: float = BUCKET_SEC) -> list:
 
 def play(device: int, tracks: list, gap_sec: float, sample_rate: int, buffer_size: int) -> None:
     import pyaudio
+
     from autolux.simulate.fake_audio_client import FileAudioClient
 
     audio = pyaudio.PyAudio()
@@ -274,12 +276,13 @@ def boundary_verdict(boundaries: list, transitions: list, window_sec: float = 30
 
 
 async def _soak(args) -> dict:
-    from autolux.lib.main import PLAYBACK_DELAY_SEC, AutoluxController
-    from autolux.lib.clients.starfire_client import StarfireClient
-    from cli.starfire import ROOT
-    from cli.starfire_runtime import StarfireRuntime, selected_rig
     import secrets
     import uuid
+
+    from autolux.lib.clients.starfire_client import StarfireClient
+    from autolux.lib.main import PLAYBACK_DELAY_SEC, AutoluxController
+    from cli.starfire import ROOT
+    from cli.starfire_runtime import StarfireRuntime, selected_rig
 
     with StarfireRuntime(
         args.starfire_binary,
@@ -348,21 +351,31 @@ def summarise(record: dict) -> str:
     tail = record["samples"][-1] if record["samples"] else {}
     lines = [
         f'  buffers            {record["buffers"]}',
-        f'  per-buffer loop    mean {loop["mean"]:.3f}  p99 {loop["p99"]:.3f}  '
-        f'p99.9 {loop["p999"]:.3f}  max {loop["max"]:.3f} ms',
-        f'  read-to-read       mean {between["mean"]:.3f}  p99 {between["p99"]:.3f}  '
-        f'p99.9 {between["p999"]:.3f}  max {between["max"]:.3f} ms  '
-        f'({record["over_budget_pct"]:.2f}% over the '
-        f'{record["budget_ms"]:.3f} ms budget)',
-        f'  peak drift         {tail.get("peak_drift_sec")}s '
-        f'(total {tail.get("total_drift_sec")}s)',
-        f'  gpu passes         {tail.get("passes")} '
-        f'({tail.get("faults")} faults, {tail.get("overflows")} overflows, '
-        f'{tail.get("reinits")} reinits, {tail.get("resyncs")} resyncs)',
+        (
+            f'  per-buffer loop    mean {loop["mean"]:.3f}  p99 {loop["p99"]:.3f}  '
+            f'p99.9 {loop["p999"]:.3f}  max {loop["max"]:.3f} ms'
+        ),
+        (
+            f'  read-to-read       mean {between["mean"]:.3f}  p99 {between["p99"]:.3f}  '
+            f'p99.9 {between["p999"]:.3f}  max {between["max"]:.3f} ms  '
+            f'({record["over_budget_pct"]:.2f}% over the '
+            f'{record["budget_ms"]:.3f} ms budget)'
+        ),
+        (
+            f'  peak drift         {tail.get("peak_drift_sec")}s '
+            f'(total {tail.get("total_drift_sec")}s)'
+        ),
+        (
+            f'  gpu passes         {tail.get("passes")} '
+            f'({tail.get("faults")} faults, {tail.get("overflows")} overflows, '
+            f'{tail.get("reinits")} reinits, {tail.get("resyncs")} resyncs)'
+        ),
         f'  shed transitions   {len(record["shed_transitions"])}',
-        f'  song boundaries    {record["boundary_verdict"]["boundaries"]}, '
-        f'{record["boundary_verdict"]["sheds_near_a_boundary"]} shed near one '
-        f'-- {"PASS" if record["boundary_verdict"]["passed"] else "FAIL"}',
+        (
+            f'  song boundaries    {record["boundary_verdict"]["boundaries"]}, '
+            f'{record["boundary_verdict"]["sheds_near_a_boundary"]} shed near one '
+            f'-- {"PASS" if record["boundary_verdict"]["passed"] else "FAIL"}'
+        ),
         f'  intent commits     {tail.get("commits")}',
     ]
     return "\n".join(lines)

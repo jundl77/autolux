@@ -1,33 +1,36 @@
 """Production topology: controller here; audio/DMX receivers on the output PC."""
 
-import argparse
 import asyncio
-from datetime import datetime
 import json
 import logging
 import math
 import multiprocessing
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime
+from pathlib import Path
 
+from autolux.lib.audio_config import SAMPLE_RATE
+from autolux.lib.main import PLAYBACK_DELAY_SEC
+from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from cli.remote_runtime import ReceiverSpec
 from cli.starfire_assets import static_rig
-from proto.starfire import starfire_pb2 as wire
 from cli.starfire_runtime import (
     StarfireRuntime,
-    add_arguments as add_starfire_arguments,
+    fixture_setup,
     selected_rig,
     validate_starfire,
-    fixture_setup,
 )
-from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
-from autolux.lib.audio_config import SAMPLE_RATE
+from cli.starfire_runtime import (
+    add_arguments as add_starfire_arguments,
+)
+from proto.starfire import starfire_pb2 as wire
 
+LOGGER = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 READINESS_TIMEOUT_SECONDS = 45
 READINESS_WORKER_EXIT_TIMEOUT_SECONDS = 2
@@ -71,7 +74,7 @@ def add_arguments(parser):
 def read_config(path):
     value = json.loads(Path(path).read_text(encoding='utf-8-sig'))
     if not isinstance(value, dict):
-        raise ValueError(f'Expected a JSON object in {path}')
+        raise ValueError(f'Expected a JSON object in {path}')  # noqa: TRY004
     return value
 
 
@@ -196,8 +199,8 @@ async def run(args):
             raise RuntimeError(
                 'Full validation requires the source checkout and development dependencies.'
             )
-        validation = subprocess.run(
-            [sys.executable, '-X', 'utf8', str(validation_script)], cwd=ROOT
+        validation = subprocess.run(  # noqa: ASYNC221
+            [sys.executable, '-X', 'utf8', str(validation_script)], cwd=ROOT, check=False
         )
         if validation.returncode:
             raise RuntimeError('Full validation failed; see .live/validation for results.')
@@ -215,7 +218,7 @@ def _readiness_worker(args, owned):
     try:
         asyncio.run(_run_session(args, checking=True))
     except (RuntimeError, OSError, ValueError) as error:
-        logging.error('[prod] readiness failed: %s', error)
+        LOGGER.error('[prod] readiness failed: %s', error)
         raise SystemExit(1) from error
 
 
@@ -245,13 +248,14 @@ def run_readiness_check(args):
 
 
 async def _run_session(args, *, checking=False):
-    from cli import main
-    from cli.windows_runtime import RoleLock
-    from cli.remote_runtime import RemoteRuntime
-    from cli.health_monitor import HealthMonitor, HealthLogger
     from contextlib import ExitStack
 
-    tx, rx = transport_settings(args, main.PLAYBACK_DELAY_SEC)
+    from cli import main
+    from cli.health_monitor import HealthLogger, HealthMonitor
+    from cli.remote_runtime import RemoteRuntime
+    from cli.windows_runtime import RoleLock
+
+    tx, rx = transport_settings(args, PLAYBACK_DELAY_SEC)
     lock = RoleLock('controller')
     app = None
     app_ran = False
@@ -265,7 +269,7 @@ async def _run_session(args, *, checking=False):
                 'The shipped neural model is missing; refusing a degraded production show.'
             )
         input_index = resolve_devices(args.input_device, tx)
-        rig = selected_rig(args.rig, getattr(args, 'library', None))
+        rig = selected_rig(args.rig, args.library)
         validate_starfire(
             args.starfire_binary,
             rig,
@@ -286,9 +290,9 @@ async def _run_session(args, *, checking=False):
         remote.check_connection()
         if checking:
             remote.prepare()
-            logging.info('[prod] Radius, Starfire, fixtures, model, capture and SSH checks passed')
+            LOGGER.info('[prod] Radius, Starfire, fixtures, model, capture and SSH checks passed')
             return
-        logging.info('[prod] session logs: %s', run_dir)
+        LOGGER.info('[prod] session logs: %s', run_dir)
         renderer = StarfireRuntime(
             args.starfire_binary,
             rig,
@@ -308,7 +312,7 @@ async def _run_session(args, *, checking=False):
         from autolux.lib.clients.starfire_client import StarfireClient
         from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
 
-        logging.getLogger(__name__).info('[prod] preparing analysis models before starting audio')
+        LOGGER.info('[prod] preparing analysis models before starting audio')
         app = main.AutoluxController(
             lighting_client=StarfireClient(send_lighting_command, groups=lambda: renderer.groups),
             input_device_index=input_index,

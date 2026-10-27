@@ -1,7 +1,10 @@
-import pyaudio
-import numpy as np
 import logging
 from contextlib import ExitStack
+
+import numpy as np
+import pyaudio
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PyAudioClient:
@@ -9,8 +12,8 @@ class PyAudioClient:
         self,
         sample_rate: int,
         buffer_size: int,
-        input_device_index: int = None,
-        output_device_index: int = None,
+        input_device_index: int | None = None,
+        output_device_index: int | None = None,
     ):
         self.sample_rate: int = sample_rate
         self.buffer_size: int = buffer_size
@@ -24,7 +27,7 @@ class PyAudioClient:
         # PortAudio repeats each device once per host API; only default-host-API indices work with open().
         default_api = self.py_audio.get_default_host_api_info()
         print(f'=== Audio devices ({default_api["name"]}) ===')
-        for i in range(0, self.py_audio.get_device_count()):
+        for i in range(self.py_audio.get_device_count()):
             info = self.py_audio.get_device_info_by_index(i)
             if info['hostApi'] != default_api['index']:
                 continue
@@ -52,12 +55,12 @@ class PyAudioClient:
         if self.input_device_index is None:
             default_input_device_info = self.py_audio.get_default_input_device_info()
             self.input_device_index = default_input_device_info['index']
-            logging.info(
+            LOGGER.info(
                 f"[pyaudio] using default sound input device: {default_input_device_info['name']}"
             )
         else:
             device_name = self.py_audio.get_device_info_by_index(self.input_device_index)["name"]
-            logging.info(
+            LOGGER.info(
                 f"[pyaudio] using sound input device: {device_name} (index: {self.input_device_index})"
             )
 
@@ -75,12 +78,12 @@ class PyAudioClient:
         if self.output_device_index is None:
             default_output_device_info = self.py_audio.get_default_output_device_info()
             self.output_device_index = default_output_device_info['index']
-            logging.info(
+            LOGGER.info(
                 f"[pyaudio] using default sound output device: {default_output_device_info['name']}"
             )
         else:
             device_name = self.py_audio.get_device_info_by_index(self.output_device_index)["name"]
-            logging.info(
+            LOGGER.info(
                 f"[pyaudio] using sound output device: {device_name} (index: {self.output_device_index})"
             )
         self.stream_out = self.py_audio.open(
@@ -112,7 +115,7 @@ class PyAudioClient:
         self.stream_out.write(audio_buffer.tobytes())
 
     def close(self) -> None:
-        logging.info('[pyaudio] closing pyaudio')
+        LOGGER.info('[pyaudio] closing pyaudio')
         with ExitStack() as cleanup:
             cleanup.callback(self.py_audio.terminate)
             for stream in (self.stream_out, self.stream_in):

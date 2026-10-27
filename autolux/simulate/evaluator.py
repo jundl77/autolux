@@ -42,8 +42,7 @@ DEFAULT_CRITERIA: dict = {
 }
 
 
-def evaluate(report: dict, criteria: dict | None = None) -> dict:
-    criteria = criteria or DEFAULT_CRITERIA
+def evaluate(report: dict) -> dict:
     m = report['metrics']
     duration_min = max(report['duration_sec'] / 60.0, 1e-9)
 
@@ -60,27 +59,26 @@ def evaluate(report: dict, criteria: dict | None = None) -> dict:
     weighted_score = 0.0
     total_weight = 0.0
 
-    for key, spec in criteria.items():
-        value = derived.get(key, 0.0)
-        weight = spec.get('weight', 1.0)
+    for key, spec in DEFAULT_CRITERIA.items():
+        value = derived[key]
         if 'max' in spec:
             passed = value <= spec['max']
-            score = max(0.0, 1.0 - value / spec['max']) if spec['max'] > 0 else float(passed)
+            score = max(0.0, 1.0 - value / spec['max'])
         else:
             passed = value >= spec['min']
-            score = min(1.0, value / spec['min']) if spec['min'] > 0 else float(passed)
+            score = min(1.0, value / spec['min'])
         results[key] = {
             'value': round(value, 3),
             'passed': passed,
             'score': round(score, 3),
             'spec': spec,
         }
-        weighted_score += score * weight
-        total_weight += weight
+        weighted_score += score * spec['weight']
+        total_weight += spec['weight']
 
     return {
         'passed': all(r['passed'] for r in results.values()),
-        'score': round(weighted_score / total_weight if total_weight else 0.0, 3),
+        'score': round(weighted_score / total_weight, 3),
         'criteria': results,
     }
 

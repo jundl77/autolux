@@ -14,24 +14,23 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import corpus_root  # noqa: E402
-
-from nn.dataset import FRAME_SEC, WINDOW_FRAMES, load_sidecar  # noqa: E402
-from nn.downbeat_decoder import aggregate_at_beats  # noqa: E402
-from nn.downbeat_infer import (  # noqa: E402
+import corpus_root
+from nn.dataset import FRAME_SEC, WINDOW_FRAMES, load_sidecar
+from nn.downbeat_decoder import aggregate_at_beats
+from nn.downbeat_infer import (
     EDGE_FRAMES,
     HOP_FRAMES,
     INPUT_NAME,
     MODEL_FILE,
     OUTPUT_NAME,
     TIME_AXIS,
-    live_beat_times,
     build_from_checkpoint,
     declared_axes,
     default_checkpoint,
     export_model,
     infer_track,
     lag_profile,
+    live_beat_times,
     load_downbeat_checkpoint,
     run_window,
     save_sidecar,
@@ -39,7 +38,7 @@ from nn.downbeat_infer import (  # noqa: E402
     sidecar_arrays,
     sidecar_is_current,
 )
-from nn.downbeat_model import DownbeatCRNN  # noqa: E402
+from nn.downbeat_model import DownbeatCRNN
 
 MEL_BANDS = 40
 GOLDEN_FILE = Path(__file__).resolve().parent / "data" / "nn_downbeat_onnx_golden.npz"
@@ -183,9 +182,8 @@ def test_torch_and_onnx_agree_on_synthetic_windows(graph, frames):
 
 
 def test_the_session_is_the_pinned_single_threaded_one(graph):
-    from nn.export_onnx import session as section_session
-
     from nn.downbeat_infer import session as downbeat_session
+    from nn.export_onnx import session as section_session
 
     assert downbeat_session is section_session
 

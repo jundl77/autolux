@@ -30,12 +30,11 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from build_training_table import (  # noqa: E402  (needs the path insert above)
+from build_training_table import (
     write_feature_sidecar,
 )
-from autolux.lib.label_space import LABEL_INDEX, NUM_SECTION_CLASSES, SECTION_LABELS  # noqa: E402
-from nn import dataset as nn_dataset  # noqa: E402
-from nn.dataset import (  # noqa: E402
+from nn import dataset as nn_dataset
+from nn.dataset import (
     BOUNDARY_MASK_RADIUS_SEC,
     BOUNDARY_SIGMA_SEC,
     FRAME_SEC,
@@ -57,6 +56,7 @@ from nn.dataset import (  # noqa: E402
     track_targets,
 )
 
+from autolux.lib.label_space import LABEL_INDEX, NUM_SECTION_CLASSES, SECTION_LABELS
 
 # --------------------------------------------------------------------------- #
 # Geometry constants
@@ -247,8 +247,10 @@ def fake_corpus(tmp_path, tracks, frames=400):
             "track_id,youtube_id,mp3_path,ffprobe_duration_sec,"
             "decoded_duration_sec,annotation_duration_sec,status,detail\n"
         )
-        for track_id, youtube, _title in tracks:
-            handle.write(f"{track_id},{youtube},x.mp3,150.0,150.0,150.0,ok,\n")
+        handle.writelines(
+            f"{track_id},{youtube},x.mp3,150.0,150.0,150.0,ok,\n"
+            for track_id, youtube, _title in tracks
+        )
 
     segments = [
         {"key": track_id, "id": youtube, "title": title, "sections": SECTIONS}
@@ -377,7 +379,7 @@ def sections(*spans):
 
 def frame_of(t):
     """Index of the frame carrying song time ``t`` (frame k is stamped t0+k*dt)."""
-    return int(round(t / FRAME_SEC)) - 1
+    return round(t / FRAME_SEC) - 1
 
 
 def targets_for(spans, duration=200.0):

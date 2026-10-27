@@ -25,10 +25,9 @@ for _path in (str(_TRAINING_DIR.parent), str(_TRAINING_DIR), str(_TRAINING_DIR /
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import build_clean_manifest as gate  # noqa: E402
-from corpus_root import corpus_dir  # noqa: E402
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
-from raveform_fetch_annotations import (  # noqa: E402
+import build_clean_manifest as gate
+from corpus_root import corpus_dir
+from raveform_fetch_annotations import (
     HAND_LABEL_SOURCE,
     annotations_dir,
     beat_csv_path,
@@ -38,7 +37,9 @@ from raveform_fetch_annotations import (  # noqa: E402
     parse_beat_csv,
     youtube_id,
 )
-from raveform_manifest import build_manifest_rows, write_manifest  # noqa: E402
+from raveform_manifest import build_manifest_rows, write_manifest
+
+from autolux.lib.label_space import SECTION_LABELS
 
 BEAT_CSV_HEADER = ("time", "downbeat", "section")
 HAND_GRID_HEADER = ("time", "downbeat")

@@ -77,12 +77,10 @@ def save_show_settings(path: Path, settings: ShowSettings) -> None:
 
 
 def apply_static(light_engine, command: dict) -> None:
-    looks = light_engine.static()
+    looks = light_engine.static_looks
     kind = command['kind']
     if kind == 'look':
-        light_engine.static_look(
-            command['target'], colour=command['colour'], dimmer=command['dimmer']
-        )
+        looks.look(command['target'], colour=command['colour'], dimmer=command['dimmer'])
     elif kind == 'preset':
         looks.preset(command['preset'])
     elif kind == 'blacklight':
@@ -192,11 +190,8 @@ class ShowControl:
             )
         elif action == 'intensity_auto':
             self._follow_music(light_engine, command['enabled'])
-        elif action == 'settings':
-            settings = command['settings']
-            if settings == self.settings:
-                return
-            self.settings = settings
+        elif action == 'settings' and command['settings'] != self.settings:
+            self.settings = command['settings']
             light_engine.settings_changed()
             self._unsaved_change_at = self._clock.monotonic()
 
@@ -230,9 +225,6 @@ class ShowControl:
             return
         LOGGER.info('[main] show settings %s', self.settings.to_dict())
 
-    def start(self, light_engine) -> None:
-        light_engine.send_renderer_settings()
-
     def publish(self, light_engine) -> None:
         if self._event_buffer is not None:
             self._event_buffer.set_control_state(
@@ -260,7 +252,7 @@ class AutoluxController:
         autoloops: AutoloopTable = DEFAULT_AUTOLOOPS,
         autoloop_meta: AutoloopMetaTable = DEFAULT_AUTOLOOP_META,
         selection_seed: int = 0,
-        static_rig: StaticRig = StaticRig(),
+        static_rig: StaticRig = StaticRig(),  # noqa: B008
     ):
         from autolux.lib.analyser.music_analyser import MusicAnalyser
         from autolux.lib.clients.pyaudio_client import PyAudioClient
@@ -281,10 +273,10 @@ class AutoluxController:
         self.command_queue: DelayedCommandQueue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
 
         self._enable_playback: bool = debug_mode or output_device_index is not None
-        self._monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, self._play_monitored)
         self.audio_client: PyAudioClient = PyAudioClient(
             SAMPLE_RATE, BUFFER_SIZE, input_device_index, output_device_index
         )
+        self._monitor = DelayedMonitor(PLAYBACK_DELAY_SEC, self.audio_client.play)
 
         from autolux.lib.engine.event_buffer import EventBuffer
 
@@ -353,9 +345,6 @@ class AutoluxController:
         )
         self.light_engine.set_analyser(self.music_analyser)
 
-    def _play_monitored(self, audio) -> None:
-        self.audio_client.play(audio)
-
     def _on_media_event(self, event: MediaEvent) -> None:
         self.track_source.note(event)
         self._publish_track()
@@ -380,9 +369,6 @@ class AutoluxController:
                 'source': source,
             }
         )
-
-    def list_devices(self):
-        self.audio_client.list_devices()
 
     async def run(self):
         LOGGER.info("[main] setting up Autolux..")
@@ -409,7 +395,7 @@ class AutoluxController:
         self.is_running = True
 
         LOGGER.info("[main] Autolux is ready, starting")
-        self.control.start(self.light_engine)
+        self.light_engine.send_renderer_settings()
 
         self._monitor.arm()
         self.media_session.start(asyncio.get_running_loop())
@@ -444,15 +430,18 @@ class AutoluxController:
 
             if now - last_100ms_callback_execution > datetime.timedelta(milliseconds=100):
                 last_100ms_callback_execution = now
-                await self._do_100ms_callback()
+                if self.health_check is not None:
+                    self.health_check()
+                await self.light_engine.on_100ms_callback()
 
             if now - last_1sec_callback_execution > datetime.timedelta(seconds=1):
                 last_1sec_callback_execution = now
-                await self._do_1s_callback()
+                self._publish_track()
+                await self.light_engine.on_1sec_callback()
 
             if now - last_10sec_callback_execution > datetime.timedelta(seconds=10):
                 last_10sec_callback_execution = now
-                await self._do_10s_callback()
+                await self.light_engine.on_10sec_callback()
 
     def _shut_down(self) -> None:
         self.is_running = False
@@ -475,15 +464,3 @@ class AutoluxController:
     def stop(self):
         self._stop_requested = True
         self.is_running = False
-
-    async def _do_100ms_callback(self):
-        if self.health_check is not None:
-            self.health_check()
-        await self.light_engine.on_100ms_callback()
-
-    async def _do_1s_callback(self):
-        self._publish_track()
-        await self.light_engine.on_1sec_callback()
-
-    async def _do_10s_callback(self):
-        await self.light_engine.on_10sec_callback()
