@@ -816,11 +816,13 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
     current = [FULL_INTENSITY]
+    # Own rows, not the catalogue, so the test does not hang on which intents ship an fx row.
     controller = EffectController(
-        lighting, clock=clock, settings=lambda: current[0], specials=discover_specials()
+        lighting, clock=clock, settings=lambda: current[0], specials=[SPIN, DROP_STROBE]
     )
-    await controller.change_effect(LightIntent.ATMOSPHERIC)
-    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID]
+    # Every drop here is loud: no arrival is measured, and an unknown arrival is never soft.
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID, DROP_ACCENT_ID]
 
     current[0] = dataclasses.replace(FULL_INTENSITY, fx_auto=False)
     start = len(lighting.events)
@@ -830,7 +832,7 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
     await controller.change_effect(LightIntent.DROP)
-    # A loud drop still bursts the strobe; only the special (the drop's spin) is left out.
+    # A loud drop still bursts the strobe; only the special is left out.
     [strobe] = accents(lighting, start)
     assert strobe['value']['id'] == DROP_ACCENT_ID
     assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
@@ -842,12 +844,11 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     looks.clear_special()
 
     current[0] = FULL_INTENSITY
+    await controller.change_effect(LightIntent.BUILDUP)
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
-    await controller.change_effect(LightIntent.ATMOSPHERIC)
     await controller.change_effect(LightIntent.DROP)
-    ids = [c['value']['id'] for c in accents(lighting, start) if 'value' in c]
-    assert ids == [SPECIAL_ID, SPECIAL_ID, DROP_ACCENT_ID]
+    assert [c['value']['id'] for c in accents(lighting, start)] == [SPECIAL_ID, DROP_ACCENT_ID]
 
 
 async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_json(tmp_path):
