@@ -119,7 +119,8 @@ def _static_command(payload: dict) -> dict:
     if kind in ('blacklight', 'clear', 'special_fx_clear'):
         return {'kind': kind}
     if kind == 'special_fx':
-        return {'kind': kind, **_static_special_fx(payload)}
+        fields = ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
+        return {'kind': kind, **{name: payload.get(name) for name in fields}}
     if kind == 'strobe':
         # The page sends the state it wants, so a retried request cannot flip the strobe twice.
         enabled = payload.get('enabled')
@@ -157,15 +158,8 @@ def _static_command(payload: dict) -> dict:
     }
 
 
-def _static_special_fx(payload: dict) -> dict:
-    return {
-        name: payload.get(name)
-        for name in ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
-    }
-
-
 def command_refusal(
-    command: dict, intent: str | None, paused: bool | None, mode: str | None = None
+    command: dict, intent: str | None, paused: bool | None, mode: str | None
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
@@ -210,22 +204,12 @@ class _Handler(BaseHTTPRequestHandler):
 
             from autolux.lib.system_health import metrics
 
-            body = metrics(self.server.event_buffer)
-            self.send_response(200)
-            self.send_header('Content-Type', CONTENT_TYPE_LATEST)
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send(200, CONTENT_TYPE_LATEST, metrics(self.server.event_buffer))
             return
         if self.path != SNAPSHOT_PATH:
             self.send_error(404)
             return
-        body = json.dumps(self.server.event_buffer.snapshot()).encode()
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._reply(200, self.server.event_buffer.snapshot())
 
     def do_OPTIONS(self) -> None:
         if self.path != CONTROL_PATH or self.server.commands is None or not self._cross_origin():
@@ -295,17 +279,16 @@ class _Handler(BaseHTTPRequestHandler):
     def send_response(self, code: int, message: str | None = None) -> None:
         super().send_response(code, message)
         # Every reply, errors included: without these the page sees a network error, not the status.
-        self._cors_headers()
-
-    def _cors_headers(self) -> None:
         if getattr(self, 'headers', None) is not None and self._cross_origin():
             self.send_header('Access-Control-Allow-Origin', self.headers['Origin'])
             self.send_header('Vary', 'Origin')
 
     def _reply(self, status: int, body: dict) -> None:
-        content = json.dumps(body).encode()
+        self._send(status, 'application/json', json.dumps(body).encode())
+
+    def _send(self, status: int, content_type: str, content: bytes) -> None:
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -353,11 +336,7 @@ class SnapshotServer:
 
 
 def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
-    command = [
-        sys.executable,
-        '-m',
-        VIEWER_MODULE,
-    ]
+    command = [sys.executable, '-m', VIEWER_MODULE]
     if fixture_setup is not None:
         command = [
             sys.executable,
@@ -372,12 +351,7 @@ def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
         ]
         if fixture_setup.get('library') is not None:
             command.extend(['--library', str(fixture_setup['library'])])
-    return command + [
-        '--port',
-        str(ui_port),
-        '--snapshot-port',
-        str(snapshot_port(ui_port)),
-    ]
+    return command + ['--port', str(ui_port), '--snapshot-port', str(snapshot_port(ui_port))]
 
 
 def _spawn(command: list) -> subprocess.Popen:
@@ -414,10 +388,6 @@ class UiBridge:
         self._stopping = False
         self._watcher = threading.Thread(target=self._watch, name='viewer-watch', daemon=True)
         self._watcher.start()
-
-    @property
-    def viewer(self) -> subprocess.Popen:
-        return self._viewer
 
     def _watch(self) -> None:
         code = self._viewer.wait()
