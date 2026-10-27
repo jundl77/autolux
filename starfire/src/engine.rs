@@ -15,7 +15,7 @@ use crate::model::{
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
-use crate::special::{self, FixtureMap, Progress, SpecialFrame};
+use crate::special::{self, CellMap, Progress, SpecialFrame};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -87,7 +87,7 @@ struct Crossfade {
 
 struct ActiveOverride {
     value: LightingOverride,
-    fixture_ids: Vec<String>,
+    cell_ids: Vec<String>,
     order: u64,
     expires_seconds: Option<f64>,
     expires_beat: Option<f64>,
@@ -105,7 +105,7 @@ impl ActiveOverride {
         let from_level = special::attack_level(&special, beat - self.progress.started_beat);
         (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
             special,
-            fixture_ids: self.fixture_ids,
+            cell_ids: self.cell_ids,
             priority: self.value.priority,
             order: self.order,
             progress: self.progress,
@@ -117,7 +117,7 @@ impl ActiveOverride {
 
 struct ReleasingSpecial {
     special: SpecialFx,
-    fixture_ids: Vec<String>,
+    cell_ids: Vec<String>,
     priority: i32,
     order: u64,
     progress: Progress,
@@ -141,7 +141,7 @@ pub struct Engine {
     fade: Option<Crossfade>,
     overrides: BTreeMap<String, ActiveOverride>,
     releasing: Vec<ReleasingSpecial>,
-    special_maps: BTreeMap<String, FixtureMap>,
+    special_maps: BTreeMap<String, CellMap>,
     override_order: u64,
     master: MasterFade,
     normalized_rms_level: Option<f64>,
@@ -161,7 +161,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(rig: FixtureRig, catalog: AutoloopCatalog, palettes: PaletteTable) -> Result<Self> {
         let last_output_states = rig.empty_states();
-        let special_maps = special::fixture_maps(&rig);
+        let special_maps = special::cell_maps(&rig);
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
         let palette =
@@ -655,7 +655,7 @@ impl Engine {
             other_active_count < MAX_ACTIVE_OVERRIDES,
             "too many active lighting overrides"
         );
-        let fixture_ids = match &value.target {
+        let cell_ids = match &value.target {
             Target::Group(group)
                 if value.special_fx.is_some() && !self.rig.groups().contains_key(group) =>
             {
@@ -663,7 +663,7 @@ impl Engine {
             }
             target => self.rig.resolve(target)?,
         };
-        for id in &fixture_ids {
+        for id in &cell_ids {
             self.rig.validate_attributes(id, &value.values.attributes)?;
         }
         let (expires_seconds, expires_beat) = match value.lifetime {
@@ -685,7 +685,7 @@ impl Engine {
             value.id.clone(),
             ActiveOverride {
                 value: value.clone(),
-                fixture_ids,
+                cell_ids,
                 order,
                 expires_seconds,
                 expires_beat,
@@ -758,7 +758,7 @@ impl Engine {
                 });
                 (
                     (value.value.priority, value.order),
-                    &value.fixture_ids,
+                    &value.cell_ids,
                     Some(&value.value),
                     special,
                 )
@@ -766,7 +766,7 @@ impl Engine {
             .chain(self.releasing.iter().map(|releasing| {
                 (
                     (releasing.priority, releasing.order),
-                    &releasing.fixture_ids,
+                    &releasing.cell_ids,
                     None,
                     Some((
                         &releasing.special,
@@ -777,8 +777,8 @@ impl Engine {
             }));
         let mut ordered: Vec<_> = layers.collect();
         ordered.sort_by_key(|(rank, ..)| *rank);
-        for (_, fixture_ids, value, special) in ordered {
-            for id in fixture_ids {
+        for (_, cell_ids, value, special) in ordered {
+            for id in cell_ids {
                 let Some(state) = states.get_mut(id) else {
                     continue;
                 };

@@ -80,17 +80,20 @@ def test_archives_are_named_by_their_manufacturer_fixture_and_revision():
             'Fun Generation',
             'SePar Quad LED RGB UV IR',
         ),
-        'UKING@ZQ06017@1.0.gdtf': ('UKING', 'ZQ06017'),
+        'UKING@UKING ZQ06017 - 24PCS LED WALL WASH LIGHT@UKING ZQ06017 - 24PCS LED WALL WASH LIGHT.gdtf': (
+            'UKING',
+            'UKING ZQ06017 - 24PCS LED WALL WASH LIGHT',
+        ),
         'Generic@RGB@1.0.gdtf': ('Generic', 'RGB'),
         'Generic@Dimmer@1.0.gdtf': ('Generic', 'Dimmer'),
         'Generic@RGBW@1.0.gdtf': ('Generic', 'RGBW'),
     }
-    # Renames keep each type's identity; the bar owns the RGB profile's, the sample RGB has its own.
+    # Renames keep each type's identity; the bar is the GDTF Share archive with its own.
     assert {entry['name']: entry['fixture_type_id'] for entry in library.values()} == {
         'Intimidator Spot 110': 'C4520A76-CB18-59DA-BD76-1A8D7895F792',
         'Mini Kinta IRC': '25DB1C80-423E-5249-AF69-F5327A2C525D',
         'SePar Quad LED RGB UV IR': 'D21247BD-52DC-5D43-85C4-C8FCA5E3DB64',
-        'ZQ06017': 'EA49AFD9-9175-566F-99D8-99BE8413B9C9',
+        'UKING ZQ06017 - 24PCS LED WALL WASH LIGHT': '8FFD5C02-7506-489D-897D-E0519CF96455',
         'RGB': '240E7347-9B66-54EE-BDD3-49893702DB62',
         'Dimmer': 'C0534927-F91B-58EC-A113-98381DCF491F',
         'RGBW': '3DECEF94-E414-57FC-ABA3-4132A883A51E',
@@ -220,4 +223,34 @@ def test_metadata_reports_movement_axes():
         for entry in library.values()
     }
     assert movement['Intimidator Spot 110'] == ['pan', 'tilt']
-    assert movement['ZQ06017'] == []
+    assert movement['UKING ZQ06017 - 24PCS LED WALL WASH LIGHT'] == []
+
+
+def _cells(description: str, mode: str) -> list[tuple[str, list[int]]]:
+    return [
+        (cell['geometry'], cell['offsets']) for cell in mvr.gdtf_modes(description)[mode]['cells']
+    ]
+
+
+def test_each_channel_owning_geometry_is_a_cell_as_starfire_derives_it():
+    # starfire/tests/fixture_encoding.rs asserts the same cells for this description.
+    bar = (Path(__file__).parent / 'data' / 'gdtf' / 'pixel_bar.xml').read_text(encoding='utf-8')
+    assert _cells(bar, 'Pixels') == [('Pixel 1', [1, 2, 3]), ('Pixel 2', [4, 5, 6])]
+    assert _cells(bar, 'Mastered') == [
+        ('Base', [1]),
+        ('Pixel 1', [2, 3, 4]),
+        ('Pixel 2', [5, 6, 7]),
+    ]
+    assert [mvr.cell_id('bar', 'Pixel 1', count) for count in (1, 2)] == ['bar', 'bar/Pixel 1']
+
+
+def test_the_share_bar_is_eight_cells_and_a_mover_chain_is_one():
+    library = gdtf.fixture_library(ROOT / 'rig/library')
+    [bar] = [entry for entry in library.values() if entry['manufacturer'] == 'UKING']
+    assert _cells(bar['gdtf_xml'], '24Channel') == [
+        (f'Beam Segment {n}', [3 * n - 2, 3 * n - 1, 3 * n]) for n in range(1, 9)
+    ]
+    assert [name for name, _ in _cells(bar['gdtf_xml'], '6Channel')] == ['Beam H1', 'Beam H2']
+    assert _cells(bar['gdtf_xml'], '7Channel') == [('Beams', list(range(1, 8)))]
+    spot = library['Chauvet DJ@Intimidator Spot 110@1.0.gdtf']['gdtf_xml']
+    assert _cells(spot, '12ch') == [('Beam', list(range(1, 13)))]

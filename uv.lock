@@ -132,6 +132,7 @@ dependencies = [
     { name = "protobuf", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "pyaudio", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "pygdtf", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
+    { name = "pymvr", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "scikit-learn", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "scipy", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
     { name = "setuptools", marker = "python_full_version < '3.12' and sys_platform == 'win32'" },
@@ -184,6 +185,7 @@ requires-dist = [
     { name = "protobuf", specifier = ">=4.25,<5" },
     { name = "pyaudio" },
     { name = "pygdtf", specifier = "==1.4.5" },
+    { name = "pymvr", specifier = "==1.0.7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.17.2" },
@@ -1569,6 +1571,14 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
+
+[[package]]
+name = "pymvr"
+version = "1.0.7"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/43/8e5ab72d8ba792f719463b888c1fc20fd5cb8bfdd2d067c55b1e0a9b506f/pymvr-1.0.7-py3-none-any.whl", hash = "sha256:1387c17971b3ed59f1e1284cdeea20f189d93e94f7a8da1b5a3617c5f024a1fb", size = 15418, upload-time = "2026-04-03T07:45:57.969Z" },
 ]
 
 [[package]]

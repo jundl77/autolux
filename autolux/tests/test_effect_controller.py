@@ -406,7 +406,7 @@ async def test_the_intensity_setting_caps_the_drop_energy_at_selection_time(reco
 
 FX_GROUP = {
     'name': 'fx',
-    'fixture_count': 1,
+    'cell_count': 1,
     'colour': True,
     'speed': True,
     'pulse': True,

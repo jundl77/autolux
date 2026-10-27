@@ -98,9 +98,9 @@ impl Renderer {
                     fixture_id: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
                 }],
                 groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()] }],
-                profiles: vec![{
-                    let (gdtf_xml, dmx_mode) = support::catalogue_profile("generic_rgb").unwrap();
-                    wire::FixtureProfile { profile_id: "rgb".into(), gdtf_xml, dmx_mode }
+                profiles: vec![wire::FixtureProfile {
+                    profile_id: "rgb".into(),
+                    ..support::catalogue_profile("generic_rgb").unwrap()
                 }],
             }),
             autoloops: vec![

@@ -200,7 +200,7 @@ def login_groups(reply) -> list[dict]:
     return [
         {
             'name': group.name,
-            'fixture_count': group.fixture_count,
+            'cell_count': group.cell_count,
             'colour': group.colour,
             'speed': group.speed,
             'pulse': group.pulse,

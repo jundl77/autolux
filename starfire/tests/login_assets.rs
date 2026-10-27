@@ -36,12 +36,7 @@ fn rig() -> wire::RigDefinition {
 }
 
 fn profile(id: &str) -> wire::FixtureProfile {
-    let (gdtf_xml, dmx_mode) = support::catalogue_profile(id).unwrap();
-    wire::FixtureProfile {
-        profile_id: id.into(),
-        gdtf_xml,
-        dmx_mode,
-    }
+    support::catalogue_profile(id).unwrap()
 }
 
 #[test]
@@ -150,12 +145,10 @@ fn typed_patch_rejects_overlaps_unknown_groups_and_ambiguous_profiles() {
     value.profiles.push(value.profiles[0].clone());
     candidates.push(value);
     let mut value = rig();
-    value.profiles[0].gdtf_xml = value.profiles[0]
-        .gdtf_xml
-        .replace("Offset=\"2\"", "Offset=\"1\"");
+    value.profiles[0].mode.as_mut().unwrap().channels[1].offsets = vec![1];
     candidates.push(value);
     let mut value = rig();
-    value.profiles[0].dmx_mode = "missing mode".into();
+    value.profiles[0].mode = None;
     candidates.push(value);
     let mut value = rig();
     value.fixtures[0].pan = Some(wire::fixture::MovementRange {
@@ -199,9 +192,17 @@ fn typed_mover_encoding_preserves_safe_channels_and_applies_calibration() {
         &rig.encode(&states).unwrap()[&0][..12],
         &[191, 255, 128, 0, 0, 111, 7, 128, 0, 0, 0, 0]
     );
-    fixture.profiles[0].gdtf_xml = fixture.profiles[0]
-        .gdtf_xml
-        .replace("WheelSlotIndex=\"1\"", "WheelSlotIndex=\"999\"");
+    let colour = fixture.profiles[0]
+        .mode
+        .as_mut()
+        .unwrap()
+        .channels
+        .iter_mut()
+        .flat_map(|channel| &mut channel.functions)
+        .flat_map(|function| &mut function.sets)
+        .find_map(|set| set.wheel_slot_colour.as_mut())
+        .unwrap();
+    colour.y = 0.0;
     assert!(FixtureRig::from_wire(&fixture).is_err());
 }
 

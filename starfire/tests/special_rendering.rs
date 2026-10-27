@@ -10,65 +10,6 @@ use starfire::special::capabilities;
 const SECONDS_PER_BEAT: f64 = 0.5;
 const DARK_LOOK: &str = "standby/dark";
 
-const WHEEL_SPINNER: &str = r#"<GDTF DataVersion="1.2"><FixtureType Name="wheel_spinner" ShortName="Spinner" LongName="Spinner" Manufacturer="Autolux" Description="Colour wheel, shutter and rotation" FixtureTypeID="0b8f3c1e-5d2a-4c7e-9a61-2f4d8e7b1c30">
-  <AttributeDefinitions><FeatureGroups><FeatureGroup Name="Color" Pretty="Color"><Feature Name="Color"/></FeatureGroup><FeatureGroup Name="Beam" Pretty="Beam"><Feature Name="Beam"/></FeatureGroup></FeatureGroups><Attributes>
-    <Attribute Name="Color1" Pretty="C1" Feature="Color.Color" PhysicalUnit="None"/>
-    <Attribute Name="Shutter1" Pretty="Sh1" Feature="Beam.Beam" PhysicalUnit="None"/>
-    <Attribute Name="Effects1PosRotate" Pretty="Rotate" Feature="Beam.Beam" PhysicalUnit="AngularSpeed"/>
-  </Attributes></AttributeDefinitions>
-  <Wheels><Wheel Name="Colours">
-    <Slot Name="Black" Color="0.3127,0.329,0"/>
-    <Slot Name="Red" Color="0.64,0.33,21.26"/>
-    <Slot Name="Green" Color="0.3,0.6,71.52"/>
-    <Slot Name="Blue" Color="0.15,0.06,7.22"/>
-  </Wheel></Wheels>
-  <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
-  <DMXModes><DMXMode Name="3ch" Geometry="Base"><DMXChannels>
-    <DMXChannel DMXBreak="1" Offset="1" Geometry="Base" InitialFunction="Base_Color1.Color1.Color1" Highlight="None"><LogicalChannel Attribute="Color1" Snap="Yes">
-      <ChannelFunction Name="Color1" Attribute="Color1" DMXFrom="0/1" Default="0/1" PhysicalFrom="1" PhysicalTo="4" Wheel="Colours">
-        <ChannelSet Name="Black" DMXFrom="0/1" PhysicalFrom="1" PhysicalTo="1" WheelSlotIndex="1"/>
-        <ChannelSet Name="Red" DMXFrom="64/1" PhysicalFrom="2" PhysicalTo="2" WheelSlotIndex="2"/>
-        <ChannelSet Name="Green" DMXFrom="128/1" PhysicalFrom="3" PhysicalTo="3" WheelSlotIndex="3"/>
-        <ChannelSet Name="Blue" DMXFrom="192/1" PhysicalFrom="4" PhysicalTo="4" WheelSlotIndex="4"/>
-      </ChannelFunction></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="2" Geometry="Base" InitialFunction="Base_Shutter1.Shutter1.Shutter1" Highlight="None"><LogicalChannel Attribute="Shutter1" Snap="Yes">
-      <ChannelFunction Name="Shutter1" Attribute="Shutter1" DMXFrom="0/1" Default="255/1" PhysicalFrom="0" PhysicalTo="1"/></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="3" Geometry="Base" InitialFunction="Base_Effects1PosRotate.Effects1PosRotate.Effects1PosRotate" Highlight="None"><LogicalChannel Attribute="Effects1PosRotate" Snap="No">
-      <ChannelFunction Name="Effects1PosRotate" Attribute="Effects1PosRotate" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="180"/></LogicalChannel></DMXChannel>
-  </DMXChannels></DMXMode></DMXModes>
-</FixtureType></GDTF>"#;
-
-const BEAM_SCANNER: &str = r#"<GDTF DataVersion="1.2"><FixtureType Name="beam_scanner" ShortName="Scanner" LongName="Scanner" Manufacturer="Autolux" Description="Pan, tilt, RGB mixing and a pattern wheel" FixtureTypeID="5c2e9d47-1b3a-4f68-8e05-7a9c3d2b6f14">
-  <AttributeDefinitions><FeatureGroups><FeatureGroup Name="Position" Pretty="Position"><Feature Name="PanTilt"/></FeatureGroup><FeatureGroup Name="Color" Pretty="Color"><Feature Name="RGB"/></FeatureGroup><FeatureGroup Name="Gobo" Pretty="Gobo"><Feature Name="Gobo"/></FeatureGroup></FeatureGroups><Attributes>
-    <Attribute Name="Pan" Pretty="P" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
-    <Attribute Name="Tilt" Pretty="T" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
-    <Attribute Name="ColorAdd_R" Pretty="R" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
-    <Attribute Name="ColorAdd_G" Pretty="G" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
-    <Attribute Name="ColorAdd_B" Pretty="B" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
-    <Attribute Name="Gobo1" Pretty="G1" Feature="Gobo.Gobo" PhysicalUnit="None"/>
-  </Attributes></AttributeDefinitions>
-  <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
-  <DMXModes><DMXMode Name="6ch" Geometry="Base"><DMXChannels>
-    <DMXChannel DMXBreak="1" Offset="1" Geometry="Base" InitialFunction="Base_Pan.Pan.Pan" Highlight="None"><LogicalChannel Attribute="Pan">
-      <ChannelFunction Name="Pan" Attribute="Pan" DMXFrom="0/1" Default="128/1" PhysicalFrom="0" PhysicalTo="540"/></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="2" Geometry="Base" InitialFunction="Base_Tilt.Tilt.Tilt" Highlight="None"><LogicalChannel Attribute="Tilt">
-      <ChannelFunction Name="Tilt" Attribute="Tilt" DMXFrom="0/1" Default="128/1" PhysicalFrom="0" PhysicalTo="270"/></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="3" Geometry="Base" InitialFunction="Base_ColorAdd_R.ColorAdd_R.ColorAdd_R" Highlight="None"><LogicalChannel Attribute="ColorAdd_R">
-      <ChannelFunction Name="ColorAdd_R" Attribute="ColorAdd_R" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="4" Geometry="Base" InitialFunction="Base_ColorAdd_G.ColorAdd_G.ColorAdd_G" Highlight="None"><LogicalChannel Attribute="ColorAdd_G">
-      <ChannelFunction Name="ColorAdd_G" Attribute="ColorAdd_G" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="5" Geometry="Base" InitialFunction="Base_ColorAdd_B.ColorAdd_B.ColorAdd_B" Highlight="None"><LogicalChannel Attribute="ColorAdd_B">
-      <ChannelFunction Name="ColorAdd_B" Attribute="ColorAdd_B" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel></DMXChannel>
-    <DMXChannel DMXBreak="1" Offset="6" Geometry="Base" InitialFunction="Base_Gobo1.Gobo1.Gobo1" Highlight="None"><LogicalChannel Attribute="Gobo1" Snap="Yes">
-      <ChannelFunction Name="Gobo1" Attribute="Gobo1" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="3">
-        <ChannelSet Name="Open" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="0"/>
-        <ChannelSet Name="Dots" DMXFrom="64/1" PhysicalFrom="1" PhysicalTo="1"/>
-        <ChannelSet Name="Lines" DMXFrom="128/1" PhysicalFrom="2" PhysicalTo="2"/>
-        <ChannelSet Name="Tunnel" DMXFrom="192/1" PhysicalFrom="3" PhysicalTo="3"/>
-      </ChannelFunction></LogicalChannel></DMXChannel>
-  </DMXChannels></DMXMode></DMXModes>
-</FixtureType></GDTF>"#;
-
 const SPINNER: std::ops::Range<usize> = 0..3;
 const SCANNER: std::ops::Range<usize> = 10..16;
 
@@ -84,11 +25,7 @@ fn synthetic_rig() -> wire::RigDefinition {
         group_id: id.into(),
         fixture_ids: members.iter().map(|member| (*member).into()).collect(),
     };
-    let profile = |id: &str, gdtf_xml: &str, dmx_mode: &str| wire::FixtureProfile {
-        profile_id: id.into(),
-        gdtf_xml: gdtf_xml.into(),
-        dmx_mode: dmx_mode.into(),
-    };
+    let profile = |id: &str, source: &str| support::compiled_profile(source, id);
     wire::RigDefinition {
         fixtures: vec![
             fixture("spinner", "wheel_spinner", SPINNER.start as u32 + 1),
@@ -100,8 +37,8 @@ fn synthetic_rig() -> wire::RigDefinition {
             group("fx", &["spinner", "scanner"]),
         ],
         profiles: vec![
-            profile("wheel_spinner", WHEEL_SPINNER, "3ch"),
-            profile("beam_scanner", BEAM_SCANNER, "6ch"),
+            profile("wheel_spinner", "wheel_spinner#3ch"),
+            profile("beam_scanner", "beam_scanner#6ch"),
         ],
     }
 }
@@ -191,9 +128,9 @@ fn unset(beat: f64, engine: &mut Engine) {
 #[test]
 fn capabilities_follow_each_profiles_attribute_families() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
-    let report = |name: &str, colour, speed, pulse, pattern, fixture_count| wire::GroupCapability {
+    let report = |name: &str, colour, speed, pulse, pattern, cell_count| wire::GroupCapability {
         name: name.into(),
-        fixture_count,
+        cell_count,
         colour,
         speed,
         pulse,
@@ -217,7 +154,7 @@ fn the_real_rig_reports_what_its_profiles_declare() {
         .map(|group| {
             (
                 group.name,
-                group.fixture_count,
+                group.cell_count,
                 [group.colour, group.speed, group.pulse, group.pattern],
             )
         })
