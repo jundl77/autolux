@@ -195,6 +195,8 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     const kinta = markup.slice(markup.indexOf("<title>kinta"));
     assert.match(kinta.slice(0, kinta.indexOf("</g>")), /stroke-dasharray/);
     assert.match(markup, /fx · accent<\/span>/);
+    const offCentre = { ...byName.kinta, x: 4000 };
+    assert.ok(!model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings).includes("plan-centreline"));
 });
 
 test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", () => {

@@ -10,7 +10,7 @@ from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
 ROLE_NAMES = {rig_wire.GROUP_ROLE_LOOP: LOOP_ROLE, rig_wire.GROUP_ROLE_ACCENT: ACCENT_ROLE}
-# MIXED (members in several zones) has no name.
+# MIXED (members in several zones) and UNSPECIFIED have no name: the row matches no zone.
 ZONE_NAMES = dict(
     zip(
         (wire.STAGE_ZONE_HOUSE_LEFT, wire.STAGE_ZONE_CENTRE, wire.STAGE_ZONE_HOUSE_RIGHT),

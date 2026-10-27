@@ -681,7 +681,10 @@
         const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
         const parts = [
             `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${n(left)} ${n(top)} ${n(width)} ${n(height)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}">`,
-            `<line class="plan-centreline" x1="0" y1="${n(top)}" x2="0" y2="${n(top + height)}" stroke-width="${n(r * 0.2)}" stroke-dasharray="${n(r)} ${n(r * 0.6)}"/>`,
+            // Only a rig placed on both sides of X = 0 has a centreline, as Starfire reads it.
+            all.some((mark) => mark.x < 0) && all.some((mark) => mark.x > 0)
+                ? `<line class="plan-centreline" x1="0" y1="${n(top)}" x2="0" y2="${n(top + height)}" stroke-width="${n(r * 0.2)}" stroke-dasharray="${n(r)} ${n(r * 0.6)}"/>`
+                : "",
             // MVR has no stage edge; the plan draws it at the most downstage object.
             `<line class="plan-stage-edge" x1="${n(left)}" y1="${edge}" x2="${n(left + width)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
             `<text x="${n(left + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,

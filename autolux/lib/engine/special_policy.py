@@ -258,9 +258,10 @@ class SpecialPolicy:
         return last is not None and now - last[1] < last[0].cooldown_seconds
 
     def _pick(self, pool: list[Special], capabilities: SpecialCapabilities) -> Special:
-        """The seed picks the row; when it lands on an accent and several accent groups are
+        """The seed picks a row; when it lands on an accent and several accent groups are
         ready, space picks the group: the house-left-most first, then each time the ready
-        group furthest in X from the last accent, so accents ping-pong across the room."""
+        group furthest in X from the last accent, so accents ping-pong across the room. The
+        seeded row plays there if that group has it, else the group's least recently used row."""
         chosen = self._least_recent(pool)
         accents = {s.group for s in pool if capabilities.role(s.group) == ACCENT_ROLE}
         if chosen.group not in accents or len(accents) < 2:
@@ -274,7 +275,9 @@ class SpecialPolicy:
             return (reach, self._accent_order.get(group, -1), x, group)
 
         group = min(accents, key=order)
-        return self._least_recent([s for s in pool if s.group == group])
+        rows = [s for s in pool if s.group == group]
+        same = [s for s in rows if s.name == chosen.name]
+        return same[0] if same else self._least_recent(rows)
 
     def _least_recent(self, pool: list[Special]) -> Special:
         unused = [s for s in pool if (s.name, s.group) not in self._last_used]

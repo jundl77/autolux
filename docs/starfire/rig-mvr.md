@@ -54,7 +54,8 @@ Sheared, mirrored or degenerate matrices are rejected.
 MVR fixes the frame ("Right-handed, Z-Up, 1 Distance Unit equals 1 mm") but names no audience
 side; Autolux reads the plan as GDTF draws a device, "X – from left (-X) to right (+X), Y – from
 the outside of the monitor (-Y) to the inside of the monitor (+Y)", with the audience as the
-viewer: -X house left, +X house right, -Y downstage, +Y upstage, X = 0 the centreline. The
+viewer: -X house left, +X house right, -Y downstage, +Y upstage. The scene origin is the
+reference: X = 0 is the centreline and Y = 0 splits downstage from upstage (Y >= 0 upstage). The
 Config rig map is a standard plot from the same draft: plan view, audience at the bottom, the
 dashed centreline at X = 0, the stage edge at the most downstage object, a 1-2-5 metre scale
 bar, one ring per fixture coloured by group (golden-angle hues past the configured six) and

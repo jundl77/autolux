@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -18,6 +19,7 @@ use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
+use crate::spatial::MM_PER_METRE;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_CATALOGUE_BYTES: usize = 4 * 1024 * 1024;
@@ -29,7 +31,6 @@ const LUA_INSTRUCTION_LIMIT: u32 = 100_000;
 const HOOK_INSTRUCTION_INTERVAL: u32 = 100;
 const MAX_EFFECTS_PER_FRAME: usize = 512;
 const LIGHTING_API: &str = include_str!("lua/lighting.lua");
-const MM_PER_METRE: f64 = 1000.0;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AutoloopInfo {
@@ -371,7 +372,9 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        let targets = rig.clone();
+        // One copy of the rig serves every native sf function.
+        let shared = Rc::new(rig.clone());
+        let targets = Rc::clone(&shared);
         api.set(
             "members",
             lua.create_function(move |lua, value: Value| {
@@ -389,7 +392,7 @@ impl LuaAutoloop {
                 lua.create_sequence_from(members)
             })?,
         )?;
-        let spatial = rig.clone();
+        let spatial = Rc::clone(&shared);
         api.set(
             "mirror",
             lua.create_function(move |lua, value: Value| {
@@ -425,7 +428,7 @@ impl LuaAutoloop {
             })?,
         )?;
         // MVR millimetres become metres here, at the Lua boundary only.
-        let located = |rig: FixtureRig| {
+        let located = |rig: Rc<FixtureRig>| {
             move |value: &Value| -> mlua::Result<[f64; 3]> {
                 let id = cell_name(value)?;
                 let position = rig
@@ -435,7 +438,7 @@ impl LuaAutoloop {
                 Ok(position.map(|mm| mm / MM_PER_METRE))
             }
         };
-        let position = located(rig.clone());
+        let position = located(Rc::clone(&shared));
         api.set(
             "position",
             lua.create_function(move |_, cell: Value| {
@@ -443,7 +446,7 @@ impl LuaAutoloop {
                 Ok((x, y, z))
             })?,
         )?;
-        let position = located(rig.clone());
+        let position = located(Rc::clone(&shared));
         api.set(
             "distance",
             lua.create_function(move |_, (cell, x, y): (Value, f64, f64)| {
@@ -451,7 +454,7 @@ impl LuaAutoloop {
                 Ok((cell_x - x).hypot(cell_y - y))
             })?,
         )?;
-        let zones = rig.clone();
+        let zones = shared;
         api.set(
             "zone",
             lua.create_function(move |_, cell: Value| {

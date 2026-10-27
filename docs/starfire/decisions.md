@@ -549,10 +549,14 @@ its reflection about the stage centreline, the scene's X = 0 (MVR, DIN SPEC 1580
 "u1,u2,u3 / v1,v2,v3 / w1,w2,w3 / o1,o2,o3", "Right-handed, Z-Up, 1 Distance Unit equals 1
 mm"; position is the o row). The reflection keeps Y and Z, so two rows that interleave in X
 still pair within their row. A partner must be unique, mutual and within 300 mm of the
-reflection; otherwise the group pairs by rank as before, with a warning (none for a single
-multi-cell fixture, whose cells share its position). A rig that does not straddle X = 0 has
-no centreline placement, so each group mirrors about its own X centre, with a warning.
-Starfire derives the pairs once at rig load (`starfire::spatial`, O(n log n) per group) from
+reflection; otherwise the group pairs by rank as before, with a warning. The 300 mm covers
+plotting error (centimetres) and stays below fixture spacing (half a metre and more); missing
+it only ever causes that fallback. Fixtures pair first; a mirrored pair's cells then pair in
+reversed rank and a fixture on the axis mirrors its own cells by rank, without a warning. A
+group wholly on one side of X = 0 (or a rig that never crosses it) mirrors about its own X
+centre, also without a warning. Starfire derives the pairs once at rig load
+(`starfire::spatial`) by searching each member's reflection within the tolerance window in X:
+O(n log n) for spread members, O(n²) where many members share one X. It reads
 `Fixture.matrix`, which the rig already carries; a cell takes its fixture's position since the
 rig carries no GDTF geometry offsets, so the RigDefinition is unchanged. The room is symmetric
 about X = 0, so its pairs equal the rank pairs and the goldens are unchanged.
@@ -561,9 +565,11 @@ about X = 0, so its pairs equal the rank pairs and the goldens are unchanged.
 (MVR: "Right-handed, Z-Up, 1 Distance Unit equals 1 mm"). The plan axes follow GDTF (DIN SPEC
 15800): "X – from left (-X) to right (+X), Y – from the outside of the monitor (-Y) to the
 inside of the monitor (+Y)", read from the audience, since MVR itself names no audience side:
--X is house left, -Y downstage. `zone` is the third of the rig's X span (house_left, centre,
-house_right; the centre third is open, so a member on a boundary is house left or right),
-`depth` the half of its Y span (upstage strictly beyond the middle), `height` is Z. Lua:
+-X is house left, -Y downstage. The scene origin is the reference on both axes, like the
+X = 0 centreline: `zone` is centre for |X| up to a third of the rig's largest |X|, else
+house_left or house_right by sign (a rig that does not straddle X = 0 has no centreline and
+falls back to thirds of its X span, centre third open); `depth` is upstage for Y >= 0, else
+downstage, so a front-of-house truss does not move the split; `height` is Z. Lua:
 `sf.zone(cell)` returns zone, depth, height; `sf.position(cell)` x, y, z; `sf.distance(cell,
 x, y)` the plan distance; all in metres, converted only at the Lua boundary, and `cell` is a
 cell name or an `sf.fixture` target. Login echoes each group's shared zone and depth (MIXED

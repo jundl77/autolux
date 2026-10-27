@@ -6,17 +6,24 @@
 //! the plan follows GDTF (DIN SPEC 15800): "X – from left (-X) to right (+X), Y – from the
 //! outside of the monitor (-Y) to the inside of the monitor (+Y)", seen from the audience:
 //! -X is house left, +X house right, -Y downstage (toward the audience), +Y upstage. The
-//! scene's X = 0 is the stage centreline. A cell sits at its fixture's position: the rig
-//! carries no GDTF geometry offsets. Positions stay in millimetres; Lua sees metres.
+//! scene origin is the reference: X = 0 is the stage centreline and Y = 0 splits downstage
+//! from upstage (Y >= 0 is upstage). A cell sits at its fixture's position: the rig carries
+//! no GDTF geometry offsets. Positions stay in millimetres; Lua sees metres.
 
 use std::collections::BTreeMap;
 
-/// Partners further apart than this from a member's reflection are not its mirror image.
+pub const MM_PER_METRE: f64 = 1000.0;
+
+/// How far a partner may sit from a member's exact reflection: plots are drawn to a few
+/// centimetres, while neighbouring fixtures on a bar hang half a metre or more apart, so
+/// 300 mm absorbs plotting error without reaching a neighbour. Missing it only ever sends the
+/// group to the rank fallback.
 const MIRROR_TOLERANCE_MM: f64 = 300.0;
 
 pub type Position = [f64; 3];
 
-/// Thirds of the rig's X span, named from the audience.
+/// Seen from the audience. About the centreline when the rig straddles X = 0, else thirds of
+/// the rig's X span.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Zone {
     HouseLeft,
@@ -24,7 +31,7 @@ pub enum Zone {
     HouseRight,
 }
 
-/// Either side of the middle of the rig's Y span.
+/// Either side of the scene's Y = 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Depth {
     Downstage,
@@ -63,14 +70,15 @@ pub struct Spatial {
     positions: BTreeMap<String, Position>,
     mirrors: BTreeMap<String, Vec<(String, String)>>,
     places: BTreeMap<String, GroupPlace>,
-    // min X, max X, min Y, max Y over every cell.
-    bounds: [f64; 4],
+    // Some(max |X|) when the rig straddles X = 0, else None and the zones use `span_x`.
+    reach_x: Option<f64>,
+    span_x: [f64; 2],
     warnings: Vec<String>,
 }
 
 impl Spatial {
-    /// `positions` holds every cell (and fixture) ID; `groups` lists each group's cells left
-    /// to right, as Autolux orders them.
+    /// `positions` holds every cell (and fixture) ID; `groups` lists each group's cells;
+    /// `fixture_of` names the fixture a cell belongs to.
     pub fn new(
         positions: BTreeMap<String, Position>,
         groups: &BTreeMap<String, Vec<String>>,
@@ -78,22 +86,15 @@ impl Spatial {
     ) -> Self {
         let xs = || positions.values().map(|position| position[0]);
         let straddles = xs().any(|x| x < 0.0) && xs().any(|x| x > 0.0);
-        let mut warnings = Vec::new();
-        if !straddles && groups.values().any(|members| members.len() > 1) {
-            warnings.push(
-                "the rig does not straddle the MVR centreline X = 0; mirroring each group about its own centre"
-                    .to_owned(),
-            );
-        }
-        let bounds = positions.values().fold(
-            [f64::MAX, f64::MIN, f64::MAX, f64::MIN],
-            |[x0, x1, y0, y1], p| [x0.min(p[0]), x1.max(p[0]), y0.min(p[1]), y1.max(p[1])],
-        );
         let mut spatial = Self {
-            bounds,
+            reach_x: straddles.then(|| xs().fold(0.0, |reach: f64, x| reach.max(x.abs()))),
+            span_x: xs().fold([f64::MAX, f64::MIN], |[low, high], x| {
+                [low.min(x), high.max(x)]
+            }),
             ..Self::default()
         };
         let mut mirrors = BTreeMap::new();
+        let mut warnings = Vec::new();
         for (group, members) in groups {
             let zones: Vec<_> = members
                 .iter()
@@ -109,8 +110,23 @@ impl Spatial {
                     centre_x_mm,
                 },
             );
-            let placed: Vec<Position> = members.iter().map(|id| positions[id]).collect();
-            let axis = if straddles {
+            // Each fixture once, in member order, with the indices of its cells.
+            let mut slots = BTreeMap::new();
+            let mut fixtures: Vec<Vec<usize>> = Vec::new();
+            for (index, id) in members.iter().enumerate() {
+                let slot = *slots.entry(fixture_of(id)).or_insert_with(|| {
+                    fixtures.push(Vec::new());
+                    fixtures.len() - 1
+                });
+                fixtures[slot].push(index);
+            }
+            let placed: Vec<Position> = fixtures
+                .iter()
+                .map(|cells| positions[&members[cells[0]]])
+                .collect();
+            // A group on one side of the centreline mirrors about its own centre.
+            let sided = placed.iter().any(|p| p[0] < 0.0) && placed.iter().any(|p| p[0] > 0.0);
+            let axis = if sided {
                 0.0
             } else {
                 let (low, high) = placed.iter().fold((f64::MAX, f64::MIN), |(low, high), p| {
@@ -118,15 +134,20 @@ impl Spatial {
                 });
                 (low + high) / 2.0
             };
-            let pairs = reflected_pairs(&placed, axis).unwrap_or_else(|| {
-                let one_fixture = members.iter().all(|id| fixture_of(id) == fixture_of(&members[0]));
-                if !one_fixture {
+            let pairs = match reflected_pairs(&placed, axis) {
+                Some(pairs) => pairs
+                    .into_iter()
+                    .flat_map(|(left, right)| {
+                        cell_pairs(&fixtures[left], &fixtures[right], left == right)
+                    })
+                    .collect(),
+                None => {
                     warnings.push(format!(
                         "group {group} is not symmetric about X = {axis} mm within {MIRROR_TOLERANCE_MM} mm; sf.mirror pairs it by rank"
                     ));
+                    rank_pairs(members.len())
                 }
-                rank_pairs(members.len())
-            });
+            };
             let named = pairs
                 .into_iter()
                 .map(|(left, right)| (members[left].clone(), members[right].clone()))
@@ -141,21 +162,29 @@ impl Spatial {
         }
     }
 
-    /// X thirds of the rig's span, the centre third open so a boundary member counts as
-    /// house left or right; Y above the middle of the span is upstage.
+    /// About the centreline, |X| up to a third of the rig's reach is centre; without one, X
+    /// thirds of the span with the centre third open. Y >= 0 is upstage.
     fn place(&self, position: Position) -> (Zone, Depth) {
-        let [x0, x1, y0, y1] = self.bounds;
-        let third = (x1 - x0) / 3.0;
-        let zone = if third <= 0.0 {
-            Zone::Centre
-        } else if position[0] <= x0 + third {
-            Zone::HouseLeft
-        } else if position[0] >= x1 - third {
-            Zone::HouseRight
-        } else {
-            Zone::Centre
+        let x = position[0];
+        let zone = match self.reach_x {
+            Some(reach) if x.abs() <= reach / 3.0 => Zone::Centre,
+            Some(_) if x < 0.0 => Zone::HouseLeft,
+            Some(_) => Zone::HouseRight,
+            None => {
+                let [low, high] = self.span_x;
+                let third = (high - low) / 3.0;
+                if third <= 0.0 {
+                    Zone::Centre
+                } else if x <= low + third {
+                    Zone::HouseLeft
+                } else if x >= high - third {
+                    Zone::HouseRight
+                } else {
+                    Zone::Centre
+                }
+            }
         };
-        let depth = if position[1] > (y0 + y1) / 2.0 {
+        let depth = if position[1] >= 0.0 {
             Depth::Upstage
         } else {
             Depth::Downstage
@@ -196,6 +225,25 @@ pub fn rank_pairs(count: usize) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Cells of mirrored fixtures pair in reversed rank (the first of one with the last of the
+/// other); a fixture on the axis mirrors its own cells by rank. Unmatched extra cells stand
+/// alone.
+fn cell_pairs(left: &[usize], right: &[usize], same: bool) -> Vec<(usize, usize)> {
+    if same {
+        return rank_pairs(left.len())
+            .into_iter()
+            .map(|(a, b)| (left[a], left[b]))
+            .collect();
+    }
+    let paired = left.len().min(right.len());
+    let mut pairs: Vec<_> = (0..paired)
+        .map(|rank| (left[rank], right[right.len() - 1 - rank]))
+        .collect();
+    let extra = left[paired..].iter().chain(&right[..right.len() - paired]);
+    pairs.extend(extra.map(|&cell| (cell, cell)));
+    pairs
+}
+
 fn shared<T: PartialEq>(mut values: impl Iterator<Item = T>) -> Option<T> {
     let first = values.next()?;
     values.all(|value| value == first).then_some(first)
@@ -207,7 +255,8 @@ fn distance(a: Position, b: Position) -> f64 {
 
 /// Pairs each member with the member nearest its reflection about X = `axis`, or None when a
 /// member has no unique partner within tolerance or the partnering is not mutual.
-/// O(n log n): members are searched by X within the tolerance window only.
+/// Members are searched by X within the tolerance window: O(n log n) for spread members,
+/// O(n²) where many share one X, since each then scans them all.
 fn reflected_pairs(placed: &[Position], axis: f64) -> Option<Vec<(usize, usize)>> {
     let mut by_x: Vec<usize> = (0..placed.len()).collect();
     by_x.sort_by(|&a, &b| placed[a][0].total_cmp(&placed[b][0]));
@@ -268,6 +317,35 @@ mod tests {
         [x, y, 0.0]
     }
 
+    fn named(pairs: &[(String, String)]) -> Vec<(&str, &str)> {
+        pairs
+            .iter()
+            .map(|(left, right)| (left.as_str(), right.as_str()))
+            .collect()
+    }
+
+    /// Each ID's fixture is its first letter, so "a1" and "a2" are cells of fixture a.
+    fn fixture_of(id: &str) -> usize {
+        id.as_bytes()[0] as usize
+    }
+
+    fn spatial(placed: &[(&str, Position)], groups: &[(&str, &[&str])]) -> Spatial {
+        let positions = placed
+            .iter()
+            .map(|(id, position)| ((*id).to_owned(), *position))
+            .collect();
+        let groups = groups
+            .iter()
+            .map(|(group, members)| {
+                (
+                    (*group).to_owned(),
+                    members.iter().map(|&id| id.to_owned()).collect(),
+                )
+            })
+            .collect();
+        Spatial::new(positions, &groups, fixture_of)
+    }
+
     #[test]
     fn partners_are_nearest_reflections_not_ranks() {
         // Sorted by X the rank partners would be (a, d) and (b, c); the reflections say
@@ -297,30 +375,81 @@ mod tests {
     }
 
     #[test]
-    fn zones_are_thirds_of_the_rig_span_and_depth_halves_it() {
-        // Span -3000..3000: house left to -1000, house right from 1000; Y middle is 0.
-        let positions = BTreeMap::from([
-            ("l".to_owned(), at(-3000.0, 0.0)),
-            ("c".to_owned(), at(0.0, -2000.0)),
-            ("r".to_owned(), at(3000.0, 0.0)),
-            ("b".to_owned(), at(-1000.0, 2000.0)),
-        ]);
-        let groups = BTreeMap::from([
-            ("front".to_owned(), vec!["c".to_owned()]),
-            ("sides".to_owned(), vec!["l".to_owned(), "r".to_owned()]),
-        ]);
-        let spatial = Spatial::new(positions, &groups, |_| 0);
+    fn zones_split_about_the_centreline_and_depth_at_y_zero() {
+        // Reach 3000 mm: centre within ±1000 (inclusive); Y >= 0 is upstage.
+        let spatial = spatial(
+            &[
+                ("l", at(-3000.0, 0.0)),
+                ("c", at(0.0, -2000.0)),
+                ("r", at(3000.0, 0.0)),
+                ("b", at(-1000.0, 2000.0)),
+            ],
+            &[("front", &["c"]), ("sides", &["l", "r"])],
+        );
         let zone = |id| spatial.zone(id).map(|(zone, depth, _)| (zone, depth));
-        assert_eq!(zone("l"), Some((Zone::HouseLeft, Depth::Downstage)));
+        assert_eq!(zone("l"), Some((Zone::HouseLeft, Depth::Upstage)));
         assert_eq!(zone("c"), Some((Zone::Centre, Depth::Downstage)));
-        assert_eq!(zone("r"), Some((Zone::HouseRight, Depth::Downstage)));
-        assert_eq!(zone("b"), Some((Zone::HouseLeft, Depth::Upstage)));
+        assert_eq!(zone("r"), Some((Zone::HouseRight, Depth::Upstage)));
+        assert_eq!(zone("b"), Some((Zone::Centre, Depth::Upstage)));
         let sides = spatial.group_place("sides").unwrap();
-        assert_eq!((sides.zone, sides.depth), (None, Some(Depth::Downstage)));
+        assert_eq!((sides.zone, sides.depth), (None, Some(Depth::Upstage)));
         assert_eq!(
             spatial.group_place("front").unwrap().zone,
             Some(Zone::Centre)
         );
+    }
+
+    #[test]
+    fn a_rig_off_the_centreline_mirrors_each_group_about_its_own_centre() {
+        // X 0..10000: no centreline placement, so zones are span thirds (3333 / 6667).
+        let spatial = spatial(
+            &[
+                ("a", at(0.0, 0.0)),
+                ("b", at(2000.0, 0.0)),
+                ("c", at(4100.0, 0.0)),
+                ("d", at(6000.0, 0.0)),
+                ("e", at(10000.0, 0.0)),
+            ],
+            &[("low", &["c", "a", "b"]), ("high", &["d", "e"])],
+        );
+        assert!(spatial.warnings().is_empty(), "{:?}", spatial.warnings());
+        assert_eq!(
+            named(spatial.mirror("low").unwrap()),
+            [("a", "c"), ("b", "b")]
+        );
+        assert_eq!(named(spatial.mirror("high").unwrap()), [("d", "e")]);
+        let zone = |id| spatial.zone(id).unwrap().0;
+        assert_eq!(
+            [zone("a"), zone("c"), zone("e")],
+            [Zone::HouseLeft, Zone::Centre, Zone::HouseRight]
+        );
+    }
+
+    #[test]
+    fn mirrored_fixtures_pair_their_cells_in_reversed_rank_without_warning() {
+        let spatial = spatial(
+            &[
+                ("a1", at(-1000.0, 0.0)),
+                ("a2", at(-1000.0, 0.0)),
+                ("m1", at(0.0, 0.0)),
+                ("m2", at(0.0, 0.0)),
+                ("m3", at(0.0, 0.0)),
+                ("z1", at(1000.0, 0.0)),
+                ("z2", at(1000.0, 0.0)),
+                ("q1", at(5000.0, 0.0)),
+                ("q2", at(5000.0, 0.0)),
+            ],
+            &[
+                ("bars", &["a1", "a2", "m1", "m2", "m3", "z1", "z2"]),
+                ("one", &["q1", "q2"]),
+            ],
+        );
+        assert!(spatial.warnings().is_empty(), "{:?}", spatial.warnings());
+        assert_eq!(
+            named(spatial.mirror("bars").unwrap()),
+            [("a1", "z2"), ("a2", "z1"), ("m1", "m3"), ("m2", "m2")]
+        );
+        assert_eq!(named(spatial.mirror("one").unwrap()), [("q1", "q2")]);
     }
 
     #[test]

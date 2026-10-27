@@ -9,7 +9,7 @@ use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
 use crate::model::{AttributeValue, FixtureState, SpecialFx, lerp};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
-use crate::spatial::{Depth, Zone};
+use crate::spatial::{Depth, MM_PER_METRE, Zone};
 
 pub const MAX_ENVELOPE_BEATS: f64 = 1_024.0;
 pub const MAX_PULSE_BEATS: u32 = 64;
@@ -222,7 +222,7 @@ pub fn capabilities(rig: &FixtureRig) -> Vec<wire::GroupCapability> {
                         Depth::Upstage => wire::StageDepth::Upstage,
                     },
                 ) as i32,
-                centre_x_metres: place.map_or(0.0, |place| place.centre_x_mm / 1000.0),
+                centre_x_metres: place.map_or(0.0, |place| place.centre_x_mm / MM_PER_METRE),
                 name: name.clone(),
                 cell_count: members.len() as u32,
                 colour: any(CellMap::colour),

@@ -274,7 +274,7 @@ fn lua_reads_zone_position_and_distance_in_metres() {
         .filter_map(|effect| effect.values.intensity)
         .map(|level| (level * 100.0).round() / 100.0)
         .collect();
-    // X span -1000..1000 in thirds; Y span -2000..0, so the y = 0 row is upstage.
+    // Reach 1000 mm: centre within ±333; the y = 0 row is upstage (Y >= 0).
     assert_eq!(levels, [0.11, 0.1, 0.2, 0.31, 0.3]);
     let a = effects.iter().find_map(|effect| effect.values.pan).unwrap();
     assert!((a - 0.4).abs() < 1e-12, "{a}");
