@@ -97,6 +97,7 @@ setup, and the [system design](docs/starfire-design.md) for timing and protocols
 Build scripts format Python with Ruff, Protobuf with clang-format and Rust
 with rustfmt. Run `uv run pre-commit run --all-files` to apply saved policies across the
 repository. Commit hooks format staged source files; re-stage any changes they make.
+Hooks run with `uv run --no-sync`, so they never re-sync or re-point the shared `.venv`'s editable `autolux` install.
 
 Python and Rust use four spaces and a 100-column target. Settings live in
 `pyproject.toml`, `.clang-format`, `.editorconfig` and `rustfmt.toml`. Dependencies,
