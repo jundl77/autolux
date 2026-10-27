@@ -3,25 +3,17 @@
 
 The baseline is cut from a warm analysis cache: each track's MERT cells and bar
 tracker chunks replay from sidecars beside its mp3 (simulate/cell_cache.py,
-simulate/tracker_cache.py). A cold run extracts on the GPU, and live extraction
-is not byte-identical to a replay. Measured 2026-10-26, cold first run against
-warm replay: 0136, 0485, 0911, 1110 and 0834 moved their checksums with the same
-beats and intent changes. --check-cache lists the sidecars a run would miss
-without simulating anything.
+simulate/tracker_cache.py). --check-cache lists the sidecars a run would miss
+without simulating anything; a cold run extracts on the GPU instead.
 
-Open bug: 0501, 0640 and 0834 never warm. A sidecar records how many source
-samples the chain was fed (total_pushed), and open_replay rejects it as
-miss_truncated when that is fewer than the file holds, because a short recording
-cannot replay a full run. Since 7ea05da, threshold-length digital silence puts
-the engine in standby, and LightEngine.on_audio returns before feeding the
-section chain until the show restarts. So on these tracks the chain sees less
-than the file holds, and every run re-records a sidecar that the next run
-rejects. Their baseline entries therefore come from live extraction, and two
-live runs of 0501 and of 0834 already disagreed (the first ran while the live
-show held the GPU), so the gate is not reliable on them yet. The fix:
-the recording chain records what the file holds (count standby samples as
-pushed), or the cache key accounts for the skip. The gate test should only call
-cold_sidecars after that.
+Two causes once made the checksums unstable. Both are fixed:
+- The simulated drop-strobe cooldown ran on the wall clock (12b1db7), so a
+  report depended on how fast the machine ran. Earlier "cold run differs from
+  warm replay" observations are confounded by it.
+- A sidecar recorded during digital-silence standby counted only the samples
+  fed to the chain and was rejected as miss_truncated forever, so 0501, 0640
+  and 0834 never warmed. Sidecars now also store source_samples, how far into
+  the file the run read (8a2ff26).
 """
 
 from __future__ import annotations

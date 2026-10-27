@@ -43,7 +43,7 @@ def build_simulation(
             watchdog=watchdog, audio_client=audio_client, data_dir=data_dir
         )
 
-    effect_controller = EffectController(lighting_client, event_buffer=event_buffer)
+    effect_controller = EffectController(lighting_client, event_buffer=event_buffer, clock=clock)
     light_engine = LightEngine(
         lighting_client,
         effect_controller,
@@ -129,7 +129,12 @@ def load_section_chain(watchdog=None, audio_client=None, data_dir=None):
     _SECTION_CHAIN.decoder.reset()
     if plan is None:
         return _SECTION_CHAIN
-    return cell_cache.recording_chain(_SECTION_CHAIN, *plan, tracker_plan=tracker_plan)
+    return cell_cache.recording_chain(
+        _SECTION_CHAIN,
+        *plan,
+        tracker_plan=tracker_plan,
+        source_samples=lambda: audio_client.samples_read,
+    )
 
 
 def _artifacts_or_degrade(data_dir=None) -> bool:
