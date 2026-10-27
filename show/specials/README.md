@@ -114,6 +114,20 @@ as a laser that rotates and colours, plays them too):
   drop, one whose arrival is known and below 0.9 of the track peak (the autoloop policy's
   grading), keeps its strobe burst but plays no intense special.
 
+## Venue
+
+`venue.toml` is not a special; it holds the room's limits across all of them:
+
+```toml
+[venue]
+max_accent_events_per_minute = 2
+```
+
+- `max_accent_events_per_minute` (default 2, at least 1): specials fired on accent groups in any
+  sliding 60 s, counted across every accent group. At the cap no accent row is selectable until
+  the oldest of those events is a minute old; loop-group rows and strobe rows are not counted or
+  capped. The FX Effects block shows it as the bar `venue · accents n/cap`.
+
 ## Adding a special
 
 Drop the file in this directory and run

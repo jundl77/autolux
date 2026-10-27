@@ -1,5 +1,8 @@
+import dataclasses
 import random
 from collections import Counter
+
+import pytest
 
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.special_policy import (
@@ -7,8 +10,9 @@ from autolux.lib.engine.special_policy import (
     Special,
     SpecialCapabilities,
     SpecialPolicy,
+    Venue,
 )
-from autolux.lighting.special_catalogue import discover_specials
+from autolux.lighting.special_catalogue import SpecialError, discover_specials, read_venue
 
 DROP, ATMOSPHERIC = LightIntent.DROP, LightIntent.ATMOSPHERIC
 FX = {
@@ -219,7 +223,53 @@ def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alon
     third = policy.choose(DROP, capabilities, now=1091.0).special
     assert third.group == first.group
     resting = {e['group']: e['ready'] for e in policy.cooldowns(1091.0, 0.0, 0.0, capabilities)}
+    resting.pop('venue')
     assert resting == {'fx': first.group == 'fx', 'laser': first.group == 'laser'}
+
+
+def test_the_venue_caps_accent_specials_per_minute_across_accent_groups():
+    capabilities = SpecialCapabilities.from_groups([FX, LASER, WASH])
+    spin = dataclasses.replace(row('spin', pulse=1), group='', role='accent')
+    sweep = row('sweep', ATMOSPHERIC, group='wash')
+    policy = SpecialPolicy([spin, sweep], random.Random(0), Venue(max_accent_events_per_minute=2))
+
+    def fire(now, intent=DROP):
+        chosen = policy.choose(intent, capabilities, now=now).special
+        if chosen is not None:
+            policy.record(chosen, now, capabilities)
+        return chosen and chosen.group
+
+    def venue(now):
+        [entry] = [
+            e for e in policy.cooldowns(now, 0.0, 0.0, capabilities) if e['group'] == 'venue'
+        ]
+        return entry['label'], entry['ready'], entry['remaining_seconds']
+
+    assert venue(0.0) == ('venue · accents 0/2', True, 0.0)
+    assert sorted([fire(0.0), fire(10.0)]) == ['fx', 'laser']
+    # Two accents fill the minute whichever groups played them; a loop group is not capped.
+    assert fire(20.0) is None
+    assert fire(20.0, ATMOSPHERIC) == 'wash'
+    assert venue(20.0) == ('venue · accents 2/2', False, 40.0)
+    # The window slides: once the first accent is a minute old, one more may fire.
+    assert venue(60.0)[:2] == ('venue · accents 1/2', True)
+    assert fire(60.0) in ('fx', 'laser')
+    assert venue(60.0) == ('venue · accents 2/2', False, 10.0)
+
+
+def test_the_venue_file_sets_the_cap_and_rejects_bad_values(tmp_path):
+    assert read_venue(tmp_path) == Venue(max_accent_events_per_minute=2)
+    assert read_venue() == Venue()
+    (tmp_path / 'venue.toml').write_text('[venue]\nmax_accent_events_per_minute = 3\n')
+    assert read_venue(tmp_path).max_accent_events_per_minute == 3
+    assert discover_specials(tmp_path) == ()
+    for text, message in [
+        ('[venue]\nmax_accent_events_per_minute = 0\n', 'must be a whole number, at least 1'),
+        ('[venue]\nmax_accents = 1\n', 'unknown venue.max_accents'),
+    ]:
+        (tmp_path / 'venue.toml').write_text(text)
+        with pytest.raises(SpecialError, match=message):
+            read_venue(tmp_path)
 
 
 def test_cooldowns_list_one_entry_per_group_and_the_strobe_on_the_shared_cooldown():

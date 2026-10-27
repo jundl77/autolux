@@ -1738,7 +1738,7 @@ def _cooldown_bar(row: dict):
     total, remaining = row['cooldown_seconds'], row['remaining_seconds']
     # A group without any cooldown is always ready, so its bar is full.
     elapsed = 1.0 if row['ready'] or total <= 0 else max(0.0, 1.0 - remaining / total)
-    label = row['group']
+    label = row.get('label') or row['group']
     if row['last']:
         label += ' · ' + row['last'].replace('_', ' ').capitalize()
     return html.Div(

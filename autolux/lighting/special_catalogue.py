@@ -4,11 +4,13 @@ import tomllib
 from pathlib import Path
 
 from autolux.lib.engine.effect_definitions import STARFIRE_MAX_STROBE_HZ, LightIntent
-from autolux.lib.engine.special_policy import Special
+from autolux.lib.engine.special_policy import Special, Venue
 from autolux.lighting.mvr_schema import ROLES
 from autolux.lighting.palettes import SLOTS
 
 SPECIAL_DIRECTORY = Path(__file__).resolve().parents[2] / 'show' / 'specials'
+# The room's limits across all specials; every other file is one special.
+VENUE_FILE = 'venue.toml'
 NAME = re.compile(r'[a-z][a-z0-9_]*')
 # The one place the file's console words meet the wire fields.
 FILE_FIELDS = {
@@ -164,6 +166,8 @@ def special_values(data: dict, labels: dict | None = None) -> dict:
 def discover_specials(directory: Path = SPECIAL_DIRECTORY) -> tuple[Special, ...]:
     specials, problems = [], []
     for path in sorted(Path(directory).glob('*.toml')):
+        if path.name == VENUE_FILE:
+            continue
         try:
             document = tomllib.loads(path.read_text(encoding='utf-8'))
             specials.append(parse_special(document, path.stem))
@@ -174,3 +178,27 @@ def discover_specials(directory: Path = SPECIAL_DIRECTORY) -> tuple[Special, ...
     if problems:
         raise SpecialError('invalid specials: ' + '; '.join(problems))
     return tuple(specials)
+
+
+def read_venue(directory: Path = SPECIAL_DIRECTORY) -> Venue:
+    """The `[venue]` table of venue.toml; an absent file or key keeps the default."""
+    path = Path(directory) / VENUE_FILE
+    if not path.is_file():
+        return Venue()
+    try:
+        document = tomllib.loads(path.read_text(encoding='utf-8'))
+    except tomllib.TOMLDecodeError as error:
+        raise SpecialError(f'{VENUE_FILE}: not TOML ({error})') from error
+    table = document.get('venue', {})
+    unknown = sorted(document.keys() - {'venue'}) + sorted(
+        f'venue.{key}' for key in table.keys() - {'max_accent_events_per_minute'}
+    )
+    if unknown:
+        raise SpecialError(f'{VENUE_FILE}: unknown {", ".join(unknown)}')
+    cap = table.get('max_accent_events_per_minute', Venue.max_accent_events_per_minute)
+    if type(cap) is not int or cap < 1:
+        raise SpecialError(
+            f'{VENUE_FILE}: venue.max_accent_events_per_minute {cap!r} must be a whole number, '
+            'at least 1'
+        )
+    return Venue(max_accent_events_per_minute=cap)

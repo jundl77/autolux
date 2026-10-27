@@ -4,6 +4,7 @@ from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.special_policy import DROP_STROBE, INTENSE_SPEED
 from autolux.lighting.special_catalogue import (
     SPECIAL_DIRECTORY,
+    VENUE_FILE,
     SpecialError,
     discover_specials,
     parse_special,
@@ -52,7 +53,8 @@ def row(**sections) -> dict:
 
 def test_the_shipped_specials_parse_and_skip_buildups():
     specials = discover_specials()
-    assert {path.stem for path in SPECIAL_DIRECTORY.glob('*.toml')} == {s.name for s in specials}
+    files = {path.stem for path in SPECIAL_DIRECTORY.glob('*.toml') if path.name != VENUE_FILE}
+    assert files == {s.name for s in specials}
     served = {intent for special in specials for intent in special.intents}
     assert served == {LightIntent.ATMOSPHERIC, LightIntent.BREAKDOWN, LightIntent.DROP}
 

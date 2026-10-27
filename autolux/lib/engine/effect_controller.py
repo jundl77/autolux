@@ -39,6 +39,7 @@ from autolux.lib.engine.special_policy import (
     Special,
     SpecialCapabilities,
     SpecialPolicy,
+    Venue,
 )
 from autolux.lighting.palettes import PALETTE_NAMES, PALETTES, Mood, Palette
 
@@ -105,6 +106,7 @@ class EffectController:
         seed: int = 0,
         palettes: tuple[Palette, ...] = PALETTES,
         specials: Sequence[Special] = DEFAULT_SPECIALS,
+        venue: Venue | None = None,
     ):
         self.lighting_client = lighting_client
         self.event_buffer = event_buffer
@@ -115,7 +117,7 @@ class EffectController:
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
-        self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'))
+        self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'), venue)
         self._special: Special | None = None
         self._special_on = False
         self._capabilities: SpecialCapabilities | None = None
@@ -359,7 +361,7 @@ class EffectController:
         if choice.special is None:
             self._forget_special()
         else:
-            self._special_policy.record(choice.special, now)
+            self._special_policy.record(choice.special, now, self._capabilities)
             self._fire_special(choice.special)
         for strobe in choice.strobes:
             self._strobe(strobe, bpm, settings)
