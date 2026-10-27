@@ -71,6 +71,7 @@ OK_COLOR = '#3fb950'
 WARN_COLOR = '#f0883e'
 MUTED = '#6e7681'
 POSTERIOR_FILL = '#58a6ff'
+POSTERIOR_TRACK = '#161d27'
 
 BEAT_MARKER_SIZE = 16
 BEATS_PER_BAR = 4
@@ -450,7 +451,7 @@ def _build_decoder(snapshot: dict) -> list:
                         ),
                         style={
                             'height': '10px',
-                            'background': '#161d27',
+                            'background': POSTERIOR_TRACK,
                             'borderRadius': '3px',
                             'overflow': 'hidden',
                         },

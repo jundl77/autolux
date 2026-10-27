@@ -228,7 +228,7 @@
    is what shows), then settles to the empty bar. */
 .cooldowns { display: grid; gap: 8px;
              --bar-fill: var(--auto);
-             /* The Section Confidence track, so both bar blocks read as one family. */
+             /* The Section Confidence track (POSTERIOR_TRACK): both bar blocks read as one. */
              --bar-track: #161d27;
              --bar-ring: var(--auto);
              --bar-flash: color-mix(in srgb, var(--text) 65%, var(--fill)); }

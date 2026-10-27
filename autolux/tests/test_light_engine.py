@@ -987,7 +987,7 @@ async def test_the_decoder_state_reaches_the_event_buffer():
     assert state['posterior'] == [0.05, 0.1, 0.1, 0.7, 0.05]
 
 
-async def test_a_bar_with_no_evidence_says_so_rather_than_reading_as_silence():
+async def test_a_bar_with_no_evidence_publishes_no_posterior():
     decoder = FakeDecoder()
     light, _, clock, _ = engine(decoder=decoder, events=True)
     decoder.recent_observations.append(BarObservation(7, 13.2, 15.1, None, float('nan')))
