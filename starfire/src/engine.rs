@@ -10,7 +10,7 @@ use crate::fixtures::FixtureRig;
 use crate::intensity;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
-    OverrideLifetime, PropertyValues, RenderContext, Rgb, SpecialFx, Target, Transition,
+    OverrideLifetime, PropertyValues, RenderContext, SpecialFx, Target, Transition, lerp,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
@@ -331,7 +331,7 @@ impl Engine {
     }
 
     pub fn active_palette(&self) -> &str {
-        self.palette.name()
+        &self.palette.name
     }
 
     pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
@@ -528,8 +528,6 @@ impl Engine {
         autoloop: &str,
         transition: &Transition,
     ) -> Result<()> {
-        validate_identifier(bank)?;
-        validate_identifier(autoloop)?;
         let script = self
             .catalog
             .instantiate(bank, autoloop, &self.rig, &self.palettes)
@@ -555,14 +553,12 @@ impl Engine {
         self.fade = match transition {
             Transition::Cut | Transition::RendererDefault => None,
             Transition::Crossfade { duration_beats } => {
-                let source = if let Some(states) = frozen_source {
-                    FadeSource::Frozen(states)
-                } else if self.script_error.is_some() {
-                    FadeSource::Frozen(self.dark_states())
-                } else if let Some(previous) = previous {
-                    FadeSource::Running(Box::new(previous))
-                } else {
-                    FadeSource::Frozen(self.dark_states())
+                let source = match (frozen_source, previous) {
+                    (Some(states), _) => FadeSource::Frozen(states),
+                    (None, Some(previous)) if self.script_error.is_none() => {
+                        FadeSource::Running(Box::new(previous))
+                    }
+                    _ => FadeSource::Frozen(self.dark_states()),
                 };
                 Some(Crossfade {
                     source,
@@ -894,10 +890,6 @@ impl ActivePalette {
         }
     }
 
-    fn name(&self) -> &str {
-        &self.name
-    }
-
     fn slots_at(&self, beat: f64) -> PaletteSlots {
         let progress = if self.duration_beats > 0.0 {
             (beat - self.start_beat) / self.duration_beats
@@ -1035,10 +1027,9 @@ fn apply_scalar_properties(state: &mut FixtureState, values: &PropertyValues) {
 
 fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureStates> {
     let mut states = rig.empty_states();
+    // LuaAutoloop::render has already validated every effect.
     for effect in effects {
-        validate_properties(&effect.values)?;
         for id in rig.resolve(&effect.target)? {
-            rig.validate_attributes(&id, &effect.values.attributes)?;
             let state = states
                 .get_mut(&id)
                 .context("resolved fixture is absent from the rig")?;
@@ -1068,24 +1059,16 @@ fn blend_states(
                     to.attributes.insert(key.clone(), value.clone());
                 }
             }
-            to.intensity = interpolate(from.intensity, to.intensity, amount);
-            to.colour = Rgb {
-                red: interpolate(from.colour.red, to.colour.red, amount),
-                green: interpolate(from.colour.green, to.colour.green, amount),
-                blue: interpolate(from.colour.blue, to.colour.blue, amount),
-            };
-            to.pan = interpolate(from.pan, to.pan, amount);
-            to.tilt = interpolate(from.tilt, to.tilt, amount);
+            to.intensity = lerp(from.intensity, to.intensity, amount);
+            to.colour = from.colour.lerp(to.colour, amount);
+            to.pan = lerp(from.pan, to.pan, amount);
+            to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
                 to.strobe_hz = from.strobe_hz;
             }
         }
     }
     destination
-}
-
-fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
-    from + (to - from) * amount
 }
 
 fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {

@@ -25,6 +25,20 @@ impl Default for Rgb {
     }
 }
 
+impl Rgb {
+    pub fn lerp(self, to: Self, amount: f64) -> Self {
+        Self {
+            red: lerp(self.red, to.red, amount),
+            green: lerp(self.green, to.green, amount),
+            blue: lerp(self.blue, to.blue, amount),
+        }
+    }
+}
+
+pub fn lerp(from: f64, to: f64, amount: f64) -> f64 {
+    from + (to - from) * amount
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Target {
