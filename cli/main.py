@@ -1,7 +1,6 @@
 """Autolux command line and application lifecycle coordination."""
 
 import argparse
-import argcomplete
 import asyncio
 import logging
 import secrets
@@ -9,10 +8,13 @@ import signal
 import sys
 from pathlib import Path
 
-from autolux.lib.main import AutoluxController, PLAYBACK_DELAY_SEC
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+import argcomplete
+
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.main import AutoluxController
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
+LOGGER = logging.getLogger(__name__)
 global_app = None
 
 
@@ -20,21 +22,19 @@ async def run_cmd(args: argparse.Namespace):
     global global_app
     if args.debug:
         print('starting in debug mode')
-        debug_mode = True
-    else:
-        debug_mode = False
 
-    from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
-    from cli.starfire import ROOT
-    from cli.starfire_assets import static_rig
+    import uuid
+
     from autolux.lib.clients.starfire_client import StarfireClient
     from autolux.lighting.autoloop_catalogue import discover_autoloops, read_autoloop_meta
-    import uuid
+    from cli.starfire import ROOT
+    from cli.starfire_assets import static_rig
+    from cli.starfire_runtime import StarfireRuntime, fixture_setup, selected_rig
 
     input_device_index = int(args.input_device) if args.input_device is not None else None
     output_device_index = int(args.output_device) if args.output_device is not None else None
     run_id = secrets.randbits(64) or 1
-    rig = selected_rig(args.rig, getattr(args, 'library', None))
+    rig = selected_rig(args.rig, args.library)
     with StarfireRuntime(
         args.starfire_binary,
         rig,
@@ -47,7 +47,7 @@ async def run_cmd(args: argparse.Namespace):
             lighting_client=StarfireClient(renderer.send_command, groups=lambda: renderer.groups),
             input_device_index=input_device_index,
             output_device_index=output_device_index,
-            debug_mode=debug_mode,
+            debug_mode=args.debug,
             enable_ui=args.ui,
             ui_port=args.ui_port,
             report_path=args.report,
@@ -68,12 +68,13 @@ async def run_cmd(args: argparse.Namespace):
 def write_report(app, path):
     if path and app.event_buffer is not None:
         import json
+
         from autolux.simulate.evaluator import evaluate, print_evaluation
 
         report = app.event_buffer.to_report()
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2, default=str)
-        logging.info(f'[main] report written: {path}')
+        LOGGER.info(f'[main] report written: {path}')
         print_evaluation(evaluate(report))
 
 
@@ -85,9 +86,6 @@ async def list_cmd(args: argparse.Namespace):
 
 async def label_cmd(args: argparse.Namespace):
     """Load the annotation tool only when requested, keeping Dash optional."""
-    import sys
-    from pathlib import Path
-
     training = str(Path(__file__).resolve().parents[1] / 'autolux' / 'training')
     if training not in sys.path:
         sys.path.insert(0, training)
@@ -104,7 +102,7 @@ def death_handler(signum, frame):
     Ctrl-C looks broken. Raise what the default handler would have."""
     if global_app is None:
         raise KeyboardInterrupt
-    logging.info('[main] stop requested; shutting down controller and receiver')
+    LOGGER.info('[main] stop requested; shutting down controller and receiver')
     global_app.stop()
 
 
@@ -126,7 +124,7 @@ def run_sync():
     except KeyboardInterrupt:
         pass
     except (RuntimeError, OSError, ValueError) as error:
-        logging.error('%s', error)
+        LOGGER.error('%s', error)
         raise SystemExit(1)
 
 
@@ -162,27 +160,21 @@ def build_parser() -> argparse.ArgumentParser:
         '-i',
         '--input_device',
         help='Specify the index of the sound INPUT device to use, uses system-default by default',
-        required=False,
-        default=None,
     )
     subparser.add_argument(
         '-o',
         '--output_device',
         help='Specify the index of the sound OUTPUT device to use, uses system-default by default',
-        required=False,
-        default=None,
     )
     subparser.add_argument(
         '-d',
         '--debug',
         help='Run in debug mode, this will playback audio on the output device with additional auditory information',
-        required=False,
         action='store_true',
     )
     subparser.add_argument(
         '--ui',
         help='Launch real-time lighting visualizer (requires dash extra)',
-        required=False,
         action='store_true',
     )
     subparser.add_argument(
@@ -190,14 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_DASHBOARD_PORT,
         help=f'Dashboard port (default: {DEFAULT_DASHBOARD_PORT})',
-        required=False,
         dest='ui_port',
     )
     subparser.add_argument(
         '--report',
-        default=None,
         help='Write a JSON session report on exit (e.g. report.json); implies event tracking',
-        required=False,
     )
     subparser.set_defaults(func=run_cmd)
 

@@ -40,6 +40,7 @@ from cli.starfire_protocol import (
 )
 from proto.starfire import starfire_pb2 as wire
 
+LOGGER = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL_SECONDS = 10.0
 HEARTBEAT_TIMEOUT_SECONDS = 30.0
 STARTUP_TIMEOUT_SECONDS = 10.0
@@ -69,7 +70,7 @@ def fixture_setup(args):
     return {
         'binary': Path(args.starfire_binary).resolve(),
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
-        'library': Path(getattr(args, 'library', FIXTURE_LIBRARY)).resolve(),
+        'library': Path(args.library).resolve(),
     }
 
 
@@ -114,7 +115,7 @@ def validate_starfire(binary, rig, autoloops, *, expected_universe=None):
         raise RuntimeError(f'Starfire is missing Autolux autoloops: {names}')
     missing_groups = report.get('missing_groups')
     if missing_groups:
-        logging.warning('[prod] Starfire groups not in this rig: %s', ', '.join(missing_groups))
+        LOGGER.warning('[prod] Starfire groups not in this rig: %s', ', '.join(missing_groups))
     try:
         read_autoloop_meta(autoloops)
     except AutoloopMetaError as error:
@@ -217,7 +218,7 @@ class StarfireRuntime:
             if not self._ready.wait(self.startup_timeout):
                 raise RuntimeError('Starfire did not become ready before its startup deadline')
             self.check_health()
-            logging.info('[prod] Starfire ready (PID %d)', self.process.pid)
+            LOGGER.info('[prod] Starfire ready (PID %d)', self.process.pid)
             return self
         except BaseException:
             self.close()
@@ -250,7 +251,7 @@ class StarfireRuntime:
                 if isinstance(event, wire.ErrorReply):
                     if not 0 < event.command_id <= self._last_sent_id or not event.message:
                         raise ValueError('Invalid Starfire error reply')
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: TRY004
                         f'Starfire rejected command {event.command_id}: {event.message}'
                     )
                 if isinstance(event, wire.Metrics):
@@ -409,9 +410,9 @@ class StarfireRuntime:
                 child.stdin.close()
             try:
                 code = child.wait(timeout=self.stop_timeout)
-                logging.info('[prod] Starfire stopped (exit %d)', code)
+                LOGGER.info('[prod] Starfire stopped (exit %d)', code)
             except subprocess.TimeoutExpired:
-                logging.warning('[prod] Starfire shutdown timed out; terminating owned renderer')
+                LOGGER.warning('[prod] Starfire shutdown timed out; terminating owned renderer')
                 child.kill()
                 child.wait(timeout=self.stop_timeout)
             for thread in self._threads:

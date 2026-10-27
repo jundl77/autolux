@@ -1,5 +1,4 @@
 import argparse
-import statistics
 import threading
 import time
 
@@ -71,59 +70,6 @@ class SlowSource:
         return snap
 
 
-def _server_callbacks(app) -> list:
-    found = []
-    for key, entry in app.callback_map.items():
-        wrapped = getattr(entry.get('callback'), '__wrapped__', None)
-        if wrapped is not None:
-            found.append((key, wrapped))
-    return found
-
-
-def profile(show: RiggedShow, ticks: int) -> None:
-    app = build_app(show.buffer)
-    snap = show.buffer.snapshot()
-    print(
-        f'snapshot: {len(snap["beats"])} beats, '
-        f'{len(snap["sound_events"])} sound events, '
-        f'{len(snap["intents"])} intent blocks, '
-        f'{show.clock.monotonic() / 60:.0f} min into the set'
-    )
-
-    from autolux.simulate import visualizer_app as V
-
-    for fn in (
-        V._build_timeline,
-        V._build_command_diagnostics,
-        V._build_decoder,
-        V._build_show_overview,
-        V._anchor,
-    ):
-        samples = []
-        for _ in range(ticks):
-            at = time.perf_counter()
-            fn(snap)
-            samples.append((time.perf_counter() - at) * 1000)
-        print(
-            f'  {fn.__name__:<26} median {statistics.median(samples):7.2f} ms   max {max(samples):7.2f} ms'
-        )
-
-    callbacks = _server_callbacks(app)
-    samples = {key: [] for key, _ in callbacks}
-    for tick in range(ticks):
-        for key, wrapped in callbacks:
-            at = time.perf_counter()
-            wrapped(tick)
-            samples[key].append((time.perf_counter() - at) * 1000)
-    for key, taken in samples.items():
-        print(f'callback {key}')
-        print(
-            f'  median {statistics.median(taken):7.2f} ms   '
-            f'mean {statistics.fmean(taken):7.2f} ms   '
-            f'max {max(taken):7.2f} ms'
-        )
-
-
 def serve(show: RiggedShow, port: int, latency_ms: float) -> None:
     server = SnapshotServer(show.buffer, snapshot_port(port))
     server.start()
@@ -145,10 +91,9 @@ def main(argv=None) -> None:
         'real snapshot server, the real Dash app, and a fixed '
         'latency added to every snapshot read. `serve` is the wedge '
         'reproduction (drive a browser at it and watch whether the '
-        'sync anchor keeps moving); `profile` times the server '
-        'callbacks on the same payload without a browser.'
+        'sync anchor keeps moving).'
     )
-    parser.add_argument('mode', choices=('serve', 'profile'))
+    parser.add_argument('mode', choices=('serve',))
     parser.add_argument(
         '--minutes', type=float, default=60.0, help='how far into a set the buffer is seeded to'
     )
@@ -159,16 +104,9 @@ def main(argv=None) -> None:
         help='latency added to every snapshot read (serve)',
     )
     parser.add_argument('--port', type=int, default=8060)
-    parser.add_argument(
-        '--ticks', type=int, default=40, help='timed invocations per callback (profile)'
-    )
     args = parser.parse_args(argv)
 
-    show = RiggedShow(args.minutes)
-    if args.mode == 'profile':
-        profile(show, args.ticks)
-    else:
-        serve(show, args.port, args.latency_ms)
+    serve(RiggedShow(args.minutes), args.port, args.latency_ms)
 
 
 if __name__ == '__main__':
