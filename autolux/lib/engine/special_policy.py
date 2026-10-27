@@ -23,7 +23,8 @@ class Special:
     # its role, so a new fixture group inherits the rows its layer and profiles allow.
     group: str = ''
     role: str | None = None
-    # A role row narrowed to the groups whose members all lie in this zone or depth.
+    # A role row narrowed to the groups whose members all share one stage area in this zone
+    # (column) or depth (row).
     zone: str | None = None
     depth: str | None = None
     colour_slot: str | None = None
@@ -72,7 +73,8 @@ class Special:
 class SpecialCapabilities:
     groups: Mapping[str, frozenset[str]] = field(default_factory=dict)
     roles: Mapping[str, str] = field(default_factory=dict)
-    # group -> (zone, depth, centre X in metres) as Starfire derived them; None is mixed.
+    # group -> (zone, depth, centre X in metres) of the members' shared stage area; both None
+    # when the members' areas differ.
     places: Mapping[str, tuple[str | None, str | None, float]] = field(default_factory=dict)
 
     @classmethod
@@ -238,7 +240,8 @@ class SpecialPolicy:
             total = last.cooldown_seconds if last else 0.0
             entries.append(_entry(group, last and last.name, total, total - (now - at)))
         for strobe in (s for s in self._specials if s.strobe_hz is not None):
-            entries.append(_entry(strobe.group, strobe.name, intense_total, intense_remaining))
+            entry = _entry(strobe.group, strobe.name, intense_total, intense_remaining)
+            entries.append({**entry, 'strobe': True})
         if ACCENT_ROLE in capabilities.roles.values():
             entries.append(self._venue_entry(now))
         return entries

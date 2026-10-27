@@ -662,7 +662,7 @@ fn attribute_engine() -> Engine {
                 r#"return { render = function()
                     return sf.scene {
                         sf.dimmer(sf.all(), 1),
-                        sf.physical_attribute(sf.group("fx"), "Effects1PosRotate", 90),
+                        sf.physical_attribute(sf.fixture("kinta"), "Effects1PosRotate", 90),
                     }
                 end }"#
                     .into(),

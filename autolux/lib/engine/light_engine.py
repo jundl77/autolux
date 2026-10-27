@@ -134,7 +134,6 @@ class LightEngine(IMusicAnalyserHandler):
         self._sent_brightness = 1.0
         self._sent_crossfade_beats: float | None = None
         # Starfire starts every group at full, so only a level it has not seen goes out.
-        self._sent_group_masters: dict[str, float] = {}
         self._room_levels: deque[float] = deque(maxlen=LOUDNESS_TREND_BEATS)
         self._entered_intent: LightIntent | None = None
         self._entered_label: str | None = None
@@ -272,16 +271,9 @@ class LightEngine(IMusicAnalyserHandler):
             settings.strobe_max_rate_hz, settings.strobe_max_burst_seconds
         )
         self.send_intensity()
-        self._send_group_masters(settings)
-
-    def _send_group_masters(self, settings: ShowSettings) -> None:
         # show.json may name groups of another rig; Starfire refuses those, so they stay here.
         for group in (group['name'] for group in self.lighting_client.groups()):
-            level = settings.group_masters.get(group, 1.0)
-            if level != self._sent_group_masters.get(group, 1.0):
-                LOGGER.info('[engine] group master %s %.2f sent to Starfire', group, level)
-                self.lighting_client.set_group_master(group, level)
-                self._sent_group_masters[group] = level
+            self.lighting_client.set_group_master(group, settings.group_masters.get(group, 1.0))
 
     def _send_crossfade(self) -> None:
         self._sent_crossfade_beats = live_crossfade_beats(self._settings())

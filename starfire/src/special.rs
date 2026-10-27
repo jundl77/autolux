@@ -9,7 +9,7 @@ use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
 use crate::model::{AttributeValue, FixtureState, SpecialFx, lerp};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
-use crate::spatial::{Depth, MM_PER_METRE, Zone};
+use crate::spatial::MM_PER_METRE;
 
 pub const MAX_ENVELOPE_BEATS: f64 = 1_024.0;
 pub const MAX_PULSE_BEATS: u32 = 64;
@@ -208,20 +208,7 @@ pub fn capabilities(rig: &FixtureRig) -> Vec<wire::GroupCapability> {
             };
             let place = rig.spatial().group_place(name);
             wire::GroupCapability {
-                zone: place
-                    .and_then(|place| place.zone)
-                    .map_or(wire::StageZone::Mixed, |zone| match zone {
-                        Zone::HouseLeft => wire::StageZone::HouseLeft,
-                        Zone::Centre => wire::StageZone::Centre,
-                        Zone::HouseRight => wire::StageZone::HouseRight,
-                    }) as i32,
-                depth: place.and_then(|place| place.depth).map_or(
-                    wire::StageDepth::Mixed,
-                    |depth| match depth {
-                        Depth::Downstage => wire::StageDepth::Downstage,
-                        Depth::Upstage => wire::StageDepth::Upstage,
-                    },
-                ) as i32,
+                area: place.and_then(|place| place.area).map(|area| area as i32),
                 centre_x_metres: place.map_or(0.0, |place| place.centre_x_mm / MM_PER_METRE),
                 name: name.clone(),
                 cell_count: members.len() as u32,

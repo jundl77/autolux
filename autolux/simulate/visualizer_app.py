@@ -846,7 +846,7 @@ def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
     return [
         html.Div(
             [
-                html.Span(f'{group} master', className='setting-name'),
+                html.Span(f'{group} group master', className='setting-name'),
                 html.Div(
                     _fader(
                         {'type': GROUP_MASTER_ID, 'group': group},

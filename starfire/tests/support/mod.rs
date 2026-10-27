@@ -126,6 +126,14 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
             tilt: range("tilt"),
             matrix: matrix(fixture),
             cells: Vec::new(),
+            // A spec without an area sits in the centre; "UNSPECIFIED" tests the refusal.
+            area: wire::StageArea::from_str_name(&format!(
+                "STAGE_AREA_{}",
+                fixture
+                    .get("area")
+                    .map_or("CENTRE", |area| area.as_str().unwrap())
+            ))
+            .unwrap() as i32,
         });
         if !rig.profiles.iter().any(|known| known.profile_id == profile)
             && let Some(found) = catalogue_profile(profile)

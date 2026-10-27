@@ -463,6 +463,7 @@ impl Engine {
             }
             // A cell in several capped groups takes the product of their masters.
             for (group, level) in &self.group_masters {
+                let level = perceptual_to_linear_master(*level);
                 for cell in &self.rig.groups()[group] {
                     if let Some(state) = states.get_mut(cell) {
                         state.intensity *= level;

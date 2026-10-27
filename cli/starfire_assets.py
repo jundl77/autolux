@@ -13,6 +13,7 @@ from autolux.lighting.palettes import palette_table
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,
     ROLE_NAMES,
+    STAGE_AREAS,
     check_payload_size,
 )
 from proto.starfire import rig_pb2 as rig_wire
@@ -42,11 +43,40 @@ def _movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
     )
 
 
+def stage_areas(positions: list[tuple[float, float]]) -> list[int]:
+    """Each plan position's (X, Y in mm) cell of the nine-area stage grid.
+
+    MVR 1.6 (DIN SPEC 15801) places a Fixture by its Matrix, "u1,u2,u3 / v1,v2,v3 / w1,w2,w3 /
+    o1,o2,o3" in a "Right-handed, Z-Up, 1 Distance Unit equals 1 mm" system, the position being
+    the o row. MVR names no audience side and gives its origin no meaning, so the axes follow
+    GDTF 1.2 (DIN SPEC 15800), which draws a device from the viewer: "X – from left (-X) to
+    right (+X), Y – from the outside of the monitor (-Y) to the inside of the monitor (+Y)".
+    With the audience as the viewer, -X is house left and -Y downstage.
+
+    The stage frame is therefore the rig's own bounding box: each axis is cut into equal thirds
+    of its extent, a position on a cut belongs to the centre third, and an axis without extent
+    puts every fixture in its centre third.
+    """
+
+    def thirds(values: list[float]) -> list[int]:
+        low, high = min(values), max(values)
+        third = (high - low) / 3
+        return [0 if value < low + third else 2 if value > high - third else 1 for value in values]
+
+    if not positions:
+        return []
+    columns = thirds([x for x, _ in positions])
+    rows = thirds([y for _, y in positions])
+    return [STAGE_AREAS[row][column] for row, column in zip(rows, columns, strict=True)]
+
+
 def rig_definition(path: Path) -> rig_wire.RigDefinition:
     scene, fixtures = load_rig(path)
     rig = rig_wire.RigDefinition()
     cells = {}
-    for fixture in fixtures:
+    plan = slice(mvr.POSITION_X, mvr.POSITION_X + 2)
+    areas = stage_areas([tuple(fixture['matrix'][plan]) for fixture in fixtures])
+    for fixture, area in zip(fixtures, areas, strict=True):
         spec, mode = fixture['gdtf_spec'], fixture['gdtf_mode']
         profile_id = f'{spec}#{mode}'
         if profile_id not in cells:
@@ -66,14 +96,16 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
             address=fixture['address'],
             matrix=fixture['matrix'],
             cells=[rig_wire.Fixture.Cell(**cell) for cell in cells[profile_id]],
+            area=area,
         )
         for axis in mvr.MOVEMENT_AXES:
             if (movement := _movement(fixture[axis])) is not None:
                 getattr(entry, axis).CopyFrom(movement)
     roles, _, warnings = mvr.group_roles(fixtures)
-    for warning in warnings:
+    groups, order_warnings = mvr.groups(fixtures)
+    for warning in warnings + order_warnings:
         LOGGER.warning('[rig] %s', warning)
-    for group, members in mvr.groups(fixtures).items():
+    for group, members in groups.items():
         rig.groups.add(group_id=group, fixture_ids=members, role=WIRE_ROLES[roles[group]])
     return rig
 
@@ -101,7 +133,7 @@ def static_rig(path: Path) -> StaticRig:
             )
         fixture['uv'] = lit_by_uv[spec, mode]
     by_name = {fixture['name']: fixture for fixture in fixtures}
-    groups = mvr.groups(fixtures)
+    groups = mvr.groups(fixtures)[0]
     return StaticRig(
         groups=tuple(sorted(groups)),
         uv_groups=tuple(

@@ -163,6 +163,58 @@ def test_committed_native_rig_is_the_exported_login_rig(rig):
     assert rig_wire.RigDefinition.FromString(content) == login.rig
 
 
+def test_stage_areas_cut_the_rigs_bounding_box_into_thirds():
+    # Box X 1000..4000, Y -500..2500: cuts at X 2000 / 3000 and Y 500 / 1500; the origin is
+    # outside the rig and plays no part.
+    areas = assets.stage_areas([(1000, -500), (2500, 1000), (4000, 2500), (1100, 2400)])
+    assert [rig_wire.StageArea.Name(area) for area in areas] == [
+        'STAGE_AREA_DOWN_LEFT',
+        'STAGE_AREA_CENTRE',
+        'STAGE_AREA_UP_RIGHT',
+        'STAGE_AREA_UP_LEFT',
+    ]
+
+
+def test_a_fixture_on_a_cut_lies_in_the_centre_third():
+    areas = assets.stage_areas([(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)])
+    assert [rig_wire.StageArea.Name(area) for area in areas] == [
+        'STAGE_AREA_DOWN_LEFT',
+        'STAGE_AREA_CENTRE',
+        'STAGE_AREA_CENTRE',
+        'STAGE_AREA_UP_RIGHT',
+    ]
+
+
+def test_an_axis_without_extent_puts_every_fixture_in_its_centre():
+    one_row = assets.stage_areas([(-2000, 700), (0, 700), (2000, 700)])
+    assert [rig_wire.StageArea.Name(area) for area in one_row] == [
+        'STAGE_AREA_CENTRE_LEFT',
+        'STAGE_AREA_CENTRE',
+        'STAGE_AREA_CENTRE_RIGHT',
+    ]
+    assert assets.stage_areas([(5, 5)]) == [rig_wire.STAGE_AREA_CENTRE]
+    assert assets.stage_areas([]) == []
+
+
+def test_the_room_rig_fixtures_lie_in_their_stage_areas():
+    # rig/room.mvr: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
+    # Y -2000..0 at -1333 / -667.
+    expected = {
+        'spot_left': 'STAGE_AREA_UP_CENTRE',  # (-300, 0)
+        'spot_right': 'STAGE_AREA_UP_CENTRE',  # (300, 0)
+        'wash_left': 'STAGE_AREA_CENTRE_LEFT',  # (-900, -1000)
+        'wash_mid_left': 'STAGE_AREA_CENTRE',  # (-300, -1000)
+        'wash_mid_right': 'STAGE_AREA_CENTRE',  # (300, -1000)
+        'wash_right': 'STAGE_AREA_CENTRE_RIGHT',  # (900, -1000)
+        'zq06017': 'STAGE_AREA_DOWN_CENTRE',  # (0, -2000), the strip bar
+        'kinta': 'STAGE_AREA_UP_CENTRE',  # (0, -500)
+    }
+    rig = assets.rig_definition(ROOT / 'rig/room.mvr')
+    assert {
+        fixture.fixture_id: rig_wire.StageArea.Name(fixture.area) for fixture in rig.fixtures
+    } == expected
+
+
 def test_login_carries_the_palette_table_and_palette_commands_round_trip():
     login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']

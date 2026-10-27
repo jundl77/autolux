@@ -30,9 +30,10 @@ outro also starts a track.
 - **Loudness is amplitude only.** `sf.loudness_gain(ctx.normalized_rms_level)` and RMS reach
   scale levels and sweep size, never colour, timing or pattern.
 - **No strobe.** Autolux adds the drop strobe itself.
-- **Living room.** Slow symmetric mover sweeps (mirror with `sf.side(index)`, centre pan 0.5),
-  nothing frantic, wash peaks at or below 0.9. Groups: `movers` (2), `wash` (4), `strip` (8);
-  accent groups (MVR layer `accent`, such as `fx`) are refused, they play specials only.
+- **Living room.** Slow symmetric mover sweeps (in `sf.each`, `sf.side(index)` is -1 for the
+  house-left half and 1 for the right, centre pan 0.5), nothing frantic, wash peaks at or
+  below 0.9. Groups: `movers` (2), `wash` (4), `strip` (8); accent groups (MVR layer
+  `accent`, such as `fx`) are refused, they play specials only.
 - **Small.** At most ~80 lines. The first line is `-- 8-beat loop` or `-- 16-beat loop`
   (the tests read the loop length from it), then the metadata block, then at most three
   comment lines saying why the technique is non-obvious. No other comments:

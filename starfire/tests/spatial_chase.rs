@@ -136,6 +136,7 @@ fn truss() -> FixtureRig {
         let x = -20000.0 + 40000.0 * along * along.sqrt();
         let id = format!("w{index:03}");
         rig.fixtures.push(wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             fixture_id: id.clone(),
             profile_id: "generic_rgb".into(),
             universe: (rank / 170) as u32,
@@ -183,4 +184,48 @@ fn on_a_400_fixture_truss_the_peak_travels_monotonically_along_x() {
     }
     assert!(last_x > 15000.0, "{last_x}");
     assert_seamless(&rig);
+}
+
+/// 60 eight-cell bars as the only movers: one pan per cell would overrun the effect cap.
+#[test]
+fn a_rig_of_many_multi_cell_movers_pans_each_fixture_once() {
+    let room = support::room_definition();
+    let bar = room
+        .fixtures
+        .iter()
+        .find(|fixture| fixture.fixture_id == "zq06017")
+        .unwrap();
+    let profile = room
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == bar.profile_id)
+        .unwrap();
+    let mut definition = wire::RigDefinition {
+        profiles: vec![profile.clone()],
+        ..Default::default()
+    };
+    let mut members = Vec::new();
+    for index in 0..60 {
+        let id = format!("m{index:02}");
+        let x = (index as f64 - 29.5) * 500.0;
+        definition.fixtures.push(wire::Fixture {
+            fixture_id: id.clone(),
+            matrix: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, x, 0.0, 3000.0],
+            universe: index / 10,
+            address: (index % 10) * 50 + 1,
+            ..bar.clone()
+        });
+        members.push(id);
+    }
+    definition.groups.push(wire::FixtureGroup {
+        group_id: "movers".into(),
+        fixture_ids: members,
+        ..Default::default()
+    });
+    let rig = FixtureRig::from_wire(&definition).unwrap();
+    assert_eq!(rig.cell_ids().len(), 480);
+    for step in 0..32 {
+        let effects = render(&rig, f64::from(step) / 2.0).effects;
+        assert!(effects < EFFECT_CAP, "{effects} effects");
+    }
 }

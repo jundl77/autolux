@@ -4,7 +4,8 @@
 -- texture: wash
 -- X is normalised to each group's own extent, so one travel fits 1.8 m of washes or a 40 m truss.
 -- Members sharing one X travel in geometry order; a lone member sits mid-group; an empty group is skipped.
--- Only glowing cells get their own dimmer (under 70 % of a group), so 512 cells stay inside the effect cap.
+-- Only glowing cells get their own dimmer (under 70 % of a group) and each mover fixture one pan,
+-- so 512 cells stay inside the effect cap.
 local palette = sf.palette()
 local LOOP_BEATS, HALF_BEATS = 16, 8
 local WIDTH = 0.35
@@ -61,11 +62,15 @@ return {
         local beat = ctx.beat_position % LOOP_BEATS
         local loudness = sf.loudness_gain(ctx.normalized_rms_level)
         local swing = PAN_SWING * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
-        local pans = {}
+        local pans, panned = {}, {}
         for _, mover in ipairs(movers.members) do
-            local along = movers.along[mover]
-            local side = along < 0.5 and -1 or along > 0.5 and 1 or 0
-            pans[#pans + 1] = sf.pan_tilt(sf.fixture(mover), CENTRE_PAN + side * swing, TILT)
+            local fixture = sf.fixture_of(mover)
+            if not panned[fixture] then
+                panned[fixture] = true
+                local along = movers.along[mover]
+                local side = along < 0.5 and -1 or along > 0.5 and 1 or 0
+                pans[#pans + 1] = sf.pan_tilt(sf.fixture(fixture), CENTRE_PAN + side * swing, TILT)
+            end
         end
         return sf.scene {
             travelling(wash, palette.secondary, 0.06, 0.4, beat, loudness),

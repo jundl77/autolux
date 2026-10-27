@@ -417,6 +417,7 @@ fn encoding_rejects_missing_unknown_nonfinite_and_unresolved_state() {
 fn pixel_bar(mode: &str, cells: Vec<wire::fixture::Cell>) -> wire::RigDefinition {
     wire::RigDefinition {
         fixtures: vec![wire::Fixture {
+            area: wire::StageArea::Centre as i32,
             fixture_id: "bar".into(),
             profile_id: "bar".into(),
             address: 1,

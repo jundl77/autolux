@@ -85,11 +85,12 @@ function sf.on_beat(ctx_or_beats, width, period)
 end
 
 local LEFT, CENTRE, RIGHT = -1, 0, 1
--- Group members run left to right (Autolux orders them by MVR position). With a count, the
--- side is the member's half of the group, an odd middle at the centre; without one it
--- alternates, which agrees for a pair.
+local each_count
+-- Group members run left to right (Autolux orders them by MVR position), so the side is the
+-- member's half of the group, an odd middle at the centre. Inside sf.each the count defaults
+-- to that group's size.
 function sf.side(index, count)
-    if count == nil then return index % 2 == 1 and LEFT or RIGHT end
+    count = count or each_count
     assert(math.type(index) == "integer" and math.type(count) == "integer"
         and index >= 1 and index <= count, "side needs a member index within 1..count")
     if 2 * index == count + 1 then return CENTRE end
@@ -160,11 +161,13 @@ end
 -- once at rig load (starfire::spatial).
 
 function sf.each(target, make_effect)
-    local result = {}
+    local result, outer_count = {}, each_count
     local members = sf.members(target)
+    each_count = #members
     for index, name in ipairs(members) do
         result[#result + 1] = make_effect(sf.fixture(name), index, #members)
     end
+    each_count = outer_count
     return sf.scene(result)
 end
 

@@ -18,6 +18,7 @@ fn rig() -> wire::RigDefinition {
             .into_iter()
             .enumerate()
             .map(|(index, id)| wire::Fixture {
+                area: wire::StageArea::Centre as i32,
                 fixture_id: id.into(),
                 profile_id: "generic_rgb".into(),
                 address: 1 + index as u32 * 3,

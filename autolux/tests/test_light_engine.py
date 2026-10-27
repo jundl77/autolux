@@ -1799,7 +1799,7 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
     ]
 
 
-def test_group_masters_go_to_starfire_for_rig_groups_only_and_only_when_they_change():
+def test_group_masters_go_to_starfire_for_rig_groups_only_on_every_settings_send():
     from autolux.lib.engine.effect_definitions import ShowSettings
 
     light, _, _, lighting = engine()
@@ -1811,7 +1811,12 @@ def test_group_masters_go_to_starfire_for_rig_groups_only_and_only_when_they_cha
     settings = ShowSettings(group_masters={})
     light.send_renderer_settings()
     assert [command for _, command in sent(lighting, 'set_group_master')] == [
+        {'kind': 'set_group_master', 'group': 'movers', 'level': 1.0},
         {'kind': 'set_group_master', 'group': 'wash', 'level': 0.5},
+        # A restarted Starfire starts every group at full, so a resend must repeat the cap.
+        {'kind': 'set_group_master', 'group': 'movers', 'level': 1.0},
+        {'kind': 'set_group_master', 'group': 'wash', 'level': 0.5},
+        {'kind': 'set_group_master', 'group': 'movers', 'level': 1.0},
         {'kind': 'set_group_master', 'group': 'wash', 'level': 1.0},
     ]
 

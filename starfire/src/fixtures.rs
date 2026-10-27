@@ -36,6 +36,7 @@ struct FixturePatch {
     declared_cells: Vec<wire::fixture::Cell>,
     cells: Vec<String>,
     position: Position,
+    area: wire::StageArea,
 }
 
 #[derive(Clone, Debug)]
@@ -193,6 +194,11 @@ impl FixtureRig {
                         .matrix
                         .get(9..12)
                         .map_or([0.0; 3], |o| [o[0], o[1], o[2]]),
+                    area: Some(fixture.area())
+                        .filter(|&area| area != wire::StageArea::Unspecified)
+                        .with_context(|| {
+                            format!("fixture {} has no stage area", fixture.fixture_id)
+                        })?,
                 })
             })
             .collect::<Result<_>>()?;
@@ -204,6 +210,12 @@ impl FixtureRig {
             .map(|group| group.group_id.clone())
             .collect();
         for group in &rig.groups {
+            ensure!(
+                wire::GroupRole::try_from(group.role).is_ok(),
+                "fixture group {} has unknown role {}",
+                group.group_id,
+                group.role
+            );
             ensure!(
                 groups
                     .insert(group.group_id.clone(), group.fixture_ids.clone())
@@ -227,10 +239,7 @@ impl FixtureRig {
                 profile.profile_id
             );
         }
-        Ok(Self {
-            accent_groups,
-            ..Self::from_parts(fixtures, groups, profiles)?
-        })
+        Self::from_parts(fixtures, groups, accent_groups, profiles)
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -244,6 +253,7 @@ impl FixtureRig {
     fn from_parts(
         mut fixtures: Vec<FixturePatch>,
         groups: BTreeMap<String, Vec<String>>,
+        accent_groups: BTreeSet<String>,
         profiles: BTreeMap<String, Vec<GdtfCell>>,
     ) -> Result<Self> {
         ensure!(
@@ -363,21 +373,24 @@ impl FixtureRig {
                 .collect();
             cell_groups.insert(group.clone(), members);
         }
-        let positions = fixtures
-            .iter()
-            .flat_map(|fixture| {
+        let placed = || {
+            fixtures.iter().flat_map(|fixture| {
                 std::iter::once(&fixture.id)
                     .chain(&fixture.cells)
-                    .map(|id| (id.clone(), fixture.position))
+                    .map(move |id| (id.clone(), fixture))
             })
+        };
+        let positions = placed()
+            .map(|(id, fixture)| (id, fixture.position))
             .collect();
-        let spatial = Spatial::new(positions, &cell_groups, |cell| {
+        let areas = placed().map(|(id, fixture)| (id, fixture.area)).collect();
+        let spatial = Spatial::new(positions, areas, &cell_groups, |cell| {
             cells.get(cell).map_or(usize::MAX, |&(fixture, _)| fixture)
         });
         Ok(Self {
             fixtures,
             groups: cell_groups,
-            accent_groups: BTreeSet::new(),
+            accent_groups,
             profiles,
             cells,
             spatial,
@@ -410,7 +423,7 @@ impl FixtureRig {
         &self.groups
     }
 
-    /// Cell positions, mirror partners and zones, derived once from the MVR matrices.
+    /// Cell positions, stage areas and mirror partners, derived once at rig load.
     pub fn spatial(&self) -> &Spatial {
         &self.spatial
     }
@@ -433,6 +446,11 @@ impl FixtureRig {
     pub fn profile(&self, cell_id: &str) -> Option<&GdtfProfile> {
         let &(fixture, cell) = self.cells.get(cell_id)?;
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
+    }
+
+    pub fn fixture_of(&self, cell_id: &str) -> Option<&str> {
+        let &(fixture, _) = self.cells.get(cell_id)?;
+        Some(&self.fixtures[fixture].id)
     }
 
     pub fn fixture_ids(&self) -> Vec<String> {

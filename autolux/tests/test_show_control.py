@@ -59,6 +59,8 @@ def test_group_masters_round_trip_through_show_json_and_reject_levels_outside_un
     for masters in ({'wash': 1.5}, {'wash': -0.1}, {'wash': True}, {'': 0.5}, ['wash']):
         with pytest.raises((TypeError, ValueError)):
             ShowSettings(group_masters=masters)
+    with pytest.raises(ValueError, match='keys must be group names'):
+        ShowSettings(group_masters={'wash': 0.5, 1: 0.5})
 
 
 def test_a_group_master_edit_sends_only_the_group_masters_with_that_group_changed():
@@ -84,6 +86,10 @@ def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group()
         {'type': 'group-master', 'group': 'wash'},
     ]
     assert [slider.value for slider in sliders] == [1.0, 0.4]
+    assert [row.children[0].children for row in rows] == [
+        'movers group master',
+        'wash group master',
+    ]
     assert all(row.children[1].className == 'fader' for row in rows)
     assert all(slider.min == 0 and slider.max == 1 for slider in sliders)
     assert build_app(_Recorder()).layout['group-masters'].children is None
@@ -959,19 +965,14 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
             for item in _build_show_status(snapshot, now=0.0)
         }
 
-    clock = VirtualClock()
-    buffer = EventBuffer(clock=clock)
+    strobe = {'group': 'all', 'strobe': True, 'remaining_seconds': 0.0}
+    buffer = EventBuffer(clock=VirtualClock())
     buffer.start()
-    buffer.set_control_state(
-        paused=False,
-        master_brightness=1.0,
-        settings={'drop_strobe_cooldown_seconds': 60.0, 'intensity': 0.7},
-    )
+    buffer.set_cooldown_source(lambda: [strobe])
     assert items(buffer.snapshot())['FX'] == '-'
     assert items(buffer.snapshot())['Strobe'] == 'ready'
     buffer.set_special('cold_spin', 'fx')
-    buffer.mark_intense()
-    clock.advance(19.0)
+    strobe['remaining_seconds'] = 41.0
     shown = items(buffer.snapshot())
     assert shown['FX'] == 'Cold spin · fx'
     assert shown['Strobe'] == 'in 41 s'

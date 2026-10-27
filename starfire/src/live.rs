@@ -184,7 +184,6 @@ impl LiveSession {
             reply.encoded_len()
         );
         let catalog = AutoloopCatalog::from_definitions(&login.autoloops)?;
-        catalog.require_no_accent_groups(&rig)?;
         if let Some(warning) = missing_groups_warning(&catalog.groups_missing_from(&rig)) {
             eprintln!("starfire: warning: {warning}");
         }
@@ -564,6 +563,7 @@ mod tests {
             protocol_minor: PROTOCOL_MINOR,
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
+                    area: wire::StageArea::Centre as i32,
                     fixture_id: "lamp".into(),
                     profile_id: "rgb".into(),
                     address: 1,
