@@ -1036,23 +1036,30 @@ def _build_control_card() -> list:
                         html.Div(
                             [
                                 html.Span('Intensity', className='control-label'),
-                                html.Button(
-                                    'Auto',
-                                    id='control-intensity-auto',
-                                    title='Follow the music: the show picks the level per track',
-                                ),
-                                html.Fieldset(
-                                    dcc.RadioItems(
-                                        id='control-intensity',
-                                        options=[
-                                            {'label': word, 'value': level}
-                                            for word, level in INTENSITY_LEVELS
-                                        ],
-                                        inline=True,
-                                        className='segmented',
-                                    ),
-                                    id='control-intensity-set',
-                                    disabled=True,
+                                # Auto and the levels read as one joined control.
+                                html.Div(
+                                    [
+                                        html.Button(
+                                            'Auto',
+                                            id='control-intensity-auto',
+                                            title='Follow the music: the show picks the level '
+                                            'per track',
+                                        ),
+                                        html.Fieldset(
+                                            dcc.RadioItems(
+                                                id='control-intensity',
+                                                options=[
+                                                    {'label': word, 'value': level}
+                                                    for word, level in INTENSITY_LEVELS
+                                                ],
+                                                inline=True,
+                                                className='segmented',
+                                            ),
+                                            id='control-intensity-set',
+                                            disabled=True,
+                                        ),
+                                    ],
+                                    className='joined',
                                 ),
                                 html.Span(id='control-intensity-value', className='fader-value'),
                                 html.Span('FX', className='control-label'),
