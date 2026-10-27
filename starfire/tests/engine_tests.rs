@@ -158,6 +158,7 @@ fn property_override_preserves_baseline_motion_and_other_fixtures() {
             3.0,
             &Command::ClearOverride {
                 id: "held_red".into(),
+                release_beats: None,
             },
         )
         .unwrap();
@@ -220,7 +221,13 @@ fn override_priority_then_latest_set_wins_and_held_values_survive_selection() {
         0.9,
     );
     engine
-        .apply(3.0, &Command::ClearOverride { id: "equal".into() })
+        .apply(
+            3.0,
+            &Command::ClearOverride {
+                id: "equal".into(),
+                release_beats: None,
+            },
+        )
         .unwrap();
     near(
         engine
@@ -310,6 +317,7 @@ fn each_multiplier_is_clamped_before_the_next_effect_and_master() {
             0.0,
             &Command::ClearOverride {
                 id: "attenuate".into(),
+                release_beats: None,
             },
         )
         .unwrap();

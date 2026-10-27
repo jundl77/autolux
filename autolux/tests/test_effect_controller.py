@@ -5,6 +5,7 @@ import pytest
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import (
+    CUT_RELEASE_BEATS,
     DROP_ACCENT_ID,
     SPECIAL_ID,
     SPECIAL_PRIORITY,
@@ -559,7 +560,7 @@ async def test_standby_releases_the_special_with_the_accent():
     controller.enter_standby(120.0)
     assert accents(lighting, start) == [
         {'kind': 'clear_override', 'id': DROP_ACCENT_ID},
-        {'kind': 'clear_override', 'id': SPECIAL_ID},
+        {'kind': 'clear_override', 'id': SPECIAL_ID, 'release_beats': CUT_RELEASE_BEATS},
     ]
 
 
@@ -827,7 +828,7 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     current[0] = dataclasses.replace(FULL_INTENSITY, fx_auto=False)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.BUILDUP)
-    # The running special is released on its usual section change, not cut at the toggle.
+    # Settings read directly, not the toggle: the section change releases it as usual.
     assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
     start = len(lighting.events)
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
@@ -849,6 +850,54 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
     clock.advance(STROBE_COOLDOWN_SECONDS + 1)
     await controller.change_effect(LightIntent.DROP)
     assert [c['value']['id'] for c in accents(lighting, start)] == [SPECIAL_ID, DROP_ACCENT_ID]
+
+
+def _long_texture_on_a_drop(tmp_path):
+    import dataclasses
+
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    control.settings = FULL_INTENSITY
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
+    texture = dataclasses.replace(SPIN, release_beats=64)
+    controller = EffectController(
+        lighting, clock=clock, settings=lambda: control.settings, specials=[texture, DROP_STROBE]
+    )
+    return control, controller, lighting, clock
+
+
+async def test_fx_off_fades_a_running_texture_out_at_once_and_spares_the_drop_strobe(tmp_path):
+    from types import SimpleNamespace
+
+    control, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID, DROP_ACCENT_ID]
+    show = SimpleNamespace(effect_controller=controller)
+
+    start = len(lighting.events)
+    control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
+    await control.apply_pending(show)
+    cut = {'kind': 'clear_override', 'id': SPECIAL_ID, 'release_beats': CUT_RELEASE_BEATS}
+    assert accents(lighting, start) == [cut], 'the drop strobe keeps its own burst'
+
+    control.commands.put_nowait({'action': 'fx_auto', 'enabled': True})
+    await control.apply_pending(show)
+    assert accents(lighting, start) == [cut], 'FX on restarts nothing; the next entry picks'
+
+
+async def test_standby_fades_a_running_texture_out_at_once_and_keeps_the_cooldown(tmp_path):
+    _, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
+    await controller.change_effect(LightIntent.DROP)
+    start = len(lighting.events)
+    controller.enter_standby(120.0)
+    assert {'kind': 'clear_override', 'id': SPECIAL_ID, 'release_beats': CUT_RELEASE_BEATS} in (
+        accents(lighting, start)
+    )
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    assert accents(lighting, start) == [], 'the cooldown still holds both intense rows back'
 
 
 async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_json(tmp_path):

@@ -194,6 +194,8 @@ class ShowControl:
         elif action == 'fx_auto' and command['enabled'] != self.settings.fx_auto:
             self.settings = dataclasses.replace(self.settings, fx_auto=command['enabled'])
             self._unsaved_change_at = self._clock.monotonic()
+            if not command['enabled']:
+                light_engine.effect_controller.cut_special()
         elif action == 'settings':
             settings = dataclasses.replace(self.settings, **command['settings'])
             if settings != self.settings:

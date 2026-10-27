@@ -172,6 +172,8 @@ message SpecialFX {
 message UnsetActiveEffect {
   uint64 command_id = 1;
   string effect_id = 2;  // Removing an absent ID does nothing.
+  // Shortens a special's own release to at most this many beats.
+  optional float release_beats = 3;
 }
 
 // [CLIENT -> SERVER]

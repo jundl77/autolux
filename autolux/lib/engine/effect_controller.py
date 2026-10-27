@@ -50,6 +50,8 @@ DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 SPECIAL_PRIORITY = DROP_ACCENT_PRIORITY
 SPECIAL_ID = 'special'
+# FX off and standby must read at once, not after a texture's authored 64-beat fade.
+CUT_RELEASE_BEATS = 4.0
 OPERATOR_FADE_SECONDS = 0.1
 
 
@@ -298,7 +300,7 @@ class EffectController:
 
     def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
-        self._forget_special()
+        self._forget_special(CUT_RELEASE_BEATS)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
@@ -327,8 +329,7 @@ class EffectController:
             intent, self.special_capabilities(), self._intense_blocked(settings, now)
         )
         if not settings.fx_auto:
-            # FX off drops the special but keeps the drop strobe, the show's own accent; a
-            # running special is released here, at its usual section end.
+            # FX off drops the special but keeps the drop strobe, the show's own accent.
             choice = dataclasses.replace(choice, special=None)
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
@@ -362,22 +363,27 @@ class EffectController:
             special.pulse_beats,
         )
 
-    def release_special(self) -> None:
+    def release_special(self, release_beats: float | None = None) -> None:
         if not self._special_on:
             return
-        self.lighting_client.clear_override(SPECIAL_ID)
+        self.lighting_client.clear_override(SPECIAL_ID, release_beats=release_beats)
+        authored = self._special.release_beats
         LOGGER.info(
             '[lighting] special %s released over %g beats',
             self._special.name,
-            self._special.release_beats,
+            authored if release_beats is None else min(authored, release_beats),
         )
         self._special_on = False
         if self.event_buffer:
             self.event_buffer.set_special(None)
 
-    def _forget_special(self) -> None:
-        self.release_special()
+    def _forget_special(self, release_beats: float | None = None) -> None:
+        self.release_special(release_beats)
         self._special = None
+
+    def cut_special(self) -> None:
+        """Fade the running special out quickly; nothing returns before the next entry fires one."""
+        self._forget_special(CUT_RELEASE_BEATS)
 
     def _restore_special(self) -> None:
         if not self._settings().fx_auto:
