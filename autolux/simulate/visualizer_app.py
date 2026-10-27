@@ -834,7 +834,9 @@ def group_master_edit(group: str, level, state: dict) -> dict | None:
         return None
     return {
         'action': 'settings',
-        'settings': {**current, 'group_masters': {**masters, group: float(level)}},
+        # Only the edited field: the engine merges it, so a stale poll of any other
+        # setting (an FX or Auto chip just pressed) is never sent back.
+        'settings': {'group_masters': {**masters, group: float(level)}},
     }
 
 

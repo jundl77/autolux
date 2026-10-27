@@ -61,15 +61,14 @@ def test_group_masters_round_trip_through_show_json_and_reject_levels_outside_un
             ShowSettings(group_masters=masters)
 
 
-def test_a_group_master_edit_changes_only_that_group_and_keeps_every_other_setting():
+def test_a_group_master_edit_sends_only_the_group_masters_with_that_group_changed():
     current = ShowSettings(crossfade_beats=4, group_masters={'movers': 0.25}).to_dict()
     state = {'settings': current}
     command = group_master_edit('wash', 0.5, state)
     assert command == {
         'action': 'settings',
-        'settings': {**current, 'group_masters': {'movers': 0.25, 'wash': 0.5}},
+        'settings': {'group_masters': {'movers': 0.25, 'wash': 0.5}},
     }
-    assert ShowSettings.from_dict(command['settings']).group_masters['wash'] == 0.5
     assert group_master_edit('movers', 0.25, state) is None
     assert group_master_edit('wash', 1.0, state) is None
     assert group_master_edit('wash', 0.5, {}) is None
