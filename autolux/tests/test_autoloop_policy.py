@@ -388,3 +388,27 @@ async def test_a_drop_carries_its_arrival_grade_into_the_selection():
     await light._apply_intent(None, DROP, None, 'drop', 0.75)
     assert light._selection_context(DROP, 'drop', 1.0).arrival_of_peak == 0.75
     assert light._selection_context(BUILDUP, 'buildup', 1.0).arrival_of_peak is None
+
+
+def test_the_spatial_traverse_is_a_calm_wash_the_policy_picks_and_names_no_accent_group():
+    import re
+    from pathlib import Path
+
+    from autolux.lighting import mvr
+
+    loop = ('atmospheric', 'traverse')
+    autoloops, meta = discover_autoloops(), read_autoloop_meta()
+    assert loop in autoloops[ATMOSPHERIC]
+    assert meta[loop] == AutoloopMeta(1, 'sweep', 'wash')
+    picked = {
+        pick(AutoloopPolicy(autoloops, meta, random.Random(seed)), ATMOSPHERIC).autoloop
+        for seed in range(80)
+    }
+    assert 'traverse' in picked
+    root = Path(__file__).resolve().parents[2]
+    source = (root / 'show/autoloops/atmospheric/traverse.lua').read_text(encoding='utf-8')
+    named = set(re.findall(r'sf\.group\("([^"]+)"\)', source))
+    room = mvr.read((root / 'rig/room.mvr').read_bytes())
+    roles = mvr.group_roles(mvr.patched_fixtures(room))[0]
+    assert named == {'wash', 'strip', 'movers'}
+    assert {roles[group] for group in named} == {mvr.LOOP_ROLE}
