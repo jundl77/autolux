@@ -20,9 +20,6 @@ class _StubHandler:
     def on_digital_gap(self, started_sec, seconds):
         pass
 
-    async def on_cycle(self):
-        pass
-
     async def on_beat(self, beat_number, bpm, bpm_changed):
         pass
 

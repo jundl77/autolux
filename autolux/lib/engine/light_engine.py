@@ -104,7 +104,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._current_intent: LightIntent | None = None
         self._section_class_at_playback: str | None = None
         self._pending_intents: list = []
-        self._published_bpm: dict = {}
+        # The last positive detector tempo; a zero-tempo warm-up keeps it.
+        self._last_bpm: float | None = None
         self._beat_index_never_reset: int = 0
         self._room_beat_phase: int | None = None
         self._room_beat_at: float = float('-inf')
@@ -236,12 +237,6 @@ class LightEngine(IMusicAnalyserHandler):
         else:
             await self.leave_static()
 
-    def static(self) -> StaticLooks:
-        return self.static_looks
-
-    def static_look(self, target: str, colour=None, dimmer=None, uv=None) -> None:
-        self.static().look(target, colour=colour, dimmer=dimmer, uv=uv)
-
     def next_autoloop(self) -> None:
         if self._paused:
             raise ValueError('the show is paused')
@@ -293,7 +288,7 @@ class LightEngine(IMusicAnalyserHandler):
             self._entered_intent, self._entered_label, self._clock.monotonic()
         )
         self.effect_controller.apply_intensity(
-            dataclasses.replace(context, new_track=False), self._published_bpm.get('last')
+            dataclasses.replace(context, new_track=False), self._last_bpm
         )
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
@@ -402,9 +397,7 @@ class LightEngine(IMusicAnalyserHandler):
             self.event_buffer.set_intent(
                 STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
             )
-        self.effect_controller.enter_standby(
-            self._published_bpm.get('last'), renderer_paused=self._paused
-        )
+        self.effect_controller.enter_standby(self._last_bpm, renderer_paused=self._paused)
         if self._static_mode:
             self.static_looks.resend()
 
@@ -458,7 +451,7 @@ class LightEngine(IMusicAnalyserHandler):
     def on_signal_return(self):
         LOGGER.info('[engine] signal returned — the show restarts from scratch')
         self._standby = False
-        self._published_bpm.clear()
+        self._last_bpm = None
         self._room_beat_at = float('-inf')
         self._committing_late = False
 
@@ -518,9 +511,6 @@ class LightEngine(IMusicAnalyserHandler):
         if self.section_decoder is not None:
             self.section_decoder.reset()
 
-    async def on_cycle(self):
-        pass
-
     def _publish_shed_state(self) -> None:
         if self.event_buffer is None or self._watchdog is None:
             return
@@ -576,7 +566,10 @@ class LightEngine(IMusicAnalyserHandler):
         self._beat_index_never_reset += 1
         beat_index = self._beat_index_never_reset
 
-        published_bpm = self._publishable_bpm(self._published_bpm, self.analyser.get_detector_bpm())
+        detector_bpm = self.analyser.get_detector_bpm()
+        if detector_bpm > 0:
+            self._last_bpm = detector_bpm
+        published_bpm = self._last_bpm or 0.0
         normalized_rms_level = rms_to_normalized_level(rms_energy)
         self._beat_levels.append((self._audio_sec, normalized_rms_level))
         measured = MeasuredBeat(
@@ -690,7 +683,7 @@ class LightEngine(IMusicAnalyserHandler):
         elif self._section_closes_track_mood(intent):
             self._finish_track_mood()
         cut = self._paused and self._showing_standby
-        bpm = self._published_bpm.get('last')
+        bpm = self._last_bpm
         if await self.effect_controller.change_effect(intent, bpm, context=context, cut=cut):
             self._note_new_look(intent, now)
         self._entered_label = label
@@ -726,7 +719,7 @@ class LightEngine(IMusicAnalyserHandler):
         )
 
     def _bar_seconds(self) -> float:
-        bpm = self._published_bpm.get('last')
+        bpm = self._last_bpm
         return BEATS_PER_BAR * 60.0 / bpm if bpm else FALLBACK_BAR_SECONDS
 
     def _resumes_build(self, intent: LightIntent, now: float) -> bool:
@@ -752,14 +745,6 @@ class LightEngine(IMusicAnalyserHandler):
                 self._build_started_at = now
         self._entered_intent = intent
         self._after_silence = False
-
-    @staticmethod
-    def _publishable_bpm(state: dict, bpm: float) -> float:
-        # A zero-tempo warm-up is unknown; retain an established tempo.
-        if bpm > 0:
-            state['last'] = bpm
-            return bpm
-        return state.get('last', 0.0)
 
     async def _commit(self, decisions) -> None:
         self._publish_decoder_state(decisions[-1] if decisions else None)

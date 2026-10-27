@@ -214,7 +214,6 @@ class MusicAnalyser:
         if is_beat and self.note_clicks:
             audio_signal += self.click_sound
 
-        await self.handler.on_cycle()
         return audio_signal
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:

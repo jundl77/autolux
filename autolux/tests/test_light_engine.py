@@ -1809,7 +1809,7 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
     control = ShowControl(tmp_path / 'show.json')
     light, _, clock, lighting = engine()
     light._settings = lambda: control.settings
-    control.start(light)
+    light.send_renderer_settings()
     renderer = ('set_paused', 'set_default_crossfade_beats', 'set_strobe_max_rate_hz')
     renderer += ('set_strobe_max_burst_seconds', 'set_intensity')
     assert [command for _, command in sent(lighting, *renderer)] == [
