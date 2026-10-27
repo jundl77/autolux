@@ -1,6 +1,7 @@
 use crate::{
     audio::{
-        CAPTURE_DISCONTINUITY_LIMIT, CAPTURE_DISCONTINUITY_WINDOW, CaptureMetrics, CaptureStream,
+        AudioBlock, CAPTURE_DISCONTINUITY_LIMIT, CAPTURE_DISCONTINUITY_WINDOW, CaptureMetrics,
+        CaptureStream,
     },
     config::{TxConfig, pin_worker},
     protocol::{self, Message, wire},
@@ -10,6 +11,7 @@ use anyhow::{Context, Result, bail, ensure};
 use crossbeam_queue::ArrayQueue;
 use std::{
     collections::VecDeque,
+    io::{Read, Write},
     net::TcpStream,
     path::{Path, PathBuf},
     sync::{
@@ -75,6 +77,7 @@ fn write_health(path: &Path, run_id: u64, report: &HealthReport) -> Result<()> {
         "rx": report.snapshot.rx,
         "rx_age_seconds": report.snapshot.receiver_age_seconds,
         "reports_dropped_total": report.dropped_reports,
+        "audio_dropped_total": report.dropped_audio,
     }))?;
     // Readers retain the previous valid report during a partial read. Direct writes
     // remain possible when a Windows reader forbids file replacement.
@@ -86,6 +89,8 @@ struct HealthReport {
     at: SystemTime,
     snapshot: TxSnapshot,
     dropped_reports: u64,
+    /// AudioFrame packets (up to 128 stereo frames each) dropped under backpressure.
+    dropped_audio: u64,
 }
 
 enum Report {
@@ -123,12 +128,13 @@ impl Reporter {
         }
     }
 
-    fn health(&mut self, snapshot: TxSnapshot) {
+    fn health(&mut self, snapshot: TxSnapshot, dropped_audio: u64) {
         let dropped_reports = self.dropped;
         self.submit(Report::Health(Box::new(HealthReport {
             at: SystemTime::now(),
             snapshot,
             dropped_reports,
+            dropped_audio,
         })));
     }
 
@@ -180,6 +186,81 @@ fn capture_failure(reason: Option<&str>, stats: &CaptureMetrics) -> String {
         );
     }
     message + "; check the endpoint, RDP audio redirection and receiver connectivity"
+}
+
+/// Sequences light and audio onto the connection. Never retains a block, so a
+/// network stall cannot back up into the 500 ms capture queue.
+struct MediaSender {
+    run_id: u64,
+    light_sequence: u32,
+    audio_sequence: u32,
+    transmitted_light: Option<[u8; protocol::DMX_CHANNELS]>,
+    audio_dropped: u64,
+    burst_dropped: u64,
+}
+
+impl MediaSender {
+    fn new(run_id: u64) -> Self {
+        Self {
+            run_id,
+            light_sequence: 0,
+            audio_sequence: 0,
+            transmitted_light: None,
+            audio_dropped: 0,
+            burst_dropped: 0,
+        }
+    }
+
+    fn send<S: Read + Write>(
+        &mut self,
+        connection: &mut Connection<S>,
+        block: &AudioBlock,
+        light: &[u8; protocol::DMX_CHANNELS],
+    ) -> Result<()> {
+        // Dropped audio still consumes a sequence number: the receiver detects the gap.
+        self.audio_sequence = self.audio_sequence.wrapping_add(1);
+        if self.transmitted_light.as_ref() != Some(light) {
+            let next = self.light_sequence.wrapping_add(1);
+            if !connection.send(&Message::LightFrame(wire::LightFrame {
+                run_id: self.run_id,
+                sequence_number: next,
+                channels: light.to_vec(),
+            }))? {
+                self.count_dropped(1);
+                return Ok(());
+            }
+            self.light_sequence = next;
+            self.transmitted_light = Some(*light);
+        }
+        let dropped = connection.send_audio(&Message::AudioFrame(wire::AudioFrame {
+            run_id: self.run_id,
+            audio_frame_position: block.audio_frame_position,
+            sequence_number: self.audio_sequence,
+            interleaved_samples: block.samples[..usize::from(block.frames) * protocol::CHANNELS]
+                .to_vec(),
+            light_sequence_number: self.light_sequence,
+        }))?;
+        self.count_dropped(dropped);
+        Ok(())
+    }
+
+    fn count_dropped(&mut self, packets: u64) {
+        self.audio_dropped += packets;
+        self.burst_dropped += packets;
+    }
+
+    /// A burst ends once the receiver has taken everything queued.
+    fn end_burst<S>(&mut self, connection: &Connection<S>) -> Option<String> {
+        if self.burst_dropped == 0 || connection.pending_bytes() != 0 {
+            return None;
+        }
+        let packets = std::mem::take(&mut self.burst_dropped);
+        Some(format!(
+            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total",
+            gap_seconds((packets * protocol::BLOCK_FRAMES as u64) as i64) * 1000.0,
+            self.audio_dropped
+        ))
+    }
 }
 
 struct Shared {
@@ -301,7 +382,6 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     );
     let mut capture = None;
     let mut capture_started = Instant::now();
-    let mut pending_audio = None;
     let mut last_heartbeat = Instant::now();
     let mut last_heartbeat_sent = Instant::now();
     let mut heartbeats_sent = 0;
@@ -309,13 +389,12 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut receiver_metrics = None;
     let mut receiver_metrics_at = None;
     let mut last_metrics = Instant::now() - protocol::METRICS_INTERVAL;
-    let mut light_sequence = 0_u32;
-    let mut audio_sequence = 0_u32;
-    let mut transmitted_light = None;
+    let mut media = MediaSender::new(config.run_id);
     let mut timeline = LightTimeline::new();
     let mut light_at = None;
     let mut reporter = Reporter::spawn(report_writer(config.run_id, config.health_file.clone()))?;
     let mut reported_discontinuities = 0;
+    let mut reported_scheduling = false;
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -397,6 +476,10 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 !stats.faulted,
                 capture_failure(capture.last_error(), &stats)
             );
+            if !reported_scheduling && let Some(scheduling) = stats.capture_scheduling {
+                reporter.log(scheduling.describe().into());
+                reported_scheduling = true;
+            }
             if stats.discontinuities != reported_discontinuities
                 && let Some(gap) = stats.last_gap_frames
             {
@@ -417,42 +500,14 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 "Radius audio capture stopped producing callbacks"
             );
             for _ in 0..MAX_AUDIO_BLOCKS_PER_TICK {
-                if pending_audio.is_none() {
-                    pending_audio = capture.pop().map(|block| {
-                        let light = timeline.state_at(block.assembly_completed_at);
-                        (block, light)
-                    });
-                }
-                let Some((block, light)) = pending_audio.as_ref() else {
+                let Some(block) = capture.pop() else {
                     break;
                 };
-                if transmitted_light.as_ref() != Some(light) {
-                    let next = light_sequence.wrapping_add(1);
-                    if !connection.send(&Message::LightFrame(wire::LightFrame {
-                        run_id: config.run_id,
-                        sequence_number: next,
-                        channels: light.to_vec(),
-                    }))? {
-                        break;
-                    }
-                    light_sequence = next;
-                    transmitted_light = Some(*light);
-                }
-                let sequence = audio_sequence.wrapping_add(1);
-                let frame = wire::AudioFrame {
-                    run_id: config.run_id,
-                    audio_frame_position: block.audio_frame_position,
-                    sequence_number: sequence,
-                    interleaved_samples: block.samples
-                        [..usize::from(block.frames) * protocol::CHANNELS]
-                        .to_vec(),
-                    light_sequence_number: light_sequence,
-                };
-                if !connection.send(&Message::AudioFrame(frame))? {
-                    break;
-                }
-                audio_sequence = sequence;
-                pending_audio = None;
+                let light = timeline.state_at(block.assembly_completed_at);
+                media.send(&mut connection, &block, &light)?;
+            }
+            if let Some(line) = media.end_burst(&connection) {
+                reporter.log(line);
             }
         } else {
             timeline.state_at(Instant::now());
@@ -485,7 +540,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
                 receiver_age_seconds: receiver_metrics_at.map(|at| at.elapsed().as_secs_f64()),
             };
             if config.health_file.is_some() {
-                reporter.health(snapshot.clone());
+                reporter.health(snapshot.clone(), media.audio_dropped);
             }
             *shared.metrics.lock().unwrap() = snapshot;
             last_metrics = Instant::now();
@@ -518,6 +573,97 @@ mod tests {
         assert!(timeline.pending.is_empty());
     }
 
+    /// Refuses the next `refusals` writes with WouldBlock, then accepts everything.
+    #[derive(Clone, Default)]
+    struct FakeSocket(std::rc::Rc<std::cell::RefCell<(usize, Vec<u8>)>>);
+
+    impl Read for FakeSocket {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::WouldBlock.into())
+        }
+    }
+
+    impl Write for FakeSocket {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            let mut state = self.0.borrow_mut();
+            if state.0 > 0 {
+                state.0 -= 1;
+                return Err(std::io::ErrorKind::WouldBlock.into());
+            }
+            state.1.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn frozen_clock() -> Instant {
+        static AT: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        *AT.get_or_init(Instant::now)
+    }
+
+    fn decoded(bytes: &[u8]) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let length = u32::from_be_bytes(rest[1..5].try_into().unwrap()) as usize;
+            let end = protocol::HEADER_BYTES + length;
+            messages.push(Message::decode(rest[0], &rest[protocol::HEADER_BYTES..end]).unwrap());
+            rest = &rest[end..];
+        }
+        messages
+    }
+
+    #[test]
+    fn refused_socket_drops_the_oldest_audio_instead_of_blocking_the_drain() {
+        const BLOCKS: u64 = 400;
+        let socket = FakeSocket::default();
+        socket.0.borrow_mut().0 = 1_000_000;
+        let mut connection = Connection::with_stream(socket.clone(), frozen_clock);
+        let mut media = MediaSender::new(7);
+        let light = [9; protocol::DMX_CHANNELS];
+        for index in 0..BLOCKS {
+            let block = AudioBlock {
+                audio_frame_position: index * protocol::BLOCK_FRAMES as u64,
+                frames: protocol::BLOCK_FRAMES as u16,
+                ..Default::default()
+            };
+            media.send(&mut connection, &block, &light).unwrap();
+            assert!(connection.pending_bytes() <= crate::transport::MAX_PENDING_BYTES);
+        }
+        let dropped = media.audio_dropped;
+        assert!(dropped > 0 && dropped < BLOCKS, "{dropped} dropped");
+        assert_eq!(
+            media.end_burst(&connection),
+            None,
+            "burst still in progress"
+        );
+
+        socket.0.borrow_mut().0 = 0;
+        connection.flush().unwrap();
+        let line = media
+            .end_burst(&connection)
+            .expect("burst ends when drained");
+        assert!(
+            line.contains(&format!("oldest {dropped} audio packets")),
+            "{line}"
+        );
+        assert_eq!(media.end_burst(&connection), None, "logged once per burst");
+
+        let messages = decoded(&socket.0.borrow().1);
+        assert!(matches!(&messages[0], Message::LightFrame(l) if l.sequence_number == 1));
+        let sequences: Vec<u32> = messages[1..]
+            .iter()
+            .map(|message| match message {
+                Message::AudioFrame(audio) => audio.sequence_number,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        let survivors: Vec<u32> = (dropped as u32 + 1..=BLOCKS as u32).collect();
+        assert_eq!(sequences, survivors, "only the oldest audio is dropped");
+    }
+
     #[test]
     fn capture_fault_names_the_discontinuity_limit_and_last_gap() {
         let stats = CaptureMetrics {
@@ -544,6 +690,7 @@ mod tests {
             at: SystemTime::now(),
             snapshot,
             dropped_reports: 3,
+            dropped_audio: 5,
         };
         write_health(&path, 1, &report(TxSnapshot::default())).unwrap();
         #[cfg(windows)]
@@ -582,11 +729,11 @@ mod tests {
         assert_eq!(report["rx_age_seconds"].as_f64(), Some(0.25));
         assert!(report["timestamp"].as_f64().unwrap() > 0.0);
         assert_eq!(report["reports_dropped_total"].as_u64(), Some(3));
+        assert_eq!(report["audio_dropped_total"].as_u64(), Some(5));
     }
 
     #[test]
     fn stalled_report_writer_never_stalls_the_capture_drain() {
-        use crate::audio::AudioBlock;
         const BLOCK_PERIOD: Duration = Duration::from_micros(
             1_000_000 * protocol::BLOCK_FRAMES as u64 / protocol::SAMPLE_RATE as u64,
         );
@@ -626,7 +773,7 @@ mod tests {
                 drained += 1;
             }
             let submitted = Instant::now();
-            reporter.health(TxSnapshot::default());
+            reporter.health(TxSnapshot::default(), 0);
             reporter.log("discontinuity".into());
             slowest_submit = slowest_submit.max(submitted.elapsed());
             thread::sleep(Duration::from_millis(10));
@@ -645,7 +792,7 @@ mod tests {
         );
         thread::sleep(Duration::from_millis(50));
         let dropped = reporter.dropped;
-        reporter.health(TxSnapshot::default());
+        reporter.health(TxSnapshot::default(), 0);
         drop(reporter);
         // Drops are visible in the health file once the writer recovers.
         assert_eq!(written.lock().unwrap().last(), Some(&dropped));

@@ -479,3 +479,19 @@ fn clock_distinguishes_startup_silence_from_valid_source_position_zero() {
     clock.publish(None, 441);
     assert!(!clock.snapshot().position_valid);
 }
+
+#[test]
+fn capture_scheduling_is_unknown_until_recorded_and_denial_counts() {
+    use crate::realtime::Scheduling;
+    let counters = CaptureCounters::default();
+    assert_eq!(counters.metrics(0).capture_scheduling, None);
+    for scheduling in [Scheduling::Mmcss, Scheduling::TimeCritical] {
+        counters.record_scheduling(scheduling);
+        assert_eq!(counters.metrics(0).capture_scheduling, Some(scheduling));
+    }
+    assert_eq!(counters.metrics(0).capture_priority_denied, 0);
+    counters.record_scheduling(Scheduling::Denied);
+    let metrics = counters.metrics(0);
+    assert_eq!(metrics.capture_scheduling, Some(Scheduling::Denied));
+    assert_eq!(metrics.capture_priority_denied, 1);
+}
