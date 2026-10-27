@@ -13,3 +13,4 @@ form = { pulse_beats = 1 }
 [playback]
 attack_beats = 0
 release_beats = 4
+cooldown_seconds = 90

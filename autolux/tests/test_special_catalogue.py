@@ -50,11 +50,21 @@ def row(**sections) -> dict:
     return changed
 
 
-def test_the_shipped_specials_parse_and_serve_only_drops():
+def test_the_shipped_specials_parse_and_skip_buildups():
     specials = discover_specials()
     assert {path.stem for path in SPECIAL_DIRECTORY.glob('*.toml')} == {s.name for s in specials}
     served = {intent for special in specials for intent in special.intents}
-    assert served == {LightIntent.DROP}
+    assert served == {LightIntent.ATMOSPHERIC, LightIntent.BREAKDOWN, LightIntent.DROP}
+
+
+def test_the_shipped_fx_rows_are_quiet_textures_or_cooled_drop_accents():
+    rows = {s.name: s for s in discover_specials() if s.group == 'fx'}
+    for name in ('drift', 'cold_drift'):
+        texture = rows[name]
+        assert not texture.intense and texture.energy <= 0.3, name
+        assert texture.attack_beats >= 32 and texture.release_beats >= 32, name
+        assert texture.cooldown_seconds == 240, name
+    assert {rows[name].cooldown_seconds for name in ('spin', 'cold_spin')} == {90}
 
 
 def test_the_drop_strobe_row_is_the_built_in_strobe_burst():

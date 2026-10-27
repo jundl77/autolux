@@ -482,14 +482,24 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
     ]
 
 
-async def test_only_a_drop_plays_a_catalogue_row():
-    controller, lighting, _ = with_specials(discover_specials())
-    for intent in (LightIntent.ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.BREAKDOWN):
-        await controller.change_effect(intent)
-    assert accents(lighting) == []
+async def test_the_catalogue_plays_each_texture_once_per_row_cooldown_then_a_drop_accent():
+    controller, lighting, clock = with_specials(discover_specials())
+    textures = []
+    for _ in range(3):
+        start = len(lighting.events)
+        await controller.change_effect(LightIntent.ATMOSPHERIC)
+        textures += [c['value']['special_fx']['colour_slot'] for c in accents(lighting, start)]
+        await controller.change_effect(LightIntent.BUILDUP)
+    # Both textures played once; the third entry finds them inside their 240 s row cooldown.
+    assert sorted(textures) == ['cold', 'secondary']
+    clock.advance(240)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.BREAKDOWN)
+    assert accents(lighting, start)[0]['kind'] == 'set_override'
 
+    start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    spin, strobe = accents(lighting)
+    spin, strobe = accents(lighting, start)
     assert spin['value']['id'] == SPECIAL_ID
     assert spin['value']['target'] == {'group': 'fx'}
     assert spin['value']['special_fx']['pulse_beats'] == 1

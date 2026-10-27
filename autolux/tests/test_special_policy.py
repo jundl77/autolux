@@ -114,11 +114,12 @@ def test_an_intent_without_rows_chooses_nothing_and_reports_no_suppression():
     assert choice.special is None and choice.suppressed is None
 
 
-def test_the_shipped_fx_rows_play_only_on_drops_outside_the_cooldown():
+def test_the_shipped_fx_rows_skip_buildups_and_keep_textures_calm():
     policy = SpecialPolicy(discover_specials(), random.Random(0))
     capabilities = SpecialCapabilities.from_groups([FX])
-    for intent in (ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.BREAKDOWN):
-        assert policy.choose(intent, capabilities).special is None
+    assert policy.choose(LightIntent.BUILDUP, capabilities).special is None
+    for intent in (ATMOSPHERIC, LightIntent.BREAKDOWN):
+        assert not policy.choose(intent, capabilities, 'cooldown 30s of 60s left').special.intense
     assert policy.choose(DROP, capabilities).special.group == 'fx'
     blocked = policy.choose(DROP, capabilities, 'cooldown 30s of 60s left')
     assert (blocked.special, blocked.strobes) == (None, ())
