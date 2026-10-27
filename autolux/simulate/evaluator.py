@@ -91,10 +91,11 @@ def print_evaluation(result: dict) -> None:
     print(f'{"─" * w}')
     print(f'  {"criterion":<32} {"value":>10}  {"threshold":>12}  {"ok":>4}')
     print(f'  {"─" * 32} {"─" * 10}  {"─" * 12}  {"─" * 4}')
-    for r in result['criteria'].values():
+    for key, r in result['criteria'].items():
         spec = r['spec']
         threshold = f'≤ {spec["max"]}' if 'max' in spec else f'≥ {spec["min"]}'
+        desc = spec.get('description', key)
         print(
-            f'  {spec["description"]:<32} {r["value"]:>10.2f}  {threshold:>12}  {"✓" if r["passed"] else "✗":>4}'
+            f'  {desc:<32} {r["value"]:>10.2f}  {threshold:>12}  {"✓" if r["passed"] else "✗":>4}'
         )
     print(f'{"─" * w}\n')
