@@ -207,6 +207,12 @@ impl FixtureRig {
             .collect();
         for group in &rig.groups {
             ensure!(
+                wire::GroupRole::try_from(group.role).is_ok(),
+                "fixture group {} has unknown role {}",
+                group.group_id,
+                group.role
+            );
+            ensure!(
                 groups
                     .insert(group.group_id.clone(), group.fixture_ids.clone())
                     .is_none(),
