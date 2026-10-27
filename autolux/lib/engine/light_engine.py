@@ -412,7 +412,9 @@ class LightEngine(IMusicAnalyserHandler):
             self.event_buffer.set_intent(
                 STANDBY_INTENT, song_sec=self.event_buffer.elapsed(), trigger=SILENCE_TRIGGER
             )
-        self.effect_controller.enter_standby(self._last_bpm)
+        # Paused, the beat clock is frozen: a crossfade would only start on play and blend the
+        # old look in. The paused frame is dark, so the cut shows nothing.
+        self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
         if self._static_mode:
             self.static_looks.resend()
 
