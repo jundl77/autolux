@@ -57,15 +57,6 @@ class DriftWatchdog:
     def fault(self) -> str | None:
         return self._fault
 
-    def exclude_pause_from_drift(self, sec: float) -> None:
-        if sec <= 0:
-            return
-        self._samples = deque((w + sec, s) for w, s in self._samples)
-        if self._first_wall is not None:
-            self._first_wall += sec
-        if self._calm_since is not None:
-            self._calm_since += sec
-
     @property
     def drift_sec(self) -> float:
         return self._drift_sec

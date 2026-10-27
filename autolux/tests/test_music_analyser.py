@@ -561,25 +561,3 @@ async def test_debug_clicks_are_mixed_into_the_returned_audio():
         'the note callback is no longer following the beat stream'
     )
     assert not clicked_off, 'audio was modified with -d off'
-
-
-async def test_beat_position_survives_a_song_reset_landing_mid_read():
-    class _ResettingClock(VirtualClock):
-        def __init__(self):
-            super().__init__()
-            self.victim = None
-
-        def now(self):
-            victim, self.victim = self.victim, None
-            if victim is not None:
-                victim._reset_state()
-            return super().now()
-
-    clock = _ResettingClock()
-    analyser = _make_analyser(clock)
-    analyser.is_playing = True
-    analyser.time_to_last_beat_sec = 0.47
-    analyser.beat_count = 12
-    clock.victim = analyser
-
-    assert analyser.get_beat_position() >= 0

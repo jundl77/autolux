@@ -112,7 +112,6 @@ class MusicAnalyser:
         self._beat_stream_times: deque = deque(maxlen=_BPM_BEAT_WINDOW)
         self.last_bpm: float = 0.0
         self.beat_count: int = 0
-        self.time_to_last_beat_sec: float = 0
         self.last_beat_detected: datetime.datetime = self._clock.now()
         self.last_note_detected: datetime.datetime = self._clock.now()
         self._reset_song_clock()
@@ -131,25 +130,12 @@ class MusicAnalyser:
         else:
             return datetime.timedelta(seconds=0)
 
-    def get_beat_position(self) -> float:
-        beat_interval_sec = self.time_to_last_beat_sec
-        if self.is_playing and beat_interval_sec > 0:
-            time_to_current_beat_sec = (self._clock.now() - self.last_beat_detected).total_seconds()
-            return self.beat_count + abs(time_to_current_beat_sec / beat_interval_sec)
-        else:
-            return 0
-
     def get_bpm(self) -> float:
         return self._fold_bpm(self.get_detector_bpm())
 
     def get_detector_bpm(self) -> float:
         """Tempo in the same beat units as the emitted detector events."""
-        if not self.is_playing:
-            return 0
-        return self._measured_bpm()
-
-    def _measured_bpm(self) -> float:
-        if len(self._beat_stream_times) < 3:
+        if not self.is_playing or len(self._beat_stream_times) < 3:
             return 0.0
         interval = float(np.median(np.diff(np.array(self._beat_stream_times))))
         return 60.0 / interval if interval > 0 else 0.0
@@ -306,7 +292,6 @@ class MusicAnalyser:
             self.beat_count += 1
             await self.handler.on_beat(self.beat_count, this_bpm, bpm_changed)
             self.last_bpm = this_bpm
-            self.time_to_last_beat_sec = (now - self.last_beat_detected).total_seconds()
             self.last_beat_detected = now
         return bool(beats)
 

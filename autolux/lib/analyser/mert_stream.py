@@ -320,10 +320,6 @@ class StreamGeometry:
     def buffer_samples(self) -> int:
         return encoder_samples(self.buffer_sec)
 
-    @property
-    def worst_case_future_sec(self) -> float:
-        return self.margin_sec + self.hop_sec
-
 
 def load_stream_geometry(
     affine_path,
