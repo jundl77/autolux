@@ -5,7 +5,7 @@
 -- X is normalised to each group's own extent, so one travel fits 1.8 m of washes or a 40 m truss.
 -- Members sharing one X travel in geometry order; a lone member sits mid-group; an empty group is skipped.
 -- Only glowing cells get their own dimmer (under 70 % of a group) and each mover fixture one pan,
--- so 512 cells stay inside the effect cap.
+-- so multi-cell movers stay inside the effect cap.
 local palette = sf.palette()
 local LOOP_BEATS, HALF_BEATS = 16, 8
 local WIDTH = 0.35
