@@ -110,7 +110,6 @@ impl Spatial {
                     centre_x_mm,
                 },
             );
-            // Each fixture once, in member order, with the indices of its cells.
             let mut slots = BTreeMap::new();
             let mut fixtures: Vec<Vec<usize>> = Vec::new();
             for (index, id) in members.iter().enumerate() {
@@ -124,11 +123,11 @@ impl Spatial {
                 .iter()
                 .map(|cells| positions[&members[cells[0]]])
                 .collect();
-            // A group on one side of the centreline mirrors about its own centre.
-            let sided = placed.iter().any(|p| p[0] < 0.0) && placed.iter().any(|p| p[0] > 0.0);
-            let axis = if sided {
+            let straddles = placed.iter().any(|p| p[0] < 0.0) && placed.iter().any(|p| p[0] > 0.0);
+            let axis = if straddles {
                 0.0
             } else {
+                // A group on one side of the centreline mirrors about its own centre.
                 let (low, high) = placed.iter().fold((f64::MAX, f64::MIN), |(low, high), p| {
                     (low.min(p[0]), high.max(p[0]))
                 });

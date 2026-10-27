@@ -372,7 +372,7 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        // One copy of the rig serves every native sf function.
+        // The closures outlive this call and the rig is large: share one copy, not one each.
         let shared = Rc::new(rig.clone());
         let targets = Rc::clone(&shared);
         api.set(
