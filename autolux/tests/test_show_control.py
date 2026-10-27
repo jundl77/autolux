@@ -1148,3 +1148,26 @@ def test_a_settings_edit_keeps_follow_the_music_on():
         'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), auto=True
     )
     assert command['settings']['intensity_auto'] is True
+
+
+def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
+    from autolux.lib.engine.effect_definitions import ShowSettings
+    from autolux.simulate.visualizer_app import FORM_SETTINGS, setting_text
+
+    source = _Recorder()
+    app = build_app(source)
+    output = next(key for key in app.callback_map if key.startswith('..control-status.children'))
+    # More digits than the form shows: a resend of the rounded text would change the show.
+    settings = ShowSettings(quiet_brightness=0.1234567, crossfade_beats=1.0).to_dict()
+    text = {name: setting_text(name, value) for name, value in settings.items()}
+    state = {'settings': settings, 'settings_text': text, 'master_brightness': 1.0}
+    shown = {f'control-{name}': text[name] for name in FORM_SETTINGS}
+    for name in FORM_SETTINGS:
+        _run_callback(app, output, {**shown, 'control-state': state}, f'control-{name}.value')
+    assert source.commands == []
+
+    edited = {**shown, 'control-crossfade_beats': '2'}
+    _run_callback(app, output, {**edited, 'control-state': state}, 'control-crossfade_beats.value')
+    assert source.commands == [
+        {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
+    ]

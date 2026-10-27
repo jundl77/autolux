@@ -782,6 +782,22 @@ def control_command(
     return None
 
 
+def settings_edit(name: str, raw, state: dict) -> dict | None:
+    """The settings command for one edited field, or None when it still shows the show's value.
+
+    A field the poll filled (or the browser restored) reads exactly the show's own text, so
+    only an operator's change goes out; every other setting is sent as the show reported it,
+    not as its rounded text.
+    """
+    current = state.get('settings')
+    if not current or str(raw).strip() == (state.get('settings_text') or {}).get(name):
+        return None
+    value = parse_decimal(name, raw)
+    if value == current.get(name):
+        return None
+    return {'action': 'settings', 'settings': {**current, name: value}}
+
+
 def setting_range_text(name: str) -> str:
     low, high = SHOW_SETTING_RANGES[name]
     return f'{setting_text(name, low)}–{setting_text(name, high)}'
@@ -2702,20 +2718,21 @@ def build_app(
         ):
             raise dash.exceptions.PreventUpdate
         try:
-            command = control_command(
-                trigger,
-                state.get('paused'),
-                level,
-                settings,
-                palette=palette,
-                intensity=intensity,
-                auto=bool(state.get('intensity_auto')),
-            )
+            if trigger in SETTING_IDS:
+                command = settings_edit(SETTING_IDS[trigger], values[f'{trigger}.value'], state)
+            else:
+                command = control_command(
+                    trigger,
+                    state.get('paused'),
+                    level,
+                    settings,
+                    palette=palette,
+                    intensity=intensity,
+                    auto=bool(state.get('intensity_auto')),
+                )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update
         if command is None or not can_control:
-            raise dash.exceptions.PreventUpdate
-        if command['action'] == 'settings' and command['settings'] == state.get('settings'):
             raise dash.exceptions.PreventUpdate
         shown = state.get('palette') or {}
         if command['action'] == 'palette' and palette == (
