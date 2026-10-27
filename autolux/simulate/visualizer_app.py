@@ -8,6 +8,7 @@ import os
 import re
 import threading
 import time
+import zlib
 from statistics import median
 
 import dash
@@ -609,6 +610,7 @@ def _build_show_status(snapshot: dict, now: float) -> list:
     health = _health(snapshot)
     fps, _ = render_window(snapshot.get('system_history') or [], now)
     palette_name = palette.get('name')
+    fx = _fx_text(snapshot)
     items = [
         _status_item(
             'Health', [_dot(HEALTH_COLORS[health]), health.capitalize()], id='health-indicator'
@@ -629,7 +631,12 @@ def _build_show_status(snapshot: dict, now: float) -> list:
         ),
     ]
     items += [
-        _status_item('FX', _fx_text(snapshot) or '-', id='status-fx'),
+        _status_item(
+            'FX',
+            fx or '-',
+            className='status-item fx-running' if fx else 'status-item',
+            id='status-fx',
+        ),
         _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
         _status_item('Render FPS', render_rate_text(fps)),
     ]
@@ -1063,15 +1070,21 @@ def _build_control_card() -> list:
                                 ),
                                 html.Span(id='control-intensity-value', className='fader-value'),
                                 html.Span('FX', className='control-label'),
-                                html.Button(
-                                    'Auto',
-                                    id='control-fx-auto',
-                                    title='The show picks FX for each section',
-                                ),
-                                html.Button(
-                                    'Off',
-                                    id='control-fx-off',
-                                    title='No automatic FX; a running one ends with its section',
+                                html.Div(
+                                    [
+                                        html.Button(
+                                            'Auto',
+                                            id='control-fx-auto',
+                                            title='The show picks FX for each section',
+                                        ),
+                                        html.Button(
+                                            'Off',
+                                            id='control-fx-off',
+                                            title='No automatic FX; a running one ends with '
+                                            'its section',
+                                        ),
+                                    ],
+                                    className='joined fx-toggle',
                                 ),
                                 html.Span('Colors', className='control-label'),
                                 dcc.Dropdown(
@@ -1792,6 +1805,11 @@ def _build_cooldowns(snapshot):
     return [_cooldown_bar(row) for row in rows]
 
 
+def _group_tint(group: str) -> str:
+    # A stable hue per group name, so a bar keeps its tint while the rows re-sort.
+    return f'hsl({zlib.crc32(group.encode()) % 360} 30% 62%)'
+
+
 def _cooldown_bar(row: dict):
     # control.js ticks fill and caption down from these data attributes between polls and
     # mirrors the arithmetic here (cooldownView); keep the two in step.
@@ -1819,6 +1837,7 @@ def _cooldown_bar(row: dict):
             ),
         ],
         className='cooldown-row ready' if row['ready'] else 'cooldown-row',
+        style={'--tint': _group_tint(row['group'])},
         **{'data-total': total, 'data-remaining': remaining},
     )
 

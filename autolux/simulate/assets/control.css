@@ -1,4 +1,4 @@
-#show-control, .dash-dropdown-content {
+#show-control, .dash-dropdown-content, .cooldowns {
     --accent: #73b6ff;
     --fill: #18212d;
     --fill-hover: #1f2a38;
@@ -191,15 +191,26 @@
     .palette-select { width: 100%; }
 }
 
-/* FX Effects: one bar per fixture group, full once the group can fire a special again. */
-.cooldowns { display: grid; gap: 9px; }
+/* FX auto | off: Off fills muted, since it means the show adds nothing. */
+#show-control .fx-toggle > button { min-width: 56px; }
+#show-control .fx-toggle > #control-fx-off.active { background: var(--muted); }
+/* A running FX reads in the accent; "-" keeps the plain text colour. */
+.status-item.fx-running .status-text { color: #73b6ff; }
+
+/* FX Effects: one bar per fixture group, full once the group can fire a special again. Each
+   group keeps its own faint tint; a ready bar fills with the accent. */
+.cooldowns { display: grid; gap: 12px; }
+.cooldown-row { --tint: var(--muted); }
 .cooldown-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
-                 margin-bottom: 4px; }
-.cooldown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                 margin-bottom: 6px; }
+.cooldown-label { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden;
+                  text-overflow: ellipsis; white-space: nowrap; }
+.cooldown-label::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%;
+                          background: var(--tint); }
 .cooldown-caption { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.cooldown-track { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
-.cooldown-fill { height: 100%; border-radius: 3px; background: var(--muted); }
+.cooldown-row.ready .cooldown-caption { color: var(--text); }
+.cooldown-track { height: 6px; border-radius: 3px; overflow: hidden;
+                  background: color-mix(in srgb, var(--tint) 12%, var(--fill)); }
+.cooldown-fill { height: 100%; border-radius: 3px;
+                 background: color-mix(in srgb, var(--tint) 60%, var(--fill)); }
 .cooldown-row.ready .cooldown-fill { background: var(--accent); }
-/* Group each label with its control: 8 px inside a group, 24 px between groups. */
-.control-row > .control-label { margin-right: -8px; }
-.control-row > .control-label:not(:first-child) { margin-left: 8px; }
