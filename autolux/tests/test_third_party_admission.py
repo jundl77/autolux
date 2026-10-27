@@ -387,7 +387,6 @@ def test_write_record_round_trips_through_read_record(tmp_path):
 
     assert path.read_bytes().endswith(b"\n")
     assert tp_record.read_record(path) == record
-    assert tp_record.labelled_span(record) == (0.04, 40.0)
 
 
 # --------------------------------------------------------------------------- #

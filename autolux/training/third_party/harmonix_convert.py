@@ -36,10 +36,7 @@ directly, and annotations convert whether or not it has landed yet.
 from __future__ import annotations
 
 import argparse
-import copy
 import csv
-import hashlib
-import json
 import re
 import sys
 from datetime import UTC, datetime
@@ -65,9 +62,12 @@ from tp_record import (
     RECORD_SCHEMA,
     annotation_path,
     beat_csv_path,
+    carry_timestamp,
+    sha256,
     third_party_dir,
     validate_record,
     write_record,
+    write_report,
 )
 
 SOURCE = "harmonix"
@@ -158,14 +158,6 @@ def corpus_audio_path(corpus: Path, native: str) -> Path:
 
 def _now_utc() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _lines(text: str) -> list:
@@ -336,30 +328,6 @@ def _optional(text: str) -> float | None:
 # --------------------------------------------------------------------------- #
 # One track
 # --------------------------------------------------------------------------- #
-
-
-def carry_timestamp(path: Path, record: dict) -> dict:
-    """Keep an unchanged record's original stamp, so a re-run rewrites nothing.
-
-    A per-run timestamp is the one field that differs when nothing has: without
-    this, a second conversion rewrites all 912 files and no diff can say whether
-    the corpus actually moved.
-    """
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            existing = json.load(handle)
-    except (OSError, ValueError):
-        return record
-    if not isinstance(existing, dict):
-        return record
-    stamp = (existing.get("provenance") or {}).get("converted_utc")
-    if not isinstance(stamp, str) or not stamp:
-        return record
-    probe = copy.deepcopy(record)
-    probe["provenance"]["converted_utc"] = stamp
-    if probe == existing:
-        record["provenance"]["converted_utc"] = stamp
-    return record
 
 
 def convert_track(native: str, sources: Sources, corpus: Path) -> Verdict:
@@ -544,21 +512,6 @@ def _report(
         "labelled_sec": round(sum(v.labelled_sec for v in verdicts), 3),
         "audio_sec": round(sum(v.duration_sec for v in verdicts), 3),
     }
-
-
-def write_report(corpus: Path, report: dict) -> Path:
-    path = third_party_dir(corpus) / report["report_file"]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".part")
-    try:
-        with open(tmp, "w", encoding="utf-8", newline="") as handle:
-            json.dump(report, handle, indent=2)
-            handle.write("\n")
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    return path
 
 
 def print_report(report: dict) -> None:

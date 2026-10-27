@@ -31,10 +31,8 @@ from __future__ import annotations
 import argparse
 import collections
 import csv
-import hashlib
 import json
 import re
-import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +56,8 @@ from tp_record import (
     RECORD_SCHEMA,
     annotation_path,
     audio_path,
+    copy_audio,
+    sha256,
     third_party_dir,
     validate_record,
     write_record,
@@ -155,14 +155,6 @@ def vocab_path(salami: Path) -> Path:
     return salami / VOCAB_FILE
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 # --------------------------------------------------------------------------- #
 # The function vocabulary
 # --------------------------------------------------------------------------- #
@@ -255,10 +247,6 @@ def parse_rows(text: str, vocab: dict) -> list:
                 f"{index - 1}'s {before.time!r} -- unsorted"
             )
     return rows
-
-
-def _is_end(row: Row) -> bool:
-    return any(name.casefold() == END_MARKER for name in row.function)
 
 
 def _musical(function: tuple) -> tuple:
@@ -363,14 +351,6 @@ def track_duration(row: dict, parse: Parse) -> tuple:
     if parse.last_time > duration:
         return parse.last_time, "annotation_last_time_over_metadata"
     return duration, "metadata"
-
-
-def copy_audio(source: Path, target: Path) -> str:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.stat().st_size == source.stat().st_size:
-        return "kept"
-    shutil.copy2(source, target)
-    return "copied"
 
 
 # --------------------------------------------------------------------------- #

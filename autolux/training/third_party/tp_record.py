@@ -11,8 +11,11 @@ this module is what makes the file trustworthy once it is opened.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import math
+import shutil
 import sys
 from pathlib import Path
 
@@ -75,13 +78,6 @@ def audio_path(corpus: Path, record: dict) -> Path:
 
 def beat_csv_path(corpus: Path, record: dict) -> Path:
     return annotations_dir(Path(corpus)) / BEATS_DIR / f"{record['id']}.beat.csv"
-
-
-def labelled_span(record: dict) -> tuple:
-    sections = record.get("sections") or []
-    if not sections:
-        return 0.0, 0.0
-    return float(sections[0]["start"]), float(sections[-1]["end"])
 
 
 def _number(value, what: str) -> float:
@@ -240,3 +236,58 @@ def load_all_third_party(corpus: Path) -> list:
     records = [record for source in THIRD_PARTY_SOURCES for record in load_records(corpus, source)]
     records.sort(key=lambda record: str(record["id"]))
     return records
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def copy_audio(source: Path, target: Path) -> str:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and target.stat().st_size == source.stat().st_size:
+        return "kept"
+    shutil.copy2(source, target)
+    return "copied"
+
+
+def carry_timestamp(path: Path, record: dict) -> dict:
+    """Keep an unchanged record's original stamp, so a re-run rewrites nothing.
+
+    A per-run timestamp is the one field that differs when nothing has: without
+    this, a second conversion rewrites every file and no diff can say whether
+    the corpus actually moved.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            existing = json.load(handle)
+    except (OSError, ValueError):
+        return record
+    if not isinstance(existing, dict):
+        return record
+    stamp = (existing.get("provenance") or {}).get("converted_utc")
+    if not isinstance(stamp, str) or not stamp:
+        return record
+    probe = copy.deepcopy(record)
+    probe["provenance"]["converted_utc"] = stamp
+    if probe == existing:
+        record["provenance"]["converted_utc"] = stamp
+    return record
+
+
+def write_report(corpus: Path, report: dict) -> Path:
+    path = third_party_dir(corpus) / report["report_file"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".part")
+    try:
+        with open(tmp, "w", encoding="utf-8", newline="") as handle:
+            json.dump(report, handle, indent=2)
+            handle.write("\n")
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return path

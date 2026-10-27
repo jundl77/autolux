@@ -46,10 +46,14 @@ from raveform_download import (
     INTERRUPT_REASON,
     KNOWN_REASONS,
     RETRYABLE_REASONS,
+    _reason_line,
+    _tail,
+    _tally,
     classify_error,
     format_duration,
     install_interrupt_handler,
     interrupt_requested,
+    print_progress,
 )
 
 ARCHIVE_FILE = "downloaded.txt"
@@ -62,7 +66,6 @@ PAUSE_JITTER = 2.5
 
 RETRY_HINT = "--retry-reasons " + ",".join(sorted(RETRYABLE_REASONS))
 
-_STDERR_TAIL_CHARS = 2000
 _PROGRESS_EVERY = 10
 
 
@@ -156,11 +159,6 @@ def build_command(corpus: Path, row) -> list:
     ]
 
 
-def _tail(text: str, limit: int = _STDERR_TAIL_CHARS) -> str:
-    text = (text or "").strip()
-    return text if len(text) <= limit else "..." + text[-limit:]
-
-
 def download_one(corpus: Path, row, timeout_sec: int) -> tuple:
     target = audio_file(corpus, row.source, row.track_id)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -197,29 +195,6 @@ def download_one(corpus: Path, row, timeout_sec: int) -> tuple:
         target.unlink(missing_ok=True)
         return False, "empty_output", "yt-dlp exited 0 but wrote a zero-byte mp3 (deleted)"
     return True, "", ""
-
-
-def print_progress(done: int, failed: int, remaining: int, elapsed: float) -> None:
-    attempted = done + failed
-    per_track = elapsed / attempted if attempted else 0.0
-    eta = per_track * remaining if attempted else float("nan")
-    print(
-        f"  progress: done {done}  failed {failed}  remaining {remaining}  "
-        f"({per_track:.1f}s/track, elapsed {format_duration(elapsed)}, "
-        f"ETA {format_duration(eta)})",
-        flush=True,
-    )
-
-
-def _reason_line(reasons: dict) -> str:
-    return ", ".join(f"{reason} x{count}" for reason, count in sorted(reasons.items()))
-
-
-def _tally(id_to_reason: dict) -> dict:
-    counts: dict = {}
-    for reason in id_to_reason.values():
-        counts[reason] = counts.get(reason, 0) + 1
-    return counts
 
 
 def main(argv: list | None = None) -> int:

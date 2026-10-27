@@ -35,6 +35,7 @@ for _path in (
 import tp_download
 import tp_record
 from corpus_root import corpus_dir
+from raveform_supervisor import hhmm, log, parse_cooldowns, write_state
 
 DOWNLOADER = Path(__file__).resolve().parent / "tp_download.py"
 STATE_FILE = "tp_supervisor.state"
@@ -80,39 +81,11 @@ def work_dir(corpus: Path) -> Path:
     return tp_record.third_party_dir(Path(corpus))
 
 
-def _stamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
-
-
-def log(log_path: Path, event: str) -> None:
-    line = f"{_stamp()}  {event}"
-    try:
-        with open(log_path, "a", encoding="ascii", errors="replace", newline="\n") as handle:
-            handle.write(line + "\n")
-            handle.flush()
-    except OSError:
-        pass
-    print(line, flush=True)
-
-
-def write_state(state_path: Path, text: str) -> None:
-    try:
-        with open(state_path, "w", encoding="ascii", errors="replace", newline="\n") as handle:
-            handle.write(text + "\n")
-            handle.flush()
-    except OSError:
-        pass
-
-
 def count_mp3s(corpus: Path) -> int:
     try:
         return sum(1 for _ in (work_dir(corpus) / tp_record.AUDIO_DIR).glob("*/*.mp3"))
     except OSError:
         return -1
-
-
-def hhmm(when: float) -> str:
-    return time.strftime("%H:%M", time.localtime(when))
 
 
 def sleep_until(deadline: float) -> None:
@@ -162,20 +135,6 @@ def run_cycle(command: list, corpus: Path, cycle: int, log_path: Path, state_pat
     except OSError as error:
         log(log_path, f"CHILD_EXIT code -1  (could not run the downloader: {error})")
         return -1
-
-
-def parse_cooldowns(text: str) -> tuple:
-    values = []
-    for part in text.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        values.append(float(part))
-    if not values:
-        raise ValueError("need at least one cool-down")
-    if any(value < 0 for value in values):
-        raise ValueError("cool-downs must not be negative")
-    return tuple(values)
 
 
 def main(argv: list | None = None) -> int:

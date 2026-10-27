@@ -51,7 +51,6 @@ from hand_label_admission import (
 )
 from raveform_fetch_annotations import parse_beat_csv
 
-TP_DIR = "third_party"
 TP_MANIFEST_FILE = "manifest.csv"
 TP_CLEAN_MANIFEST_FILE = "clean_manifest.csv"
 TP_MANIFEST_HEADER = (
