@@ -1344,8 +1344,7 @@ def _build_overlay_banner():
 # While the show follows the music Auto lights, and the level it chose stays lit beside it.
 FOLLOW_SYNC_JS = '''function(state) {
     state = window.autoluxControl ? window.autoluxControl.view(state) : state;
-    const on = !!(state && state.intensity_auto);
-    return [on ? 'active' : '', on ? 'following' : ''];
+    return state && state.intensity_auto ? 'active' : '';
 }'''
 
 
@@ -1369,23 +1368,9 @@ DIRECT_AUTO_JS = (
                 .map((t) => t.prop_id);
             const shown = control.view(state) || {};
             const status = 'control-status';
-            // The chips and the levels act only on a real press: Dash can re-fire this
-            // callback from a re-render or a poll writing the radio's value.
-            const pressed = control.operatorJustActed();
-            const chip = ['control-fx-auto.n_clicks', 'control-fx-off.n_clicks',
-                'control-intensity-auto.n_clicks', 'control-intensity.value']
-                .find((id) => triggered.includes(id));
-            if (chip && !pressed) {
-                if (!chip.endsWith('.value')) {
-                    console.warn('[control] dropped a chip callback with no press', chip);
-                }
-                return [nu, nu];
-            }
             const showFollowing = (on) => {
                 window.dash_clientside.set_props(
                     'control-intensity-auto', {className: on ? 'active' : ''});
-                window.dash_clientside.set_props(
-                    'control-intensity-set', {className: on ? 'following' : ''});
             };
             if (triggered.includes('control-toggle.n_clicks')) {
                 const paused = !!shown.paused;
@@ -2492,10 +2477,6 @@ def build_app(
             return jsonify({'error': 'this dashboard cannot control the show'}), 403
         if not isinstance(command, dict):
             return jsonify({'error': 'a command must be a JSON object'}), 400
-        if direct and command.get('action') in ('fx_auto', 'intensity_auto'):
-            # The page sends these chips to the bridge itself; one arriving here is a second
-            # copy of a click (or a stale page), never a new one.
-            return jsonify({'error': f'{command["action"]} goes to the show directly'}), 409
         reply = snapshot_source.control(command)
         if 'error' not in reply:
             expectations.expect(**expected_control_values(command, reply))
@@ -2706,7 +2687,6 @@ def build_app(
     app.clientside_callback(
         FOLLOW_SYNC_JS,
         Output('control-intensity-auto', 'className'),
-        Output('control-intensity-set', 'className'),
         Input('control-state', 'data'),
     )
     app.clientside_callback(

@@ -194,8 +194,8 @@
 
 /* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first. Name and
    seconds sit inside the bar; the flat group-tinted fill is empty as the group fires, grows
-   left to right as it recovers and stays full with "ready". The fill is the same 30% tint over the
-   surface as an Intensity level that follows the music. Head and track share one grid cell.
+   left to right as it recovers and stays full with "ready", a 30% tint over the surface. Head and
+   track share one grid cell.
    control.js adds .flash for 500 ms when a group fires: the whole track lights in its tint (the
    fill is empty then, so the track is what shows) and fades back once the class goes. */
 .cooldowns { display: grid; gap: 4px; }

@@ -263,6 +263,14 @@ class _Handler(BaseHTTPRequestHandler):
         except queue.Full:
             self._reply(503, {'error': 'the show is busy; try again'})
             return
+        # Names the sender, so a command no operator remembers can be traced to its page.
+        LOGGER.info(
+            '[control] %s from %s origin=%s agent=%s',
+            command,
+            self.client_address[0],
+            self.headers.get('Origin', '-'),
+            (self.headers.get('User-Agent') or '-')[:80],
+        )
         timeout = self.server.handoff_timeout
         if timeout is not None and not _await_handoff(commands, timeout):
             self._reply(504, {'error': 'the show has not taken the command yet'})

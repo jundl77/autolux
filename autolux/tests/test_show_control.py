@@ -1177,7 +1177,7 @@ def test_the_banner_counts_operator_looks_not_the_dark_under_the_blacklight():
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_following_the_music_greys_the_segments_but_keeps_the_chosen_level_lit():
+def test_following_the_music_lights_auto_and_keeps_the_segments_clickable():
     from autolux.simulate.visualizer_app import FOLLOW_SYNC_JS
 
     rendered = _run_control_js(
@@ -1185,12 +1185,12 @@ def test_following_the_music_greys_the_segments_but_keeps_the_chosen_level_lit()
         'const states = [{intensity_auto: true}, {intensity_auto: false}, null];\n'
         'console.log(JSON.stringify(states.map((state) => follow(state))));'
     )
-    assert rendered == [['active', 'following'], ['', ''], ['', '']]
+    assert rendered == ['active', '', '']
     app = build_app(_Recorder())
     # The segments stay clickable (a pick turns auto off) and are still fed the show's level.
     writers = [key for key in app.callback_map if 'control-intensity-set.disabled' in key]
     assert len(writers) == 1
-    assert 'control-intensity-set.className' in ' '.join(app.callback_map)
+    assert 'control-intensity-set.className' not in ' '.join(app.callback_map)
 
 
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
@@ -1493,58 +1493,6 @@ console.log(JSON.stringify(seen));
     assert json.loads(result.stdout) == [False, False, True, True, False, False]
 
 
-@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
-def test_one_chip_press_sends_one_command_and_a_refire_without_a_press_sends_none():
-    following = {'settings': {'intensity': 0.3}, 'intensity_auto': True, 'fx_auto': True}
-    moved_on = {**following, 'settings': {'intensity': 0.7}}
-    # (ms on the page clock, a real press first?, what triggered the callback, radio, state)
-    steps = [
-        (0, True, 'control-fx-off.n_clicks', 0.3, following),
-        # Dash re-firing the chips' callback after a poll re-rendered them: no press behind it.
-        (3000, False, 'control-fx-off.n_clicks', 0.3, following),
-        (3000, False, 'control-fx-auto.n_clicks', 0.3, following),
-        (3000, False, 'control-intensity-auto.n_clicks', 0.3, following),
-        # The radio still on the old level as the poll reports the one the music moved to.
-        (3000, False, 'control-intensity.value', 0.3, moved_on),
-        (6000, True, 'control-intensity-auto.n_clicks', 0.3, following),
-        (9000, True, 'control-intensity.value', 0.3, moved_on),
-    ]
-    result = _run_control_js(
-        f'''
-window.autoluxControlConfig = {{direct: true, bridgePort: 8766}};
-globalThis.location = {{protocol: 'http:', hostname: 'autolux.local'}};
-let now = 0;
-Object.defineProperty(globalThis, 'performance', {{value: {{now: () => now}}}});
-console.warn = () => {{}};
-const sent = [];
-globalThis.fetch = async (url, options) => {{
-    sent.push(JSON.parse(options.body));
-    return {{ok: true, status: 202, json: async () => ({{accepted: 'ok'}})}};
-}};
-const fire = {DIRECT_AUTO_JS};
-window.dash_clientside = {{no_update: null, set_props: () => {{}}}};
-(async () => {{
-    for (const [at, press, trigger, radio, state] of {json.dumps(steps)}) {{
-        now = at;
-        if (press) {{
-            control.operatorActs();
-            now += 120;
-        }}
-        window.dash_clientside.callback_context = {{triggered: [{{prop_id: trigger}}]}};
-        fire(null, null, null, radio, null, null, null, state);
-        await new Promise((resolve) => setTimeout(resolve, 0));
-    }}
-    console.log(JSON.stringify(sent));
-}})();
-'''
-    )
-    assert result == [
-        {'action': 'fx_auto', 'enabled': False},
-        {'action': 'intensity_auto', 'enabled': False},
-        {'action': 'intensity', 'level': 0.3},
-    ]
-
-
 def test_auto_every_intensity_level_and_the_on_fx_side_fill_in_one_colour():
     css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
     css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
@@ -1564,12 +1512,3 @@ def test_auto_every_intensity_level_and_the_on_fx_side_fill_in_one_colour():
     ]
     assert [sel.strip() for sel in overrides] == ['#control-intensity']
     assert '--warm' not in css
-
-
-@pytest.mark.parametrize('action', ['fx_auto', 'intensity_auto'])
-def test_the_relay_never_forwards_an_auto_chip_while_the_page_sends_them_directly(action):
-    source = _Recorder()
-    client = build_app(source, direct_control=True).server.test_client()
-    reply = client.post('/control-relay', json={'action': action, 'enabled': True})
-    assert reply.status_code == 409
-    assert source.commands == []
