@@ -62,9 +62,6 @@ class EventBuffer:
             self._end_time = self._clock.monotonic()
 
     def elapsed(self) -> float:
-        return self._now()
-
-    def _now(self) -> float:
         if self._start_time is None:
             return 0.0
         now = self._clock.monotonic()
@@ -77,7 +74,7 @@ class EventBuffer:
             self._beats_detected += 1
             self._beats.append(
                 {
-                    't': self._now(),
+                    't': self.elapsed(),
                     'bpm': bpm,
                     'change': change,
                     'rms': round(rms, 4),
@@ -97,7 +94,7 @@ class EventBuffer:
         ):
             raise ValueError('Effect duration must be finite and positive')
         with self._lock:
-            now = self._now()
+            now = self.elapsed()
             for effect in reversed(self._effects):
                 if effect['type'] == effect_type and (
                     effect_type == 'AUTOLOOP' or effect['name'] == name
@@ -115,14 +112,14 @@ class EventBuffer:
 
     def stop_effects(self) -> None:
         with self._lock:
-            now = self._now()
+            now = self.elapsed()
             for effect in self._effects:
                 effect['end'] = min(effect.get('end', now), now)
 
     def set_playing(self, is_playing: bool) -> None:
         with self._lock:
             self._is_playing = is_playing
-            now = self._now()
+            now = self.elapsed()
             self._sound_events.append({'t': now, 'playing': is_playing})
 
     def set_intent(
@@ -133,7 +130,7 @@ class EventBuffer:
                 return
             self._current_intent = intent
             self._current_trigger = trigger
-            now = self._now()
+            now = self.elapsed()
             if self._intents and 'end' not in self._intents[-1]:
                 self._intents[-1]['end'] = now
             block = {'t': now, 'intent': intent, 'trigger': trigger}
@@ -194,7 +191,7 @@ class EventBuffer:
                 return
             self._special = {'name': name, 'group': group}
             if duration_seconds is not None:
-                self._special['end'] = self._now() + duration_seconds
+                self._special['end'] = self.elapsed() + duration_seconds
 
     def set_special_groups(self, groups: dict[str, list[str]]) -> None:
         with self._lock:
@@ -202,7 +199,7 @@ class EventBuffer:
 
     def mark_intense(self) -> None:
         with self._lock:
-            self._intense_at = self._now()
+            self._intense_at = self.elapsed()
 
     def _strobe_cooldown_seconds(self, now: float) -> float | None:
         from autolux.lib.engine.effect_controller import drop_strobe_cooldown_seconds
@@ -266,7 +263,7 @@ class EventBuffer:
 
     def snapshot(self) -> dict:
         with self._lock:
-            now = self._now()
+            now = self.elapsed()
             cutoff = now - min(self._window_sec, self.SNAPSHOT_WINDOW_SEC + self._look_ahead_sec)
             timing_stats = self._timing_stats(self._timing_log)
             return {
@@ -307,7 +304,7 @@ class EventBuffer:
 
     def to_report(self, timing_log: list[dict] | None = None) -> dict:
         with self._lock:
-            now = self._now()
+            now = self.elapsed()
 
             all_effects = [
                 {**effect, 'end': min(effect.get('end', now), now)} for effect in self._effects

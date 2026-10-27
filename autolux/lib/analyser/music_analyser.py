@@ -1,15 +1,19 @@
 import datetime
 import logging
 import math
-import numpy as np
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
+
+import numpy as np
+
 from autolux.lib.analyser.drift_watchdog import DriftWatchdog
 from autolux.lib.analyser.madmom_rhythm import FRAME_SIZE, SAMPLE_RATE, MadmomRhythm
 from autolux.lib.analyser.music_analyser_handler import IMusicAnalyserHandler
-from autolux.lib.clock import Clock, SYSTEM_CLOCK
+from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_definitions import ShowSettings
-from collections.abc import Callable
+
+LOGGER = logging.getLogger(__name__)
 
 _BPM_BEAT_WINDOW = 9
 _BPM_FOLD_MIN = 85.0
@@ -112,7 +116,6 @@ class MusicAnalyser:
         self._beat_stream_times: deque = deque(maxlen=_BPM_BEAT_WINDOW)
         self.last_bpm: float = 0.0
         self.beat_count: int = 0
-        self.time_to_last_beat_sec: float = 0
         self.last_beat_detected: datetime.datetime = self._clock.now()
         self.last_note_detected: datetime.datetime = self._clock.now()
         self._reset_song_clock()
@@ -131,25 +134,12 @@ class MusicAnalyser:
         else:
             return datetime.timedelta(seconds=0)
 
-    def get_beat_position(self) -> float:
-        beat_interval_sec = self.time_to_last_beat_sec
-        if self.is_playing and beat_interval_sec > 0:
-            time_to_current_beat_sec = (self._clock.now() - self.last_beat_detected).total_seconds()
-            return self.beat_count + abs(time_to_current_beat_sec / beat_interval_sec)
-        else:
-            return 0
-
     def get_bpm(self) -> float:
         return self._fold_bpm(self.get_detector_bpm())
 
     def get_detector_bpm(self) -> float:
         """Tempo in the same beat units as the emitted detector events."""
-        if not self.is_playing:
-            return 0
-        return self._measured_bpm()
-
-    def _measured_bpm(self) -> float:
-        if len(self._beat_stream_times) < 3:
+        if not self.is_playing or len(self._beat_stream_times) < 3:
             return 0.0
         interval = float(np.median(np.diff(np.array(self._beat_stream_times))))
         return 60.0 / interval if interval > 0 else 0.0
@@ -214,7 +204,6 @@ class MusicAnalyser:
         if is_beat and self.note_clicks:
             audio_signal += self.click_sound
 
-        await self.handler.on_cycle()
         return audio_signal
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
@@ -245,13 +234,13 @@ class MusicAnalyser:
             return
         self._track_start_sample = self._sample_clock
         seconds = gap_samples / self.sample_rate
-        logging.info(f'[rhythm] {seconds * 1000:.0f} ms of digital silence — new-track cue')
+        LOGGER.info(f'[rhythm] {seconds * 1000:.0f} ms of digital silence — new-track cue')
         self.handler.on_digital_gap(started / self.sample_rate, seconds)
 
     def enter_standby(self, reason: str) -> None:
         if self.in_standby:
             return
-        logging.info(f'[rhythm] {reason} — standby')
+        LOGGER.info(f'[rhythm] {reason} — standby')
         self.in_standby = True
         self._on_sound_stop()
         self.handler.on_digital_silence()
@@ -259,7 +248,7 @@ class MusicAnalyser:
     def leave_standby(self) -> None:
         if not self.in_standby:
             return
-        logging.info('[rhythm] signal returned — analysis restarts from scratch')
+        LOGGER.info('[rhythm] signal returned — analysis restarts from scratch')
         self.in_standby = False
         self._reset_state()
         self._audio_started = False
@@ -271,7 +260,7 @@ class MusicAnalyser:
         window = (now - (self._rhythm_log_at - _RHYTHM_LOG_INTERVAL)).total_seconds()
         self._rhythm_log_at = now + _RHYTHM_LOG_INTERVAL
         drift = self.get_drift_status()
-        logging.debug(
+        LOGGER.debug(
             f'[rhythm] madmom {self._beats_since_log} beats '
             f'({self._beats_since_log / window:.2f}/s) '
             f'over {window:.1f}s | bpm={self.get_bpm():.1f} '
@@ -298,7 +287,7 @@ class MusicAnalyser:
             self._beat_stream_times.append(beat_time)
             self._beats_since_log += 1
             this_bpm: float = self.get_bpm()
-            logging.debug(
+            LOGGER.debug(
                 f'[rhythm] beat #{self.beat_count + 1} @ {beat_time:.3f}s '
                 f'(madmom stream), interval={interval:.3f}s, bpm={this_bpm:.1f}, '
                 f'activation={self._last_beat_activation:.3f}'
@@ -307,7 +296,6 @@ class MusicAnalyser:
             self.beat_count += 1
             await self.handler.on_beat(self.beat_count, this_bpm, bpm_changed)
             self.last_bpm = this_bpm
-            self.time_to_last_beat_sec = (now - self.last_beat_detected).total_seconds()
             self.last_beat_detected = now
         return bool(beats)
 

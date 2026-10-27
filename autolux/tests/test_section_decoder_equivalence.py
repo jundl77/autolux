@@ -23,11 +23,11 @@ for extra in (
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-from autolux.lib.engine.section_decoder import (  # noqa: E402
+from autolux.lib.engine.section_decoder import (
+    _BEAT_GAP_SEC,
     BEATS_PER_BAR,
     DecodeParams,
     SectionDecoder,
-    _BEAT_GAP_SEC,
 )
 
 GATE_ARTIFACT = Path("models/phase_b/phase_tracking/phase_tracking_gate.json")
@@ -127,9 +127,8 @@ def test_the_runtime_draws_the_gates_candidate_d_lines_beat_for_beat():
 @pytest.mark.integration
 def test_a_beat_gap_leaves_no_bar_position_worth_anchoring_on():
     import phase_tracking as pt
-    from raveform_fetch_annotations import BEATS_DIR, annotations_dir
-
     from corpus_root import corpus_dir
+    from raveform_fetch_annotations import BEATS_DIR, annotations_dir
 
     report, beats_dir = gate()
     annotations = annotations_dir(corpus_dir()) / BEATS_DIR

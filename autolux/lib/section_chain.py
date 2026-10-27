@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import NamedTuple
 
+LOGGER = logging.getLogger(__name__)
+
 MODEL_VERSION = "ng_DACLEANTV_w128_s1234"
 _GENERATION = "l9d"
 _AFFINE = "input_affine_F3.npz"
@@ -25,7 +27,6 @@ class Artifacts(NamedTuple):
 class SectionChain(NamedTuple):
     stream: object
     decoder: object
-    feature_latency_sec: float
 
     def stop(self) -> None:
         stop = getattr(self.stream, "stop", None)
@@ -110,8 +111,7 @@ def corpus_dir() -> Path:
 
 
 def artifacts(data_dir=None) -> Artifacts:
-    root = Path(data_dir) if data_dir is not None else corpus_dir()
-    generation = root / "models" / _GENERATION
+    generation = generation_dir(data_dir)
     return Artifacts(
         affine=generation / _AFFINE,
         graph=generation / MODEL_VERSION / _GRAPH,
@@ -123,7 +123,7 @@ def artifacts_present(data_dir=None) -> bool:
     try:
         return not artifacts(data_dir).missing()
     except (OSError, ValueError) as error:
-        logging.warning(
+        LOGGER.warning(
             f'[chain] cannot resolve the corpus directory '
             f'({error!r}) — treating the model as absent'
         )
@@ -268,14 +268,14 @@ def build_section_chain(
 
     feature_latency_sec = geometry.margin_sec + geometry.hop_sec + head.future_sec
     decoder = SectionDecoder(priors, params, feature_latency_sec=feature_latency_sec, phase=phase)
-    logging.info(
+    LOGGER.info(
         f'[chain] {MODEL_VERSION} on {_where(stage)} | '
         f'feature latency {feature_latency_sec:.4f}s '
         f'(F {geometry.margin_sec:g} + hop {geometry.hop_sec:g} + '
         f'head {head.future_sec:g}) | bar grid: '
         f'{"counting" if tracker is None else "fused tracker"}'
     )
-    return SectionChain(stream, decoder, feature_latency_sec)
+    return SectionChain(stream, decoder)
 
 
 def _build_tracker(data_dir, device):
@@ -285,7 +285,7 @@ def _build_tracker(data_dir, device):
 
     generation = generation_dir(data_dir)
     if not bar_tracker.tracker_present(generation):
-        logging.info('[chain] no bar tracker artifacts — the bar grid is the counting rule')
+        LOGGER.info('[chain] no bar tracker artifacts — the bar grid is the counting rule')
         return None
     return bar_tracker.load_bar_tracker(generation, device=device)
 

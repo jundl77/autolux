@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from autolux.lib.analyser import mert_stream as M
-from autolux.lib.analyser.drift_watchdog import DriftWatchdog, ShedLevel
+from autolux.lib.analyser.drift_watchdog import DriftWatchdog
 from autolux.lib.analyser.gpu_stage import GpuStage
 from autolux.lib.analyser.section_model import PosteriorStream, SectionModel
 from autolux.tests.test_drift_watchdog import FakeClock

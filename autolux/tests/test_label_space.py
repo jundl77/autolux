@@ -6,8 +6,6 @@ from autolux.lib.label_space import (
     NUM_SECTION_CLASSES,
     SECTION_LABELS,
     check_class_space,
-    is_dropped_label,
-    is_section_label,
 )
 
 
@@ -28,19 +26,19 @@ def test_the_vocabulary_is_the_raw_raveform_nine_in_arrangement_order():
 
 def test_end_is_the_only_dropped_label():
     assert DROPPED_LABELS == frozenset({'end'})
-    assert is_dropped_label('end')
-    assert not is_dropped_label('outro')
-    assert not is_section_label('end')
+    assert 'end' in DROPPED_LABELS
+    assert 'outro' not in DROPPED_LABELS
+    assert 'end' not in LABEL_INDEX
 
 
 def test_every_vocabulary_label_indexes_to_its_position():
     assert LABEL_INDEX == {label: i for i, label in enumerate(SECTION_LABELS)}
-    assert all(is_section_label(label) for label in SECTION_LABELS)
+    assert all(label in LABEL_INDEX for label in SECTION_LABELS)
 
 
 @pytest.mark.parametrize('retired', ['canonical', 'v1', 'quiet', 'groove'])
 def test_a_retired_space_name_is_not_a_label(retired):
-    assert not is_section_label(retired)
+    assert retired not in LABEL_INDEX
 
 
 def test_check_class_space_accepts_the_whole_vocabulary():

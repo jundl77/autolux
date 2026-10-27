@@ -3,7 +3,7 @@
 import bisect
 import logging
 from collections import deque
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 
@@ -39,7 +39,8 @@ class DelayedCommandQueue:
     def schedule(self, label: str, factory: CommandFactory, delay_sec: float | None = None) -> None:
         enqueue_time = self._clock.monotonic()
         delay = self._delay_sec if delay_sec is None else float(delay_sec)
-        fire_at = self._kept_in_stream_order(label, enqueue_time + delay)
+        # Never ahead of an earlier command of the same label: each label keeps stream order.
+        fire_at = max(enqueue_time + delay, self._last_fire_at.get(label, float('-inf')))
         self._last_fire_at[label] = fire_at
         self._sequence += 1
         bisect.insort(
@@ -48,16 +49,8 @@ class DelayedCommandQueue:
             key=lambda item: (item[0], item[1]),
         )
 
-    def _kept_in_stream_order(self, label: str, fire_at: float) -> float:
-        return max(fire_at, self._last_fire_at.get(label, float('-inf')))
-
-    def drop_pending(self, label: str, later_than: float, inclusive: bool = False) -> int:
-        def doomed(item) -> bool:
-            return item[4] == label and (
-                item[0] >= later_than if inclusive else item[0] > later_than
-            )
-
-        keep = [item for item in self._queue if not doomed(item)]
+    def drop_pending(self, label: str, later_than: float) -> int:
+        keep = [item for item in self._queue if item[4] != label or item[0] <= later_than]
         dropped = len(self._queue) - len(keep)
         if not dropped:
             return 0
@@ -69,11 +62,9 @@ class DelayedCommandQueue:
             self._last_fire_at.pop(label, None)
         return dropped
 
-    def clear(self) -> int:
-        dropped = len(self._queue)
+    def clear(self) -> None:
         self._queue = []
         self._last_fire_at.clear()
-        return dropped
 
     async def drain(self) -> None:
         if not self._queue:
@@ -105,7 +96,7 @@ class DelayedCommandQueue:
                 await factory()
             except Exception as error:
                 log.exception(
-                    f'[cmd_queue] {label!r} failed ({error!r}) — '
+                    f'[cmd_queue] {label!r} failed ({error!r}) — '  # noqa: TRY401
                     f'dropping it and delivering the rest'
                 )
 

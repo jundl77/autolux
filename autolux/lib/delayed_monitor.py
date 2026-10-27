@@ -5,6 +5,8 @@ from collections import deque
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 
+LOGGER = logging.getLogger(__name__)
+
 
 class DelayedMonitor:
     def __init__(self, delay_sec: float, play, clock: Clock = SYSTEM_CLOCK):
@@ -42,7 +44,5 @@ class DelayedMonitor:
             return
         if not self._started:
             self._started = True
-            logging.info(
-                f'[monitor] {self._delay_sec:.1f}s buffered — the headphones join the room'
-            )
+            LOGGER.info(f'[monitor] {self._delay_sec:.1f}s buffered — the headphones join the room')
         self._play(self._buffered.popleft())

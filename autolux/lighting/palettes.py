@@ -89,7 +89,7 @@ class Palette:
             colour = getattr(self, slot)
             if len(colour) != 3 or not all(0.0 <= channel <= 1.0 for channel in colour):
                 raise ValueError(f'palette {self.name} {slot} must be three channels in 0..1')
-        self.mood
+        self.mood  # noqa: B018
 
     @property
     def mood(self) -> Mood:

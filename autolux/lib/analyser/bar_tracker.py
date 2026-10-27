@@ -29,6 +29,8 @@ import numpy as np
 from autolux.lib.analyser.mert_stream import RingOverrun, SampleRing
 from autolux.lib.audio_config import SAMPLE_RATE as SOURCE_SAMPLE_RATE
 
+LOGGER = logging.getLogger(__name__)
+
 TRACKER_DIR = "bar_tracker"
 RECORD_NAME = "bar_tracker.json"
 
@@ -36,7 +38,7 @@ FPS = 50
 CHUNK_FRAMES = 1500
 MARGIN_FRAMES = 6
 STRIDE_SEC = 2.5
-STRIDE_FRAMES = int(round(STRIDE_SEC * FPS))
+STRIDE_FRAMES = round(STRIDE_SEC * FPS)
 
 _N_FFT = 1024
 _HOP_22K = 441
@@ -90,11 +92,8 @@ def tracker_present(generation_dir) -> bool:
 
 
 def _sha256(path) -> str:
-    digest = hashlib.sha256()
     with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def load_record(generation_dir) -> dict:
@@ -130,7 +129,7 @@ def load_bar_tracker(generation_dir, *, device: str | None = None):
     recorded = record.get("arch")
     if recorded is not None and recorded != hparams:
         raise RuntimeError(f"bar tracker arch {hparams} is not the recorded {recorded}")
-    logging.info(f'[tracker] {found.checkpoint.name} on {where} (sha {record["sha256"][:12]})')
+    LOGGER.info(f'[tracker] {found.checkpoint.name} on {where} (sha {record["sha256"][:12]})')
     return BarTrackerStream(model, device=where)
 
 
@@ -194,9 +193,9 @@ class BarTrackerStream:
         except RingOverrun:
             self.resync()
             return []
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             self.alive = False
-            logging.warning(
+            LOGGER.warning(
                 f'[tracker] forward failed ({error!r}) — the bar '
                 f'tracker is dead for this run; the decoder is on '
                 f'the counting grid'
@@ -211,7 +210,7 @@ class BarTrackerStream:
         passes = max(self.passes, (self._ring.written - _PASS_PAD_SRC) // _STRIDE_SRC)
         skipped_to = passes * STRIDE_FRAMES
         if skipped_to > self._n_frames:
-            logging.warning(
+            LOGGER.warning(
                 f'[tracker] resync: skipping frames '
                 f'[{self._n_frames}, {skipped_to}) — evidence for '
                 f'that span is lost'
