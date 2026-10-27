@@ -231,7 +231,7 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
     assert address_node(store.load()[0], 'wash_right')['text'] == str(winners[0])
 
 
-def test_class_order_follows_document_order_after_moving_a_fixture(rig_file):
+def test_class_order_follows_positions_not_document_order_after_moving_a_fixture(rig_file):
     store = store_for(rig_file, lambda _staged: None)
     draft, revision = store.load()
     children = next(node for node in mvr._nodes(draft['scene']) if node['tag'] == 'ChildList')
@@ -240,7 +240,7 @@ def test_class_order_follows_document_order_after_moving_a_fixture(rig_file):
     children['children'][first], children['children'][second] = spots[1], spots[0]
     store.save(draft, revision)
     fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
-    assert mvr.groups(fixtures)['movers'] == ['spot_right', 'spot_left']
+    assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
 
 
 def test_config_names_the_library_folder_it_lists():

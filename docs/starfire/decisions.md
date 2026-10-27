@@ -522,3 +522,14 @@ Still refused, each with its reason (pinned per corpus mode in test_gdtf_compile
 Relations, sub-channel sets, wheel Filter slots, DMX breaks other than 1, GDTF versions
 outside 1.0..1.2, duplicate function names, and brightness functions that share their
 channel, carry presets, depend on a ModeMaster or run inverted.
+
+2026-10-27 Spatial group order: a rig group (MVR Class) lists its members left to right by
+the X of each fixture's placed MVR Matrix (scene space, layers and parents composed); equal X
+keeps file order, and a group whose members all share one X keeps file order with a warning
+naming the group. The exported RigDefinition carries that order, so `sf.group`/`sf.members`
+in Lua see it unchanged. Mirror pairs are by symmetry about the group's centre in that order:
+`sf.mirror(target)` returns `{left, right}` partners outermost first (an odd middle pairs
+with itself), and `sf.side(index, count)` gives each member's half (-1, 0 for an odd middle,
+1); `sf.side(index)` without a count keeps its alternating meaning, which agrees for pairs.
+The room's positions (washes at X -900/-300/300/900, spots at -300/300, mm) already match
+their names, so room.rig.pb and the goldens are unchanged.

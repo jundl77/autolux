@@ -136,6 +136,56 @@ fn composed_effects_resolve_named_groups_in_the_authored_order() {
 }
 
 #[test]
+fn mirror_pairs_and_sides_follow_the_groups_left_to_right_order() {
+    let rig = support::rig(
+        serde_json::from_str(
+            r#"{"schema_version":1,"fixtures":[
+          {"id":"a","profile":"generic_rgb","universe":0,"address":1},
+          {"id":"b","profile":"generic_rgb","universe":0,"address":4},
+          {"id":"c","profile":"generic_rgb","universe":0,"address":7}],
+          "groups":{"row":["c","a","b"]}}"#,
+        )
+        .unwrap(),
+    );
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          local effects = {}
+          for rank, pair in ipairs(sf.mirror(sf.group("row"))) do
+            effects[#effects + 1] = sf.dimmer(pair[1], rank / 10)
+            effects[#effects + 1] = sf.dimmer(pair[2], rank / 10)
+          end
+          return sf.scene {
+            effects,
+            sf.each(sf.group("row"), function(fixture, index, count)
+              return sf.pan_tilt(fixture, 0.5 + sf.side(index, count) / 4, 0.5)
+            end)
+          }
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let effects = autoloop.render(&snapshot(0.0), &techno()).unwrap();
+    let mirrored: Vec<_> = effects[..4]
+        .iter()
+        .map(|effect| (effect.target.clone(), effect.values.intensity.unwrap()))
+        .collect();
+    assert_eq!(
+        mirrored,
+        [
+            (Target::Fixture("c".into()), 0.1),
+            (Target::Fixture("b".into()), 0.1),
+            (Target::Fixture("a".into()), 0.2),
+            (Target::Fixture("a".into()), 0.2),
+        ]
+    );
+    let pans: Vec<_> = effects[4..]
+        .iter()
+        .map(|effect| effect.values.pan.unwrap())
+        .collect();
+    assert_eq!(pans, [0.25, 0.5, 0.75]);
+}
+
+#[test]
 fn oscillators_are_periodic_and_use_supplied_musical_time() {
     let mut autoloop = autoloop(
         r#"return {render = function(ctx)

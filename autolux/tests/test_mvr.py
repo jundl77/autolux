@@ -27,6 +27,45 @@ WASH_CLASSING = (
 )
 
 
+# The room's names say where each fixture hangs; its MVR positions must agree.
+ROOM_GROUP_ORDER = {
+    'movers': ['spot_left', 'spot_right'],
+    'wash': ['wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right'],
+    'strip': ['zq06017'],
+    'fx': ['kinta'],
+}
+
+
+def placed_group(xs: list[float]) -> list[dict]:
+    """One wash class whose members sit at these X positions, in this file order."""
+    scene = mvr.new_scene()
+    for index, x in enumerate(xs):
+        mvr.add_fixture(
+            scene,
+            name=f'wash_at_{index}',
+            gdtf_spec=DIMMER_SPEC,
+            gdtf_mode='1ch',
+            universe=0,
+            address=index + 1,
+            fixture_id=index + 1,
+            fixture_class='wash',
+            matrix=[*mvr.IDENTITY_MATRIX[:9], x, -1000.0, 3000.0],
+        )
+    return mvr.patched_fixtures(scene)
+
+
+def test_group_members_run_left_to_right_by_position_whatever_the_file_order():
+    fixtures = placed_group([900.0, -900.0, 300.0, -300.0])
+    assert mvr.groups(fixtures)['wash'] == ['wash_at_1', 'wash_at_3', 'wash_at_2', 'wash_at_0']
+
+
+def test_a_group_without_distinct_positions_keeps_file_order_and_warns(caplog):
+    fixtures = placed_group([0.0, 0.0, 0.0])
+    with caplog.at_level('WARNING', logger='autolux.lighting.mvr'):
+        assert mvr.groups(fixtures)['wash'] == ['wash_at_0', 'wash_at_1', 'wash_at_2']
+    assert 'MVR group wash has no distinct X positions' in caplog.text
+
+
 def sample_text() -> str:
     return (DATA / 'mvr/sample_scene.xml').read_text(encoding='utf-8')
 
@@ -142,7 +181,7 @@ def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
     scene, fixtures = load_rig(ROOT / 'rig/room.mvr')
     assert validate(scene) == []
     assert len(fixtures) == 8
-    assert mvr.groups(fixtures)['movers'] == ['spot_left', 'spot_right']
+    assert mvr.groups(fixtures) == ROOM_GROUP_ORDER
     first = mvr.draft(scene)
     saved = mvr.write(mvr.apply_draft(scene, first, LIBRARY))
     assert saved == content

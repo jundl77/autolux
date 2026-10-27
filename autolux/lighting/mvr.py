@@ -9,6 +9,7 @@ for byte.
 
 import copy
 import io
+import logging
 import math
 import uuid
 import zipfile
@@ -22,6 +23,7 @@ import pymvr
 
 from autolux.lighting import mvr_schema as schema
 
+LOGGER = logging.getLogger(__name__)
 SCENE_ENTRY = 'GeneralSceneDescription.xml'
 GDTF_DESCRIPTION = 'description.xml'
 GDTF_SUFFIX = '.gdtf'
@@ -38,6 +40,8 @@ MATRIX_DECIMALS = 6
 ORTHONORMAL_TOLERANCE = 1e-3
 GIMBAL_TOLERANCE = 1e-9
 MAX_PITCH_DEGREES = 60.0
+# MVR Matrix rows are the X, Y, Z axes then the position; left to right is ascending X.
+POSITION_X = 9
 IDENTITY_MATRIX = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
 MOVEMENT_AXES = ('pan', 'tilt')
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
@@ -646,11 +650,29 @@ def patched_fixtures(scene: Scene) -> list[dict]:
     return fixtures
 
 
+def _venue_x(fixture) -> float:
+    return fixture['matrix'][POSITION_X]
+
+
 def groups(fixtures) -> dict[str, list[str]]:
-    result = {}
+    """Each class's members left to right: ascending scene X of their placed positions.
+
+    Equal positions keep file order; a group whose members all share one X (no positions, or
+    every fixture at the origin) has no spatial order, so it keeps file order and says so.
+    """
+    members = {}
     for fixture in fixtures:
         if fixture['class']:
-            result.setdefault(fixture['class'], []).append(fixture['name'])
+            members.setdefault(fixture['class'], []).append(fixture)
+    result = {}
+    for group, placed in members.items():
+        if len(placed) > 1 and len({_venue_x(fixture) for fixture in placed}) == 1:
+            LOGGER.warning(
+                'MVR group %s has no distinct X positions; its members keep file order', group
+            )
+        else:
+            placed = sorted(placed, key=_venue_x)
+        result[group] = [fixture['name'] for fixture in placed]
     return result
 
 
