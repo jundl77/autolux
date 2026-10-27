@@ -663,6 +663,101 @@ mod tests {
         assert_eq!(sequences, survivors, "only the oldest audio is dropped");
     }
 
+    /// Show start through the whole chain on a simulated clock: 14 s of delay-ring
+    /// silence (some dropped under backpressure), then music captured at
+    /// 1 s, whose light Starfire renders 14 s later. The receiver must render that
+    /// light at the music's first audible frame, not seconds after it.
+    #[test]
+    fn first_light_renders_with_the_first_audible_music_after_start_up() {
+        use crate::playout::Playout;
+        use crate::rx::MediaReceiver;
+        const SR: u64 = protocol::SAMPLE_RATE as u64;
+        const BLOCK: u64 = protocol::BLOCK_FRAMES as u64;
+        const DELAY: u64 = 14 * SR;
+        const ONSET: u64 = SR + DELAY;
+        const BLOCKS: u64 = (ONSET + 2 * SR) / BLOCK;
+        let start = frozen_clock();
+        let at_frame = |frame: u64| start + Duration::from_nanos(frame * 1_000_000_000 / SR);
+
+        let mut timeline = LightTimeline::new();
+        // Starfire sends dark at login, then the look for the onset when it is due.
+        for (at, value) in [(start, 0), (at_frame(ONSET), 200)] {
+            timeline.pending.push_back(TimedLight {
+                at,
+                channels: [value; protocol::DMX_CHANNELS],
+            });
+        }
+        let socket = FakeSocket::default();
+        let mut connection = Connection::with_stream(socket.clone(), frozen_clock);
+        let mut media = MediaSender::new(7);
+        let mut receiver = MediaReceiver::default();
+        let (mut playout, mut sender) = Playout::new();
+        let mut output = [0.0_f32; protocol::CHANNELS];
+        let (mut first_audible, mut first_light) = (None, None);
+
+        for index in 0..BLOCKS {
+            if index == 1_000 {
+                // A receiver stall during the silent fill: the oldest audio is dropped.
+                socket.0.borrow_mut().0 = 3_000;
+            }
+            let position = index * BLOCK;
+            let mut block = AudioBlock {
+                audio_frame_position: position,
+                frames: BLOCK as u16,
+                assembly_completed_at: at_frame(position + BLOCK),
+                ..Default::default()
+            };
+            for frame in 0..BLOCK {
+                if position + frame >= ONSET {
+                    let offset = (frame as usize) * protocol::CHANNELS;
+                    block.samples[offset..offset + protocol::CHANNELS].fill(0.5);
+                }
+            }
+            let light = timeline.state_at(block.assembly_completed_at);
+            media.send(&mut connection, &block, &light).unwrap();
+
+            let bytes = std::mem::take(&mut socket.0.borrow_mut().1);
+            for message in decoded(&bytes) {
+                let admitted = match message {
+                    Message::LightFrame(light) => {
+                        receiver.cache_light(light).unwrap();
+                        continue;
+                    }
+                    Message::AudioFrame(audio) => receiver.resolve_audio(audio).unwrap(),
+                    other => panic!("unexpected {other:?}"),
+                };
+                for block in admitted.blocks() {
+                    sender.enqueue(block).unwrap();
+                    playout.begin_callback();
+                    for _ in 0..BLOCK {
+                        let position = playout.frame(&mut output);
+                        if first_audible.is_none() && output[0] != 0.0 {
+                            first_audible = position;
+                        }
+                        while let Some(update) = sender.lighting.pop() {
+                            if first_light.is_none() && update.channels[0] != 0 {
+                                first_light = Some(update.audio_frame_position);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            receiver.audio_gaps_total > 0,
+            "backpressure drops were exercised"
+        );
+        let (audible, light) = (first_audible.unwrap(), first_light.unwrap());
+        assert!(
+            audible.abs_diff(ONSET) <= 1,
+            "music audible at frame {audible}, expected {ONSET}"
+        );
+        assert!(
+            audible.abs_diff(light) <= BLOCK,
+            "light renders at frame {light}, audio at {audible}"
+        );
+    }
+
     #[test]
     fn refused_sends_count_as_send_failures_but_queued_ones_do_not() {
         let socket = FakeSocket::default();
