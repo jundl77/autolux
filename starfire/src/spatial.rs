@@ -18,6 +18,12 @@ pub const MM_PER_METRE: f64 = 1000.0;
 /// group to the rank fallback.
 const MIRROR_TOLERANCE_MM: f64 = 300.0;
 
+/// How far a member may sit from the axis and still be its own partner. The partner tolerance
+/// would let any member within 150 mm of the axis claim itself, so an asymmetric group hugging
+/// the centreline would pair every member alone and never close; 50 mm keeps a centre fixture's
+/// few centimetres of plotting error and nothing more.
+const ON_AXIS_TOLERANCE_MM: f64 = 50.0;
+
 pub type Position = [f64; 3];
 
 impl wire::StageArea {
@@ -186,7 +192,8 @@ fn distance(a: Position, b: Position) -> f64 {
 }
 
 /// Pairs each member with the member nearest its reflection about X = `axis`, or None when a
-/// member has no unique partner within tolerance or the partnering is not mutual.
+/// member has no unique partner within tolerance or the partnering is not mutual. A member is
+/// its own partner only on the axis.
 /// Members are searched by X within the tolerance window: O(n log n) for spread members,
 /// O(n²) where many share one X, since each then scans them all.
 fn reflected_pairs(placed: &[Position], axis: f64) -> Option<Vec<(usize, usize)>> {
@@ -203,6 +210,9 @@ fn reflected_pairs(placed: &[Position], axis: f64) -> Option<Vec<(usize, usize)>
             .iter()
             .take_while(|&&i| placed[i][0] <= image[0] + MIRROR_TOLERANCE_MM)
         {
+            if candidate == member && (p[0] - axis).abs() > ON_AXIS_TOLERANCE_MM {
+                continue;
+            }
             let gap = distance(image, placed[candidate]);
             match best {
                 Some((nearest, _)) if gap > nearest => {}
@@ -401,6 +411,20 @@ mod tests {
             [("a1", "z2"), ("a2", "z1"), ("m1", "m3"), ("m2", "m2")]
         );
         assert_eq!(named(spatial.mirror("one").unwrap()), [("q1", "q2")]);
+    }
+
+    #[test]
+    fn members_near_but_off_the_axis_are_not_their_own_partners() {
+        // Each is within the partner tolerance of its own reflection, yet 2 m from the other's.
+        let spatial = spatial(
+            &[("a", at(100.0, 0.0)), ("b", at(-100.0, 2000.0))],
+            &[("pair", &["a", "b"])],
+        );
+        assert_eq!(spatial.warnings().len(), 1, "{:?}", spatial.warnings());
+        assert_eq!(named(spatial.mirror("pair").unwrap()), [("a", "b")]);
+        // On the axis within plotting error, a lone member still stands alone.
+        assert_eq!(reflected_pairs(&[at(50.0, 0.0)], 0.0), Some(vec![(0, 0)]));
+        assert_eq!(reflected_pairs(&[at(51.0, 0.0)], 0.0), None);
     }
 
     #[test]

@@ -551,7 +551,9 @@ mm"; position is the o row). The reflection keeps Y and Z, so two rows that inte
 still pair within their row. A partner must be unique, mutual and within 300 mm of the
 reflection; otherwise the group pairs by rank as before, with a warning. The 300 mm covers
 plotting error (centimetres) and stays below fixture spacing (half a metre and more); missing
-it only ever causes that fallback. Fixtures pair first; a mirrored pair's cells then pair in
+it only ever causes that fallback. A member is its own partner only within 50 mm of the axis;
+otherwise any member within 150 mm of it would claim itself and an asymmetric group hugging
+the centreline would never close. Fixtures pair first; a mirrored pair's cells then pair in
 reversed rank and a fixture on the axis mirrors its own cells by rank, without a warning. A
 group wholly on one side of X = 0 (or a rig that never crosses it) mirrors about its own X
 centre, also without a warning. Starfire derives the pairs once at rig load
