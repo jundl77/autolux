@@ -1,8 +1,8 @@
 """Exercise generated protocol dependencies through the published Python artifact."""
 
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 
 def test_wheel_built_from_sdist_contains_both_generated_protocols(tmp_path):
@@ -10,6 +10,7 @@ def test_wheel_built_from_sdist_contains_both_generated_protocols(tmp_path):
     built = subprocess.run(
         ['uv', 'build', '--out-dir', str(tmp_path)],
         cwd=root,
+        check=False,
         capture_output=True,
         text=True,
         encoding='utf-8',
@@ -22,16 +23,19 @@ def test_wheel_built_from_sdist_contains_both_generated_protocols(tmp_path):
             sys.executable,
             '-I',
             '-c',
-            'import sys; sys.path.insert(0, sys.argv[1]); '
-            'from proto.starfire import starfire_pb2 as starfire; '
-            'from proto.radius import radius_pb2 as radius; '
-            'renderer = starfire.Metrics(run_id=2**64-1); '
-            'transport = radius.Metrics(run_id=2**64-1); '
-            'assert starfire.Metrics.FromString(renderer.SerializeToString()).run_id == 2**64-1; '
-            'assert radius.Metrics.FromString(transport.SerializeToString()).run_id == 2**64-1',
+            (
+                'import sys; sys.path.insert(0, sys.argv[1]); '
+                'from proto.starfire import starfire_pb2 as starfire; '
+                'from proto.radius import radius_pb2 as radius; '
+                'renderer = starfire.Metrics(run_id=2**64-1); '
+                'transport = radius.Metrics(run_id=2**64-1); '
+                'assert starfire.Metrics.FromString(renderer.SerializeToString()).run_id == 2**64-1; '
+                'assert radius.Metrics.FromString(transport.SerializeToString()).run_id == 2**64-1'
+            ),
             str(wheel),
         ],
         cwd=tmp_path,
+        check=False,
         capture_output=True,
         text=True,
         timeout=15,

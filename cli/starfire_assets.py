@@ -6,8 +6,8 @@ from pathlib import Path
 from autolux.lib.engine.static_mode import UV_ATTRIBUTE, StaticRig
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import load_rig
-from autolux.lighting.gdtf_compile import compile_mode
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
+from autolux.lighting.gdtf_compile import compile_mode
 from autolux.lighting.palettes import palette_table
 from cli.starfire_protocol import (
     COMMAND_ID_MAX_ENCODED_BYTES,

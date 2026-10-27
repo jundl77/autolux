@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 import pytest
+
 from cli import production
 from cli.remote_runtime import ReceiverSpec
 
@@ -160,12 +161,13 @@ def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypa
 async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     tmp_path, monkeypatch, failure, checking
 ):
-    from cli import main, remote_runtime, windows_runtime, starfire_runtime, health_monitor
+    import json
+    from types import SimpleNamespace
+
     from autolux.lib import section_chain
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lighting.autoloop_catalogue import required_autoloops
-    from types import SimpleNamespace
-    import json
+    from cli import health_monitor, main, remote_runtime, starfire_runtime, windows_runtime
 
     events = []
     parser = argparse.ArgumentParser()
@@ -186,7 +188,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     monkeypatch.setattr(production, 'ROOT', tmp_path)
     (tmp_path / '.live').mkdir()
     monkeypatch.setattr(production, 'transport_settings', lambda *_: [tx, rx])
-    monkeypatch.setattr(production, 'running_processes', lambda: [])
+    monkeypatch.setattr(production, 'running_processes', list)
     monkeypatch.setattr(production, 'resolve_devices', lambda *_: 1)
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda: True)
 

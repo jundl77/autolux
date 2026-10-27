@@ -1,5 +1,6 @@
 import argparse
 import http.client
+import itertools
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
 
+LOGGER = logging.getLogger(__name__)
 TITLE = 'Autolux'
 TIMELINE_WINDOW_SEC = 30.0
 TIMELINE_LEAD_SEC = 0.5
@@ -257,7 +259,7 @@ def _bar_grid(snapshot: dict, origin: float) -> tuple:
         return [], []
     delay = snapshot.get('look_ahead_sec', 0.0)
     first_bar = state.get('first_bar') or 0
-    spans = [b - a for a, b in zip(edges, edges[1:])]
+    spans = [b - a for a, b in itertools.pairwise(edges)]
     bar_sec = state.get('bar_sec') or median(spans)
 
     shapes, annotations = [], []
@@ -265,46 +267,46 @@ def _bar_grid(snapshot: dict, origin: float) -> tuple:
         at = start + delay - origin
         span = spans[index]
         shapes.append(
-            dict(
-                type='line',
-                xref='x',
-                yref='paper',
-                x0=at,
-                x1=at,
-                y0=0.0,
-                y1=0.5,
-                line=dict(color=DOWNBEAT_COLOR, width=1.4),
-            )
+            {
+                'type': 'line',
+                'xref': 'x',
+                'yref': 'paper',
+                'x0': at,
+                'x1': at,
+                'y0': 0.0,
+                'y1': 0.5,
+                'line': {'color': DOWNBEAT_COLOR, 'width': 1.4},
+            }
         )
         if span <= bar_sec * BAR_SPAN_TOLERANCE:
             for beat in range(1, BEATS_PER_BAR):
                 tick = at + span * beat / BEATS_PER_BAR
                 shapes.append(
-                    dict(
-                        type='line',
-                        xref='x',
-                        yref='paper',
-                        x0=tick,
-                        x1=tick,
-                        y0=0.06,
-                        y1=0.20,
-                        line=dict(color=BEAT_TICK_COLOR, width=0.8),
-                    )
+                    {
+                        'type': 'line',
+                        'xref': 'x',
+                        'yref': 'paper',
+                        'x0': tick,
+                        'x1': tick,
+                        'y0': 0.06,
+                        'y1': 0.20,
+                        'line': {'color': BEAT_TICK_COLOR, 'width': 0.8},
+                    }
                 )
         bar = first_bar + index
         if bar % BAR_LABEL_EVERY == 0:
             annotations.append(
-                dict(
-                    x=at,
-                    y=0.50,
-                    xref='x',
-                    yref='paper',
-                    text=str(bar),
-                    showarrow=False,
-                    xanchor='left',
-                    yanchor='bottom',
-                    font=dict(color=DOWNBEAT_COLOR, size=9, family='monospace'),
-                )
+                {
+                    'x': at,
+                    'y': 0.50,
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'text': str(bar),
+                    'showarrow': False,
+                    'xanchor': 'left',
+                    'yanchor': 'bottom',
+                    'font': {'color': DOWNBEAT_COLOR, 'size': 9, 'family': 'monospace'},
+                }
             )
     return shapes, annotations
 
@@ -333,30 +335,30 @@ def _build_timeline(snapshot: dict) -> go.Figure:
         cfg = _intent_config(entry['intent'])
         color = cfg['primary']
         shapes.append(
-            dict(
-                type='rect',
-                xref='x',
-                yref='paper',
-                x0=t_start,
-                x1=t_end,
-                y0=0.52,
-                y1=0.96,
-                fillcolor=color,
-                opacity=0.80,
-                line_width=0,
-            )
+            {
+                'type': 'rect',
+                'xref': 'x',
+                'yref': 'paper',
+                'x0': t_start,
+                'x1': t_end,
+                'y0': 0.52,
+                'y1': 0.96,
+                'fillcolor': color,
+                'opacity': 0.80,
+                'line_width': 0,
+            }
         )
         if t_end - t_start > 1.5:
             annotations.append(
-                dict(
-                    x=(t_start + t_end) / 2,
-                    y=0.74,
-                    xref='x',
-                    yref='paper',
-                    text=cfg['label'],
-                    showarrow=False,
-                    font=dict(color='rgba(255,255,255,0.85)', size=10, family='monospace'),
-                )
+                {
+                    'x': (t_start + t_end) / 2,
+                    'y': 0.74,
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'text': cfg['label'],
+                    'showarrow': False,
+                    'font': {'color': 'rgba(255,255,255,0.85)', 'size': 10, 'family': 'monospace'},
+                }
             )
 
     if origin is not None:
@@ -367,28 +369,28 @@ def _build_timeline(snapshot: dict) -> go.Figure:
             color = '#3fb950' if is_start else '#f85149'
             label = '▶ START' if is_start else '■ STOP'
             shapes.append(
-                dict(
-                    type='line',
-                    xref='x',
-                    yref='paper',
-                    x0=t,
-                    x1=t,
-                    y0=0,
-                    y1=1,
-                    line=dict(color=color, width=1.5, dash='dash'),
-                )
+                {
+                    'type': 'line',
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'x0': t,
+                    'x1': t,
+                    'y0': 0,
+                    'y1': 1,
+                    'line': {'color': color, 'width': 1.5, 'dash': 'dash'},
+                }
             )
             annotations.append(
-                dict(
-                    x=t,
-                    y=0.04,
-                    xref='x',
-                    yref='paper',
-                    text=label,
-                    showarrow=False,
-                    font=dict(color=color, size=9, family='monospace'),
-                    xanchor='left' if is_start else 'right',
-                )
+                {
+                    'x': t,
+                    'y': 0.04,
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'text': label,
+                    'showarrow': False,
+                    'font': {'color': color, 'size': 9, 'family': 'monospace'},
+                    'xanchor': 'left' if is_start else 'right',
+                }
             )
 
     # Beats are deliberately NOT drawn here: a figure push arrives most of a
@@ -398,21 +400,21 @@ def _build_timeline(snapshot: dict) -> go.Figure:
     fig.update_layout(
         shapes=shapes,
         annotations=annotations,
-        xaxis=dict(
-            range=[x0, x1],
-            dtick=5.0,
-            tickformat='.0f',
-            ticksuffix='s',
-            gridcolor='#1a2332',
-            color='#6e7681',
-            showline=False,
-            minor=dict(dtick=1.0, showgrid=True, gridcolor='#151e2b', gridwidth=0.8),
-        ),
-        yaxis=dict(range=[0, 1], showticklabels=False, showgrid=False),
+        xaxis={
+            'range': [x0, x1],
+            'dtick': 5.0,
+            'tickformat': '.0f',
+            'ticksuffix': 's',
+            'gridcolor': '#1a2332',
+            'color': '#6e7681',
+            'showline': False,
+            'minor': {'dtick': 1.0, 'showgrid': True, 'gridcolor': '#151e2b', 'gridwidth': 0.8},
+        },
+        yaxis={'range': [0, 1], 'showticklabels': False, 'showgrid': False},
         plot_bgcolor=DARK_BG,
         paper_bgcolor=DARK_BG,
         height=175,
-        margin=dict(l=TIMELINE_MARGIN_L_PX, r=TIMELINE_MARGIN_R_PX, t=6, b=36),
+        margin={'l': TIMELINE_MARGIN_L_PX, 'r': TIMELINE_MARGIN_R_PX, 't': 6, 'b': 36},
         uirevision='timeline',
         showlegend=False,
     )
@@ -540,7 +542,7 @@ def render_window(history: list, now: float) -> tuple[float | None, int]:
         return None, 0
     recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
     span = frames = missed = 0.0
-    for before, sample in zip(recent, recent[1:]):
+    for before, sample in itertools.pairwise(recent):
         interval = sample['at'] - before['at']
         rendered, skipped = sample.get(RENDERED_RATE), sample.get(MISSED_RATE)
         if interval > 0 and finite(rendered) and finite(skipped):
@@ -1074,14 +1076,18 @@ STATIC_PRESETS = {
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
 # Targets and UV come from the rig the show published; a rig without UV fixtures
 # greys both UV chips rather than offering commands the show would refuse.
-STATIC_TARGETS_JS = '''function(state) {
-    const all = %s;
+STATIC_TARGETS_JS = (
+    '''function(state) {
+    const all = '''
+    + json.dumps(ALL_FIXTURES)
+    + ''';
     const ready = !!state && !!state.mode && !!state.static;
     const statics = ready ? state.static : {targets: [all], blacklight: false};
     const options = statics.targets.map((target) =>
         ({label: target === all ? 'All' : target, value: target}));
     return [options, !statics.blacklight, !statics.blacklight];
-}''' % json.dumps(ALL_FIXTURES)
+}'''
+)
 STATIC_BUTTONS = {
     'static-blacklight': 'blacklight',
     'static-strobe': 'strobe',
@@ -2128,12 +2134,12 @@ class SnapshotPoller:
                 connection.request('GET', SNAPSHOT_PATH)
                 self._last = json.loads(connection.getresponse().read())
                 if not self._answering:
-                    logging.info('[viewer] the show is answering again')
+                    LOGGER.info('[viewer] the show is answering again')
                     self._answering = True
             except (OSError, http.client.HTTPException, ValueError) as error:
                 self._connection = None
                 if self._answering:
-                    logging.warning(
+                    LOGGER.warning(
                         f'[viewer] the show stopped answering on '
                         f'{self.url} ({error!r}) — holding the last frame'
                     )
@@ -2756,7 +2762,7 @@ def run_app(
     configure_logging()
     app = build_app(snapshot_source, fixture_store=fixture_store)
     with advertise_dashboard_mdns(port):
-        logging.info(
+        LOGGER.info(
             '[dashboard] http://%s:%d (listening on %s)',
             DASHBOARD_MDNS_HOSTNAME.rstrip('.'),
             port,

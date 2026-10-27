@@ -4,7 +4,7 @@ import os
 import sys
 import time
 
-from autolux.lib.audio_config import SAMPLE_RATE, BUFFER_SIZE
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 
 
@@ -119,7 +119,7 @@ def _open_monitor(output_device_index: int, delay_sec: float):
 async def _run_file_paced(args):
     from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.simulate.fake_audio_client import FileAudioClient
-    from autolux.simulate.runner import build_simulation, PLAYBACK_DELAY_SEC
+    from autolux.simulate.runner import PLAYBACK_DELAY_SEC, build_simulation
 
     audio_client = FileAudioClient(SAMPLE_RATE, BUFFER_SIZE, args.audio)
     event_buffer = EventBuffer(window_sec=float('inf'), look_ahead_sec=PLAYBACK_DELAY_SEC)
@@ -128,22 +128,16 @@ async def _run_file_paced(args):
         speaker, monitor = _open_monitor(args.output_device_index, PLAYBACK_DELAY_SEC)
     components, command_queue = build_simulation(audio_client, event_buffer, threaded=True)
 
-    try:
-        import librosa
-
-        duration_sec = librosa.get_duration(path=args.audio)
-    except Exception:
-        duration_sec = float('inf')
-
     event_buffer.start()
 
     try:
+        audio_client.start_streams()
         await _with_viewer(
             event_buffer,
             args.port,
             lambda: _run_pipeline(
                 components,
-                duration_sec,
+                audio_client.duration_sec,
                 event_buffer,
                 command_queue,
                 True,
@@ -158,9 +152,9 @@ async def _run_file_paced(args):
 
 
 async def run_realtime(args):
-    from autolux.lib.engine.event_buffer import EventBuffer
     from autolux.lib.clients.pyaudio_client import PyAudioClient
-    from autolux.simulate.runner import build_simulation, PLAYBACK_DELAY_SEC
+    from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.simulate.runner import PLAYBACK_DELAY_SEC, build_simulation
 
     audio_client = PyAudioClient(
         sample_rate=SAMPLE_RATE,
