@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from autolux.lighting import mvr
+from autolux.lighting.gdtf_compile import compile_mode
 from cli import starfire_assets as assets
 from cli import starfire_protocol as protocol
 from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_RIG, ROOT
@@ -56,7 +57,7 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.rig.groups[0].group_id == 'movers'
     assert login.rig.groups[0].fixture_ids == ['front']
     [profile] = login.rig.profiles
-    assert profile.gdtf_xml == GDTF_XML
+    assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
     script = login.autoloops[0]
     assert script.autoloop_id == 'atmospheric/blue'
@@ -77,7 +78,7 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
     ]
     for profile in login.rig.profiles:
         spec, mode = profile.profile_id.split('#')
-        assert profile.gdtf_xml == mvr.gdtf_description(scene, spec)
+        assert profile.mode == compile_mode(mvr.gdtf_description(scene, spec), mode)
         assert profile.dmx_mode == mode
     assert {script.autoloop_id for script in login.autoloops} == {
         path.relative_to(DEFAULT_AUTOLOOPS).with_suffix('').as_posix()
@@ -246,3 +247,14 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
     assert rebuilt.read_bytes() == shipped.read_bytes()
     exported = assets.rig_definition(rebuilt).SerializeToString()
     assert exported == (folder / f'{name}.rig.pb').read_bytes()
+
+
+def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():
+    rig = assets.rig_definition(DEFAULT_RIG)
+    [bar] = [fixture for fixture in rig.fixtures if fixture.fixture_id == 'zq06017']
+    assert (bar.universe, bar.address) == (0, 97)
+    assert bar.profile_id.endswith('#24Channel')
+    assert [(cell.geometry, list(cell.offsets)) for cell in bar.cells] == [
+        (f'Beam Segment {n}', [3 * n - 2, 3 * n - 1, 3 * n]) for n in range(1, 9)
+    ]
+    assert {group.group_id: list(group.fixture_ids) for group in rig.groups}['strip'] == ['zq06017']

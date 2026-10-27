@@ -7,40 +7,110 @@ use starfire::model::{AttributeValue, Command, FixtureState, Rgb, Transition};
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
-fn description(channels: &str) -> String {
-    format!(
-        r#"<GDTF DataVersion="1.2"><FixtureType ShortName="Test" LongName="Test" Description="Test fixture" Name="Test" Manufacturer="Autolux" FixtureTypeID="85176e68-73d4-4217-9bfd-7791b08b01ef">
-      <AttributeDefinitions><FeatureGroups><FeatureGroup Name="Control" Pretty="Control"><Feature Name="Control"/></FeatureGroup></FeatureGroups><Attributes>
-      <Attribute Name="Fog1" Pretty="Test" Feature="Control.Control" PhysicalUnit="None"/><Attribute Name="Gobo1" Pretty="Test" Feature="Control.Control" PhysicalUnit="None"/>
-      <Attribute Name="Zoom" Pretty="Test" Feature="Control.Control" PhysicalUnit="None"/><Attribute Name="Mode" Pretty="Test" Feature="Control.Control" PhysicalUnit="None"/>
-      <Attribute Name="Dimmer" Pretty="Test" Feature="Control.Control" PhysicalUnit="None"/><Attribute Name="Pan" Pretty="Test" Feature="Control.Control" PhysicalUnit="None"/>
-      <Attribute Name="ColorAdd_R" Pretty="Red" Feature="Control.Control" PhysicalUnit="Percent"/>
-      <Attribute Name="ColorAdd_G" Pretty="Green" Feature="Control.Control" PhysicalUnit="Percent"/>
-      <Attribute Name="ColorAdd_B" Pretty="Blue" Feature="Control.Control" PhysicalUnit="Percent"/>
-      <Attribute Name="ColorAdd_W" Pretty="White" Feature="Control.Control" PhysicalUnit="Percent"/>
-      <Attribute Name="ColorAdd_A" Pretty="Amber" Feature="Control.Control" PhysicalUnit="Percent"/>
-      <Attribute Name="ColorSub_UV" Pretty="UV filter" Feature="Control.Control" PhysicalUnit="Percent"/>
-      </Attributes></AttributeDefinitions>
-      <Geometries><Geometry Position="{{1,0,0,0}}{{0,1,0,0}}{{0,0,1,0}}{{0,0,0,1}}" Name="Base"><Geometry Position="{{1,0,0,0}}{{0,1,0,0}}{{0,0,1,0}}{{0,0,0,1}}" Name="Head1"/><Geometry Position="{{1,0,0,0}}{{0,1,0,0}}{{0,0,1,0}}{{0,0,0,1}}" Name="Head2"/></Geometry></Geometries>
-      <DMXModes><DMXMode Name="Control" Geometry="Base"><DMXChannels>{channels}</DMXChannels></DMXMode></DMXModes>
-    </FixtureType></GDTF>"#
+// Modes are built as Autolux's GDTF compiler emits them; parsing is tested in Python.
+const ROOT_GEOMETRY: &str = "Base";
+
+fn function(attribute: &str, name: &str) -> wire::ChannelFunction {
+    wire::ChannelFunction {
+        path: name.into(),
+        attribute: attribute.into(),
+        physical_from: 0.0,
+        physical_to: 100.0,
+        ..Default::default()
+    }
+}
+
+fn starting(mut function: wire::ChannelFunction, dmx_from: u32) -> wire::ChannelFunction {
+    function.dmx_from = dmx_from;
+    function
+}
+
+fn mastered(
+    mut function: wire::ChannelFunction,
+    channel: u32,
+    master_function: Option<u32>,
+    range: (u32, u32),
+) -> wire::ChannelFunction {
+    function.mode_master = Some(wire::ModeMaster {
+        channel,
+        function: master_function,
+        dmx_from: range.0,
+        dmx_to: range.1,
+    });
+    function
+}
+
+fn set(name: &str, dmx_from: u32, dmx_to: u32, physical: (f64, f64)) -> wire::ChannelSet {
+    wire::ChannelSet {
+        name: name.into(),
+        dmx_from,
+        dmx_to,
+        physical_from: physical.0,
+        physical_to: physical.1,
+        wheel_slot_colour: None,
+    }
+}
+
+/// One DMX channel whose first logical channel is `logical`; function paths and geometry
+/// qualification follow GDTF naming (`Geometry_Logical.Logical.Function`).
+fn channel_with(
+    logical: &[(&str, Vec<wire::ChannelFunction>)],
+    geometry: &str,
+    offsets: &[u32],
+) -> wire::DmxChannel {
+    let channel_name = format!("{geometry}_{}", logical[0].0);
+    let functions = logical
+        .iter()
+        .flat_map(|(attribute, functions)| {
+            let channel_name = &channel_name;
+            functions.iter().cloned().map(move |mut function| {
+                function.path = format!("{channel_name}.{attribute}.{}", function.path);
+                function.qualified_attribute = format!("{geometry}.{}", function.attribute);
+                function
+            })
+        })
+        .collect();
+    let mut geometry_path = vec![ROOT_GEOMETRY.to_owned()];
+    if geometry != ROOT_GEOMETRY {
+        geometry_path.push(geometry.into());
+    }
+    wire::DmxChannel {
+        geometry_path,
+        offsets: offsets.to_vec(),
+        default: 0,
+        functions,
+    }
+}
+
+fn channel(
+    attribute: &str,
+    geometry: &str,
+    offsets: &[u32],
+    functions: Vec<wire::ChannelFunction>,
+) -> wire::DmxChannel {
+    channel_with(&[(attribute, functions)], geometry, offsets)
+}
+
+fn plain(attribute: &str, geometry: &str, offset: u32) -> wire::DmxChannel {
+    channel(
+        attribute,
+        geometry,
+        &[offset],
+        vec![function(attribute, "Control")],
     )
 }
 
-fn channel(attribute: &str, geometry: &str, offsets: &str, functions: &str) -> String {
-    format!(
-        r#"<DMXChannel Offset="{offsets}" Highlight="None" Geometry="{geometry}"><LogicalChannel Attribute="{attribute}">{functions}</LogicalChannel></DMXChannel>"#
-    )
+fn defaulted(mut channel: wire::DmxChannel, default: u32) -> wire::DmxChannel {
+    channel.default = default;
+    channel
 }
 
-fn function(attribute: &str, extra: &str) -> String {
-    format!(
-        r#"<ChannelFunction Name="Control" Attribute="{attribute}" PhysicalFrom="0" PhysicalTo="100" {extra}/>"#
-    )
+fn mode(channels: Vec<wire::DmxChannel>) -> wire::DmxMode {
+    wire::DmxMode { channels }
 }
 
-fn profile(channels: &str) -> GdtfProfile {
-    GdtfProfile::from_xml(&description(channels), "Control").unwrap()
+fn profile(channels: Vec<wire::DmxChannel>) -> GdtfProfile {
+    GdtfProfile::from_wire(&mode(channels)).unwrap()
 }
 
 fn values(items: &[(&str, AttributeValue)]) -> FixtureState {
@@ -62,12 +132,17 @@ fn encode(profile: &GdtfProfile, state: &FixtureState) -> Vec<u8> {
 #[test]
 fn physical_values_preserve_all_channel_resolutions_and_arbitrary_offsets() {
     for (offsets, expected) in [
-        ("1", vec![128]),
-        ("2,1", vec![0, 128]),
-        ("3,1,2", vec![0, 0, 128]),
-        ("4,1,3,2", vec![0, 0, 0, 128]),
+        (vec![1], vec![128]),
+        (vec![2, 1], vec![0, 128]),
+        (vec![3, 1, 2], vec![0, 0, 128]),
+        (vec![4, 1, 3, 2], vec![0, 0, 0, 128]),
     ] {
-        let profile = profile(&channel("Fog1", "Base", offsets, &function("Fog1", "")));
+        let profile = profile(vec![channel(
+            "Fog1",
+            "Base",
+            &offsets,
+            vec![function("Fog1", "Control")],
+        )]);
         assert_eq!(
             encode(&profile, &values(&[("Fog1", AttributeValue::Number(50.0))])),
             expected
@@ -83,73 +158,52 @@ fn physical_values_preserve_all_channel_resolutions_and_arbitrary_offsets() {
 }
 
 #[test]
-fn defaults_use_standard_byte_mirroring_and_byte_shifting() {
-    for (default, expected) in [("18/1", vec![18, 18]), ("18/1s", vec![18, 0])] {
-        let profile = profile(&channel(
-            "Fog1",
-            "Base",
-            "1,2",
-            &function("Fog1", &format!(r#"Default="{default}""#)),
-        ));
+fn compiled_defaults_are_written_at_channel_resolution() {
+    for (default, expected) in [(0x1212, [18, 18]), (0x1200, [18, 0])] {
+        let profile = profile(vec![defaulted(
+            channel("Fog1", "Base", &[1, 2], vec![function("Fog1", "Control")]),
+            default,
+        )]);
         assert_eq!(encode(&profile, &FixtureState::default()), expected);
     }
 }
 
-#[test]
-fn optional_highlight_defaults_and_oversized_dmx_literals_are_handled() {
-    let channels = channel("Fog1", "Base", "1", &function("Fog1", ""));
-    let omitted = channels.replace(" Highlight=\"None\"", "");
-    assert_eq!(
-        encode(
-            &profile(&omitted),
-            &values(&[("Fog1", AttributeValue::Number(50.0))])
-        ),
-        [128]
-    );
-    for invalid in ["256/1", "65536/2", "0/8"] {
-        let channels = channel(
-            "Fog1",
-            "Base",
-            "1",
-            &function("Fog1", &format!(r#"Default="{invalid}""#)),
-        );
-        assert!(
-            GdtfProfile::from_xml(&description(&channels), "Control").is_err(),
-            "{invalid}"
-        );
-    }
-    let nested = format!("{}{}", "<x>".repeat(129), "</x>".repeat(129));
-    assert!(
-        GdtfProfile::from_xml(&nested, "Control")
-            .unwrap_err()
-            .to_string()
-            .contains("nesting")
-    );
+fn rig_with(mode: wire::DmxMode, fixture: wire::Fixture) -> FixtureRig {
+    FixtureRig::from_wire(&wire::RigDefinition {
+        fixtures: vec![wire::Fixture {
+            profile_id: "test".into(),
+            address: 1,
+            ..fixture
+        }],
+        profiles: vec![wire::FixtureProfile {
+            profile_id: "test".into(),
+            dmx_mode: "Control".into(),
+            mode: Some(mode),
+        }],
+        ..Default::default()
+    })
+    .unwrap()
 }
 
 #[test]
 fn physical_pan_values_obey_patch_calibration() {
-    let xml = description(&channel("Pan", "Base", "1,2", &function("Pan", "")));
-    let rig = FixtureRig::from_wire(&wire::RigDefinition {
-        fixtures: vec![wire::Fixture {
+    let rig = rig_with(
+        mode(vec![channel(
+            "Pan",
+            "Base",
+            &[1, 2],
+            vec![function("Pan", "Control")],
+        )]),
+        wire::Fixture {
             fixture_id: "mover".into(),
-            profile_id: "test".into(),
-            address: 1,
             pan: Some(wire::fixture::MovementRange {
                 minimum: Some(0.25),
                 maximum: Some(0.75),
                 inverted: true,
             }),
             ..Default::default()
-        }],
-        profiles: vec![wire::FixtureProfile {
-            profile_id: "test".into(),
-            gdtf_xml: xml,
-            dmx_mode: "Control".into(),
-        }],
-        ..Default::default()
-    })
-    .unwrap();
+        },
+    );
     let mut states = rig.empty_states();
     states.insert(
         "mover".into(),
@@ -165,9 +219,7 @@ fn physical_pan_values_obey_patch_calibration() {
 
 #[test]
 fn geometry_qualification_keeps_cells_independent_and_rejects_ambiguous_names() {
-    let channels = channel("Fog1", "Head1", "1", &function("Fog1", ""))
-        + &channel("Fog1", "Head2", "3", &function("Fog1", ""));
-    let profile = profile(&channels);
+    let profile = profile(vec![plain("Fog1", "Head1", 1), plain("Fog1", "Head2", 3)]);
     let state = values(&[
         ("Head1.Fog1", AttributeValue::Number(100.0)),
         ("Head2_Fog1.Fog1.Control", AttributeValue::Number(50.0)),
@@ -182,12 +234,10 @@ fn geometry_qualification_keeps_cells_independent_and_rejects_ambiguous_names() 
 
 #[test]
 fn physical_ranges_can_be_inverted_and_must_not_be_exceeded() {
-    let profile = profile(&channel(
-        "Zoom",
-        "Base",
-        "1,2",
-        r#"<ChannelFunction Name="Zoom" Attribute="Zoom" PhysicalFrom="60" PhysicalTo="10"/>"#,
-    ));
+    let mut zoom = function("Zoom", "Zoom");
+    zoom.physical_from = 60.0;
+    zoom.physical_to = 10.0;
+    let profile = profile(vec![channel("Zoom", "Base", &[1, 2], vec![zoom])]);
     assert_eq!(
         encode(&profile, &values(&[("Zoom", AttributeValue::Number(60.0))])),
         [0, 0]
@@ -209,12 +259,13 @@ fn physical_ranges_can_be_inverted_and_must_not_be_exceeded() {
 
 #[test]
 fn channel_sets_are_explicit_presets_and_do_not_crossfade_through_other_gobos() {
-    let profile = profile(&channel(
-        "Gobo1",
-        "Base",
-        "1",
-        r#"<ChannelFunction Name="Gobo" Attribute="Gobo1" PhysicalFrom="0" PhysicalTo="1"><ChannelSet Name="Open" DMXFrom="0/1"/><ChannelSet Name="Stars" DMXFrom="128/1"/></ChannelFunction>"#,
-    ));
+    let mut gobo = function("Gobo1", "Gobo");
+    gobo.physical_to = 1.0;
+    gobo.sets = vec![
+        set("Open", 0, 127, (0.0, 1.0)),
+        set("Stars", 128, 255, (0.0, 1.0)),
+    ];
+    let profile = profile(vec![channel("Gobo1", "Base", &[1], vec![gobo])]);
     let open = AttributeValue::Preset("Open".into());
     let stars = AttributeValue::Preset("Stars".into());
     assert_eq!(
@@ -241,14 +292,10 @@ fn mode_master_is_resolved_before_dependent_channels_and_inactive_values_fail() 
     let dependent = channel(
         "Fog1",
         "Base",
-        "1",
-        &function(
-            "Fog1",
-            r#"ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1""#,
-        ),
+        &[1],
+        vec![mastered(function("Fog1", "Control"), 1, None, (128, 255))],
     );
-    let master = channel("Mode", "Base", "2", &function("Mode", ""));
-    let profile = profile(&(dependent + &master));
+    let profile = profile(vec![dependent, plain("Mode", "Base", 2)]);
     let active = values(&[
         ("Mode", AttributeValue::Number(100.0)),
         ("Fog1", AttributeValue::Number(50.0)),
@@ -266,22 +313,26 @@ fn mode_master_is_resolved_before_dependent_channels_and_inactive_values_fail() 
 
 #[test]
 fn function_ranges_follow_numeric_order_at_every_resolution_without_changing_initial_function() {
-    for bytes in 1..=4 {
-        let split = 1_u64 << (8 * bytes - 1);
-        let offsets = (1..=bytes)
-            .map(|value| value.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        let functions = format!(
-            r#"
-          <ChannelFunction Name="High" Attribute="Zoom" DMXFrom="{split}/{bytes}" Default="{split}/{bytes}" PhysicalFrom="0" PhysicalTo="100"/>
-          <ChannelFunction Name="Low" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/>"#
-        );
-        let profile = profile(&channel("Fog1", "Base", &offsets, &functions));
-        let mut initial = vec![0; bytes];
+    for bytes in 1..=4_u32 {
+        let split = 1_u32 << (8 * bytes - 1);
+        let offsets: Vec<u32> = (1..=bytes).collect();
+        let profile = profile(vec![defaulted(
+            channel(
+                "Fog1",
+                "Base",
+                &offsets,
+                vec![
+                    starting(function("Zoom", "High"), split),
+                    function("Fog1", "Low"),
+                ],
+            ),
+            split,
+        )]);
+        let width = bytes as usize;
+        let mut initial = vec![0; width];
         initial[0] = 128;
         assert_eq!(encode(&profile, &FixtureState::default()), initial);
-        let mut expected = vec![255; bytes];
+        let mut expected = vec![255; width];
         expected[0] = 127;
         assert_eq!(
             encode(
@@ -295,18 +346,21 @@ fn function_ranges_follow_numeric_order_at_every_resolution_without_changing_ini
                 &profile,
                 &values(&[("Zoom", AttributeValue::Number(100.0))])
             ),
-            vec![255; bytes]
+            vec![255; width]
         );
     }
 }
 
 #[test]
 fn function_bounds_cross_logical_channels_on_the_same_physical_channel() {
-    let channels = r#"<DMXChannel Offset="1" Geometry="Base">
-      <LogicalChannel Attribute="Zoom"><ChannelFunction Name="High" Attribute="Zoom" DMXFrom="128/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel>
-      <LogicalChannel Attribute="Fog1"><ChannelFunction Name="Low" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel>
-    </DMXChannel>"#;
-    let profile = profile(channels);
+    let profile = profile(vec![channel_with(
+        &[
+            ("Zoom", vec![starting(function("Zoom", "High"), 128)]),
+            ("Fog1", vec![function("Fog1", "Low")]),
+        ],
+        "Base",
+        &[1],
+    )]);
     assert_eq!(
         encode(
             &profile,
@@ -325,13 +379,14 @@ fn repeated_function_starts_are_valid_in_mutually_exclusive_modes() {
     let dependent = channel(
         "Fog1",
         "Base",
-        "1",
-        r#"
-      <ChannelFunction Name="LowMode" Attribute="Fog1" DMXFrom="0/1" ModeMaster="Base_Mode" ModeFrom="0/1" ModeTo="127/1" PhysicalFrom="0" PhysicalTo="100"/>
-      <ChannelFunction Name="HighMode" Attribute="Fog1" DMXFrom="0/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1" PhysicalFrom="0" PhysicalTo="100"/>
-      <ChannelFunction Name="Zoom" Attribute="Zoom" DMXFrom="128/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1" PhysicalFrom="0" PhysicalTo="100"/>"#,
+        &[1],
+        vec![
+            mastered(function("Fog1", "LowMode"), 1, None, (0, 127)),
+            mastered(function("Fog1", "HighMode"), 1, None, (128, 255)),
+            mastered(starting(function("Zoom", "Zoom"), 128), 1, None, (128, 255)),
+        ],
     );
-    let profile = profile(&(dependent + &channel("Mode", "Base", "2", &function("Mode", ""))));
+    let profile = profile(vec![dependent, plain("Mode", "Base", 2)]);
     for (mode, expected) in [(0.0, [128, 0]), (100.0, [64, 255])] {
         assert_eq!(
             encode(
@@ -351,12 +406,13 @@ fn unconditional_function_range_expands_when_the_next_function_is_inactive() {
     let dependent = channel(
         "Fog1",
         "Base",
-        "1",
-        r#"
-      <ChannelFunction Name="Fog" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/>
-      <ChannelFunction Name="Zoom" Attribute="Zoom" DMXFrom="128/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1" PhysicalFrom="0" PhysicalTo="100"/>"#,
+        &[1],
+        vec![
+            function("Fog1", "Fog"),
+            mastered(starting(function("Zoom", "Zoom"), 128), 1, None, (128, 255)),
+        ],
     );
-    let profile = profile(&(dependent + &channel("Mode", "Base", "2", &function("Mode", ""))));
+    let profile = profile(vec![dependent, plain("Mode", "Base", 2)]);
     for (mode, expected) in [(0.0, [128, 0]), (100.0, [64, 255])] {
         assert_eq!(
             encode(
@@ -376,21 +432,19 @@ fn a_function_mode_master_requires_its_own_dmx_range_to_be_active() {
     let dependent = channel(
         "Fog1",
         "Base",
-        "1",
-        &function(
-            "Fog1",
-            r#"ModeMaster="Base_Mode.Mode.Enabled" ModeFrom="0/1" ModeTo="255/1""#,
-        ),
+        &[1],
+        vec![mastered(function("Fog1", "Control"), 1, Some(1), (0, 255))],
     );
     let master = channel(
         "Mode",
         "Base",
-        "2",
-        r#"
-      <ChannelFunction Name="Idle" Attribute="Mode" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100"/>
-      <ChannelFunction Name="Enabled" Attribute="Mode" DMXFrom="128/1" PhysicalFrom="0" PhysicalTo="100"/>"#,
+        &[2],
+        vec![
+            function("Mode", "Idle"),
+            starting(function("Mode", "Enabled"), 128),
+        ],
     );
-    let profile = profile(&(dependent + &master));
+    let profile = profile(vec![dependent, master]);
     let fog = ("Fog1", AttributeValue::Number(50.0));
     assert!(
         profile
@@ -417,22 +471,24 @@ fn a_function_mode_master_requires_its_own_mode_condition_to_be_active() {
     let dependent = channel(
         "Fog1",
         "Base",
-        "1",
-        &function(
-            "Fog1",
-            r#"ModeMaster="Base_Mode.Mode.Enabled" ModeFrom="0/1" ModeTo="255/1""#,
-        ),
+        &[1],
+        vec![mastered(function("Fog1", "Control"), 1, Some(1), (0, 255))],
     );
+    let unit = |name| {
+        let mut function = function("Mode", name);
+        function.physical_to = 1.0;
+        function
+    };
     let master = channel(
         "Mode",
         "Base",
-        "2",
-        r#"
-      <ChannelFunction Name="Idle" Attribute="Mode" DMXFrom="0/1" ModeMaster="Head1_Mode" ModeFrom="0/1" ModeTo="127/1"/>
-      <ChannelFunction Name="Enabled" Attribute="Mode" DMXFrom="0/1" ModeMaster="Head1_Mode" ModeFrom="128/1" ModeTo="255/1"/>"#,
+        &[2],
+        vec![
+            mastered(unit("Idle"), 2, None, (0, 127)),
+            mastered(unit("Enabled"), 2, None, (128, 255)),
+        ],
     );
-    let gate = channel("Mode", "Head1", "3", &function("Mode", ""));
-    let profile = profile(&(dependent + &master + &gate));
+    let profile = profile(vec![dependent, master, plain("Mode", "Head1", 3)]);
     let fog = ("Fog1", AttributeValue::Number(50.0));
     assert!(
         profile
@@ -449,20 +505,18 @@ fn a_function_mode_master_requires_its_own_mode_condition_to_be_active() {
 }
 
 #[test]
-fn channel_sets_are_sorted_and_cannot_escape_a_mode_dependent_function_range() {
-    let dependent = channel(
-        "Fog1",
-        "Base",
-        "1",
-        r#"
-      <ChannelFunction Name="Fog" Attribute="Fog1" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="100">
-        <ChannelSet Name="Boost" DMXFrom="200/1" PhysicalFrom="50" PhysicalTo="100"/>
-        <ChannelSet Name="Low" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="49"/>
-      </ChannelFunction>
-      <ChannelFunction Name="Zoom" Attribute="Zoom" DMXFrom="128/1" ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1"/>
-    "#,
-    );
-    let profile = profile(&(dependent + &channel("Mode", "Base", "2", &function("Mode", ""))));
+fn channel_sets_cannot_escape_a_mode_dependent_function_range() {
+    let mut fog = function("Fog1", "Fog");
+    fog.sets = vec![
+        set("Low", 0, 199, (0.0, 49.0)),
+        set("Boost", 200, 255, (50.0, 100.0)),
+    ];
+    let mut zoom = mastered(starting(function("Zoom", "Zoom"), 128), 1, None, (128, 255));
+    zoom.physical_to = 1.0;
+    let profile = profile(vec![
+        channel("Fog1", "Base", &[1], vec![fog, zoom]),
+        plain("Mode", "Base", 2),
+    ]);
     assert_eq!(
         encode(
             &profile,
@@ -494,52 +548,60 @@ fn channel_sets_are_sorted_and_cannot_escape_a_mode_dependent_function_range() {
 }
 
 #[test]
-fn malformed_offsets_cycles_and_unsupported_modes_fail_at_initialization() {
-    let normal = channel("Fog1", "Base", "1", &function("Fog1", ""));
+fn malformed_compiled_modes_and_cycles_fail_at_initialization() {
+    let normal = plain("Fog1", "Base", 1);
+    let with_offsets = |offsets: &[u32]| {
+        let mut channel = normal.clone();
+        channel.offsets = offsets.to_vec();
+        channel
+    };
+    let mut wide_default = normal.clone();
+    wide_default.default = 256;
+    let mut empty = normal.clone();
+    empty.functions.clear();
+    let mut overlapping_sets = function("Gobo1", "Gobo");
+    overlapping_sets.sets = vec![set("A", 0, 200, (0.0, 1.0)), set("B", 128, 255, (0.0, 1.0))];
     for invalid in [
-        normal.replace("Offset=\"1\"", "Offset=\"0\""),
-        normal.replace("Offset=\"1\"", "Offset=\"1,1\""),
-        normal.replace("Offset=\"1\"", "Offset=\"513\""),
-        normal.replace("Offset=\"1\"", "Offset=\"1,2,3,4,5\""),
-        normal.replace("Offset=\"1\"", "Offset=\"None\""),
-        normal.replace("<DMXChannel", "<DMXChannel DMXBreak=\"2\""),
-        channel(
+        vec![with_offsets(&[0])],
+        vec![with_offsets(&[1, 1])],
+        vec![with_offsets(&[513])],
+        vec![with_offsets(&[1, 2, 3, 4, 5])],
+        vec![with_offsets(&[])],
+        vec![wide_default],
+        vec![empty],
+        vec![channel("Gobo1", "Base", &[1], vec![overlapping_sets])],
+        vec![channel(
             "Fog1",
             "Base",
-            "1",
-            &function(
-                "Fog1",
-                r#"ModeMaster="Base_Fog1" ModeFrom="0/1" ModeTo="255/1""#,
-            ),
-        ),
+            &[1],
+            vec![mastered(function("Fog1", "Control"), 0, None, (0, 255))],
+        )],
+        vec![channel(
+            "Fog1",
+            "Base",
+            &[1],
+            vec![mastered(function("Fog1", "Control"), 7, None, (0, 255))],
+        )],
     ] {
         assert!(
-            GdtfProfile::from_xml(&description(&invalid), "Control").is_err(),
-            "{invalid}"
+            GdtfProfile::from_wire(&mode(invalid.clone())).is_err(),
+            "{invalid:?}"
         );
     }
-    assert!(GdtfProfile::from_xml(&description(&normal), "missing").is_err());
+    assert!(GdtfProfile::from_wire(&mode(Vec::new())).is_err());
 }
 
-fn rig(channels: &str) -> FixtureRig {
-    FixtureRig::from_wire(&wire::RigDefinition {
-        fixtures: vec![wire::Fixture {
+fn rig(channels: Vec<wire::DmxChannel>) -> FixtureRig {
+    rig_with(
+        mode(channels),
+        wire::Fixture {
             fixture_id: "fixture".into(),
-            profile_id: "test".into(),
-            address: 1,
             ..Default::default()
-        }],
-        profiles: vec![wire::FixtureProfile {
-            profile_id: "test".into(),
-            gdtf_xml: description(channels),
-            dmx_mode: "Control".into(),
-        }],
-        ..Default::default()
-    })
-    .unwrap()
+        },
+    )
 }
 
-fn engine(channels: &str, source: &str) -> Engine {
+fn engine(channels: Vec<wire::DmxChannel>, source: &str) -> Engine {
     let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
         autoloop_id: "test".into(),
         bank: "test".into(),
@@ -563,9 +625,8 @@ fn engine(channels: &str, source: &str) -> Engine {
 
 #[test]
 fn lua_controls_non_lighting_attributes_and_blackout_restores_defaults() {
-    let channels = channel("Fog1", "Base", "1", &function("Fog1", ""));
     let mut engine = engine(
-        &channels,
+        vec![plain("Fog1", "Base", 1)],
         "return {render=function(ctx) return sf.scene {sf.physical_attribute(sf.all(), 'Fog1', 50)} end}",
     );
     assert_eq!(
@@ -583,9 +644,8 @@ fn lua_controls_non_lighting_attributes_and_blackout_restores_defaults() {
 
 #[test]
 fn explicit_dimmer_values_respect_master_and_blackout() {
-    let channels = channel("Dimmer", "Base", "1", &function("Dimmer", ""));
     let mut engine = engine(
-        &channels,
+        vec![plain("Dimmer", "Base", 1)],
         "return {render=function(ctx) return sf.scene {sf.physical_attribute(sf.all(), 'Dimmer', 100)} end}",
     );
     engine
@@ -613,16 +673,11 @@ fn explicit_dimmer_values_respect_master_and_blackout() {
 #[test]
 fn white_only_emitters_follow_intensity_without_applying_colour_brightness_twice() {
     for with_dimmer in [false, true] {
-        let mut channels = channel(
-            "ColorAdd_W",
-            "Base",
-            "1",
-            &function("ColorAdd_W", r#"Default="255/1""#),
-        );
+        let mut channels = vec![defaulted(plain("ColorAdd_W", "Base", 1), 255)];
         if with_dimmer {
-            channels += &channel("Dimmer", "Base", "2", &function("Dimmer", ""));
+            channels.push(plain("Dimmer", "Base", 2));
         }
-        let profile = profile(&channels);
+        let profile = profile(channels);
         for (intensity, expected) in [(0.0, 0), (0.5, 128), (1.0, 255)] {
             let output = encode(
                 &profile,
@@ -662,22 +717,16 @@ fn white_only_emitters_follow_intensity_without_applying_colour_brightness_twice
 
 #[test]
 fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults() {
-    for (attribute, default, dark, dimmed) in [
-        ("ColorAdd_A", "255/1", 0, 32),
-        ("ColorSub_UV", "0/1", 255, 223),
-    ] {
-        let channels = channel(
-            attribute,
-            "Base",
-            "1",
-            &function(attribute, &format!(r#"Default="{default}""#)),
-        );
+    for (attribute, default, dark, dimmed) in
+        [("ColorAdd_A", 255, 0, 32), ("ColorSub_UV", 0, 255, 223)]
+    {
+        let channels = vec![defaulted(plain(attribute, "Base", 1), default)];
         assert_eq!(
-            encode(&profile(&channels), &FixtureState::default()),
+            encode(&profile(channels.clone()), &FixtureState::default()),
             [dark]
         );
         let mut engine = engine(
-            &channels,
+            channels,
             &format!(
                 "return {{render=function(ctx) if ctx.time_seconds >= 1 then error('fixture fault') end; return {{sf.physical_attribute(sf.all(), '{attribute}', 50)}} end}}"
             ),
@@ -743,22 +792,29 @@ fn extra_emitters_ignore_lit_defaults_and_obey_master_blackout_idle_and_faults()
 
 #[test]
 fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloop() {
-    for (zoom_condition, extra_effect, diagnostic) in [
+    for (conditional, extra_effect, diagnostic) in [
         (
-            r#"ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1""#,
+            true,
             "sf.physical_attribute(sf.all(), 'Zoom', 50)",
             "inactive",
         ),
         (
-            "",
+            false,
             "sf.physical_attribute(sf.all(), 'Zoom', 50), sf.physical_attribute(sf.all(), 'Base.Zoom', 75)",
             "conflicting",
         ),
     ] {
-        let channels = channel("Dimmer", "Base", "1", &function("Dimmer", ""))
-            + &channel("Pan", "Base", "2", &function("Pan", ""))
-            + &channel("Mode", "Base", "3", &function("Mode", ""))
-            + &channel("Zoom", "Base", "4", &function("Zoom", zoom_condition));
+        let zoom = if conditional {
+            mastered(function("Zoom", "Control"), 2, None, (128, 255))
+        } else {
+            function("Zoom", "Control")
+        };
+        let channels = vec![
+            plain("Dimmer", "Base", 1),
+            plain("Pan", "Base", 2),
+            plain("Mode", "Base", 3),
+            channel("Zoom", "Base", &[4], vec![zoom]),
+        ];
         let broken = format!(
             "return {{render=function(ctx) if ctx.time_seconds == 0 then return {{sf.dimmer(sf.all(), 0.5), sf.pan_tilt(sf.all(), 0.25, 0.5)}} end; return {{sf.dimmer(sf.all(), 1), sf.pan_tilt(sf.all(), 0.9, 0.5), {extra_effect}}} end}}"
         );
@@ -766,7 +822,7 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
             wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "broken".into(), lua_source: broken },
             wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "healthy".into(), lua_source: "return {render=function(ctx) return {sf.dimmer(sf.all(), 0.75), sf.pan_tilt(sf.all(), 0.75, 0.5)} end}".into() },
         ]).unwrap();
-        let mut engine = Engine::new(rig(&channels), catalog, support::palettes()).unwrap();
+        let mut engine = Engine::new(rig(channels), catalog, support::palettes()).unwrap();
         engine
             .play_autoloop(0.0, "broken", Transition::Cut, "techno")
             .unwrap();
@@ -794,23 +850,20 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
 
 #[test]
 fn unsupported_brightness_ranges_are_rejected_before_they_can_bypass_blackout() {
-    let unsafe_dimmer = channel(
-        "Dimmer",
-        "Base",
-        "1",
-        r#"<ChannelFunction Name="Dimmer" Attribute="Dimmer" Default="255/1" PhysicalFrom="0" PhysicalTo="100"><ChannelSet Name="Full" DMXFrom="0/1"/></ChannelFunction>"#,
-    );
-    let conditional_dimmer = channel(
-        "Dimmer",
-        "Base",
-        "1",
-        &function(
+    let mut full = function("Dimmer", "Dimmer");
+    full.sets = vec![set("Full", 0, 255, (0.0, 100.0))];
+    let unsafe_dimmer = vec![defaulted(channel("Dimmer", "Base", &[1], vec![full]), 255)];
+    let conditional_dimmer = vec![
+        channel(
             "Dimmer",
-            r#"ModeMaster="Base_Mode" ModeFrom="128/1" ModeTo="255/1""#,
+            "Base",
+            &[1],
+            vec![mastered(function("Dimmer", "Control"), 1, None, (128, 255))],
         ),
-    ) + &channel("Mode", "Base", "2", &function("Mode", ""));
+        plain("Mode", "Base", 2),
+    ];
     for channels in [unsafe_dimmer, conditional_dimmer] {
-        let error = GdtfProfile::from_xml(&description(&channels), "Control").unwrap_err();
+        let error = GdtfProfile::from_wire(&mode(channels)).unwrap_err();
         assert!(
             error.to_string().contains("brightness attribute"),
             "{error:#}"
@@ -820,21 +873,16 @@ fn unsupported_brightness_ranges_are_rejected_before_they_can_bypass_blackout() 
 
 #[test]
 fn unrelated_cells_keep_independent_brightness_and_blackout() {
-    let mut channels = channel("Dimmer", "Head1", "1", &function("Dimmer", ""));
+    let mut channels = vec![plain("Dimmer", "Head1", 1)];
     for (geometry, offset) in [("Head1", 2), ("Head2", 5)] {
         for (index, attribute) in ["ColorAdd_R", "ColorAdd_G", "ColorAdd_B"]
             .iter()
             .enumerate()
         {
-            channels += &channel(
-                attribute,
-                geometry,
-                &(offset + index).to_string(),
-                &function(attribute, ""),
-            );
+            channels.push(plain(attribute, geometry, offset + index as u32));
         }
     }
-    let profile = profile(&channels);
+    let profile = profile(channels);
     let state = FixtureState {
         intensity: 0.5,
         ..Default::default()

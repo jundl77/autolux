@@ -14,7 +14,7 @@ use starfire::script::AutoloopCatalog;
 const FLOAT_TOLERANCE: f64 = 1e-9;
 const GOLDEN_INTENSITY: f64 = 1.0;
 const SOFT_INTENSITY: f64 = 0.3;
-const ROOM_FIXTURE_COUNT: usize = 15;
+const ROOM_CELL_COUNT: usize = 15;
 const REPLAY_BPM: f64 = 120.0;
 const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
 const MIN_REPLAY_SECONDS: f64 = 16.0 * 4.0 * SECONDS_PER_BEAT;
@@ -270,7 +270,7 @@ fn check_replay(look: &Look) {
         );
         assert_eq!(
             frame.fixture_properties_before_strobe.len(),
-            ROOM_FIXTURE_COUNT
+            ROOM_CELL_COUNT
         );
         for (id, state) in &frame.fixture_properties_before_strobe {
             assert!(state.strobe_hz == 0.0, "{look} strobes {id}");
@@ -663,7 +663,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     "#,
     );
     assert_eq!(
-        frame.fixture_properties_before_strobe["zq06017_pixel_1"].colour,
+        frame.fixture_properties_before_strobe["zq06017/Beam Segment 1"].colour,
         Rgb {
             red: 0.0,
             green: 0.85,
@@ -731,4 +731,46 @@ fn one_loop_under_two_palettes_changes_only_colour() {
         }
     }
     assert!(recoloured > 0, "the palette must reach the rendered colour");
+}
+
+#[test]
+fn the_bar_emits_the_bytes_the_eight_pixel_fixtures_did() {
+    const BAR: std::ops::Range<usize> = 96..120;
+    // Captured from the room rig before the bar became one 24-channel fixture, when it was
+    // eight 3-channel fixtures at 97-120.
+    let rain = [
+        (
+            0.5,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 52, 58, 69, 18, 20, 24,
+            ],
+        ),
+        (
+            1.25,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 52, 58, 69, 18, 20, 24, 0, 0, 0,
+            ],
+        ),
+        (
+            3.6,
+            [
+                52, 58, 69, 18, 20, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+        ),
+    ];
+    let kick = [(0.5, [118, 0, 3]), (1.25, [157, 129, 94])];
+    let mut rain_engine = engine("atmospheric", "pixel_rain", 0.0);
+    for (seconds, expected) in rain {
+        let frame = rain_engine.render_at(seconds).unwrap();
+        assert_eq!(frame.dmx_frames_by_universe[&0][BAR], expected, "{seconds}");
+    }
+    let mut kick_engine = engine("drop", "kick", 0.0);
+    for (seconds, pixel) in kick {
+        let frame = kick_engine.render_at(seconds).unwrap();
+        assert_eq!(
+            frame.dmx_frames_by_universe[&0][BAR],
+            pixel.repeat(8),
+            "{seconds}"
+        );
+    }
 }

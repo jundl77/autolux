@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GDTF DataVersion="1.2"><FixtureType Name="beam_scanner" ShortName="Scanner" LongName="Scanner" Manufacturer="Autolux" Description="Pan, tilt, RGB mixing and a pattern wheel" FixtureTypeID="5c2e9d47-1b3a-4f68-8e05-7a9c3d2b6f14">
+  <AttributeDefinitions><FeatureGroups><FeatureGroup Name="Position" Pretty="Position"><Feature Name="PanTilt"/></FeatureGroup><FeatureGroup Name="Color" Pretty="Color"><Feature Name="RGB"/></FeatureGroup><FeatureGroup Name="Gobo" Pretty="Gobo"><Feature Name="Gobo"/></FeatureGroup></FeatureGroups><Attributes>
+    <Attribute Name="Pan" Pretty="P" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
+    <Attribute Name="Tilt" Pretty="T" Feature="Position.PanTilt" PhysicalUnit="Angle"/>
+    <Attribute Name="ColorAdd_R" Pretty="R" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
+    <Attribute Name="ColorAdd_G" Pretty="G" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
+    <Attribute Name="ColorAdd_B" Pretty="B" Feature="Color.RGB" PhysicalUnit="ColorComponent"/>
+    <Attribute Name="Gobo1" Pretty="G1" Feature="Gobo.Gobo" PhysicalUnit="None"/>
+  </Attributes></AttributeDefinitions>
+  <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
+  <DMXModes><DMXMode Name="6ch" Geometry="Base"><DMXChannels>
+    <DMXChannel DMXBreak="1" Offset="1" Geometry="Base" InitialFunction="Base_Pan.Pan.Pan" Highlight="None"><LogicalChannel Attribute="Pan">
+      <ChannelFunction Name="Pan" Attribute="Pan" DMXFrom="0/1" Default="128/1" PhysicalFrom="0" PhysicalTo="540"/></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="2" Geometry="Base" InitialFunction="Base_Tilt.Tilt.Tilt" Highlight="None"><LogicalChannel Attribute="Tilt">
+      <ChannelFunction Name="Tilt" Attribute="Tilt" DMXFrom="0/1" Default="128/1" PhysicalFrom="0" PhysicalTo="270"/></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="3" Geometry="Base" InitialFunction="Base_ColorAdd_R.ColorAdd_R.ColorAdd_R" Highlight="None"><LogicalChannel Attribute="ColorAdd_R">
+      <ChannelFunction Name="ColorAdd_R" Attribute="ColorAdd_R" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="4" Geometry="Base" InitialFunction="Base_ColorAdd_G.ColorAdd_G.ColorAdd_G" Highlight="None"><LogicalChannel Attribute="ColorAdd_G">
+      <ChannelFunction Name="ColorAdd_G" Attribute="ColorAdd_G" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="5" Geometry="Base" InitialFunction="Base_ColorAdd_B.ColorAdd_B.ColorAdd_B" Highlight="None"><LogicalChannel Attribute="ColorAdd_B">
+      <ChannelFunction Name="ColorAdd_B" Attribute="ColorAdd_B" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="100"/></LogicalChannel></DMXChannel>
+    <DMXChannel DMXBreak="1" Offset="6" Geometry="Base" InitialFunction="Base_Gobo1.Gobo1.Gobo1" Highlight="None"><LogicalChannel Attribute="Gobo1" Snap="Yes">
+      <ChannelFunction Name="Gobo1" Attribute="Gobo1" DMXFrom="0/1" Default="0/1" PhysicalFrom="0" PhysicalTo="3">
+        <ChannelSet Name="Open" DMXFrom="0/1" PhysicalFrom="0" PhysicalTo="0"/>
+        <ChannelSet Name="Dots" DMXFrom="64/1" PhysicalFrom="1" PhysicalTo="1"/>
+        <ChannelSet Name="Lines" DMXFrom="128/1" PhysicalFrom="2" PhysicalTo="2"/>
+        <ChannelSet Name="Tunnel" DMXFrom="192/1" PhysicalFrom="3" PhysicalTo="3"/>
+      </ChannelFunction></LogicalChannel></DMXChannel>
+  </DMXChannels></DMXMode></DMXModes>
+</FixtureType></GDTF>

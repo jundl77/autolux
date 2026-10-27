@@ -1,8 +1,13 @@
 mod support;
 
+use std::collections::BTreeMap;
+
+use prost::Message;
 use serde_json::json;
 use starfire::fixtures::FixtureRig;
-use starfire::model::{DMX_CHANNELS, FixtureState, Rgb, Target};
+use starfire::gdtf::GdtfProfile;
+use starfire::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb, Target};
+use starfire::protocol::wire;
 
 const HALF_TURN: [f64; 12] = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
 
@@ -407,4 +412,142 @@ fn encoding_rejects_missing_unknown_nonfinite_and_unresolved_state() {
         states.insert("test".into(), state);
         assert!(rig.encode(&states).is_err());
     }
+}
+
+fn pixel_bar(mode: &str, cells: Vec<wire::fixture::Cell>) -> wire::RigDefinition {
+    wire::RigDefinition {
+        fixtures: vec![wire::Fixture {
+            fixture_id: "bar".into(),
+            profile_id: "bar".into(),
+            address: 1,
+            cells,
+            ..Default::default()
+        }],
+        groups: vec![wire::FixtureGroup {
+            group_id: "strip".into(),
+            fixture_ids: vec!["bar".into()],
+        }],
+        profiles: vec![support::compiled_profile(
+            &format!("pixel_bar#{mode}"),
+            "bar",
+        )],
+    }
+}
+
+fn cell(geometry: &str, offsets: &[u32]) -> wire::fixture::Cell {
+    wire::fixture::Cell {
+        geometry: geometry.into(),
+        offsets: offsets.to_vec(),
+    }
+}
+
+fn lit(intensity: f64, red: f64, green: f64, blue: f64) -> FixtureState {
+    FixtureState {
+        intensity,
+        colour: Rgb { red, green, blue },
+        ..FixtureState::default()
+    }
+}
+
+#[test]
+fn each_channel_owning_geometry_is_a_cell_encoded_from_its_own_state() {
+    let layout = |mode| {
+        GdtfProfile::cells_from_wire(
+            support::compiled_profile(&format!("pixel_bar#{mode}"), "bar")
+                .mode
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap()
+        .into_iter()
+        .map(|cell| (cell.geometry, cell.offsets))
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        layout("Pixels"),
+        [
+            ("Pixel 1".to_owned(), vec![1, 2, 3]),
+            ("Pixel 2".to_owned(), vec![4, 5, 6])
+        ]
+    );
+    assert_eq!(
+        layout("Mastered"),
+        [
+            ("Base".to_owned(), vec![1]),
+            ("Pixel 1".to_owned(), vec![2, 3, 4]),
+            ("Pixel 2".to_owned(), vec![5, 6, 7])
+        ]
+    );
+
+    let rig = FixtureRig::from_wire(&pixel_bar("Pixels", Vec::new())).unwrap();
+    let cells = ["bar/Pixel 1", "bar/Pixel 2"];
+    assert_eq!(rig.fixture_ids(), ["bar"]);
+    assert_eq!(rig.cell_ids(), cells);
+    assert_eq!(rig.resolve(&Target::Group("strip".into())).unwrap(), cells);
+    assert_eq!(rig.resolve(&Target::Fixture("bar".into())).unwrap(), cells);
+    assert_eq!(
+        rig.resolve(&Target::Fixture("bar/Pixel 2".into())).unwrap(),
+        ["bar/Pixel 2"]
+    );
+    let red = BTreeMap::from([("ColorAdd_R".to_owned(), AttributeValue::Number(0.5))]);
+    rig.validate_attributes("bar/Pixel 1", &red).unwrap();
+    let mut states = rig.empty_states();
+    states.insert(cells[0].into(), lit(0.5, 1.0, 0.5, 0.0));
+    states.insert(cells[1].into(), lit(1.0, 0.0, 0.0, 1.0));
+    assert_eq!(
+        &rig.encode(&states).unwrap()[&0][..7],
+        [128, 64, 0, 0, 0, 255, 0]
+    );
+
+    let mastered = FixtureRig::from_wire(&pixel_bar("Mastered", Vec::new())).unwrap();
+    let mut states = mastered.empty_states();
+    states.insert("bar/Base".into(), lit(0.5, 1.0, 1.0, 1.0));
+    states.insert("bar/Pixel 1".into(), lit(0.0, 1.0, 0.5, 0.0));
+    states.insert("bar/Pixel 2".into(), lit(0.0, 0.0, 0.0, 1.0));
+    assert_eq!(
+        &mastered.encode(&states).unwrap()[&0][..7],
+        [128, 255, 128, 0, 0, 0, 255]
+    );
+}
+
+#[test]
+fn a_login_whose_declared_cells_differ_from_the_profile_is_refused() {
+    let exact = vec![cell("Pixel 1", &[1, 2, 3]), cell("Pixel 2", &[4, 5, 6])];
+    FixtureRig::from_wire(&pixel_bar("Pixels", exact)).unwrap();
+    for declared in [
+        vec![cell("Pixel 1", &[1, 2, 3])],
+        vec![cell("Pixel 2", &[4, 5, 6]), cell("Pixel 1", &[1, 2, 3])],
+        vec![cell("Pixel 1", &[1, 2]), cell("Pixel 2", &[3, 4, 5, 6])],
+    ] {
+        let error = FixtureRig::from_wire(&pixel_bar("Pixels", declared))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("declares cells"), "{error}");
+    }
+}
+
+#[test]
+fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_cells() {
+    for exported in [
+        include_bytes!("../../rig/room.rig.pb").as_slice(),
+        include_bytes!("../../autolux/tests/data/generic_rig/generic.rig.pb"),
+    ] {
+        let definition = wire::RigDefinition::decode(exported).unwrap();
+        assert!(
+            definition
+                .fixtures
+                .iter()
+                .all(|fixture| !fixture.cells.is_empty())
+        );
+        FixtureRig::from_wire(&definition).unwrap();
+    }
+    let room = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+    assert_eq!(room.fixture_ids().len(), 8);
+    assert_eq!(room.cell_ids().len(), 15);
+    assert_eq!(
+        room.resolve(&Target::Group("strip".into())).unwrap(),
+        (1..=8)
+            .map(|segment| format!("zq06017/Beam Segment {segment}"))
+            .collect::<Vec<_>>()
+    );
 }

@@ -473,3 +473,47 @@ group which axes at least one member can express, and login fails if that reply
 exceeds the real-time message cap.
 A dimmerless wheel resolves to its zero-luminance slot at zero intensity or black
 colour; without such a slot it closes its continuous Shutter(n) instead.
+
+2026-10-27 cells: the addressing unit is the cell, not the fixture. A fixture contributes
+one cell per channel-owning geometry of its mode; a geometry above exactly one
+channel-owning leaf joins that leaf's cell (a mover's yoke and head), one above several
+leaves is a cell of its own (a bar's master dimmer). Cells order by first DMX offset. A
+single-cell fixture's cell keeps the fixture ID, other cells are `fixture/geometry`; a
+fixture target on a multi-cell fixture means all its cells. Groups list fixtures and expand
+to their cells. Each cell encodes its own channels from its own state; ModeMaster across
+cells is refused. The rig proto declares each fixture's cells as Autolux derives them, and
+Login fails if Starfire derives different ones. GeometryReference stays unsupported. Open:
+under a master-dimmer cell a pixel cell's own intensity does not dim it, and the master cell
+joins its fixture's group like any pixel.
+
+2026-10-27 GDTF compiler: Autolux compiles each patched mode with pygdtf 1.4.5
+(`autolux/lighting/gdtf_compile.py`) into the typed `DmxMode` of rig.proto; Starfire
+validates and encodes from it and has no GDTF parser (the gdtf and quick-xml crates are
+gone; this supersedes U32's "existing parsers compile at Login" and the gdtf 0.3 note).
+pygdtf drops DMXValue's byte-shifting flag, range checks and mirroring, so the compiler
+re-reads DMXFrom, Default, ModeFrom, ModeTo and set physical values from description.xml.
+Starfire's tests build modes directly; the synthetic test descriptions compile into the
+committed `starfire/tests/data/compiled_profiles.pb` (`tools/compile_test_profiles.py`).
+
+2026-10-27 MVR reading: `mvr.patched_fixtures` reads through pymvr 1.0.7 and `mvr.gdtf_modes`
+through pygdtf (GeometryReference breaks expanded). pymvr re-decodes GDTFSpec as cp437 and
+maps an unreadable address to DMX 1, so the spec text and address validity come from the
+scene XML. Our writer, editor tree and schema validation stay: pymvr's writer reorders
+elements and drops nodes it does not model, which Config's byte-for-byte round trip forbids.
+A room.mvr written by pymvr reads back to the same patch and exports the same rig.
+
+2026-10-27 GDTF coverage (bounded): the compiler expands GeometryReference instances at
+their Break offsets, leaves virtual channels out (they carry no DMX; a ModeMaster on one is
+refused), takes GDTF 1.0's channel Default when there is no InitialFunction, names an
+unnamed function `Attribute n` for paths and ModeMaster links, ignores a WheelSlotIndex on a
+function without a wheel, and drops channel sets that have neither a physical range nor a
+wheel slot (GDTF Builder's min/max labels; the function's own mapping encodes the same
+DMX). DMXProfile curves are carried as points and inverted by Starfire on semantic and
+physical values; x and the output are read as 0..100 percent of the DMX and physical range
+(the spec leaves the scale implicit), and non-monotonic curves are refused. Master and
+attribute brightness still scale an explicit value on a curved channel in DMX steps. When
+several active functions on one channel can express the look, the lowest DMX range wins.
+Still refused, each with its reason (pinned per corpus mode in test_gdtf_compile.py):
+Relations, sub-channel sets, wheel Filter slots, DMX breaks other than 1, GDTF versions
+outside 1.0..1.2, duplicate function names, and brightness functions that share their
+channel, carry presets, depend on a ModeMaster or run inverted.
