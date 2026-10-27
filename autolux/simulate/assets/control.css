@@ -106,7 +106,8 @@
     border-left-color: color-mix(in srgb, var(--muted) 55%, var(--line)); }
 #show-control .joined > button:hover:not(:disabled):not(.active) { background: var(--fill);
                                                                      color: var(--text); }
-#show-control .joined > button.active { background: var(--accent); color: var(--ink); }
+/* Auto is a mode, not a level: the light neutral, lighter than any level fill. */
+#show-control .joined > button.active { background: var(--text); color: var(--ink); }
 .segmented .dash-options-list-option { padding: 0; margin: 0; background: transparent;
                                        align-items: stretch; }
 .segmented .dash-options-list-option + .dash-options-list-option {
@@ -121,9 +122,12 @@
 .segmented .dash-options-list-option:has(input:focus-visible) .dash-options-list-option-text {
     outline: 1px solid var(--accent); outline-offset: -2px; }
 
-/* Intensity runs cool to warm: accent, neutral, a low-saturation warm. */
+/* Intensity runs cool to warm and dark to light (L* about 59, 68, 77, Auto 93), so the four
+   fills also separate in greyscale: a dimmed accent, a neutral, a low-saturation warm. */
+#control-intensity:has([data-option-index="0"].selected) {
+    --tone: color-mix(in srgb, var(--accent) 75%, var(--fill)); }
 #control-intensity:has([data-option-index="1"].selected) {
-    --tone: color-mix(in srgb, var(--text) 75%, var(--fill)); }
+    --tone: color-mix(in srgb, var(--text) 65%, var(--fill)); }
 #control-intensity:has([data-option-index="2"].selected) { --tone: var(--warm); }
 /* Following the music: Auto is filled, the show's current level only tinted. */
 #control-intensity-set.following .selected .dash-options-list-option-text {
@@ -199,21 +203,17 @@
 .status-item.fx-running .status-text { color: #73b6ff; }
 
 /* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first. Name and
-   seconds sit inside the bar; the group-tinted fill is full as the group fires and drains
-   right to left, leaving the bare track and "ready". Head and track share one grid cell. */
+   seconds sit inside the bar; the flat group-tinted fill is full as the group fires and drains
+   right to left, leaving the bare track and "ready". The fill is the same 30% tint over the surface
+   as an Intensity level that follows the music. Head and track share one grid cell. */
 .cooldowns { display: grid; gap: 4px; }
 .cooldown-row { --tint: var(--muted); display: grid; }
 .cooldown-head, .cooldown-track { grid-area: 1 / 1; }
 .cooldown-head { position: relative; display: flex; justify-content: space-between;
                  align-items: center; gap: 12px; padding: 0 8px; min-width: 0;
-                 color: var(--text); font-size: 11px; text-shadow: 0 1px 1px var(--ink); }
+                 color: var(--text); font: inherit; font-size: 11px; font-weight: 400; }
 .cooldown-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cooldown-caption { flex: none; font-variant-numeric: tabular-nums; }
 .cooldown-row.ready .cooldown-caption { color: var(--muted); }
-.cooldown-track { height: 20px; border-radius: 4px; overflow: hidden;
-                  background: color-mix(in srgb, var(--tint) 10%, var(--fill));
-                  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 60%, var(--fill)); }
-.cooldown-fill { height: 100%;
-                 background: linear-gradient(color-mix(in srgb, var(--tint) 80%, var(--text)),
-                                             color-mix(in srgb, var(--tint) 70%, var(--ink)));
-                 box-shadow: inset 0 -2px 3px color-mix(in srgb, var(--ink) 35%, var(--tint)); }
+.cooldown-track { height: 20px; border-radius: 6px; overflow: hidden; background: var(--fill); }
+.cooldown-fill { height: 100%; background: color-mix(in srgb, var(--tint) 30%, var(--fill)); }
