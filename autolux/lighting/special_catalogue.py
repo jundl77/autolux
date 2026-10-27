@@ -150,10 +150,10 @@ def parse_special(document, stem: str) -> Special:
         if 'cooldown_seconds' in data
         else 0.0
     )
-    return Special(**common, **special_values(data, labels), cooldown_seconds=cooldown)
+    return Special(**common, **_special_values(data, labels), cooldown_seconds=cooldown)
 
 
-def special_values(data: dict, labels: dict | None = None) -> dict:
+def _special_values(data: dict, labels: dict | None = None) -> dict:
     """Validate wire fields; labels name each field the way its source wrote it."""
     labels = labels or {}
     if data['colour_slot'] not in SLOTS:

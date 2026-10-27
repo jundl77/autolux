@@ -80,7 +80,7 @@ def operator_transition(bpm: float | None) -> dict:
     return {'kind': 'cut'}
 
 
-def strobe_override(
+def _strobe_override(
     override_id: str,
     priority: int,
     duration_seconds: float,
@@ -122,7 +122,7 @@ class EffectController:
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
         self.specials = tuple(specials)
-        self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'), venue)
+        self._special_policy = SpecialPolicy(self.specials, random.Random(f'{seed}/special'), venue)
         self._special: Special | None = None
         self._special_on = False
         self._capabilities: SpecialCapabilities | None = None
@@ -433,7 +433,7 @@ class EffectController:
     def _strobe(self, special: Special, bpm: float | None, settings: ShowSettings) -> None:
         duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
-            strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings, special)
+            _strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings, special)
         )
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)

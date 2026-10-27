@@ -27,6 +27,7 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
+STREAMED_ACTIONS = frozenset({'master', 'intensity', 'settings'})
 # A refused body up to this size is read and discarded so the refusal arrives intact.
 MAX_DRAINED_BYTES = 16 * MAX_CONTROL_BYTES
 DRAIN_TIMEOUT_SEC = 1.0
@@ -264,7 +265,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(503, {'error': 'the show is busy; try again'})
             return
         # Names the sender, so a command no operator remembers can be traced to its page.
-        LOGGER.info(
+        # Toggles, static and transport stay at INFO where a flip-back shows; fader and
+        # form edits arrive in streams and would bury them.
+        LOGGER.log(
+            logging.DEBUG if command['action'] in STREAMED_ACTIONS else logging.INFO,
             '[control] %s from %s origin=%s agent=%s',
             command,
             self.client_address[0],

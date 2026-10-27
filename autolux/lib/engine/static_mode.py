@@ -62,11 +62,13 @@ class StaticLooks:
     def active(self) -> bool:
         return bool(self._looks) or self._floor or self.blackout or self._special is not None
 
-    def special_rows(self, target: str) -> list[str]:
+    def special_rows(
+        self, target: str, capabilities: SpecialCapabilities | None = None
+    ) -> list[str]:
         """Catalogue rows the operator may hold on target: the rows the automatic show could
         place on that group (its own group, or its role where the fixtures render the row's
         axes), and any row on the whole rig."""
-        capabilities = self.special_capabilities()
+        capabilities = capabilities or self.special_capabilities()
         return [
             name
             for name, row in self._rows.items()
@@ -176,6 +178,7 @@ class StaticLooks:
         self.set_blackout(False)
 
     def state(self) -> dict:
+        capabilities = self.special_capabilities()
         return {
             'targets': list(self.rig.targets),
             'blacklight': bool(self.rig.uv_groups),
@@ -183,7 +186,9 @@ class StaticLooks:
             'special_fx': None
             if self._special is None
             else {'name': self._special.name, 'group': self._special.group},
-            'fx_rows': {target: self.special_rows(target) for target in self.rig.targets},
+            'fx_rows': {
+                target: self.special_rows(target, capabilities) for target in self.rig.targets
+            },
             'looks': {
                 target: {
                     'colour': None if 'colour' not in look else colour_hex(look['colour']),
