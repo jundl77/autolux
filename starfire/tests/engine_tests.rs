@@ -1292,11 +1292,11 @@ fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attribut
         ("empty", "return {render=function(ctx) return {} end}"),
         (
             "still",
-            "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
+            "return {render=function(ctx) return {sf.physical_attribute(sf.fixture('kinta'), 'Effects1PosRotate', 0)} end}",
         ),
         (
             "spin",
-            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
+            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.fixture('kinta'), 'Color1', 'Red'), sf.physical_attribute(sf.fixture('kinta'), 'Effects1PosRotate', 160)} end}",
         ),
     ]);
     let red = AttributeValue::Preset("Red".into());
