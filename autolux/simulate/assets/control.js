@@ -20,6 +20,49 @@
             document.addEventListener(type, operatorActs, {capture: true, once: true}));
     }
 
+    // The FX chips, Intensity Auto and the levels send only what a real click pressed, read
+    // off the element before Dash's own handler queues DIRECT_AUTO_JS. Dash can run that
+    // callback with an input no click changed (the poll's set_props on the level radio,
+    // merged requests); such a run finds no press and sends nothing.
+    const presses = {};
+    const press = (action, value) => {
+        presses[action] = value;
+    };
+    // One click, one command: the first callback run takes the press.
+    const takePress = (action) => {
+        const value = presses[action];
+        delete presses[action];
+        return value;
+    };
+    function pressOf(target) {
+        const chip = target.closest('#control-fx-auto, #control-fx-off');
+        if (chip) {
+            return ['fx_auto', chip.id === 'control-fx-auto'];
+        }
+        const follow = target.closest('#control-intensity-auto');
+        if (follow) {
+            // What the operator sees lit, not the last poll, decides which way Auto flips.
+            return ['intensity_auto', !follow.classList.contains('active')];
+        }
+        const level = target.closest('#control-intensity label');
+        const radio = level && level.querySelector('input');
+        // A click on the level already chosen changes nothing, so no callback would take it.
+        if (radio && level.getAttribute('aria-selected') !== 'true') {
+            return ['intensity', Number(radio.value)];
+        }
+        return null;
+    }
+    if (typeof document !== 'undefined') {
+        // Keyboard activation of a button or radio also arrives as a click.
+        document.addEventListener('click', (event) => {
+            const pressed = event.isTrusted && event.target instanceof Element
+                && pressOf(event.target);
+            if (pressed) {
+                press(...pressed);
+            }
+        }, true);
+    }
+
     function staticCommand(trigger, target, colour) {
         const all = config().allFixtures || 'all';
         const colours = config().presetColours || {};
@@ -261,7 +304,7 @@
     }
 
     window.autoluxControl = {
-        build, send, dispatch, sendLatest, hold, view, operatorActs, cooldownView,
-        cooldownFired,
+        build, send, dispatch, sendLatest, hold, view, operatorActs, press, takePress,
+        cooldownView, cooldownFired,
     };
 })();
