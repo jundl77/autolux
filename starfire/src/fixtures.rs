@@ -330,10 +330,18 @@ impl FixtureRig {
                     "group {group} repeats fixture {member}"
                 );
             }
+            // A master cell follows its pixels, so groups name the pixels only.
             let members = members
                 .iter()
                 .filter_map(|member| fixtures.iter().find(|fixture| fixture.id == *member))
-                .flat_map(|fixture| fixture.cells.iter().cloned())
+                .flat_map(|fixture| {
+                    fixture
+                        .cells
+                        .iter()
+                        .zip(&profiles[&fixture.profile])
+                        .filter(|(_, cell)| cell.governed.is_empty())
+                        .map(|(id, _)| id.clone())
+                })
                 .collect();
             cell_groups.insert(group.clone(), members);
         }
@@ -449,12 +457,52 @@ impl FixtureRig {
                     offset_tilt(position, fixture.tilt_offset_degrees, from, to)
                 })
             };
-            for (id, cell) in fixture.cells.iter().zip(cells) {
-                let state = states
-                    .get(id)
-                    .with_context(|| format!("missing cell state {id}"))?;
-                validate_state(state).with_context(|| format!("cell {id}"))?;
-                let mut calibrated = state.clone();
+            let cell_states = fixture
+                .cells
+                .iter()
+                .map(|id| {
+                    let state = states
+                        .get(id)
+                        .with_context(|| format!("missing cell state {id}"))?;
+                    validate_state(state).with_context(|| format!("cell {id}"))?;
+                    Ok(state)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let master_levels: Vec<f64> = cells
+                .iter()
+                .map(|cell| {
+                    cell.governed
+                        .iter()
+                        .map(|&pixel| light_demand(cell_states[pixel]))
+                        .fold(0.0, f64::max)
+                })
+                .collect();
+            for (index, ((id, cell), state)) in fixture
+                .cells
+                .iter()
+                .zip(cells)
+                .zip(&cell_states)
+                .enumerate()
+            {
+                let mut calibrated = (*state).clone();
+                if !cell.governed.is_empty() {
+                    calibrated.intensity = master_levels[index];
+                } else if let Some(master) = cells
+                    .iter()
+                    .position(|master| master.governed.contains(&index))
+                {
+                    // Master level times pixel output equals what the pixel would show alone.
+                    let level = master_levels[master];
+                    let scale = |value: f64| {
+                        if level > 0.0 {
+                            (value / level).min(1.0)
+                        } else {
+                            0.0
+                        }
+                    };
+                    calibrated.intensity = scale(state.intensity);
+                    calibrated.attribute_brightness = scale(state.attribute_brightness);
+                }
                 calibrated.pan = pan(state.pan);
                 calibrated.tilt = tilt(state.tilt);
                 cell.profile
@@ -468,6 +516,16 @@ impl FixtureRig {
             }
         }
         Ok(universes)
+    }
+}
+
+/// The light a pixel cell asks for: its intensity, or the brightness scaling its explicit
+/// attributes when it has any.
+fn light_demand(state: &FixtureState) -> f64 {
+    if state.attributes.is_empty() {
+        state.intensity
+    } else {
+        state.intensity.max(state.attribute_brightness)
     }
 }
 

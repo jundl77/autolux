@@ -6,7 +6,7 @@
       <FeatureGroups><FeatureGroup Name="Dimmer" Pretty="Dimmer"><Feature Name="Dimmer"/></FeatureGroup></FeatureGroups>
       <Attributes><Attribute Name="Dimmer" Pretty="Dimmer" Feature="Dimmer.Dimmer" PhysicalUnit="Percent"/></Attributes>
     </AttributeDefinitions>
-    <PhysicalDescriptions><DMXProfiles><DMXProfile Name="Square"><Point DMXPercentage="0" CFC0="0" CFC1="0" CFC2="0.01" CFC3="0"/></DMXProfile></DMXProfiles></PhysicalDescriptions>
+    <PhysicalDescriptions><DMXProfiles><DMXProfile Name="Square"><Point DMXPercentage="0" CFC0="0" CFC1="0" CFC2="1" CFC3="0"/></DMXProfile></DMXProfiles></PhysicalDescriptions>
     <Geometries><Geometry Name="Base" Position="{1,0,0,0}{0,1,0,0}{0,0,1,0}{0,0,0,1}"/></Geometries>
     <DMXModes>
       <DMXMode Name="8 bit" Description="One channel" Geometry="Base">

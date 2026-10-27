@@ -194,9 +194,28 @@ def test_virtual_channels_carry_no_dmx_and_cannot_be_mode_masters():
 def test_dmx_profiles_compile_to_their_curve_points():
     xml = (Path(__file__).parent / 'data/gdtf/curved_dimmer.xml').read_text(encoding='utf-8')
     [point] = compile_mode(xml, '8 bit').channels[0].functions[0].dmx_profile
-    assert (point.dmx_percentage, point.cfc1, point.cfc2) == (0, 0, 0.01)
+    assert (point.dmx_percentage, point.cfc1, point.cfc2) == (0, 0, 1)
+    with pytest.raises(ValueError, match='outside DMX fraction'):
+        compile_mode(xml.replace('DMXPercentage="0"', 'DMXPercentage="50"'), '8 bit')
     with pytest.raises(ValueError, match='DMX profile Missing'):
         compile_mode(xml.replace('DMXProfile="Square"', 'DMXProfile="Missing"'), '8 bit')
+
+
+def test_a_master_dimmer_compiles_above_the_pixels_it_scales():
+    # Starfire makes the Base Dimmer a master cell that follows these pixels
+    # (starfire/tests/fixture_encoding.rs); it needs the Dimmer on their common ancestor.
+    xml = (Path(__file__).parent / 'data/gdtf/pixel_bar.xml').read_text(encoding='utf-8')
+    channels = compile_mode(xml, 'Mastered').channels
+    layout = [
+        (tuple(c.geometry_path), [f.attribute for f in c.functions], list(c.offsets))
+        for c in channels
+    ]
+    assert layout[0] == (('Base',), ['Dimmer'], [1])
+    assert [path for path, _, _ in layout[1:]] == [('Base', 'Pixel 1')] * 3 + [
+        ('Base', 'Pixel 2')
+    ] * 3
+    owned = [(path, offsets) for path, _, offsets in layout]
+    assert [cell['geometry'] for cell in mvr.mode_cells(owned)] == ['Base', 'Pixel 1', 'Pixel 2']
 
 
 CORPUS = Path(__file__).parents[2] / 'tests/data/corpus/gdtf'

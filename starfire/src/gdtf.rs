@@ -8,7 +8,6 @@ use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb};
 use crate::protocol::wire;
 
 const MAX_CHANNEL_BYTES: usize = 4;
-const FULL_PERCENT: f64 = 100.0;
 const CURVE_SAMPLES: u32 = 1024;
 const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
@@ -58,7 +57,8 @@ struct Function {
     curve: Option<DmxCurve>,
 }
 
-/// A GDTF DMXProfile: output percentage as a piecewise cubic of DMX percentage.
+/// A GDTF DMXProfile: output as a piecewise cubic of the DMX position, both fractions 0..1
+/// (GDTF 1.2's Figure 1 gives "DMXPercentage = 0,75" for 75% of the DMX range).
 #[derive(Clone, Debug, PartialEq)]
 struct DmxCurve {
     points: Vec<wire::DmxProfilePoint>,
@@ -89,7 +89,7 @@ impl DmxCurve {
             points: points.to_vec(),
         };
         let samples: Vec<_> = (0..=CURVE_SAMPLES)
-            .map(|step| curve.output(FULL_PERCENT * f64::from(step) / f64::from(CURVE_SAMPLES)))
+            .map(|step| curve.output(f64::from(step) / f64::from(CURVE_SAMPLES)))
             .collect();
         ensure!(
             samples
@@ -101,39 +101,39 @@ impl DmxCurve {
     }
 
     // GDTF: the point with the greatest DMXPercentage at or below x applies; none gives 0.
-    fn output(&self, percent: f64) -> f64 {
+    fn output(&self, position: f64) -> f64 {
         self.points
             .iter()
             .rev()
-            .find(|point| point.dmx_percentage <= percent)
+            .find(|point| point.dmx_percentage <= position)
             .map_or(0.0, |point| {
-                let x = percent - point.dmx_percentage;
+                let x = position - point.dmx_percentage;
                 point.cfc0 + x * (point.cfc1 + x * (point.cfc2 + x * point.cfc3))
             })
     }
 
     /// The DMX value in first..=last whose output is nearest `amount` of full output.
     fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
-        let target = amount * FULL_PERCENT;
-        let percent = |value: u32| {
+        let target = amount;
+        let position = |value: u32| {
             if last == first {
                 0.0
             } else {
-                FULL_PERCENT * f64::from(value - first) / f64::from(last - first)
+                f64::from(value - first) / f64::from(last - first)
             }
         };
         let (mut low, mut high) = (first, last);
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.output(percent(middle)) < target {
+            if self.output(position(middle)) < target {
                 low = middle + 1;
             } else {
                 high = middle;
             }
         }
         if low > first
-            && (target - self.output(percent(low - 1))).abs()
-                <= (self.output(percent(low)) - target).abs()
+            && (target - self.output(position(low - 1))).abs()
+                <= (self.output(position(low)) - target).abs()
         {
             low - 1
         } else {
@@ -192,6 +192,9 @@ pub struct GdtfCell {
     /// One-based DMX offsets of this geometry's channels within the fixture footprint, ascending.
     pub offsets: Vec<usize>,
     pub profile: GdtfProfile,
+    /// A master cell (a Dimmer above several pixel cells) lists the cells it scales; GDTF
+    /// multiplies the master's output into every pixel below it.
+    pub governed: Vec<usize>,
 }
 
 impl GdtfProfile {
@@ -342,9 +345,10 @@ impl GdtfProfile {
                 geometry: geometries.remove(0).1,
                 offsets: offsets(&self.channels),
                 profile: self,
+                governed: Vec::new(),
             }]);
         }
-        geometries
+        let mut cells = geometries
             .into_iter()
             .map(|(_, geometry)| {
                 let members: Vec<_> = (0..self.channels.len())
@@ -363,6 +367,23 @@ impl GdtfProfile {
                     }
                     channels.push(channel);
                 }
+                // Only a dimmer inside the cell gates its colour; a master's is applied by
+                // FixtureRig::encode, which divides the master level out of each pixel.
+                let own_dimmers: Vec<_> = channels
+                    .iter()
+                    .filter(|channel| {
+                        channel
+                            .functions
+                            .iter()
+                            .any(|function| function.attribute == "Dimmer")
+                    })
+                    .filter_map(|channel| channel.geometry_path.last().cloned())
+                    .collect();
+                for channel in &mut channels {
+                    channel.has_dimmer = own_dimmers
+                        .iter()
+                        .any(|geometry| channel.geometry_path.contains(geometry));
+                }
                 let order = dependency_order(&channels)?;
                 Ok(GdtfCell {
                     geometry,
@@ -372,9 +393,42 @@ impl GdtfProfile {
                         order,
                         footprint: self.footprint,
                     },
+                    governed: Vec::new(),
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        for master in 0..cells.len() {
+            let dims = cells[master].profile.channels.iter().any(|channel| {
+                channel.geometry_path.last() == Some(&cells[master].geometry)
+                    && channel
+                        .functions
+                        .iter()
+                        .any(|function| function.attribute == "Dimmer")
+            });
+            if !dims {
+                continue;
+            }
+            cells[master].governed =
+                (0..cells.len())
+                    .filter(|&cell| {
+                        cell != master
+                            && cells[cell].profile.channels.iter().any(|channel| {
+                                channel.geometry_path.contains(&cells[master].geometry)
+                            })
+                    })
+                    .collect();
+        }
+        for cell in 0..cells.len() {
+            ensure!(
+                cells
+                    .iter()
+                    .filter(|master| master.governed.contains(&cell))
+                    .count()
+                    <= 1,
+                "nested GDTF master dimmers are unsupported"
+            );
+        }
+        Ok(cells)
     }
 
     fn assemble(mut channels: Vec<Channel>) -> Result<Self> {
