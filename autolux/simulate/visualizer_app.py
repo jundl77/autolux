@@ -1268,15 +1268,22 @@ def _build_static_panel():
     )
 
 
-OVERLAY_BANNER_JS = '''function(state) {
+OVERLAY_BANNER_JS = (
+    '''function(state) {
     state = window.autoluxControl ? window.autoluxControl.view(state) : state;
     if (!state || state.mode !== 'static') {
         return [{display: 'none'}, ''];
     }
-    const looks = Object.keys((state.static || {}).looks || {}).length;
+    // The UV preset darkens everything under the blacklit groups; that is not a look of its own.
+    const looks = Object.entries((state.static || {}).looks || {}).filter(([target, look]) =>
+        !(target === '''
+    + json.dumps(ALL_FIXTURES)
+    + ''' && look.dimmer === 0
+          && !look.colour && !look.uv)).length;
     return [{}, 'Static overlay active'
         + (looks ? ' · ' + looks + (looks === 1 ? ' look' : ' looks') : '')];
 }'''
+)
 
 
 def _build_overlay_banner():
@@ -1349,13 +1356,20 @@ def _register_direct_static_controls(app) -> None:
             const ids = """
         + json.dumps(list(STATIC_CHIP_IDS))
         + """;
-            const target = args[ids.length];
-            const classes = args.slice(ids.length + 1, 2 * ids.length + 1);
-            const state = control.view(args[2 * ids.length + 1]) || {};
+            const colour = args[ids.length];
+            const target = args[ids.length + 1];
+            const classes = args.slice(ids.length + 2, 2 * ids.length + 2);
+            const state = control.view(args[2 * ids.length + 2]) || {};
             const triggered = (window.dash_clientside.callback_context.triggered || [])
                 .map((t) => t.prop_id.split('.')[0]);
             const chip = ids.find((id) => triggered.includes(id));
             if (!chip) {
+                if (triggered.includes('static-colour')) {
+                    const look = control.build.static('static-colour', target, undefined, colour);
+                    if (look) {
+                        control.dispatch(look, 'static-status');
+                    }
+                }
                 return classes.map(() => window.dash_clientside.no_update);
             }
             const before = classes[ids.indexOf(chip)] || '';
@@ -1390,6 +1404,7 @@ def _register_direct_static_controls(app) -> None:
         }""",
         *[Output(name, 'className') for name in STATIC_CHIP_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
+        Input('static-colour', 'value'),
         State('static-target', 'value'),
         *[State(name, 'className') for name in STATIC_CHIP_IDS],
         State('control-state', 'data'),
@@ -1513,16 +1528,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
     if direct:
         _register_direct_static_controls(app)
         _register_direct_fx_controls(app)
-    operator_inputs = (
-        []
-        if direct
-        else [
-            *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
-            *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
-            *[Input(name, 'n_clicks') for name in (*FX_SLOT_IDS, FX_CLEAR_ID)],
-            *[Input(name, 'value') for name in FX_SEGMENT_IDS],
-        ]
-    )
+        return
 
     def _fx_command(trigger, target, state):
         inputs = dash.ctx.inputs
@@ -1537,7 +1543,10 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
 
     @app.callback(
         Output('static-status', 'children'),
-        *operator_inputs,
+        *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
+        *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
+        *[Input(name, 'n_clicks') for name in (*FX_SLOT_IDS, FX_CLEAR_ID)],
+        *[Input(name, 'value') for name in FX_SEGMENT_IDS],
         Input('static-colour', 'value'),
         State('static-target', 'value'),
         State('control-state', 'data'),
