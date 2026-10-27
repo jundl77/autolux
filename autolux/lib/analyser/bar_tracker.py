@@ -92,11 +92,8 @@ def tracker_present(generation_dir) -> bool:
 
 
 def _sha256(path) -> str:
-    digest = hashlib.sha256()
     with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+        return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def load_record(generation_dir) -> dict:
