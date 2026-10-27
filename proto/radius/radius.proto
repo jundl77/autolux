@@ -98,24 +98,21 @@ message Metrics {
   double buffer_target_seconds = 7;
   uint64 underruns_total = 8;
   uint64 device_underruns_total = 9;
-  uint64 concealed_frames_total = 10;
   uint64 lost_frames_total = 11;  // Frames the client dropped, played as silence.
   uint64 overflow_frames_total = 12;
-  uint64 late_packets_total = 13;
-  uint64 latency_trims_total = 14;
   sint32 clock_correction_ppm = 15;
   bool dmx_connected = 16;
   uint64 dmx_frames_total = 17;  // Complete successful Enttec frame writes, including blackouts.
-  uint64 dmx_dropped_total = 18;
   double dmx_lateness_seconds = 19;
   optional double audio_input_age_seconds = 20;
   optional double audio_max_gap_seconds = 21;
   float audio_signal_peak = 22;
-  uint64 invalid_packets_total = 23;
   uint64 send_failures_total = 24;
   bool playing = 27;  // False while filling the 500 ms buffer or after starvation.
   uint64 rebuffer_count = 28;
   uint64 audio_gaps_total = 29;  // AudioFrame sequence gaps filled with silence.
+  // Removed counters that no code path could increment.
+  reserved 10, 13, 14, 18, 23;
 }
 
 // Local TX measurements for the transport health report.
@@ -129,11 +126,11 @@ message TxMetrics {
   uint64 capture_overruns_total = 7;
   uint64 queue_dropped_frames_total = 8;
   uint64 send_failures_total = 9;
-  uint64 invalid_packets_total = 10;
   double playback_delay_seconds = 11;
   optional double dmx_input_age_seconds = 12;
   uint64 network_queued_bytes = 13;
   uint64 capture_discontinuities_total = 14;
   optional double capture_last_gap_seconds = 15;
   uint64 capture_priority_denied = 16;
+  reserved 10;  // Removed counter: every validation failure ends the session.
 }
