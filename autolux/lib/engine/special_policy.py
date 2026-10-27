@@ -154,6 +154,9 @@ class SpecialPolicy:
         self._last_used: dict[tuple[str, str], int] = {}
         # group -> the row that last fired there and when; the group rests that row's cooldown.
         self._group_fired: dict[str, tuple[Special, float]] = {}
+        # The accent group that fired last and its X, and when each accent group last fired.
+        self._last_accent: tuple[str, float] | None = None
+        self._accent_order: dict[str, int] = {}
 
     def choose(
         self,
@@ -182,14 +185,14 @@ class SpecialPolicy:
         calm = [special for special in selectable if not special.intense]
         if intense_blocked:
             suppressed = intense_blocked if strobes or len(calm) < len(selectable) else None
-            chosen = self._least_recent(calm) if calm else None
+            chosen = self._pick(calm, capabilities) if calm else None
             return SpecialChoice(chosen, suppressed=suppressed)
         if soft_drop:
             # A soft drop keeps its strobe burst but not an intense special on top of it.
             suppressed = soft_drop if len(calm) < len(selectable) else None
-            chosen = self._least_recent(calm) if calm else None
+            chosen = self._pick(calm, capabilities) if calm else None
             return SpecialChoice(chosen, strobes, suppressed)
-        chosen = self._least_recent(selectable) if selectable else None
+        chosen = self._pick(selectable, capabilities) if selectable else None
         return SpecialChoice(chosen, strobes)
 
     def record(
@@ -203,6 +206,8 @@ class SpecialPolicy:
         self._group_fired[special.group] = (special, now)
         if capabilities is not None and capabilities.role(special.group) == ACCENT_ROLE:
             self._accent_fired = [*self._recent_accents(now), now]
+            self._last_accent = (special.group, capabilities.x(special.group))
+            self._accent_order[special.group] = self._selections
 
     def _recent_accents(self, now: float) -> list[float]:
         fired = list(self._accent_fired)  # replaced, never mutated, so the snapshot reads safely
@@ -251,6 +256,25 @@ class SpecialPolicy:
     def _cooling(self, special: Special, now: float) -> bool:
         last = self._group_fired.get(special.group)
         return last is not None and now - last[1] < last[0].cooldown_seconds
+
+    def _pick(self, pool: list[Special], capabilities: SpecialCapabilities) -> Special:
+        """The seed picks the row; when it lands on an accent and several accent groups are
+        ready, space picks the group: the house-left-most first, then each time the ready
+        group furthest in X from the last accent, so accents ping-pong across the room."""
+        chosen = self._least_recent(pool)
+        accents = {s.group for s in pool if capabilities.role(s.group) == ACCENT_ROLE}
+        if chosen.group not in accents or len(accents) < 2:
+            return chosen
+        last = self._last_accent
+
+        def order(group: str):
+            x = capabilities.x(group)
+            reach = x if last is None else -abs(x - last[1])
+            # Equal reach: the group that has waited longest, then house left first.
+            return (reach, self._accent_order.get(group, -1), x, group)
+
+        group = min(accents, key=order)
+        return self._least_recent([s for s in pool if s.group == group])
 
     def _least_recent(self, pool: list[Special]) -> Special:
         unused = [s for s in pool if (s.name, s.group) not in self._last_used]
