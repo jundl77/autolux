@@ -1545,6 +1545,27 @@ window.dash_clientside = {{no_update: null, set_props: () => {{}}}};
     ]
 
 
+def test_auto_every_intensity_level_and_the_on_fx_side_fill_in_one_colour():
+    css = (CONTROL_JS.parent / 'control.css').read_text(encoding='utf8')
+    css = re.sub(r'/\*.*?\*/', '', css, flags=re.DOTALL)
+    rules = dict(re.findall(r'([^{}]+?)\s*\{([^{}]*)\}', css))
+
+    def declared(selector, prop):
+        [body] = [body for sel, body in rules.items() if sel.strip() == selector]
+        return re.search(rf'{prop}:\s*([^;]+);', body).group(1)
+
+    assert declared('#show-control .joined > button.active', 'background') == 'var(--fill-on)'
+    assert declared('#control-intensity', '--tone') == 'var(--fill-on)'
+    # No per-level, per-side or follow-the-music override repaints a filled part.
+    overrides = [
+        sel
+        for sel in rules
+        if '#control-intensity' in sel or '#control-fx-off' in sel or '.following' in sel
+    ]
+    assert [sel.strip() for sel in overrides] == ['#control-intensity']
+    assert '--warm' not in css
+
+
 @pytest.mark.parametrize('action', ['fx_auto', 'intensity_auto'])
 def test_the_relay_never_forwards_an_auto_chip_while_the_page_sends_them_directly(action):
     source = _Recorder()

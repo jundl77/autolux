@@ -1341,7 +1341,7 @@ def _build_overlay_banner():
     )
 
 
-# While the show follows the music the segments grey out, but the level it chose stays lit.
+# While the show follows the music Auto lights, and the level it chose stays lit beside it.
 FOLLOW_SYNC_JS = '''function(state) {
     state = window.autoluxControl ? window.autoluxControl.view(state) : state;
     const on = !!(state && state.intensity_auto);
