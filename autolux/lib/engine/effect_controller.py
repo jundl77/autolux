@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from autolux.lib.clients.starfire_client import StarfireClient, special_target
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.autoloop_policy import (
+    MAXIMAL_ARRIVAL_OF_PEAK,
     AutoloopChoice,
     AutoloopPolicy,
     SelectionContext,
@@ -120,6 +121,8 @@ class EffectController:
         self._capabilities: SpecialCapabilities | None = None
         self._publish_palette()
         self.special_capabilities()
+        if event_buffer is not None:
+            event_buffer.set_cooldown_source(self.special_cooldowns)
 
     def special_capabilities(self) -> SpecialCapabilities:
         capabilities = SpecialCapabilities.from_groups(self.lighting_client.groups())
@@ -206,7 +209,7 @@ class EffectController:
         self._announce('[lighting]', intent, choice, palette)
 
         if fresh:
-            self._enter_special(intent, bpm)
+            self._enter_special(intent, bpm, context.arrival_of_peak)
         else:
             self._restore_special()
         return True
@@ -311,6 +314,13 @@ class EffectController:
             self.event_buffer.add_effect(f'{bank}/{autoloop}', 'AUTOLOOP')
         LOGGER.info('[lighting] standby | autoloop=%s/%s', bank, autoloop)
 
+    def special_cooldowns(self) -> list[dict]:
+        now = self.clock.monotonic()
+        total = drop_strobe_cooldown_seconds(self._settings())
+        last = self._last_intense_at
+        remaining = 0.0 if last is None else max(0.0, total - (now - last))
+        return self._special_policy.cooldowns(now, total, remaining)
+
     def _intense_blocked(self, settings: ShowSettings, now: float) -> str | None:
         if settings.intensity <= STROBE_GATE_INTENSITY:
             return f'intensity {settings.intensity:.2f} at or below {STROBE_GATE_INTENSITY:.2f}'
@@ -320,11 +330,24 @@ class EffectController:
             return f'cooldown {cooldown - (now - last):.0f}s of {cooldown:.0f}s left'
         return None
 
-    def _enter_special(self, intent: LightIntent, bpm: float | None) -> None:
+    def _enter_special(
+        self, intent: LightIntent, bpm: float | None, arrival_of_peak: float | None = None
+    ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
+        # An unknown arrival is not soft, matching how intensity follow grades a drop.
+        soft = arrival_of_peak is not None and arrival_of_peak < MAXIMAL_ARRIVAL_OF_PEAK
         choice = self._special_policy.choose(
-            intent, self.special_capabilities(), self._intense_blocked(settings, now)
+            intent,
+            self.special_capabilities(),
+            self._intense_blocked(settings, now),
+            soft_drop=(
+                f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
+                'of the track peak'
+                if soft
+                else None
+            ),
+            now=now,
         )
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
@@ -335,7 +358,7 @@ class EffectController:
         if choice.special is None:
             self._forget_special()
         else:
-            self._special_policy.record(choice.special)
+            self._special_policy.record(choice.special, now)
             self._fire_special(choice.special)
         for strobe in choice.strobes:
             self._strobe(strobe, bpm, settings)

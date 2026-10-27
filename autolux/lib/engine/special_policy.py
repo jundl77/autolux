@@ -24,6 +24,9 @@ class Special:
     release_beats: float = 0.0
     pattern: float | None = None
     strobe_hz: float | None = None
+    # Never on the wire: how long the row's group rests after it fires; no row on that group
+    # is selectable meanwhile, since the fixtures are what the room tires of, not the recipe.
+    cooldown_seconds: float = 0.0
 
     @property
     def intense(self) -> bool:
@@ -97,12 +100,17 @@ class SpecialPolicy:
         self._rng = rng
         self._selections = 0
         self._last_used: dict[str, int] = {}
+        # group -> the row that last fired there and when; the group rests that row's cooldown.
+        self._group_fired: dict[str, tuple[Special, float]] = {}
 
     def choose(
         self,
         intent: LightIntent,
         capabilities: SpecialCapabilities,
         intense_blocked: str | None = None,
+        soft_drop: str | None = None,
+        *,
+        now: float = 0.0,
     ) -> SpecialChoice:
         rows = [
             special
@@ -110,18 +118,45 @@ class SpecialPolicy:
             if intent in special.intents and capabilities.allows(special)
         ]
         strobes = tuple(special for special in rows if special.strobe_hz is not None)
-        selectable = [special for special in rows if special.strobe_hz is None]
+        selectable = [
+            special
+            for special in rows
+            if special.strobe_hz is None and not self._cooling(special, now)
+        ]
         calm = [special for special in selectable if not special.intense]
         if intense_blocked:
             suppressed = intense_blocked if strobes or len(calm) < len(selectable) else None
             chosen = self._least_recent(calm) if calm else None
             return SpecialChoice(chosen, suppressed=suppressed)
+        if soft_drop:
+            # A soft drop keeps its strobe burst but not an intense special on top of it.
+            suppressed = soft_drop if len(calm) < len(selectable) else None
+            chosen = self._least_recent(calm) if calm else None
+            return SpecialChoice(chosen, strobes, suppressed)
         chosen = self._least_recent(selectable) if selectable else None
         return SpecialChoice(chosen, strobes)
 
-    def record(self, special: Special) -> None:
+    def record(self, special: Special, now: float = 0.0) -> None:
         self._selections += 1
         self._last_used[special.name] = self._selections
+        self._group_fired[special.group] = (special, now)
+
+    def cooldowns(self, now: float, intense_total: float, intense_remaining: float) -> list[dict]:
+        """One entry per group with special rows, plus each strobe row on the shared intense one."""
+        fired = dict(self._group_fired)  # read from the snapshot thread while the engine records
+        groups = dict.fromkeys(s.group for s in self._specials if s.strobe_hz is None)
+        entries = []
+        for group in groups:
+            last, at = fired.get(group, (None, now))
+            total = last.cooldown_seconds if last else 0.0
+            entries.append(_entry(group, last and last.name, total, total - (now - at)))
+        for strobe in (s for s in self._specials if s.strobe_hz is not None):
+            entries.append(_entry(strobe.group, strobe.name, intense_total, intense_remaining))
+        return entries
+
+    def _cooling(self, special: Special, now: float) -> bool:
+        last = self._group_fired.get(special.group)
+        return last is not None and now - last[1] < last[0].cooldown_seconds
 
     def _least_recent(self, pool: list[Special]) -> Special:
         unused = [special for special in pool if special.name not in self._last_used]
@@ -129,3 +164,14 @@ class SpecialPolicy:
             return self._rng.choice(unused)
         weights = [self._selections + 1 - self._last_used[special.name] for special in pool]
         return self._rng.choices(pool, weights)[0]
+
+
+def _entry(group: str, last: str | None, total: float, remaining: float) -> dict:
+    remaining = max(0.0, remaining)
+    return {
+        'group': group,
+        'last': last,
+        'cooldown_seconds': total,
+        'remaining_seconds': remaining,
+        'ready': remaining <= 0.0,
+    }

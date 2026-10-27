@@ -22,6 +22,7 @@ FILE_FIELDS = {
     ('effect', 'pattern'): 'pattern',
     ('playback', 'attack_beats'): 'attack_beats',
     ('playback', 'release_beats'): 'release_beats',
+    ('playback', 'cooldown_seconds'): 'cooldown_seconds',
 }
 FILE_NAMES = {field: '.'.join(path) for path, field in FILE_FIELDS.items()}
 SECTIONS = {path[:depth] for path in FILE_FIELDS for depth in range(1, len(path))}
@@ -29,7 +30,7 @@ SPECIAL_KEYS = frozenset(
     {'name', 'intents', 'group', 'colour_slot', 'energy', 'speed', 'attack_beats', 'release_beats'}
 )
 STROBE_KEYS = frozenset({'name', 'intents', 'group', 'strobe_hz'})
-OPTIONAL_KEYS = {SPECIAL_KEYS: {'pulse_beats', 'pattern'}, STROBE_KEYS: set()}
+OPTIONAL_KEYS = {SPECIAL_KEYS: {'pulse_beats', 'pattern', 'cooldown_seconds'}, STROBE_KEYS: set()}
 
 
 class SpecialError(ValueError):
@@ -122,7 +123,12 @@ def parse_special(document, stem: str) -> Special:
     if shape is STROBE_KEYS:
         strobe_hz = _number(data, 'strobe_hz', 0.0, STARFIRE_MAX_STROBE_HZ, labels)
         return Special(**common, strobe_hz=strobe_hz)
-    return Special(**common, **special_values(data, labels))
+    cooldown = (
+        _number(data, 'cooldown_seconds', 0.0, math.inf, labels)
+        if 'cooldown_seconds' in data
+        else 0.0
+    )
+    return Special(**common, **special_values(data, labels), cooldown_seconds=cooldown)
 
 
 def special_values(data: dict, labels: dict | None = None) -> dict:
