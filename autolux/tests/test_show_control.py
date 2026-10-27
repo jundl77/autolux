@@ -1193,6 +1193,13 @@ def test_loading_the_page_and_its_first_poll_command_nothing():
     assert 'static-status.children' not in app.callback_map
 
 
+def test_no_chip_click_rewrites_the_clear_buttons_class():
+    app = build_app(_Recorder(), direct_control=True)
+    chips = next(key for key in app.callback_map if 'static-preset-red.className' in key)
+    assert 'static-clear.className' not in chips
+    assert 'static-banner-clear.className' not in chips
+
+
 def test_clear_all_leads_the_static_action_row_in_the_quiet_style():
     app = build_app(_Recorder())
     row = app.layout['static-control'].children[0]
@@ -1494,8 +1501,8 @@ def test_the_fx_effects_ticker_counts_a_bar_down_from_the_last_poll():
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routine_poll():
-    def poll(last, remaining, ready=False):
-        return {'last': last, 'remaining': remaining, 'ready': ready}
+    def poll(last, remaining, ready=False, total=240):
+        return {'last': last, 'remaining': remaining, 'ready': ready, 'total': total}
 
     # (previous poll of the group, this poll)
     cases = [
@@ -1505,13 +1512,14 @@ def test_an_fx_effects_bar_flashes_once_when_its_group_fires_and_not_on_a_routin
         (poll('drift', 0, True), poll('drift', 240)),  # ready group fires the same special
         (poll('drift', 30), poll('drift', 240)),  # fired again before it was ready
         (poll('drift', 0, True), poll('spin', 90)),  # a different special fired
+        (poll('drift', 30), poll('drift', 330, total=540)),  # the operator lengthened it
     ]
     calls = ', '.join(
         f'control.cooldownFired({json.dumps(previous)}, {json.dumps(polled)})'
         for previous, polled in cases
     )
     fired = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
-    assert fired == [False, False, False, True, True, True]
+    assert fired == [False, False, False, True, True, True, False]
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')

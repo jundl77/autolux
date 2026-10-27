@@ -13,7 +13,7 @@ audio level, interruptions, lost/dropped audio frames, scheduling error and DMX
 delivery. Counters appear as rates; missing reports and counter resets leave gaps.
 The section decoder's confidence per section type is under **Section Confidence**;
 **FX Effects** shows when each fixture group and the drop strobe can fire a special again,
-with the row that last fired, readiest first; the bars count down live between polls.
+with the row that last fired, readiest first; each bar fills up live between polls as its group recovers.
 Link, telemetry and hardware faults appear only when they need attention.
 
 - **No link:** check receiver power, SSH access and TCP 19002. Heartbeats run every

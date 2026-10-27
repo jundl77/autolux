@@ -1605,6 +1605,7 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 
     entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
     assert entered['autoloop'] == 'warm_white'
+    assert entered['transition'] == {'kind': 'cut'}
 
     await show.play(15.5, 0.2)
     assert show.light.paused

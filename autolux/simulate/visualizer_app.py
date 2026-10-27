@@ -1492,9 +1492,12 @@ def _register_direct_static_controls(app) -> None:
             const ids = """
         + json.dumps(list(STATIC_CHIP_IDS))
         + """;
+            const presets = """
+        + json.dumps(list(STATIC_PRESET_IDS))
+        + """;
             const colour = args[ids.length];
             const target = args[ids.length + 1];
-            const classes = args.slice(ids.length + 2, 2 * ids.length + 2);
+            const classes = args.slice(ids.length + 2);
             const triggered = (window.dash_clientside.callback_context.triggered || [])
                 .map((t) => t.prop_id.split('.')[0]);
             const chip = ids.find((id) => triggered.includes(id));
@@ -1507,25 +1510,26 @@ def _register_direct_static_controls(app) -> None:
                 }
                 return classes.map(() => window.dash_clientside.no_update);
             }
-            const before = classes[ids.indexOf(chip)] || '';
+            const before = classes[presets.indexOf(chip)] || '';
             const command = control.build.static(chip, target);
             if (command.kind === 'clear') {
                 control.hold({mode: 'auto'});
                 control.dispatch(command, 'static-status', ['mode']);
-                return ids.map(() => '');
+                return presets.map(() => '');
             }
             control.dispatch(command, 'static-status').then((reply) => {
                 if (reply && reply.error) {
                     window.dash_clientside.set_props(chip, {className: before});
                 }
             });
-            return ids.map((id) => id === chip ? 'active' : '');
+            return presets.map((id) => id === chip ? 'active' : '');
         }""",
-        *[Output(name, 'className') for name in STATIC_CHIP_IDS],
+        # The clear buttons keep their own ghost-button class.
+        *[Output(name, 'className') for name in STATIC_PRESET_IDS],
         *[Input(name, 'n_clicks') for name in STATIC_CHIP_IDS],
         Input('static-colour', 'value'),
         State('static-target', 'value'),
-        *[State(name, 'className') for name in STATIC_CHIP_IDS],
+        *[State(name, 'className') for name in STATIC_PRESET_IDS],
         prevent_initial_call=True,
     )
 
