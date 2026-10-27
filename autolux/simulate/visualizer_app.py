@@ -2166,10 +2166,6 @@ class SnapshotPoller:
         return reply
 
 
-def direct_control_default() -> bool:
-    return os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
-
-
 def control_page_config(snapshot_source, direct: bool) -> dict:
     return {
         'direct': direct,
@@ -2194,9 +2190,9 @@ def build_app(
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
     can_control = callable(getattr(snapshot_source, 'control', None))
-    direct = can_control and (
-        direct_control_default() if direct_control is None else direct_control
-    )
+    if direct_control is None:
+        direct_control = os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
+    direct = can_control and direct_control
     app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
         '{%css%}',
         '{%css%}<script>window.autoluxControlConfig = '
