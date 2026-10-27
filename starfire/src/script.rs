@@ -451,6 +451,15 @@ impl LuaAutoloop {
                 })
             })?,
         )?;
+        let fixtures = Rc::clone(&shared);
+        api.set(
+            "fixture_of",
+            lua.create_function(move |_, cell: Value| {
+                let (_, fixture) =
+                    cell_fact(&cell, |id| fixtures.fixture_of(id).map(str::to_owned))?;
+                Ok(fixture)
+            })?,
+        )?;
         globals.set("sf", api)?;
         let identity = format!("{bank}/{autoloop}");
         instruction_budget.store(LUA_INSTRUCTION_LIMIT, Ordering::Relaxed);

@@ -444,6 +444,11 @@ impl FixtureRig {
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
     }
 
+    pub fn fixture_of(&self, cell_id: &str) -> Option<&str> {
+        let &(fixture, _) = self.cells.get(cell_id)?;
+        Some(&self.fixtures[fixture].id)
+    }
+
     pub fn fixture_ids(&self) -> Vec<String> {
         self.fixtures
             .iter()
