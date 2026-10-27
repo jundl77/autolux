@@ -690,10 +690,6 @@ def find_caches(data_dir: Path) -> set:
 _CORES_RESERVED_FOR_OS = 2
 
 
-def default_workers() -> int:
-    return max(1, (os.cpu_count() or 4) - _CORES_RESERVED_FOR_OS)
-
-
 # The serial cold path accumulates working set per track (#334: the singleton
 # chain's CUDA arena never shrinks and each track's object graph dies in
 # reference cycles the generational GC frees late), so every batch runs in
@@ -1078,7 +1074,7 @@ def main(argv: list | None = None) -> int:
     parser.add_argument(
         "--workers",
         type=int,
-        default=default_workers(),
+        default=max(1, (os.cpu_count() or 4) - _CORES_RESERVED_FOR_OS),
         help="parallel simulation workers (default: %(default)s = cpu_count - 2)",
     )
     parser.add_argument(

@@ -298,14 +298,6 @@ def load_metadata(dataset: Path) -> dict:
     return _keyed(dataset / METADATA_FILE, "File")
 
 
-def load_urls(dataset: Path) -> dict:
-    return _keyed(dataset / URLS_FILE, "File")
-
-
-def load_scores(dataset: Path) -> dict:
-    return _keyed(dataset / SCORES_FILE, "File")
-
-
 def youtube_id(url: str) -> str:
     found = _YOUTUBE_ID.search(url or "")
     return found.group(1) if found else ""
@@ -565,7 +557,12 @@ def convert(
     require_audio: bool = False,
 ) -> dict:
     dataset = dataset_dir(harmonixset)
-    sources = Sources(dataset, load_metadata(dataset), load_urls(dataset), load_scores(dataset))
+    sources = Sources(
+        dataset,
+        load_metadata(dataset),
+        _keyed(dataset / URLS_FILE, "File"),
+        _keyed(dataset / SCORES_FILE, "File"),
+    )
     convertible, no_annotation, no_audio, unknown = eligible(sources, corpus, ids, require_audio)
     if limit is not None:
         convertible = convertible[:limit]

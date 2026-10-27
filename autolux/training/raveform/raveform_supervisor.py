@@ -75,12 +75,8 @@ def install_signal_handlers() -> None:
             pass
 
 
-def _stamp() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S")
-
-
 def log(log_path: Path, event: str) -> None:
-    line = f"{_stamp()}  {event}"
+    line = f"{time.strftime('%Y-%m-%dT%H:%M:%S')}  {event}"
     try:
         with open(log_path, "a", encoding="ascii", errors="replace", newline="\n") as handle:
             handle.write(line + "\n")

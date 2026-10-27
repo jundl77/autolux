@@ -95,7 +95,7 @@ for _path in (
 import itertools
 
 from build_clean_manifest import CLEAN_MANIFEST_FILE, STATUS_OK
-from eval_assets import build_eval_artifact_metadata
+from eval_assets import build_eval_artifact_metadata, sha256_of
 from raveform_fetch_annotations import (
     SEGMENTS_FILE,
     annotations_dir,
@@ -431,14 +431,6 @@ def rationale_line(pick: Pick) -> str:
         f"{candidate.duration_sec / 60.0:.1f} min, {candidate.boundaries} boundaries, "
         f"classes {classes} -- {pick.reason}"
     )
-
-
-def sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def input_paths(data_dir: Path) -> dict:

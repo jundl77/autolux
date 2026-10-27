@@ -279,10 +279,6 @@ def live_beat_times(data_dir, youtube_id: str) -> np.ndarray:
     return np.asarray([float(beat["t"]) for beat in beats], dtype=np.float64)
 
 
-def expert_beat_times(grid) -> np.ndarray:
-    return np.asarray(grid.times, dtype=np.float64)
-
-
 def sidecar_arrays(
     track: TrackActivation,
     beats: dict,
@@ -346,7 +342,7 @@ def _beat_streams(data_dir: Path, youtube_id: str, grid, activation: np.ndarray)
     streams: dict = {}
     for condition, times in (
         ("live", live_beat_times(data_dir, youtube_id)),
-        ("expert", expert_beat_times(grid)),
+        ("expert", np.asarray(grid.times, dtype=np.float64)),
     ):
         scores, counts = aggregate_at_beats(activation, times, FRAME_SEC, FRAME_SEC)
         streams[condition] = (times, scores, counts)

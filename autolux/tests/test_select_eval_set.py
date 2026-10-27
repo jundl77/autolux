@@ -471,7 +471,7 @@ def test_verify_inputs_reports_a_changed_selection_input(tmp_path):
 
 
 def test_verify_inputs_is_silent_when_nothing_moved(tmp_path):
-    from select_eval_set import sha256_of
+    from eval_assets import sha256_of
 
     (tmp_path / "annotations").mkdir()
     (tmp_path / "clean_manifest.csv").write_text("x", encoding="utf-8")
