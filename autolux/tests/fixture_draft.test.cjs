@@ -175,3 +175,44 @@ test("selecting a node changes only the inspector, never the rig layout", () => 
     assert.equal(picked[3], false);
     assert.match(picked[2], /channels/);
 });
+
+test("the rig plan marks each fixture at its MVR position, coloured by group, accents dashed", () => {
+    const plan = model.planMarks(draft(), settings);
+    const byName = Object.fromEntries(plan.fixtures.map((mark) => [mark.name, mark]));
+    assert.deepEqual(plain([byName.wash_left.x, byName.wash_left.y, byName.wash_left.group]), [-900, -1000, "wash"]);
+    assert.equal(byName.kinta.accent, true);
+    assert.equal(byName.spot_left.accent, false);
+    // Hung turned around (yaw 180): the local Y axis points downstage, toward the audience.
+    assert.deepEqual(plain(byName.spot_left.facing.map(Math.round)), [0, -1]);
+    const markup = model.planSvg(plan, settings);
+    assert.match(markup, /class="plan-centreline" x1="0"/);
+    assert.match(markup, /class="plan-stage-edge"/);
+    // A 2 m span gets the largest 1-2-5 step within a fifth of it.
+    assert.match(markup, />0.2 m<\/text>/);
+    for (const name of ["spot_left", "wash_mid_right", "kinta"]) assert.ok(markup.includes(`>${name}</text>`), name);
+    // The audience is at the bottom: the most downstage fixture (the strip, Y -2000) is lowest.
+    assert.match(markup, /<circle cx="0" cy="2000"/);
+    const kinta = markup.slice(markup.indexOf("<title>kinta"));
+    assert.match(kinta.slice(0, kinta.indexOf("</g>")), /stroke-dasharray/);
+    assert.match(markup, /fx · accent<\/span>/);
+});
+
+test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", () => {
+    const fixtures = Array.from({ length: 500 }, (_, index) => ({
+        key: `n${index}`,
+        name: `fixture_${index}`,
+        group: `group_${String(index % 30).padStart(2, "0")}`,
+        accent: index % 30 < 6,
+        x: (index % 25) * 1200 - 14400,
+        y: Math.floor(index / 25) * 900 - 9000,
+        facing: [0, 1]
+    }));
+    const markup = model.planSvg({ fixtures, others: [] }, settings);
+    assert.ok(markup.length < 200 * 1024, `${markup.length} bytes`);
+    // Too dense to label: names move to hover titles.
+    assert.equal((markup.match(/<title>/g) || []).length, 500);
+    assert.ok(!markup.includes(">fixture_0</text>"));
+    const legend = markup.slice(markup.indexOf("plan-legend"));
+    assert.equal(new Set([...legend.matchAll(/fill="([^"]+)"/g)].map((match) => match[1])).size, 30);
+    assert.equal((legend.match(/· accent/g) || []).length, 6);
+});
