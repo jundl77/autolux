@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import random
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -16,7 +17,10 @@ AXES = ('colour', 'speed', 'pulse', 'pattern')
 class Special:
     name: str
     intents: tuple[LightIntent, ...]
-    group: str
+    # The group it plays on; a role row leaves it empty and plays on each capable group of
+    # its role, so a new fixture group inherits the rows its layer and profiles allow.
+    group: str = ''
+    role: str | None = None
     colour_slot: str | None = None
     energy: float = 0.0
     speed: float = 0.0
@@ -86,6 +90,17 @@ class SpecialCapabilities:
         axes = self.groups.get(special.group)
         return axes is not None and special.axes <= axes
 
+    def targets(self, special: Special) -> list[Special]:
+        """The row on each group it can play on: its own group, or every capable one of its role."""
+        if special.role is None:
+            return [special] if self.allows(special) else []
+        placed = (
+            dataclasses.replace(special, group=group)
+            for group in sorted(self.groups)
+            if self.role(group) == special.role
+        )
+        return [row for row in placed if self.allows(row)]
+
 
 @dataclass(frozen=True)
 class SpecialChoice:
@@ -107,7 +122,7 @@ class SpecialPolicy:
         self._specials = tuple(specials)
         self._rng = rng
         self._selections = 0
-        self._last_used: dict[str, int] = {}
+        self._last_used: dict[tuple[str, str], int] = {}
         # group -> the row that last fired there and when; the group rests that row's cooldown.
         self._group_fired: dict[str, tuple[Special, float]] = {}
 
@@ -121,9 +136,10 @@ class SpecialPolicy:
         now: float = 0.0,
     ) -> SpecialChoice:
         rows = [
-            special
+            row
             for special in self._specials
-            if intent in special.intents and capabilities.allows(special)
+            if intent in special.intents
+            for row in capabilities.targets(special)
         ]
         strobes = tuple(special for special in rows if special.strobe_hz is not None)
         selectable = [
@@ -146,13 +162,25 @@ class SpecialPolicy:
 
     def record(self, special: Special, now: float = 0.0) -> None:
         self._selections += 1
-        self._last_used[special.name] = self._selections
+        self._last_used[special.name, special.group] = self._selections
         self._group_fired[special.group] = (special, now)
 
-    def cooldowns(self, now: float, intense_total: float, intense_remaining: float) -> list[dict]:
+    def cooldowns(
+        self,
+        now: float,
+        intense_total: float,
+        intense_remaining: float,
+        capabilities: SpecialCapabilities | None = None,
+    ) -> list[dict]:
         """One entry per group with special rows, plus each strobe row on the shared intense one."""
         fired = dict(self._group_fired)  # read from the snapshot thread while the engine records
-        groups = dict.fromkeys(s.group for s in self._specials if s.strobe_hz is None)
+        capabilities = capabilities or SpecialCapabilities()
+        groups = dict.fromkeys(
+            row.group
+            for special in self._specials
+            if special.strobe_hz is None
+            for row in (capabilities.targets(special) if special.role else [special])
+        )
         entries = []
         for group in groups:
             last, at = fired.get(group, (None, now))
@@ -167,10 +195,10 @@ class SpecialPolicy:
         return last is not None and now - last[1] < last[0].cooldown_seconds
 
     def _least_recent(self, pool: list[Special]) -> Special:
-        unused = [special for special in pool if special.name not in self._last_used]
+        unused = [s for s in pool if (s.name, s.group) not in self._last_used]
         if unused:
             return self._rng.choice(unused)
-        weights = [self._selections + 1 - self._last_used[special.name] for special in pool]
+        weights = [self._selections + 1 - self._last_used[s.name, s.group] for s in pool]
         return self._rng.choices(pool, weights)[0]
 
 

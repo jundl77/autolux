@@ -411,6 +411,7 @@ FX_GROUP = {
     'speed': True,
     'pulse': True,
     'pattern': False,
+    'role': 'accent',
 }
 SPIN = Special(
     'spin',

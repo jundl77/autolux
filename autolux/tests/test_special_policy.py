@@ -18,6 +18,7 @@ FX = {
     'speed': True,
     'pulse': True,
     'pattern': False,
+    'role': 'accent',
 }
 
 
@@ -193,6 +194,32 @@ def test_each_group_rests_on_its_own():
     assert {first.group, second.group} == {'fx', 'movers'}
     assert policy.choose(ATMOSPHERIC, capabilities, now=1239.0).special is None
     assert policy.choose(ATMOSPHERIC, capabilities, now=1249.0).special == first
+
+
+LASER = {**FX, 'name': 'laser', 'pulse': True}
+WASH = {**FX, 'name': 'wash', 'role': 'loop'}
+
+
+def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alone():
+    spins = [s for s in discover_specials() if s.name in ('spin', 'cold_spin')]
+    capabilities = SpecialCapabilities.from_groups([FX, LASER, WASH])
+    assert {row.group for s in spins for row in capabilities.targets(s)} == {'fx', 'laser'}
+    # A laser that cannot rotate does not inherit the spin rows.
+    assert [
+        row.group
+        for row in SpecialCapabilities.from_groups([FX, LASER | {'speed': False}]).targets(spins[0])
+    ] == ['fx']
+    policy = SpecialPolicy(spins, random.Random(0))
+    first = policy.choose(DROP, capabilities, now=1000.0).special
+    policy.record(first, 1000.0)
+    second = policy.choose(DROP, capabilities, now=1010.0).special
+    policy.record(second, 1010.0)
+    assert {first.group, second.group} == {'fx', 'laser'}
+    assert policy.choose(DROP, capabilities, now=1089.0).special is None
+    third = policy.choose(DROP, capabilities, now=1091.0).special
+    assert third.group == first.group
+    resting = {e['group']: e['ready'] for e in policy.cooldowns(1091.0, 0.0, 0.0, capabilities)}
+    assert resting == {'fx': first.group == 'fx', 'laser': first.group == 'laser'}
 
 
 def test_cooldowns_list_one_entry_per_group_and_the_strobe_on_the_shared_cooldown():

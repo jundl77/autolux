@@ -5,6 +5,7 @@ from pathlib import Path
 
 from autolux.lib.engine.effect_definitions import STARFIRE_MAX_STROBE_HZ, LightIntent
 from autolux.lib.engine.special_policy import Special
+from autolux.lighting.mvr_schema import ROLES
 from autolux.lighting.palettes import SLOTS
 
 SPECIAL_DIRECTORY = Path(__file__).resolve().parents[2] / 'show' / 'specials'
@@ -14,6 +15,7 @@ FILE_FIELDS = {
     ('name',): 'name',
     ('intents',): 'intents',
     ('group',): 'group',
+    ('role',): 'role',
     ('preset', 'colour'): 'colour_slot',
     ('effect', 'rate'): 'speed',
     ('effect', 'size'): 'energy',
@@ -27,10 +29,15 @@ FILE_FIELDS = {
 FILE_NAMES = {field: '.'.join(path) for path, field in FILE_FIELDS.items()}
 SECTIONS = {path[:depth] for path in FILE_FIELDS for depth in range(1, len(path))}
 SPECIAL_KEYS = frozenset(
-    {'name', 'intents', 'group', 'colour_slot', 'energy', 'speed', 'attack_beats', 'release_beats'}
+    {'name', 'intents', 'colour_slot', 'energy', 'speed', 'attack_beats', 'release_beats'}
 )
 STROBE_KEYS = frozenset({'name', 'intents', 'group', 'strobe_hz'})
-OPTIONAL_KEYS = {SPECIAL_KEYS: {'pulse_beats', 'pattern', 'cooldown_seconds'}, STROBE_KEYS: set()}
+# A special row plays on one named group or on every group of a role; the strobe on a group.
+TARGET_KEYS = {SPECIAL_KEYS: ('group', 'role'), STROBE_KEYS: ()}
+OPTIONAL_KEYS = {
+    SPECIAL_KEYS: {'pulse_beats', 'pattern', 'cooldown_seconds', 'group', 'role'},
+    STROBE_KEYS: set(),
+}
 
 
 class SpecialError(ValueError):
@@ -112,14 +119,18 @@ def parse_special(document, stem: str) -> Special:
         raise SpecialError(f'unknown {_names(unknown, labels)}')
     if data['name'] != stem:
         raise SpecialError(f'name {data["name"]!r} must match the file name {stem!r}')
-    group = data['group']
-    if not isinstance(group, str) or not NAME.fullmatch(group):
-        raise SpecialError(f'group {group!r} must be a lower-case rig group name')
-    common = {
-        'name': stem,
-        'intents': _intents(data['intents']),
-        'group': group,
-    }
+    if TARGET_KEYS[shape] and len(data.keys() & set(TARGET_KEYS[shape])) != 1:
+        raise SpecialError('give exactly one of group, role')
+    common = {'name': stem, 'intents': _intents(data['intents'])}
+    if 'role' in data:
+        if data['role'] not in ROLES:
+            raise SpecialError(f'role {data["role"]!r} is not one of {", ".join(ROLES)}')
+        common['role'] = data['role']
+    else:
+        group = data['group']
+        if not isinstance(group, str) or not NAME.fullmatch(group):
+            raise SpecialError(f'group {group!r} must be a lower-case rig group name')
+        common['group'] = group
     if shape is STROBE_KEYS:
         strobe_hz = _number(data, 'strobe_hz', 0.0, STARFIRE_MAX_STROBE_HZ, labels)
         return Special(**common, strobe_hz=strobe_hz)

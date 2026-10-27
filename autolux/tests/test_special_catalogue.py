@@ -58,7 +58,7 @@ def test_the_shipped_specials_parse_and_skip_buildups():
 
 
 def test_the_shipped_fx_rows_are_quiet_textures_or_cooled_drop_accents():
-    rows = {s.name: s for s in discover_specials() if s.group == 'fx'}
+    rows = {s.name: s for s in discover_specials() if s.role == 'accent'}
     for name in ('drift', 'cold_drift'):
         texture = rows[name]
         assert not texture.intense and texture.energy <= 0.3, name
@@ -141,6 +141,20 @@ def test_intense_is_derived_from_pulse_or_speed(speed, pulse, intense):
 def test_invalid_rows_name_the_field_and_the_rule(change, message):
     with pytest.raises(SpecialError, match=message.replace('(', r'\(').replace('.', r'\.')):
         parse_special(row(**change), 'glow')
+
+
+def test_a_row_selects_by_role_instead_of_naming_a_group():
+    groupless = {key: value for key, value in ROW.items() if key != 'group'}
+    special = parse_special(groupless | {'role': 'accent'}, 'glow')
+    assert (special.group, special.role) == ('', 'accent')
+    assert parse_special(ROW, 'glow').role is None
+    for document, message in [
+        (ROW | {'role': 'accent'}, 'give exactly one of group, role'),
+        (groupless, 'give exactly one of group, role'),
+        (groupless | {'role': 'laser'}, "role 'laser' is not one of loop, accent"),
+    ]:
+        with pytest.raises(SpecialError, match=message):
+            parse_special(document, 'glow')
 
 
 def test_a_missing_field_is_named_by_its_file_path():
