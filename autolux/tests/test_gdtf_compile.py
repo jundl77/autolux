@@ -194,7 +194,9 @@ def test_virtual_channels_carry_no_dmx_and_cannot_be_mode_masters():
 def test_dmx_profiles_compile_to_their_curve_points():
     xml = (Path(__file__).parent / 'data/gdtf/curved_dimmer.xml').read_text(encoding='utf-8')
     [point] = compile_mode(xml, '8 bit').channels[0].functions[0].dmx_profile
-    assert (point.dmx_percentage, point.cfc1, point.cfc2) == (0, 0, 0.01)
+    assert (point.dmx_percentage, point.cfc1, point.cfc2) == (0, 0, 1)
+    with pytest.raises(ValueError, match='outside DMX fraction'):
+        compile_mode(xml.replace('DMXPercentage="0"', 'DMXPercentage="50"'), '8 bit')
     with pytest.raises(ValueError, match='DMX profile Missing'):
         compile_mode(xml.replace('DMXProfile="Square"', 'DMXProfile="Missing"'), '8 bit')
 

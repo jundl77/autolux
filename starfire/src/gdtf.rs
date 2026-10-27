@@ -8,7 +8,6 @@ use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, Rgb};
 use crate::protocol::wire;
 
 const MAX_CHANNEL_BYTES: usize = 4;
-const FULL_PERCENT: f64 = 100.0;
 const CURVE_SAMPLES: u32 = 1024;
 const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
@@ -58,7 +57,8 @@ struct Function {
     curve: Option<DmxCurve>,
 }
 
-/// A GDTF DMXProfile: output percentage as a piecewise cubic of DMX percentage.
+/// A GDTF DMXProfile: output as a piecewise cubic of the DMX position, both fractions 0..1
+/// (GDTF 1.2's Figure 1 gives "DMXPercentage = 0,75" for 75% of the DMX range).
 #[derive(Clone, Debug, PartialEq)]
 struct DmxCurve {
     points: Vec<wire::DmxProfilePoint>,
@@ -89,7 +89,7 @@ impl DmxCurve {
             points: points.to_vec(),
         };
         let samples: Vec<_> = (0..=CURVE_SAMPLES)
-            .map(|step| curve.output(FULL_PERCENT * f64::from(step) / f64::from(CURVE_SAMPLES)))
+            .map(|step| curve.output(f64::from(step) / f64::from(CURVE_SAMPLES)))
             .collect();
         ensure!(
             samples
@@ -101,39 +101,39 @@ impl DmxCurve {
     }
 
     // GDTF: the point with the greatest DMXPercentage at or below x applies; none gives 0.
-    fn output(&self, percent: f64) -> f64 {
+    fn output(&self, position: f64) -> f64 {
         self.points
             .iter()
             .rev()
-            .find(|point| point.dmx_percentage <= percent)
+            .find(|point| point.dmx_percentage <= position)
             .map_or(0.0, |point| {
-                let x = percent - point.dmx_percentage;
+                let x = position - point.dmx_percentage;
                 point.cfc0 + x * (point.cfc1 + x * (point.cfc2 + x * point.cfc3))
             })
     }
 
     /// The DMX value in first..=last whose output is nearest `amount` of full output.
     fn dmx(&self, amount: f64, first: u32, last: u32) -> u32 {
-        let target = amount * FULL_PERCENT;
-        let percent = |value: u32| {
+        let target = amount;
+        let position = |value: u32| {
             if last == first {
                 0.0
             } else {
-                FULL_PERCENT * f64::from(value - first) / f64::from(last - first)
+                f64::from(value - first) / f64::from(last - first)
             }
         };
         let (mut low, mut high) = (first, last);
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.output(percent(middle)) < target {
+            if self.output(position(middle)) < target {
                 low = middle + 1;
             } else {
                 high = middle;
             }
         }
         if low > first
-            && (target - self.output(percent(low - 1))).abs()
-                <= (self.output(percent(low)) - target).abs()
+            && (target - self.output(position(low - 1))).abs()
+                <= (self.output(position(low)) - target).abs()
         {
             low - 1
         } else {

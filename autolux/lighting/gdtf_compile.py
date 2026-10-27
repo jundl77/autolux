@@ -8,6 +8,12 @@ accepts literals beyond their declared resolution and never mirrors bytes when a
 to its channel's resolution. Its ChannelSet also interpolates a missing PhysicalFrom/To, where
 GDTF takes the function's. So DMXFrom, Default, ModeFrom, ModeTo and the sets' physical values
 are re-read from the same description.xml, in pygdtf's element order, and widened here.
+
+DMXProfile points pass through unscaled: x and Output(x) are fractions 0..1 of the function's
+DMX and physical range. GDTF 1.2's Point table only says "DMX percentage of the point; Unit:
+Percentage", but its Figure 1, "an example where the output follows a function f for 75% of
+the DMX Range and another function g for the last 25%", gives that point "DMXPercentage =
+0,75" with f(x) = 4x² - 4x + 1 and g(x) = 64x³ reaching 1 at full DMX.
 """
 
 import io
@@ -166,6 +172,8 @@ def _dmx_profile(fixture, name: str) -> list[rig_wire.DmxProfilePoint]:
     profile = next((entry for entry in fixture.dmx_profiles if entry.name == name), None)
     if profile is None or not profile.points:
         raise ValueError(f'GDTF DMX profile {name} is missing or has no points')
+    if any(not 0 <= point.dmx_percentage <= 1 for point in profile.points):
+        raise ValueError(f'GDTF DMX profile {name} has a point outside DMX fraction 0..1')
     return [
         rig_wire.DmxProfilePoint(
             dmx_percentage=point.dmx_percentage,

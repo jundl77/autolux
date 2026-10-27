@@ -73,12 +73,13 @@ message ChannelFunction {
   bool snap = 7;
   repeated ChannelSet sets = 8;  // Ascending DMXFrom.
   ModeMaster mode_master = 9;    // Unset when the function is always active.
-  // GDTF DMXProfile: output percentage against DMX percentage; empty is linear.
+  // GDTF DMXProfile: output against DMX position; empty is linear.
   repeated DmxProfilePoint dmx_profile = 10;
 }
 
 // Output(x) = CFC3·d³ + CFC2·d² + CFC1·d + CFC0 with d = x − dmx_percentage, from the point
-// with the greatest dmx_percentage at or below x; x and output are 0..100 percent.
+// with the greatest dmx_percentage at or below x; x and output are fractions 0..1 of the
+// function's DMX range and physical range (GDTF 1.2 Figure 1: 75% is 0,75).
 message DmxProfilePoint {
   double dmx_percentage = 1;
   double cfc0 = 2;

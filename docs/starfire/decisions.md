@@ -513,8 +513,9 @@ unnamed function `Attribute n` for paths and ModeMaster links, ignores a WheelSl
 function without a wheel, and drops channel sets that have neither a physical range nor a
 wheel slot (GDTF Builder's min/max labels; the function's own mapping encodes the same
 DMX). DMXProfile curves are carried as points and inverted by Starfire on semantic and
-physical values; x and the output are read as 0..100 percent of the DMX and physical range
-(the spec leaves the scale implicit), and non-monotonic curves are refused. Master and
+physical values; x and the output are fractions 0..1 of the DMX and physical range (GDTF
+1.2 Figure 1 sets "DMXPercentage = 0,75" for 75% of the DMX range, and its curves reach 1 at
+full DMX), points outside 0..1 are refused, and so are non-monotonic curves. Master and
 attribute brightness still scale an explicit value on a curved channel in DMX steps. When
 several active functions on one channel can express the look, the lowest DMX range wins.
 Still refused, each with its reason (pinned per corpus mode in test_gdtf_compile.py):
