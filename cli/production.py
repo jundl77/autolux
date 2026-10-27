@@ -1,6 +1,5 @@
 """Production topology: controller here; audio/DMX receivers on the output PC."""
 
-import argparse
 import asyncio
 from datetime import datetime
 import json
@@ -265,7 +264,7 @@ async def _run_session(args, *, checking=False):
                 'The shipped neural model is missing; refusing a degraded production show.'
             )
         input_index = resolve_devices(args.input_device, tx)
-        rig = selected_rig(args.rig, getattr(args, 'library', None))
+        rig = selected_rig(args.rig, args.library)
         validate_starfire(
             args.starfire_binary,
             rig,

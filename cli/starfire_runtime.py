@@ -69,7 +69,7 @@ def fixture_setup(args):
     return {
         'binary': Path(args.starfire_binary).resolve(),
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
-        'library': Path(getattr(args, 'library', FIXTURE_LIBRARY)).resolve(),
+        'library': Path(args.library).resolve(),
     }
 
 
