@@ -191,7 +191,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._paused = True
         self._held_intent = None
         # Paused, the renderer outputs the off frame; cut the special so play does not revive it.
-        self.effect_controller.cut_special()
+        self.effect_controller.forget_special(cut=True)
         self.lighting_client.set_paused(True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
