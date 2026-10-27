@@ -27,24 +27,26 @@ if _TRAINING_DIR not in sys.path:
     sys.path.insert(0, _TRAINING_DIR)
 
 from nn.decoder import (
+    SHIPPING_DECODER_CONFIG,
     DecodeParams,
-    SHIPPING_DECODER_CONFIG,  # noqa: E402
     build_decoder,
     decoder_config_classes,
     load_decoder_config,
     temper,
 )
-from nn.priors import Priors  # noqa: E402
+from nn.priors import Priors
+
+LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "BEATS_PER_BAR",
     "NOMINAL_BAR_SEC",
+    "SHIPPING_DECODER_CONFIG",
     "BarDecision",
     "BarObservation",
-    "SectionDecoder",
     "DecodeParams",
     "Priors",
-    "SHIPPING_DECODER_CONFIG",
+    "SectionDecoder",
     "decoder_config_classes",
     "load_decoder_config",
 ]
@@ -218,7 +220,7 @@ class SectionDecoder:
         return self._last_beat_sec is not None and at_sec - self._last_beat_sec > _BEAT_GAP_SEC
 
     def _re_anchor(self, at_sec: float) -> None:
-        logging.warning(
+        LOGGER.warning(
             f'[decoder] {at_sec - self._last_beat_sec:.1f}s without a beat — '
             f're-anchoring the bar grid at {at_sec:.2f}s and dropping '
             f'{len(self._cells)} pending cells'
@@ -259,7 +261,7 @@ class SectionDecoder:
         oldest = max(0, self._next_bar - self.params.lag_bars - 1)
         if oldest >= self._edge_base:
             return
-        logging.warning(
+        LOGGER.warning(
             f'[decoder] the beat grid has run {self._edge_base - oldest} bars '
             f'past the oldest line the committer can still name (cursor '
             f'{self._next_bar}, grid holds from {self._edge_base}) — '

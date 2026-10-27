@@ -476,7 +476,7 @@ async def test_a_partial_window_is_discarded_on_a_new_track_and_the_palette_hold
 
 
 async def test_a_silence_restart_discards_the_window():
-    light, lighting = await engine_showing_an_intro()
+    light, _lighting = await engine_showing_an_intro()
     for index in range(8):
         light._measure_track_mood(WARM_BRIGHT_LAID_BACK_BEAT, index % 4)
     light._forget_room_look()

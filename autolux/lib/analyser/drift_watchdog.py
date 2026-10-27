@@ -9,6 +9,8 @@ from enum import IntEnum
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 
+LOGGER = logging.getLogger(__name__)
+
 _WINDOW_SEC = 5.0
 _ENTER_SEC = 0.15
 # Positive: a hardware-paced input hands over one buffer per period, so drift never goes negative.
@@ -56,15 +58,6 @@ class DriftWatchdog:
     @property
     def fault(self) -> str | None:
         return self._fault
-
-    def exclude_pause_from_drift(self, sec: float) -> None:
-        if sec <= 0:
-            return
-        self._samples = deque((w + sec, s) for w, s in self._samples)
-        if self._first_wall is not None:
-            self._first_wall += sec
-        if self._calm_since is not None:
-            self._calm_since += sec
 
     @property
     def drift_sec(self) -> float:
@@ -154,4 +147,4 @@ class DriftWatchdog:
                 return
             self._last_log_times_seconds[direction] = now
             more = self._suppressed_log_counts.pop(direction, 0)
-            logging.warning(message + (f' [+{more} more since the last line]' if more else ''))
+            LOGGER.warning(message + (f' [+{more} more since the last line]' if more else ''))

@@ -6,7 +6,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _beat_stage():
     from autolux.lib.analyser.madmom_rhythm import _BeatStage
 
@@ -99,7 +99,8 @@ def test_online_state_is_bounded_so_the_roll_may_keep_the_beat_lock():
     # count). _pending is exempt: it is the sub-hop remainder, bounded by one
     # hop by construction.
     import numpy as np
-    from autolux.lib.analyser.madmom_rhythm import MadmomRhythm, SAMPLE_RATE
+
+    from autolux.lib.analyser.madmom_rhythm import SAMPLE_RATE, MadmomRhythm
 
     def click(seconds, t0):
         n = int(seconds * SAMPLE_RATE)

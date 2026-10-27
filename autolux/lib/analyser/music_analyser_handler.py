@@ -1,4 +1,3 @@
-import logging
 from abc import ABC, abstractmethod
 
 
@@ -20,10 +19,6 @@ class IMusicAnalyserHandler(ABC):
         pass
 
     def on_digital_gap(self, started_sec: float, seconds: float) -> None:
-        pass
-
-    @abstractmethod
-    async def on_cycle(self):
         pass
 
     @abstractmethod
