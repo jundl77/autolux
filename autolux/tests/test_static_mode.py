@@ -125,10 +125,9 @@ async def test_the_overlay_state_follows_the_looks_and_runs_the_hooks_once():
     light.static_looks.clear()
     await light.sync_static()
     assert (light.mode, light.static_looks.active) == ('auto', False)
-    assert overrides(lighting)[-3:] == [
+    assert overrides(lighting)[-2:] == [
         {'kind': 'clear_override', 'id': 'static_wash'},
         {'kind': 'clear_override', 'id': 'static_strip'},
-        {'kind': 'clear_override', 'id': 'static_floor'},
     ]
 
 
@@ -169,12 +168,11 @@ async def test_off_darkens_the_rig_instead_of_revealing_the_held_automatic_look(
     assert overrides(lighting) == [{'kind': 'clear_override', 'id': 'static_floor'}]
 
 
-async def test_a_wash_look_lights_only_the_wash_and_darkens_the_other_groups():
+async def test_a_group_look_leaves_every_other_group_on_what_it_showed():
     light, _, _, lighting = static_engine()
     light.enter_static()
     light.static_looks.look('wash', colour=(1.0, 0.0, 0.0))
     assert [c['value'] for c in overrides(lighting)] == [
-        DARK_FLOOR,
         {
             'id': 'static_wash',
             'target': {'group': 'wash'},
@@ -184,7 +182,7 @@ async def test_a_wash_look_lights_only_the_wash_and_darkens_the_other_groups():
     ]
     light.static_looks.look('movers', dimmer=0.5)
     assert overrides(lighting)[-1]['value']['target'] == {'group': 'movers'}
-    assert [c['value']['id'] for c in overrides(lighting)].count('static_floor') == 1
+    assert 'static_floor' not in [c['value']['id'] for c in overrides(lighting)]
 
 
 async def test_leaving_static_clears_every_look_and_applies_the_current_intent_on_the_downbeat():
@@ -266,10 +264,7 @@ async def test_show_control_applies_static_commands_as_an_overlay_and_clears_it(
         {},
         False,
     )
-    assert overrides(lighting)[-2:] == [
-        {'kind': 'clear_override', 'id': 'static_wash'},
-        {'kind': 'clear_override', 'id': 'static_floor'},
-    ]
+    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': 'static_wash'}
 
 
 async def test_a_group_look_outranks_all_and_a_colour_on_all_takes_the_groups_colour_back():

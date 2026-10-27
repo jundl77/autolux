@@ -24,7 +24,7 @@ from autolux.lib.engine.effect_definitions import (
     WILD,
 )
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
-from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
+from autolux.lib.engine.static_mode import ALL_FIXTURES, BLACK, PRESET_COLOURS, colour_hex
 from autolux.lib.media_session import MEDIA_SESSION_SOURCE
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
@@ -1129,6 +1129,15 @@ def static_control_command(trigger, target, colour) -> dict | None:
             }
         if target != ALL_FIXTURES and preset == 'off':
             return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': 0.0}
+        if target != ALL_FIXTURES and preset == 'uv':
+            return {
+                'action': 'static',
+                'kind': 'look',
+                'target': target,
+                'colour': colour_hex(BLACK),
+                'dimmer': 1.0,
+                'uv': True,
+            }
         return {'action': 'static', 'kind': 'preset', 'preset': preset}
     if trigger in STATIC_BUTTONS:
         return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}

@@ -108,9 +108,6 @@ class StaticLooks:
                     other.pop('colour', None)
                     other.pop('uv', None)
                     self._send(name)
-        if target != ALL_FIXTURES and ALL_FIXTURES not in self._looks:
-            # Without it the held automatic look keeps lighting every other group.
-            self._set_floor()
         look = self._looks.setdefault(target, {})
         if colour is not None and uv is None:
             look.pop('uv', None)

@@ -80,7 +80,12 @@ def apply_static(light_engine, command: dict) -> None:
     looks = light_engine.static_looks
     kind = command['kind']
     if kind == 'look':
-        looks.look(command['target'], colour=command['colour'], dimmer=command['dimmer'])
+        looks.look(
+            command['target'],
+            colour=command['colour'],
+            dimmer=command['dimmer'],
+            uv=command.get('uv'),
+        )
     elif kind == 'preset':
         looks.preset(command['preset'])
     elif kind == 'blackout':

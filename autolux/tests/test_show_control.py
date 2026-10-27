@@ -15,6 +15,7 @@ from autolux.lib.engine.effect_definitions import (
     ShowSettings,
 )
 from autolux.lib.engine.event_buffer import EventBuffer
+from autolux.lib.engine.static_mode import STATIC_GROUP_PRIORITY
 from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer
 from autolux.lighting.palettes import PALETTE_NAMES
@@ -286,7 +287,20 @@ def static_show():
             '#ffffff',
             {'action': 'static', 'kind': 'look', 'target': 'wash', 'colour': None, 'dimmer': 0.0},
         ),
-        ('static-preset-uv', 'wash', None, {'action': 'static', 'kind': 'preset', 'preset': 'uv'}),
+        ('static-preset-uv', 'all', None, {'action': 'static', 'kind': 'preset', 'preset': 'uv'}),
+        (
+            'static-preset-uv',
+            'wash',
+            None,
+            {
+                'action': 'static',
+                'kind': 'look',
+                'target': 'wash',
+                'colour': (0.0, 0.0, 0.0),
+                'dimmer': 1.0,
+                'uv': True,
+            },
+        ),
         (
             'static-colour',
             'wash',
@@ -335,8 +349,7 @@ async def test_red_with_target_wash_lights_only_the_wash(static_show):
         o['value']['id']: o['value'] for o in overrides(lighting) if o['kind'] == 'set_override'
     }
     assert looks['static_wash']['target'] == {'group': 'wash'}
-    assert looks['static_floor']['target'] == 'all'
-    assert looks['static_floor']['values'] == {'intensity': 0.0}
+    assert 'static_floor' not in looks
 
 
 @pytest.mark.parametrize(
@@ -1177,3 +1190,53 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
     assert source.commands == [
         {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
     ]
+
+
+RED = {'red': 1.0, 'green': 0.0, 'blue': 0.0}
+BLACK = {'red': 0.0, 'green': 0.0, 'blue': 0.0}
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run the overlay banner')
+@pytest.mark.parametrize(
+    ('chip', 'target', 'values'),
+    [
+        ('static-preset-off', 'fx', {'intensity': 0.0}),
+        ('static-preset-off', 'movers', {'intensity': 0.0}),
+        ('static-preset-red', 'strip', {'colour': RED, 'intensity': 1.0}),
+        (
+            'static-preset-uv',
+            'wash',
+            {'colour': BLACK, 'intensity': 1.0, 'attributes': {'ColorAdd_UV': 255.0}},
+        ),
+    ],
+)
+async def test_a_preset_on_a_group_target_changes_only_that_group(
+    static_show, chip, target, values
+):
+    from autolux.simulate.visualizer_app import OVERLAY_BANNER_JS
+
+    poller, commands = static_show
+    assert poller.control(static_control_command(chip, target, None)) == {'accepted': 'static'}
+    light, _, _, lighting = static_engine()
+    apply_static(light, commands.get_nowait())
+    await light.sync_static()
+    assert light.mode == 'static'
+    # Every other group keeps what it showed: no dark floor, no whole-rig look, no blackout.
+    assert overrides(lighting) == [
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': f'static_{target}',
+                'target': {'group': target},
+                'values': values,
+                'priority': STATIC_GROUP_PRIORITY,
+            },
+        }
+    ]
+    assert not light.static_looks.blackout
+    state = {'mode': 'static', 'static': light.static_looks.state()}
+    banner = _run_control_js(
+        f'const banner = {OVERLAY_BANNER_JS};\n'
+        f'console.log(JSON.stringify(banner({json.dumps(state)})));'
+    )
+    assert banner == [{}, 'Static overlay active · 1 look']

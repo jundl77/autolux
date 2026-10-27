@@ -31,6 +31,12 @@
             if (target !== all && preset === 'off') {
                 return {action: 'static', kind: 'look', target: target, dimmer: 0.0};
             }
+            if (target !== all && preset === 'uv') {
+                return {
+                    action: 'static', kind: 'look', target: target,
+                    colour: '#000000', dimmer: 1.0, uv: true,
+                };
+            }
             return {action: 'static', kind: 'preset', preset: preset};
         }
         if (trigger === 'static-clear' || trigger === 'static-banner-clear') {

@@ -144,12 +144,17 @@ def _static_command(payload: dict) -> dict:
         raise ValueError('a static dimmer must be within 0..1')
     if colour is None and dimmer is None:
         raise ValueError('a static look needs a colour or a dimmer')
-    return {
+    look = {
         'kind': kind,
         'target': target,
         'colour': colour,
         'dimmer': None if dimmer is None else float(dimmer),
     }
+    if 'uv' in payload:
+        if type(payload['uv']) is not bool:
+            raise ValueError('uv must be true or false')
+        look['uv'] = payload['uv']
+    return look
 
 
 def command_refusal(
