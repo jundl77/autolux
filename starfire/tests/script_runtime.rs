@@ -196,6 +196,37 @@ fn placed(id: &str, address: u32, x: f64, y: f64) -> String {
     )
 }
 
+#[test]
+fn side_without_a_count_parks_each_half_of_a_mover_row_on_its_own_side() {
+    let rig = support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{},{},{}],
+              "groups":{{"movers":["a","b","c","d"]}}}}"#,
+            placed("a", 1, -900.0, 0.0),
+            placed("b", 4, -300.0, 0.0),
+            placed("c", 7, 300.0, 0.0),
+            placed("d", 10, 900.0, 0.0),
+        ))
+        .unwrap(),
+    );
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          return sf.each(sf.group("movers"), function(mover, index)
+            return sf.pan_tilt(mover, 0.5 + sf.side(index) / 4, 0.5)
+          end)
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let pans: Vec<_> = autoloop
+        .render(&snapshot(0.0), &techno())
+        .unwrap()
+        .iter()
+        .map(|effect| effect.values.pan.unwrap())
+        .collect();
+    assert_eq!(pans, [0.25, 0.25, 0.75, 0.75]);
+}
+
 /// `area` is a StageArea name without its prefix, as Autolux would derive it.
 fn placed_in(id: &str, address: u32, x: f64, y: f64, area: &str) -> String {
     let fixture = placed(id, address, x, y);
