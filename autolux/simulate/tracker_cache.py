@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from autolux.lib.analyser import bar_tracker
-from autolux.simulate.cell_cache import _write_archive
+from autolux.simulate.cell_cache import _write_archive, covered_samples
 
 SCHEMA = "bar-tracker/1"
 SUFFIX = "bartracker.npz"
@@ -95,7 +95,10 @@ def open_replay(path, key: dict, expected_samples: int | None = None):
             if reason is not None:
                 return None, reason
             total = int(archive["total_pushed"])
-            if expected_samples is not None and total < int(expected_samples):
+            # A run in standby feeds the chain nothing, so the chain's own count falls
+            # short of the file; what the source read is what says the run was complete.
+            covered = int(archive["source_samples"]) if "source_samples" in archive.files else total
+            if expected_samples is not None and covered < int(expected_samples):
                 return None, "miss_truncated"
             return TrackerReplay(
                 archive["pass_trigger"],
@@ -178,10 +181,11 @@ class TrackerReplay:
 
 
 class TrackerRecorder:
-    def __init__(self, tracker, path, key: dict) -> None:
+    def __init__(self, tracker, path, key: dict, source_samples=None) -> None:
         self.tracker = tracker
         self.path = Path(path)
         self._key = key
+        self._source_samples = source_samples
         self._pushed = 0
         self._triggers: list = []
         self._chunk_offsets: list = [0]
@@ -234,6 +238,7 @@ class TrackerRecorder:
             {
                 "key": np.str_(json.dumps(self._key, sort_keys=True)),
                 "total_pushed": np.int64(self._pushed),
+                "source_samples": np.int64(covered_samples(self._source_samples, self._pushed)),
                 "pass_trigger": np.asarray(self._triggers, dtype=np.int64),
                 "chunk_offset": np.asarray(self._chunk_offsets, dtype=np.int64),
                 "frame_lo": np.asarray(self._frame_lo, dtype=np.int64),

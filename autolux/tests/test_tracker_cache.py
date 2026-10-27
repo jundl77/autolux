@@ -122,6 +122,19 @@ def test_a_truncated_recording_refuses_to_overrun(tmp_path):
         replay.feed(np.zeros(1, dtype=np.float32))
 
 
+def test_a_run_that_skipped_audio_in_standby_still_records_the_whole_file(tmp_path):
+    audio, key = _key(tmp_path)
+    path = tracker_cache.sidecar_path(audio, "librosa")
+    recorder = tracker_cache.TrackerRecorder(_FakeTracker(), path, key, source_samples=lambda: 9999)
+    for _ in range(5):
+        recorder.feed(np.zeros(1000, dtype=np.float32))
+        while recorder.due():
+            recorder.run_pass()
+    recorder.save()
+    assert tracker_cache.open_replay(path, key, expected_samples=9999)[1] == "hit"
+    assert tracker_cache.open_replay(path, key, expected_samples=10000)[1] == "miss_truncated"
+
+
 def test_the_archive_bytes_are_reproducible(tmp_path):
     audio, key = _key(tmp_path)
     path_a = tmp_path / "a.npz"
