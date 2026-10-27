@@ -1,6 +1,10 @@
 """A track's Mood from its opening, on fixed reference ranges rather than session statistics.
 
 The window runs from new_track to the first BUILDUP or DROP entry, at most MAX_MEASURED_BARS.
+A BUILDUP or DROP that arrives before MIN_MOOD_BEATS leaves the window open: it then closes at
+the next section entry of any kind, or at MAX_MEASURED_BARS. A show joined mid-track can meet
+its first drop a few beats into the window, and committing on those beats, or never, would
+leave the previous track's palette up for the whole track.
 
 drive = 0.6 x tempo on TEMPO_RANGE_BPM + 0.4 x 90th-percentile level on DRIVE_LEVEL_RANGE
 weight = mean(mean level on LEVEL_RANGE, spectral centroid on CENTROID_RANGE_HZ)
@@ -43,6 +47,7 @@ from statistics import fmean, median
 from autolux.lighting.palettes import Mood
 
 MAX_MEASURED_BARS = 32
+MIN_MOOD_BEATS = 16
 DRIVE_TEMPO_SHARE = 0.6
 DRIVE_LEVEL_PERCENTILE = 90
 TEMPO_RANGE_BPM = (85.0, 160.0)
@@ -94,6 +99,10 @@ class TrackMoodMeter:
     @property
     def measuring(self) -> bool:
         return self._beats is not None
+
+    @property
+    def beats_measured(self) -> int:
+        return 0 if self._beats is None else len(self._beats)
 
     def start(self) -> None:
         self._beats = []

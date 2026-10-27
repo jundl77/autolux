@@ -38,7 +38,12 @@ from autolux.lib.engine.event_buffer import (
 from autolux.lib.engine.intensity_follow import LEVEL_INTENSITIES, FollowMusic
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lib.engine.static_mode import StaticLooks, StaticRig
-from autolux.lib.engine.track_mood import MAX_MEASURED_BARS, MeasuredBeat, TrackMoodMeter
+from autolux.lib.engine.track_mood import (
+    MAX_MEASURED_BARS,
+    MIN_MOOD_BEATS,
+    MeasuredBeat,
+    TrackMoodMeter,
+)
 from autolux.lib.media_session import TrackChanged
 from autolux.lighting.palettes import Mood
 
@@ -138,6 +143,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._capture_discontinuity_seen_at: deque[float] = deque(maxlen=8)
         self._track_mood = TrackMoodMeter(MAX_MEASURED_BARS * BEATS_PER_BAR)
         self._measured_track_mood: Mood | None = None
+        self._mood_closes_at_next_section = False
         self.follow_music = FollowMusic()
         # Set by the show: applies an automatic level through the operator's path.
         self.on_auto_intensity: Callable[[float, str], None] | None = None
@@ -635,6 +641,23 @@ class LightEngine(IMusicAnalyserHandler):
     def _discard_track_mood(self) -> None:
         self._track_mood.finish()
         self._measured_track_mood = None
+        self._mood_closes_at_next_section = False
+
+    def _section_closes_track_mood(self, intent: LightIntent) -> bool:
+        # A full window still waiting for its downbeat rides this section's select instead.
+        if self._measured_track_mood is not None:
+            return True
+        if not self._track_mood.measuring:
+            return False
+        measured = self._track_mood.beats_measured
+        if self._mood_closes_at_next_section:
+            return measured > 0
+        if intent not in MEASUREMENT_ENDING_INTENTS:
+            return False
+        if measured >= MIN_MOOD_BEATS:
+            return True
+        self._mood_closes_at_next_section = True
+        return False
 
     def _start_track_mood(self) -> None:
         self._discard_track_mood()
@@ -650,7 +673,7 @@ class LightEngine(IMusicAnalyserHandler):
         if context.new_track:
             self._start_track_mood()
             self._track_started_audio_sec = self._audio_sec - self._playback_delay_sec
-        elif intent in MEASUREMENT_ENDING_INTENTS:
+        elif self._section_closes_track_mood(intent):
             self._finish_track_mood()
         cut = self._paused and self._showing_standby
         bpm = self._published_bpm.get('last')
