@@ -1,7 +1,7 @@
-import pyaudio
-import numpy as np
-from magenta.models.music_vae import TrainedModel
 import magenta.music as mm
+import numpy as np
+import pyaudio
+from magenta.models.music_vae import TrainedModel
 
 model = TrainedModel(
     model_name='hierdec-mel_16bar', batch_size=4, checkpoint_dir_or_path='PATH_TO_CHECKPOINT'

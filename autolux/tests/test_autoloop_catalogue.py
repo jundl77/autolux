@@ -95,7 +95,7 @@ def test_the_python_header_keys_match_the_starfire_parity_test():
     rust = (AUTOLOOP_DIRECTORY.parents[1] / 'starfire/tests/autoloop_replay.rs').read_text(
         encoding='utf-8'
     )
-    block = re.search(r'const META_KEYS[^=]*= \[(.*?)\];', rust, re.S).group(1)
+    block = re.search(r'const META_KEYS[^=]*= \[(.*?)\];', rust, re.DOTALL).group(1)
     rust_keys = {
         key: tuple(re.findall(r'"([^"]+)"', values))
         for key, values in re.findall(r'\("(\w+)", &\[([^\]]*)\]\)', block)

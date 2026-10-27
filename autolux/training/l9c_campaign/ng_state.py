@@ -50,9 +50,10 @@ def pool_gb() -> float:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         ).stdout.strip()
         return round(float(out) / 1e9, 3)
-    except Exception:
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return -1.0
 
 
@@ -63,7 +64,7 @@ def main() -> None:
     ap.add_argument("--note")
     args = ap.parse_args()
 
-    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    now = dt.datetime.now(dt.UTC).isoformat()
     pool = pool_gb()
 
     if args.init:

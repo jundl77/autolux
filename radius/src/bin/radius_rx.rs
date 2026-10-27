@@ -34,7 +34,7 @@ fn main() -> Result<()> {
     )?;
     if args.check_config {
         if config.audio_enabled {
-            audio::check_device(&config.audio_device_id, false)?;
+            audio::check_device(&config.audio_device_id)?;
         }
         println!("Radius receiver configuration and audio endpoint are ready");
         return Ok(());

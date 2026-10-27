@@ -1,5 +1,7 @@
 import json
+
 import pytest
+
 from cli.health_monitor import HealthMonitor
 
 
@@ -11,6 +13,7 @@ def ready_health():
 
 def test_health_log_summarizes_periodically_and_reports_fault_and_recovery(caplog):
     import logging
+
     from cli.health_monitor import HealthLogger
 
     now = [0]
@@ -41,6 +44,7 @@ def test_health_log_summarizes_periodically_and_reports_fault_and_recovery(caplo
 
 def test_missing_health_is_unavailable_and_stale_link_is_a_warning(caplog):
     import logging
+
     from cli.health_monitor import HealthLogger
 
     with caplog.at_level(logging.INFO):
@@ -57,6 +61,7 @@ def test_missing_health_is_unavailable_and_stale_link_is_a_warning(caplog):
 
 def test_individual_latency_samples_do_not_flood_the_log(caplog):
     import logging
+
     from cli.health_monitor import HealthLogger
 
     state = ready_health()
@@ -86,7 +91,7 @@ def test_recent_glitches_clear_after_ten_seconds(tmp_path, monkeypatch):
     path = tmp_path / 'health.json'
     monitor = HealthMonitor(path, 1)
     for second in range(100, 114):
-        monkeypatch.setattr('cli.health_monitor.time.time', lambda: second)
+        monkeypatch.setattr('cli.health_monitor.time.time', lambda second=second: second)
         path.write_text(
             json.dumps(
                 {'run_id': 1, 'timestamp': second, 'rx': {'underruns_total': int(second > 100)}}

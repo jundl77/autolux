@@ -192,10 +192,6 @@ pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
     Ok(Some(ServerMessage::decode(kind, &payload)?))
 }
 
-pub fn write_event(output: &mut impl Write, message: &ServerMessage) -> Result<()> {
-    message.write(output)
-}
-
 /// Validate against the state left by preceding accepted commands.
 pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessage) -> Result<()> {
     match command {

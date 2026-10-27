@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.effect_definitions import (
     INTENSITY_BALANCED,
     INTENSITY_CALM,
     INTENSITY_WILD,
     ShowSettings,
 )
-from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer

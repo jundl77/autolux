@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import random
 import signal
 import subprocess
@@ -281,6 +282,7 @@ def download_one(data_dir: Path, youtube_id: str, timeout_sec: int) -> tuple[boo
             encoding="utf-8",
             errors="replace",
             timeout=timeout_sec,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         if interrupt_requested():
@@ -313,7 +315,7 @@ def download_one(data_dir: Path, youtube_id: str, timeout_sec: int) -> tuple[boo
 
 
 def format_duration(seconds: float) -> str:
-    if seconds < 0 or seconds != seconds:
+    if seconds < 0 or math.isnan(seconds):
         return "?"
     seconds = int(seconds)
     hours, rest = divmod(seconds, 3600)

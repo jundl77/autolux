@@ -13,58 +13,110 @@ const READ_CHUNK_BYTES: usize = 8192;
 const MAX_READ_BYTES_PER_POLL: usize = 64 * 1024;
 const STALLED_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub struct Connection {
-    stream: TcpStream,
+struct Outgoing {
+    bytes: Vec<u8>,
+    droppable: bool,
+}
+
+pub struct Connection<S = TcpStream> {
+    stream: S,
+    clock: fn() -> Instant,
     incoming: Vec<u8>,
-    outgoing: VecDeque<Vec<u8>>,
+    outgoing: VecDeque<Outgoing>,
     write_offset: usize,
     pending_bytes: usize,
     last_write_progress: Instant,
     read_eof: bool,
+    refused_sends: u64,
 }
 
 impl Connection {
     pub fn new(stream: TcpStream) -> Result<Self> {
         stream.set_nodelay(true)?;
         stream.set_nonblocking(true)?;
-        Ok(Self {
-            stream,
-            incoming: Vec::with_capacity(READ_CHUNK_BYTES + MAX_MESSAGE_BYTES),
-            outgoing: VecDeque::new(),
-            write_offset: 0,
-            pending_bytes: 0,
-            last_write_progress: Instant::now(),
-            read_eof: false,
-        })
+        Ok(Self::with_stream(stream, Instant::now))
     }
+}
 
-    /// False means bounded backpressure: the caller retains this message.
-    pub fn send(&mut self, message: &Message) -> Result<bool> {
-        let bytes = message.encode()?;
-        if self.pending_bytes + bytes.len() > MAX_PENDING_BYTES {
-            return Ok(false);
-        }
-        if self.pending_bytes == 0 {
-            self.last_write_progress = Instant::now();
-        }
-        self.pending_bytes += bytes.len();
-        self.outgoing.push_back(bytes);
-        self.flush()?;
-        Ok(true)
-    }
-
+impl<S> Connection<S> {
     pub fn pending_bytes(&self) -> usize {
         self.pending_bytes
     }
 
+    /// Messages `send` refused under backpressure; evicted audio is counted by the caller.
+    pub fn refused_sends(&self) -> u64 {
+        self.refused_sends
+    }
+}
+
+impl<S: Read + Write> Connection<S> {
+    /// `stream` must be nonblocking; `clock` times the stalled-write detector.
+    pub fn with_stream(stream: S, clock: fn() -> Instant) -> Self {
+        Self {
+            stream,
+            clock,
+            incoming: Vec::with_capacity(READ_CHUNK_BYTES + MAX_MESSAGE_BYTES),
+            outgoing: VecDeque::new(),
+            write_offset: 0,
+            pending_bytes: 0,
+            last_write_progress: clock(),
+            read_eof: false,
+            refused_sends: 0,
+        }
+    }
+
+    /// False means bounded backpressure: the caller retains this message. Unsent
+    /// audio queued with `send_audio` is evicted, oldest first, to make room.
+    pub fn send(&mut self, message: &Message) -> Result<bool> {
+        let bytes = message.encode()?;
+        let queued = self.enqueue(bytes, false)?.0;
+        self.refused_sends += u64::from(!queued);
+        Ok(queued)
+    }
+
+    /// Never retains the caller: under backpressure the oldest unsent audio is
+    /// dropped instead, this message last. Returns the AudioFrames dropped.
+    pub fn send_audio(&mut self, message: &Message) -> Result<u64> {
+        let bytes = message.encode()?;
+        let (queued, evicted) = self.enqueue(bytes, true)?;
+        Ok(evicted + u64::from(!queued))
+    }
+
+    fn enqueue(&mut self, bytes: Vec<u8>, droppable: bool) -> Result<(bool, u64)> {
+        self.flush()?;
+        let mut evicted = 0;
+        while self.pending_bytes + bytes.len() > MAX_PENDING_BYTES {
+            // A partially written message must finish or the peer loses framing.
+            let unsent = usize::from(self.write_offset > 0);
+            let Some(index) = self
+                .outgoing
+                .iter()
+                .skip(unsent)
+                .position(|entry| entry.droppable)
+            else {
+                return Ok((false, evicted));
+            };
+            let entry = self.outgoing.remove(index + unsent).expect("found above");
+            self.pending_bytes -= entry.bytes.len();
+            evicted += 1;
+        }
+        if self.pending_bytes == 0 {
+            self.last_write_progress = (self.clock)();
+        }
+        self.pending_bytes += bytes.len();
+        self.outgoing.push_back(Outgoing { bytes, droppable });
+        self.flush()?;
+        Ok((true, evicted))
+    }
+
     pub fn flush(&mut self) -> Result<()> {
-        while let Some(bytes) = self.outgoing.front() {
+        while let Some(Outgoing { bytes, .. }) = self.outgoing.front() {
             match self.stream.write(&bytes[self.write_offset..]) {
                 Ok(0) => bail!("Radius peer closed while writing"),
                 Ok(count) => {
                     self.write_offset += count;
                     self.pending_bytes -= count;
-                    self.last_write_progress = Instant::now();
+                    self.last_write_progress = (self.clock)();
                     if self.write_offset == bytes.len() {
                         self.outgoing.pop_front();
                         self.write_offset = 0;
@@ -76,7 +128,8 @@ impl Connection {
             }
         }
         ensure!(
-            self.pending_bytes == 0 || self.last_write_progress.elapsed() < STALLED_WRITE_TIMEOUT,
+            self.pending_bytes == 0
+                || (self.clock)().duration_since(self.last_write_progress) < STALLED_WRITE_TIMEOUT,
             "Radius receiver is not accepting data; TCP backpressure exceeded 2 seconds"
         );
         Ok(())

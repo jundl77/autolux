@@ -11,7 +11,7 @@ runtime is a consumer too: the decoder commits these names and the engine maps
 them to lights, and ``lib`` may not import the training tree.
 """
 
-from typing import Iterable
+from collections.abc import Iterable
 
 SECTION_LABELS = (
     'intro',
@@ -31,14 +31,6 @@ DROPPED_LABELS = frozenset({'end'})
 
 NUM_SECTION_CLASSES = len(SECTION_LABELS)
 LABEL_INDEX = {label: index for index, label in enumerate(SECTION_LABELS)}
-
-
-def is_section_label(label: str) -> bool:
-    return label in LABEL_INDEX
-
-
-def is_dropped_label(label: str) -> bool:
-    return label in DROPPED_LABELS
 
 
 def check_class_space(classes: Iterable[str], source: str) -> None:

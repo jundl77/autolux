@@ -36,13 +36,10 @@ directly, and annotations convert whether or not it has landed yet.
 from __future__ import annotations
 
 import argparse
-import copy
 import csv
-import hashlib
-import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -56,16 +53,21 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from corpus_root import corpus_dir  # noqa: E402
-from hand_label_admission import beat_rows, write_beat_csv  # noqa: E402
-from tp_record import (  # noqa: E402
+import itertools
+
+from corpus_root import corpus_dir
+from hand_label_admission import beat_rows, write_beat_csv
+from tp_record import (
     ID_PREFIXES,
     RECORD_SCHEMA,
     annotation_path,
     beat_csv_path,
+    carry_timestamp,
+    sha256,
     third_party_dir,
     validate_record,
     write_record,
+    write_report,
 )
 
 SOURCE = "harmonix"
@@ -155,15 +157,7 @@ def corpus_audio_path(corpus: Path, native: str) -> Path:
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _lines(text: str) -> list:
@@ -198,7 +192,7 @@ def segment_rows(text: str) -> list:
         rows.append((time, fields[1]))
     if not rows:
         raise ConvertError("no segment lines")
-    for index, (before, after) in enumerate(zip(rows, rows[1:]), 2):
+    for index, (before, after) in enumerate(itertools.pairwise(rows), 2):
         if after[0] <= before[0]:
             raise ConvertError(
                 f"segments line {index}: time {after[0]!r} does not advance on "
@@ -242,7 +236,7 @@ def section_dicts(sections: list) -> list:
 
 
 def adjacent_identical(sections: list) -> int:
-    return sum(1 for before, after in zip(sections, sections[1:]) if before.name == after.name)
+    return sum(1 for before, after in itertools.pairwise(sections) if before.name == after.name)
 
 
 # --------------------------------------------------------------------------- #
@@ -268,7 +262,7 @@ def parse_beats(text: str) -> list:
         beats.append((time, position))
     if not beats:
         raise ConvertError("no beat lines")
-    for index, (before, after) in enumerate(zip(beats, beats[1:]), 2):
+    for index, (before, after) in enumerate(itertools.pairwise(beats), 2):
         if after[0] <= before[0]:
             raise ConvertError(
                 f"beats line {index}: time {after[0]!r} does not advance on "
@@ -304,14 +298,6 @@ def load_metadata(dataset: Path) -> dict:
     return _keyed(dataset / METADATA_FILE, "File")
 
 
-def load_urls(dataset: Path) -> dict:
-    return _keyed(dataset / URLS_FILE, "File")
-
-
-def load_scores(dataset: Path) -> dict:
-    return _keyed(dataset / SCORES_FILE, "File")
-
-
 def youtube_id(url: str) -> str:
     found = _YOUTUBE_ID.search(url or "")
     return found.group(1) if found else ""
@@ -334,30 +320,6 @@ def _optional(text: str) -> float | None:
 # --------------------------------------------------------------------------- #
 # One track
 # --------------------------------------------------------------------------- #
-
-
-def carry_timestamp(path: Path, record: dict) -> dict:
-    """Keep an unchanged record's original stamp, so a re-run rewrites nothing.
-
-    A per-run timestamp is the one field that differs when nothing has: without
-    this, a second conversion rewrites all 912 files and no diff can say whether
-    the corpus actually moved.
-    """
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            existing = json.load(handle)
-    except (OSError, ValueError):
-        return record
-    if not isinstance(existing, dict):
-        return record
-    stamp = (existing.get("provenance") or {}).get("converted_utc")
-    if not isinstance(stamp, str) or not stamp:
-        return record
-    probe = copy.deepcopy(record)
-    probe["provenance"]["converted_utc"] = stamp
-    if probe == existing:
-        record["provenance"]["converted_utc"] = stamp
-    return record
 
 
 def convert_track(native: str, sources: Sources, corpus: Path) -> Verdict:
@@ -544,21 +506,6 @@ def _report(
     }
 
 
-def write_report(corpus: Path, report: dict) -> Path:
-    path = third_party_dir(corpus) / report["report_file"]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".part")
-    try:
-        with open(tmp, "w", encoding="utf-8", newline="") as handle:
-            json.dump(report, handle, indent=2)
-            handle.write("\n")
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
-    return path
-
-
 def print_report(report: dict) -> None:
     print(
         f"converted {report['converted']}/{report['tracks_requested']}, failed {report['failed']}"
@@ -610,7 +557,12 @@ def convert(
     require_audio: bool = False,
 ) -> dict:
     dataset = dataset_dir(harmonixset)
-    sources = Sources(dataset, load_metadata(dataset), load_urls(dataset), load_scores(dataset))
+    sources = Sources(
+        dataset,
+        load_metadata(dataset),
+        _keyed(dataset / URLS_FILE, "File"),
+        _keyed(dataset / SCORES_FILE, "File"),
+    )
     convertible, no_annotation, no_audio, unknown = eligible(sources, corpus, ids, require_audio)
     if limit is not None:
         convertible = convertible[:limit]

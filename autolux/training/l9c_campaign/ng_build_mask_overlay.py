@@ -37,7 +37,7 @@ MINING = CORPUS / "models" / "l9b_campaign" / "label_mining" / "corpus_mining.js
 W = str(MAIN)
 sys.path[:0] = [W, W + r"\training", W + r"\training\raveform"]
 
-from raveform_fetch_annotations import load_tracks  # noqa: E402
+from raveform_fetch_annotations import load_tracks
 
 OVERLAY_KIND = "nextgen_supervision_mask"
 DELTA_Q_MIN = 0.6
@@ -152,7 +152,7 @@ def main(argv: list | None = None) -> int:
             "track_ids": sorted(set(excluded)),
         },
         "surviving_spans": len(kept),
-        "generated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_utc": datetime.datetime.now(datetime.UTC).isoformat(),
         "sections": kept,
     }
     camp.mkdir(parents=True, exist_ok=True)

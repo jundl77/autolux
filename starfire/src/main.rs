@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
 use serde_json::json;
 
 use starfire::artnet::ArtNetOutput;
-use starfire::engine::{Engine, RenderedFrame};
+use starfire::engine::{Engine, RenderedFrame, extinguish};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
 use starfire::palette::PaletteTable;
@@ -126,7 +126,7 @@ fn run(arguments: Arguments) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "fixtures": rig.fixture_ids(), "groups": rig.groups(),
+                    "fixtures": rig.fixture_ids(), "cells": rig.cell_ids(), "groups": rig.groups(),
                     "universes": universes, "checked_autoloops": autoloops,
                     "missing_groups": missing_groups,
                 }))?
@@ -154,7 +154,7 @@ fn run(arguments: Arguments) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "fixtures": rig.fixture_ids(), "groups": rig.groups(), "universes": universes,
+                    "fixtures": rig.fixture_ids(), "cells": rig.cell_ids(), "groups": rig.groups(), "universes": universes,
                 }))?
             );
         }
@@ -178,24 +178,23 @@ fn run(arguments: Arguments) -> Result<()> {
             let rig = FixtureRig::load(&rig)?;
             let catalogue = AutoloopCatalog::load(&autoloops)?;
             let started = Instant::now();
-            let result = render_replay(&replay, rig.clone(), catalogue)?;
+            let frames = render_replay(&replay, rig.clone(), catalogue)?;
             let render_elapsed_seconds = started.elapsed().as_secs_f64();
             let render_realtime_factor = (replay.duration_seconds > 0.0
                 && render_elapsed_seconds > 0.0)
                 .then(|| replay.duration_seconds / render_elapsed_seconds);
-            let failures: BTreeSet<_> = result
-                .frames
+            let failures: BTreeSet<_> = frames
                 .iter()
                 .filter_map(|frame| frame.script_error.as_deref())
                 .collect();
             if let Some(path) = output {
-                write_capture(&path, &result.frames)?;
+                write_capture(&path, &frames)?;
             }
             let report = json!({
-                "frames": result.frames.len(),
+                "frames": frames.len(),
                 "duration_seconds": replay.duration_seconds,
                 "frame_rate_hz": replay.frame_rate_hz,
-                "dmx_sha256": dmx_digest(&result.frames),
+                "dmx_sha256": dmx_digest(&frames),
                 "render_elapsed_seconds": render_elapsed_seconds,
                 "render_realtime_factor": render_realtime_factor,
                 "script_errors": failures,
@@ -211,7 +210,7 @@ fn run(arguments: Arguments) -> Result<()> {
                 "replay contains script faults; network playback cancelled"
             );
             if let Some(destination) = artnet {
-                validate_output_cadence(&result.frames, replay.frame_rate_hz)?;
+                validate_output_cadence(&frames, replay.frame_rate_hz)?;
                 let local = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
                 let mut sender = if broadcast {
                     ArtNetOutput::bind_broadcast(local, destination)?
@@ -222,13 +221,7 @@ fn run(arguments: Arguments) -> Result<()> {
                 let handler_stop = Arc::clone(&stop);
                 ctrlc::set_handler(move || handler_stop.store(true, Ordering::Relaxed))
                     .context("install playback stop handler")?;
-                play_frames(
-                    &result.frames,
-                    &rig,
-                    &mut sender,
-                    &stop,
-                    stop_file.as_deref(),
-                )?;
+                play_frames(&frames, &rig, &mut sender, &stop, stop_file.as_deref())?;
             }
         }
     }
@@ -313,11 +306,7 @@ fn play_frames(
         }
         Ok(())
     })();
-    for state in last_states.values_mut() {
-        state.intensity = 0.0;
-        state.strobe_hz = 0.0;
-        state.output_blackout = true;
-    }
+    extinguish(&mut last_states);
     let blackout = rig
         .encode(&last_states)
         .and_then(|frame| sender.send_frame(&frame));

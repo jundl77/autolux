@@ -13,7 +13,7 @@ use mlua::serde::SerializeOptions;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value, VmState};
 use serde::Serialize;
 
-use crate::fixtures::{FixtureRig, MAX_FIXTURES};
+use crate::fixtures::{FixtureRig, MAX_CELLS};
 use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
@@ -255,8 +255,8 @@ impl LuaAutoloop {
         palettes: &PaletteTable,
     ) -> Result<Self> {
         ensure!(
-            rig.fixture_ids().len() <= MAX_FIXTURES,
-            "Lua fixture target limit exceeded"
+            rig.cell_ids().len() <= MAX_CELLS,
+            "Lua cell target limit exceeded"
         );
         let lua = Lua::new_with(
             StdLib::MATH | StdLib::TABLE | StdLib::STRING,
@@ -327,7 +327,10 @@ impl LuaAutoloop {
             .set_mode(ChunkMode::Text)
             .eval()?;
         for (name, slots) in palettes.iter() {
-            named_palettes.set(name, read_only(&lua, lua.to_value(slots)?)?)?;
+            named_palettes.set(
+                name,
+                read_only(&lua, lua.to_value(slots)?, "palettes are read-only")?,
+            )?;
         }
         let initial_slots = palettes.slots(palettes.initial())?;
         let active_palette = lua.create_table()?;
@@ -341,7 +344,11 @@ impl LuaAutoloop {
             active_palette.set(slot, &table)?;
             active_palette_slots.push(table);
         }
-        use_active_palette.call::<()>(read_only(&lua, Value::Table(active_palette))?)?;
+        use_active_palette.call::<()>(read_only(
+            &lua,
+            Value::Table(active_palette),
+            "palettes are read-only",
+        )?)?;
         let targets = rig.clone();
         api.set(
             "members",
@@ -352,9 +359,9 @@ impl LuaAutoloop {
                     return lua.create_table();
                 }
                 let members = targets.resolve(&target).map_err(mlua::Error::external)?;
-                if members.len() > MAX_FIXTURES {
+                if members.len() > MAX_CELLS {
                     return Err(mlua::Error::RuntimeError(
-                        "fixture target limit exceeded".to_owned(),
+                        "cell target limit exceeded".to_owned(),
                     ));
                 }
                 lua.create_sequence_from(members)
@@ -424,20 +431,7 @@ impl LuaAutoloop {
             context,
             SerializeOptions::new().serialize_none_to_null(false),
         )?;
-        let metatable = self.lua.create_table()?;
-        metatable.set("__index", values)?;
-        metatable.set("__metatable", false)?;
-        metatable.set(
-            "__newindex",
-            self.lua
-                .create_function(|_, _: (Value, Value, Value)| -> mlua::Result<()> {
-                    Err(mlua::Error::RuntimeError(
-                        "render context is read-only".to_owned(),
-                    ))
-                })?,
-        )?;
-        let snapshot = self.lua.create_table()?;
-        snapshot.set_metatable(Some(metatable))?;
+        let snapshot = read_only(&self.lua, values, "render context is read-only")?;
 
         let result: Table = self
             .render
@@ -481,16 +475,14 @@ impl LuaAutoloop {
     }
 }
 
-fn read_only(lua: &Lua, value: Value) -> mlua::Result<Table> {
+fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {
     let metatable = lua.create_table()?;
     metatable.set("__index", value)?;
     metatable.set("__metatable", false)?;
     metatable.set(
         "__newindex",
-        lua.create_function(|_, _: (Value, Value, Value)| -> mlua::Result<()> {
-            Err(mlua::Error::RuntimeError(
-                "palettes are read-only".to_owned(),
-            ))
+        lua.create_function(move |_, _: (Value, Value, Value)| -> mlua::Result<()> {
+            Err(mlua::Error::RuntimeError(error.to_owned()))
         })?,
     )?;
     let proxy = lua.create_table()?;

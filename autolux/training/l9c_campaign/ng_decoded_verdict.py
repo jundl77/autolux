@@ -20,7 +20,6 @@ Ground truth on val is published labels only (asserted: no val id carries a
 hand override).
 """
 
-import ctypes
 import dataclasses
 import datetime
 import hashlib
@@ -44,21 +43,16 @@ W = str(CODE)
 sys.path[:0] = [str(CODE.parent), W, W + r"\training"]
 from autolux.training import module_source
 
+module_source.below_normal_priority()
+
 module_source.require_imported_package_under_root("autolux.lib", CODE)
 module_source.require_imported_package_under_root("nn", CODE)
 
-try:
-    _kernel32 = ctypes.windll.kernel32
-    _kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-    _kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    _kernel32.SetPriorityClass(_kernel32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
-import psutil  # noqa: E402
-
-from nn.decoder import decoder_config_classes, load_decoder_config  # noqa: E402
-from nn.evaluate_v1 import (  # noqa: E402
+import psutil
+from build_training_table import label_coverage
+from evaluate_against_labels import aggregate
+from nn.decoder import decoder_config_classes, load_decoder_config
+from nn.evaluate_v1 import (
     UNDECODED,
     beat_classes,
     build_decoder,
@@ -70,12 +64,10 @@ from nn.evaluate_v1 import (  # noqa: E402
     split_ids,
     write_json,
 )
-from nn.priors import Priors  # noqa: E402
+from nn.priors import Priors
+from raveform_fetch_annotations import load_all_tracks, parse_sections
 
-from build_training_table import label_coverage  # noqa: E402
-from evaluate_against_labels import aggregate  # noqa: E402
-from autolux.lib.label_space import SECTION_LABELS, check_class_space  # noqa: E402
-from raveform_fetch_annotations import load_all_tracks, parse_sections  # noqa: E402
+from autolux.lib.label_space import SECTION_LABELS, check_class_space
 
 DATA = MAIN / "training" / "data" / "raveform"
 CAMP = DATA / "models" / "l9c_campaign"
@@ -101,7 +93,7 @@ MIN_AVAILABLE_MB = 700
 ENTRY_TOLERANCE_SEC = 2.0
 
 sys.path.insert(0, str(L9_CAMPAIGN))
-from l9_decoder_reference import decoded_drop_deficit, drop_spans_by_id  # noqa: E402
+from l9_decoder_reference import decoded_drop_deficit, drop_spans_by_id
 
 RUNS = {
     "l9_w128_s1234": {
@@ -459,8 +451,10 @@ def markdown(rows: dict, genre_rows: dict, skipped: dict, ceiling: float) -> str
         )
     lines += [
         "",
-        f"Flicker ceiling: {ceiling:.6f}/min (5-class decoded "
-        f"reference).  Deficit caveat -- {DEFICIT_CAVEAT}.",
+        (
+            f"Flicker ceiling: {ceiling:.6f}/min (5-class decoded "
+            f"reference).  Deficit caveat -- {DEFICIT_CAVEAT}."
+        ),
         "",
         "bu>drop / bu lag / bu never are the #344 transition instrument: reported, NOT gated.",
         "",
@@ -665,7 +659,7 @@ def main() -> int:
         )
 
     verdict = {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "label": "the l9c campaign decoded raveform-val verdict (#346): "
         "shipped l9 + l9b arm H anchors + the l9c arms, each under "
         "its own swept config + refit priors, with the #344 "

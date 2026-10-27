@@ -9,9 +9,9 @@ TRAINING_DIR = AUTOLUX_PACKAGE_ROOT / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn import sweep  # noqa: E402
-from nn.decoder import DecodeParams  # noqa: E402
-from nn.sweep import (  # noqa: E402
+from nn import sweep
+from nn.decoder import DecodeParams
+from nn.sweep import (
     ABLATION_AXES,
     ablate,
     refinement_axes,

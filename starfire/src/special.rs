@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 
 use crate::fixtures::FixtureRig;
 use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
-use crate::model::{AttributeValue, FixtureState, Rgb, SpecialFx};
+use crate::model::{AttributeValue, FixtureState, SpecialFx, lerp};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
 
@@ -42,7 +42,7 @@ impl Continuous {
         } else {
             self.from
         };
-        from + (self.to - from) * speed
+        lerp(from, self.to, speed)
     }
 }
 
@@ -84,9 +84,9 @@ impl Pulse {
     }
 }
 
-/// What one fixture's profile can express, resolved once per session.
+/// What one cell's profile can express, resolved once per session.
 #[derive(Clone, Debug, Default)]
-pub struct FixtureMap {
+pub struct CellMap {
     colour_channels: BTreeSet<usize>,
     energy_channels: BTreeSet<usize>,
     rotations: Vec<Continuous>,
@@ -95,7 +95,7 @@ pub struct FixtureMap {
     pattern: Option<Slots>,
 }
 
-impl FixtureMap {
+impl CellMap {
     pub fn new(profile: &GdtfProfile) -> Self {
         let functions = profile.functions();
         let family = |predicate: &dyn Fn(&FunctionInfo) -> bool| -> Vec<&FunctionInfo> {
@@ -185,33 +185,33 @@ impl FixtureMap {
     }
 }
 
-pub fn fixture_maps(rig: &FixtureRig) -> BTreeMap<String, FixtureMap> {
-    rig.fixture_ids()
+pub fn cell_maps(rig: &FixtureRig) -> BTreeMap<String, CellMap> {
+    rig.cell_ids()
         .into_iter()
         .filter_map(|id| {
-            let map = FixtureMap::new(rig.profile(&id)?);
+            let map = CellMap::new(rig.profile(&id)?);
             Some((id, map))
         })
         .collect()
 }
 
 pub fn capabilities(rig: &FixtureRig) -> Vec<wire::GroupCapability> {
-    let maps = fixture_maps(rig);
+    let maps = cell_maps(rig);
     rig.groups()
         .iter()
         .map(|(name, members)| {
-            let any = |axis: fn(&FixtureMap) -> bool| {
+            let any = |axis: fn(&CellMap) -> bool| {
                 members
                     .iter()
                     .any(|member| maps.get(member).is_some_and(axis))
             };
             wire::GroupCapability {
                 name: name.clone(),
-                fixture_count: members.len() as u32,
-                colour: any(FixtureMap::colour),
-                speed: any(FixtureMap::speed),
-                pulse: any(FixtureMap::pulse),
-                pattern: any(FixtureMap::pattern),
+                cell_count: members.len() as u32,
+                colour: any(CellMap::colour),
+                speed: any(CellMap::speed),
+                pulse: any(CellMap::pulse),
+                pattern: any(CellMap::pattern),
             }
         })
         .collect()
@@ -325,7 +325,7 @@ pub struct SpecialFrame<'a> {
 
 pub fn apply(
     state: &mut FixtureState,
-    map: &FixtureMap,
+    map: &CellMap,
     profile: &GdtfProfile,
     special: &SpecialFx,
     frame: &SpecialFrame,
@@ -425,11 +425,7 @@ pub fn apply(
 
     state.intensity = lerp(state.intensity, special.energy, level);
     if let Some(colour) = colour {
-        state.colour = Rgb {
-            red: lerp(state.colour.red, colour.red, level),
-            green: lerp(state.colour.green, colour.green, level),
-            blue: lerp(state.colour.blue, colour.blue, level),
-        };
+        state.colour = state.colour.lerp(colour, level);
     }
     if scan {
         let cycles = frame.progress.scan_cycles;
@@ -439,8 +435,4 @@ pub fn apply(
     if !open && matches!(pulse, Some((Pulse::DarkSlot, _))) {
         state.intensity *= 1.0 - level;
     }
-}
-
-fn lerp(from: f64, to: f64, amount: f64) -> f64 {
-    from + (to - from) * amount
 }

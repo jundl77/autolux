@@ -12,7 +12,7 @@ from autolux.lib.engine.special_policy import (
 DROP, ATMOSPHERIC = LightIntent.DROP, LightIntent.ATMOSPHERIC
 FX = {
     'name': 'fx',
-    'fixture_count': 1,
+    'cell_count': 1,
     'colour': True,
     'speed': True,
     'pulse': True,
@@ -35,7 +35,7 @@ def row(name, intent=DROP, *, group='fx', speed=0.3, pulse=None, pattern=None):
 
 def test_capabilities_keep_populated_groups_with_their_axes():
     capabilities = SpecialCapabilities.from_groups(
-        [FX, {'name': 'empty', 'fixture_count': 0, 'colour': True}, {'fixture_count': 2}]
+        [FX, {'name': 'empty', 'cell_count': 0, 'colour': True}, {'cell_count': 2}]
     )
     assert capabilities.groups == {'fx': frozenset({'colour', 'speed', 'pulse'})}
 

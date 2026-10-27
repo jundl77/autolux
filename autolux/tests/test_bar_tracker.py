@@ -1,5 +1,6 @@
 """The tracker stage: artifact verification, framing, and how it dies."""
 
+import itertools
 import json
 from pathlib import Path
 
@@ -8,13 +9,13 @@ import pytest
 
 from autolux.lib.analyser import bar_tracker
 from autolux.lib.analyser.bar_tracker import (
-    BarTrackerStream,
-    CHUNK_FRAMES,
-    MARGIN_FRAMES,
-    STRIDE_FRAMES,
     _PASS_PAD_SRC,
     _SRC_PER_FRAME,
     _STRIDE_SRC,
+    CHUNK_FRAMES,
+    MARGIN_FRAMES,
+    STRIDE_FRAMES,
+    BarTrackerStream,
 )
 
 RECORD = {
@@ -146,4 +147,4 @@ def test_resync_skips_to_the_live_edge_and_leaves_the_hole(caplog):
     chunks = _feed(stream, 2 * _STRIDE_SRC)
     assert chunks, "the tracker must resume at the live edge"
     assert chunks[0].frame_lo >= 7 * STRIDE_FRAMES - MARGIN_FRAMES
-    assert all(b.frame_lo == a.frame_hi for a, b in zip(chunks, chunks[1:]))
+    assert all(b.frame_lo == a.frame_hi for a, b in itertools.pairwise(chunks))

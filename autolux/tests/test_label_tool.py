@@ -14,13 +14,13 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import label_tool  # noqa: E402
-from label_tool import (  # noqa: E402
+import label_tool
+from label_tool import (
+    _YOUTUBE_ID,
     DEFAULT_STRENGTH,
     LABEL_COLORS,
     LABELS,
     STRENGTHS,
-    _YOUTUBE_ID,
     add_boundary,
     apply_edit,
     audio_digest,
@@ -33,8 +33,8 @@ from label_tool import (  # noqa: E402
     load_labels,
     normalise,
     parse_csv,
-    save_labels,
     resolve_identity,
+    save_labels,
     to_annotation,
 )
 

@@ -75,6 +75,7 @@ def _child(mp3: str, mode: str) -> dict:
         cwd=str(AUTOLUX_PACKAGE_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     if out.returncode != 0:
         raise RuntimeError(

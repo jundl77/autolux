@@ -10,12 +10,12 @@ use crate::fixtures::FixtureRig;
 use crate::intensity;
 use crate::model::{
     Command, Effect, FixtureState, FixtureStates, LightingOverride, MAX_STROBE_HZ,
-    OverrideLifetime, PropertyValues, RenderContext, Rgb, SpecialFx, Target, Transition,
+    OverrideLifetime, PropertyValues, RenderContext, SpecialFx, Target, Transition, lerp,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
 use crate::script::{AutoloopCatalog, LuaAutoloop};
-use crate::special::{self, FixtureMap, Progress, SpecialFrame};
+use crate::special::{self, CellMap, Progress, SpecialFrame};
 
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
@@ -87,7 +87,7 @@ struct Crossfade {
 
 struct ActiveOverride {
     value: LightingOverride,
-    fixture_ids: Vec<String>,
+    cell_ids: Vec<String>,
     order: u64,
     expires_seconds: Option<f64>,
     expires_beat: Option<f64>,
@@ -105,7 +105,7 @@ impl ActiveOverride {
         let from_level = special::attack_level(&special, beat - self.progress.started_beat);
         (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
             special,
-            fixture_ids: self.fixture_ids,
+            cell_ids: self.cell_ids,
             priority: self.value.priority,
             order: self.order,
             progress: self.progress,
@@ -117,7 +117,7 @@ impl ActiveOverride {
 
 struct ReleasingSpecial {
     special: SpecialFx,
-    fixture_ids: Vec<String>,
+    cell_ids: Vec<String>,
     priority: i32,
     order: u64,
     progress: Progress,
@@ -141,7 +141,7 @@ pub struct Engine {
     fade: Option<Crossfade>,
     overrides: BTreeMap<String, ActiveOverride>,
     releasing: Vec<ReleasingSpecial>,
-    special_maps: BTreeMap<String, FixtureMap>,
+    special_maps: BTreeMap<String, CellMap>,
     override_order: u64,
     master: MasterFade,
     normalized_rms_level: Option<f64>,
@@ -161,7 +161,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(rig: FixtureRig, catalog: AutoloopCatalog, palettes: PaletteTable) -> Result<Self> {
         let last_output_states = rig.empty_states();
-        let special_maps = special::fixture_maps(&rig);
+        let special_maps = special::cell_maps(&rig);
         // Validate the final encoding boundary before accepting commands.
         rig.encode(&last_output_states)?;
         let palette =
@@ -331,7 +331,7 @@ impl Engine {
     }
 
     pub fn active_palette(&self) -> &str {
-        self.palette.name()
+        &self.palette.name
     }
 
     pub fn set_parameter(&mut self, seconds: f64, parameter: &wire::Parameter) -> Result<()> {
@@ -528,8 +528,6 @@ impl Engine {
         autoloop: &str,
         transition: &Transition,
     ) -> Result<()> {
-        validate_identifier(bank)?;
-        validate_identifier(autoloop)?;
         let script = self
             .catalog
             .instantiate(bank, autoloop, &self.rig, &self.palettes)
@@ -555,14 +553,12 @@ impl Engine {
         self.fade = match transition {
             Transition::Cut | Transition::RendererDefault => None,
             Transition::Crossfade { duration_beats } => {
-                let source = if let Some(states) = frozen_source {
-                    FadeSource::Frozen(states)
-                } else if self.script_error.is_some() {
-                    FadeSource::Frozen(self.dark_states())
-                } else if let Some(previous) = previous {
-                    FadeSource::Running(Box::new(previous))
-                } else {
-                    FadeSource::Frozen(self.dark_states())
+                let source = match (frozen_source, previous) {
+                    (Some(states), _) => FadeSource::Frozen(states),
+                    (None, Some(previous)) if self.script_error.is_none() => {
+                        FadeSource::Running(Box::new(previous))
+                    }
+                    _ => FadeSource::Frozen(self.dark_states()),
                 };
                 Some(Crossfade {
                     source,
@@ -655,7 +651,7 @@ impl Engine {
             other_active_count < MAX_ACTIVE_OVERRIDES,
             "too many active lighting overrides"
         );
-        let fixture_ids = match &value.target {
+        let cell_ids = match &value.target {
             Target::Group(group)
                 if value.special_fx.is_some() && !self.rig.groups().contains_key(group) =>
             {
@@ -663,7 +659,7 @@ impl Engine {
             }
             target => self.rig.resolve(target)?,
         };
-        for id in &fixture_ids {
+        for id in &cell_ids {
             self.rig.validate_attributes(id, &value.values.attributes)?;
         }
         let (expires_seconds, expires_beat) = match value.lifetime {
@@ -685,7 +681,7 @@ impl Engine {
             value.id.clone(),
             ActiveOverride {
                 value: value.clone(),
-                fixture_ids,
+                cell_ids,
                 order,
                 expires_seconds,
                 expires_beat,
@@ -758,7 +754,7 @@ impl Engine {
                 });
                 (
                     (value.value.priority, value.order),
-                    &value.fixture_ids,
+                    &value.cell_ids,
                     Some(&value.value),
                     special,
                 )
@@ -766,7 +762,7 @@ impl Engine {
             .chain(self.releasing.iter().map(|releasing| {
                 (
                     (releasing.priority, releasing.order),
-                    &releasing.fixture_ids,
+                    &releasing.cell_ids,
                     None,
                     Some((
                         &releasing.special,
@@ -777,8 +773,8 @@ impl Engine {
             }));
         let mut ordered: Vec<_> = layers.collect();
         ordered.sort_by_key(|(rank, ..)| *rank);
-        for (_, fixture_ids, value, special) in ordered {
-            for id in fixture_ids {
+        for (_, cell_ids, value, special) in ordered {
+            for id in cell_ids {
                 let Some(state) = states.get_mut(id) else {
                     continue;
                 };
@@ -894,10 +890,6 @@ impl ActivePalette {
         }
     }
 
-    fn name(&self) -> &str {
-        &self.name
-    }
-
     fn slots_at(&self, beat: f64) -> PaletteSlots {
         let progress = if self.duration_beats > 0.0 {
             (beat - self.start_beat) / self.duration_beats
@@ -949,7 +941,7 @@ impl MasterFade {
         }
         let progress =
             ((time_seconds - self.start_seconds) / self.duration_seconds).clamp(0.0, 1.0);
-        self.from + (self.to - self.from) * progress
+        lerp(self.from, self.to, progress)
     }
 
     fn retarget(&mut self, time_seconds: f64, to: f64, duration_seconds: f64) {
@@ -1035,10 +1027,9 @@ fn apply_scalar_properties(state: &mut FixtureState, values: &PropertyValues) {
 
 fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureStates> {
     let mut states = rig.empty_states();
+    // LuaAutoloop::render has already validated every effect.
     for effect in effects {
-        validate_properties(&effect.values)?;
         for id in rig.resolve(&effect.target)? {
-            rig.validate_attributes(&id, &effect.values.attributes)?;
             let state = states
                 .get_mut(&id)
                 .context("resolved fixture is absent from the rig")?;
@@ -1056,26 +1047,23 @@ fn blend_states(
 ) -> FixtureStates {
     for (id, to) in &mut destination {
         if let Some(from) = source.get(id) {
+            let profile = rig.profile(id);
             for (key, value) in &from.attributes {
                 if let Some(destination) = to.attributes.get(key) {
-                    let blended = rig.interpolate_attribute(id, key, value, destination, amount);
+                    let blended = profile
+                        .expect("validated cell state")
+                        .interpolate_attribute(key, value, destination, amount);
                     to.attributes.insert(key.clone(), blended);
                 } else if amount < 1.0
-                    && rig
-                        .profile(id)
-                        .is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
+                    && profile.is_none_or(|profile| !profile.shares_channel(key, &to.attributes))
                 {
                     to.attributes.insert(key.clone(), value.clone());
                 }
             }
-            to.intensity = interpolate(from.intensity, to.intensity, amount);
-            to.colour = Rgb {
-                red: interpolate(from.colour.red, to.colour.red, amount),
-                green: interpolate(from.colour.green, to.colour.green, amount),
-                blue: interpolate(from.colour.blue, to.colour.blue, amount),
-            };
-            to.pan = interpolate(from.pan, to.pan, amount);
-            to.tilt = interpolate(from.tilt, to.tilt, amount);
+            to.intensity = lerp(from.intensity, to.intensity, amount);
+            to.colour = from.colour.lerp(to.colour, amount);
+            to.pan = lerp(from.pan, to.pan, amount);
+            to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
                 to.strobe_hz = from.strobe_hz;
             }
@@ -1084,15 +1072,11 @@ fn blend_states(
     destination
 }
 
-fn interpolate(from: f64, to: f64, amount: f64) -> f64 {
-    from + (to - from) * amount
-}
-
 fn step_toward(from: f64, to: f64, max_step: f64) -> f64 {
     from + (to - from).clamp(-max_step, max_step)
 }
 
-fn extinguish(states: &mut FixtureStates) {
+pub fn extinguish(states: &mut FixtureStates) {
     for state in states.values_mut() {
         state.intensity = 0.0;
         state.strobe_hz = 0.0;

@@ -1,5 +1,6 @@
 import argparse
 import http.client
+import itertools
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
 from autolux.simulate.runner import TIMING_TOLERANCE_SEC
 
+LOGGER = logging.getLogger(__name__)
 TITLE = 'Autolux'
 TIMELINE_WINDOW_SEC = 30.0
 TIMELINE_LEAD_SEC = 0.5
@@ -63,7 +65,6 @@ NOW_CURSOR_LEFT = (
     f'{NOW_CURSOR_X:.6f} * {TIMELINE_MARGIN_L_PX + TIMELINE_MARGIN_R_PX}px)'
 )
 DARK_BG = '#0d1117'
-CARD_BG = '#111827'
 BORDER = '#1e2937'
 OK_COLOR = '#3fb950'
 WARN_COLOR = '#f0883e'
@@ -174,10 +175,6 @@ def _room_beats(snapshot: dict, horizon_sec: float = 0.0) -> list:
     return beats
 
 
-def _heard_beats(snapshot: dict) -> list:
-    return _room_beats(snapshot)
-
-
 def _clock_text(seconds: float) -> str:
     minutes, secs = divmod(int(seconds), 60)
     return f'{minutes}:{secs:02d}'
@@ -210,7 +207,7 @@ def _room_is_playing(snapshot: dict) -> bool:
 
 
 def _room_bpm(snapshot: dict) -> float:
-    heard = _heard_beats(snapshot)
+    heard = _room_beats(snapshot)
     return heard[-1]['bpm'] if heard else snapshot.get('bpm', 0.0)
 
 
@@ -262,7 +259,7 @@ def _bar_grid(snapshot: dict, origin: float) -> tuple:
         return [], []
     delay = snapshot.get('look_ahead_sec', 0.0)
     first_bar = state.get('first_bar') or 0
-    spans = [b - a for a, b in zip(edges, edges[1:])]
+    spans = [b - a for a, b in itertools.pairwise(edges)]
     bar_sec = state.get('bar_sec') or median(spans)
 
     shapes, annotations = [], []
@@ -270,46 +267,46 @@ def _bar_grid(snapshot: dict, origin: float) -> tuple:
         at = start + delay - origin
         span = spans[index]
         shapes.append(
-            dict(
-                type='line',
-                xref='x',
-                yref='paper',
-                x0=at,
-                x1=at,
-                y0=0.0,
-                y1=0.5,
-                line=dict(color=DOWNBEAT_COLOR, width=1.4),
-            )
+            {
+                'type': 'line',
+                'xref': 'x',
+                'yref': 'paper',
+                'x0': at,
+                'x1': at,
+                'y0': 0.0,
+                'y1': 0.5,
+                'line': {'color': DOWNBEAT_COLOR, 'width': 1.4},
+            }
         )
         if span <= bar_sec * BAR_SPAN_TOLERANCE:
             for beat in range(1, BEATS_PER_BAR):
                 tick = at + span * beat / BEATS_PER_BAR
                 shapes.append(
-                    dict(
-                        type='line',
-                        xref='x',
-                        yref='paper',
-                        x0=tick,
-                        x1=tick,
-                        y0=0.06,
-                        y1=0.20,
-                        line=dict(color=BEAT_TICK_COLOR, width=0.8),
-                    )
+                    {
+                        'type': 'line',
+                        'xref': 'x',
+                        'yref': 'paper',
+                        'x0': tick,
+                        'x1': tick,
+                        'y0': 0.06,
+                        'y1': 0.20,
+                        'line': {'color': BEAT_TICK_COLOR, 'width': 0.8},
+                    }
                 )
         bar = first_bar + index
         if bar % BAR_LABEL_EVERY == 0:
             annotations.append(
-                dict(
-                    x=at,
-                    y=0.50,
-                    xref='x',
-                    yref='paper',
-                    text=str(bar),
-                    showarrow=False,
-                    xanchor='left',
-                    yanchor='bottom',
-                    font=dict(color=DOWNBEAT_COLOR, size=9, family='monospace'),
-                )
+                {
+                    'x': at,
+                    'y': 0.50,
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'text': str(bar),
+                    'showarrow': False,
+                    'xanchor': 'left',
+                    'yanchor': 'bottom',
+                    'font': {'color': DOWNBEAT_COLOR, 'size': 9, 'family': 'monospace'},
+                }
             )
     return shapes, annotations
 
@@ -338,30 +335,30 @@ def _build_timeline(snapshot: dict) -> go.Figure:
         cfg = _intent_config(entry['intent'])
         color = cfg['primary']
         shapes.append(
-            dict(
-                type='rect',
-                xref='x',
-                yref='paper',
-                x0=t_start,
-                x1=t_end,
-                y0=0.52,
-                y1=0.96,
-                fillcolor=color,
-                opacity=0.80,
-                line_width=0,
-            )
+            {
+                'type': 'rect',
+                'xref': 'x',
+                'yref': 'paper',
+                'x0': t_start,
+                'x1': t_end,
+                'y0': 0.52,
+                'y1': 0.96,
+                'fillcolor': color,
+                'opacity': 0.80,
+                'line_width': 0,
+            }
         )
         if t_end - t_start > 1.5:
             annotations.append(
-                dict(
-                    x=(t_start + t_end) / 2,
-                    y=0.74,
-                    xref='x',
-                    yref='paper',
-                    text=cfg['label'],
-                    showarrow=False,
-                    font=dict(color='rgba(255,255,255,0.85)', size=10, family='monospace'),
-                )
+                {
+                    'x': (t_start + t_end) / 2,
+                    'y': 0.74,
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'text': cfg['label'],
+                    'showarrow': False,
+                    'font': {'color': 'rgba(255,255,255,0.85)', 'size': 10, 'family': 'monospace'},
+                }
             )
 
     if origin is not None:
@@ -372,28 +369,28 @@ def _build_timeline(snapshot: dict) -> go.Figure:
             color = '#3fb950' if is_start else '#f85149'
             label = '▶ START' if is_start else '■ STOP'
             shapes.append(
-                dict(
-                    type='line',
-                    xref='x',
-                    yref='paper',
-                    x0=t,
-                    x1=t,
-                    y0=0,
-                    y1=1,
-                    line=dict(color=color, width=1.5, dash='dash'),
-                )
+                {
+                    'type': 'line',
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'x0': t,
+                    'x1': t,
+                    'y0': 0,
+                    'y1': 1,
+                    'line': {'color': color, 'width': 1.5, 'dash': 'dash'},
+                }
             )
             annotations.append(
-                dict(
-                    x=t,
-                    y=0.04,
-                    xref='x',
-                    yref='paper',
-                    text=label,
-                    showarrow=False,
-                    font=dict(color=color, size=9, family='monospace'),
-                    xanchor='left' if is_start else 'right',
-                )
+                {
+                    'x': t,
+                    'y': 0.04,
+                    'xref': 'x',
+                    'yref': 'paper',
+                    'text': label,
+                    'showarrow': False,
+                    'font': {'color': color, 'size': 9, 'family': 'monospace'},
+                    'xanchor': 'left' if is_start else 'right',
+                }
             )
 
     # Beats are deliberately NOT drawn here: a figure push arrives most of a
@@ -403,21 +400,21 @@ def _build_timeline(snapshot: dict) -> go.Figure:
     fig.update_layout(
         shapes=shapes,
         annotations=annotations,
-        xaxis=dict(
-            range=[x0, x1],
-            dtick=5.0,
-            tickformat='.0f',
-            ticksuffix='s',
-            gridcolor='#1a2332',
-            color='#6e7681',
-            showline=False,
-            minor=dict(dtick=1.0, showgrid=True, gridcolor='#151e2b', gridwidth=0.8),
-        ),
-        yaxis=dict(range=[0, 1], showticklabels=False, showgrid=False),
+        xaxis={
+            'range': [x0, x1],
+            'dtick': 5.0,
+            'tickformat': '.0f',
+            'ticksuffix': 's',
+            'gridcolor': '#1a2332',
+            'color': '#6e7681',
+            'showline': False,
+            'minor': {'dtick': 1.0, 'showgrid': True, 'gridcolor': '#151e2b', 'gridwidth': 0.8},
+        },
+        yaxis={'range': [0, 1], 'showticklabels': False, 'showgrid': False},
         plot_bgcolor=DARK_BG,
         paper_bgcolor=DARK_BG,
         height=175,
-        margin=dict(l=TIMELINE_MARGIN_L_PX, r=TIMELINE_MARGIN_R_PX, t=6, b=36),
+        margin={'l': TIMELINE_MARGIN_L_PX, 'r': TIMELINE_MARGIN_R_PX, 't': 6, 'b': 36},
         uirevision='timeline',
         showlegend=False,
     )
@@ -545,7 +542,7 @@ def render_window(history: list, now: float) -> tuple[float | None, int]:
         return None, 0
     recent = [sample for sample in history if now - sample['at'] <= RENDER_WINDOW_SECONDS]
     span = frames = missed = 0.0
-    for before, sample in zip(recent, recent[1:]):
+    for before, sample in itertools.pairwise(recent):
         interval = sample['at'] - before['at']
         rendered, skipped = sample.get(RENDERED_RATE), sample.get(MISSED_RATE)
         if interval > 0 and finite(rendered) and finite(skipped):
@@ -1079,14 +1076,18 @@ STATIC_PRESETS = {
 STATIC_PRESET_IDS = {f'static-preset-{name}': name for name in STATIC_PRESETS}
 # Targets and UV come from the rig the show published; a rig without UV fixtures
 # greys both UV chips rather than offering commands the show would refuse.
-STATIC_TARGETS_JS = '''function(state) {
-    const all = %s;
+STATIC_TARGETS_JS = (
+    '''function(state) {
+    const all = '''
+    + json.dumps(ALL_FIXTURES)
+    + ''';
     const ready = !!state && !!state.mode && !!state.static;
     const statics = ready ? state.static : {targets: [all], blacklight: false};
     const options = statics.targets.map((target) =>
         ({label: target === all ? 'All' : target, value: target}));
     return [options, !statics.blacklight, !statics.blacklight];
-}''' % json.dumps(ALL_FIXTURES)
+}'''
+)
 STATIC_BUTTONS = {
     'static-blacklight': 'blacklight',
     'static-strobe': 'strobe',
@@ -1990,14 +1991,9 @@ _GATE_STATE_JS = '''
     const ds = window.dash_clientside = window.dash_clientside || {};
     const gate = ds.ss_gate = ds.ss_gate ||
         {inflight: {}, sent: null, behind: 0};
-    const streamOf = (outputs) => {
-        const list = Array.isArray(outputs) ? outputs : [outputs];
-        for (let i = 0; i < list.length; i++) {
-            if (!list[i]) continue;
-            if (list[i].id === 'sync') return 'anchor';
-        }
-        return null;
-    };
+    const streamOf = (outputs) =>
+        (Array.isArray(outputs) ? outputs : [outputs]).some((output) => output && output.id === 'sync')
+            ? 'anchor' : null;
 '''
 
 REQUEST_PRE_JS = (
@@ -2029,7 +2025,6 @@ CALLBACK_RESOLVED_JS = (
         gate.viewAt = gate.metricsAt = 0;
         return;
     }
-    if (stream !== 'anchor') return;
     const fresh = result.data && result.data.sync && result.data.sync.data;
     if (!fresh) return;
     const landed = ds.ss || {};
@@ -2116,8 +2111,7 @@ class SnapshotPoller:
         port: int = snapshot_port(DEFAULT_DASHBOARD_PORT),
         timeout: float = POLL_TIMEOUT_SEC,
     ):
-        self._host, self._port, self._timeout = host, port, timeout
-        self.port = port
+        self._host, self.port, self._timeout = host, port, timeout
         self._connection = None
         self._last = dict(BLANK_SNAPSHOT)
         self._answering = True
@@ -2125,7 +2119,7 @@ class SnapshotPoller:
 
     @property
     def url(self) -> str:
-        return f'http://{self._host}:{self._port}{SNAPSHOT_PATH}'
+        return f'http://{self._host}:{self.port}{SNAPSHOT_PATH}'
 
     def snapshot(self) -> dict:
         if not self._lock.acquire(blocking=False):
@@ -2135,17 +2129,17 @@ class SnapshotPoller:
                 connection = self._connection
                 if connection is None:
                     connection = self._connection = http.client.HTTPConnection(
-                        self._host, self._port, timeout=self._timeout
+                        self._host, self.port, timeout=self._timeout
                     )
                 connection.request('GET', SNAPSHOT_PATH)
                 self._last = json.loads(connection.getresponse().read())
                 if not self._answering:
-                    logging.info('[viewer] the show is answering again')
+                    LOGGER.info('[viewer] the show is answering again')
                     self._answering = True
             except (OSError, http.client.HTTPException, ValueError) as error:
                 self._connection = None
                 if self._answering:
-                    logging.warning(
+                    LOGGER.warning(
                         f'[viewer] the show stopped answering on '
                         f'{self.url} ({error!r}) — holding the last frame'
                     )
@@ -2155,7 +2149,7 @@ class SnapshotPoller:
             self._lock.release()
 
     def control(self, command: dict) -> dict:
-        connection = http.client.HTTPConnection(self._host, self._port, timeout=self._timeout)
+        connection = http.client.HTTPConnection(self._host, self.port, timeout=self._timeout)
         try:
             connection.request(
                 'POST',
@@ -2176,10 +2170,6 @@ class SnapshotPoller:
         if not isinstance(reply, dict):
             return {'error': f'the show refused the command (HTTP {response.status})'}
         return reply
-
-
-def direct_control_default() -> bool:
-    return os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
 
 
 def control_page_config(snapshot_source, direct: bool) -> dict:
@@ -2206,9 +2196,9 @@ def build_app(
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
     can_control = callable(getattr(snapshot_source, 'control', None))
-    direct = can_control and (
-        direct_control_default() if direct_control is None else direct_control
-    )
+    if direct_control is None:
+        direct_control = os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
+    direct = can_control and direct_control
     app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
         '{%css%}',
         '{%css%}<script>window.autoluxControlConfig = '
@@ -2528,18 +2518,16 @@ def build_app(
             notices = system_metrics.build_telemetry_notices(snap, now=now)
         return (
             sync,
-            *(
-                status,
-                show_timing,
-                decoder,
-                commands,
-                timeline,
-                notices,
-                performance,
-                renderer,
-                control,
-                charts,
-            ),
+            status,
+            show_timing,
+            decoder,
+            commands,
+            timeline,
+            notices,
+            performance,
+            renderer,
+            control,
+            charts,
         )
 
     setting_names = json.dumps(list(FORM_SETTINGS))
@@ -2774,7 +2762,7 @@ def run_app(
     configure_logging()
     app = build_app(snapshot_source, fixture_store=fixture_store)
     with advertise_dashboard_mdns(port):
-        logging.info(
+        LOGGER.info(
             '[dashboard] http://%s:%d (listening on %s)',
             DASHBOARD_MDNS_HOSTNAME.rstrip('.'),
             port,

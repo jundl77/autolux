@@ -15,6 +15,12 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 import torch
+from build_training_table import (
+    _read_json_gz,
+    default_data_dir,
+    report_path,
+)
+from raveform_fetch_annotations import beat_csv_path, load_tracks
 
 from .dataset import FEATURES_DIR, FRAME_SEC, WINDOW_FRAMES, load_sidecar, make_splits
 from .downbeat_decoder import (
@@ -26,24 +32,19 @@ from .downbeat_decoder import (
 from .downbeat_model import PARAM_BUDGET, DownbeatCRNN
 from .downbeat_train import MODEL_VERSION
 from .export_onnx import OPSET, declared_axes, session, sha256_file
-from .model import count_parameters
-from .train import BEST_CHECKPOINT, MODELS_DIR, weight_hash
 from .infer import (
     EDGE_FRAMES,
     HOP_FRAMES,
     _sigmoid,
     contribution_span,
-    save_posteriors as save_sidecar,
     usable_frames,
     window_offsets,
 )
-
-from build_training_table import (  # noqa: E402
-    _read_json_gz,
-    default_data_dir,
-    report_path,
+from .infer import (
+    save_posteriors as save_sidecar,
 )
-from raveform_fetch_annotations import beat_csv_path, load_tracks  # noqa: E402
+from .model import count_parameters
+from .train import BEST_CHECKPOINT, MODELS_DIR, weight_hash
 
 MODEL_FILE = "downbeat.onnx"
 MODEL_META_FILE = "downbeat.onnx.json"
@@ -278,10 +279,6 @@ def live_beat_times(data_dir, youtube_id: str) -> np.ndarray:
     return np.asarray([float(beat["t"]) for beat in beats], dtype=np.float64)
 
 
-def expert_beat_times(grid) -> np.ndarray:
-    return np.asarray(grid.times, dtype=np.float64)
-
-
 def sidecar_arrays(
     track: TrackActivation,
     beats: dict,
@@ -345,7 +342,7 @@ def _beat_streams(data_dir: Path, youtube_id: str, grid, activation: np.ndarray)
     streams: dict = {}
     for condition, times in (
         ("live", live_beat_times(data_dir, youtube_id)),
-        ("expert", expert_beat_times(grid)),
+        ("expert", np.asarray(grid.times, dtype=np.float64)),
     ):
         scores, counts = aggregate_at_beats(activation, times, FRAME_SEC, FRAME_SEC)
         streams[condition] = (times, scores, counts)
@@ -398,7 +395,7 @@ def generate(
             track = infer_track(sess, load_sidecar(features / f"{youtube_id}.npz"))
             streams = _beat_streams(data_dir, youtube_id, grid, track.activation)
             save_sidecar(path, sidecar_arrays(track, streams, model_sha, pos_weight))
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001
             stale = path.exists() and not sidecar_is_current(path, model_sha)
             if stale:
                 path.unlink(missing_ok=True)
@@ -418,7 +415,7 @@ def generate(
             "frames": track.n_frames,
             "windows": track.windows,
             "bytes": path.stat().st_size,
-            "beats": {name: int(len(streams[name][0])) for name in CONDITIONS},
+            "beats": {name: len(streams[name][0]) for name in CONDITIONS},
             "seconds": round(time.perf_counter() - clock, 3),
         }
 
@@ -605,9 +602,9 @@ def main(argv: list | None = None) -> int:
         profile = measure_lag(args.data_dir, ids, sidecar_dir=args.out_dir)
         print(f"aggregation-window measurement over {profile['tracks']} tracks")
         print(f"  offset {'':>4}" + "".join(f"{o:>9d}" for o in profile["offsets"]))
-        print(f"  downbeat  " + "".join(f"{v:9.4f}" for v in profile["downbeat_mean"]))
-        print(f"  off-beat  " + "".join(f"{v:9.4f}" for v in profile["offbeat_mean"]))
-        print(f"  peak at   " + "".join(f"{v:9d}" for v in profile["peak_histogram"]))
+        print("  downbeat  " + "".join(f"{v:9.4f}" for v in profile["downbeat_mean"]))
+        print("  off-beat  " + "".join(f"{v:9.4f}" for v in profile["offbeat_mean"]))
+        print("  peak at   " + "".join(f"{v:9d}" for v in profile["peak_histogram"]))
         print(
             f"  mean argmax {profile['argmax_offset']:+d} frames | "
             f"modal peak {profile['modal_peak_offset']:+d} frames "

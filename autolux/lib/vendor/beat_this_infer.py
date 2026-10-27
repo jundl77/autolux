@@ -354,11 +354,10 @@ def load_checkpoint(path, device="cpu") -> dict:
     Its hparams carry a Path and numpy scalars (the c2a_finetune campaign's own
     artifact), so exactly those types are allow-listed.
     """
+    import importlib
     import pathlib
 
     import numpy as np
-
-    import importlib
 
     # The checkpoint was written under numpy 2, so its pickle names the
     # _core paths; the (object, name) form covers a numpy 1.x venv where the

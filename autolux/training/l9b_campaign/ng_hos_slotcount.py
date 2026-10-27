@@ -10,21 +10,14 @@ anywhere on the path.  Run under the exp-ceiling venv; CPU only.
 
 import argparse
 import collections
-import ctypes
 import json
 import sys
 from pathlib import Path
 
-try:
-    _k32 = ctypes.windll.kernel32
-    _k32.GetCurrentProcess.restype = ctypes.c_void_p
-    _k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    _k32.SetPriorityClass(_k32.GetCurrentProcess(), 0x00004000)
-except Exception:  # noqa: BLE001
-    pass
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import module_source
+
+module_source.below_normal_priority()
 
 PHASE_B = module_source.experiment_checkout("AUTOLUX_PHASE_B_CHECKOUT")
 DATA = Path(__file__).resolve().parents[1] / "data" / "raveform"
@@ -46,8 +39,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 # first -- the two disagree, and nothing downstream would say which ran.
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
-from training.nn.ceiling import demote as DD  # noqa: E402
-from training.nn.ceiling.train_head import build_datasets  # noqa: E402
+from training.nn.ceiling import demote as DD
+from training.nn.ceiling.train_head import build_datasets
 
 
 def main() -> int:

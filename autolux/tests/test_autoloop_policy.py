@@ -340,7 +340,7 @@ def build_engine():
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock)
     light = LightEngine(lighting, EffectController(lighting), None, clock=clock)
-    light._published_bpm['last'] = 120.0
+    light._last_bpm = 120.0
     return light
 
 

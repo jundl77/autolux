@@ -42,8 +42,8 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-import tp_record  # noqa: E402
-from corpus_root import corpus_dir  # noqa: E402
+import tp_record
+from corpus_root import corpus_dir
 
 QUEUE_FILE = "fetch_queue.csv"
 QUEUE_HEADER = (

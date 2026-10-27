@@ -6,9 +6,9 @@ import argparse
 import json
 from pathlib import Path
 
-from . import _TRAINING_DIR  # noqa: F401
+from build_training_table import default_data_dir
 
-from build_training_table import default_data_dir  # noqa: E402
+from . import _TRAINING_DIR  # noqa: F401
 
 MODELS_DIR = "models"
 REPORT_FILE = "training_report.json"

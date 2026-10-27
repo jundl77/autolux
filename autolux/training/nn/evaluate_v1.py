@@ -12,22 +12,10 @@ import zipfile
 from pathlib import Path
 
 import numpy as np
-
-from .decoder import (
-    DecodeParams,
-    FixedLagViterbi,
-    bar_grid,
-    bar_observations,
-    build_decoder,
-    load_decoder_config,
-    observation_knobs,
-)
-from .priors import MODEL_VERSION, MODELS_DIR, PRIORS_FILE, Priors
-
-from build_training_table import NO_INTENT, TABLE_FILE  # noqa: E402
+from build_training_table import NO_INTENT, TABLE_FILE
 
 # Metrics imported, never reimplemented: only the claim map and sentinel differ.
-from evaluate_against_labels import (  # noqa: E402
+from evaluate_against_labels import (
     INTENT_ORDER,
     INTENT_TO_LABELS,
     PRIMARY_SPACE,
@@ -52,8 +40,19 @@ from evaluate_against_labels import (  # noqa: E402
     score_track,
     typed_predictions,
 )
-from evaluate_against_labels import write_json as _write_json  # noqa: E402
-from raveform_fetch_annotations import BEATS_DIR, annotations_dir  # noqa: E402
+from evaluate_against_labels import write_json as _write_json
+from raveform_fetch_annotations import BEATS_DIR, annotations_dir
+
+from .decoder import (
+    DecodeParams,
+    FixedLagViterbi,
+    bar_grid,
+    bar_observations,
+    build_decoder,
+    load_decoder_config,
+    observation_knobs,
+)
+from .priors import MODEL_VERSION, MODELS_DIR, PRIORS_FILE, Priors
 
 UNDECODED = NO_INTENT
 
@@ -602,7 +601,7 @@ def build_report(
     deltas = _per_track_deltas(strict["per_track"], rule["per_track"], restricted_classes)
     by_restricted = sorted(deltas, key=lambda row: (row["restricted_delta"], row["track_id"]))
     return {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "split": split,
         "space": space,
         "tracks": len(inputs),
@@ -643,8 +642,10 @@ def render(report: dict) -> str:
     primary = report["primary"]
     nn, rule = primary["nn"], primary["rule"]
     lines = [
-        f"NN v1 decoded vs rule classifier -- {report['split']} split, "
-        f"{report['tracks']} tracks, space {report['space']}, class stream",
+        (
+            f"NN v1 decoded vs rule classifier -- {report['split']} split, "
+            f"{report['tracks']} tracks, space {report['space']}, class stream"
+        ),
         "=" * 78,
         f"{'metric':<34}{'NN':>13}{'rule':>13}{'delta':>13}",
         "-" * 78,

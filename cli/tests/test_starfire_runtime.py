@@ -112,14 +112,14 @@ def test_control_adapter_translates_a_special_one_to_one():
 def test_login_groups_become_plain_capability_records():
     reply = wire.LoginReply(
         groups=[
-            wire.GroupCapability(name='fx', fixture_count=1, colour=True, speed=True, pulse=True),
-            wire.GroupCapability(name='wash', fixture_count=4, pulse=True),
+            wire.GroupCapability(name='fx', cell_count=1, colour=True, speed=True, pulse=True),
+            wire.GroupCapability(name='wash', cell_count=4, pulse=True),
         ]
     )
     assert protocol.login_groups(reply) == [
         {
             'name': 'fx',
-            'fixture_count': 1,
+            'cell_count': 1,
             'colour': True,
             'speed': True,
             'pulse': True,
@@ -127,7 +127,7 @@ def test_login_groups_become_plain_capability_records():
         },
         {
             'name': 'wash',
-            'fixture_count': 4,
+            'cell_count': 4,
             'colour': False,
             'speed': False,
             'pulse': True,
@@ -404,7 +404,7 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
                 protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
                 protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply'),
-                groups=[wire.GroupCapability(name='fx', fixture_count=1, colour=True, pulse=True)],
+                groups=[wire.GroupCapability(name='fx', cell_count=1, colour=True, pulse=True)],
             ))
     elif isinstance(value, wire.Heartbeat):
         if mode != 'no_heartbeat':
@@ -443,7 +443,7 @@ def test_owned_child_readiness_heartbeats_and_eof_cleanup(tmp_path):
         assert runtime.groups == [
             {
                 'name': 'fx',
-                'fixture_count': 1,
+                'cell_count': 1,
                 'colour': True,
                 'speed': False,
                 'pulse': True,
@@ -510,9 +510,8 @@ def test_shutdown_discards_a_full_queue_and_closes_the_pipe_normally(tmp_path):
 def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason):
     runtime = _fake_runtime(tmp_path, mode, startup_timeout=0.5, stop_timeout=0.1)
     started = time.monotonic()
-    with pytest.raises(RuntimeError, match=reason):
-        with runtime:
-            pytest.fail('invalid startup became ready')
+    with pytest.raises(RuntimeError, match=reason), runtime:
+        pytest.fail('invalid startup became ready')
     assert time.monotonic() - started < 3
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
@@ -521,18 +520,16 @@ def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason)
 @pytest.mark.parametrize('mode', ['wrong_major_reply', 'newer_minor_reply', 'wrong_login_run'])
 def test_login_rejects_an_incompatible_server_version_and_reaps_it(tmp_path, mode):
     runtime = _fake_runtime(tmp_path, mode)
-    with pytest.raises(RuntimeError, match='Unexpected Starfire login reply'):
-        with runtime:
-            pytest.fail('incompatible server became ready')
+    with pytest.raises(RuntimeError, match='Unexpected Starfire login reply'), runtime:
+        pytest.fail('incompatible server became ready')
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
 
 
 def test_startup_waits_for_login_reply_before_sending_any_other_command(tmp_path):
     runtime = _fake_runtime(tmp_path, 'no_login_reply', startup_timeout=0.1)
-    with pytest.raises(RuntimeError, match='startup deadline'):
-        with runtime:
-            pytest.fail('renderer became ready without a login reply')
+    with pytest.raises(RuntimeError, match='startup deadline'), runtime:
+        pytest.fail('renderer became ready without a login reply')
     assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'Login'}]
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
@@ -560,9 +557,11 @@ def test_metrics_from_a_different_run_fail_the_owned_connection(tmp_path):
 
 def test_rejected_login_reports_initialization_error_and_reaps_owned_process(tmp_path):
     runtime = _fake_runtime(tmp_path, 'login_error')
-    with pytest.raises(RuntimeError, match='rejected command 1: fixture patch is missing'):
-        with runtime:
-            pytest.fail('failed initialization became ready')
+    with (
+        pytest.raises(RuntimeError, match='rejected command 1: fixture patch is missing'),
+        runtime,
+    ):
+        pytest.fail('failed initialization became ready')
     assert runtime.process is None
     assert json.loads((tmp_path / 'commands.json').read_text()) == [{'id': 1, 'kind': 'Login'}]
     assert all(not thread.is_alive() for thread in runtime._threads)
@@ -581,9 +580,8 @@ def test_thread_start_failure_closes_pipes_without_masking_the_original_error(
         start(thread)
 
     monkeypatch.setattr(threading.Thread, 'start', fail_selected)
-    with pytest.raises(RuntimeError, match='injected thread start failure'):
-        with runtime:
-            pytest.fail('renderer became ready with a missing worker')
+    with pytest.raises(RuntimeError, match='injected thread start failure'), runtime:
+        pytest.fail('renderer became ready with a missing worker')
     assert json.loads((tmp_path / 'commands.json').read_text()) == []
     assert runtime.process is None
     assert all(not thread.is_alive() for thread in runtime._threads)
@@ -743,7 +741,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             runtime.send_command(
                 wire.SetActiveEffect(
                     effect_id='held_red',
-                    fixture='zq06017_pixel_1',
+                    fixture='zq06017/Beam Segment 1',
                     intensity=0.75,
                     colour=wire.RgbColor(red=1.0),
                 )

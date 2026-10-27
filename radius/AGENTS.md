@@ -7,7 +7,8 @@
 - No magic values. Name protocol sizes, capacities, rates, thresholds and timeouts
   next to their owner; include units in names. Reuse existing constants.
 - Make ownership and lifetime explicit. Prefer RAII, value types and bounded
-  queues; keep interfaces small and avoid speculative abstractions. Do not add unsafe code.
+  queues; keep interfaces small and avoid speculative abstractions. Unsafe code is limited to
+  the Win32 scheduling calls in `realtime.rs`.
 - Prefer deletion and direct code over new layers. Reduce duplication without
   making the control flow harder to follow; fewer lines alone is not readability.
 - Validate lengths, ranges and overflow before access or conversion. Preserve

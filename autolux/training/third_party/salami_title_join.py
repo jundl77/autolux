@@ -185,8 +185,7 @@ def score_file(forms: list, variants: list) -> dict:
                 token_set_ratio(tokens, var.tokens),
                 char_bound(chars, var.chars, lf, lv),
             )
-            if bound > best:
-                best = bound
+            best = max(best, bound)
         if bound_gt(best, bounds.get(var.song_id)):
             bounds[var.song_id] = best
 
@@ -207,8 +206,7 @@ def score_file(forms: list, variants: list) -> dict:
                 token_set_ratio(tokens, var.tokens),
                 matcher.ratio(),
             )
-            if value > best:
-                best = value
+            best = max(best, value)
         if bound_gt(best, exact.get(var.song_id)):
             exact[var.song_id] = best
 
@@ -243,6 +241,7 @@ def probe_duration(path: Path) -> Probe:
             text=True,
             timeout=120,
             creationflags=BELOW_NORMAL,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return Probe(None, f"ffprobe_failed: {exc}")

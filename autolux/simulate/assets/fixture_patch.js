@@ -10,6 +10,7 @@
     const MAX_UNIVERSES = 32768;
     const PLAN_MIN_SPAN_MM = 2000;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+    const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
     let suppressedClick = null;
     let requestId = 0;
@@ -198,6 +199,40 @@
         return channels;
     }
 
+    // Mirrors mvr.mode_cells: the geometries Starfire addresses as cells, by first offset.
+    function modeCells(tree, mode) {
+        const node = tree && [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "DMXMode" && entry.attributes.Name === mode);
+        if (!node) return [];
+        const paths = {};
+        const visit = (entry, parent) => {
+            if (!GEOMETRY_TAGS.has(entry.tag)) return;
+            const path = [...parent, entry.attributes.Name ?? ""];
+            paths[path.at(-1)] = path;
+            for (const child of entry.children) visit(child, path);
+        };
+        const geometries = [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "Geometries");
+        for (const child of geometries?.children || []) visit(child, []);
+        const owned = [];
+        for (const [channel] of walk(node)) {
+            const offsets = channel.attributes.Offset ?? "None";
+            if (channel.tag !== "DMXChannel" || (channel.attributes.DMXBreak ?? "1") !== "1" || offsets === "None") continue;
+            const geometry = channel.attributes.Geometry ?? "";
+            owned.push([paths[geometry] || [geometry], offsets.split(",").map(Number)]);
+        }
+        const within = (path, outer) => outer.length <= path.length && outer.every((name, index) => path[index] === name);
+        const leaves = owned.map(([path]) => path).filter((path) => !owned.some(([other]) => other.length > path.length && within(other, path)));
+        const cells = new Map();
+        for (const [path, offsets] of owned) {
+            const below = new Set(leaves.filter((leaf) => within(leaf, path)).map((leaf) => leaf.at(-1)));
+            const name = below.size === 1 ? [...below][0] : path.at(-1);
+            cells.set(name, [...(cells.get(name) || []), ...offsets]);
+        }
+        return [...cells]
+            .map(([geometry, offsets]) => ({ geometry, first: Math.min(...offsets) }))
+            .sort((a, b) => a.first - b.first || (a.geometry < b.geometry ? -1 : 1))
+            .map((cell) => cell.geometry);
+    }
+
     function placedObjects(draft, settings) {
         const objects = [];
         const visit = (node, matrix) => {
@@ -231,9 +266,11 @@
             const mode = textOf(node, "GDTFMode");
             const [universe, address] = dmxAddress(addresses[0].text) || [null, null];
             const breaks = addresses.map((entry) => entry.attributes.break ?? "0");
-            const channels = modeChannels(gdtfTree(draft, settings, spec), mode);
+            const tree = gdtfTree(draft, settings, spec);
+            const channels = modeChannels(tree, mode);
+            const cells = modeCells(tree, mode);
             const className = classes[textOf(node, "Classing").toUpperCase()] || "";
-            return [{ key: node.key, name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, className, matrix }];
+            return [{ key: node.key, name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
         });
     }
 
@@ -429,7 +466,7 @@
             for (const index of new Set(occupied.flat())) {
                 const row = rows[index];
                 const [start, end] = [row.address - 1, row.address - 1 + row.channels];
-                const title = `${row.name} · ${start + 1}–${end}`;
+                const title = `${row.name} · ${start + 1}–${end}${row.cells.length > 1 ? ` · ${row.cells.length} cells` : ""}`;
                 const conflict = occupied.slice(start, end).some((owners) => owners.length > 1);
                 for (let segment = start, part = 0; segment < end; part++) {
                     const stop = Math.min(end, (Math.floor(segment / settings.columns) + 1) * settings.columns);
@@ -490,7 +527,7 @@
             const node = path.at(-1);
             const row = rows.find((entry) => entry.key === node.key);
             const detail = row
-                ? `${row.channels ?? "?"} channels · ${row.address ?? "?"}–${(row.address ?? 0) + (row.channels ?? 1) - 1} · ${row.spec}`
+                ? `${row.channels ?? "?"} channels · ${row.cells.length > 1 ? `${row.cells.length} cells: ${row.cells.join(", ")} · ` : ""}${row.address ?? "?"}–${(row.address ?? 0) + (row.channels ?? 1) - 1} · ${row.spec}`
                 : `${node.tag}${node.attributes.name ? ` · ${node.attributes.name}` : ""}`;
             return [...layout, detail, path.length === 1, summary];
         },

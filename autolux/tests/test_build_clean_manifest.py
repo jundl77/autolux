@@ -12,8 +12,7 @@ RAVEFORM_DIR = Path(__file__).resolve().parents[1] / "training" / "raveform"
 if str(RAVEFORM_DIR) not in sys.path:
     sys.path.insert(0, str(RAVEFORM_DIR))
 
-from build_clean_manifest import (  # noqa: E402
-    _run,
+from build_clean_manifest import (
     ABS_TOLERANCE_SEC,
     CLEAN_MANIFEST_HEADER,
     MIN_AGE_SEC,
@@ -23,6 +22,7 @@ from build_clean_manifest import (  # noqa: E402
     STATUS_OK,
     ManifestRow,
     TrackJob,
+    _run,
     audio_path,
     check_track,
     classify,

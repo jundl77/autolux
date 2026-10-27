@@ -33,18 +33,16 @@ for extra in (
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-import rebirth as RB  # noqa: E402
+import rebirth as RB
+from nn.decoder import DecodeParams, FixedLagViterbi, segments
 
-from nn.decoder import DecodeParams, FixedLagViterbi, segments  # noqa: E402
-
-from autolux.lib.engine.section_decoder import (  # noqa: E402
-    BEATS_PER_BAR,
-    SectionDecoder,
+from autolux.lib.engine.section_decoder import (
     _BEAT_GAP_SEC,
     _FIRST_BEAT_BAR_POSITION,
+    BEATS_PER_BAR,
+    SectionDecoder,
 )
-
-from autolux.tests.test_nn_decoder import one_hot, toy_priors  # noqa: E402
+from autolux.tests.test_nn_decoder import one_hot, toy_priors
 
 INTRO, BUILDUP, BREAKDOWN, DROP, OUTRO = range(5)
 

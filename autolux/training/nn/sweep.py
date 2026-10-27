@@ -10,6 +10,12 @@ import itertools
 import time
 from pathlib import Path
 
+from evaluate_against_labels import (
+    PRIMARY_TOLERANCE_SEC,
+    file_sha256,
+    prf,
+)
+
 from .decoder import DEFAULT_LAG_BARS, DecodeParams, observation_knobs
 from .evaluate_v1 import (
     DECODER_CONFIG_FILE,
@@ -28,12 +34,6 @@ from .evaluate_v1 import (
     write_json,
 )
 from .priors import MODEL_VERSION, MODELS_DIR, PRIORS_FILE, Priors
-
-from evaluate_against_labels import (  # noqa: E402
-    PRIMARY_TOLERANCE_SEC,
-    file_sha256,
-    prf,
-)
 
 LATENCY_BUDGET_BARS = DEFAULT_LAG_BARS
 
@@ -79,10 +79,6 @@ def enumerate_configs(base: DecodeParams, axes: dict) -> list:
     ]
 
 
-def observation_key(params: DecodeParams) -> tuple:
-    return tuple(observation_knobs(params).items())
-
-
 class InputCache:
     def __init__(self, data_dir, ids, table_path=None, posteriors_dir=None, model_sha=None) -> None:
         self.data_dir = Path(data_dir)
@@ -94,7 +90,7 @@ class InputCache:
         self.skipped: list = []
 
     def for_params(self, params: DecodeParams) -> list:
-        key = observation_key(params)
+        key = tuple(observation_knobs(params).items())
         if key not in self._cache:
             inputs, skipped = load_inputs(
                 self.data_dir,
@@ -476,7 +472,7 @@ def main(argv: list | None = None) -> int:
     chosen = DecodeParams(**result["chosen"]["params"])
     provenance = artifact_provenance(args.data_dir, args.model_version, args.posteriors_dir)
     payload = {
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "provenance": provenance,
         "split": args.split,
         "tracks": len(inputs),

@@ -1,8 +1,8 @@
 use crate::{
-    audio::{AudibleClock, AudibleSnapshot, AudioBlock, PlaybackBlock, PlaybackStream},
+    audio::{AudibleClock, AudibleSnapshot, AudioBlock, PlaybackStream},
     config::{RxConfig, pin_worker},
     enttec::EnttecOutput,
-    playout::LightingUpdate,
+    playout::{LightingUpdate, PlaybackBlock},
     protocol::{self, Message, wire},
     transport::Connection,
 };
@@ -27,6 +27,8 @@ const DMX_FRAME_INTERVAL: Duration = Duration::from_millis(25);
 const OUTPUT_START_TIMEOUT: Duration = Duration::from_secs(10);
 const CALLBACK_STALE_TIMEOUT: Duration = Duration::from_secs(1);
 const HEALTH_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(30);
+// Longer than the transmitter's 2 s stall limit, so one stall logs once.
+const GAP_LOG_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Resolves lighting before admission. TCP guarantees each reference targets the
 /// most recent preceding light state; no independently advancing lighting clock.
@@ -35,6 +37,36 @@ pub struct MediaReceiver {
     light: Option<wire::LightFrame>,
     audio_sequence: Option<u32>,
     next_audio_position: Option<u64>,
+    pub audio_gaps_total: u64,
+    pub lost_frames_total: u64,
+}
+
+/// An admitted AudioFrame, preceded by silence for audio the transmitter dropped.
+#[derive(Debug)]
+pub struct AdmittedAudio {
+    pub silence_frames: u64,
+    pub block: PlaybackBlock,
+}
+
+impl AdmittedAudio {
+    /// Silence is generated lazily so the playback queue bound, not this span, limits memory.
+    pub fn blocks(self) -> impl Iterator<Item = PlaybackBlock> {
+        let end = self.block.audio.audio_frame_position;
+        let start = end - self.silence_frames;
+        let template = PlaybackBlock {
+            audio: AudioBlock::default(),
+            ..self.block.clone()
+        };
+        (start..end)
+            .step_by(protocol::BLOCK_FRAMES)
+            .map(move |position| {
+                let mut silence = template.clone();
+                silence.audio.audio_frame_position = position;
+                silence.audio.frames = (end - position).min(protocol::BLOCK_FRAMES as u64) as u16;
+                silence
+            })
+            .chain(std::iter::once(self.block))
+    }
 }
 
 impl MediaReceiver {
@@ -53,7 +85,9 @@ impl MediaReceiver {
         Ok(())
     }
 
-    pub fn resolve_audio(&mut self, audio: wire::AudioFrame) -> Result<PlaybackBlock> {
+    /// A sequence gap means the transmitter dropped its oldest audio under backpressure;
+    /// the missing span must be consistent with the dropped packet count.
+    pub fn resolve_audio(&mut self, audio: wire::AudioFrame) -> Result<AdmittedAudio> {
         Message::AudioFrame(audio.clone()).validate(audio.run_id)?;
         let light = self
             .light
@@ -63,17 +97,24 @@ impl MediaReceiver {
             light.run_id == audio.run_id && light.sequence_number == audio.light_sequence_number,
             "audio references an unavailable light state"
         );
-        if let Some(previous) = self.audio_sequence {
-            ensure!(
-                audio.sequence_number == previous.wrapping_add(1),
-                "audio sequence is not consecutive"
-            );
-        }
-        if let Some(expected) = self.next_audio_position {
-            ensure!(
-                audio.audio_frame_position == expected,
-                "audio sample timeline is not consecutive"
-            );
+        let missing_packets = self.audio_sequence.map_or(0, |previous| {
+            u64::from(audio.sequence_number.wrapping_sub(previous.wrapping_add(1)))
+        });
+        let silence_frames = match self.next_audio_position {
+            Some(expected) => audio
+                .audio_frame_position
+                .checked_sub(expected)
+                .context("audio sample timeline moved backwards")?,
+            None => 0,
+        };
+        ensure!(
+            (missing_packets..=missing_packets * protocol::BLOCK_FRAMES as u64)
+                .contains(&silence_frames),
+            "audio sequence gap of {missing_packets} packets does not match a {silence_frames}-frame timeline gap"
+        );
+        if missing_packets != 0 {
+            self.audio_gaps_total += 1;
+            self.lost_frames_total += silence_frames;
         }
         let frames = audio.interleaved_samples.len() / protocol::CHANNELS;
         let mut block = AudioBlock {
@@ -85,10 +126,13 @@ impl MediaReceiver {
             .copy_from_slice(&audio.interleaved_samples);
         self.audio_sequence = Some(audio.sequence_number);
         self.next_audio_position = Some(audio.audio_frame_position + frames as u64);
-        Ok(PlaybackBlock {
-            audio: block,
-            light_sequence_number: light.sequence_number,
-            channels: light.channels.as_slice().try_into()?,
+        Ok(AdmittedAudio {
+            silence_frames,
+            block: PlaybackBlock {
+                audio: block,
+                light_sequence_number: light.sequence_number,
+                channels: light.channels.as_slice().try_into()?,
+            },
         })
     }
 }
@@ -322,10 +366,7 @@ fn run_connected(
         "Login outputs differ from receiver deployment settings"
     );
     let mut playback = if login.audio_enabled {
-        Some(PlaybackStream::start(
-            &config.audio_device_id,
-            login.jitter_buffer_ms,
-        )?)
+        Some(PlaybackStream::start(&config.audio_device_id)?)
     } else {
         None
     };
@@ -354,6 +395,7 @@ fn run_connected(
     let mut audio_max_gap: f64 = 0.0;
     let mut audio_peak: f32 = 0.0;
     let mut health_error_at: Option<Instant> = None;
+    let mut gap_logged_at: Option<Instant> = None;
     let output_started = Instant::now();
     while !stop.load(Ordering::Acquire) {
         for message in connection.poll()? {
@@ -369,8 +411,22 @@ fn run_connected(
                         .interleaved_samples
                         .iter()
                         .fold(audio_peak, |peak, value| peak.max(value.abs()));
-                    let block = receiver.resolve_audio(audio)?;
-                    playback.as_mut().unwrap().enqueue(block)?;
+                    let admitted = receiver.resolve_audio(audio)?;
+                    if admitted.silence_frames != 0
+                        && gap_logged_at.is_none_or(|at| at.elapsed() >= GAP_LOG_INTERVAL)
+                    {
+                        eprintln!(
+                            "Radius transmitter dropped audio under backpressure: {:.0} ms filled with silence ({} gaps total)",
+                            admitted.silence_frames as f64 * 1000.0
+                                / f64::from(protocol::SAMPLE_RATE),
+                            receiver.audio_gaps_total
+                        );
+                        gap_logged_at = Some(Instant::now());
+                    }
+                    let playback = playback.as_mut().unwrap();
+                    for block in admitted.blocks() {
+                        playback.enqueue(block)?;
+                    }
                     if let Some(at) = audio_at {
                         audio_max_gap =
                             audio_max_gap.max(Instant::now().duration_since(at).as_secs_f64());
@@ -438,6 +494,9 @@ fn run_connected(
                 audio_max_gap_seconds: audio_at
                     .map(|at| audio_max_gap.max(at.elapsed().as_secs_f64())),
                 audio_signal_peak: audio_peak,
+                lost_frames_total: receiver.lost_frames_total,
+                audio_gaps_total: receiver.audio_gaps_total,
+                send_failures_total: connection.refused_sends(),
                 ..Default::default()
             };
             if let Some(playback) = &playback {
@@ -506,7 +565,6 @@ mod tests {
             audio_frame_position: 100,
             position_valid: true,
             callback_age: Some(Duration::ZERO),
-            device_latency_frames: 0,
         };
         assert_eq!(
             lighting.frame(&audible, &updates),

@@ -25,9 +25,9 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-import build_training_table  # noqa: E402
-from build_training_table import TABLE_HEADER  # noqa: E402
-from evaluate_against_labels import (  # noqa: E402
+import build_training_table
+from build_training_table import TABLE_HEADER
+from evaluate_against_labels import (
     INTENT_ORDER,
     INTENT_TO_LABELS,
     LABEL_COLUMN,
@@ -55,12 +55,12 @@ from evaluate_against_labels import (  # noqa: E402
     score_track,
     typed_predictions,
 )
-from autolux.lib.engine.effect_definitions import (  # noqa: E402
+
+from autolux.lib.engine.effect_definitions import (
     SECTION_CLASS_INTENTS,
     LightIntent,
 )
-from autolux.lib.label_space import SECTION_LABELS  # noqa: E402
-
+from autolux.lib.label_space import SECTION_LABELS
 
 # --------------------------------------------------------------------------- #
 # helpers
@@ -419,7 +419,7 @@ def test_the_achievable_allocation_beats_every_other_allocation():
     support = {"a": 1.0, "b": 3.0, "c": 4.0}
     best = best_achievable_macro_f1(support, ["c"])
     extra = 4.0
-    for step in range(0, 101):
+    for step in range(101):
         x_a = extra * step / 100.0
         x_b = extra - x_a
         rival = (2 * 1.0 / (2 * 1.0 + x_a) + 2 * 3.0 / (2 * 3.0 + x_b)) / 3

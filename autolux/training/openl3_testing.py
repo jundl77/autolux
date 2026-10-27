@@ -1,6 +1,6 @@
-import pyaudio
 import numpy as np
 import openl3
+import pyaudio
 from sklearn.metrics.pairwise import cosine_similarity
 
 sample_rate = 44100

@@ -40,13 +40,22 @@ sys.path.append(str(HERE.parent))
 # nowhere else, so every training.nn it reads must come from there too.
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
+import phase_tracking as pt
+from phase_tracking_probe import (
+    WINDOWS,
+    BoundaryStream,
+    placement,
+    slip_pr,
+    span_repairs,
+)
+from raveform_fetch_annotations import BEATS_DIR, annotations_dir
+from training.nn.ceiling.decoder_frontier import score_stream
 from training.nn.decoder import (
     DecodeParams,
-    bar_observations,  # noqa: E402
+    bar_observations,
     observation_knobs,
 )
-from training.nn.ceiling.decoder_frontier import score_stream  # noqa: E402
-from training.nn.evaluate_v1 import (  # noqa: E402
+from training.nn.evaluate_v1 import (
     DEFAULT_SPACE,
     aggregate,
     build_decoder,
@@ -58,18 +67,8 @@ from training.nn.evaluate_v1 import (  # noqa: E402
     split_ids,
     write_json,
 )
-from training.nn.paired import CONTESTED  # noqa: E402
-from training.nn.priors import MODELS_DIR, PRIORS_FILE, Priors  # noqa: E402
-from raveform_fetch_annotations import BEATS_DIR, annotations_dir  # noqa: E402
-
-import phase_tracking as pt  # noqa: E402
-from phase_tracking_probe import (  # noqa: E402
-    WINDOWS,
-    BoundaryStream,
-    placement,
-    slip_pr,
-    span_repairs,
-)
+from training.nn.paired import CONTESTED
+from training.nn.priors import MODELS_DIR, PRIORS_FILE, Priors
 
 LAG_BARS = 2
 ANCHOR = {"boundary_f1_0.5": 0.673856, "macro_f1_contested": 0.708425, "flicker_2.0": 0.312882}
@@ -466,7 +465,14 @@ def main(argv=None) -> int:
         flush=True,
     )
 
-    specs = [dict(family="fallback", name="live_fallback_phase0", interpolate=False, primary=False)]
+    specs = [
+        {
+            "family": "fallback",
+            "name": "live_fallback_phase0",
+            "interpolate": False,
+            "primary": False,
+        }
+    ]
     probe_path = args.out_dir / "phase_probe.json"
     probe = json.loads(probe_path.read_text(encoding="utf-8"))
     selected, missing_families = select(probe["sweep"])
@@ -477,8 +483,24 @@ def main(argv=None) -> int:
             f"{missing_families} -- those candidates are ABSENT from this gate",
             flush=True,
         )
-    specs.append(dict(family="oracle", name="oracle_lag8", lag=8, interpolate=False, primary=False))
-    specs.append(dict(family="oracle", name="oracle_lag0", lag=0, interpolate=False, primary=False))
+    specs.append(
+        {
+            "family": "oracle",
+            "name": "oracle_lag8",
+            "lag": 8,
+            "interpolate": False,
+            "primary": False,
+        }
+    )
+    specs.append(
+        {
+            "family": "oracle",
+            "name": "oracle_lag0",
+            "lag": 0,
+            "interpolate": False,
+            "primary": False,
+        }
+    )
 
     arms = {"expert": expert_scores, "annotated_phase0": annotated_scores}
     rows = {"expert": expert_row, "annotated_phase0": annotated_row}

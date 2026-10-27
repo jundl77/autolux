@@ -149,13 +149,12 @@ def test_historical_analysis_skips_do_not_keep_a_recovered_show_degraded():
     assert health_summary({'system': healthy(), 'shed': shed})['state'] == 'healthy'
 
 
-def test_queue_drops_and_latency_recovery_explain_the_audio_warning():
+def test_queue_drops_explain_the_audio_warning():
     state = healthy()
-    state['recent'] = {'dropped_frames': 128, 'latency_recoveries': 3}
+    state['recent'] = {'dropped_frames': 128}
     audio = health_summary({'system': state})['cards'][2]
     assert audio[1] == 'Glitches'
     assert '128 dropped frames' in audio[2]
-    assert '3 latency recovery drops' in audio[2]
     assert not audio[3]
 
 

@@ -11,7 +11,7 @@ for _path in (str(AUTOLUX_PACKAGE_ROOT), str(AUTOLUX_PACKAGE_ROOT / "training"))
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from soak_nn import boundary_verdict, buckets, spread  # noqa: E402
+from soak_nn import boundary_verdict, buckets, spread
 
 
 def shed(t: float, fault=None) -> dict:

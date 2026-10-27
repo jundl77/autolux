@@ -31,25 +31,24 @@ for _path in (
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from build_clean_manifest import (  # noqa: E402
+from build_clean_manifest import (
     CLEAN_MANIFEST_FILE,
     MIN_AGE_SEC,
     STATUS_OK,
     is_settled,
 )
-from raveform_fetch_annotations import (  # noqa: E402
+from corpus_root import corpus_dir as default_data_dir
+from raveform_fetch_annotations import (
     genre_of,
     load_all_tracks,
     load_tracks,
     parse_sections,
 )
-from raveform_manifest import section_runs  # noqa: E402
+from raveform_manifest import section_runs
 
-from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE  # noqa: E402
-from autolux.lib.label_space import DROPPED_LABELS, SECTION_LABELS  # noqa: E402
-from autolux.lib.engine.event_buffer import CLASSIFIER_TRIGGER, SILENCE_TRIGGER  # noqa: E402
-
-from corpus_root import corpus_dir as default_data_dir  # noqa: E402,F401
+from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.engine.event_buffer import CLASSIFIER_TRIGGER, SILENCE_TRIGGER
+from autolux.lib.label_space import DROPPED_LABELS, SECTION_LABELS
 
 TABLE_FILE = "training_table.csv.gz"
 META_FILE = "training_table.meta.json"
@@ -459,13 +458,15 @@ def _write_json_gz(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".part")
     try:
-        with open(tmp, "wb") as raw:
-            with gzip.GzipFile(
+        with (
+            open(tmp, "wb") as raw,
+            gzip.GzipFile(
                 fileobj=raw, mode="wb", compresslevel=6, filename="", mtime=_REPRODUCIBLE_GZIP_MTIME
-            ) as compressed:
-                compressed.write(
-                    json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-                )
+            ) as compressed,
+        ):
+            compressed.write(
+                json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            )
         tmp.replace(path)
     except BaseException:
         tmp.unlink(missing_ok=True)
@@ -550,13 +551,10 @@ def _release_track_memory() -> None:
     import gc
 
     gc.collect()
-    try:
-        import torch
+    import torch
 
-        if torch.cuda.is_available() and torch.cuda.is_initialized():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+    if torch.cuda.is_available() and torch.cuda.is_initialized():
+        torch.cuda.empty_cache()
 
 
 def load_ok_rows(data_dir: Path) -> list:
@@ -690,10 +688,6 @@ def find_caches(data_dir: Path) -> set:
 
 
 _CORES_RESERVED_FOR_OS = 2
-
-
-def default_workers() -> int:
-    return max(1, (os.cpu_count() or 4) - _CORES_RESERVED_FOR_OS)
 
 
 # The serial cold path accumulates working set per track (#334: the singleton
@@ -843,6 +837,7 @@ def _git(repo_root: Path, *args: str) -> str | None:
             encoding="utf-8",
             stdin=subprocess.DEVNULL,
             timeout=30,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -914,7 +909,7 @@ def write_meta(
 ) -> Path:
     count, total_bytes = sidecar_stats(data_dir)
     meta = {
-        "built_at": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
+        "built_at": datetime.datetime.now(datetime.UTC).replace(microsecond=0).isoformat(),
         "git_sha": git_sha(),
         "pipeline_sha": pipeline_sha(data_dir=data_dir) if sha is None else sha,
         "report_cache": dict(sorted((cache_counts or {}).items())),
@@ -1079,7 +1074,7 @@ def main(argv: list | None = None) -> int:
     parser.add_argument(
         "--workers",
         type=int,
-        default=default_workers(),
+        default=max(1, (os.cpu_count() or 4) - _CORES_RESERVED_FOR_OS),
         help="parallel simulation workers (default: %(default)s = cpu_count - 2)",
     )
     parser.add_argument(

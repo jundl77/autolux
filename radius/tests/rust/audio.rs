@@ -293,7 +293,7 @@ fn stream_errors_fault_distinctly_while_capture_xruns_and_priority_denial_contin
 #[test]
 fn discard_request_fades_to_contiguous_silence_without_rebuffering_receiver_playout() {
     let mut capture = assembler(0.25);
-    let (mut playout, mut sender) = Playout::new(JITTER_BUFFER_MS).unwrap();
+    let (mut playout, mut sender) = Playout::new();
     let mut step = |capture: &mut CaptureAssembler, input: f32| {
         let first_frame = capture.counters.device_frames.load(Relaxed);
         capture.capture_at(&[input; BLOCK_FRAMES * CHANNELS], first_frame);
@@ -466,16 +466,31 @@ fn clock_distinguishes_startup_silence_from_valid_source_position_zero() {
         sequence: AtomicU64::new(0),
         audio_frame_position: AtomicU64::new(0),
         position_valid: AtomicBool::new(false),
-        device_latency_frames: AtomicU64::new(0),
         counters: Arc::new(StreamCounters::default()),
     };
     let before = clock.snapshot();
     assert!(!before.position_valid);
     assert_eq!(before.callback_age, None);
     clock.counters.callback();
-    clock.publish(Some(0), 441);
+    clock.publish(Some(0));
     assert!(clock.snapshot().position_valid);
     assert_eq!(clock.snapshot().audio_frame_position, 0);
-    clock.publish(None, 441);
+    clock.publish(None);
     assert!(!clock.snapshot().position_valid);
+}
+
+#[test]
+fn capture_scheduling_is_unknown_until_recorded_and_denial_counts() {
+    use crate::realtime::Scheduling;
+    let counters = CaptureCounters::default();
+    assert_eq!(counters.metrics(0).capture_scheduling, None);
+    for scheduling in [Scheduling::Mmcss, Scheduling::TimeCritical] {
+        counters.record_scheduling(scheduling);
+        assert_eq!(counters.metrics(0).capture_scheduling, Some(scheduling));
+    }
+    assert_eq!(counters.metrics(0).capture_priority_denied, 0);
+    counters.record_scheduling(Scheduling::Denied);
+    let metrics = counters.metrics(0);
+    assert_eq!(metrics.capture_scheduling, Some(Scheduling::Denied));
+    assert_eq!(metrics.capture_priority_denied, 1);
 }

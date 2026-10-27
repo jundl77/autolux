@@ -1,17 +1,19 @@
 """Deploy an immutable Radius bundle and supervise one SSH-owned receiver session."""
 
 import base64
-from dataclasses import dataclass
 import hashlib
 import ipaddress
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,7 @@ class RemoteRuntime:
                     + script
                 ),
             ],
+            check=False,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -158,7 +161,7 @@ class RemoteRuntime:
                     f'$p=Join-Path {run} ready; if(Test-Path -LiteralPath $p){{Get-Content -LiteralPath $p}}'
                 )
                 if ready == 'ready':
-                    logging.info('[prod] receiver ready on %s', self.host)
+                    LOGGER.info('[prod] receiver ready on %s', self.host)
                     return self
                 time.sleep(0.2)
             raise RuntimeError(
@@ -183,15 +186,15 @@ class RemoteRuntime:
                     timeout=8,
                 )
             except (OSError, RuntimeError, subprocess.TimeoutExpired):
-                logging.exception(
+                LOGGER.exception(
                     '[prod] remote shutdown request failed; receiver heartbeat timeout remains active'
                 )
             try:
                 code = self.process.wait(timeout=8)
                 if code == 0:
-                    logging.info('[prod] receiver stopped on %s', self.host)
+                    LOGGER.info('[prod] receiver stopped on %s', self.host)
                 else:
-                    logging.warning(
+                    LOGGER.warning(
                         '[prod] receiver SSH exited with code %s; see %s',
                         code,
                         self.run_dir / 'receiver-ssh.log',

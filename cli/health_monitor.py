@@ -1,14 +1,15 @@
 """Translate current native measurements into a bounded health snapshot."""
 
-from collections import deque
 import json
 import logging
-from pathlib import Path
 import time
+from collections import deque
+from pathlib import Path
 
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS
 
+LOGGER = logging.getLogger(__name__)
 DEFAULT_HEALTH_LOG_INTERVAL_SECONDS = 30
 HEALTH_SAMPLE_INTERVAL_SECONDS = 0.5
 MAX_HEALTH_HISTORY_SAMPLES = 120
@@ -39,7 +40,7 @@ class HealthLogger:
         level = logging.INFO if starting or summary['state'] == 'healthy' else logging.WARNING
         values = [card[1] for card in cards]
         details = '; '.join(f'{name}: {detail}' for name, _, detail, good in cards if not good)
-        logging.log(
+        LOGGER.log(
             level,
             '[health] controller=%s | link=%s | audio=%s | buffer=%s | lighting=%s | sync=%s%s',
             *values,
@@ -76,7 +77,6 @@ class HealthMonitor:
             'lost_frames': rx.get('lost_frames_total', 0),
             'dropped_frames': tx.get('queue_dropped_frames_total', 0)
             + rx.get('overflow_frames_total', 0),
-            'latency_recoveries': rx.get('latency_trims_total', 0),
         }
         if age is not None and age < TELEMETRY_STALE_SECONDS:
             if not self._history or now - self._history[-1][0] >= HEALTH_SAMPLE_INTERVAL_SECONDS:

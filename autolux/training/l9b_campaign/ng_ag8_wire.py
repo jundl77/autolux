@@ -37,10 +37,9 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 # first -- the two disagree, and nothing downstream would say which ran.
 module_source.require_imported_package_under_root("training.nn", PHASE_B)
 
-from ng_common import CAMP, CORPUS, F3_DIR, NEW_HAND_IDS  # noqa: E402
-from ng_ag8_variants import SHIFTS, variant_id  # noqa: E402
-
-from training.nn.ceiling import demote as DD  # noqa: E402
+from ng_ag8_variants import SHIFTS, variant_id
+from ng_common import CAMP, CORPUS, F3_DIR, NEW_HAND_IDS
+from training.nn.ceiling import demote as DD
 
 FEAT_ROOT = CAMP / "features_ag8_root" / "MERT-v1-330M_L6-22_F3_hop1"
 

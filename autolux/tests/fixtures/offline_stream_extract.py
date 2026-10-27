@@ -20,7 +20,7 @@ LABEL_FRAME_SEC = FRAME_SEC * LABEL_POOL
 
 
 def chunk_samples(seconds: float, sample_rate: int = ENCODER_SAMPLE_RATE) -> int:
-    frames = int(math.floor(seconds * sample_rate / ENCODER_SAMPLES_PER_FRAME))
+    frames = math.floor(seconds * sample_rate / ENCODER_SAMPLES_PER_FRAME)
     return frames * ENCODER_SAMPLES_PER_FRAME
 
 

@@ -9,7 +9,9 @@ TRAINING_DIR = Path(__file__).resolve().parents[1] / "training"
 if str(TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(TRAINING_DIR))
 
-from nn.downbeat_decoder import (  # noqa: E402
+import itertools
+
+from nn.downbeat_decoder import (
     AGG_HI_FRAMES,
     AGG_LO_FRAMES,
     BEATS_PER_BAR,
@@ -146,7 +148,7 @@ def test_phase_advances_cyclically_when_nothing_forces_a_flip():
     decisions = BarPhaseHMM().decode(beat_grid(40), clean_scores(40))
 
     assert phase_flips(decisions) == 0
-    for previous, current in zip(decisions, decisions[1:]):
+    for previous, current in itertools.pairwise(decisions):
         assert current.phase == previous.phase % BEATS_PER_BAR + 1
 
 
@@ -328,7 +330,7 @@ def test_the_longest_coastable_gap_is_still_coasted():
 def test_the_phase_re_locks_after_a_discontinuity():
     first = beat_grid(48)
     second = beat_grid(48, tempo=0.5, start=900.0)
-    confident = dict(high=0.9999, low=0.0001)
+    confident = {"high": 0.9999, "low": 0.0001}
     scores = np.concatenate(
         [clean_scores(48, **confident), clean_scores(48, offset=1, **confident)]
     )
@@ -526,7 +528,11 @@ def test_the_decode_path_imports_without_torch():
         "assert 'nn.dataset' not in sys.modules, sorted(sys.modules)"
     )
     result = subprocess.run(
-        [sys.executable, "-c", probe], cwd=str(TRAINING_DIR), capture_output=True, text=True
+        [sys.executable, "-c", probe],
+        cwd=str(TRAINING_DIR),
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

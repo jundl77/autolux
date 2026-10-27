@@ -1,10 +1,10 @@
 import base64
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
-from cli.remote_runtime import ReceiverSpec
-from cli.remote_runtime import RemoteRuntime, encoded_command, ps_literal
+
+from cli.remote_runtime import ReceiverSpec, RemoteRuntime, encoded_command, ps_literal
 
 
 def test_remote_paths_cannot_inject_powershell():

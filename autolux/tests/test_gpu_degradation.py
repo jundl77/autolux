@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import logging
-import threading
 import time
 
 import numpy as np
-import pytest
 
-from autolux.lib.analyser import mert_stream as M
 from autolux.lib.analyser.drift_watchdog import DriftWatchdog, ShedLevel
 from autolux.lib.analyser.gpu_stage import GpuStage
 from autolux.tests.test_drift_watchdog import FakeClock
@@ -96,7 +93,7 @@ OUT_OF_MEMORY = RuntimeError(
 
 def test_a_cuda_error_mid_pass_holds_logs_and_comes_back(tiny, mean, caplog):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(tiny, mean, CUDA_ERROR, clock=clock, fail_until=1)
+    worker, watchdog, _encoder, _built = faulty(tiny, mean, CUDA_ERROR, clock=clock, fail_until=1)
     try:
         with caplog.at_level(logging.WARNING):
             feed(worker, 4.0)
@@ -182,7 +179,7 @@ def test_a_pass_that_never_returns_leaves_a_show_running_on_beats(tiny, mean):  
 
 def test_a_lost_context_is_repaired_by_reinitialising_the_extractor(tiny, mean):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, built = faulty(tiny, mean, CONTEXT_LOST, clock=clock)
+    worker, _watchdog, _encoder, built = faulty(tiny, mean, CONTEXT_LOST, clock=clock)
     try:
         feed(worker, 4.0)
         settle(lambda: worker.faults > 0, why='the fault never surfaced')
@@ -202,10 +199,14 @@ def test_a_lost_context_is_repaired_by_reinitialising_the_extractor(tiny, mean):
 
 
 def test_an_allocation_failure_gets_the_same_hold_and_reinit_contract_as_a_cuda_error(
-    tiny, mean, caplog
-):  # noqa: F811
+    tiny,  # noqa: F811
+    mean,  # noqa: F811
+    caplog,
+):
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(tiny, mean, OUT_OF_MEMORY, clock=clock, fail_until=1)
+    worker, _watchdog, _encoder, _built = faulty(
+        tiny, mean, OUT_OF_MEMORY, clock=clock, fail_until=1
+    )
     try:
         with caplog.at_level(logging.WARNING):
             feed(worker, 4.0)
@@ -221,7 +222,7 @@ def test_an_allocation_failure_gets_the_same_hold_and_reinit_contract_as_a_cuda_
 
 def test_a_permanent_fault_logs_at_a_rate_not_at_a_frequency(tiny, mean, caplog):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(
+    worker, _watchdog, _encoder, _built = faulty(
         tiny, mean, CUDA_ERROR, clock=clock, repairable=False
     )
     try:
@@ -243,7 +244,7 @@ def test_a_permanent_fault_logs_at_a_rate_not_at_a_frequency(tiny, mean, caplog)
 
 def test_the_backoff_is_capped_so_retrying_never_stops(tiny, mean):  # noqa: F811
     clock = FakeClock()
-    worker, watchdog, encoder, _built = faulty(
+    worker, _watchdog, _encoder, _built = faulty(
         tiny, mean, CUDA_ERROR, clock=clock, repairable=False
     )
     try:
@@ -281,7 +282,7 @@ async def test_a_full_shed_run_is_the_degradation_state_the_digest_names(tiny, m
     from autolux.tests.test_nn_decoder import toy_priors
 
     clock = VirtualClock()
-    worker, watchdog, _encoder, _built = faulty(
+    worker, _watchdog, _encoder, _built = faulty(
         tiny, mean, CUDA_ERROR, clock=FakeClock(), repairable=False
     )
     lighting = RecordingStarfireClient(clock=clock)
@@ -356,7 +357,7 @@ def flapping(tiny, mean, error):  # noqa: F811
 
 def test_a_flapping_gpu_does_not_disarm_the_backoff(tiny, mean, caplog):  # noqa: F811
     caplog.set_level(logging.WARNING)
-    worker, encoder = flapping(tiny, mean, CUDA_ERROR)
+    worker, _encoder = flapping(tiny, mean, CUDA_ERROR)
     try:
         feed(worker, seconds=6.0)
         drain(worker, ticks=250)
@@ -373,7 +374,7 @@ def test_one_good_pass_is_not_a_recovery(tiny, mean):  # noqa: F811
     from autolux.lib.analyser.gpu_stage import _HEALTHY_PASSES
 
     assert _HEALTHY_PASSES > 1
-    worker, encoder = flapping(tiny, mean, CUDA_ERROR)
+    worker, _encoder = flapping(tiny, mean, CUDA_ERROR)
     try:
         feed(worker, seconds=6.0)
         drain(worker, ticks=250)

@@ -1,3 +1,12 @@
+"""Read, write and edit MVR scenes and their embedded GDTF archives.
+
+Reading goes through pymvr 1.0.7 (scene graph, fixtures, addresses, classes, user data) and
+pygdtf 1.4.5 (modes and geometry). pymvr re-decodes GDTFSpec as cp437 and appends ".gdtf",
+so the spec is read from the scene XML itself. Writing stays here: pymvr's writer reorders
+elements and drops nodes it does not model, and Config edits must round-trip every node byte
+for byte.
+"""
+
 import copy
 import io
 import math
@@ -7,6 +16,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from xml.etree import ElementTree
+
+import pygdtf
+import pymvr
 
 from autolux.lighting import mvr_schema as schema
 
@@ -217,21 +229,74 @@ def gdtf_root(description: str, label: str) -> ElementTree.Element:
     return root
 
 
+LIBRARY_ERRORS = (AttributeError, IndexError, KeyError, TypeError, ValueError)
+
+
+def _gdtf_fixture(description: str, label: str) -> pygdtf.FixtureType:
+    gdtf_root(description, label)
+    try:
+        return pygdtf.FixtureType(dsc_file=io.BytesIO(description.encode('utf-8')))
+    except LIBRARY_ERRORS as error:
+        raise ValueError(f'{label}: GDTF description could not be read: {error!r}') from error
+
+
+def _geometry_paths(fixture: pygdtf.FixtureType) -> dict[str, tuple[str, ...]]:
+    """Every geometry by name with its ancestors; a GeometryReference is its own instance."""
+    paths, pending = {}, [(node, ()) for node in fixture.geometries]
+    while pending:
+        node, parent = pending.pop()
+        paths[node.name] = path = (*parent, node.name)
+        pending.extend((child, path) for child in getattr(node, 'geometries', ()))
+    return paths
+
+
+def mode_cells(owned: list[tuple[tuple[str, ...], list[int]]]) -> list[dict]:
+    """Starfire's addressing cells from (geometry path, offsets) per channel, by first offset.
+
+    A geometry above exactly one channel-owning leaf belongs to that leaf's cell (a mover's yoke
+    and head); one above several leaves is a cell of its own (a bar's master dimmer).
+    """
+    owners = {path for path, _ in owned}
+    leaves = [
+        path for path in owners if not any(o != path and o[: len(path)] == path for o in owners)
+    ]
+    cells = {}
+    for path, offsets in owned:
+        below = [leaf for leaf in leaves if leaf[: len(path)] == path]
+        cells.setdefault((below[0] if len(below) == 1 else path)[-1], []).extend(offsets)
+    return [
+        {'geometry': name, 'offsets': sorted(offsets)}
+        for name, offsets in sorted(cells.items(), key=lambda item: (min(item[1]), item[0]))
+    ]
+
+
+def cell_id(fixture: str, geometry: str, cell_count: int) -> str:
+    return fixture if cell_count == 1 else f'{fixture}/{geometry}'
+
+
 def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
+    """Each mode's footprint, DMX breaks, movement axes and Starfire cells.
+
+    Channels come from pygdtf with geometry references expanded at their Break offsets.
+    """
+    fixture = _gdtf_fixture(description, label)
+    paths = _geometry_paths(fixture)
     modes = {}
-    for mode in gdtf_root(description, label).iter('DMXMode'):
-        offsets, breaks, attributes = [], set(), set()
-        for channel in mode.iter('DMXChannel'):
-            breaks.add(dmx_break := channel.get('DMXBreak', '1'))
-            if dmx_break == '1' and (text := channel.get('Offset', 'None')) != 'None':
-                offsets.extend(map(int, text.split(',')))
+    for mode in fixture.dmx_modes:
+        offsets, breaks, attributes, owned = [], set(), set(), []
+        for channel in [*mode.dmx_channels, *mode.virtual_channels]:
+            breaks.add(str(channel.dmx_break))
+            if channel.dmx_break == 1 and channel.offset:
+                offsets.extend(channel.offset)
+                owned.append((paths.get(channel.geometry, (channel.geometry,)), channel.offset))
             attributes.update(
-                node.get('Attribute', '').lower() for node in channel.iter('LogicalChannel')
+                str(logical.attribute).lower() for logical in channel.logical_channels
             )
-        modes[mode.get('Name', '')] = {
+        modes[mode.name or ''] = {
             'channels': max(offsets, default=0),
             'breaks': sorted(breaks),
             'movement': sorted(set(MOVEMENT_AXES) & attributes),
+            'cells': mode_cells(owned),
         }
     return modes
 
@@ -487,47 +552,93 @@ def _text(node, tag: str) -> str:
     return (node.findtext(tag) or '').strip()
 
 
+def _library_matrix(matrix: pymvr.Matrix) -> list[float]:
+    values = [float(value) for row in matrix.matrix for value in row[:3]]
+    if len(values) != len(IDENTITY_MATRIX) or not all(math.isfinite(v) for v in values):
+        raise ValueError('MVR Matrix must contain four {x,y,z} rows of finite numbers')
+    return values
+
+
+def _library_objects(child_list, matrix):
+    """pymvr's objects with scene-space matrices; pymvr groups a ChildList by object type."""
+    if child_list is None:
+        return
+    for kind in (
+        'fixtures',
+        'focus_points',
+        'group_objects',
+        'scene_objects',
+        'supports',
+        'trusses',
+        'video_screens',
+        'projectors',
+    ):
+        for item in getattr(child_list, kind):
+            placed = multiply(matrix, _library_matrix(item.matrix))
+            yield item, placed
+            yield from _library_objects(getattr(item, 'child_list', None), placed)
+
+
 def patched_fixtures(scene: Scene) -> list[dict]:
     root = scene.root
+    try:
+        library = pymvr.Scene(xml_node=root.find('Scene'))
+        data = root.find('UserData')
+        user_data = pymvr.UserData(xml_node=data) if data is not None else None
+    except LIBRARY_ERRORS as error:
+        raise ValueError(f'MVR scene could not be read: {error!r}') from error
     classes = {
-        node.get('uuid', '').upper(): node.get('name', '')
-        for node in root.findall('Scene/AUXData/Class')
+        entry.uuid.upper(): entry.name
+        for entry in (library.aux_data.classes if library.aux_data is not None else [])
     }
     limits = {
         (node.get('fixture', '').upper(), node.get('axis', '').lower()): (
             float(node.get('minimum', '0')),
             float(node.get('maximum', '1')),
         )
-        for data in root.findall('UserData/Data')
-        if data.get('provider') == PROVIDER
-        for node in data.findall('Movement')
+        for entry in (user_data.data if user_data is not None else [])
+        if entry.provider == PROVIDER
+        for node in entry.extra_children
+        if node.tag == 'Movement'
     }
+    order = {node.get('uuid', '').upper(): index for index, node in enumerate(root.iter())}
+    specs = {}
+    for node in root.iter('Fixture'):
+        specs[node.get('uuid', '').upper()] = _text(node, 'GDTFSpec')
+        # pymvr turns an unreadable address into DMX 1; refuse it instead.
+        for address in node.findall('Addresses/Address'):
+            if schema.dmx_address((address.text or '').strip()) is None:
+                raise ValueError(f'{node.get("name", node.get("uuid"))}: invalid DMX address')
+    placed = [
+        (item, matrix)
+        for layer in library.layers
+        for item, matrix in _library_objects(layer.child_list, _library_matrix(layer.matrix))
+        if isinstance(item, pymvr.Fixture)
+    ]
     fixtures = []
-    for node, matrix in placed_objects(root):
-        addresses = node.findall('Addresses/Address')
-        if node.tag != 'Fixture' or not _text(node, 'GDTFSpec') or not addresses:
+    for node, matrix in sorted(placed, key=lambda entry: order.get(entry[0].uuid.upper(), 0)):
+        identity = node.uuid.upper()
+        if not specs.get(identity) or not node.addresses.addresses:
             continue
-        identity = node.get('uuid', '').upper()
-        patch = []
-        for address in addresses:
-            if (location := schema.dmx_address((address.text or '').strip())) is None:
-                raise ValueError(f'{node.get("name", identity)}: invalid DMX address')
-            patch.append((int(address.get('break', '0')), *location))
+        patch = [
+            (address.dmx_break, address.universe - 1, address.address)
+            for address in node.addresses.addresses
+        ]
         movement = {}
         for axis in MOVEMENT_AXES:
             low, high = limits.get((identity, axis), (0.0, 1.0))
-            inverted = _text(node, f'DMXInvert{axis.title()}') == 'true'
+            inverted = bool(getattr(node, f'dmx_invert_{axis}'))
             movement[axis] = {'min': low, 'max': high, 'inverted': inverted}
         fixtures.append(
             {
                 'uuid': identity,
-                'name': node.get('name', ''),
-                'gdtf_spec': _text(node, 'GDTFSpec'),
-                'gdtf_mode': _text(node, 'GDTFMode'),
+                'name': node.name,
+                'gdtf_spec': specs[identity],
+                'gdtf_mode': (node.gdtf_mode or '').strip(),
                 'addresses': patch,
                 'universe': patch[0][1],
                 'address': patch[0][2],
-                'class': classes.get(_text(node, 'Classing').upper(), ''),
+                'class': classes.get((node.classing or '').strip().upper(), ''),
                 'matrix': matrix,
                 **movement,
             }

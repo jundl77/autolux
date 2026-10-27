@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use starfire::engine::Engine;
-use starfire::fixtures::FixtureRig;
 use starfire::model::{
     AttributeValue, Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target,
     Transition,
@@ -28,7 +27,7 @@ fn steady_room() -> Engine {
     )
     .unwrap();
     let catalogue = AutoloopCatalog::load(directory.path()).unwrap();
-    let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+    let rig = support::room();
     let mut engine = Engine::new(rig, catalogue, support::palettes()).unwrap();
     engine
         .apply(

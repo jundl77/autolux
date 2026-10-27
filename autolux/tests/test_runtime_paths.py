@@ -1,5 +1,7 @@
 from pathlib import Path
+
 import pytest
+
 from autolux.training.runtime_paths import resolve_autolux_package_directory
 
 
@@ -22,6 +24,7 @@ def test_shadow_simulation_dispatches_through_the_current_cli(campaign, monkeypa
     import asyncio
     import sys
     import types
+
     from cli import main
 
     source = Path(__file__).resolve().parents[1] / 'training' / campaign / 'ng_probe_rig.py'
@@ -53,6 +56,7 @@ def test_shadow_simulation_dispatches_through_the_current_cli(campaign, monkeypa
         'MAIN': source.parents[2],
         'CODE': source.parents[2],
     }
-    exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), scope)
+    code = compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec')
+    exec(code, scope)  # noqa: S102
     scope['run_sim_inner'](str(root), 'track.mp3', 'report.json')
     assert calls == [['autolux', 'simulate', 'file', 'track.mp3', '--report', 'report.json']]

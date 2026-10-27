@@ -1,8 +1,9 @@
 import datetime
+import itertools
 import time
 
 from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
-from autolux.lib.clock import SystemClock, VirtualClock, SYSTEM_CLOCK
+from autolux.lib.clock import SYSTEM_CLOCK, SystemClock, VirtualClock
 
 
 def test_system_clock_tracks_real_time():
@@ -52,7 +53,7 @@ def test_the_system_clock_can_resolve_a_single_audio_buffer():
             f'20000 reads — it is quantised far coarser than the '
             f'{buffer_sec * 1000:.3f} ms audio buffer it has to time'
         )
-    granularity = min(b - a for a, b in zip(samples, samples[1:]))
+    granularity = min(b - a for a, b in itertools.pairwise(samples))
     assert granularity < buffer_sec / 10, (
         f'system clock granularity {granularity * 1000:.3f} ms cannot resolve a '
         f'{buffer_sec * 1000:.3f} ms audio buffer'
