@@ -1432,9 +1432,7 @@ async def test_show_control_settings_survive_a_restart_and_apply_without_one(tmp
     light._settings = lambda: control.settings
     light.pause()
 
-    control.commands.put_nowait(
-        {'action': 'settings', 'settings': ShowSettings(quiet_brightness=0.3)}
-    )
+    control.commands.put_nowait({'action': 'settings', 'settings': {'quiet_brightness': 0.3}})
     await control.apply_pending(light)
     assert masters(lighting)[-1] == pytest.approx(0.3)
     clock.advance(SETTINGS_SAVE_SETTLE_SECONDS)
@@ -1803,7 +1801,6 @@ async def test_pause_and_play_reach_starfire_at_once_and_only_play_follows_the_m
 
 
 async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_path):
-    from autolux.lib.engine.effect_definitions import ShowSettings
     from autolux.lib.main import ShowControl
 
     control = ShowControl(tmp_path / 'show.json')
@@ -1825,9 +1822,12 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
     control.commands.put_nowait(
         {
             'action': 'settings',
-            'settings': ShowSettings(
-                crossfade_beats=4, strobe_max_rate_hz=5, strobe_max_burst_seconds=2, intensity=0.4
-            ),
+            'settings': {
+                'crossfade_beats': 4,
+                'strobe_max_rate_hz': 5,
+                'strobe_max_burst_seconds': 2,
+                'intensity': 0.4,
+            },
         }
     )
     await control.apply_pending(light)

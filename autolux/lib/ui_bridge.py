@@ -97,7 +97,14 @@ def parse_control_command(payload) -> dict:
             raise ValueError('intensity must be within 0..1')
         return {'action': action, 'level': float(level)}
     if action == 'settings':
-        return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
+        # Only the named fields change: a panel's stale fx_auto, intensity or follow-the-music
+        # flag must never undo the chip that owns it.
+        changes = payload.get('settings')
+        validated = ShowSettings.from_dict(changes).to_dict()
+        return {
+            'action': action,
+            'settings': {name: value for name, value in validated.items() if name in changes},
+        }
     if action == 'palette':
         name = payload.get('name')
         if name != PALETTE_POLICY and name not in PALETTE_NAMES:

@@ -20,6 +20,8 @@ from autolux.lib.main import apply_static
 from autolux.lib.ui_bridge import SnapshotServer
 from autolux.lighting.palettes import PALETTE_NAMES
 from autolux.simulate.visualizer_app import (
+    DIRECT_AUTO_JS,
+    FORM_SETTINGS,
     INTENSITY_LEVELS,
     PALETTE_POLICY,
     PALETTE_SYNC_JS,
@@ -35,6 +37,7 @@ from autolux.simulate.visualizer_app import (
     expected_control_values,
     setting_text,
     static_control_command,
+    with_control_flags,
 )
 from autolux.tests.test_static_mode import overrides, static_engine
 
@@ -65,7 +68,10 @@ def show():
             False,
             None,
             (30, 0.5, 2, 20, 6, 3),
-            {'action': 'settings', 'settings': ShowSettings(30.0, 0.5, 2.0, 0.2, 6.0, 3.0)},
+            {
+                'action': 'settings',
+                'settings': dict(zip(FORM_SETTINGS, (30.0, 0.5, 2.0, 0.2, 6.0, 3.0))),
+            },
         ),
     ],
 )
@@ -98,7 +104,9 @@ def test_a_comma_decimal_is_sent_as_the_same_number(show):
         'control-crossfade_beats', False, None, ('30', '0,5', '2', ' 15,5 ', '6', '3')
     )
     assert poller.control(command) == {'accepted': 'settings'}
-    assert commands.get_nowait()['settings'] == ShowSettings(30.0, 0.5, 2.0, 0.155, 6.0, 3.0)
+    assert commands.get_nowait()['settings'] == dict(
+        zip(FORM_SETTINGS, (30.0, 0.5, 2.0, 0.155, 6.0, 3.0))
+    )
 
 
 @pytest.mark.parametrize(
@@ -174,6 +182,47 @@ def test_an_expected_control_value_outlasts_one_stale_snapshot_until_confirmed_o
     assert expectations.apply(stale)['master_brightness'] == 1.0, 'an unconfirmed value expires'
 
 
+def test_a_held_chip_or_settings_field_outlasts_a_stale_poll_of_the_settings_it_lives_in():
+    now = [0.0]
+    expectations = ControlExpectations(hold_seconds=2.0, clock=lambda: now[0])
+    expectations.expect(fx_auto=False, settings={'crossfade_beats': 2.0})
+    stale = with_control_flags({'settings': {'crossfade_beats': 1.0, 'fx_auto': True}})
+    shown = expectations.apply(stale)
+    assert shown['fx_auto'] is False
+    assert shown['settings'] == {'crossfade_beats': 2.0, 'fx_auto': True}
+    landed = with_control_flags({'settings': {'crossfade_beats': 2.0, 'fx_auto': False}})
+    assert expectations.apply(landed) == landed
+    assert expectations.apply(stale) == stale, 'both confirmed, the poll rules again'
+
+
+def test_the_relay_holds_an_fx_click_on_the_chip_until_the_show_reports_it():
+    class Lagging(_Recorder):
+        def __init__(self):
+            super().__init__()
+            self.settings = {'fx_auto': True}
+
+        def snapshot(self):
+            return {'settings': dict(self.settings), 'master_brightness': 1.0}
+
+    source = Lagging()
+    app = build_app(source, direct_control=False)
+    refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
+    gate = {'tab': 'control', 'metrics': False, 'timeline': False}
+
+    def polled():
+        reply = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()
+        return reply['response']['control-state']['data']['fx_auto']
+
+    client = app.server.test_client()
+    reply = client.post('/control-relay', json={'action': 'fx_auto', 'enabled': False})
+    assert reply.get_json() == {'accepted': 'fx_auto'}
+    assert polled() is False, 'the engine has not published it yet'
+    source.settings = {'fx_auto': False}
+    assert polled() is False
+    source.settings = {'fx_auto': True}
+    assert polled() is True, 'confirmed once, the show rules the chip again'
+
+
 def test_each_accepted_command_names_the_value_the_show_should_report():
     settings = {'crossfade_beats': 2.0}
     assert expected_control_values({'action': 'pause'}, {'accepted': 'pause'}) == {'paused': True}
@@ -209,17 +258,13 @@ def test_unknown_palettes_are_refused_before_the_controller(show, name):
     assert commands.empty()
 
 
-def test_a_settings_change_keeps_the_intensity_the_fader_set(show):
+def test_a_settings_change_carries_only_the_form_so_a_stale_poll_cannot_undo_a_chip(show):
     poller, commands = show
     command = control_command(
-        'control-crossfade_beats',
-        False,
-        None,
-        ('30', '0.5', '2', '20', '6', '3', '3', '0'),
-        intensity=0.4,
+        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3', '3'), auto=True
     )
     assert poller.control(command) == {'accepted': 'settings'}
-    assert commands.get_nowait()['settings'].intensity == 0.4
+    assert set(commands.get_nowait()['settings']) == set(FORM_SETTINGS)
 
 
 def test_a_settings_change_from_an_old_panel_still_carrying_warmth_is_accepted(show):
@@ -229,7 +274,7 @@ def test_a_settings_change_from_an_old_panel_still_carrying_warmth_is_accepted(s
     )
     command['settings']['palette_temperature_bias'] = -0.5
     assert poller.control(command) == {'accepted': 'settings'}
-    assert 'palette_temperature_bias' not in commands.get_nowait()['settings'].to_dict()
+    assert 'palette_temperature_bias' not in commands.get_nowait()['settings']
 
 
 @pytest.mark.parametrize('level', [1.2, -0.1, '0.5', None])
@@ -1164,16 +1209,7 @@ def test_following_the_music_greys_the_segments_but_keeps_the_chosen_level_lit()
     assert 'control-intensity-set.className' in ' '.join(app.callback_map)
 
 
-def test_a_settings_edit_keeps_follow_the_music_on():
-    command = control_command(
-        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), auto=True
-    )
-    assert command['settings']['intensity_auto'] is True
-
-
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
-    from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.simulate.visualizer_app import FORM_SETTINGS, setting_text
 
     source = _Recorder()
     app = build_app(source)
@@ -1189,9 +1225,7 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
 
     edited = {**shown, 'control-crossfade_beats': '2'}
     _run_callback(app, output, {**edited, 'control-state': state}, 'control-crossfade_beats.value')
-    assert source.commands == [
-        {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
-    ]
+    assert source.commands == [{'action': 'settings', 'settings': {'crossfade_beats': 2.0}}]
 
 
 RED = {'red': 1.0, 'green': 0.0, 'blue': 0.0}
@@ -1258,8 +1292,44 @@ def test_the_auto_tab_has_fx_auto_and_off_chips_and_fx_defaults_to_auto():
         assert synced == [['active', ''], ['', 'active'], ['', '']]
     off = control_command('control-fx-off', False, None, ())
     assert off == {'action': 'fx_auto', 'enabled': False}
-    assert control_command('control-fx-auto', False, None, ()) is None, 'already on'
-    edit = control_command(
-        'control-crossfade_beats', False, None, ('30', '0.5', '2', '20', '6', '3'), fx_auto=False
+    # Sent even when the last poll says the show has it: that poll may be stale.
+    assert control_command('control-fx-auto', False, None, ()) == {
+        'action': 'fx_auto',
+        'enabled': True,
+    }
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_an_fx_chip_click_dispatches_whatever_the_page_last_polled():
+    # No poll yet, a state from before the chips, and one that already reports the value.
+    states = [None, {'settings': {}}, {'settings': {'fx_auto': True}, 'fx_auto': True}]
+    clicks = [(state, chip) for state in states for chip in ('control-fx-off', 'control-fx-auto')]
+    result = _run_control_js(
+        f'''
+window.autoluxControlConfig = {{direct: true, bridgePort: 8766}};
+globalThis.location = {{protocol: 'http:', hostname: 'autolux.local'}};
+const sent = [];
+const classes = [];
+globalThis.fetch = async (url, options) => {{
+    sent.push(JSON.parse(options.body));
+    return {{ok: true, status: 202, json: async () => ({{accepted: 'fx_auto'}})}};
+}};
+const clicked = {DIRECT_AUTO_JS};
+window.dash_clientside = {{
+    no_update: null,
+    set_props: (id, props) => classes.push([id, props.className]),
+}};
+(async () => {{
+    control.operatorActs();
+    for (const [state, chip] of {json.dumps(clicks)}) {{
+        window.dash_clientside.callback_context = {{triggered: [{{prop_id: chip + '.n_clicks'}}]}};
+        clicked(null, null, null, null, null, 1, 1, state);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    }}
+    console.log(JSON.stringify({{sent, classes, shown: control.view({{fx_auto: false}})}}));
+}})();
+'''
     )
-    assert edit['settings']['fx_auto'] is False
+    assert result['sent'] == [{'action': 'fx_auto', 'enabled': on} for on in (False, True)] * 3
+    assert result['classes'][:2] == [['control-fx-auto', ''], ['control-fx-off', 'active']]
+    assert result['shown'] == {'fx_auto': True}, 'the last click holds until the show reports it'

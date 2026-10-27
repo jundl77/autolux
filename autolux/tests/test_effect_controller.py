@@ -871,3 +871,24 @@ async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_js
     assert ShowControl(tmp_path / 'show.json').settings.fx_auto is False
     with pytest.raises(ValueError, match='fx_auto must be true or false'):
         parse_control_command({'action': 'fx_auto', 'enabled': 'off'})
+
+
+async def test_a_settings_edit_keeps_fx_off_and_the_level_picked_since_its_page_last_polled(
+    tmp_path,
+):
+    from autolux.lib.ui_bridge import parse_control_command
+
+    control, light, _, _, _ = _capped_show(tmp_path)
+    for command in (
+        {'action': 'fx_auto', 'enabled': False},
+        {'action': 'intensity', 'level': 0.3},
+        {'action': 'settings', 'settings': {'crossfade_beats': 2.0}},
+        # A panel from before the FX chips: a settings dict with no fx_auto in it.
+        {'action': 'settings', 'settings': {'quiet_brightness': 0.25, 'intensity_auto': False}},
+    ):
+        control.commands.put_nowait(parse_control_command(command))
+    await control.apply_pending(light)
+    settings = light.effect_controller._settings()
+    assert settings.fx_auto is False
+    assert settings.intensity == 0.3
+    assert (settings.crossfade_beats, settings.quiet_brightness) == (2.0, 0.25)

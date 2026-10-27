@@ -713,11 +713,25 @@ class ControlExpectations:
         held = {}
         with self._lock:
             for key, (value, at) in list(self._expected.items()):
-                if snapshot.get(key) == value or now - at >= self._hold_seconds:
+                reported = snapshot.get(key)
+                # A settings command names only the fields it changes.
+                partial = isinstance(value, dict) and isinstance(reported, dict)
+                confirmed = value.items() <= reported.items() if partial else reported == value
+                if confirmed or now - at >= self._hold_seconds:
                     del self._expected[key]
                 else:
-                    held[key] = value
+                    held[key] = {**reported, **value} if partial else value
         return {**snapshot, **held}
+
+
+def with_control_flags(snapshot: dict) -> dict:
+    # Lifted beside the settings they live in, so a held chip value can win over a stale poll.
+    settings = snapshot.get('settings') or {}
+    return {
+        **snapshot,
+        'intensity_auto': bool(settings.get('intensity_auto')),
+        'fx_auto': settings.get('fx_auto') is not False,
+    }
 
 
 def expected_control_values(command: dict, reply: dict) -> dict:
@@ -759,15 +773,13 @@ def control_command(
     settings,
     *,
     palette=None,
-    intensity=DEFAULT_INTENSITY,
     auto=False,
-    fx_auto=True,
 ) -> dict | None:
     if trigger == 'control-intensity-auto':
         return {'action': 'intensity_auto', 'enabled': not auto}
     if trigger in FX_AUTO_IDS:
-        enabled = FX_AUTO_IDS[trigger]
-        return None if enabled == fx_auto else {'action': 'fx_auto', 'enabled': enabled}
+        # Sent on every click: a stale poll must not decide that the show already has it.
+        return {'action': 'fx_auto', 'enabled': FX_AUTO_IDS[trigger]}
     if trigger == 'control-toggle':
         return {'action': 'play' if paused else 'pause'}
     if trigger == 'control-next':
@@ -782,10 +794,7 @@ def control_command(
         return {
             'action': 'settings',
             'settings': {
-                **{name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)},
-                'intensity': intensity,
-                'intensity_auto': auto,
-                'fx_auto': fx_auto,
+                name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)
             },
         }
     return None
@@ -795,8 +804,8 @@ def settings_edit(name: str, raw, state: dict) -> dict | None:
     """The settings command for one edited field, or None when it still shows the show's value.
 
     A field the poll filled (or the browser restored) reads exactly the show's own text, so
-    only an operator's change goes out; every other setting is sent as the show reported it,
-    not as its rounded text.
+    only an operator's change goes out, and only that field: the show keeps every other
+    setting as it has it, never a stale poll's copy.
     """
     current = state.get('settings')
     if not current or str(raw).strip() == (state.get('settings_text') or {}).get(name):
@@ -804,7 +813,7 @@ def settings_edit(name: str, raw, state: dict) -> dict | None:
     value = parse_decimal(name, raw)
     if value == current.get(name):
         return None
-    return {'action': 'settings', 'settings': {**current, name: value}}
+    return {'action': 'settings', 'settings': {name: value}}
 
 
 def setting_range_text(name: str) -> str:
@@ -1375,10 +1384,9 @@ FX_SYNC_JS = '''function(state) {
 }'''
 
 
-def _register_direct_auto_controls(app) -> None:
-    # Visual state flips here at click time; the bridge round trip never gates it.
-    app.clientside_callback(
-        """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
+# The Auto tab's clicks in the browser path.
+DIRECT_AUTO_JS = (
+    """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
             const triggered = (window.dash_clientside.callback_context.triggered || [])
@@ -1404,22 +1412,22 @@ def _register_direct_auto_controls(app) -> None:
             } else if (triggered.includes('control-palette.value')) {
                 const pin = shown.palette || {};
                 const current = pin.pinned ? pin.name : """
-        + json.dumps(PALETTE_POLICY)
-        + """;
+    + json.dumps(PALETTE_POLICY)
+    + """;
                 if (palette && palette !== current) {
                     control.dispatch(control.build.palette(palette), status);
                 }
             } else if (triggered.includes('control-fx-auto.n_clicks')
                     || triggered.includes('control-fx-off.n_clicks')) {
+                // Every click goes out: the poll can be missing or stale, the show ignores a
+                // repeat.
                 const enabled = triggered.includes('control-fx-auto.n_clicks');
-                if (enabled !== (shown.fx_auto !== false)) {
-                    control.hold({fx_auto: enabled});
-                    window.dash_clientside.set_props(
-                        'control-fx-auto', {className: enabled ? 'active' : ''});
-                    window.dash_clientside.set_props(
-                        'control-fx-off', {className: enabled ? '' : 'active'});
-                    control.dispatch(control.build.fxAuto(enabled), status, ['fx_auto']);
-                }
+                control.hold({fx_auto: enabled});
+                window.dash_clientside.set_props(
+                    'control-fx-auto', {className: enabled ? 'active' : ''});
+                window.dash_clientside.set_props(
+                    'control-fx-off', {className: enabled ? '' : 'active'});
+                control.dispatch(control.build.fxAuto(enabled), status, ['fx_auto']);
             } else if (triggered.includes('control-intensity-auto.n_clicks')) {
                 const enabled = !shown.intensity_auto;
                 control.hold({intensity_auto: enabled});
@@ -1439,7 +1447,14 @@ def _register_direct_auto_controls(app) -> None:
                 }
             }
             return [nu, nu];
-        }""",
+        }"""
+)
+
+
+def _register_direct_auto_controls(app) -> None:
+    # Visual state flips here at click time; the bridge round trip never gates it.
+    app.clientside_callback(
+        DIRECT_AUTO_JS,
         Output('control-toggle', 'children', allow_duplicate=True),
         Output('control-toggle', 'className', allow_duplicate=True),
         Input('control-toggle', 'n_clicks'),
@@ -2517,7 +2532,9 @@ def build_app(
     def refresh(requested):
         if not requested or requested.get('tab') not in ('control', 'telemetry'):
             raise dash.exceptions.PreventUpdate
-        snap = expectations.apply(_with_base_palette(snapshot_source.snapshot()))
+        snap = expectations.apply(
+            with_control_flags(_with_base_palette(snapshot_source.snapshot()))
+        )
         now = time.time()
         sync = status = show_timing = decoder = commands = dash.no_update
         timeline = dash.no_update
@@ -2542,11 +2559,11 @@ def build_app(
                         'mode',
                         'static',
                         'special_groups',
+                        'intensity_auto',
+                        'fx_auto',
                     )
                 }
                 settings = control['settings'] or {}
-                control['intensity_auto'] = bool(settings.get('intensity_auto'))
-                control['fx_auto'] = bool(settings.get('fx_auto', True))
                 control['settings_text'] = {
                     name: setting_text(name, value) for name, value in settings.items()
                 }
@@ -2762,9 +2779,7 @@ def build_app(
                     level,
                     settings,
                     palette=palette,
-                    intensity=intensity,
                     auto=bool(state.get('intensity_auto')),
-                    fx_auto=state.get('fx_auto') is not False,
                 )
         except ValueError as error:
             return f'Rejected: {error}', dash.no_update
