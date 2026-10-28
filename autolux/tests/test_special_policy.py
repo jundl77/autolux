@@ -156,6 +156,9 @@ def test_a_texture_rests_its_group_so_no_accent_or_other_texture_plays_there():
     # A drop inside the texture's 240 s keeps its strobe burst but plays nothing on fx.
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1239.0)
     assert (choice.special, choice.strobes) == (None, (DROP_STROBE,))
+    # The texture itself returns exactly when its 240 s are up.
+    capabilities = SpecialCapabilities.from_groups([FX])
+    assert policy.choose(ATMOSPHERIC, capabilities, now=1240.0).special is not None
     assert fire(policy, DROP, 1240.0).name == 'spin'
 
 

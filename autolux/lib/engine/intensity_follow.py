@@ -6,7 +6,7 @@ needs evidence from the track's sections since its start:
 - calm: the first CALM_OPENING_BARS are heard without a DROP, and the committed intents average
   CALM_MAX_MEAN_ENERGY or less on INTENT_ENERGY;
 - wild: the drive is above WILD_ABOVE_DRIVE and at least one DROP arrived loud, at
-  MAXIMAL_ARRIVAL_OF_PEAK of the track peak or more (not autoloop_policy.soft_drop);
+  MAXIMAL_ARRIVAL_OF_PEAK of the track peak or more, i.e. not autoloop_policy.soft_drop;
 - balanced: the drive is above BALANCED_ABOVE_DRIVE;
 - calm otherwise.
 

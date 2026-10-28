@@ -8,7 +8,10 @@ backtest and simulation. Both leave outputs stopped. Stop a show with Ctrl-C or
 ## Health
 
 The dashboard at `http://autolux.local:8765` groups playback, tempo, intent and effect
-above the show timeline. Transport charts retain five minutes of receiver buffer,
+above the show timeline. Its controls post from the browser straight to the show's bridge on
+TCP 8766 (there is no fallback through the dashboard), so the firewall must allow 8765, 8766
+and UDP 5353; control is plain http only, as the bridge accepts only http origins and an https
+proxy would break its CORS check. Transport charts retain five minutes of receiver buffer,
 audio level, interruptions, lost/dropped audio frames, scheduling error and DMX
 delivery. Counters appear as rates; missing reports and counter resets leave gaps.
 The section decoder's confidence per section type is under **Section Confidence**;
