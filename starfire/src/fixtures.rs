@@ -82,6 +82,15 @@ impl Placement {
             focus,
         })
     }
+
+    /// The tilt range a hanging head would have: the encode mirrors a standing head itself, so
+    /// aim reads lean as the hanging one.
+    fn hanging_tilt(&self) -> MovementRange {
+        MovementRange {
+            inverted: self.tilt.inverted ^ self.reversed,
+            ..self.tilt.clone()
+        }
+    }
 }
 
 impl MovementRange {
@@ -596,13 +605,30 @@ impl FixtureRig {
         Ok(rig)
     }
 
-    /// Logical pan and tilt throwing the beam through the fixture's focus point. None for a
-    /// cell without a pan range.
+    /// The point a cell (or fixture) rests its beam on: its MVR focus point, or the stage centre
+    /// without one.
+    pub fn focus(&self, id: &str) -> Option<Position> {
+        let fixture = match self.cells.get(id) {
+            Some(&(fixture, _)) => &self.fixtures[fixture],
+            None => self
+                .fixtures
+                .iter()
+                .find(|fixture| fixture.fixture_uuid == id)?,
+        };
+        Some(fixture.placement.focus.unwrap_or(self.stage_centre))
+    }
+
+    /// Logical pan and tilt throwing the beam through the cell's focus point. None for a cell
+    /// without a pan range.
     pub fn aim(&self, cell_id: &str) -> Option<(f64, f64)> {
-        let fixture = &self.fixtures[self.cells.get(cell_id)?.0];
-        let placement = &fixture.placement;
-        let focus = placement.focus.unwrap_or(self.stage_centre);
-        let [x, y, z] = [0, 1, 2].map(|axis| focus[axis] - placement.position[axis]);
+        self.aim_at(cell_id, self.focus(cell_id)?)
+    }
+
+    /// Logical pan and tilt throwing the beam through `point` (scene millimetres), held inside
+    /// the soft limits. None for a cell without a pan range.
+    pub fn aim_at(&self, cell_id: &str, point: Position) -> Option<(f64, f64)> {
+        let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
+        let [x, y, z] = [0, 1, 2].map(|axis| point[axis] - placement.position[axis]);
         // The scene heading clockwise from +Y the encode reads a logical pan as, and the lean
         // off the pan axis, which runs down from a hanging head and up from a standing one.
         let heading_degrees = x.atan2(y).to_degrees();
@@ -620,18 +646,44 @@ impl FixtureRig {
         let position = (heading_degrees - from) / (to - from);
         let centre = (placement.pan.min + placement.pan.max) / 2.0;
         let position = position + ((centre - position) / turn).round() * turn;
-        // The encode mirrors a standing head itself, so the lean is the hanging one.
-        let hanging_tilt = MovementRange {
-            inverted: placement.tilt.inverted ^ placement.reversed,
-            ..placement.tilt.clone()
-        };
         let tilt = profile
             .movement_range("Tilt")
             .filter(|(from, to)| from != to)
             .map_or(0.5, |(from, to)| {
-                hanging_tilt.unmap(0.5 + lean_degrees / (to - from))
+                placement
+                    .hanging_tilt()
+                    .unmap(0.5 + lean_degrees / (to - from))
             });
         Some((placement.pan.unmap(position), tilt))
+    }
+
+    /// The scene unit vector `aim_at` reads a logical pan and tilt as, so its inverse inside
+    /// the soft limits; a head without a tilt range leans along its pan axis. None for a cell
+    /// without a pan range.
+    pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
+        let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
+        let profile = self.profile(cell_id)?;
+        let (from, to) = profile
+            .movement_range("Pan")
+            .filter(|(from, to)| from != to)?;
+        let heading = (from + placement.pan.map(pan) * (to - from)).to_radians();
+        let lean = profile
+            .movement_range("Tilt")
+            .filter(|(from, to)| from != to)
+            .map_or(0.0, |(from, to)| {
+                (placement.hanging_tilt().map(tilt) - 0.5) * (to - from)
+            })
+            .to_radians();
+        let along_pan_axis = if placement.reversed {
+            lean.cos()
+        } else {
+            -lean.cos()
+        };
+        Some([
+            lean.sin() * heading.sin(),
+            lean.sin() * heading.cos(),
+            along_pan_axis,
+        ])
     }
 
     pub fn uuid_of_cell(&self, cell_id: &str) -> Option<&str> {
