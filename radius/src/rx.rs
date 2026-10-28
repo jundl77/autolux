@@ -48,7 +48,11 @@ impl ArrivalWatch {
     }
 
     fn audio(&mut self, now: Instant) -> Option<String> {
-        let longest_iteration = std::mem::take(&mut self.longest_iteration);
+        // The current iteration counts too: a stall can sit inside one poll's batch.
+        let current = self
+            .iteration_at
+            .map_or(Duration::ZERO, |at| now.duration_since(at));
+        let longest_iteration = std::mem::take(&mut self.longest_iteration).max(current);
         let gap = now.duration_since(self.audio_at.replace(now)?);
         (gap > ARRIVAL_GAP).then(|| {
             let cause = if longest_iteration * 2 >= gap {
@@ -433,6 +437,7 @@ fn run_connected(
     let mut gap_logged_at: Option<Instant> = None;
     let output_started = Instant::now();
     let mut arrivals = ArrivalWatch::default();
+    let mut arrival_logged_at: Option<Instant> = None;
     while !stop.load(Ordering::Acquire) {
         arrivals.iteration(Instant::now());
         for message in connection.poll()? {
@@ -469,8 +474,11 @@ fn run_connected(
                             audio_max_gap.max(Instant::now().duration_since(at).as_secs_f64());
                     }
                     audio_at = Some(Instant::now());
-                    if let Some(line) = arrivals.audio(Instant::now()) {
+                    if let Some(line) = arrivals.audio(Instant::now())
+                        && arrival_logged_at.is_none_or(|at| at.elapsed() >= GAP_LOG_INTERVAL)
+                    {
                         eprintln!("{line}");
+                        arrival_logged_at = Some(Instant::now());
                     }
                 }
                 _ => bail!("unexpected Radius client message after Login"),
@@ -607,6 +615,15 @@ mod tests {
             arrivals.audio(at(950)).as_deref(),
             Some(
                 "Radius audio arrival gap 550 ms; longest receive loop iteration 550 ms; the receive loop stalled"
+            )
+        );
+        // Stalled after the poll returned, mid-batch: no new iteration has started.
+        arrivals.iteration(at(951));
+        assert_eq!(arrivals.audio(at(951)), None);
+        assert_eq!(
+            arrivals.audio(at(1251)).as_deref(),
+            Some(
+                "Radius audio arrival gap 300 ms; longest receive loop iteration 300 ms; the receive loop stalled"
             )
         );
     }

@@ -30,6 +30,7 @@ try {
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError $errorLog
     # Relay stderr live over SSH into the controller's receiver-ssh.log, timestamped so
     # receiver warnings line up with the controller log; without it they appear only at exit.
+    # Timestamps are relay time (up to 250 ms late); a line caught mid-write may split.
     $reader = $null
     try {
         $reader = [IO.StreamReader]::new([IO.FileStream]::new($errorLog, [IO.FileMode]::Open,
@@ -37,9 +38,12 @@ try {
     } catch {}
     while (-not $child.WaitForExit(250)) {
         if ($reader) {
-            while ($null -ne ($line = $reader.ReadLine())) {
-                [Console]::Out.WriteLine((Get-Date -Format 'HH:mm:ss.fff') + ' ' + $line)
-            }
+            # A broken relay must never reach the finally block's stop file.
+            try {
+                while ($null -ne ($line = $reader.ReadLine())) {
+                    [Console]::Out.WriteLine((Get-Date -Format 'HH:mm:ss.fff') + ' ' + $line)
+                }
+            } catch { $reader = $null }
         }
     }
     $child.WaitForExit()

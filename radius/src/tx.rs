@@ -200,7 +200,6 @@ struct MediaSender {
     audio_dropped: u64,
     burst_dropped: u64,
     burst_stalled_for: Duration,
-    burst_pending_bytes: usize,
 }
 
 impl MediaSender {
@@ -213,7 +212,6 @@ impl MediaSender {
             audio_dropped: 0,
             burst_dropped: 0,
             burst_stalled_for: Duration::ZERO,
-            burst_pending_bytes: 0,
         }
     }
 
@@ -258,7 +256,6 @@ impl MediaSender {
         self.burst_dropped += packets;
         // Sampled at each drop: by the time the burst ends the socket has drained.
         self.burst_stalled_for = self.burst_stalled_for.max(connection.write_stalled_for());
-        self.burst_pending_bytes = self.burst_pending_bytes.max(connection.pending_bytes());
     }
 
     /// A burst ends once the receiver has taken everything queued.
@@ -268,9 +265,8 @@ impl MediaSender {
         }
         let packets = std::mem::take(&mut self.burst_dropped);
         let stalled_for = std::mem::take(&mut self.burst_stalled_for);
-        let pending = std::mem::take(&mut self.burst_pending_bytes);
         Some(format!(
-            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total; socket accepted no bytes for {} ms with {pending} bytes pending",
+            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total; socket accepted no bytes for {} ms",
             gap_seconds((packets * protocol::BLOCK_FRAMES as u64) as i64) * 1000.0,
             self.audio_dropped,
             stalled_for.as_millis()
@@ -739,10 +735,9 @@ mod tests {
         let line = media.end_burst(&connection).unwrap();
         // The first write was refused at 0 ms; the last drop happened at 1490 ms.
         assert!(
-            line.contains("socket accepted no bytes for 1490 ms with "),
+            line.ends_with("socket accepted no bytes for 1490 ms"),
             "{line}"
         );
-        assert!(line.ends_with(" bytes pending"), "{line}");
     }
 
     #[test]
