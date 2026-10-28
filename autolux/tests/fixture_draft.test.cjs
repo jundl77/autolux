@@ -473,10 +473,6 @@ test("the test controls send highlight commands, hold them alive and clear once 
     assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000, 600000]);
     [...timers.values()][0].run();
     assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
-    // › steps in patch order (kinta at 40 follows spot_right at 13), keeping the lit colour.
-    ds.fixture_patch.syncTest({ ...live, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" } }, "config");
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
-    assert.equal(actions.at(-1).key, fixtureNode(current, "kinta").key);
     assert.equal(timers.size, 2);
     const sent = commands.length;
     ds.fixture_patch.syncTest(live, "control");
@@ -497,6 +493,49 @@ test("the test controls send highlight commands, hold them alive and clear once 
     const refused = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     assert.equal(commands.length, refused);
+});
+
+test("the first Test click lights Test at once, and a refusal says why", async () => {
+    const current = draft();
+    const [spot, kinta] = ["spot_right", "kinta"].map((name) => fixtureNode(current, name));
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    const button = (cfgTest, kind) => {
+        const classes = new Set([kind]);
+        return { dataset: { cfgTest }, disabled: false, classList: { contains: (name) => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) } };
+    };
+    const buttons = [button("test", "cfg-test-main"), button("red", "cfg-swatch")];
+    const note = { textContent: "" };
+    const strip = { querySelectorAll: () => buttons };
+    page.querySelector = (selector) => ({ "#fixture-info .cfg-test": strip, "#fixture-info .cfg-test-note": note })[selector] ?? null;
+    const lit = () => buttons[0].classList.contains("active");
+    try {
+        timers.clear();
+        ds.fixture_patch.renderRig(spot.key, current, settings);
+        ds.fixture_patch.syncTest(live, "config");
+        const sent = commands.length;
+        model.testControl("test");
+        // Lit before any echo, and a poll from before the click does not flip it back.
+        assert.ok(lit());
+        ds.fixture_patch.syncTest(live, "config");
+        assert.ok(lit());
+        assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white" }]);
+        model.testControl("test");
+        assert.ok(!lit());
+        // After a selection change the first click is one command and lights Test too.
+        ds.fixture_patch.renderRig(kinta.key, current, settings);
+        model.testControl("test");
+        assert.ok(lit());
+        assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "white" });
+        model.testControl("test");
+        replies.push({ error: "the show is paused", status: 409 });
+        model.testControl("test");
+        await new Promise(setImmediate);
+        assert.ok(!lit());
+        assert.equal(note.textContent, "Test refused: the show is paused");
+    } finally {
+        delete page.querySelector;
+        ds.fixture_patch.renderRig(null, current, settings);
+    }
 });
 
 test("only a mover's test row offers Sweep and Aim, which toggle its motion and keep the swatch", () => {
@@ -696,17 +735,6 @@ test("a plan drag writes the Matrix the server's area and group-order test reads
     assert.equal(child(fixtureNode(moved, fixture.fixture), "Matrix").text, fixture.matrix);
 });
 
-test("› carries the operator's latest swatch, not the colour the last poll reported", () => {
-    const current = draft();
-    const green = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "green" } };
-    timers.clear();
-    ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
-    ds.fixture_patch.syncTest(green, "config");
-    model.testControl("red");
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
-    model.testControl("test");
-});
-
 test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixture is never sent", () => {
     const current = draft();
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
@@ -720,17 +748,16 @@ test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixt
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_left").key, swapped, settings);
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
     const renamed = rename(current, "kinta", "kinta_new");
-    ds.fixture_patch.renderRig(fixtureNode(renamed, "spot_right").key, renamed, settings);
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
+    ds.fixture_patch.renderRig(fixtureNode(renamed, "kinta_new").key, renamed, settings);
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
     // A fixture added since the show started has a uuid the show does not know.
     const spec = Object.keys(settings.library).find((name) => name.startsWith("Generic@Dimmer@"));
     const [added, , , fresh] = edit(renamed, null, { trigger: "fixture-add", profile: spec });
     ds.fixture_patch.renderRig(fixtureNode(added, "kinta_new").key, added, settings);
     const sent = commands.length;
-    // ‹ selects the new dimmer (at 25, before kinta at 40) but cannot light it: the lit kinta is cleared instead.
-    assert.equal(model.testControl("-1"), null);
-    assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: null }]);
+    // Selecting the new dimmer cannot light it: the lit kinta is cleared instead.
     ds.fixture_patch.renderRig(fresh, added, settings);
+    assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: null }]);
     assert.equal(model.testControl("red"), null);
     assert.equal(commands.length, sent + 1);
 });
