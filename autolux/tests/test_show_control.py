@@ -1424,6 +1424,12 @@ const step = async (name, act) => {{
         clickOn(button('control-intensity-auto'));
         return fire('control-intensity-auto.n_clicks', 0.7, echoed);
     }});
+    // A page stalled past the level window between the recorder and Dash's handler.
+    await step('Off whose run comes late', () => {{
+        clickOn(button('control-fx-off'));
+        now += 1500;
+        return fire('control-fx-off.n_clicks', 0.7, stale);
+    }});
     console.log(JSON.stringify(log));
 }})();
 """
@@ -1449,4 +1455,5 @@ const step = async (name, act) => {{
         ['stuck press, then a poll', []],
         ['Enter on a level', [{'action': 'intensity', 'level': 0.3}]],
         ['click Intensity Auto', [{'action': 'intensity_auto', 'enabled': True}]],
+        ['Off whose run comes late', [{'action': 'fx_auto', 'enabled': False}]],
     ]

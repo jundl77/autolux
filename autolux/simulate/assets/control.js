@@ -24,8 +24,10 @@
     // callback with an input no click changed (the poll's set_props on the level radio,
     // merged requests); such a run finds no press and sends nothing.
     const presses = {};
-    // A press no run takes within this window (its callback never fired) must not be spent
-    // by a later poll's run.
+    // A level press no run takes within this window (its callback never fired) must not be
+    // spent by a later poll's run: the poll's set_props on the level radio re-runs that
+    // callback. A chip press is taken only by a real n_clicks run, so it never expires;
+    // a stalled page that runs it late still sends it.
     const PRESS_TTL_MS = 1000;
     const press = (action, value) => {
         presses[action] = {value: value, at: performance.now()};
@@ -34,7 +36,9 @@
     const takePress = (action) => {
         const taken = presses[action];
         delete presses[action];
-        return taken && performance.now() - taken.at <= PRESS_TTL_MS ? taken.value : undefined;
+        return taken && (action !== 'intensity' || performance.now() - taken.at <= PRESS_TTL_MS)
+            ? taken.value
+            : undefined;
     };
     function pressOf(target, type) {
         const level = target.closest('#control-intensity label');
