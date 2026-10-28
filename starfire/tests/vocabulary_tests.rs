@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Transition};
+use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
 // A binary-exact frame time keeps the accumulated gate phase exact, so counts are exact too.
@@ -118,4 +119,66 @@ fn a_strobe_burst_stops_gating_at_the_burst_cap() {
             .all(|&count| count == 0),
         "{counts:?}"
     );
+}
+
+/// A spec's rig with synthetic compiled test profiles added under the names its fixtures use.
+fn rig_with(spec: Value, profiles: &[(&str, wire::FixtureProfile)]) -> FixtureRig {
+    let mut definition = support::definition(&spec);
+    for (name, profile) in profiles {
+        definition.profiles.push(wire::FixtureProfile {
+            profile_id: (*name).into(),
+            ..profile.clone()
+        });
+    }
+    FixtureRig::from_wire(&definition).unwrap()
+}
+
+fn solid(colour: &str) -> String {
+    format!(
+        "return {{render=function(ctx) return sf.scene {{sf.dimmer(sf.all(), 1), \
+         sf.colour(sf.all(), sf.rgb({colour}))}} end}}"
+    )
+}
+
+#[test]
+fn a_wheel_only_cell_changes_slot_half_way_through_a_fade_while_mixing_cells_blend() {
+    let rig = rig_with(
+        json!({"fixtures": [
+            {"fixture_uuid": "wheel", "profile": "wheel", "universe": 0, "address": 1},
+            {"fixture_uuid": "mixer", "profile": "generic_rgb", "universe": 0, "address": 4}]}),
+        &[(
+            "wheel",
+            support::compiled_profile("wheel_spinner#3ch", "wheel"),
+        )],
+    );
+    let (red, blue) = (solid("1, 0, 0"), solid("0, 0, 1"));
+    let mut engine = engine(rig, &[("red", &red), ("blue", &blue)]);
+    select(&mut engine, 0.0, "red", Transition::Cut);
+    engine.render_at(0.0).unwrap();
+    // 120 bpm: a 4-beat crossfade from 1 s reaches half-way at 2 s.
+    select(
+        &mut engine,
+        1.0,
+        "blue",
+        Transition::Crossfade {
+            duration_beats: 4.0,
+        },
+    );
+    // wheel_spinner's Color1 slots: Red from 64, Blue from 192.
+    for (seconds, wheel_dmx, wheel_red, mixer_red) in [
+        (1.5, 64, 1.0, 0.75),
+        (1.99, 64, 1.0, 0.505),
+        (2.0, 192, 0.0, 0.5),
+        (2.5, 192, 0.0, 0.25),
+    ] {
+        let frame = engine.render_at(seconds).unwrap();
+        let states = &frame.fixture_properties_before_strobe;
+        assert_eq!(frame.dmx_frames_by_universe[&0][0], wheel_dmx, "{seconds}");
+        assert_eq!(states["wheel"].colour.red, wheel_red, "{seconds}");
+        assert!(
+            (states["mixer"].colour.red - mixer_red).abs() < 1e-9,
+            "{seconds}: {}",
+            states["mixer"].colour.red
+        );
+    }
 }

@@ -13,6 +13,8 @@ const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
+/// Wheel slots cannot mix: a blend jumps half-way rather than crossing unrelated slots.
+const WHEEL_SNAP_AMOUNT: f64 = 0.5;
 const DMX_BYTE_BITS: usize = 8;
 const DMX_BYTE_MASK: u32 = 255;
 const CIE_LUMINANCE_SCALE: f64 = 100.0;
@@ -721,6 +723,26 @@ impl GdtfProfile {
         infos
     }
 
+    /// A fade's or LTP layer's colour at `amount` of the way from `from` to `to`.
+    pub fn blend_colour(&self, from: Rgb, to: Rgb, amount: f64) -> Rgb {
+        if !self.colour_is_wheel_only() {
+            from.lerp(to, amount)
+        } else if amount < WHEEL_SNAP_AMOUNT {
+            from
+        } else {
+            to
+        }
+    }
+
+    fn colour_is_wheel_only(&self) -> bool {
+        let functions = || self.channels.iter().flat_map(|channel| &channel.functions);
+        functions().any(is_colour_wheel)
+            && !functions().any(|function| {
+                function.attribute.starts_with("ColorAdd_")
+                    || function.attribute.starts_with("ColorSub_")
+            })
+    }
+
     pub fn has_dark_wheel_slot(&self) -> bool {
         self.channels
             .iter()
@@ -915,8 +937,7 @@ fn semantic_value(
     } else {
         0.0
     };
-    let wheel = !function.sets.is_empty() && function.sets.iter().any(|set| set.colour.is_some());
-    if wheel && function.attribute.starts_with("Color") {
+    if is_colour_wheel(function) {
         let dark = state.intensity <= 0.0 || colour_peak(state.colour) <= 0.0;
         let requested = if rgb {
             Rgb::default()
@@ -1095,6 +1116,10 @@ pub fn numbered_attribute(attribute: &str, prefix: &str) -> bool {
     attribute
         .strip_prefix(prefix)
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn is_colour_wheel(function: &Function) -> bool {
+    function.attribute.starts_with("Color") && function.sets.iter().any(|set| set.colour.is_some())
 }
 
 fn is_gate_shutter(function: &Function) -> bool {

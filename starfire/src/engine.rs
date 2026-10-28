@@ -1153,7 +1153,10 @@ fn blend_states(
                 }
             }
             to.intensity = lerp(from.intensity, to.intensity, amount);
-            to.colour = from.colour.lerp(to.colour, amount);
+            to.colour = profile.map_or_else(
+                || from.colour.lerp(to.colour, amount),
+                |profile| profile.blend_colour(from.colour, to.colour, amount),
+            );
             to.pan = lerp(from.pan, to.pan, amount);
             to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
