@@ -3,11 +3,14 @@
 mod support;
 
 use std::fs;
+use std::path::PathBuf;
+
+use prost::Message;
 
 use serde_json::{Value, json};
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
-use starfire::model::{Command, Transition};
+use starfire::model::{Command, Rgb, Transition};
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
@@ -307,4 +310,131 @@ fn sf_gobo_sends_a_validated_preset_to_every_member_with_a_gobo_wheel() {
         "{:?}",
         failed.script_error
     );
+}
+
+/// Every compiled mode the test data carries: synthetic and corpus modes and the shipped types.
+fn test_data_profiles() -> Vec<wire::FixtureProfile> {
+    let read = |path: PathBuf| {
+        wire::RigDefinition::decode(fs::read(path).unwrap().as_slice())
+            .unwrap()
+            .profiles
+    };
+    let mut profiles =
+        read(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/compiled_profiles.pb"));
+    profiles.extend(read(support::rig_folder().join("room.rig.pb")));
+    profiles.extend(read(support::sample_rig().join("generic.rig.pb")));
+    profiles
+}
+
+fn channel_value(frame: &[u8], channel: &wire::DmxChannel) -> u32 {
+    channel.offsets.iter().fold(0, |value, &offset| {
+        value << 8 | u32::from(frame[offset as usize - 1])
+    })
+}
+
+fn has(channel: &wire::DmxChannel, test: impl Fn(&wire::ChannelFunction) -> bool) -> bool {
+    channel.functions.iter().any(test)
+}
+
+fn is_colour_wheel(function: &wire::ChannelFunction) -> bool {
+    function.attribute.starts_with("Color")
+        && function
+            .sets
+            .iter()
+            .any(|set| set.wheel_slot_colour.is_some())
+}
+
+/// Whether a frame can emit light, read from the compiled mode: every dimmer at zero, every
+/// emitter at zero, or a black wheel slot keeps the beam dark. A shutter's DMX 0 means closed
+/// on some fixtures and open on others, so shutters are not read.
+fn emits_light(mode: &wire::DmxMode, frame: &[u8]) -> bool {
+    let channels = |test: fn(&wire::ChannelFunction) -> bool| {
+        mode.channels
+            .iter()
+            .filter(move |channel| has(channel, test))
+            .map(|channel| (channel, channel_value(frame, channel)))
+    };
+    let dimmers: Vec<_> = channels(|function| function.attribute == "Dimmer").collect();
+    let emitters: Vec<_> =
+        channels(|function| function.attribute.starts_with("ColorAdd_")).collect();
+    let wheel_lit = channels(is_colour_wheel).all(|(channel, value)| {
+        channel
+            .functions
+            .iter()
+            .flat_map(|function| &function.sets)
+            .find(|set| {
+                (set.dmx_from..=set.dmx_to).contains(&value) && set.wheel_slot_colour.is_some()
+            })
+            .is_none_or(|set| set.wheel_slot_colour.as_ref().unwrap().luminance > 0.0)
+    });
+    (dimmers.is_empty() || dimmers.iter().any(|&(_, value)| value > 0))
+        && if emitters.is_empty() {
+            wheel_lit
+        } else {
+            emitters.iter().any(|&(_, value)| value > 0)
+        }
+}
+
+#[test]
+fn intensity_zero_is_dark_on_every_test_data_profile_that_can_be_dark() {
+    let mut checked = 0;
+    for profile in test_data_profiles() {
+        let mode = profile.mode.clone().unwrap();
+        let controllable = mode.channels.iter().any(|channel| {
+            has(channel, |function| {
+                function.attribute == "Dimmer" || function.attribute.starts_with("ColorAdd_")
+            }) || has(channel, |function| {
+                is_colour_wheel(function)
+                    && function.sets.iter().any(|set| {
+                        set.wheel_slot_colour
+                            .as_ref()
+                            .is_some_and(|colour| colour.luminance == 0.0)
+                    })
+            })
+        });
+        if !controllable {
+            continue;
+        }
+        let rig = FixtureRig::from_wire(&wire::RigDefinition {
+            fixtures: vec![wire::Fixture {
+                fixture_uuid: "fixture".into(),
+                name: "fixture".into(),
+                profile_id: profile.profile_id.clone(),
+                universe: 0,
+                address: 1,
+                area: wire::StageArea::Centre as i32,
+                ..Default::default()
+            }],
+            profiles: vec![profile.clone()],
+            ..Default::default()
+        })
+        .unwrap_or_else(|error| panic!("{}: {error:#}", profile.profile_id));
+        for (intensity, lit) in [(1.0, true), (0.0, false)] {
+            let mut states = rig.empty_states();
+            for state in states.values_mut() {
+                state.intensity = intensity;
+                state.colour = Rgb {
+                    red: 1.0,
+                    green: 1.0,
+                    blue: 1.0,
+                };
+            }
+            let frame = &rig.encode(&states).unwrap()[&0];
+            assert_eq!(
+                emits_light(&mode, frame),
+                lit,
+                "{} at intensity {intensity}: {:?}",
+                profile.profile_id,
+                &frame[..mode
+                    .channels
+                    .iter()
+                    .flat_map(|c| &c.offsets)
+                    .max()
+                    .copied()
+                    .unwrap() as usize]
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked >= 10, "{checked}");
 }
