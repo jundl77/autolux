@@ -571,6 +571,31 @@ fn an_unknown_fixture_is_still_an_error() {
 }
 
 #[test]
+fn loops_name_a_fixture_by_label_and_render_it_by_uuid() {
+    let room = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
+    let spot = room.fixture_named("spot_left").unwrap();
+    let source = format!(
+        r#"return {{render = function(ctx)
+          assert(sf.fixture_of("spot_left") == "{spot}")
+          assert(sf.position("spot_left") == sf.position("{spot}"))
+          assert(sf.members(sf.fixture("spot_left"))[1] == "{spot}")
+          return {{sf.dimmer(sf.fixture("spot_left"), 1), sf.dimmer({{ fixture = "kinta" }}, 1)}}
+        end}}"#
+    );
+    let effects = catalog(&source)
+        .instantiate("test", "autoloop", &room, &support::palettes())
+        .unwrap()
+        .render(&snapshot(0.0), &techno())
+        .unwrap();
+    let targets: Vec<_> = effects.into_iter().map(|effect| effect.target).collect();
+    let kinta = room.fixture_named("kinta").unwrap();
+    assert_eq!(
+        targets,
+        [Target::Fixture(spot.into()), Target::Fixture(kinta.into())]
+    );
+}
+
+#[test]
 fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
     let catalog = catalog(
         r#"return {render = function(ctx)

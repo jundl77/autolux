@@ -360,6 +360,12 @@ const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'o
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
 const lightOn = (target, colour) => ({action: 'highlight', target, colour});
+// The frozen room's MVR uuids: tests target a fixture by its uuid, whatever its name is now.
+const ROOM_ID = {
+    spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
+    spot_right: '0BD68C96-850C-57EA-86E0-1780E40FF826',
+    zq06017: 'B3F12D06-678A-51FE-AD71-BC2BC260EB9F',
+};
 const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
 const markOf = (name) => `[...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) =>
@@ -509,7 +515,7 @@ function fixtureXml(xml, name) {
 // on an unknown fixture; the bridge refusing it is the last line, not the first).
 async function checkHighlightIds(scenario) {
     const rig = (await harness('state')).rig;
-    const ids = new Set(rig.fixtures.flatMap((f) => [`fixture:${f.name}`, ...f.cells.map((c) => `cell:${c}`)]));
+    const ids = new Set(rig.fixtures.flatMap((f) => [`fixture:${f.id}`, ...f.cells.map((c) => `cell:${c}`)]));
     const bad = network.slice(scenarioNet).map((n) => JSON.parse(n.body))
         .filter((c) => c.action === 'highlight' && c.target)
         .filter((c) => !ids.has(Object.entries(c.target).map(([k, v]) => `${k}:${v}`)[0]));
@@ -1067,6 +1073,31 @@ const SUITES = {
             && refused.repo_pb === bumped.repo_pb && same(refused.repo, bumped.repo) && refused.revision !== after.revision,
             {revision: [after.revision, bumped.revision, refused.revision]});
         await check('stale save', 'the draft keeps the unsaved edit', (await ev(`document.querySelector('${cfg('FixtureID')}').value`)) === '9');
+
+        // Swapping two names swaps labels only: everything else stays with each uuid.
+        await cfgFresh();
+        const unswapped = await rigFiles();
+        for (const [from, to] of [['spot_left', 'spot_tmp'], ['spot_right', 'spot_left'], ['spot_tmp', 'spot_right']]) {
+            await selectFixture(from);
+            await formEdit(`rename ${from} -> ${to}`, () => typeInto(cfg('name'), to), {action: 'set-attribute', doc: 'scene', name: 'name', value: to});
+        }
+        await check('name swap', 'Save', await save(), {status: await statusText()});
+        const swapped = await rigFiles();
+        const byUuid = (files) => Object.fromEntries(files.fixtures.map(({name, ...rest}) => [rest.uuid, {name, rest}]));
+        const [was, now] = [byUuid(unswapped), byUuid(swapped)];
+        await check('name swap', 'the two names traded uuids', now[ROOM_ID.spot_left].name === 'spot_right' && now[ROOM_ID.spot_right].name === 'spot_left',
+            {now: [now[ROOM_ID.spot_left]?.name, now[ROOM_ID.spot_right]?.name]});
+        await check('name swap', 'Matrices, addresses and groups stay with the uuids',
+            Object.keys(was).length === Object.keys(now).length && Object.entries(was).every(([id, fixture]) => same(fixture.rest, now[id]?.rest)),
+            {was: was[ROOM_ID.spot_left]?.rest, now: now[ROOM_ID.spot_left]?.rest});
+        await selectFixture('spot_right');
+        await arm();
+        await click(testButton('white'));
+        await sleep(1500);
+        await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: ROOM_ID.spot_left}, 'white')]),
+            {seen: await since()});
+        await click(testButton('off'));
+        await sleep(800);
     },
 
     cfg_locate: async () => {
@@ -1083,27 +1114,27 @@ const SUITES = {
             return seen;
         };
         const note = () => text('#fixture-info .cfg-test-note');
-        await exactly('locate Test', 'click', () => click(testButton('white')), [lightOn({fixture: 'spot_left'}, 'white')]);
+        await exactly('locate Test', 'click', () => click(testButton('white')), [lightOn({fixture: ROOM_ID.spot_left}, 'white')]);
         await check('locate Test', 'lights its button and names the test', await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000)
             && (await note()) === 'Testing spot_left in white.', {note: await note()});
         await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
-        await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: 'spot_left'}, 'white')]);
+        await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: ROOM_ID.spot_left}, 'white')]);
         for (const colour of ['warm', 'red', 'blue', 'green']) {
-            await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: 'spot_left'}, colour)]);
+            await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: ROOM_ID.spot_left}, colour)]);
         }
         await check('locate swatch', 'the lit swatch wears the active ring', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
             && !document.querySelector('${testButton('blue')}').classList.contains('active')`, 3000));
         await check('locate swatch', 'one keep-alive, whatever the clicks', (await keepAlive()).held === 1, await keepAlive());
-        await exactly('locate ›', 'next in patch order (spot_right), no clear first', () => click(testButton('1')), [lightOn({fixture: 'spot_right'}, 'green')]);
+        await exactly('locate ›', 'next in patch order (spot_right), no clear first', () => click(testButton('1')), [lightOn({fixture: ROOM_ID.spot_right}, 'green')]);
         await check('locate ›', 'the selection follows the test', await waitFor(`document.querySelector('${cfg('name')}').value === 'spot_right'`, 2000));
-        await exactly('locate ‹', 'back to spot_left', () => click(testButton('-1')), [lightOn({fixture: 'spot_left'}, 'green')]);
-        await exactly('locate ‹', 'wraps from the first to the last (zq06017 at 97)', () => click(testButton('-1')), [lightOn({fixture: 'zq06017'}, 'green')]);
-        await exactly('locate ›', 'wraps back to spot_left', () => click(testButton('1')), [lightOn({fixture: 'spot_left'}, 'green')]);
+        await exactly('locate ‹', 'back to spot_left', () => click(testButton('-1')), [lightOn({fixture: ROOM_ID.spot_left}, 'green')]);
+        await exactly('locate ‹', 'wraps from the first to the last (zq06017 at 97)', () => click(testButton('-1')), [lightOn({fixture: ROOM_ID.zq06017}, 'green')]);
+        await exactly('locate ›', 'wraps back to spot_left', () => click(testButton('1')), [lightOn({fixture: ROOM_ID.spot_left}, 'green')]);
         // The operator's latest colour must travel with ›, even before the show echoes it.
         await exactly('locate ›', 'right after a swatch carries that swatch', async () => {
             await click(testButton('red'));
             await click(testButton('1'));
-        }, [lightOn({fixture: 'spot_left'}, 'red'), lightOn({fixture: 'spot_right'}, 'red')]);
+        }, [lightOn({fixture: ROOM_ID.spot_left}, 'red'), lightOn({fixture: ROOM_ID.spot_right}, 'red')]);
         await exactly('locate Off', 'click', () => click(testButton('off')), [CLEAR]);
         await check('locate Off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
         await exactly('locate Off', 'a tick after Off sends nothing', () => ev('window.__tickKeepAlive()'), []);
@@ -1117,6 +1148,9 @@ const SUITES = {
         const listed = await ev(listing);
         await check('locate cells', "lists the running rig's cells for zq06017", same(listed, cells),
             {listed, cells, shown: await ev(`document.querySelector('#fixture-info .cfg-cells')?.outerHTML.slice(0, 400)`)});
+        const shown = await ev(`[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.textContent)`);
+        await check('locate cells', 'each cell reads by the fixture name, not its uuid',
+            same(shown, cells.map((id) => id.replace(ROOM_ID.zq06017, 'zq06017'))), {shown});
         const cell = cells[2];
         await exactly('locate cells', `picking ${cell} alone sends nothing`, () => click(`#fixture-info [data-cfg-cell="${cell}"]`), [], 800);
         await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('white')), [lightOn({cell}, 'white')]);
@@ -1127,7 +1161,7 @@ const SUITES = {
         await check('locate deselect', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
 
         await selectFixture('spot_left');
-        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('white')), [lightOn({fixture: 'spot_left'}, 'white')]);
+        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('white')), [lightOn({fixture: ROOM_ID.spot_left}, 'white')]);
         await exactly('locate tab switch', 'Control sends one clear and nothing after', async () => {
             await tab('Control');
             await sleep(2000);
@@ -1228,29 +1262,21 @@ const SUITES = {
             typingNote = await noteOf('name');
             await ev('document.activeElement.blur()');
         }, {action: 'set-attribute', doc: 'scene', name: 'name', value: NAME});
-        await check('odd name', 'typing the rename warns about groups and tests',
-            typingNote === 'Renaming changes the Class membership the show uses for groups and stops a test running on it.', {note: typingNote});
+        await check('odd name', 'typing the rename is a label edit, so nothing warns', typingNote === '', {note: typingNote});
         await check('odd name', 'survives the form', (await ev(`document.querySelector('${cfg('name')}').value`)) === NAME);
         const svg = await ev(`(() => { const g = ${markOf(NAME)}; return g && {label: g.querySelector('text')?.textContent, title: g.querySelector('title').textContent}; })()`);
         await check('odd name', 'survives the plan SVG (label and tooltip)', svg?.label === NAME && svg?.title === NAME + ' · movers', {svg});
         await check('odd name', 'survives the DMX map', (await ev(`[...document.querySelectorAll('#fixture-channel-map .patch-block')].some((b) => b.dataset.fixtureName === ${JSON.stringify(NAME)} && b.textContent.startsWith(${JSON.stringify(NAME + ' · ')}))`)));
         await check('odd name', 'leaves no stray markup in the plan', (await ev(`document.querySelectorAll('#mvr-plan svg.plan').length === 1 && !document.querySelector('#mvr-plan svg.plan left, #mvr-plan svg.plan co')`)));
-        // A renamed fixture is not in the running rig until Apply: its test must not post that id.
+        // A rename keeps the uuid the running rig knows, so its test lights the same fixture.
         await arm();
-        await watchNote();
         await click(testButton('white'));
         await sleep(1500);
         const renamedTest = posted();
-        await check('odd name', 'the refused test of the renamed fixture says why',
-            (await ev('window.__notes.slice()')).some((n) => n.startsWith('Test refused: no fixture')) || renamedTest.length === 0,
-            {notes: await ev('window.__notes.slice()')});
-        await check('odd name', 'Test on the renamed, unapplied fixture posts no id outside the running rig',
-            renamedTest.every((c) => c.action !== 'highlight' || !c.target || c.target.fixture === 'spot_left'), {posted: renamedTest,
-                note: await text('#fixture-info .cfg-test-note')});
-        if (renamedTest.length) {
-            await click(testButton('off'));
-            await sleep(800);
-        }
+        await check('odd name', 'Test on the renamed, unapplied fixture lights its uuid', same(renamedTest, [lightOn({fixture: ROOM_ID.spot_left}, 'white')]),
+            {posted: renamedTest, note: await text('#fixture-info .cfg-test-note')});
+        await click(testButton('off'));
+        await sleep(800);
         await check('odd name', 'Save', await save(), {status: await statusText()});
         const files = await rigFiles();
         const xml = files.store[SCENE_XML];
@@ -1298,7 +1324,7 @@ const SUITES = {
         await arm();
         await click(testButton('white'));
         await sleep(1500);
-        await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: 'spot_left'}, 'white')]),
+        await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: ROOM_ID.spot_left}, 'white')]),
             {seen: await since()});
         await click(testButton('off'));
         await sleep(1000);

@@ -565,6 +565,7 @@ mod tests {
                 fixtures: vec![wire::Fixture {
                     area: wire::StageArea::Centre as i32,
                     fixture_id: "lamp".into(),
+                    name: "lamp".into(),
                     profile_id: "rgb".into(),
                     address: 1,
                     ..Default::default()

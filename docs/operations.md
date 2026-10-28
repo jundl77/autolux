@@ -62,6 +62,12 @@ lights go dark until the next session is up: the show supervisor restarts the sh
 exit until its stop flag `.live/supervisor.stop` exists, on the saved store. Without a
 supervisor, start the show again by hand.
 
+A fixture is its MVR uuid, and its name is a label. Renaming a fixture, or swapping the names of
+two, changes labels only: position, address, group and a running test stay with the uuid, so a
+renamed fixture tests before Apply. Names stay unique because autoloops name fixtures by label.
+A fixture added in Config gets a fresh uuid, which the show learns only on Apply; until then
+the Config tab does not test it.
+
 The show runs one fixture test at a time, so two open dashboards share it: a test from one moves
 or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it
 (standby, sound stop, restart) the page stops holding it rather than relighting it.

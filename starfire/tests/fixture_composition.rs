@@ -183,7 +183,7 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
             0.0,
             &lighting_override(
                 "red",
-                Target::Fixture("spot_left".into()),
+                Target::Fixture(support::room_id("spot_left")),
                 PropertyValues {
                     colour: Some(Rgb {
                         red: 1.0,

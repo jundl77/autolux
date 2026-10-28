@@ -260,8 +260,8 @@ class ShowControl:
                 highlight=light_engine.static_looks.highlighted,
                 rig={
                     'fixtures': [
-                        {'name': name, 'cells': list(cells)}
-                        for name, cells in light_engine.static_looks.rig.fixtures
+                        {'id': identity, 'name': name, 'cells': list(cells)}
+                        for identity, name, cells in light_engine.static_looks.rig.fixtures
                     ]
                 },
             )

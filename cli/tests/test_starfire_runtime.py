@@ -762,6 +762,11 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
     binary = root / 'target/debug/starfire.exe'
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise the native protocol boundary')
+    [bar] = [
+        f['uuid']
+        for f in mvr.patched_fixtures(mvr.read(ROOM.read_bytes()))
+        if f['name'] == 'zq06017'
+    ]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
         receiver.bind(('127.0.0.1', 0))
         receiver.settimeout(3)
@@ -785,7 +790,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
             runtime.send_command(
                 wire.SetActiveEffect(
                     effect_id='held_red',
-                    fixture='zq06017/Beam Segment 1',
+                    fixture=f'{bar}/Beam Segment 1',
                     intensity=0.75,
                     colour=wire.RgbColor(red=1.0),
                 )

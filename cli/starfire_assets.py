@@ -90,7 +90,8 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
                 mode=compile_mode(description, mode),
             )
         entry = rig.fixtures.add(
-            fixture_id=fixture['name'],
+            fixture_id=fixture['uuid'],
+            name=fixture['name'],
             profile_id=profile_id,
             universe=fixture['universe'],
             address=fixture['address'],
@@ -137,29 +138,36 @@ def static_rig(path: Path) -> StaticRig:
                 for logical in dmx_mode.iter('LogicalChannel')
             )
         fixture['uv'] = lit_by_uv[spec, mode]
-    by_name = {fixture['name']: fixture for fixture in fixtures}
+    by_uuid = {fixture['uuid']: fixture for fixture in fixtures}
     groups = mvr.groups(fixtures)[0]
     # The ids come from the very RigDefinition Starfire loads, named by Starfire's cell rule.
-    patched = {
-        entry.fixture_id: tuple(
-            mvr.cell_id(entry.fixture_id, cell.geometry, len(entry.cells)) for cell in entry.cells
+    patched = [
+        (
+            entry.fixture_id,
+            entry.name,
+            tuple(
+                mvr.cell_id(entry.fixture_id, cell.geometry, len(entry.cells))
+                for cell in entry.cells
+            ),
         )
         for entry in rig_definition(path).fixtures
-    }
+    ]
     return StaticRig(
         groups=tuple(sorted(groups)),
         uv_groups=tuple(
             sorted(
                 group
                 for group, members in groups.items()
-                if all(by_name[name]['uv'] for name in members)
+                if all(by_uuid[member]['uv'] for member in members)
             )
         ),
-        fixtures=tuple(patched.items()),
+        fixtures=tuple(patched),
         # Starfire checks attributes per cell, and which cell of a multi-cell fixture owns the
         # UV channel is not known here, so only single-cell fixtures get UV zeroed.
         uv_targets=tuple(
-            name for name, cells in patched.items() if by_name[name]['uv'] and len(cells) == 1
+            identity
+            for identity, _, cells in patched
+            if by_uuid[identity]['uv'] and len(cells) == 1
         ),
     )
 

@@ -55,7 +55,10 @@ def running_rig(path: Path) -> tuple[str, dict]:
     """What a show booted on the store at `path` reports: its revision and Starfire's rig."""
     fixtures = static_rig(path).fixtures
     return rig_revision(path.read_bytes()), {
-        'fixtures': [{'name': name, 'cells': list(cells)} for name, cells in fixtures]
+        'fixtures': [
+            {'id': identity, 'name': name, 'cells': list(cells)}
+            for identity, name, cells in fixtures
+        ]
     }
 
 
@@ -278,7 +281,7 @@ class RigFiles:
 
     def describe(self) -> dict:
         store = self.store.read_bytes()
-        fields = ('name', 'gdtf_spec', 'gdtf_mode', 'universe', 'address', 'class', 'layer')
+        fields = ('uuid', 'name', 'gdtf_spec', 'gdtf_mode', 'universe', 'address', 'class', 'layer')
         fixtures = [
             {
                 **{key: fixture.get(key) for key in fields},

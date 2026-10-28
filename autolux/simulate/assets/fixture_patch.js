@@ -297,7 +297,7 @@
             const channels = modeChannels(tree, mode);
             const cells = modeCells(tree, mode);
             const className = classes[textOf(node, "Classing").toUpperCase()] || "";
-            return [{ key: node.key, name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
+            return [{ key: node.key, id: (node.attributes.uuid || "").toUpperCase(), name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
         });
     }
 
@@ -572,8 +572,8 @@
             case "name": {
                 const twin = others.some((entry) => entry.attributes.name === value);
                 const error = !value.trim() ? "A name is required." : bytes(value) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : twin ? `Another fixture is named ${value}.` : null;
-                const warning = value !== row.name ? "Renaming changes the Class membership the show uses for groups and stops a test running on it." : null;
-                return { error, warning, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
+                // The name is a label: groups, positions and a running test follow the uuid.
+                return { error, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
             }
             case "FixtureID":
             case "FixtureIDNumeric": {
@@ -686,9 +686,14 @@
         return command;
     }
 
-    // A renamed or new fixture is not in the rig the show runs until Apply, and Starfire answers
-    // an unknown target with an error that stops the show.
-    const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.name === target.fixture || fixture.cells.includes(target.cell));
+    // A new fixture (or a new uuid) is not in the rig the show runs until Apply, and Starfire
+    // answers an unknown target with an error that stops the show.
+    const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.id === target.fixture || fixture.cells.includes(target.cell));
+    // Targets carry ids; people read the running rig's labels.
+    const labelOf = (id) => {
+        const fixture = (show?.rig?.fixtures || []).find((entry) => entry.id === id || entry.cells.includes(id));
+        return fixture ? id.replace(fixture.id, fixture.name) : id;
+    };
 
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
     function testControl(spec) {
@@ -698,17 +703,17 @@
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
         if (spec in rig.settings.testColours) {
-            const target = selectedCell ? { cell: selectedCell } : { fixture: row.name };
+            const target = selectedCell ? { cell: selectedCell } : { fixture: row.id };
             return running(target) ? highlight(target, spec) : null;
         }
         const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
         sendAction({ action: "select", key: next.key });
-        if (!running({ fixture: next.name })) {
+        if (!running({ fixture: next.id })) {
             clearTest();
             return null;
         }
-        return highlight({ fixture: next.name }, (lit && testCommand.colour) || show.highlight?.colour || "white");
+        return highlight({ fixture: next.id }, (lit && testCommand.colour) || show.highlight?.colour || "white");
     }
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });
@@ -787,8 +792,8 @@
                 testRefusal = "";
                 const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
                 // The lit test follows the selection, so the old fixture is never kept alive.
-                if (!next || !running({ fixture: next.name })) clearTest();
-                else if (testCommand.target.fixture !== next.name) highlight({ fixture: next.name }, testCommand.colour);
+                if (!next || !running({ fixture: next.id })) clearTest();
+                else if (testCommand.target.fixture !== next.id) highlight({ fixture: next.id }, testCommand.colour);
             }
             rig = { draft, settings, selection };
             if (typeof document.getElementById === "function") {
@@ -1207,27 +1212,27 @@
         const strip = typeof document.querySelector === "function" && document.querySelector("#fixture-info .cfg-test");
         if (!strip || !rig) return;
         const row = fixtureRows(rig.draft, rig.settings).find((entry) => entry.key === rig.selection);
-        const ids = show?.rig?.fixtures?.find((fixture) => fixture.name === row?.name)?.cells || [];
+        const ids = show?.rig?.fixtures?.find((fixture) => fixture.id === row?.id)?.cells || [];
         if (!ids.includes(selectedCell)) selectedCell = null;
         const cells = document.querySelector("#fixture-info .cfg-cells");
-        const listed = JSON.stringify([row?.name, ids]);
+        const listed = JSON.stringify([row?.id, row?.name, ids]);
         if (cells.dataset.listed !== listed) {
             cells.dataset.listed = listed;
             const offline = row?.cells.length ? `${row.cells.join(", ")} · not in the running show` : "No cells.";
-            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", className: "mvr-small", "data-cfg-cell": cell, title: `Pick ${cell} to test`, text: cell })) : [muted(offline)]));
+            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", className: "mvr-small", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.id, row.name)} to test`, text: cell.replace(row.id, row.name) })) : [muted(offline)]));
         }
         cells.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
-        const offline = row && !running({ fixture: row.name }) ? `${row.name} · not in the running show` : null;
+        const offline = row && !running({ fixture: row.id }) ? `${row.name} · not in the running show` : null;
         const active = show?.highlight;
-        const here = Boolean(active) && (active.target?.fixture === row?.name || ids.includes(active.target?.cell));
+        const here = Boolean(active) && (active.target?.fixture === row?.id || ids.includes(active.target?.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
             // ‹ › and Off still work: they move off or clear what the show does run.
             button.disabled = Boolean(blocked || (offline && !["off", "1", "-1"].includes(button.dataset.cfgTest)));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
         }
-        testNote(blocked || testRefusal || offline || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
+        testNote(blocked || testRefusal || offline || (active ? `Testing ${labelOf(active.target?.fixture ?? active.target?.cell)} in ${active.colour}.` : testEnded));
     }
 
     // Console-style patch form over the raw inspector; every field maps to one draft action.

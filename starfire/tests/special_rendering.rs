@@ -17,6 +17,7 @@ fn synthetic_rig() -> wire::RigDefinition {
     let fixture = |id: &str, profile: &str, address| wire::Fixture {
         area: wire::StageArea::Centre as i32,
         fixture_id: id.into(),
+        name: id.into(),
         profile_id: profile.into(),
         universe: 0,
         address,
