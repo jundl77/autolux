@@ -348,15 +348,19 @@ enum Motion {
 }
 
 /// The scene direction the frame throws the beam, decoded independently of the encoder and
-/// carried through the Matrix, as fixture_encoding's mount test does. The pan range centre faces
+/// carried through the Matrix, as fixture_encoding's mount test does. Physical pan 0 faces
 /// local +Y, the display, and pan turns clockwise about local +Z; mid tilt runs along local -Z,
 /// the pan axis, and tilts towards the pan heading; standing is the rigid flip.
 fn beam(frame: &[u8], matrix: &[f64]) -> [f64; 3] {
-    // The 16-bit channel pair at `at` as a body angle off its range centre.
-    let angle = |at: usize, travel: f64| {
-        (f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 - 0.5) * travel
+    // The 16-bit channel pair at `at` as a body angle: pan from physical 0 (PhysicalFrom 0), tilt
+    // off its range centre.
+    let angle = |at: usize, travel: f64, zero: f64| {
+        (f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 - zero) * travel
     };
-    let (pan, tilt) = (angle(0, 540.0).to_radians(), angle(2, 270.0).to_radians());
+    let (pan, tilt) = (
+        angle(0, 540.0, 0.0).to_radians(),
+        angle(2, 270.0, 0.5).to_radians(),
+    );
     let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos(), -tilt.cos()];
     [0, 1, 2].map(|axis| (0..3).map(|row| matrix[3 * row + axis] * body[row]).sum())
 }
