@@ -13,6 +13,10 @@ const CURVE_TOLERANCE: f64 = 1e-9;
 const MAX_FUNCTIONS: usize = 4096;
 const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
+pub const GOBO_ATTRIBUTE: &str = "Gobo1";
+const OPEN_GOBO: &str = "Open";
+/// Wheel slots cannot mix: a blend jumps half-way rather than crossing unrelated slots.
+const WHEEL_SNAP_AMOUNT: f64 = 0.5;
 const DMX_BYTE_BITS: usize = 8;
 const DMX_BYTE_MASK: u32 = 255;
 const CIE_LUMINANCE_SCALE: f64 = 100.0;
@@ -665,11 +669,7 @@ impl GdtfProfile {
                 if function.condition.is_some() {
                     continue;
                 }
-                let last = channel.functions_by_dmx_start[position + 1..]
-                    .iter()
-                    .map(|&next| channel.functions[next].first)
-                    .find(|&first| first > function.first)
-                    .map_or(function.maximum_dmx_value, |first| first - 1);
+                let last = channel.unconditional_end(position);
                 let rest = if (function.first..=last).contains(&channel.default) {
                     let span = f64::from(last - function.first);
                     let amount = if span == 0.0 {
@@ -719,6 +719,75 @@ impl GdtfProfile {
             }
         }
         infos
+    }
+
+    /// The Gobo1 ChannelSet at `slot`: 0 is the set named Open (any case), else the first;
+    /// n >= 1 is the n-th of the others in DMX order, wrapping. None without a named Gobo1 set.
+    pub fn gobo_name(&self, slot: u64) -> Option<String> {
+        let (channel, position) = self.channels.iter().find_map(|channel| {
+            channel
+                .functions_by_dmx_start
+                .iter()
+                .position(|&index| {
+                    let function = &channel.functions[index];
+                    function.attribute == GOBO_ATTRIBUTE && function.condition.is_none()
+                })
+                .map(|position| (channel, position))
+        })?;
+        let function = &channel.functions[channel.functions_by_dmx_start[position]];
+        let last = channel.unconditional_end(position);
+        // A preset addresses its set by name, so only uniquely named, reachable sets are slots.
+        let names: Vec<&str> = function
+            .sets
+            .iter()
+            .filter(|set| {
+                set.first <= last
+                    && !set.name.is_empty()
+                    && function
+                        .sets
+                        .iter()
+                        .filter(|other| other.name == set.name)
+                        .count()
+                        == 1
+            })
+            .map(|set| set.name.as_str())
+            .collect();
+        let open = names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(OPEN_GOBO))
+            .unwrap_or(0);
+        let others: Vec<&str> = names
+            .iter()
+            .enumerate()
+            .filter(|&(index, _)| index != open)
+            .map(|(_, name)| *name)
+            .collect();
+        let name = if slot == 0 || others.is_empty() {
+            names.get(open)?
+        } else {
+            &others[((slot - 1) % others.len() as u64) as usize]
+        };
+        Some((*name).to_owned())
+    }
+
+    /// A fade's or LTP layer's colour at `amount` of the way from `from` to `to`.
+    pub fn blend_colour(&self, from: Rgb, to: Rgb, amount: f64) -> Rgb {
+        if !self.colour_is_wheel_only() {
+            from.lerp(to, amount)
+        } else if amount < WHEEL_SNAP_AMOUNT {
+            from
+        } else {
+            to
+        }
+    }
+
+    fn colour_is_wheel_only(&self) -> bool {
+        let functions = || self.channels.iter().flat_map(|channel| &channel.functions);
+        functions().any(is_colour_wheel)
+            && !functions().any(|function| {
+                function.attribute.starts_with("ColorAdd_")
+                    || function.attribute.starts_with("ColorSub_")
+            })
     }
 
     pub fn has_dark_wheel_slot(&self) -> bool {
@@ -774,6 +843,16 @@ impl GdtfProfile {
 }
 
 impl Channel {
+    /// The last DMX value of the function at `position` in DMX order, ignoring ModeMaster.
+    fn unconditional_end(&self, position: usize) -> u32 {
+        let function = &self.functions[self.functions_by_dmx_start[position]];
+        self.functions_by_dmx_start[position + 1..]
+            .iter()
+            .map(|&next| self.functions[next].first)
+            .find(|&first| first > function.first)
+            .map_or(function.maximum_dmx_value, |first| first - 1)
+    }
+
     fn active_function_ends(
         &self,
         values: &[u32],
@@ -915,8 +994,7 @@ fn semantic_value(
     } else {
         0.0
     };
-    let wheel = !function.sets.is_empty() && function.sets.iter().any(|set| set.colour.is_some());
-    if wheel && function.attribute.starts_with("Color") {
+    if is_colour_wheel(function) {
         let dark = state.intensity <= 0.0 || colour_peak(state.colour) <= 0.0;
         let requested = if rgb {
             Rgb::default()
@@ -1095,6 +1173,10 @@ pub fn numbered_attribute(attribute: &str, prefix: &str) -> bool {
     attribute
         .strip_prefix(prefix)
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn is_colour_wheel(function: &Function) -> bool {
+    function.attribute.starts_with("Color") && function.sets.iter().any(|set| set.colour.is_some())
 }
 
 fn is_gate_shutter(function: &Function) -> bool {
