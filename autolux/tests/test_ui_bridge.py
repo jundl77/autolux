@@ -208,11 +208,44 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
             parse_control_command({'action': 'settings', 'settings': owned})
 
 
+IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+
+
+def patched(spec, mode, address):
+    return {'gdtf_spec': spec, 'gdtf_mode': mode, 'universe': 0, 'address': address}
+
+
 RIG = {
     'fixtures': [
-        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par']},
-        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a']},
-    ]
+        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par'], 'pan': False}
+        | patched('par.gdtf', '8ch', 1),
+        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a'], 'pan': False}
+        | patched('bar.gdtf', '8ch', 9),
+        {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True}
+        | patched('spot.gdtf', '12ch', 17),
+    ],
+    'modes': {
+        'par.gdtf': {'8ch': {'channels': 8, 'cells': ['Beam'], 'attributes': ['Dimmer']}},
+        'bar.gdtf': {'8ch': {'channels': 8, 'cells': ['a'], 'attributes': ['Dimmer']}},
+        'spot.gdtf': {
+            '12ch': {'channels': 12, 'cells': ['Beam'], 'attributes': ['Dimmer', 'Pan']},
+            '16ch': {'channels': 16, 'cells': ['Beam'], 'attributes': ['Dimmer', 'Pan', 'Zoom']},
+            '6ch': {'channels': 6, 'cells': ['Beam'], 'attributes': ['Dimmer']},
+            'split': {'channels': 12, 'cells': ['Head', 'Base'], 'attributes': ['Dimmer', 'Pan']},
+        },
+    },
+}
+for fixture in RIG['fixtures']:
+    fixture['matrix'] = IDENTITY
+STILL = {'sweep': False, 'aim': False, 'pose': None}
+POSE = {
+    'matrix': [0, 1, 0, -1, 0, 0, 0, 0, 1, 100, 200, 3000],
+    'pan': {'min': 0.1, 'max': 0.8, 'inverted': True},
+    'tilt': {'min': 0, 'max': 1, 'inverted': False},
+    'focus': [],
+    'universe': 0,
+    'address': 17,
+    'gdtf_mode': '12ch',
 }
 
 
@@ -223,10 +256,11 @@ def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears
         'action': 'highlight',
         'target': {'fixture': 'par'},
         'colour': 'white',
+        **STILL,
     }
     assert parse_control_command(
         {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
-    ) == {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
+    ) == {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green', **STILL}
     assert parse_control_command({'action': 'highlight', 'target': None}) == {
         'action': 'highlight',
         'target': None,
@@ -238,6 +272,98 @@ def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears
         parse_control_command({'action': 'highlight'})
     with pytest.raises(ValueError, match='colour'):
         parse_control_command({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'uv'})
+
+
+def test_a_highlight_sweeps_or_aims_a_whole_fixture_and_never_both():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    spot = {'action': 'highlight', 'target': {'fixture': 'spot'}}
+    for motion in ('sweep', 'aim'):
+        assert parse_control_command({**spot, motion: True}) == {
+            **spot,
+            'colour': 'white',
+            **STILL,
+            motion: True,
+        }
+    for payload, reason in (
+        ({**spot, 'sweep': 1}, 'true or false'),
+        ({**spot, 'sweep': True, 'aim': True}, 'not both'),
+        ({**spot, 'target': {'cell': 'bar/a'}, 'aim': True}, 'not a cell'),
+    ):
+        with pytest.raises(ValueError, match=reason):
+            parse_control_command(payload)
+
+
+def test_a_highlight_carries_the_draft_pose_of_a_whole_fixture_checked_as_a_rig_load_is():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    spot = {'action': 'highlight', 'target': {'fixture': 'spot'}}
+    focused = {**POSE, 'focus': [0, 2000, 0]}
+    for pose in (POSE, focused):
+        assert parse_control_command({**spot, 'aim': True, 'pose': pose}) == {
+            **spot,
+            'colour': 'white',
+            **STILL,
+            'aim': True,
+            'pose': pose,
+        }
+    pitched = [1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0]
+    for pose, reason in (
+        ({**POSE, 'matrix': POSE['matrix'][:9]}, 'a pose is'),
+        ({**POSE, 'focus': [1, 2]}, 'a pose is'),
+        ({**POSE, 'focus': [0, float('nan'), 0]}, 'a pose is'),
+        ({**POSE, 'scale': 1}, 'a pose is'),
+        ({**POSE, 'universe': None}, 'a pose is'),
+        ({**POSE, 'address': '17'}, 'a pose is'),
+        ({**POSE, 'address': 0}, 'a pose is'),
+        ({**POSE, 'gdtf_mode': None}, 'a pose is'),
+        ({**POSE, 'matrix': pitched}, 'pitch'),
+        ({**POSE, 'matrix': [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]}, 'orthogonal'),
+        ({**POSE, 'pan': {'min': 0.9, 'max': 0.1, 'inverted': False}}, 'pose pan'),
+        ({**POSE, 'tilt': {'min': 0, 'max': 1, 'inverted': 0}}, 'pose tilt'),
+    ):
+        with pytest.raises(ValueError, match=reason):
+            parse_control_command({**spot, 'pose': pose})
+    with pytest.raises(ValueError, match='whole fixture'):
+        parse_control_command({**spot, 'target': {'cell': 'bar/a'}, 'pose': POSE})
+
+
+@pytest.mark.parametrize(
+    ('patch', 'refusal'),
+    [
+        ({}, None),
+        ({'address': 100, 'gdtf_mode': '16ch'}, None),
+        ({'address': 12}, 'mover overlaps strip in universe 1.'),
+        ({'address': 505}, 'mover: 12 channels do not fit at address 505.'),
+        ({'universe': 1}, 'universe 2 is not one the show outputs'),
+        ({'gdtf_mode': '24ch'}, "mover: GDTF mode '24ch' is not in spot.gdtf."),
+        ({'gdtf_mode': 'split'}, "mover: mode 'split' lacks the cells or attributes of '12ch'"),
+        ({'gdtf_mode': '6ch'}, "mover: mode '6ch' lacks the cells or attributes of '12ch'"),
+    ],
+)
+def test_a_pose_is_refused_where_starfires_rig_copy_would_refuse_its_patch(patch, refusal):
+    from autolux.lib.ui_bridge import command_refusal
+
+    command = {'action': 'highlight', 'target': {'fixture': 'spot'}, 'colour': 'white', **STILL}
+    command['pose'] = {**POSE, **patch}
+    reason = command_refusal(command, 'drop', False, 'auto', {'blackout': False}, RIG)
+    assert (reason or '').startswith(refusal or '') and bool(reason) == bool(refusal), reason
+
+
+@pytest.mark.parametrize(
+    ('target', 'motion', 'refusal'),
+    [
+        ({'fixture': 'spot'}, 'sweep', None),
+        ({'fixture': 'spot'}, 'aim', None),
+        ({'fixture': 'par'}, 'sweep', 'front has no pan'),
+        ({'fixture': 'par'}, 'aim', 'front has no pan'),
+    ],
+)
+def test_sweep_and_aim_are_refused_for_a_fixture_without_pan(target, motion, refusal):
+    from autolux.lib.ui_bridge import command_refusal
+
+    command = {'action': 'highlight', 'target': target, 'colour': 'white', **STILL, motion: True}
+    assert command_refusal(command, 'drop', False, 'auto', {'blackout': False}, RIG) == refusal
 
 
 @pytest.mark.parametrize(
@@ -259,7 +385,7 @@ def test_a_highlight_is_refused_for_a_fixture_the_rig_lacks_or_a_dark_rig(
 ):
     from autolux.lib.ui_bridge import command_refusal
 
-    command = {'action': 'highlight', 'target': target, 'colour': 'white'}
+    command = {'action': 'highlight', 'target': target, 'colour': 'white', **STILL}
     static = {'blackout': blackout}
     assert command_refusal(command, 'drop', paused, 'auto', static, RIG) == refusal
 

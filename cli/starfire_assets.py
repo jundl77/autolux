@@ -6,7 +6,7 @@ from pathlib import Path
 
 from autolux.lib.engine.static_mode import UV_ATTRIBUTE, StaticRig
 from autolux.lighting import mvr
-from autolux.lighting.fixture_setup import load_rig
+from autolux.lighting.fixture_setup import load_rig, rig_modes
 from autolux.lighting.gdtf import MAX_DESCRIPTION_BYTES
 from autolux.lighting.gdtf_compile import compile_mode
 from autolux.lighting.palettes import palette_table
@@ -15,6 +15,8 @@ from cli.starfire_protocol import (
     ROLE_NAMES,
     STAGE_AREAS,
     check_payload_size,
+    movement,
+    profile_id,
 )
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
@@ -25,6 +27,8 @@ MAX_SCRIPTS = 256
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,64}')
 WIRE_ROLES = {name: role for role, name in ROLE_NAMES.items()}
 LOGGER = logging.getLogger(__name__)
+# What the running rig publishes of each fixture's patch, for a test pose's checks.
+PATCH_KEYS = ('gdtf_spec', 'gdtf_mode', 'universe', 'address', 'matrix')
 
 
 def _read(path: Path, limit: int) -> bytes:
@@ -33,14 +37,6 @@ def _read(path: Path, limit: int) -> bytes:
     if len(content) > limit:
         raise ValueError(f'Asset exceeds its {limit}-byte limit: {path}')
     return content
-
-
-def _movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
-    if limits == {'min': 0.0, 'max': 1.0, 'inverted': False}:
-        return None
-    return rig_wire.Fixture.MovementRange(
-        minimum=limits['min'], maximum=limits['max'], inverted=limits['inverted']
-    )
 
 
 def stage_areas(positions: list[tuple[float, float]]) -> list[int]:
@@ -73,35 +69,39 @@ def stage_areas(positions: list[tuple[float, float]]) -> list[int]:
 def rig_definition(path: Path) -> rig_wire.RigDefinition:
     scene, fixtures = load_rig(path)
     rig = rig_wire.RigDefinition()
-    cells = {}
+    modes = {}
     plan = slice(mvr.POSITION_X, mvr.POSITION_X + 2)
     areas = stage_areas([tuple(fixture['matrix'][plan]) for fixture in fixtures])
     for fixture, area in zip(fixtures, areas, strict=True):
         spec, mode = fixture['gdtf_spec'], fixture['gdtf_mode']
-        profile_id = f'{spec}#{mode}'
-        if profile_id not in cells:
+        if spec not in modes:
             description = mvr.gdtf_description(scene, spec)
             if len(description.encode('utf-8')) > MAX_DESCRIPTION_BYTES:
                 raise ValueError('GDTF description exceeds its size limit')
-            cells[profile_id] = mvr.gdtf_modes(description, spec)[mode]['cells']
-            rig.profiles.add(
-                profile_id=profile_id,
-                dmx_mode=mode,
-                mode=compile_mode(description, mode),
-            )
+            modes[spec] = mvr.gdtf_modes(description, spec)
+            # Every mode, so a test pose can repatch a fixture in another before a restart.
+            for name in modes[spec]:
+                try:
+                    compiled = compile_mode(description, name)
+                except ValueError:
+                    if any(f['gdtf_spec'] == spec and f['gdtf_mode'] == name for f in fixtures):
+                        raise
+                    continue
+                rig.profiles.add(profile_id=profile_id(spec, name), dmx_mode=name, mode=compiled)
         entry = rig.fixtures.add(
             fixture_uuid=fixture['fixture_uuid'],
             name=fixture['name'],
-            profile_id=profile_id,
+            profile_id=profile_id(spec, mode),
             universe=fixture['universe'],
             address=fixture['address'],
             matrix=fixture['matrix'],
-            cells=[rig_wire.Fixture.Cell(**cell) for cell in cells[profile_id]],
+            focus=fixture['focus'],
+            cells=[rig_wire.Fixture.Cell(**cell) for cell in modes[spec][mode]['cells']],
             area=area,
         )
         for axis in mvr.MOVEMENT_AXES:
-            if (movement := _movement(fixture[axis])) is not None:
-                getattr(entry, axis).CopyFrom(movement)
+            if (limits := movement(fixture[axis])) is not None:
+                getattr(entry, axis).CopyFrom(limits)
     roles, _, warnings = mvr.group_roles(fixtures)
     groups, order_warnings = mvr.groups(fixtures)
     for warning in warnings + order_warnings:
@@ -126,18 +126,35 @@ def native_rig(path: Path):
 
 def static_rig(path: Path) -> StaticRig:
     scene, fixtures = load_rig(path)
-    lit_by_uv = {}
+    definition = rig_definition(path)
+    compiled = {profile.profile_id for profile in definition.profiles}
+    # What a test pose's mode is checked by: Starfire's copy must keep the cells the show's
+    # states are keyed by, and every attribute the loops may set must still encode.
+    modes = {}
+    for spec, spec_modes in rig_modes(scene).items():
+        root = mvr.gdtf_root(mvr.gdtf_description(scene, spec), spec)
+        attributes = {
+            dmx_mode.get('Name'): {
+                element.get('Attribute')
+                for element in dmx_mode.iter()
+                if element.tag in ('LogicalChannel', 'ChannelFunction')
+            }
+            - {None}
+            for dmx_mode in root.iter('DMXMode')
+        }
+        modes[spec] = {
+            mode: {
+                'channels': entry['channels'],
+                'cells': [cell['geometry'] for cell in entry['cells']],
+                'attributes': sorted(attributes[mode]),
+            }
+            for mode, entry in spec_modes.items()
+            if profile_id(spec, mode) in compiled
+        }
     for fixture in fixtures:
-        spec, mode = fixture['gdtf_spec'], fixture['gdtf_mode']
-        if (spec, mode) not in lit_by_uv:
-            root = mvr.gdtf_root(mvr.gdtf_description(scene, spec), spec)
-            lit_by_uv[spec, mode] = any(
-                logical.get('Attribute') == UV_ATTRIBUTE
-                for dmx_mode in root.iter('DMXMode')
-                if dmx_mode.get('Name') == mode
-                for logical in dmx_mode.iter('LogicalChannel')
-            )
-        fixture['uv'] = lit_by_uv[spec, mode]
+        attributes = modes[fixture['gdtf_spec']][fixture['gdtf_mode']]['attributes']
+        fixture['uv'] = UV_ATTRIBUTE in attributes
+        fixture['pan'] = 'Pan' in attributes
     by_uuid = {fixture['fixture_uuid']: fixture for fixture in fixtures}
     groups = mvr.groups(fixtures)[0]
     # The ids come from the very RigDefinition Starfire loads, named by Starfire's cell rule.
@@ -150,7 +167,7 @@ def static_rig(path: Path) -> StaticRig:
                 for cell in entry.cells
             ),
         )
-        for entry in rig_definition(path).fixtures
+        for entry in definition.fixtures
     ]
     return StaticRig(
         groups=tuple(sorted(groups)),
@@ -169,6 +186,14 @@ def static_rig(path: Path) -> StaticRig:
             for fixture_uuid, _, cells in patched
             if by_uuid[fixture_uuid]['uv'] and len(cells) == 1
         ),
+        pan_targets=tuple(
+            fixture_uuid for fixture_uuid, _, _ in patched if by_uuid[fixture_uuid]['pan']
+        ),
+        patch={
+            fixture['fixture_uuid']: {key: fixture[key] for key in PATCH_KEYS}
+            for fixture in fixtures
+        },
+        modes=modes,
     )
 
 

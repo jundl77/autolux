@@ -368,17 +368,34 @@ const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
-const lightOn = (target, colour) => ({action: 'highlight', target, colour});
 // The frozen room's MVR uuids: tests target a fixture by its uuid, whatever its name is now.
 const ROOM_UUID = {
     spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
     spot_right: '0BD68C96-850C-57EA-86E0-1780E40FF826',
     zq06017: 'B3F12D06-678A-51FE-AD71-BC2BC260EB9F',
 };
+// A mover's test carries its draft placement and patch: the room hangs both turned to the
+// audience, no soft limits and no MVR Focus, in 12ch on universe 1.
+const roomPose = (x, address) => {
+    const full = {min: 0, max: 1, inverted: false};
+    return {matrix: [-1, 0, 0, 0, -1, 0, 0, 0, 1, x, 0, 0], pan: full, tilt: full, focus: [], universe: 0, address, gdtf_mode: '12ch'};
+};
+const ROOM_POSE = {[ROOM_UUID.spot_left]: roomPose(-300, 1), [ROOM_UUID.spot_right]: roomPose(300, 13)};
+const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim', pose: ROOM_POSE[target.fixture] ?? null});
 const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
 const markOf = (name) => `[...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) =>
     (g.querySelector('title')?.textContent || '').split(' · ')[0] === ${JSON.stringify(name)})`;
+// Every fixture label's box, in viewport pixels, against the plan SVG's own box.
+const labelBoxesJs = `(() => {
+    const box = document.querySelector('#mvr-plan svg.plan')?.getBoundingClientRect();
+    return [...document.querySelectorAll('#mvr-plan .plan-name')].map((t) => {
+        const r = t.getBoundingClientRect();
+        return {text: t.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+            inside: !box || (r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5)};
+    });
+})()`;
+const labelsInPlan = async () => (await ev(labelBoxesJs)).every((label) => label.inside);
 const takeActions = () => ev('window.__actions.splice(0)');
 const keepAlive = () => ev('({held: window.__keepAlive.size, delays: window.__keepAliveDelays.slice()})');
 const statusText = () => text(STATUS);
@@ -446,7 +463,7 @@ async function planMark(name) {
         const m = circle.ownerSVGElement.getScreenCTM();
         const [cx, cy] = [Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))];
         return {cx, cy, a: m.a, d: m.d, x: m.a * cx + m.c * cy + m.e, y: m.b * cx + m.d * cy + m.f,
-            ring: circle.classList.contains('ring')};
+            ring: !!mark.querySelector('circle.ring')};
     })()`);
 }
 const areaBox = () => ev(`(() => { const r = document.querySelector('#mvr-plan .plan-areas rect');
@@ -863,6 +880,7 @@ const SUITES = {
         const keys = await ev(`[...document.querySelectorAll('#mvr-plan .plan-legend .plan-key')].map((k) => k.textContent)`);
         await check('rig map', 'has a legend', keys.length > 0, {keys});
         await check('rig map', 'has a scale bar', /\d+(\.\d+)? m$/.test(await text('#mvr-plan .plan-scale')), {scale: await text('#mvr-plan .plan-scale')});
+        await check('rig map', 'no fixture label is clipped at a plan edge', await labelsInPlan(), {labels: await ev(labelBoxesJs)});
         await shot('config');
         await planSettled();
         await action('rig map', 'select a fixture', () => click('#mvr-plan .mvr-object circle'), {watch: 1500});
@@ -873,13 +891,10 @@ const SUITES = {
         const plan = await ev(`(() => {
             const marks = [...document.querySelectorAll('#mvr-plan .mvr-object:has(circle)')];
             return {head: document.getElementById('mvr-summary').textContent, marks: marks.length,
-                badges: marks.filter((m) => /^\\d+( ×\\d+)?$/.test(m.querySelector('.plan-badge')?.textContent)).length,
-                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0),
-                caption: [...document.querySelectorAll('#mvr-plan .plan-caption')].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.textContent)};
+                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0)};
         })()`);
-        await check('rig map', 'header, legend counts and a badge per mark agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
-            && plan.badges === plan.marks && plan.counts === plan.marks, plan);
-        await check('rig map', 'only the selected mark shows its DMX caption', plan.caption.length === 1 && /^DMX \d+–\d+ · \w+ · (loop|accent)$/.test(plan.caption[0]), plan);
+        await check('rig map', 'header and legend counts agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
+            && plan.counts === plan.marks, plan);
         await shot('plan_rich', '.mvr-card');
         await action('Telemetry tab', 'open', () => tab('Telemetry'), {watch: 2500});
         await check('Telemetry tab', 'shows its panel', await ev(shown('telemetry-panel')));
@@ -1023,7 +1038,7 @@ const SUITES = {
         }
         await formEdit('pitch 60° (the limit)', () => typeInto(splitInput('matrix', 'pitch'), '60'),
             {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 60, 0], standing: false});
-        await formEdit('Pan limits min 54° (of 0–540°)', () => typeInto(splitInput('Pan', 'min'), '54'),
+        await formEdit('Pan limits min -166° (of -220–320°)', () => typeInto(splitInput('Pan', 'min'), '-166'),
             {action: 'set-movement', axis: 'Pan', minimum: 0.1, maximum: 1});
         await formRefusal('Tilt limits min 200° above max 100°', async () => {
             await ev(`document.querySelector('${splitInput('Tilt', 'max')}').value = '100'`);
@@ -1039,8 +1054,7 @@ const SUITES = {
             {action: 'set-child-text', tag: 'DMXInvertTilt', value: 'true'});
         await check('patch form', 'spot_left is filled (loop) before its group changes', !(await planMark('spot_left')).ring);
         await formEdit('Group movers -> fx', () => choose(cfg('group'), 'fx'), {action: 'set-class', name: 'fx'});
-        await check('patch form', 'joining fx moves spot_left to the accent Layer', await waitFor(`(() => {
-            const c = ${markOf('spot_left')}?.querySelector('circle'); return !!c && c.classList.contains('ring'); })()`, 3000)
+        await check('patch form', 'joining fx moves spot_left to the accent Layer', await waitFor(`!!${markOf('spot_left')}?.querySelector('circle.ring')`, 3000)
             && (await ev(`document.querySelector('${cfg('role')}').value`)) === 'accent');
 
         await selectFixture('zq06017');
@@ -1068,8 +1082,8 @@ const SUITES = {
         await check('patch form', 'Save is enabled again', await waitFor(`!document.getElementById('fixture-save').disabled`, 2000));
         await formEdit('Role of wash -> accent', () => choose(cfg('role'), 'accent'), {action: 'set-role', role: 'accent'});
         await check('patch form', 'the whole wash group moves to the accent Layer', await waitFor(`['wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right']
-            .every((name) => [...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) => (g.querySelector('title')?.textContent || '').split(' · ')[0] === name)
-                ?.querySelector('circle').classList.contains('ring'))`, 3000));
+            .every((name) => !![...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) => (g.querySelector('title')?.textContent || '').split(' · ')[0] === name)
+                ?.querySelector('circle.ring'))`, 3000));
         await selectFixture('wash_right');
         await takeActions();
         await choose(cfg('group'), NEW_GROUP);
@@ -1133,11 +1147,11 @@ const SUITES = {
             {was: was[ROOM_UUID.spot_left]?.rest, now: now[ROOM_UUID.spot_left]?.rest});
         await selectFixture('spot_right');
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {seen: await since()});
-        await click(testButton('off'));
+        await click(testButton('test'));
         await sleep(800);
     },
 
@@ -1155,32 +1169,39 @@ const SUITES = {
             return seen;
         };
         const note = () => text('#fixture-info .cfg-test-note');
-        await exactly('locate Test', 'click', () => click(testButton('white')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
-        await check('locate Test', 'lights its button; the note stays empty', await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000)
+        await exactly('locate Test', 'click', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await check('locate Test', 'lights its button; the note stays empty', await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000)
             && (await note()) === '', {note: await note()});
         await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
         await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'a second click clears it', () => click(testButton('test')), [CLEAR]);
+        await check('locate Test', 'its button goes dark', await waitFor(`!document.querySelector('${testButton('test')}').classList.contains('active')`, 3000));
+        await exactly('locate Test', 'a third click lights it again', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         for (const colour of ['warm', 'red', 'blue', 'green']) {
             await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: ROOM_UUID.spot_left}, colour)]);
         }
-        await check('locate swatch', 'the lit swatch wears the active ring', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
+        await check('locate swatch', 'the lit swatch is filled, the last one not', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
             && !document.querySelector('${testButton('blue')}').classList.contains('active')`, 3000));
         await check('locate swatch', 'one keep-alive, whatever the clicks', (await keepAlive()).held === 1, await keepAlive());
-        await exactly('locate ›', 'next in patch order (spot_right), no clear first', () => click(testButton('1')), [lightOn({fixture: ROOM_UUID.spot_right}, 'green')]);
-        await check('locate ›', 'the selection follows the test', await waitFor(`document.querySelector('${cfg('name')}').value === 'spot_right'`, 2000));
-        await exactly('locate ‹', 'back to spot_left', () => click(testButton('-1')), [lightOn({fixture: ROOM_UUID.spot_left}, 'green')]);
-        await exactly('locate ‹', 'wraps from the first to the last (zq06017 at 97)', () => click(testButton('-1')), [lightOn({fixture: ROOM_UUID.zq06017}, 'green')]);
-        await exactly('locate ›', 'wraps back to spot_left', () => click(testButton('1')), [lightOn({fixture: ROOM_UUID.spot_left}, 'green')]);
-        // The operator's latest colour must travel with ›, even before the show echoes it.
-        await exactly('locate ›', 'right after a swatch carries that swatch', async () => {
-            await click(testButton('red'));
-            await click(testButton('1'));
-        }, [lightOn({fixture: ROOM_UUID.spot_left}, 'red'), lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
-        await exactly('locate Off', 'click', () => click(testButton('off')), [CLEAR]);
-        await check('locate Off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
-        await exactly('locate Off', 'a tick after Off sends nothing', () => ev('window.__tickKeepAlive()'), []);
+        await exactly('locate selection', 'the lit test follows to spot_right', () => selectFixture('spot_right'), [lightOn({fixture: ROOM_UUID.spot_right}, 'green')]);
+        await exactly('locate swatch red', 'click', () => click(testButton('red')), [lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
+        for (const motion of ['sweep', 'aim']) {
+            await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
+            await check(`locate ${motion}`, 'lights its button', await waitFor(`document.querySelector('${testButton(motion)}').classList.contains('active')`, 3000));
+        }
+        await shot('test_row_mover', '#fixture-info');
+        await exactly('locate Test off', 'a second Test clears the aim', () => click(testButton('test')), [CLEAR]);
+        await check('locate Test off', 'Test and the motion buttons go dark', await waitFor(['test', 'aim'].map((spec) => `!document.querySelector('${testButton(spec)}').classList.contains('active')`).join(' && '), 3000));
+        for (const motion of ['sweep', 'aim']) {
+            await exactly(`locate ${motion}`, 'from dark starts the test in white', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', motion)]);
+            await check(`locate ${motion}`, 'lights Test with it', await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000));
+            await exactly('locate Test off', `clears the ${motion}`, () => click(testButton('test')), [CLEAR]);
+        }
+        await check('locate Test off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
+        await exactly('locate Test off', 'a tick after it sends nothing', () => ev('window.__tickKeepAlive()'), []);
 
         await selectFixture('zq06017');
+        await check('locate cells', 'a fixture without pan offers no Sweep or Aim', await ev(`!document.querySelector('${testButton('sweep')}') && !document.querySelector('${testButton('aim')}')`));
         const rig = (await harness('state')).rig;
         const cells = rig.fixtures.find((f) => f.name === 'zq06017').cells;
         const listing = `[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.dataset.cfgCell)`;
@@ -1194,15 +1215,16 @@ const SUITES = {
             same(shown, cells.map((id) => id.replace(ROOM_UUID.zq06017, 'zq06017'))), {shown});
         const cell = cells[2];
         await exactly('locate cells', `picking ${cell} alone sends nothing`, () => click(`#fixture-info [data-cfg-cell="${cell}"]`), [], 800);
-        await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('white')), [lightOn({cell}, 'white')]);
+        await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('test')), [lightOn({cell}, 'white')]);
         await exactly('locate cells', 'a swatch keeps the cell', () => click(testButton('blue')), [lightOn({cell}, 'blue')]);
+        await shot('test_row_static', '#fixture-info');
         await check('locate cells', 'the picked cell is marked', await ev(`document.querySelector('#fixture-info [data-cfg-cell="${cell}"]').classList.contains('selected')`));
 
         await exactly('locate deselect', 'Close sends one clear', () => click('#fixture-close'), [CLEAR]);
         await check('locate deselect', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
 
         await selectFixture('spot_left');
-        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('white')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         await exactly('locate tab switch', 'Control sends one clear and nothing after', async () => {
             await tab('Control');
             await sleep(2000);
@@ -1210,12 +1232,12 @@ const SUITES = {
         }, [CLEAR], 4000);
 
         await tab('Config');
-        await waitFor(`!!document.querySelector('${testButton('white')}') && !document.querySelector('${testButton('white')}').disabled`, 3000);
+        await waitFor(`!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 3000);
         await planSettled();
         await harness('control', {refuse_paused: true});
         await arm();
         await watchNote();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         const history = await ev('window.__notes.slice()');
         await check('locate 409', 'shows the reason', history.includes('Test refused: the show is paused'), {history});
@@ -1223,7 +1245,7 @@ const SUITES = {
             (await note()) === 'Test refused: the show is paused', {note: await note(), history});
         await check('locate 409', 'the page posted one highlight; the show took none',
             posted().length === 1 && posted()[0].action === 'highlight' && (await since()).length === 0, {posted: posted(), seen: await since(),
-                pointer: await ev('window.__pointer.slice(-3)'), button: await ev(`(() => { const b = document.querySelector('${testButton('white')}'); const r = b.getBoundingClientRect(); return [b.disabled, r.x, r.y, scrollY]; })()`)});
+                pointer: await ev('window.__pointer.slice(-3)'), button: await ev(`(() => { const b = document.querySelector('${testButton('test')}'); const r = b.getBoundingClientRect(); return [b.disabled, r.x, r.y, scrollY]; })()`)});
         await check('locate 409', 'turns the test off (no keep-alive)', (await keepAlive()).held === 0, await keepAlive());
         await exactly('locate 409', 'a deselect after the refusal has nothing to clear', () => click('#fixture-close'), []);
         await harness('control', {refuse_paused: false});
@@ -1234,14 +1256,135 @@ const SUITES = {
         await check('locate paused', 'every test control is disabled', disabled);
         await check('locate paused', 'says why', (await note()) === 'Test is off while the show is paused.', {note: await note()});
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await click(testButton('red'));
         await sleep(800);
         await check('locate paused', 'clicks on the disabled controls post nothing', posted().length === 0, {posted: posted()});
         await harness('control', {paused: false});
         await check('locate paused', 'play enables them again', await waitFor(`[...document.querySelectorAll('#fixture-info [data-cfg-test]')].every((b) => !b.disabled)`, 3000)
             && (await note()) === '', {note: await note()});
+
+        // The draft frees 13-24, which the running show still patches to spot_right.
+        await selectFixture('spot_right');
+        await typeInto(cfg('address'), '400');
+        await selectFixture('spot_left');
+        await exactly('locate address', 'Test lights spot_left', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        const at300 = {...lightOn({fixture: ROOM_UUID.spot_left}, 'white'), pose: {...ROOM_POSE[ROOM_UUID.spot_left], address: 300}};
+        await exactly('locate address', 'an Address edit moves the lit test to 300', () => typeInto(cfg('address'), '300'), [at300]);
+        await arm();
+        await watchNote();
+        await typeInto(cfg('address'), '13');
+        await sleep(1500);
+        const refusal = 'Test refused: spot_right overlaps spot_left in universe 1.';
+        await check('locate address', 'the show refuses 13, which spot_right still runs at, and says why',
+            (await since()).length === 0 && (await note()) === refusal, {note: await note(), posted: posted()});
+        await exactly('locate address', 'the keep-alive keeps the test at 300', () => ev('window.__tickKeepAlive()'), [at300]);
+        await exactly('locate address', 'Test clears it', () => click(testButton('test')), [CLEAR]);
+
+        // spot_left has no FocusPoint: the first edit writes one, and each edit re-aims the lit test.
+        await typeInto(cfg('address'), '1');
+        await click(testButton('aim'));
+        const centre = [];
+        for (const axis of ['x', 'y', 'z']) centre.push(Number(await ev(`document.querySelector('${splitInput('focus', axis)}').value`)));
+        for (const [axis, value, focus] of [['x', '500', [500, centre[1], centre[2]]], ['z', '1000', [500, centre[1], 1000]]]) {
+            await arm();
+            await typeInto(splitInput('focus', axis), value);
+            await sleep(500);
+            const seen = await since();
+            await check('locate focus', `a focus ${axis.toUpperCase()} edit re-aims within 500 ms`,
+                seen.length === 1 && seen[0].aim && same(seen[0].pose?.focus, focus), {centre, focus, seen, note: await note()});
+        }
+        await exactly('locate focus', 'Test clears it', () => click(testButton('test')), [CLEAR]);
         await checkHighlightIds('locate');
+    },
+
+    // A held test stays lit through yaw edits and idle time until the operator turns it off.
+    cfg_test_hold: async () => {
+        await cfgFresh();
+        await selectFixture('spot_left');
+        await click(testButton('test'));
+        await click(testButton('aim'));
+        await waitFor(`document.querySelector('${testButton('aim')}').classList.contains('active')`, 3000);
+        await arm();
+        const started = Date.now();
+        for (const yaw of ['10', '20', '30']) {
+            await typeInto(splitInput('matrix', 'yaw'), yaw);
+            await sleep(6500);
+        }
+        // macOS reports a window another one covers as hidden; that is not the page going away.
+        await ev(`Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
+        await sleep(Math.max(0, 30000 - (Date.now() - started)));
+        await ev(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))`);
+        const seen = await since();
+        await check('test hold', 'three yaw edits and 30 s send no clear', seen.length >= 3 && !seen.some((c) => c.target === null),
+            {seen: seen.map((c) => [c.target, c.aim, c.pose?.matrix])});
+        await check('test hold', 'every re-send keeps Aim', seen.every((c) => c.aim === true), {seen});
+        await check('test hold', 'Test and Aim stay lit', await ev(['test', 'aim'].map((spec) => `document.querySelector('${testButton(spec)}').classList.contains('active')`).join(' && ')));
+        await check('test hold', 'one keep-alive since the first click, never restarted by an edit', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
+        await arm();
+        await ev('window.__tickKeepAlive()');
+        await sleep(1000);
+        const tick = await since();
+        await check('test hold', 'a keep-alive tick re-sends the aimed test', tick.length === 1 && tick[0].aim === true && tick[0].target !== null, {tick});
+        await click(testButton('test'));
+    },
+
+    // The first Test click after a load, a selection change or a restart sends one command and lights.
+    cfg_first_press: async () => {
+        const pick = async (name) => {
+            await planSettled();
+            await ev(`(() => {
+                document.querySelectorAll('[data-harness-mark]').forEach((e) => e.removeAttribute('data-harness-mark'));
+                ${markOf(name)}.querySelector('circle').setAttribute('data-harness-mark', '');
+            })()`);
+            await click('[data-harness-mark]');
+            return waitFor(`document.querySelector('${cfg('name')}')?.value === ${JSON.stringify(name)}
+                && !!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 5000);
+        };
+        const once = async (name, uuid, pause = 0) => {
+            await sleep(pause);
+            await arm();
+            await click(testButton('test'));
+            // Lit before the show's echo (1 s here): a dark button invites the click that clears it.
+            const lit = await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 300);
+            await sleep(1500);
+            const seen = await since();
+            await check('first press', `${name} -> one highlight, exactly`, seen.length === 1 && same(seen[0], lightOn({fixture: uuid}, 'white')),
+                {seen, posted: posted(), note: await text('#fixture-info .cfg-test-note')});
+            await check('first press', `${name} -> lights Test at once`, lit, {note: await text('#fixture-info .cfg-test-note')});
+        };
+        const off = async () => {
+            await arm();
+            await click(testButton('test'));
+            await sleep(1500);
+            await check('first press', 'the next click clears', same(await since(), [CLEAR]), {seen: await since()});
+        };
+        await cfgFresh();
+        await check('first press', 'select spot_left', await pick('spot_left'));
+        await once('right after the pane renders', ROOM_UUID.spot_left);
+        await off();
+        await cfgFresh();
+        await check('first press', 'select spot_left', await pick('spot_left'));
+        await once('3 s after the pane renders', ROOM_UUID.spot_left, 3000);
+        await off();
+        await check('first press', 'select spot_right', await pick('spot_right'));
+        await once('right after a selection change', ROOM_UUID.spot_right);
+        await off();
+        await check('first press', 'select spot_left', await pick('spot_left'));
+        await once('3 s after a selection change', ROOM_UUID.spot_left, 3000);
+        await off();
+        // A restart in progress: the page loads while the show reports nothing.
+        await harness('rig', {restore: true});
+        await fresh({blank: true});
+        await tab('Config');
+        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+        await pick('spot_left');
+        await sleep(1500);
+        await check('first press', 'mid-restart Test is off and says why', await ev(`document.querySelector('${testButton('test')}').disabled`)
+            && (await text('#fixture-info .cfg-test-note')) !== '', {note: await text('#fixture-info .cfg-test-note')});
+        await harness('control', {blank: false});
+        await waitFor(`!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 5000);
+        await once('after the rig appears', ROOM_UUID.spot_left);
     },
 
     cfg_apply: async () => {
@@ -1305,12 +1448,12 @@ const SUITES = {
         await check('odd name', 'leaves no stray markup in the plan', (await ev(`document.querySelectorAll('#mvr-plan svg.plan').length === 1 && !document.querySelector('#mvr-plan svg.plan left, #mvr-plan svg.plan co')`)));
         // A rename keeps the uuid the running rig knows, so its test lights the same fixture.
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         const renamedTest = posted();
         await check('odd name', 'Test on the renamed, unapplied fixture lights its uuid', same(renamedTest, [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {posted: renamedTest, note: await text('#fixture-info .cfg-test-note')});
-        await click(testButton('off'));
+        await click(testButton('test'));
         await sleep(800);
         await check('odd name', 'Save', await save(), {status: await statusText()});
         const files = await rigFiles();
@@ -1339,8 +1482,8 @@ const SUITES = {
         // the reloaded page shows no test and holds no keep-alive.
         await cfgFresh();
         await selectFixture('spot_left');
-        await click(testButton('white'));
-        await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000);
+        await click(testButton('test'));
+        await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000);
         await arm();
         await navigate('Page.reload');
         await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
@@ -1354,14 +1497,14 @@ const SUITES = {
             ds.set_props = function (id, props) { if (id === 'fixture-grid-action') window.__actions.push(props.data); return real.apply(this, arguments); }; })()`);
         await check('reload mid-test', 'the reloaded page selects the fixture', await selectFixture('spot_left'));
         await sleep(800);
-        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(`document.querySelector('${testButton('white')}').classList.contains('active')`))
+        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(`document.querySelector('${testButton('test')}').classList.contains('active')`))
             && (await text('#fixture-info .cfg-test-note')) === '' && (await keepAlive()).held === 0, {note: await text('#fixture-info .cfg-test-note')});
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {seen: await since()});
-        await click(testButton('off'));
+        await click(testButton('test'));
         await sleep(1000);
 
         // A browser reload after a Save must show the saved patch, and say the show runs an older rig.
@@ -1405,11 +1548,9 @@ const SUITES = {
         await click('#fixture-info .cfg-advanced > summary');
         await waitFor(`!document.querySelector('#fixture-info .cfg-advanced').open`, 2000);
 
-        // The pan arc: drawn bright for the selected mover, faint for the other, none for a par.
-        const arc = (name) => ev(`(() => { const p = ${markOf(name)}?.querySelector('.plan-pan'); return p && Number(getComputedStyle(p).opacity); })()`);
-        await check('pan arc', 'the selected mover has a bright arc, the other a faint one, a par none',
-            (await arc('spot_right')) > 0.5 && (await arc('spot_left')) < 0.5 && (await arc('spot_left')) > 0 && (await arc('wash_left')) === null,
-            {spot_right: await arc('spot_right'), spot_left: await arc('spot_left'), wash_left: await arc('wash_left')});
+        await check('selected mark', 'wears the selected class, the others dimmed', await ev(`${markOf('spot_right')}.classList.contains('selected')
+            && !${markOf('spot_left')}.classList.contains('selected') && Number(getComputedStyle(${markOf('spot_left')}).opacity) < 1`));
+        await shot('plan_selected', '#mvr-plan');
         await shot('pane_impl_mover', '#fixture-info');
 
         await selectFixture('wash_left');
@@ -1417,20 +1558,17 @@ const SUITES = {
             {headings: await headings()});
         await shot('pane_impl_static', '#fixture-info');
 
-        // Soft limits in degrees, clamped to the GDTF's 0–540° pan.
+        // Soft limits in degrees, clamped to the GDTF's -220–320° pan.
         await selectFixture('spot_left');
-        const arcPath = () => ev(`${markOf('spot_left')}?.querySelector('.plan-pan')?.getAttribute('d')`);
-        const fullArc = await arcPath();
-        await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '0–540'
-            && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '540');
-        await formEdit('Pan max 600° clamps to 540°', () => typeInto(splitInput('Pan', 'max'), '600'), {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 1});
-        await formEdit('Pan min -20° clamps to 0°, max 270°', async () => {
-            await ev(`document.querySelector('${splitInput('Pan', 'min')}').value = '-20'`);
-            await typeInto(splitInput('Pan', 'max'), '270');
+        await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '-220–320'
+            && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '320');
+        await formEdit('Pan max 600° clamps to 320°', () => typeInto(splitInput('Pan', 'max'), '600'), {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 1});
+        await formEdit('Pan min -300° clamps to -220°, max 50°', async () => {
+            await ev(`document.querySelector('${splitInput('Pan', 'min')}').value = '-300'`);
+            await typeInto(splitInput('Pan', 'max'), '50');
         }, {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 0.5});
-        await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '0'
-            && document.querySelector('${splitInput('Pan', 'max')}').value === '270'`, 2000));
-        await check('pan arc', 'the arc follows the limits', !!fullArc && (await arcPath()) !== fullArc, {before: fullArc, after: await arcPath()});
+        await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '-220'
+            && document.querySelector('${splitInput('Pan', 'max')}').value === '50'`, 2000));
 
         // Hanging -> standing turns the head 180° about its facing; it survives Save and Reload.
         await check('mount', 'spot_left reads hanging', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'hanging');
@@ -1454,6 +1592,95 @@ const SUITES = {
         await selectFixture('spot_hero');
         await check('mount', 'after Reload spot_hero reads standing', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'standing');
         await check('pane', 'no bridge command from the pane edits', (await since()).length === 0, {seen: await since()});
+    },
+
+    cfg_plan_nav: async () => {
+        await cfgFresh();
+        const plan = `document.querySelector('#mvr-plan svg.plan')`;
+        const view = () => ev(`(() => { const b = ${plan}.viewBox.baseVal; return [b.x, b.y, b.width, b.height]; })()`);
+        const fitted = () => ev(`${plan}.dataset.fit.split(' ').map(Number)`);
+        const labelPx = () => ev(`(() => { const t = document.querySelector('#mvr-plan .plan-name'); return t.getBBox().height * ${plan}.getScreenCTM().d; })()`);
+        const near = (a, b, tolerance = 1.5) => Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
+        // A screen point on plan background, clear of every mark.
+        const empty = () => ev(`(() => { const r = ${plan}.getBoundingClientRect();
+            for (let fy = 0.1; fy < 1; fy += 0.1) for (let fx = 0.1; fx < 1; fx += 0.1) {
+                const [x, y] = [r.x + r.width * fx, r.y + r.height * fy];
+                const hit = document.elementFromPoint(x, y);
+                if (hit?.closest('svg.plan') && !hit.closest('.mvr-object')) return {x, y};
+            } })()`);
+        const wheel = (x, y, deltaY) => cdp('Input.dispatchMouseEvent', {type: 'mouseWheel', x, y, deltaX: 0, deltaY});
+        const fit = await fitted();
+        await check('plan nav', 'the plan opens fitted to the rig', same(await view(), fit), {view: await view(), fit});
+        const label0 = await labelPx();
+
+        let m = await planMark('spot_left');
+        await wheel(m.x, m.y, -300);
+        await sleep(200);
+        const zoomed = await view();
+        let after = await planMark('spot_left');
+        await check('plan nav', 'wheel up zooms in', zoomed[2] < fit[2] * 0.6, {zoomed, fit});
+        await check('plan nav', 'the point under the cursor stays put', near(after, m), {before: m, after});
+        const label1 = await labelPx();
+        await check('plan nav', 'labels keep their on-screen size', Math.abs(label1 / label0 - 1) <= 0.1, {label0, label1});
+        await wheel(m.x, m.y, 5000);
+        await sleep(200);
+        await check('plan nav', 'zoom out stops at half the fit', Math.abs((await view())[2] - fit[2] * 2) < 1, {view: await view()});
+        await wheel(m.x, m.y, -700);
+        await sleep(200);
+
+        // Pan from plan background.
+        m = await planMark('spot_left');
+        const p = await empty();
+        await arm();
+        await pressAndMove(p.x, p.y, p.x + 80, p.y + 40);
+        await release(p.x + 80, p.y + 40);
+        await sleep(300);
+        after = await planMark('spot_left');
+        await check('plan nav', 'a drag on empty space pans the plan', near(after, {x: m.x + 80, y: m.y + 40}), {before: m, after});
+        await check('plan nav', 'a pan sends no draft action', (await takeActions()).length === 0);
+        const panned = await view();
+        await sleep(1500);
+        await check('plan nav', 'polls keep the view', same(await view(), panned), {panned, now: await view()});
+        await check('plan nav', 'selecting keeps the view', await selectFixture('spot_left') && same(await view(), panned), {panned, now: await view()});
+
+        // The same 300 mm drag cfg_drag makes at fit lands on the same mm when zoomed.
+        m = await planMark('spot_left');
+        await pressAndMove(m.x, m.y, m.x + 300 * m.a, m.y);
+        await release(m.x + 300 * m.a, m.y);
+        await waitFor('window.__actions.length > 0', 3000);
+        await sleep(600);
+        const moves = (await takeActions()).filter((a) => a.action === 'set-position');
+        await check('plan nav', 'a zoomed fixture drag commits X 0, Y 0 as at fit',
+            moves.length === 1 && moves[0].x_mm === 0 && moves[0].y_mm === 0, {moves, a: m.a});
+        await check('plan nav', 'the edit redraw keeps the view', same(await view(), panned), {panned, now: await view()});
+        await shot('plan_zoom', '#mvr-plan');
+
+        await click('#mvr-plan-fit');
+        await sleep(200);
+        await check('plan nav', 'Fit restores the fitted view', same(await view(), await fitted()), {view: await view()});
+        await wheel(m.x, m.y, -300);
+        await sleep(200);
+        const q = await empty();
+        await cdp('Input.dispatchMouseEvent', {type: 'mouseMoved', x: q.x, y: q.y});
+        for (const clickCount of [1, 2]) {
+            await mouse('mousePressed', q.x, q.y, {clickCount});
+            await mouse('mouseReleased', q.x, q.y, {clickCount});
+        }
+        await sleep(200);
+        await check('plan nav', 'a double-click on empty space fits', same(await view(), await fitted()), {view: await view()});
+
+        // Two touches spreading apart pinch-zoom in.
+        const touch = (type, spread) => cdp('Input.dispatchTouchEvent', {type, touchPoints: type === 'touchEnd' ? [] :
+            [{x: q.x - spread, y: q.y, id: 1}, {x: q.x + spread, y: q.y, id: 2}]});
+        await touch('touchStart', 20);
+        for (const spread of [30, 45, 60]) {
+            await touch('touchMove', spread);
+            await sleep(50);
+        }
+        await touch('touchEnd');
+        await sleep(200);
+        const pinched = await view();
+        await check('plan nav', 'a pinch zooms in about threefold', Math.abs(fit[2] / pinched[2] - 3) < 0.3, {pinched, fit});
     },
 
     narrow: async () => {

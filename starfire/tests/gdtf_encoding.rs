@@ -3,7 +3,10 @@ mod support;
 use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::gdtf::GdtfProfile;
-use starfire::model::{AttributeValue, Command, FixtureState, Rgb, Transition};
+use starfire::model::{
+    AttributeValue, Command, FixturePose, FixtureState, LightingOverride, MovementRange,
+    OverrideLifetime, PropertyValues, Rgb, Target, Transition,
+};
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
@@ -218,6 +221,412 @@ fn physical_pan_values_obey_patch_calibration() {
         values(&[("Pan", AttributeValue::Number(100.0))]),
     );
     assert_eq!(&rig.encode(&states).unwrap()[&0][..2], [64, 0]);
+}
+
+#[test]
+fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
+    let rig = rig_with(
+        mode(vec![channel(
+            "Pan",
+            "Base",
+            &[1, 2],
+            vec![function("Pan", "Control")],
+        )]),
+        wire::Fixture {
+            area: wire::StageArea::Centre as i32,
+            fixture_uuid: "mover".into(),
+            name: "mover".into(),
+            pan: Some(wire::fixture::MovementRange {
+                minimum: Some(0.25),
+                maximum: Some(0.75),
+                inverted: false,
+            }),
+            ..Default::default()
+        },
+    );
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    let sweep = LightingOverride {
+        id: "highlight".into(),
+        target: Target::Fixture("mover".into()),
+        values: PropertyValues {
+            intensity: Some(1.0),
+            ..Default::default()
+        },
+        intensity_multiplier: None,
+        lifetime: OverrideLifetime::UntilCleared,
+        priority: 0,
+        special_fx: None,
+        pan_sweep: true,
+        aim_focus: false,
+        pose: None,
+    };
+    engine
+        .apply(0.0, &Command::SetOverride { value: sweep })
+        .unwrap();
+    // Two full cycles on the render clock, 10 ms frames.
+    let pan: Vec<u16> = (0..=1600)
+        .map(|frame| {
+            let dmx = &engine
+                .render_at(f64::from(frame) / 100.0)
+                .unwrap()
+                .dmx_frames_by_universe[&0];
+            u16::from_be_bytes([dmx[0], dmx[1]])
+        })
+        .collect();
+    // The soft limits 0.25 and 0.75 at 16 bits, as the patch calibration encodes them.
+    let (low, high) = (16384, 49151);
+    assert_eq!(pan.iter().min(), Some(&low));
+    assert_eq!(pan.iter().max(), Some(&high));
+    assert_eq!(
+        [pan[0], pan[400], pan[800], pan[1200]],
+        [low, high, low, high]
+    );
+}
+
+/// A yawed MVR Matrix at `position`, flipped about its facing when standing.
+fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
+    let (sin, cos) = f64::to_radians(yaw).sin_cos();
+    let flip = if hanging { 1.0 } else { -1.0 };
+    [
+        [flip * cos, flip * sin, 0.0],
+        [-sin, cos, 0.0],
+        [0.0, 0.0, flip],
+        position,
+    ]
+    .concat()
+}
+
+/// The first frame's DMX for one Intimidator under a highlight that sweeps or aims.
+fn moved(matrix: &[f64], focus: [f64; 3], inverted: bool, motion: Motion) -> Vec<u8> {
+    let rig = support::rig(serde_json::json!({"fixtures": [{
+        "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
+        "universe": 0, "address": 1, "matrix": matrix, "focus": focus,
+        "pan": {"min": 0.1, "max": 0.8, "inverted": inverted},
+        "tilt": {"inverted": inverted},
+    }]}));
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    let highlight = LightingOverride {
+        id: "highlight".into(),
+        target: Target::Fixture("test".into()),
+        values: PropertyValues {
+            intensity: Some(1.0),
+            ..Default::default()
+        },
+        intensity_multiplier: None,
+        lifetime: OverrideLifetime::UntilCleared,
+        priority: 0,
+        special_fx: None,
+        pan_sweep: matches!(motion, Motion::Sweep),
+        aim_focus: !matches!(motion, Motion::Sweep),
+        pose: match motion {
+            Motion::Posed(pose) => Some(Box::new(pose)),
+            _ => None,
+        },
+    };
+    engine
+        .apply(0.0, &Command::SetOverride { value: highlight })
+        .unwrap();
+    engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][..4].to_vec()
+}
+
+enum Motion {
+    Aim,
+    Sweep,
+    Posed(FixturePose),
+}
+
+/// The scene direction the frame throws the beam, decoded independently of the encoder and
+/// carried through the Matrix, as fixture_encoding's mount test does. Physical pan 0 faces
+/// local +Y, the display, and pan turns clockwise about local +Z; mid tilt runs along local -Z,
+/// the pan axis, and tilts towards the pan heading; standing is the rigid flip.
+fn beam(frame: &[u8], matrix: &[f64]) -> [f64; 3] {
+    let probe = support::rig(serde_json::json!({ "fixtures": [{
+        "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
+        "universe": 0, "address": 1,
+    }] }));
+    let (from, to) = probe
+        .profile("test")
+        .unwrap()
+        .movement_range("Pan")
+        .unwrap();
+    let share = |at: usize| f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
+    // Pan from physical 0 of the profile's declared range, tilt off its range centre.
+    let (pan, tilt) = (
+        (from + share(0) * (to - from)).to_radians(),
+        ((share(2) - 0.5) * 270.0).to_radians(),
+    );
+    let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos(), -tilt.cos()];
+    [0, 1, 2].map(|axis| (0..3).map(|row| matrix[3 * row + axis] * body[row]).sum())
+}
+
+fn towards(from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
+    let offset = [0, 1, 2].map(|axis| to[axis] - from[axis]);
+    let length = offset.iter().map(|value| value * value).sum::<f64>().sqrt();
+    offset.map(|value| value / length)
+}
+
+fn assert_through(beam: [f64; 3], direction: [f64; 3], context: &str) {
+    assert!(
+        (0..3).all(|axis| (beam[axis] - direction[axis]).abs() < 1e-3),
+        "{context}: beam {beam:?}, focus {direction:?}"
+    );
+}
+
+#[test]
+fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
+    for hanging in [true, false] {
+        let position = [1000.0, -500.0, if hanging { 3000.0 } else { 0.0 }];
+        let rise = if hanging { -2500.0 } else { 2500.0 };
+        for offset in [
+            [1500.0, 2500.0, rise],
+            [-2000.0, -800.0, rise],
+            [0.0, 2000.0, 0.0],
+        ] {
+            let focus = [0, 1, 2].map(|axis| position[axis] + offset[axis]);
+            for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, -90.0] {
+                let matrix = mounted(hanging, yaw, position);
+                for inverted in [false, true] {
+                    let aimed = moved(&matrix, focus, inverted, Motion::Aim);
+                    let context =
+                        format!("hanging {hanging} yaw {yaw} inverted {inverted} focus {offset:?}");
+                    assert_through(beam(&aimed, &matrix), towards(position, focus), &context);
+                    // A sweep pans on but holds the tilt that reaches the point's elevation.
+                    let swept = moved(&matrix, focus, inverted, Motion::Sweep);
+                    assert_eq!(swept[2..4], aimed[2..4], "{context}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
+    // The fixtures' plan bounding box runs x -2000..3000, y -1000..1000: centre (500, 0, 0).
+    let positions = [[-2000.0, 1000.0, 3000.0], [3000.0, -1000.0, 2500.0]];
+    let matrices = [
+        mounted(true, 37.0, positions[0]),
+        mounted(true, -90.0, positions[1]),
+    ];
+    let fixtures = [0, 1].map(|index| {
+        serde_json::json!({
+            "fixture_uuid": format!("head{index}"), "profile": "chauvet_intimidator_spot_110_12ch",
+            "universe": 0, "address": 1 + 12 * index, "matrix": matrices[index],
+        })
+    });
+    let rig = support::rig(serde_json::json!({ "fixtures": fixtures }));
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    for index in 0..2 {
+        let highlight = LightingOverride {
+            id: format!("highlight{index}"),
+            target: Target::Fixture(format!("head{index}")),
+            values: PropertyValues {
+                intensity: Some(1.0),
+                ..Default::default()
+            },
+            intensity_multiplier: None,
+            lifetime: OverrideLifetime::UntilCleared,
+            priority: 0,
+            special_fx: None,
+            pan_sweep: false,
+            aim_focus: true,
+            pose: None,
+        };
+        engine
+            .apply(0.0, &Command::SetOverride { value: highlight })
+            .unwrap();
+    }
+    let frame = &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0];
+    for index in 0..2 {
+        assert_through(
+            beam(&frame[12 * index..], &matrices[index]),
+            towards(positions[index], [500.0, 0.0, 0.0]),
+            &format!("head{index}"),
+        );
+    }
+}
+
+#[test]
+fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
+    let position = [0.0, 0.0, 3000.0];
+    let focus = [0.0, 2000.0, 1000.0];
+    let (loaded, edited) = (mounted(true, 0.0, position), mounted(true, 90.0, position));
+    let pose = FixturePose {
+        matrix: edited.clone(),
+        pan: MovementRange {
+            min: 0.1,
+            max: 0.8,
+            inverted: false,
+        },
+        tilt: MovementRange::default(),
+        focus: focus.to_vec(),
+        universe: 0,
+        address: 1,
+        profile_id: "chauvet_intimidator_spot_110_12ch".into(),
+    };
+    let posed = moved(&loaded, focus, false, Motion::Posed(pose));
+    assert_through(beam(&posed, &edited), towards(position, focus), "posed");
+    assert_ne!(posed, moved(&loaded, focus, false, Motion::Aim));
+}
+
+#[test]
+fn a_pose_aims_through_the_edited_focus_before_the_rig_reloads() {
+    let position = [865.0, -1291.0, 0.0];
+    let matrix = mounted(false, 180.0, position);
+    let focus = [-100.0, 60.0, 0.0];
+    let pose = FixturePose {
+        matrix: matrix.clone(),
+        pan: MovementRange::default(),
+        tilt: MovementRange::default(),
+        focus: focus.to_vec(),
+        universe: 0,
+        address: 1,
+        profile_id: "chauvet_intimidator_spot_110_12ch".into(),
+    };
+    let posed = moved(&matrix, [0.0; 3], false, Motion::Posed(pose));
+    assert_through(beam(&posed, &matrix), towards(position, focus), "posed");
+}
+
+/// A red test of the room fixture `name`, without a pose and then with its loaded patch as
+/// `edit` changes it: the universe 0 frames, the second or its refusal.
+fn room_test(
+    definition: &wire::RigDefinition,
+    name: &str,
+    edit: impl FnOnce(&mut FixturePose),
+) -> (Vec<u8>, Result<Vec<u8>, String>) {
+    let fixture = definition.fixtures.iter().find(|f| f.name == name).unwrap();
+    let mut pose = FixturePose {
+        matrix: fixture.matrix.clone(),
+        pan: MovementRange::from_wire(&fixture.pan),
+        tilt: MovementRange::from_wire(&fixture.tilt),
+        focus: fixture.focus.clone(),
+        universe: fixture.universe,
+        address: fixture.address,
+        profile_id: fixture.profile_id.clone(),
+    };
+    edit(&mut pose);
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let rig = FixtureRig::from_wire(definition).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    let mut test = |pose: Option<FixturePose>| {
+        let value = LightingOverride {
+            id: "highlight".into(),
+            target: Target::Fixture(fixture.fixture_uuid.clone()),
+            values: PropertyValues {
+                intensity: Some(1.0),
+                colour: Some(Rgb {
+                    red: 1.0,
+                    green: 0.0,
+                    blue: 0.0,
+                }),
+                ..Default::default()
+            },
+            intensity_multiplier: None,
+            lifetime: OverrideLifetime::UntilCleared,
+            priority: 0,
+            special_fx: None,
+            pan_sweep: false,
+            aim_focus: false,
+            pose: pose.map(Box::new),
+        };
+        engine
+            .apply(0.0, &Command::SetOverride { value })
+            .map_err(|error| format!("{error:#}"))?;
+        Ok(engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0].clone())
+    };
+    (test(None).unwrap(), test(Some(pose)))
+}
+
+fn slots(frame: &[u8], address: usize, count: usize) -> &[u8] {
+    &frame[address - 1..address - 1 + count]
+}
+
+#[test]
+fn a_pose_at_a_new_address_moves_the_test_there_and_leaves_the_old_slots_dark() {
+    // The room's spot_left (12 channels) sits at 1; nothing is patched from 200.
+    let (loaded, posed) = room_test(&support::room_definition(), "spot_left", |pose| {
+        pose.address = 200;
+    });
+    let posed = posed.unwrap();
+    assert_ne!(
+        slots(&loaded, 1, 12),
+        [0; 12],
+        "the test lights the loaded slots"
+    );
+    assert_eq!(slots(&posed, 1, 12), [0; 12]);
+    assert_eq!(slots(&posed, 200, 12), slots(&loaded, 1, 12));
+}
+
+#[test]
+fn a_pose_in_another_mode_patches_that_modes_channel_count() {
+    // The bar in 7Channel, one cell like 4Channel, so a pose may switch between them.
+    let mut definition = support::room_definition();
+    let mode = |name: &str| {
+        let profiles = &support::room_definition().profiles;
+        let profile = profiles.iter().find(|p| p.dmx_mode == name).unwrap();
+        profile.profile_id.clone()
+    };
+    let bar = definition
+        .fixtures
+        .iter_mut()
+        .find(|f| f.name == "zq06017")
+        .unwrap();
+    bar.profile_id = mode("7Channel");
+    bar.cells.clear();
+    let (loaded, posed) = room_test(&definition, "zq06017", |pose| {
+        (pose.profile_id, pose.address) = (mode("4Channel"), 509);
+    });
+    let posed = posed.unwrap();
+    assert_ne!(slots(&posed, 509, 4), [0; 4]);
+    assert_eq!(slots(&posed, 97, 7), [0; 7]);
+    assert_ne!(slots(&loaded, 97, 7), [0; 7]);
+    // Seven channels do not fit where four do.
+    let (_, refused) = room_test(&definition, "zq06017", |pose| pose.address = 509);
+    assert!(refused.unwrap_err().contains("exceeds universe boundary"));
+}
+
+#[test]
+fn a_pose_that_overlaps_another_fixture_leaves_the_universe_or_changes_the_cells_is_refused() {
+    let definition = support::room_definition();
+    let refusal = |name: &str, edit: fn(&mut FixturePose)| room_test(&definition, name, edit).1;
+    // spot_right sits at 13.
+    let overlap = refusal("spot_left", |pose| pose.address = 5).unwrap_err();
+    assert!(
+        overlap.contains("overlaps DMX channel 13 in universe 0"),
+        "{overlap}"
+    );
+    let universe = refusal("spot_left", |pose| pose.universe = 1).unwrap_err();
+    assert!(
+        universe.contains("universe 1 is not one the show outputs"),
+        "{universe}"
+    );
+    let cells = refusal("zq06017", |pose| {
+        pose.profile_id = pose.profile_id.replace("24Channel", "7Channel");
+    })
+    .unwrap_err();
+    assert!(cells.contains("keep the fixture's cells"), "{cells}");
 }
 
 #[test]

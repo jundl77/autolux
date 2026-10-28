@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
@@ -52,10 +52,32 @@ class StaticRig:
     fixtures: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
     # Fixture uuids and cell ids Starfire accepts a UV attribute on.
     uv_targets: tuple[str, ...] = ()
+    # Fixture uuids whose mode has a pan channel, the ones a highlight can sweep.
+    pan_targets: tuple[str, ...] = ()
+    # Each fixture's GDTF spec and mode, universe, address and matrix, by uuid.
+    patch: Mapping[str, dict] = field(default_factory=dict)
+    # Each spec's modes Starfire was sent: {spec: {mode: {channels, cells, attributes}}}.
+    modes: Mapping[str, dict] = field(default_factory=dict)
 
     @property
     def targets(self) -> tuple[str, ...]:
         return (ALL_FIXTURES, *self.groups)
+
+    def published(self) -> dict:
+        """The running rig as the control state reports it to the dashboard."""
+        return {
+            'fixtures': [
+                {
+                    'fixture_uuid': fixture_uuid,
+                    'name': name,
+                    'cells': list(cells),
+                    'pan': fixture_uuid in self.pan_targets,
+                    **self.patch.get(fixture_uuid, {}),
+                }
+                for fixture_uuid, name, cells in self.fixtures
+            ],
+            'modes': self.modes,
+        }
 
 
 def colour_hex(colour: tuple[float, float, float]) -> str:
@@ -180,13 +202,32 @@ class StaticLooks:
             # Clearing alone would reveal the held automatic look (warm-white standby when idle).
             self._set_floor()
 
-    def highlight(self, target: dict, colour: str = 'white', *, paused: bool = False) -> None:
+    def highlight(
+        self,
+        target: dict,
+        colour: str = 'white',
+        *,
+        sweep: bool = False,
+        aim: bool = False,
+        pose: dict | None = None,
+        paused: bool = False,
+    ) -> None:
         """Locate {'fixture': uuid} or {'cell': id}: open white (or a swatch), beam home, no
-        strobe. One highlight at a time, so testing another fixture moves it."""
+        strobe. One highlight at a time, so testing another fixture moves it. On a mover, a
+        sweep pans between the soft limits and an aim points at the focus point, so the operator
+        can check yaw and mount against the plan. A pose ({matrix, pan, tilt, focus, universe,
+        address, gdtf_mode} as the rig patch has them) places and patches the fixture for the
+        test as the unsaved patch does."""
         if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
         if colour not in HIGHLIGHT_COLOURS:
             raise ValueError(f'unknown highlight colour {colour!r}')
+        if sweep and aim:
+            raise ValueError('a highlight sweeps or aims, not both')
+        if (sweep or aim) and target.get('fixture') not in self.rig.pan_targets:
+            raise ValueError(f'{target!r} has no pan')
+        if pose is not None and 'fixture' not in target:
+            raise ValueError('a pose places a whole fixture, not a cell')
         # Paused or blacked out, the rig is dark and the Locate would light nothing.
         if paused:
             raise ValueError('the show is paused')
@@ -196,24 +237,30 @@ class StaticLooks:
         values = {
             'intensity': 1.0,
             'colour': {'red': red, 'green': green, 'blue': blue},
-            'pan': 0.5,
-            'tilt': 0.5,
             'strobe_hz': 0.0,
         }
+        override = {
+            'id': HIGHLIGHT_ID,
+            'priority': STATIC_GROUP_PRIORITY + 1,
+            'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
+        }
+        # Starfire moves the head itself, through the logical pan the show's loops drive.
+        if sweep:
+            override['pan_sweep'] = True
+        elif aim:
+            override['aim_focus'] = True
+        else:
+            values.update(pan=0.5, tilt=0.5)
         (fixture_uuid,) = target.values()
+        if pose is not None:
+            override['pose'] = {**pose, 'gdtf_spec': self.rig.patch[fixture_uuid]['gdtf_spec']}
         if fixture_uuid in self.rig.uv_targets:
             values['attributes'] = {UV_ATTRIBUTE: 0.0}
+        # Starfire resolves a cell id through its fixture target too.
         self._lighting.set_override(
-            {
-                'id': HIGHLIGHT_ID,
-                # Starfire resolves a cell id through its fixture target too.
-                'target': {'fixture': fixture_uuid},
-                'values': values,
-                'priority': STATIC_GROUP_PRIORITY + 1,
-                'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
-            }
+            {**override, 'target': {'fixture': fixture_uuid}, 'values': values}
         )
-        self._highlighted = {'target': dict(target), 'colour': colour}
+        self._highlighted = {'target': dict(target), 'colour': colour, 'sweep': sweep, 'aim': aim}
         self._highlight_ends = self._clock.monotonic() + HIGHLIGHT_SECONDS
 
     def clear_highlight(self) -> None:

@@ -96,8 +96,8 @@ fn number(fixture: &Value, key: &str) -> u32 {
     u32::try_from(fixture[key].as_u64().unwrap()).unwrap()
 }
 
-fn matrix(fixture: &Value) -> Vec<f64> {
-    fixture.get("matrix").map_or_else(Vec::new, |matrix| {
+fn numbers(fixture: &Value, key: &str) -> Vec<f64> {
+    fixture.get(key).map_or_else(Vec::new, |matrix| {
         matrix
             .as_array()
             .unwrap()
@@ -131,7 +131,8 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
             address: number(fixture, "address"),
             pan: range("pan"),
             tilt: range("tilt"),
-            matrix: matrix(fixture),
+            matrix: numbers(fixture, "matrix"),
+            focus: numbers(fixture, "focus"),
             cells: Vec::new(),
             // A spec without an area sits in the centre; "UNSPECIFIED" tests the refusal.
             area: wire::StageArea::from_str_name(&format!(

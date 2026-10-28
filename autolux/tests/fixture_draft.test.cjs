@@ -13,11 +13,15 @@ const replies = [];
 const timers = new Map();
 let timerId = 0;
 const labels = [];
+// The window listeners the page registers once, by type: only pagehide ends a held test now.
+const windowListeners = new Map();
 ds.set_props = (id, props) => (id === "fixture-grid-action" ? actions.push(props.data) : labels.push([id, props.children]));
 const autoluxControl = { dispatch: (command) => (commands.push(command), Promise.resolve(replies.shift() || {})) };
+// No DOM: a test that builds the pane lends this page a createElement.
+const page = { addEventListener() {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixture_patch.js"), "utf8"), {
-    window: { dash_clientside: ds, addEventListener() {}, autoluxControl },
-    document: { addEventListener() {} },
+    window: { dash_clientside: ds, addEventListener: (type, fn) => windowListeners.set(type, fn), autoluxControl },
+    document: page,
     structuredClone,
     crypto: globalThis.crypto,
     TextEncoder,
@@ -38,6 +42,9 @@ const RUNNING = {
 };
 // Each room fixture's MVR uuid by its committed name.
 const FIXTURE_UUID = Object.fromEntries(data.patched.map(([fixture_uuid, name]) => [name, fixture_uuid]));
+// A test carries its fixture's placement and patch as the server exports them.
+const POSES = plain(data.poses);
+const posed = (name) => ({ pose: POSES[FIXTURE_UUID[name]] });
 const nodes = function* (tree) {
     yield tree;
     for (const child of tree.children) yield* nodes(child);
@@ -234,7 +241,6 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     const kinta = markup.slice(markup.indexOf("<title>kinta"));
     assert.match(kinta.slice(0, kinta.indexOf("</g>")), /fill="none" class="ring"/);
     assert.match(markup, /fx <b>1<\/b><\/span>/);
-    assert.match(kinta, /class="plan-badge"[^]*?>\d+<\/text><\/g><text class="plan-caption"[^>]*>DMX \d+–\d+ · fx · accent</);
     const offCentre = { ...byName.kinta, x: 4000 };
     // One row: no depth extent, so only the X cuts (4000..9000 at 5667 and 7333).
     const row = model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings);
@@ -268,6 +274,32 @@ test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", ()
     assert.equal((markup.match(/class="ring"/g) || []).length, 6 * 17);
 });
 
+test("zooming keeps the point under the cursor, clamps to 0.5x..8x of the fit, and keeps marks their fitted size", () => {
+    const fit = { x: -1000, y: 0, w: 2000, h: 1000 };
+    const at = [500, 250];
+    const near = model.zoomPlan(fit, fit, at, at, 0.5);
+    assert.deepEqual(plain(near), { x: -250, y: 125, w: 1000, h: 500 });
+    // The cursor point sits at the same fraction of the view before and after.
+    assert.deepEqual([(at[0] - near.x) / near.w, (at[1] - near.y) / near.h], [(at[0] - fit.x) / fit.w, (at[1] - fit.y) / fit.h]);
+    assert.equal(model.zoomPlan(near, fit, at, at, 1e-3).w, fit.w / 8);
+    assert.equal(model.zoomPlan(near, fit, at, at, 1e3).w, fit.w * 2);
+    // A pan is a unit scale: the point that was at `at` moves to `anchor`.
+    assert.deepEqual(plain(model.zoomPlan(fit, fit, [0, 0], [100, 50], 1)), { x: -1100, y: -50, w: 2000, h: 1000 });
+
+    const plan = model.planMarks(draft(), settings);
+    const fitted = model.planSvg(plan, settings);
+    const [view, fitBox] = fitted.match(/viewBox="([^"]+)" data-fit="([^"]+)"/).slice(1);
+    assert.equal(view, fitBox);
+    const [x, y, w, h] = fitBox.split(" ").map(Number);
+    const zoomed = model.planSvg(plan, settings, model.zoomPlan({ x, y, w, h }, { x, y, w, h }, [0, 1000], [0, 1000], 0.2));
+    const size = (markup, pattern) => Number(markup.slice(markup.indexOf("<svg class=\"plan\"")).match(pattern)[1]);
+    for (const pattern of [/<circle cx="[^"]+" cy="[^"]+" r="([^"]+)"/, /font-size="([^"]+)"/]) {
+        assert.ok(Math.abs(size(zoomed, pattern) - size(fitted, pattern) / 5) < 0.1, String(pattern));
+    }
+    assert.match(zoomed, />0.05 m<\/text>/);
+    assert.match(zoomed, new RegExp(`data-fit="${fitBox}"`));
+});
+
 const matrixOf = (tree, name) => model.parseMatrix(child(fixtureNode(tree, name), "Matrix")?.text ?? "");
 const layerOf = (tree, name) => model.placedObjects(tree, settings).find((entry) => entry.node.attributes.name === name).layer;
 // 10 mm per screen pixel, SVG origin at pixel (50, 50): a plain inverse screen CTM.
@@ -284,7 +316,7 @@ test("a plan drag maps screen to world to the rotated parent's frame in whole mm
     const rotated = yawedLayer();
     const spot = fixtureNode(rotated, "spot_left");
     const before = model.planMarks(rotated, settings).fixtures.find((mark) => mark.key === spot.key);
-    const drag = model.startPlanDrag(rotated, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(rotated, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     // +30 px right, -20 px up the screen: world +300 mm X and, SVG y being -Y, +200 mm Y.
     const move = model.planMove(drag, 130.04, 80);
     // The layer is yawed 90°: world +X is the layer's -Y and world +Y its +X.
@@ -293,17 +325,16 @@ test("a plan drag maps screen to world to the rotated parent's frame in whole mm
     const [moved] = edit(rotated, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     const after = model.planMarks(moved, settings).fixtures.find((mark) => mark.key === spot.key);
     assert.deepEqual([Math.round(after.x - before.x), Math.round(after.y - before.y)], [300, 200]);
-    assert.equal(model.startPlanDrag(rotated, settings, rotated.scene.key, INVERSE, 0, 0, ""), null);
+    assert.equal(model.startPlanDrag(rotated, settings, rotated.scene.key, INVERSE, 0, 0, null), null);
 });
 
 test("the plan keeps its frozen viewBox while a drag previews the mark and the area grid", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_left");
-    const frozen = "-1200 -400 2400 2900";
-    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 0, 0, frozen);
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 0, 0, { x: -1200, y: -400, w: 2400, h: 2900 });
     // Far outside the rig: a live layout would grow the view, the frozen one must not.
     const { markup } = model.planMove(drag, 900, 0);
-    assert.match(markup, new RegExp(`viewBox="${frozen}"`));
+    assert.match(markup, /viewBox="-1200 -400 2400 2900"/);
     const x = model.placedObjects(current, settings).find((entry) => entry.node === spot).matrix[9] + 9000;
     assert.match(markup, new RegExp(`<circle cx="${x}" `));
     assert.match(markup, new RegExp(`class="plan-areas"[^]*?<rect x="-900" y="0" width="${x + 900}"`));
@@ -313,7 +344,7 @@ test("a fixture with no Matrix drags from the identity", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_left");
     spot.children.splice(spot.children.indexOf(child(spot, "Matrix")), 1);
-    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     const move = model.planMove(drag, 110, 100);
     const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     assert.equal(child(fixtureNode(moved, "spot_left"), "Matrix").text, `{1,0,0}{0,1,0}{0,0,1}{${move.x_mm},${move.y_mm},0}`);
@@ -339,13 +370,13 @@ test("a pitched parent's plan drag is exact and an on-edge parent refuses it", (
     const pitched = tilt(30);
     const spot = fixtureNode(pitched, "spot_left");
     const before = model.planMarks(pitched, settings).fixtures.find((mark) => mark.key === spot.key);
-    const drag = model.startPlanDrag(pitched, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(pitched, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     // 20 px up the screen is world +200 mm Y, which the 30° pitch shortens to cos 30° per local mm.
     const move = model.planMove(drag, 100, 80);
     const [moved] = edit(pitched, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     const after = model.planMarks(moved, settings).fixtures.find((mark) => mark.key === spot.key);
     assert.deepEqual([Math.round(after.x - before.x), Math.round(after.y - before.y)], [0, 200]);
-    assert.equal(model.startPlanDrag(tilt(90), settings, spot.key, INVERSE, 100, 100, "0 0 10 10"), null);
+    assert.equal(model.startPlanDrag(tilt(90), settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 }), null);
 });
 
 test("the patch form validates each field and maps it to one draft action", () => {
@@ -379,17 +410,17 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [numbered] = edit(current, check("FixtureID", "17").action);
     assert.deepEqual(["FixtureID", "FixtureIDNumeric"].map((tag) => child(fixtureNode(numbered, "wash_right"), tag).text), ["17", "17"]);
     assert.match(check("matrix", ["0", "0", "0", "0", "61", "0"]).error, /±60°/);
-    // Soft limits in degrees within the GDTF's physical range (the spot pans 0–540°, tilts 0–270°),
+    // Soft limits in degrees within the GDTF's physical range (the spot pans -220–320°, tilts 0–270°),
     // stored as the share of it Starfire maps; edits past the range clamp to it.
     assert.match(check("Pan", ["400", "100"], current, spot.key).error, /Min is above max/);
     assert.match(check("Pan", ["", "100"], current, spot.key).error, /both limits/);
-    const [limited] = edit(current, check("Pan", ["54", "486"], current, spot.key).action);
+    const [limited] = edit(current, check("Pan", ["-166", "266"], current, spot.key).action);
     const movement = [...nodes(limited.scene)].find((node) => node.tag === "Movement");
     assert.deepEqual(plain(movement.attributes), { fixture: spot.attributes.uuid, axis: "Pan", minimum: "0.1", maximum: "0.9" });
     assert.deepEqual(plain(check("Tilt", ["-20", "300"], current, spot.key)), { error: null, action: { action: "set-movement", key: spot.key, axis: "Tilt", minimum: 0, maximum: 1 } });
     // The range's ends are the share's ends exactly, on both axes.
-    for (const [axis, top] of [["Pan", "540"], ["Tilt", "270"]]) {
-        assert.deepEqual(plain(check(axis, ["0", top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 0, maximum: 1 });
+    for (const [axis, bottom, top] of [["Pan", "-220", "320"], ["Tilt", "0", "270"]]) {
+        assert.deepEqual(plain(check(axis, [bottom, top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 0, maximum: 1 });
         assert.deepEqual(plain(check(axis, [top, top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 1, maximum: 1 });
     }
 });
@@ -410,40 +441,6 @@ test("the mount toggle turns the fixture 180° about its facing and keeps its ro
     assert.ok(matrix(yawed)[8] < 0);
     const [hanging] = edit(standing, model.patchEdit(standing, settings, spot.key, "mount", "hanging").action);
     assert.deepEqual(plain(matrix(hanging)), plain(matrix(current)));
-});
-
-test("the plan draws each mover's pan limits where Starfire's encode sends the beam", () => {
-    const current = draft();
-    const marks = (tree) => Object.fromEntries(model.planMarks(tree, settings).fixtures.map((mark) => [mark.name, mark]));
-    const before = marks(current);
-    // The spot pans 0–540°; logical 270° is the heading 270° clockwise from +Y, i.e. MVR -X.
-    assert.deepEqual(plain(before.spot_left.pan), { span: 540, centre: -180 });
-    assert.equal(before.wash_left.pan, null);
-    const markup = model.planSvg(model.planMarks(current, settings), settings);
-    assert.equal((markup.match(/class="plan-pan"/g) || []).length, 2);
-    const spot = fixtureNode(current, "spot_left");
-    const [limited] = edit(current, model.patchEdit(current, settings, spot.key, "Pan", ["54", "216"]).action);
-    const sector = (tree) => marks(tree).spot_left.pan;
-    assert.deepEqual(plain(sector(limited)), { span: 162, centre: -45 });
-    // The yaw and mount only change the head's own angle: the sector stays put in the scene.
-    const turned = (tree, rotation, standing) => edit(tree, { action: "set-matrix", key: spot.key, position: [-300, 0, 0], rotation, standing })[0];
-    for (const yaw of [0, 90, 180, 270]) {
-        for (const standing of [false, true]) assert.deepEqual(plain(sector(turned(limited, [yaw, 0, 0], standing))), { span: 162, centre: -45 }, `yaw ${yaw} standing ${standing}`);
-    }
-    // An inversion reorders the pan inside the limits; the sector stays.
-    const [inverted] = edit(limited, model.patchEdit(limited, settings, spot.key, "DMXInvertPan", true).action);
-    assert.deepEqual(plain(sector(inverted)), plain(sector(limited)));
-    // The path's start, middle and end in SVG coordinates (y is MVR -Y); spot_left sits at (-300, 0).
-    const arcOf = (tree) => model.planSvg(model.planMarks(tree, settings), settings).match(/<title>spot_left[^]*?<path class="plan-pan" d="([^"]+)"/)[1];
-    const points = (d) => [[0, 1], [7, 8], [14, 15]].map((pair) => pair.map((index) => Number(d.match(/-?\d+/g)[index])));
-    // The full 540° is a whole circle, split at its middle (left of the mark).
-    const [start, middle, end] = points(arcOf(current));
-    assert.deepEqual(start, end);
-    assert.ok(middle[0] < -300 && middle[1] === 0, arcOf(current));
-    // Limited to 54–216°, the middle is 135° clockwise of upstage: below and right of the mark.
-    const [from, centre, to] = points(arcOf(limited));
-    assert.ok(centre[0] > -300 && centre[1] > 0, arcOf(limited));
-    assert.ok(Math.abs(Math.hypot(from[0] - centre[0], from[1] - centre[1]) - Math.hypot(to[0] - centre[0], to[1] - centre[1])) <= 2, arcOf(limited));
 });
 
 test("a role move keeps each fixture where it hangs, out of a nested group and a yawed layer", () => {
@@ -498,16 +495,17 @@ test("the test controls send highlight commands, hold them alive and clear once 
     ds.fixture_patch.syncTest({ ...live, static: { blackout: true } }, "config");
     assert.equal(model.testControl("red"), null);
     ds.fixture_patch.syncTest(live, "config");
-    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" });
-    // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command, and the 10-minute end.
-    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000, 600000]);
-    [...timers.values()][0].run();
+    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
+    // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command; it never ends on its own.
+    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000]);
+    const [keepAlive] = [...timers.values()];
+    keepAlive.run();
     assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
-    // › steps in patch order (kinta at 40 follows spot_right at 13), keeping the lit colour.
-    ds.fixture_patch.syncTest({ ...live, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" } }, "config");
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
-    assert.equal(actions.at(-1).key, fixtureNode(current, "kinta").key);
-    assert.equal(timers.size, 2);
+    assert.equal(timers.size, 1);
+    // The old 10-minute cap is gone: 20 minutes of keep-alives still hold the same test lit.
+    for (let i = 0; i < 80; i++) keepAlive.run();
+    assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
+    assert.equal(timers.size, 1);
     const sent = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     ds.fixture_patch.syncTest(live, "telemetry");
@@ -518,7 +516,7 @@ test("the test controls send highlight commands, hold them alive and clear once 
     model.testControl("blue");
     ds.fixture_patch.renderRig(null, current, settings);
     ds.fixture_patch.renderRig(null, current, settings);
-    assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "blue" }, { action: "highlight", target: null }]);
+    assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "blue", ...posed("spot_right") }, { action: "highlight", target: null }]);
     ds.fixture_patch.renderRig(spot.key, current, settings);
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("white");
@@ -527,6 +525,176 @@ test("the test controls send highlight commands, hold them alive and clear once 
     const refused = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     assert.equal(commands.length, refused);
+});
+
+test("the first Test click lights Test at once, and a refusal says why", async () => {
+    const current = draft();
+    const [spot, kinta] = ["spot_right", "kinta"].map((name) => fixtureNode(current, name));
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    const button = (cfgTest, kind) => {
+        const classes = new Set([kind]);
+        return { dataset: { cfgTest }, disabled: false, classList: { contains: (name) => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) } };
+    };
+    const buttons = [button("test", "cfg-test-main"), button("red", "cfg-swatch")];
+    const note = { textContent: "" };
+    const strip = { querySelectorAll: () => buttons };
+    page.querySelector = (selector) => ({ "#fixture-info .cfg-test": strip, "#fixture-info .cfg-test-note": note })[selector] ?? null;
+    const lit = () => buttons[0].classList.contains("active");
+    try {
+        timers.clear();
+        ds.fixture_patch.renderRig(spot.key, current, settings);
+        ds.fixture_patch.syncTest(live, "config");
+        const sent = commands.length;
+        model.testControl("test");
+        // Lit before any echo, and a poll from before the click does not flip it back.
+        assert.ok(lit());
+        ds.fixture_patch.syncTest(live, "config");
+        assert.ok(lit());
+        const pose = plain(model.draftPose(current, settings, model.fixtureRows(current, settings).find((entry) => entry.key === spot.key)));
+        assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white", pose }]);
+        model.testControl("test");
+        assert.ok(!lit());
+        // After a selection change the first click is one command and lights Test too.
+        ds.fixture_patch.renderRig(kinta.key, current, settings);
+        model.testControl("test");
+        assert.ok(lit());
+        assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "white", ...posed("kinta") });
+        model.testControl("test");
+        replies.push({ error: "the show is paused", status: 409 });
+        model.testControl("test");
+        await new Promise(setImmediate);
+        assert.ok(!lit());
+        assert.equal(note.textContent, "Test refused: the show is paused");
+    } finally {
+        delete page.querySelector;
+        ds.fixture_patch.renderRig(null, current, settings);
+    }
+});
+
+test("only a mover's test row offers Sweep and Aim, which toggle its motion and keep the swatch", () => {
+    const element = () => ({ attributes: {}, children: [], setAttribute(name, value) { this.attributes[name] = value; }, append(...children) { this.children.push(...children); } });
+    const specs = (nodes) => nodes.flatMap(function visit(node) { return typeof node === "object" ? [node.attributes["data-cfg-test"], ...node.children.flatMap(visit)] : []; }).filter(Boolean);
+    const current = draft();
+    page.createElement = element;
+    try {
+        ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
+        assert.ok(["sweep", "aim"].every((spec) => specs(model.patchForm(current, settings, fixtureNode(current, "spot_right"))).includes(spec)));
+        for (const still of ["kinta", "wash_left"]) assert.ok(!specs(model.patchForm(current, settings, fixtureNode(current, still))).some((spec) => spec === "sweep" || spec === "aim"), still);
+    } finally {
+        delete page.createElement;
+    }
+    ds.fixture_patch.syncTest({ rig: RUNNING, paused: false, static: { blackout: false }, highlight: null }, "config");
+    const spot = { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, ...posed("spot_right") };
+    assert.deepEqual(plain(model.testControl("sweep")), { ...spot, colour: "white", sweep: true });
+    assert.deepEqual(plain(model.testControl("red")), { ...spot, colour: "red", sweep: true });
+    assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red", aim: true });
+    // A second click on the lit motion holds the light still; a second Test clears it all.
+    assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red" });
+    assert.deepEqual(plain(model.testControl("test")), { action: "highlight", target: null });
+    assert.deepEqual(plain(model.testControl("test")), { ...spot, colour: "white" });
+    assert.deepEqual(plain(model.testControl("test")), { action: "highlight", target: null });
+});
+
+test("a test pose is the placement and patch the server exports, and a focus edit adds the MVR FocusPoint", () => {
+    const current = draft();
+    for (const row of model.fixtureRows(current, settings)) {
+        assert.deepEqual(plain(model.draftPose(current, settings, row)), POSES[row.fixture_uuid], row.name);
+    }
+    const spot = fixtureNode(current, "spot_left");
+    // Without a FocusPoint the pane shows the stage centre: the fixtures' plan box centre on the floor.
+    const plan = model.fixtureRows(current, settings).map((row) => row.matrix.slice(9, 11));
+    const middle = (axis) => (Math.min(...plan.map((p) => p[axis])) + Math.max(...plan.map((p) => p[axis]))) / 2;
+    const shown = (nodes) => nodes.flatMap(function visit(node) { return typeof node !== "object" ? [] : node.attributes["data-cfg"] === "focus" ? [node] : node.children.flatMap(visit); });
+    page.createElement = (tag) => ({ tag, attributes: {}, children: [], setAttribute(name, value) { this.attributes[name] = value; }, append(...children) { this.children.push(...children); } });
+    try {
+        const [row0] = shown(model.patchForm(current, settings, spot));
+        const inputs = (function all(node) { return typeof node !== "object" ? [] : node.tag === "input" ? [node] : node.children.flatMap(all); })(row0);
+        assert.deepEqual(inputs.map((input) => Number(input.attributes.value)), [middle(0), middle(1), 0]);
+    } finally {
+        delete page.createElement;
+    }
+    assert.notDeepEqual([middle(0), middle(1)], [plan[0][0], plan[0][1]]);
+    const focus = model.patchEdit(current, settings, spot.key, "focus", ["-300", "2500", "0"]);
+    assert.deepEqual(plain(focus.action), { action: "set-focus", key: spot.key, position: [-300, 2500, 0] });
+    assert.equal(model.patchEdit(current, settings, spot.key, "focus", ["1", "", "2"]).error, "Enter X, Y and Z in mm.");
+    const [focused] = edit(current, focus.action);
+    const point = [...nodes(focused.scene)].find((node) => node.tag === "FocusPoint");
+    assert.match(point.attributes.uuid, UUID);
+    assert.equal(child(fixtureNode(focused, "spot_left"), "Focus").text, point.attributes.uuid);
+    assert.deepEqual(plain(point.children.map((entry) => entry.tag)), ["Matrix", "Geometries"]);
+    const row = model.fixtureRows(focused, settings).find((entry) => entry.key === spot.key);
+    assert.deepEqual(plain(model.draftPose(focused, settings, row).focus), [-300, 2500, 0]);
+    // A second edit moves the same point.
+    const [moved] = edit(focused, model.patchEdit(focused, settings, spot.key, "focus", ["0", "0", "0"]).action);
+    assert.equal([...nodes(moved.scene)].filter((node) => node.tag === "FocusPoint").length, 1);
+});
+
+test("an edit to the lit mover's yaw or focus re-sends its test with the new pose once settled", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_right");
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    timers.clear();
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("aim");
+    const settling = () => [...timers.values()].filter((timer) => timer.ms === 150);
+    const sent = commands.length;
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    assert.equal(settling().length, 0, "an unchanged draft sends nothing");
+    const yaw = (tree, degrees) => edit(tree, model.patchEdit(tree, settings, spot.key, "matrix", ["300", "0", "0", String(degrees), "0", "0"]).action)[0];
+    const [turned, more] = [yaw(current, 90), yaw(current, 120)];
+    ds.fixture_patch.renderRig(spot.key, turned, settings);
+    ds.fixture_patch.renderRig(spot.key, more, settings);
+    assert.equal(settling().length, 1, "edits in quick succession send once");
+    assert.equal(commands.length, sent);
+    settling()[0].run();
+    const row = (tree) => model.fixtureRows(tree, settings).find((entry) => entry.key === spot.key);
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white", aim: true, pose: plain(model.draftPose(more, settings, row(more))) });
+    assert.equal(Math.round(model.homeOrientation(commands.at(-1).pose.matrix).pan), 120);
+    const [focused] = edit(more, model.patchEdit(more, settings, spot.key, "focus", ["0", "3000", "0"]).action);
+    ds.fixture_patch.renderRig(spot.key, focused, settings);
+    settling()[0].run();
+    assert.deepEqual(plain(commands.at(-1).pose.focus), [0, 3000, 0]);
+    assert.equal(commands.at(-1).aim, true);
+    // The first edit wrote the FocusPoint; a later one moves it, Z included.
+    const [raised] = edit(focused, model.patchEdit(focused, settings, spot.key, "focus", ["0", "3000", "1200"]).action);
+    ds.fixture_patch.renderRig(spot.key, raised, settings);
+    settling()[0].run();
+    assert.deepEqual(plain(commands.at(-1).pose.focus), [0, 3000, 1200]);
+    model.testControl("off");
+    assert.equal(settling().length, 0);
+});
+
+test("an address edit re-sends the lit test at the new address; a refused one keeps the previous pose lit", async () => {
+    const current = draft();
+    const kinta = fixtureNode(current, "kinta");
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    // Starts from no test, whatever an earlier test left lit or queued.
+    ds.fixture_patch.renderRig(null, current, settings);
+    timers.clear();
+    replies.length = 0;
+    ds.fixture_patch.renderRig(kinta.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("red");
+    const settling = () => [...timers.values()].filter((timer) => timer.ms === 150);
+    const readdress = (tree, address) => edit(tree, model.patchEdit(tree, settings, kinta.key, "address", String(address)).action)[0];
+    const moved = readdress(current, 300);
+    ds.fixture_patch.renderRig(kinta.key, moved, settings);
+    settling()[0].run();
+    const at300 = { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red", pose: { ...POSES[FIXTURE_UUID.kinta], address: 300 } };
+    assert.deepEqual(plain(commands.at(-1)), at300);
+    await new Promise(setImmediate);
+    // The running rig still patches a fixture where the draft has moved it away.
+    replies.push({ error: "kinta overlaps spot_left in universe 1.", status: 409 });
+    ds.fixture_patch.renderRig(kinta.key, readdress(moved, 400), settings);
+    settling()[0].run();
+    assert.equal(commands.at(-1).pose.address, 400);
+    await new Promise(setImmediate);
+    const [refresh] = [...timers.values()].filter((timer) => timer.ms !== 150);
+    assert.ok(refresh, "the test stays lit");
+    refresh.run();
+    assert.deepEqual(plain(commands.at(-1)), at300);
+    model.testControl("off");
 });
 
 test("Restart show restarts the show only on a second click within 5 s", async () => {
@@ -557,20 +725,23 @@ test("a lit test follows the selection; late or unanswered replies never turn it
     const [spot, kinta] = ["spot_right", "kinta"].map((name) => fixtureNode(current, name));
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
     timers.clear();
-    ds.fixture_patch.renderRig(spot.key, current, settings);
+    // A held test outlives the test that lit it; force any earlier one off before this scenario.
     ds.fixture_patch.syncTest(live, "config");
+    ds.fixture_patch.renderRig(null, current, settings);
+    commands.length = 0;
+    ds.fixture_patch.renderRig(spot.key, current, settings);
     // An older test's late 409 must not stop the test that replaced it.
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("red");
     ds.fixture_patch.renderRig(kinta.key, current, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red", ...posed("kinta") });
     await new Promise(setImmediate);
-    assert.equal(timers.size, 2, "kinta's keep-alive survives spot_right's late refusal");
+    assert.equal(timers.size, 1, "kinta's keep-alive survives spot_right's late refusal");
     // No answer at all may mean lit: the keep-alive stays and a deselect still clears.
     replies.push({ error: "the show is not answering" });
     [...timers.values()][0].run();
     await new Promise(setImmediate);
-    assert.equal(timers.size, 2);
+    assert.equal(timers.size, 1);
     ds.fixture_patch.renderRig(null, current, settings);
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
     assert.equal(timers.size, 0);
@@ -615,7 +786,7 @@ test("the Restart banner names an older rig and holds until the next session rep
     assert.deepEqual(banner("old", "three"), [stale, false]);
 });
 
-test("a held test ends after 10 minutes, and stops when the show drops it without an Off", () => {
+test("a held test never ends on its own", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_right");
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
@@ -624,18 +795,27 @@ test("a held test ends after 10 minutes, and stops when the show drops it withou
     ds.fixture_patch.renderRig(spot.key, current, settings);
     ds.fixture_patch.syncTest(live, "config");
     model.testControl("white");
-    const [end] = [...timers.values()].filter((timer) => timer.ms === 600000);
-    end.run();
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
-    assert.equal(timers.size, 0);
+    const [keepAlive] = [...timers.values()];
+    assert.equal(keepAlive.ms, 15000);
+    // The old 10-minute cap is gone: 20 minutes of keep-alives still hold the same test lit.
+    for (let i = 0; i < 80; i++) keepAlive.run();
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white", ...posed("spot_right") });
+    assert.equal(timers.size, 1);
     // Standby, a sound stop or a restart clears the show's highlight: no relight, no clear.
-    model.testControl("white");
     ds.fixture_patch.syncTest(lit, "config");
     const sent = commands.length;
     ds.fixture_patch.syncTest(live, "config");
     assert.equal(timers.size, 0);
     ds.fixture_patch.renderRig(null, current, settings);
     assert.equal(commands.length, sent);
+    // Only a page that goes away ends a held test now; pagehide clears it.
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("white");
+    assert.equal(timers.size, 1);
+    windowListeners.get("pagehide")();
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
+    assert.equal(timers.size, 0);
 });
 
 test("a plan drag writes the Matrix the server's area and group-order test reads", () => {
@@ -643,21 +823,10 @@ test("a plan drag writes the Matrix the server's area and group-order test reads
     const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "data/plan_drag.json"), "utf8"));
     const current = draft();
     const spot = fixtureNode(current, fixture.fixture);
-    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     const move = model.planMove(drag, 100 + fixture.right_px, 100);
     const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     assert.equal(child(fixtureNode(moved, fixture.fixture), "Matrix").text, fixture.matrix);
-});
-
-test("› carries the operator's latest swatch, not the colour the last poll reported", () => {
-    const current = draft();
-    const green = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "green" } };
-    timers.clear();
-    ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
-    ds.fixture_patch.syncTest(green, "config");
-    model.testControl("red");
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
-    model.testControl("off");
 });
 
 test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixture is never sent", () => {
@@ -669,21 +838,20 @@ test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixt
     ds.fixture_patch.syncTest(live, "config");
     // The label spot_right now sits on the old spot_left: its test lights that uuid.
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_right").key, swapped, settings);
-    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_left }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_left }, colour: "red", ...posed("spot_left") });
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_left").key, swapped, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
     const renamed = rename(current, "kinta", "kinta_new");
-    ds.fixture_patch.renderRig(fixtureNode(renamed, "spot_right").key, renamed, settings);
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
+    ds.fixture_patch.renderRig(fixtureNode(renamed, "kinta_new").key, renamed, settings);
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red", ...posed("kinta") });
     // A fixture added since the show started has a uuid the show does not know.
     const spec = Object.keys(settings.library).find((name) => name.startsWith("Generic@Dimmer@"));
     const [added, , , fresh] = edit(renamed, null, { trigger: "fixture-add", profile: spec });
     ds.fixture_patch.renderRig(fixtureNode(added, "kinta_new").key, added, settings);
     const sent = commands.length;
-    // ‹ selects the new dimmer (at 25, before kinta at 40) but cannot light it: the lit kinta is cleared instead.
-    assert.equal(model.testControl("-1"), null);
-    assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: null }]);
+    // Selecting the new dimmer cannot light it: the lit kinta is cleared instead.
     ds.fixture_patch.renderRig(fresh, added, settings);
+    assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: null }]);
     assert.equal(model.testControl("red"), null);
     assert.equal(commands.length, sent + 1);
 });

@@ -159,6 +159,26 @@ message SetActiveEffect {
   map<string, AttributeValue> attributes = 12;
   // Rendered on the target; a group absent from the rig renders nothing.
   SpecialFX special_fx = 13;
+  // Pan runs low soft limit to high and back, one cycle per 8 s, and tilt reaches the focus
+  // point's elevation, in place of both.
+  bool pan_sweep = 14;
+  // Pan and tilt throw the beam through the fixture's focus point, in place of both.
+  bool aim_focus = 15;
+  // The target fixture is patched and placed by this in place of the loaded rig's, so a test
+  // follows an edit before the show restarts. Only for a whole-fixture target.
+  FixturePose pose = 16;
+
+  // The rig Fixture's placement and patch fields, as the operator's unsaved patch has them. The
+  // universe must be one the rig uses, and the profile must keep the fixture's cells.
+  message FixturePose {
+    repeated double matrix = 1;
+    Fixture.MovementRange pan = 2;
+    Fixture.MovementRange tilt = 3;
+    repeated double focus = 4;
+    uint32 universe = 5;
+    uint32 address = 6;
+    string profile_id = 7;
+  }
 }
 
 // Fixture-agnostic accent; Starfire maps each axis onto the profiles' GDTF attribute families.

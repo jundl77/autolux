@@ -23,6 +23,8 @@ const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
+/// Slow enough to follow the beam by eye, inside even calm's movement slew limit.
+const PAN_SWEEP_SECONDS: f64 = 8.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -87,6 +89,8 @@ struct Crossfade {
 
 struct ActiveOverride {
     value: LightingOverride,
+    /// The rig with the override's pose in place, for its aim and the frame's encode.
+    posed: Option<FixtureRig>,
     cell_ids: Vec<String>,
     order: u64,
     expires_seconds: Option<f64>,
@@ -457,7 +461,14 @@ impl Engine {
 
         let mut encoded_states = states.clone();
         apply_software_strobe(time_seconds, &mut encoded_states);
-        let universes = match self.rig.encode(&encoded_states) {
+        // A test's pose stands in for its fixture's loaded placement; the newest pose wins.
+        let rig = self
+            .overrides
+            .values()
+            .filter_map(|active| active.posed.as_ref().map(|rig| (active.order, rig)))
+            .max_by_key(|(order, _)| *order)
+            .map_or(&self.rig, |(_, rig)| rig);
+        let universes = match rig.encode(&encoded_states) {
             Ok(universes) => universes,
             Err(error) => {
                 self.stop_on_script_error(&error);
@@ -677,6 +688,20 @@ impl Engine {
     ) -> Result<()> {
         validate_identifier(&value.id)?;
         validate_properties(&value.values)?;
+        ensure!(
+            !((value.pan_sweep || value.aim_focus)
+                && (value.values.pan.is_some() || value.values.tilt.is_some())),
+            "a pan sweep or focus aim replaces pan and tilt"
+        );
+        ensure!(
+            !(value.pan_sweep && value.aim_focus),
+            "a pan sweep and a focus aim exclude each other"
+        );
+        let posed = match (&value.pose, &value.target) {
+            (None, _) => None,
+            (Some(pose), Target::Fixture(fixture)) => Some(self.rig.posed(fixture, pose)?),
+            (Some(_), _) => anyhow::bail!("a pose needs a whole-fixture target"),
+        };
         if let Some(special) = &value.special_fx {
             special::validate(special)?;
         }
@@ -728,6 +753,7 @@ impl Engine {
             value.id.clone(),
             ActiveOverride {
                 value: value.clone(),
+                posed,
                 cell_ids,
                 order,
                 expires_seconds,
@@ -802,7 +828,7 @@ impl Engine {
                 (
                     (value.value.priority, value.order),
                     &value.cell_ids,
-                    Some(&value.value),
+                    Some((&value.value, value.posed.as_ref().unwrap_or(&self.rig))),
                     special,
                 )
             })
@@ -825,8 +851,18 @@ impl Engine {
                 let Some(state) = states.get_mut(id) else {
                     continue;
                 };
-                if let Some(value) = value {
+                if let Some((value, rig)) = value {
                     overlay_properties(&self.rig, id, state, &value.values);
+                    if (value.pan_sweep || value.aim_focus)
+                        && let Some((pan, tilt)) = rig.aim(id)
+                    {
+                        state.tilt = tilt;
+                        state.pan = if value.pan_sweep {
+                            pan_sweep_position(seconds)
+                        } else {
+                            pan
+                        };
+                    }
                     if let Some(multiplier) = value.intensity_multiplier {
                         state.intensity *= multiplier;
                     }
@@ -1031,6 +1067,13 @@ fn validate_properties(values: &PropertyValues) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Logical pan, so the encode applies the soft limits, yaw and mount exactly as for a loop.
+/// Phase follows the render clock, not the override, so a keep-alive re-send never jumps it.
+fn pan_sweep_position(seconds: f64) -> f64 {
+    let phase = (seconds / PAN_SWEEP_SECONDS).rem_euclid(1.0);
+    1.0 - (2.0 * phase - 1.0).abs()
 }
 
 /// Between layers the later one owns every channel it addresses.

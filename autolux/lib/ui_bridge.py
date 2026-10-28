@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -195,7 +196,57 @@ def _highlight_command(payload: dict) -> dict:
     colour = payload.get('colour', 'white')
     if colour not in HIGHLIGHT_COLOURS:
         raise ValueError(f'highlight colour must be one of {", ".join(HIGHLIGHT_COLOURS)}')
-    return {'target': dict(target), 'colour': colour}
+    sweep, aim = payload.get('sweep', False), payload.get('aim', False)
+    if type(sweep) is not bool or type(aim) is not bool:
+        raise ValueError('sweep and aim must be true or false')
+    if sweep and aim:
+        raise ValueError('a highlight sweeps or aims, not both')
+    if (sweep or aim) and 'fixture' not in target:
+        raise ValueError('sweep and aim move a whole fixture, not a cell')
+    pose = payload.get('pose')
+    if pose is not None:
+        if 'fixture' not in target:
+            raise ValueError('a pose places a whole fixture, not a cell')
+        _check_pose(pose)
+    return {'target': dict(target), 'colour': colour, 'sweep': sweep, 'aim': aim, 'pose': pose}
+
+
+def _check_pose(pose) -> None:
+    """Checked as a rig load checks a fixture, since Starfire stops the show on a pose it refuses."""
+    from autolux.lighting import mvr
+
+    def numbers(values, counts) -> bool:
+        return (
+            isinstance(values, list)
+            and len(values) in counts
+            and all(type(value) in (int, float) and math.isfinite(value) for value in values)
+        )
+
+    if (
+        not isinstance(pose, dict)
+        or pose.keys() != {'matrix', 'pan', 'tilt', 'focus', 'universe', 'address', 'gdtf_mode'}
+        or not numbers(pose['matrix'], (12,))
+        or not numbers(pose['focus'], (0, 3))
+        or type(pose['universe']) is not int
+        or type(pose['address']) is not int
+        or not 1 <= pose['address'] <= mvr.DMX_UNIVERSE_SIZE
+        or not isinstance(pose['gdtf_mode'], str)
+    ):
+        raise ValueError(
+            'a pose is {matrix: 12 numbers, pan, tilt, focus: [] or [x, y, z], universe, '
+            'address, gdtf_mode}'
+        )
+    mvr.home_orientation(pose['matrix'])
+    for axis in mvr.MOVEMENT_AXES:
+        limits = pose[axis]
+        if (
+            not isinstance(limits, dict)
+            or limits.keys() != {'min', 'max', 'inverted'}
+            or type(limits['inverted']) is not bool
+            or not numbers([limits['min'], limits['max']], (2,))
+            or not 0 <= limits['min'] <= limits['max'] <= 1
+        ):
+            raise ValueError(f'pose {axis} needs 0 <= min <= max <= 1 and inverted true or false')
 
 
 def command_refusal(
@@ -211,12 +262,20 @@ def command_refusal(
 
     if command['action'] == 'highlight' and command['target'] is not None:
         # Starfire answers an unknown fixture with an ErrorReply, which stops the show.
-        fixtures = (
-            (f['fixture_uuid'], f['name'], f['cells']) for f in (rig or {}).get('fixtures', ())
-        )
-        if not names_target(fixtures, command['target']):
+        fixtures = (rig or {}).get('fixtures', ())
+        listed = ((f['fixture_uuid'], f['name'], f['cells']) for f in fixtures)
+        if not names_target(listed, command['target']):
             ((kind, name),) = command['target'].items()
             return f'no {kind} {name!r} in the running rig'
+        if command['sweep'] or command['aim']:
+            fixture = next(f for f in fixtures if f['fixture_uuid'] == command['target']['fixture'])
+            if not fixture['pan']:
+                return f'{fixture["name"]} has no pan'
+        if command['pose'] is not None:
+            from autolux.lighting.fixture_setup import pose_refusal
+
+            if refusal := pose_refusal(rig, command['target']['fixture'], command['pose']):
+                return refusal
         if paused:
             return 'the show is paused'
         if (static or {}).get('blackout'):

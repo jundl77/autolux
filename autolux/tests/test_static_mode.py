@@ -513,9 +513,15 @@ HALL = StaticRig(
     groups=('wash',),
     uv_groups=('wash',),
     # Labels differ from uuids, so a target can only match by uuid.
-    fixtures=(('par', 'front', ('par',)), ('bar', 'strip', ('bar/a', 'bar/b'))),
+    fixtures=(
+        ('par', 'front', ('par',)),
+        ('bar', 'strip', ('bar/a', 'bar/b')),
+        ('spot', 'mover', ('spot',)),
+    ),
     uv_targets=('par',),
+    pan_targets=('spot',),
 )
+STILL = {'sweep': False, 'aim': False}
 
 
 def highlight_looks():
@@ -545,8 +551,31 @@ def test_a_highlight_is_one_open_white_override_at_home_with_uv_zeroed_and_a_dea
             },
         }
     ]
-    assert looks.highlighted == {'target': {'fixture': 'par'}, 'colour': 'white'}
+    assert looks.highlighted == {'target': {'fixture': 'par'}, 'colour': 'white', **STILL}
     assert not looks.active, 'a Locate must not hold the automatic show'
+
+
+@pytest.mark.parametrize(
+    ('motion', 'flag', 'values'),
+    [('sweep', 'pan_sweep', {}), ('aim', 'aim_focus', {})],
+)
+def test_a_mover_sweeps_or_aims_through_starfire_in_place_of_the_home_pan(motion, flag, values):
+    looks, lighting = highlight_looks()
+    looks.highlight({'fixture': 'spot'}, 'red', **{motion: True})
+    sent = overrides(lighting)[-1]['value']
+    assert sent[flag] is True
+    assert sent['values'] == {
+        'intensity': 1.0,
+        'colour': {'red': 1.0, 'green': 0.0, 'blue': 0.0},
+        'strobe_hz': 0.0,
+        **values,
+    }
+    assert looks.highlighted == {
+        'target': {'fixture': 'spot'},
+        'colour': 'red',
+        **STILL,
+        motion: True,
+    }
 
 
 def test_testing_another_fixture_moves_the_one_highlight_and_clear_releases_it():
@@ -559,7 +588,7 @@ def test_testing_another_fixture_moves_the_one_highlight_and_clear_releases_it()
         {'fixture': 'bar/b'},
         False,
     )
-    assert looks.highlighted == {'target': {'cell': 'bar/b'}, 'colour': 'red'}
+    assert looks.highlighted == {'target': {'cell': 'bar/b'}, 'colour': 'red', **STILL}
     looks.clear_highlight()
     looks.clear_highlight()
     assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': HIGHLIGHT_ID}
@@ -572,11 +601,25 @@ def test_the_highlight_state_lapses_with_starfires_60_s_expiry_on_the_engine_clo
     looks = StaticLooks(lighting, HALL, clock=clock)
     looks.highlight({'fixture': 'par'})
     clock.advance(59.9)
-    assert looks.highlighted == {'target': {'fixture': 'par'}, 'colour': 'white'}
+    assert looks.highlighted == {'target': {'fixture': 'par'}, 'colour': 'white', **STILL}
     clock.advance(0.1)
     assert looks.highlighted is None
     looks.clear_highlight()
     assert overrides(lighting)[-1]['kind'] == 'set_override', 'Starfire already dropped it'
+
+
+def test_the_pages_keep_alive_holds_the_highlight_state_past_ten_minutes_with_no_cap():
+    clock, lighting = VirtualClock(), RecordingStarfireClient()
+    looks = StaticLooks(lighting, HALL, clock=clock)
+    aim = {'target': {'fixture': 'spot'}, 'colour': 'red', 'sweep': False, 'aim': True}
+    for _ in range(60):
+        looks.highlight(aim['target'], 'red', aim=True)
+        clock.advance(15.0)
+        assert looks.highlighted == aim
+    clock.advance(44.9)
+    assert looks.highlighted == aim
+    clock.advance(0.1)
+    assert looks.highlighted is None, 'a page that stopped refreshing lapses with the dead-man'
 
 
 @pytest.mark.parametrize(
@@ -599,6 +642,10 @@ def test_each_highlight_swatch_sends_its_colour(colour, rgb):
         ({'fixture': 'par'}, 'uv', False, False, 'unknown highlight colour'),
         ({'fixture': 'par'}, 'white', True, False, 'the show is paused'),
         ({'fixture': 'par'}, 'white', False, True, 'blackout is on'),
+        ({'fixture': 'par'}, 'sweep', False, False, 'has no pan'),
+        ({'cell': 'bar/a'}, 'aim', False, False, 'has no pan'),
+        ({'fixture': 'spot'}, 'both', False, False, 'not both'),
+        ({'cell': 'bar/a'}, 'posed', False, False, 'whole fixture'),
     ],
 )
 def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
@@ -607,8 +654,16 @@ def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
     looks, lighting = highlight_looks()
     looks.set_blackout(blackout)
     lighting.events.clear()
+    # A motion row lights white and asks for that motion; 'both' asks for the two at once.
+    motions = {
+        'sweep': {'sweep': True},
+        'aim': {'aim': True},
+        'both': {'sweep': True, 'aim': True},
+        'posed': {'pose': {}},
+    }
+    motion = motions.get(colour, {})
     with pytest.raises(ValueError, match=reason):
-        looks.highlight(target, colour, paused=paused)
+        looks.highlight(target, 'white' if motion else colour, paused=paused, **motion)
     assert lighting.events == []
 
 
@@ -622,7 +677,13 @@ async def test_the_published_highlight_ends_at_standby_sound_stop_and_expiry_and
     control = ShowControl(tmp_path / 'show.json', buffer)
     light, _, clock, lighting = static_engine()
     light.static_looks = StaticLooks(lighting, HALL, clock=clock)
-    locate = {'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white'}
+    locate = {
+        'action': 'highlight',
+        'target': {'fixture': 'par'},
+        'colour': 'white',
+        **STILL,
+        'pose': None,
+    }
 
     async def published(command=None):
         control.commands.put_nowait(command or {'action': 'master', 'level': 1.0})
@@ -659,13 +720,23 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
         await control.apply_pending(light)
         return buffer.snapshot()
 
-    snapshot = await apply({'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'blue'})
-    assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue'}
+    snapshot = await apply(
+        {
+            'action': 'highlight',
+            'target': {'cell': 'bar/a'},
+            'colour': 'blue',
+            **STILL,
+            'pose': None,
+        }
+    )
+    assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue', **STILL}
     assert snapshot['rig'] == {
         'fixtures': [
-            {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par']},
-            {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a', 'bar/b']},
-        ]
+            {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par'], 'pan': False},
+            {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a', 'bar/b'], 'pan': False},
+            {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True},
+        ],
+        'modes': {},
     }
     assert snapshot['mode'] == 'auto'
     assert (await apply({'action': 'highlight', 'target': None}))['highlight'] is None
@@ -679,7 +750,15 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
     ]
     for clear in clears:
         await light.resume()
-        await apply({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white'})
+        await apply(
+            {
+                'action': 'highlight',
+                'target': {'fixture': 'par'},
+                'colour': 'white',
+                **STILL,
+                'pose': None,
+            }
+        )
         assert light.static_looks.highlighted is not None
         lighting.events.clear()
         result = clear()
@@ -689,5 +768,13 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
         assert {'kind': 'clear_override', 'id': HIGHLIGHT_ID} in overrides(lighting)
 
     await apply({'action': 'pause'})
-    snapshot = await apply({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white'})
+    snapshot = await apply(
+        {
+            'action': 'highlight',
+            'target': {'fixture': 'par'},
+            'colour': 'white',
+            **STILL,
+            'pose': None,
+        }
+    )
     assert snapshot['highlight'] is None, 'paused, the engine refuses what the bridge let through'

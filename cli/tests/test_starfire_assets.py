@@ -58,7 +58,7 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert list(fixture.matrix[:3]) == [-1, 0, 0]
     assert login.rig.groups[0].group_id == 'movers'
     assert login.rig.groups[0].fixture_uuids == [fixture.fixture_uuid]
-    [profile] = login.rig.profiles
+    [profile] = [profile for profile in login.rig.profiles if profile.dmx_mode == '16 bit']
     assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
     script = login.autoloops[0]
@@ -286,11 +286,45 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     assert cells['zq06017'] == tuple(f'{ids["zq06017"]}/Beam Segment {n}' for n in range(1, 9))
     washes = ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
     assert rig.uv_targets == tuple(ids[name] for name in washes)
+    assert rig.pan_targets == (ids['spot_left'], ids['spot_right'])
     lighting = RecordingStarfireClient()
     looks = StaticLooks(lighting, rig)
     looks.highlight({'fixture': ids['wash_left']}, 'warm')
     looks.highlight({'cell': cells['zq06017'][2]})
-    wash, segment = (protocol.build_command(event['command']) for event in lighting.events)
+    looks.highlight({'fixture': ids['spot_left']}, sweep=True)
+    pose = {
+        'matrix': [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 100.0, 200.0, 3000.0],
+        'pan': {'min': 0.1, 'max': 0.8, 'inverted': True},
+        'tilt': {'min': 0.0, 'max': 1.0, 'inverted': False},
+        'focus': [0.0, 2000.0, 0.0],
+        'universe': 0,
+        'address': 300,
+        'gdtf_mode': '12ch',
+    }
+    looks.highlight({'fixture': ids['spot_left']}, aim=True, pose=pose)
+    wash, segment, sweep, aim = (
+        protocol.build_command(event['command']) for event in lighting.events
+    )
+    moved = (sweep.pan_sweep, sweep.HasField('pan'), sweep.HasField('tilt'), aim.aim_focus)
+    assert moved == (True, False, False, True)
+    # The pose reaches Starfire in the rig's own Fixture terms.
+    assert (list(aim.pose.matrix), list(aim.pose.focus), aim.HasField('tilt')) == (
+        pose['matrix'],
+        pose['focus'],
+        False,
+    )
+    assert (aim.pose.pan.minimum, aim.pose.pan.inverted, aim.pose.HasField('tilt')) == (
+        0.1,
+        True,
+        False,
+    )
+    # The mode reaches Starfire as the profile the login compiled for it.
+    assert (aim.pose.universe, aim.pose.address, aim.pose.profile_id) == (
+        0,
+        300,
+        'Chauvet DJ@Intimidator Spot 110@1.0.gdtf#12ch',
+    )
+    assert not sweep.HasField('pose')
     assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (
         ids['wash_left'],
         0.0,

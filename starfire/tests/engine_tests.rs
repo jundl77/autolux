@@ -76,6 +76,9 @@ fn lighting_override(id: &str, values: PropertyValues) -> LightingOverride {
         lifetime: OverrideLifetime::UntilCleared,
         priority: 0,
         special_fx: None,
+        pan_sweep: false,
+        aim_focus: false,
+        pose: None,
     }
 }
 
@@ -758,6 +761,36 @@ fn script_error_while_interrupting_a_fade_stops_the_existing_show() {
         stopped.fixture_properties_before_strobe["left"].intensity,
         0.0,
     );
+}
+
+#[test]
+fn a_seconds_override_re_sent_as_a_keep_alive_holds_past_ten_minutes_then_lapses() {
+    let mut engine = engine(&[("constant", CONSTANT)]);
+    select(&mut engine, 0.0, "constant", Transition::Cut);
+    let mut held = lighting_override(
+        "highlight",
+        PropertyValues {
+            intensity: Some(0.8),
+            ..Default::default()
+        },
+    );
+    held.lifetime = OverrideLifetime::Seconds {
+        duration_seconds: 60.0,
+    };
+    let left = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity
+    };
+    for tick in 0..=60 {
+        let at = f64::from(tick) * 15.0;
+        set_override(&mut engine, at, held.clone());
+        near(left(&mut engine, at + 14.999), 0.8);
+    }
+    near(left(&mut engine, 900.0 + 59.999), 0.8);
+    assert!((left(&mut engine, 960.0) - 0.8).abs() > 0.1);
 }
 
 #[test]

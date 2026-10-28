@@ -90,8 +90,32 @@ label. A fixture added in Config gets a fresh uuid, which the show learns only a
 show**; until then the Config tab does not test it.
 
 The show runs one fixture test at a time, so two open dashboards share it: a test from one moves
-or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it
-(standby, sound stop, restart) the page stops holding it rather than relighting it.
+or clears the other's. A test stays lit, through edits and with the window in the background,
+until you turn it off, close or change the selection, leave the Config tab, pause or close the
+page. The page re-sends it every 15 s; Starfire's 60 s dead-man only ends a test whose page
+vanished. When the show drops it (standby, sound stop, restart) the page stops holding it rather
+than relighting it.
+
+A mover's test row also has **Sweep** and **Aim**, which move the head through the same logical
+pan as the show, so yaw, mount and soft limits apply exactly as in a loop. Sweep: the beam should
+trace the arc drawn on the plan, tilted to the focus point's elevation; if it sweeps the other
+way the yaw is wrong. Aim: the beam should pass through the focus point; if it points elsewhere,
+the yaw or mount is wrong.
+
+Focus point: the MVR focus point the fixture aims at; Aim points at it. A mover's Placement has a
+**Focus point (mm)** row in scene coordinates. Until it is edited it shows the default, the
+stage centre on the floor (the middle of the fixtures' plan bounding box, where every head without
+a focus point converges), and the MVR has no FocusPoint; the first edit adds
+one beside the fixture and points the fixture's Focus at it.
+
+Edits reach the lit fixture instantly while testing; Save writes the patch; Restart show makes the
+loops use it. Every test of a fixture carries the unsaved placement (Matrix, soft limits, inversion
+and focus point), and an edit to it re-sends the lit test within 150 ms, so Aim and Sweep follow a
+yaw, mount or focus change at once. The test carries the unsaved Address, Universe and Mode too, so
+it lights the new slots in the new mode's layout and the old ones go dark; an address that leaves
+the universe or overlaps a fixture where the show runs it, a universe the show does not output, or a
+mode with other cells or fewer attributes is refused in the status line and the previous test
+stays lit. Only the test sees the unsaved pose; the loops keep the rig the show loaded.
 
 Tests pin no geometry from `rig/room.mvr`: they use the frozen copies
 `autolux/tests/data/room.mvr` and `room.rig.pb` (Starfire's tests embed the same `room.rig.pb`),

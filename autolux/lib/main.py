@@ -181,7 +181,12 @@ class ShowControl:
                     looks.clear_highlight()
                 else:
                     looks.highlight(
-                        command['target'], command['colour'], paused=light_engine.paused
+                        command['target'],
+                        command['colour'],
+                        sweep=command['sweep'],
+                        aim=command['aim'],
+                        pose=command['pose'],
+                        paused=light_engine.paused,
                     )
             except ValueError as error:
                 LOGGER.warning('[main] highlight refused: %s', error)
@@ -260,12 +265,7 @@ class ShowControl:
                 mode=light_engine.mode,
                 static=light_engine.static_looks.state(),
                 highlight=light_engine.static_looks.highlighted,
-                rig={
-                    'fixtures': [
-                        {'fixture_uuid': fixture_uuid, 'name': name, 'cells': list(cells)}
-                        for fixture_uuid, name, cells in light_engine.static_looks.rig.fixtures
-                    ]
-                },
+                rig=light_engine.static_looks.rig.published(),
             )
 
 

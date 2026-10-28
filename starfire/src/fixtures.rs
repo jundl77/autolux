@@ -3,11 +3,14 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 
 use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::{GdtfCell, GdtfProfile};
-use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
+use crate::model::{
+    AttributeValue, DMX_CHANNELS, FixturePose, FixtureState, FixtureStates, MovementRange, Rgb,
+    Target,
+};
 use crate::protocol::{MAX_LOGIN_BYTES, wire};
 use crate::spatial::{Position, Spatial};
 use prost::Message;
@@ -30,40 +33,71 @@ struct FixturePatch {
     profile: String,
     universe: u16,
     address: usize,
+    placement: Placement,
+    declared_cells: Vec<wire::fixture::Cell>,
+    cells: Vec<String>,
+    area: wire::StageArea,
+}
+
+/// What pan, tilt and aim read of a fixture's pose.
+#[derive(Clone, Debug)]
+struct Placement {
     pan: MovementRange,
     tilt: MovementRange,
     pan_offset_degrees: f64,
     tilt_offset_degrees: f64,
     reversed: bool,
-    declared_cells: Vec<wire::fixture::Cell>,
-    cells: Vec<String>,
     position: Position,
-    area: wire::StageArea,
+    /// None aims at the rig's stage centre: MVR's Focus is optional.
+    focus: Option<Position>,
 }
 
-#[derive(Clone, Debug)]
-struct MovementRange {
-    min: f64,
-    max: f64,
-    inverted: bool,
-}
-
-impl Default for MovementRange {
-    fn default() -> Self {
-        Self {
-            min: 0.0,
-            max: 1.0,
-            inverted: false,
-        }
+impl Placement {
+    fn from_wire(fixture: &wire::Fixture) -> Result<Self> {
+        let home = home_orientation(&fixture.matrix)?;
+        let pan = MovementRange::from_wire(&fixture.pan);
+        let tilt = MovementRange::from_wire(&fixture.tilt);
+        pan.validate().context("pan bounds")?;
+        tilt.validate().context("tilt bounds")?;
+        // The Matrix's o row; an empty Matrix is identity, at the origin.
+        let position = fixture
+            .matrix
+            .get(9..12)
+            .map_or([0.0; 3], |o| [o[0], o[1], o[2]]);
+        let focus = match fixture.focus[..] {
+            [] => None,
+            [x, y, z] if [x, y, z].iter().all(|value| value.is_finite()) => Some([x, y, z]),
+            _ => bail!("focus must be three finite numbers"),
+        };
+        Ok(Self {
+            pan,
+            tilt: MovementRange {
+                inverted: tilt.inverted ^ home.reversed,
+                ..tilt
+            },
+            pan_offset_degrees: home.pan_offset_degrees,
+            tilt_offset_degrees: home.tilt_offset_degrees,
+            reversed: home.reversed,
+            position,
+            focus,
+        })
     }
 }
 
 impl MovementRange {
-    fn from_wire(value: &Option<wire::fixture::MovementRange>) -> Self {
+    pub fn from_wire(value: &Option<wire::fixture::MovementRange>) -> Self {
         value.as_ref().map_or_else(Self::default, |value| Self {
             min: value.minimum.unwrap_or(0.0),
             max: value.maximum.unwrap_or(1.0),
             inverted: value.inverted,
+        })
+    }
+
+    fn to_wire(&self) -> Option<wire::fixture::MovementRange> {
+        Some(wire::fixture::MovementRange {
+            minimum: Some(self.min),
+            maximum: Some(self.max),
+            inverted: self.inverted,
         })
     }
 
@@ -81,6 +115,21 @@ impl MovementRange {
             position
         };
         self.min + position * (self.max - self.min)
+    }
+
+    /// The logical position `map` sends nearest to `physical`, held inside the soft limits.
+    fn unmap(&self, physical: f64) -> f64 {
+        let span = self.max - self.min;
+        let position = if span > 0.0 {
+            ((physical - self.min) / span).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        if self.inverted {
+            1.0 - position
+        } else {
+            position
+        }
     }
 }
 
@@ -158,6 +207,29 @@ pub struct FixtureRig {
     cells: BTreeMap<String, (usize, usize)>,
     names: BTreeMap<String, usize>,
     spatial: Spatial,
+    stage_centre: Position,
+    /// Every frame carries these, so the slots a test pose moves a fixture off go dark.
+    universes: BTreeSet<u16>,
+    /// The login rig a test pose is patched into.
+    definition: wire::RigDefinition,
+}
+
+/// The centre of the fixtures' plan bounding box on the floor, the box the stage areas are cut
+/// from, so every head without a focus point converges on one spot.
+fn stage_centre(fixtures: &[FixturePatch]) -> Position {
+    let centre = |axis: usize| {
+        let values = fixtures
+            .iter()
+            .map(|fixture| fixture.placement.position[axis]);
+        let low = values.clone().fold(f64::INFINITY, f64::min);
+        let high = values.fold(f64::NEG_INFINITY, f64::max);
+        if low.is_finite() {
+            (low + high) / 2.0
+        } else {
+            0.0
+        }
+    };
+    [centre(0), centre(1), 0.0]
 }
 
 /// A single-cell fixture's cell is the fixture itself; other cells are named after their geometry.
@@ -175,11 +247,6 @@ impl FixtureRig {
             .fixtures
             .iter()
             .map(|fixture| -> Result<_> {
-                let home = home_orientation(&fixture.matrix)
-                    .with_context(|| format!("fixture {}", fixture.name))?;
-                let pan = MovementRange::from_wire(&fixture.pan);
-                let mut tilt = MovementRange::from_wire(&fixture.tilt);
-                tilt.inverted ^= home.reversed;
                 Ok(FixturePatch {
                     fixture_uuid: fixture.fixture_uuid.clone(),
                     name: fixture.name.clone(),
@@ -187,18 +254,10 @@ impl FixtureRig {
                     universe: u16::try_from(fixture.universe)
                         .context("fixture universe exceeds range")?,
                     address: fixture.address as usize,
-                    pan,
-                    tilt,
-                    pan_offset_degrees: home.pan_offset_degrees,
-                    tilt_offset_degrees: home.tilt_offset_degrees,
-                    reversed: home.reversed,
+                    placement: Placement::from_wire(fixture)
+                        .with_context(|| format!("fixture {}", fixture.name))?,
                     declared_cells: fixture.cells.clone(),
                     cells: Vec::new(),
-                    // The Matrix's o row; an empty Matrix is identity, at the origin.
-                    position: fixture
-                        .matrix
-                        .get(9..12)
-                        .map_or([0.0; 3], |o| [o[0], o[1], o[2]]),
                     area: Some(fixture.area())
                         .filter(|&area| area != wire::StageArea::Unspecified)
                         .with_context(|| format!("fixture {} has no stage area", fixture.name))?,
@@ -242,7 +301,9 @@ impl FixtureRig {
                 profile.profile_id
             );
         }
-        Self::from_parts(fixtures, groups, accent_groups, profiles)
+        let mut built = Self::from_parts(fixtures, groups, accent_groups, profiles)?;
+        built.definition = rig.clone();
+        Ok(built)
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -338,14 +399,6 @@ impl FixtureRig {
                     patch.universe
                 );
             }
-            patch
-                .pan
-                .validate()
-                .with_context(|| format!("fixture {} pan bounds", patch.name))?;
-            patch
-                .tilt
-                .validate()
-                .with_context(|| format!("fixture {} tilt bounds", patch.name))?;
         }
         ensure!(
             cells.len() <= MAX_CELLS,
@@ -397,7 +450,7 @@ impl FixtureRig {
             })
         };
         let positions = placed()
-            .map(|(id, fixture)| (id, fixture.position))
+            .map(|(id, fixture)| (id, fixture.placement.position))
             .collect();
         let areas = placed().map(|(id, fixture)| (id, fixture.area)).collect();
         let spatial = Spatial::new(positions, areas, &cell_groups, |cell| {
@@ -419,6 +472,9 @@ impl FixtureRig {
             .cloned()
             .collect();
         Ok(Self {
+            stage_centre: stage_centre(&fixtures),
+            universes: fixtures.iter().map(|fixture| fixture.universe).collect(),
+            definition: wire::RigDefinition::default(),
             fixtures,
             groups: cell_groups,
             accent_groups,
@@ -509,6 +565,75 @@ impl FixtureRig {
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
     }
 
+    /// The rig with one fixture patched and placed as `pose` has it, built and checked as the
+    /// login rig is. Its cells stay those the show's states are keyed by.
+    pub fn posed(&self, fixture_uuid: &str, pose: &FixturePose) -> Result<Self> {
+        let mut definition = self.definition.clone();
+        let fixture = definition
+            .fixtures
+            .iter_mut()
+            .find(|fixture| fixture.fixture_uuid == fixture_uuid)
+            .with_context(|| format!("a pose needs a fixture uuid, not {fixture_uuid}"))?;
+        ensure!(
+            u16::try_from(pose.universe).is_ok_and(|universe| self.universes.contains(&universe)),
+            "universe {} is not one the show outputs",
+            pose.universe
+        );
+        fixture.matrix.clone_from(&pose.matrix);
+        fixture.pan = pose.pan.to_wire();
+        fixture.tilt = pose.tilt.to_wire();
+        fixture.focus.clone_from(&pose.focus);
+        fixture.universe = pose.universe;
+        fixture.address = pose.address;
+        fixture.profile_id.clone_from(&pose.profile_id);
+        fixture.cells.clear();
+        let mut rig = Self::from_wire(&definition).context("pose")?;
+        ensure!(
+            rig.cells.keys().eq(self.cells.keys()),
+            "a pose's mode must keep the fixture's cells"
+        );
+        rig.universes.clone_from(&self.universes);
+        Ok(rig)
+    }
+
+    /// Logical pan and tilt throwing the beam through the fixture's focus point. None for a
+    /// cell without a pan range.
+    pub fn aim(&self, cell_id: &str) -> Option<(f64, f64)> {
+        let fixture = &self.fixtures[self.cells.get(cell_id)?.0];
+        let placement = &fixture.placement;
+        let focus = placement.focus.unwrap_or(self.stage_centre);
+        let [x, y, z] = [0, 1, 2].map(|axis| focus[axis] - placement.position[axis]);
+        // The scene heading clockwise from +Y the encode reads a logical pan as, and the lean
+        // off the pan axis, which runs down from a hanging head and up from a standing one.
+        let heading_degrees = x.atan2(y).to_degrees();
+        let lean_degrees = x
+            .hypot(y)
+            .atan2(if placement.reversed { z } else { -z })
+            .to_degrees();
+        let profile = self.profile(cell_id)?;
+        let (from, to) = profile
+            .movement_range("Pan")
+            .filter(|(from, to)| from != to)?;
+        // A range past a full turn reaches the heading more than once; take the copy nearest
+        // the middle of the soft limits.
+        let turn = FULL_TURN_DEGREES / (to - from);
+        let position = (heading_degrees - from) / (to - from);
+        let centre = (placement.pan.min + placement.pan.max) / 2.0;
+        let position = position + ((centre - position) / turn).round() * turn;
+        // The encode mirrors a standing head itself, so the lean is the hanging one.
+        let hanging_tilt = MovementRange {
+            inverted: placement.tilt.inverted ^ placement.reversed,
+            ..placement.tilt.clone()
+        };
+        let tilt = profile
+            .movement_range("Tilt")
+            .filter(|(from, to)| from != to)
+            .map_or(0.5, |(from, to)| {
+                hanging_tilt.unmap(0.5 + lean_degrees / (to - from))
+            });
+        Some((placement.pan.unmap(position), tilt))
+    }
+
     pub fn uuid_of_cell(&self, cell_id: &str) -> Option<&str> {
         let &(fixture, _) = self.cells.get(cell_id)?;
         Some(&self.fixtures[fixture].fixture_uuid)
@@ -576,7 +701,11 @@ impl FixtureRig {
             states.len() == self.cells.len(),
             "cell state does not match rig"
         );
-        let mut universes = BTreeMap::new();
+        let mut universes: BTreeMap<_, _> = self
+            .universes
+            .iter()
+            .map(|&universe| (universe, vec![0; DMX_CHANNELS]))
+            .collect();
         for fixture in &self.fixtures {
             let cells = &self.profiles[&fixture.profile];
             let profile = &cells[0].profile;
@@ -586,26 +715,28 @@ impl FixtureRig {
             let start = fixture.address - 1;
             let pan_range = profile.movement_range("Pan");
             let tilt_range = profile.movement_range("Tilt");
+            let placement = &fixture.placement;
             let pan = |position| {
-                let position = fixture.pan.map(position);
+                let position = placement.pan.map(position);
                 pan_range.map_or(position, |(from, to)| {
-                    if fixture.reversed {
-                        // Standing turns pan the other way round and tilt flips the beam a half
-                        // turn, so heading L needs head angle 180 - L - yaw: the mirror of the
-                        // whole range, then this offset, canonical like the yaw.
+                    if placement.reversed {
+                        // Standing turns pan the other way round about physical 0 and the
+                        // reversed tilt throws the beam a half turn, so heading L needs
+                        // 180 - L - yaw: the mirror of the whole range, then this offset,
+                        // canonical like the yaw.
                         let offset = HALF_TURN_DEGREES
-                            - (from + to + fixture.pan_offset_degrees)
+                            - (placement.pan_offset_degrees + from + to)
                                 .rem_euclid(FULL_TURN_DEGREES);
                         offset_pan(1.0 - position, offset, from, to)
                     } else {
-                        offset_pan(position, fixture.pan_offset_degrees, from, to)
+                        offset_pan(position, placement.pan_offset_degrees, from, to)
                     }
                 })
             };
             let tilt = |position| {
-                let position = fixture.tilt.map(position);
+                let position = placement.tilt.map(position);
                 tilt_range.map_or(position, |(from, to)| {
-                    offset_tilt(position, fixture.tilt_offset_degrees, from, to)
+                    offset_tilt(position, placement.tilt_offset_degrees, from, to)
                 })
             };
             let cell_states = fixture
