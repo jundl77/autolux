@@ -116,7 +116,7 @@
         if (!row || (active.name === row && active.group === target)) {
             return null;
         }
-        return {action: 'static_fx', row: row, target: target};
+        return {action: 'static', kind: 'special_fx', row: row, target: target};
     }
 
     const build = {

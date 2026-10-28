@@ -433,7 +433,9 @@ async def test_a_picked_row_survives_section_changes_and_fx_auto_off(tmp_path):
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
     lighting.groups = lambda: [FX_GROUP]
     await beat_at_phase(light, decoder, 0, decision='breakdown')
-    control.commands.put_nowait({'action': 'static_fx', 'row': 'drift', 'target': 'all'})
+    control.commands.put_nowait(
+        {'action': 'static', 'kind': 'special_fx', 'row': 'drift', 'target': 'all'}
+    )
     await control.apply_pending(light)
     assert light.mode == 'static'
     assert light.static_looks.state()['special_fx'] == {'name': 'drift', 'group': 'all'}

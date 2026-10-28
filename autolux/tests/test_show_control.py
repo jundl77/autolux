@@ -359,12 +359,12 @@ def test_a_static_colour_that_is_not_hex_never_reaches_the_controller():
 
 def test_the_static_special_command_reaches_the_controller_queue_as_parsed(static_show):
     poller, commands = static_show
-    command = {'action': 'static_fx', 'row': 'drift', 'target': 'fx'}
-    assert poller.control(command) == {'accepted': 'static_fx'}
+    command = {'action': 'static', 'kind': 'special_fx', 'row': 'drift', 'target': 'fx'}
+    assert poller.control(command) == {'accepted': 'static'}
     assert commands.get_nowait() == command
     assert (
         'needs a row and a target'
-        in poller.control({'action': 'static_fx', 'row': 'drift'})['error']
+        in poller.control({'action': 'static', 'kind': 'special_fx', 'row': 'drift'})['error']
     )
     assert poller.control({'action': 'static', 'kind': 'special_fx_clear'}) == {
         'accepted': 'static'
@@ -623,6 +623,7 @@ def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_
 
 
 FX_ROWS = {'all': ['cold_drift', 'drift', 'spin'], 'fx': ['cold_drift', 'drift'], 'wash': []}
+SPECIAL_FX = {'action': 'static', 'kind': 'special_fx'}
 FX_STATE = {
     **STATIC_STATE,
     'static': {
@@ -633,8 +634,8 @@ FX_STATE = {
 }
 # (picked row, static target, the command the show must receive or None)
 FX_PICKS = [
-    ('cold_drift', 'fx', {'action': 'static_fx', 'row': 'cold_drift', 'target': 'fx'}),
-    ('drift', 'all', {'action': 'static_fx', 'row': 'drift', 'target': 'all'}),
+    ('cold_drift', 'fx', {**SPECIAL_FX, 'row': 'cold_drift', 'target': 'fx'}),
+    ('drift', 'all', {**SPECIAL_FX, 'row': 'drift', 'target': 'all'}),
     # The row already held there: a poll syncing the picker must not re-fire it.
     ('drift', 'fx', None),
     (None, 'fx', None),
@@ -761,7 +762,7 @@ def test_a_picked_fx_row_is_sent_once_and_clear_fx_empties_the_picker_in_the_bro
         'console.log(JSON.stringify([sent, a, b, c]));'
     )
     assert sent == [
-        {'action': 'static_fx', 'row': 'cold_drift', 'target': 'fx'},
+        {**SPECIAL_FX, 'row': 'cold_drift', 'target': 'fx'},
         {'action': 'static', 'kind': 'special_fx_clear'},
     ]
     assert (picked, synced, cleared) == ('same', 'same', None)

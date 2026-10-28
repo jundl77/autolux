@@ -491,7 +491,7 @@ const SUITES = {
         await action('static pars red', 'click', () => click('#static-preset-red'),
             {expect: [{action: 'static', kind: 'look', target: 'pars'}], look: has('static-preset-red', 'active'), watch: 2500});
         await action('static FX picker', 'Colour chase on pars', () => click('#static-fx-row label:nth-child(1)'),
-            {expect: [{action: 'static_fx', row: 'colour_chase', target: 'pars'}],
+            {expect: [{action: 'static', kind: 'special_fx', row: 'colour_chase', target: 'pars'}],
                 look: `document.querySelector('#static-fx-row label[aria-selected="true"] input')?.value === 'colour_chase'`});
         await check('FX row', 'names the held static FX', (await text('#status-fx .status-text')) === 'Static · Colour chase · pars',
             {fx: await text('#status-fx')});

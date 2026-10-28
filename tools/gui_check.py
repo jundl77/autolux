@@ -136,8 +136,6 @@ class StubShow:
                 settings.update(c['settings'])
             elif a == 'palette':
                 s['palette'] = {'name': c['name'], 'pinned': c['name'] != 'auto'}
-            elif a == 'static_fx':
-                static['special_fx'] = {'name': c['row'], 'group': c['target']}
             elif a == 'static':
                 self._apply_static(static, c)
 
@@ -146,6 +144,8 @@ class StubShow:
         kind = c['kind']
         if kind == 'clear':
             static.update(looks={}, special_fx=None, blackout=False)
+        elif kind == 'special_fx':
+            static['special_fx'] = {'name': c['row'], 'group': c['target']}
         elif kind == 'special_fx_clear':
             static['special_fx'] = None
         elif kind == 'preset':
