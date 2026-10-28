@@ -136,3 +136,14 @@ def test_renderer_settings_and_a_default_transition_use_the_replay_command_shape
         {'kind': 'set_strobe_max_rate_hz', 'hz': 6.0},
         {'kind': 'set_strobe_max_burst_seconds', 'seconds': 3.0},
     ]
+
+
+def test_an_unset_names_an_instantaneous_release_only_when_asked():
+    calls = []
+    client = StarfireClient(calls.append)
+    client.clear_override('special')
+    client.clear_override('special', instantaneous_release=True)
+    assert calls == [
+        {'kind': 'clear_override', 'id': 'special'},
+        {'kind': 'clear_override', 'id': 'special', 'instantaneous_release': True},
+    ]

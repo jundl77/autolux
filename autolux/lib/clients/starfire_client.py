@@ -96,8 +96,11 @@ class StarfireClient:
             }
         )
 
-    def clear_override(self, override_id: str) -> None:
-        self._send_command({'kind': 'clear_override', 'id': override_id})
+    def clear_override(self, override_id: str, instantaneous_release: bool = False) -> None:
+        command = {'kind': 'clear_override', 'id': override_id}
+        if instantaneous_release:
+            command['instantaneous_release'] = True
+        self._send_command(command)
 
     def set_master(self, intensity: float, fade_seconds: float = 0.0) -> None:
         command = {'kind': 'set_master', 'intensity': intensity}

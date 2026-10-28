@@ -27,6 +27,7 @@ SNAPSHOT_HOST = '127.0.0.1'
 SNAPSHOT_PATH = '/snapshot'
 CONTROL_PATH = '/control'
 MAX_CONTROL_BYTES = 4096
+STREAMED_ACTIONS = frozenset({'master', 'intensity', 'settings'})
 # A refused body up to this size is read and discarded so the refusal arrives intact.
 MAX_DRAINED_BYTES = 16 * MAX_CONTROL_BYTES
 DRAIN_TIMEOUT_SEC = 1.0
@@ -97,7 +98,19 @@ def parse_control_command(payload) -> dict:
             raise ValueError('intensity must be within 0..1')
         return {'action': action, 'level': float(level)}
     if action == 'settings':
-        return {'action': action, 'settings': ShowSettings.from_dict(payload.get('settings'))}
+        # Only the named fields change, and never fx_auto, intensity or intensity_auto: their
+        # own actions also cut the special and track the hand-picked level.
+        changes = payload.get('settings')
+        if (
+            isinstance(changes, dict)
+            and {'fx_auto', 'intensity', 'intensity_auto'} & changes.keys()
+        ):
+            raise ValueError('fx_auto, intensity and intensity_auto have their own actions')
+        validated = ShowSettings.from_dict(changes).to_dict()
+        return {
+            'action': action,
+            'settings': {name: value for name, value in validated.items() if name in changes},
+        }
     if action == 'palette':
         name = payload.get('name')
         if name != PALETTE_POLICY and name not in PALETTE_NAMES:
@@ -105,9 +118,9 @@ def parse_control_command(payload) -> dict:
                 f'palette must be {PALETTE_POLICY!r} or one of {", ".join(PALETTE_NAMES)}'
             )
         return {'action': action, 'name': name}
-    if action == 'intensity_auto':
+    if action in ('intensity_auto', 'fx_auto'):
         if type(payload.get('enabled')) is not bool:
-            raise ValueError('intensity_auto must be true or false')
+            raise ValueError(f'{action} must be true or false')
         return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
@@ -118,19 +131,13 @@ def _static_command(payload: dict) -> dict:
     from autolux.lib.engine.static_mode import PRESETS
 
     kind = payload.get('kind')
-    if kind in ('blacklight', 'clear', 'special_fx_clear'):
+    if kind in ('clear', 'special_fx_clear'):
         return {'kind': kind}
     if kind == 'special_fx':
-        fields = ('group', 'colour_slot', 'energy', 'speed', 'pulse_beats')
-        return {'kind': kind, **{name: payload.get(name) for name in fields}}
-    if kind == 'strobe':
-        # The page sends the state it wants, so a retried request cannot flip the strobe twice.
-        enabled = payload.get('enabled')
-        if enabled is None:
-            return {'kind': kind}
-        if type(enabled) is not bool:
-            raise ValueError('strobe must be true or false')
-        return {'kind': kind, 'enabled': enabled}
+        row, target = payload.get('row'), payload.get('target')
+        if not isinstance(row, str) or not row or not isinstance(target, str) or not target:
+            raise ValueError('special_fx needs a row and a target')
+        return {'kind': kind, 'row': row, 'target': target}
     if kind == 'blackout':
         if type(payload.get('enabled')) is not bool:
             raise ValueError('blackout must be true or false')
@@ -152,12 +159,17 @@ def _static_command(payload: dict) -> dict:
         raise ValueError('a static dimmer must be within 0..1')
     if colour is None and dimmer is None:
         raise ValueError('a static look needs a colour or a dimmer')
-    return {
+    look = {
         'kind': kind,
         'target': target,
         'colour': colour,
         'dimmer': None if dimmer is None else float(dimmer),
     }
+    if 'uv' in payload:
+        if type(payload['uv']) is not bool:
+            raise ValueError('uv must be true or false')
+        look['uv'] = payload['uv']
+    return look
 
 
 def command_refusal(
@@ -257,6 +269,17 @@ class _Handler(BaseHTTPRequestHandler):
         except queue.Full:
             self._reply(503, {'error': 'the show is busy; try again'})
             return
+        # Names the sender, so a command no operator remembers can be traced to its page.
+        # Toggles, static and transport stay at INFO where a flip-back shows; fader and
+        # form edits arrive in streams and would bury them.
+        LOGGER.log(
+            logging.DEBUG if command['action'] in STREAMED_ACTIONS else logging.INFO,
+            '[control] %s from %s origin=%s agent=%s',
+            command,
+            self.client_address[0],
+            self.headers.get('Origin', '-'),
+            (self.headers.get('User-Agent') or '-')[:80],
+        )
         timeout = self.server.handoff_timeout
         if timeout is not None and not _await_handoff(commands, timeout):
             self._reply(504, {'error': 'the show has not taken the command yet'})

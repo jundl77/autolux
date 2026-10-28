@@ -104,6 +104,7 @@ impl ActiveOverride {
         let special = *self.value.special_fx?;
         let from_level = special::attack_level(&special, beat - self.progress.started_beat);
         (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
+            id: self.value.id,
             special,
             cell_ids: self.cell_ids,
             priority: self.value.priority,
@@ -116,6 +117,7 @@ impl ActiveOverride {
 }
 
 struct ReleasingSpecial {
+    id: String,
     special: SpecialFx,
     cell_ids: Vec<String>,
     priority: i32,
@@ -252,9 +254,16 @@ impl Engine {
                 );
             }
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
-            Command::ClearOverride { id } => {
+            Command::ClearOverride {
+                id,
+                instantaneous_release,
+            } => {
                 validate_identifier(id)?;
-                if let Some(removed) = self.overrides.remove(id) {
+                let removed = self.overrides.remove(id);
+                if *instantaneous_release {
+                    // A special already fading under this ID (released, or replaced) goes too.
+                    self.releasing.retain(|releasing| releasing.id != *id);
+                } else if let Some(removed) = removed {
                     self.release(removed, time.elapsed_musical_beats);
                 }
             }
@@ -439,7 +448,10 @@ impl Engine {
         }
         self.limit_movement_speed(time_seconds, &mut states);
         self.limit_strobes(time_seconds, &mut states);
-        if self.blackout {
+        // Pause is the operator's lights-off. A dimmerless fixture (the Kinta) shows any master
+        // above zero at full colour and keeps its frozen spin, so all but pan/tilt go to the
+        // GDTF default. Overrides and static looks go dark too, on purpose: pause means off.
+        if self.blackout || self.clock.paused() {
             extinguish(&mut states);
         }
 
@@ -477,6 +489,8 @@ impl Engine {
         self.paused_at_seconds = paused.then_some(seconds);
         if paused {
             self.release_strobe_overrides_instead_of_holding_them();
+            // A frozen clock would hold a fade at its level and replay it on play.
+            self.releasing.clear();
         }
         Ok(())
     }

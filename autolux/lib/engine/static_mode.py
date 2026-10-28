@@ -1,15 +1,13 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import StarfireClient
-from autolux.lib.clock import Clock
-from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY, strobe_override
-from autolux.lib.engine.effect_definitions import ShowSettings
+from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
-from autolux.lighting.special_catalogue import special_values
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,7 +16,6 @@ STATIC_FLOOR_PRIORITY = STATIC_PRIORITY - 1
 STATIC_FLOOR_ID = 'static_floor'
 STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
-STATIC_STROBE_ID = 'static_strobe'
 STATIC_SPECIAL_ID = 'static_special'
 STATIC_SPECIAL_RELEASE_BEATS = 4.0
 ALL_FIXTURES = 'all'
@@ -53,53 +50,59 @@ class StaticLooks:
         self,
         lighting_client: StarfireClient,
         rig: StaticRig,
-        clock: Clock,
-        settings: Callable[[], ShowSettings],
+        specials: Sequence[Special] = (),
+        capabilities: Callable[[], SpecialCapabilities] = SpecialCapabilities,
     ):
         self._lighting = lighting_client
         self.rig = rig
-        self._clock = clock
-        self._settings = settings
+        self._capabilities = capabilities
+        # Strobe rows stay the show's own drop accent; the operator never holds one.
+        self._rows = {row.name: row for row in specials if row.strobe_hz is None}
         self._looks: dict[str, dict] = {}
-        self._strobe_until: float | None = None
         self._special: Special | None = None
         self._floor = False
         self.blackout = False
 
     @property
     def active(self) -> bool:
-        # A strobe burst alone ends by itself, so it does not hold the automatic show; an FX does.
         return bool(self._looks) or self._floor or self.blackout or self._special is not None
 
-    def special(
-        self,
-        group: str,
-        colour_slot: str,
-        energy: float,
-        speed: float,
-        pulse_beats: int | None = None,
-    ) -> None:
-        values = {
-            'colour_slot': colour_slot,
-            'energy': energy,
-            'speed': speed,
-            'pulse_beats': pulse_beats,
-            'attack_beats': 0.0,
-            'release_beats': STATIC_SPECIAL_RELEASE_BEATS,
-        }
-        special = Special('static', (), group, **special_values(values))
-        if not self.special_capabilities().allows(special):
-            raise ValueError(f'{group!r} cannot render this special')
-        self._special = special
+    def special_rows(
+        self, target: str, capabilities: SpecialCapabilities | None = None
+    ) -> list[str]:
+        """Catalogue rows the operator may hold on target: the rows the automatic show could
+        place on that group (its own group, or its role where the fixtures render the row's
+        axes), and on the whole rig any row it could place somewhere."""
+        capabilities = capabilities or self._capabilities()
+        return [
+            name
+            for name, row in self._rows.items()
+            if any(target in (ALL_FIXTURES, placed.group) for placed in capabilities.targets(row))
+        ]
+
+    def special(self, row: str, target: str) -> None:
+        """Hold a catalogue row on target until Clear FX or Clear all; cooldowns and the FX auto
+        toggle belong to the automatic show and never touch it."""
+        if target not in self.rig.targets:
+            raise ValueError(f'unknown static target {target!r}')
+        if row not in self._rows:
+            raise ValueError(f'unknown FX {row!r}')
+        if row not in self.special_rows(target):
+            raise ValueError(f'{target!r} cannot render {row!r}')
+        # Cut in at once and release short: the operator's hand, not the row's section pacing.
+        self._special = dataclasses.replace(
+            self._rows[row],
+            group=target,
+            attack_beats=0.0,
+            release_beats=STATIC_SPECIAL_RELEASE_BEATS,
+            cooldown_seconds=0.0,
+        )
         self._send_special()
 
     def clear_special(self) -> None:
         if self._special is not None:
             self._special = None
             self._lighting.clear_override(STATIC_SPECIAL_ID)
-
-    def special_capabilities(self) -> SpecialCapabilities:
-        return SpecialCapabilities.from_groups(self._lighting.groups())
 
     def _send_special(self) -> None:
         special = self._special
@@ -122,9 +125,6 @@ class StaticLooks:
                     other.pop('colour', None)
                     other.pop('uv', None)
                     self._send(name)
-        if target != ALL_FIXTURES and ALL_FIXTURES not in self._looks:
-            # Without it the held automatic look keeps lighting every other group.
-            self._set_floor()
         look = self._looks.setdefault(target, {})
         if colour is not None and uv is None:
             look.pop('uv', None)
@@ -134,12 +134,6 @@ class StaticLooks:
             if value is not None:
                 look[key] = value
         self._send(target)
-
-    def blacklight(self) -> None:
-        if not self.rig.uv_groups:
-            raise ValueError('the rig has no UV fixtures')
-        for group in self.rig.uv_groups:
-            self.look(group, colour=BLACK, dimmer=1.0, uv=True)
 
     def preset(self, name: str) -> None:
         if name not in PRESETS:
@@ -151,8 +145,11 @@ class StaticLooks:
         if name in PRESET_COLOURS:
             self.look(ALL_FIXTURES, colour=PRESET_COLOURS[name], dimmer=1.0)
         elif name == 'uv':
+            if not self.rig.uv_groups:
+                raise ValueError('the rig has no UV fixtures')
             self.look(ALL_FIXTURES, dimmer=0.0)
-            self.blacklight()
+            for group in self.rig.uv_groups:
+                self.look(group, colour=BLACK, dimmer=1.0, uv=True)
         elif name == 'off':
             # Clearing alone would reveal the held automatic look (warm-white standby when idle).
             self._set_floor()
@@ -163,28 +160,7 @@ class StaticLooks:
         self.blackout = enabled
         self._lighting.set_blackout(enabled)
 
-    def strobe(self, enabled: bool | None = None) -> None:
-        now = self._clock.monotonic()
-        running = self._strobe_until is not None and now < self._strobe_until
-        if enabled is None:
-            enabled = not running
-        if not enabled:
-            if running:
-                self._strobe_until = None
-                self._lighting.clear_override(STATIC_STROBE_ID)
-            return
-        if running:
-            return
-        settings = self._settings()
-        # Starfire caps the burst at this scaled length; matching it keeps the toggle in step.
-        duration = settings.strobe_max_burst_seconds * settings.intensity
-        self._strobe_until = now + duration
-        self._lighting.set_override(
-            strobe_override(STATIC_STROBE_ID, STATIC_PRIORITY, duration, settings)
-        )
-
     def resend(self) -> None:
-        self._strobe_until = None
         if self._floor:
             self._send_floor()
         for target in self._looks:
@@ -200,24 +176,19 @@ class StaticLooks:
         if self._floor:
             self._floor = False
             self._lighting.clear_override(STATIC_FLOOR_ID)
-        if self._strobe_until is not None:
-            self._strobe_until = None
-            self._lighting.clear_override(STATIC_STROBE_ID)
         self.set_blackout(False)
 
     def state(self) -> dict:
+        capabilities = self._capabilities()
         return {
             'targets': list(self.rig.targets),
             'blacklight': bool(self.rig.uv_groups),
             'blackout': self.blackout,
             'special_fx': None
             if self._special is None
-            else {
-                'group': self._special.group,
-                'colour_slot': self._special.colour_slot,
-                'energy': self._special.energy,
-                'speed': self._special.speed,
-                'pulse_beats': self._special.pulse_beats,
+            else {'name': self._special.name, 'group': self._special.group},
+            'fx_rows': {
+                target: self.special_rows(target, capabilities) for target in self.rig.targets
             },
             'looks': {
                 target: {

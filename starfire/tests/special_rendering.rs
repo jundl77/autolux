@@ -117,12 +117,21 @@ fn primary() -> starfire::model::Rgb {
 }
 
 fn unset(beat: f64, engine: &mut Engine) {
+    unset_with(beat, engine, false);
+}
+
+fn unset_instantly(beat: f64, engine: &mut Engine) {
+    unset_with(beat, engine, true);
+}
+
+fn unset_with(beat: f64, engine: &mut Engine, instantaneous_release: bool) {
     fire(
         engine,
         beat,
         &ClientMessage::UnsetActiveEffect(wire::UnsetActiveEffect {
             command_id: 1,
             effect_id: "special".into(),
+            instantaneous_release,
         }),
     );
 }
@@ -295,6 +304,56 @@ fn attack_and_release_follow_the_musical_clock_without_snapping() {
     assert_eq!(dmx(&mut engine, 7.0)[red], level(0.75));
     assert_eq!(dmx(&mut engine, 9.0)[red], level(0.25));
     assert_eq!(dmx(&mut engine, 10.0)[red], 0);
+}
+
+#[test]
+fn an_operator_cut_drops_the_special_this_frame_off_the_beat() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let red = SCANNER.start + 2;
+    let mut engine = engine(&rig);
+    let texture = wire::SpecialFx {
+        release_beats: 64.0,
+        ..steady("primary", 1.0, 0.0)
+    };
+    fire(&mut engine, 0.0, &special("scanners", texture));
+    assert_ne!(dmx(&mut engine, 4.0)[red], 0);
+    unset_instantly(4.3, &mut engine);
+    assert_eq!(dmx(&mut engine, 4.3)[red], 0);
+}
+
+#[test]
+fn a_cut_also_drops_a_special_already_fading_under_its_id() {
+    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
+    let red = SCANNER.start + 2;
+    let texture = wire::SpecialFx {
+        release_beats: 64.0,
+        ..steady("primary", 1.0, 0.0)
+    };
+    // A plain release, and a replacement that leaves the first special fading beneath it.
+    for replace in [false, true] {
+        let mut engine = engine(&rig);
+        fire(&mut engine, 0.0, &special("scanners", texture.clone()));
+        if replace {
+            fire(&mut engine, 4.0, &special("scanners", texture.clone()));
+        } else {
+            unset(4.0, &mut engine);
+        }
+        assert_ne!(dmx(&mut engine, 4.5)[red], 0, "replace {replace}");
+        unset_instantly(4.5, &mut engine);
+        assert_eq!(dmx(&mut engine, 4.5)[red], 0, "replace {replace}");
+    }
+}
+
+fn paused(value: bool) -> ClientMessage {
+    ClientMessage::SetParameter(wire::SetParameter {
+        command_id: 1,
+        parameter: Some(wire::Parameter {
+            r#type: wire::ParameterType::Paused as i32,
+            value: Some(wire::parameter::Value::Boolean(value)),
+            fade_seconds: 0.0,
+            group: String::new(),
+        }),
+    })
 }
 
 #[test]
@@ -491,6 +550,40 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
         dmx(&mut engine, 0.75)[fixture.clone()],
         reference(&rig, member, spinning(0.0))[fixture]
     );
+}
+
+#[test]
+fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_its_render() {
+    let definition = support::room_definition();
+    let rig = support::room();
+    let member = &rig.groups()["fx"][0];
+    let address = definition
+        .fixtures
+        .iter()
+        .find(|fixture| &fixture.fixture_id == member)
+        .unwrap()
+        .address as usize
+        - 1;
+    let fixture = address..address + rig.profile(member).unwrap().footprint();
+    let mut engine = engine(&rig);
+    fire(
+        &mut engine,
+        0.0,
+        &special("fx", steady("primary", 1.0, 1.0)),
+    );
+    let spinning = dmx(&mut engine, 1.0)[fixture.clone()].to_vec();
+    let mut idle = rig.empty_states();
+    idle.get_mut(member.as_str()).unwrap().output_blackout = true;
+    let defaults = rig.encode(&idle).unwrap()[&0][fixture.clone()].to_vec();
+    // The Kinta manual's 0 rows: no colour, no strobe, motor indexed, no auto/sound program.
+    assert_eq!(defaults, [0, 0, 0, 0]);
+    assert_ne!(spinning, defaults);
+
+    fire(&mut engine, 1.0, &paused(true));
+    assert_eq!(dmx(&mut engine, 1.0)[fixture.clone()], defaults[..]);
+    assert_eq!(dmx(&mut engine, 3.0)[fixture.clone()], defaults[..]);
+    fire(&mut engine, 3.0, &paused(false));
+    assert_eq!(dmx(&mut engine, 3.0)[fixture], spinning[..]);
 }
 
 fn parameter(kind: wire::ParameterType, value: f64) -> ClientMessage {
