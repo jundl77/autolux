@@ -695,7 +695,7 @@
         const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
         sendAction({ action: "select", key: next.key });
-        return highlight({ fixture: next.name }, show.highlight?.colour || "white");
+        return highlight({ fixture: next.name }, (lit && testCommand.colour) || show.highlight?.colour || "white");
     }
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });

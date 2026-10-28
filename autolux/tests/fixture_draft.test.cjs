@@ -563,3 +563,14 @@ test("a plan drag writes the Matrix the server's area and group-order test reads
     const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     assert.equal(child(fixtureNode(moved, fixture.fixture), "Matrix").text, fixture.matrix);
 });
+
+test("› carries the operator's latest swatch, not the colour the last poll reported", () => {
+    const current = draft();
+    const green = { paused: false, static: { blackout: false }, highlight: { target: { fixture: "spot_right" }, colour: "green" } };
+    timers.clear();
+    ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
+    ds.fixture_patch.syncTest(green, "config");
+    model.testControl("red");
+    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: "kinta" }, colour: "red" });
+    model.testControl("off");
+});
