@@ -162,6 +162,7 @@ pub struct Engine {
     strobe_max_rate_hz: f64,
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
+    strobe_gates: BTreeMap<String, StrobeGate>,
     palette: ActivePalette,
     intensity: f64,
     last_render_seconds: Option<f64>,
@@ -202,6 +203,7 @@ impl Engine {
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
+            strobe_gates: BTreeMap::new(),
             palette,
             intensity: 1.0,
             last_render_seconds: None,
@@ -661,7 +663,7 @@ impl Engine {
         }
 
         let mut encoded_states = states.clone();
-        apply_software_strobe(time_seconds, &mut encoded_states);
+        apply_software_strobe(&mut self.strobe_gates, time_seconds, &mut encoded_states);
         // A test's pose stands in for its fixture's loaded placement; the newest pose wins.
         let rig = self
             .overrides
@@ -1364,7 +1366,10 @@ fn blend_states(
                 }
             }
             to.intensity = lerp(from.intensity, to.intensity, amount);
-            to.colour = from.colour.lerp(to.colour, amount);
+            to.colour = profile.map_or_else(
+                || from.colour.lerp(to.colour, amount),
+                |profile| profile.blend_colour(from.colour, to.colour, amount),
+            );
             to.pan = lerp(from.pan, to.pan, amount);
             to.tilt = lerp(from.tilt, to.tilt, amount);
             if amount < 1.0 {
@@ -1387,20 +1392,45 @@ pub fn extinguish(states: &mut FixtureStates) {
     }
 }
 
-fn apply_software_strobe(seconds: f64, states: &mut FixtureStates) {
-    for state in states.values_mut() {
-        if state.strobe_hz > 0.0 {
-            let cycles = seconds * state.strobe_hz;
-            let phase = if cycles.is_finite() {
-                cycles.fract()
-            } else {
-                seconds.rem_euclid(1.0 / state.strobe_hz) * state.strobe_hz
-            };
-            if phase >= STROBE_OPEN_FRACTION {
-                state.intensity = 0.0;
-                state.attribute_brightness = 0.0;
-            }
-        }
+/// A strobing cell's gate: its phase in cycles at `seconds`, advancing at `hz` until the rate
+/// changes. Integrating the rate frame by frame keeps a sweep continuous; a phase of
+/// time x rate would gate at rate + time x d(rate)/dt and alias past the cap.
+struct StrobeGate {
+    seconds: f64,
+    cycles: f64,
+    hz: f64,
+}
+
+fn apply_software_strobe(
+    gates: &mut BTreeMap<String, StrobeGate>,
+    seconds: f64,
+    states: &mut FixtureStates,
+) {
+    for (id, state) in states.iter_mut() {
+        let hz = state.strobe_hz;
         state.strobe_hz = 0.0;
+        if hz <= 0.0 {
+            gates.remove(id);
+            continue;
+        }
+        // A strobe starts open, so its first frame is a flash.
+        let gate = gates.entry(id.clone()).or_insert(StrobeGate {
+            seconds,
+            cycles: 0.0,
+            hz,
+        });
+        let cycles = (gate.cycles + gate.hz * (seconds - gate.seconds)).fract();
+        // Re-anchoring only when the rate changes keeps a steady rate exact over a long burst.
+        if gate.hz != hz {
+            *gate = StrobeGate {
+                seconds,
+                cycles,
+                hz,
+            };
+        }
+        if cycles >= STROBE_OPEN_FRACTION {
+            state.intensity = 0.0;
+            state.attribute_brightness = 0.0;
+        }
     }
 }
