@@ -57,7 +57,8 @@ render as separate patches.
   so a logical pan lands on the same stage heading as on a hanging head at any yaw; roll
   otherwise does not render;
 - a standing head pans the other way round, which Starfire accounts for: it reaches heading L
-  at centre - L - yaw, its beam still on the display side;
+  at centre + 180 - L - yaw (kept in range by whole turns), because its reversed tilt throws the
+  beam a half turn;
 - identity = the GDTF default (hanging) orientation, display to upstage: offset 0, not
   reversed.
 

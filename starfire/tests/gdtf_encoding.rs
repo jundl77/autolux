@@ -292,8 +292,19 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
 fn an_upstage_aim_throws_the_beam_towards_plus_y_at_any_yaw_and_mount() {
     // Independent of the encoder: decode the DMX to body angles and carry the beam through the
     // Matrix, as fixture_encoding's mount test does. The pan range centre faces local +Y, the
-    // display, and pan turns clockwise about local +Z; mid tilt is on the pan axis and tilts towards the pan
-    // heading, standing too.
+    // display, and pan turns clockwise about local +Z; mid tilt is on the pan axis and tilts
+    // towards the pan heading; standing is the rigid flip.
+    let probe = support::rig(serde_json::json!({"fixtures": [{
+        "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
+        "universe": 0, "address": 1,
+    }]}));
+    let ranges =
+        ["Pan", "Tilt"].map(|axis| probe.profile("test").unwrap().movement_range(axis).unwrap());
+    // The 16-bit channel pair at `at` as a body angle off its range centre.
+    let decode = |frame: &[u8], at: usize, (from, to): (f64, f64)| {
+        let share = f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
+        (from + share * (to - from) - (from + to) / 2.0).to_radians()
+    };
     let aimed = |hanging: bool, yaw: f64, inverted: bool| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
         let flip = if hanging { 1.0 } else { -1.0 };
@@ -333,18 +344,12 @@ fn an_upstage_aim_throws_the_beam_towards_plus_y_at_any_yaw_and_mount() {
             .apply(0.0, &Command::SetOverride { value: aim })
             .unwrap();
         let frame = &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0];
-        let angle = |at: usize, travel: f64| {
-            f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 * travel
-        };
-        let (pan, tilt) = (
-            (angle(0, 540.0) - 270.0).to_radians(),
-            (flip * (angle(2, 270.0) - 135.0)).to_radians(),
-        );
+        let (pan, tilt) = (decode(frame, 0, ranges[0]), decode(frame, 2, ranges[1]));
         let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
         [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
     };
     let upstage = [0.0, f64::to_radians(45.0).sin()];
-    for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, -90.0] {
+    for yaw in [0.0, 37.0, 90.0, 130.0, 180.0, 233.0, 270.0, -90.0, -130.0] {
         for hanging in [true, false] {
             for inverted in [false, true] {
                 let beam = aimed(hanging, yaw, inverted);
