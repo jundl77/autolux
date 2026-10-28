@@ -329,19 +329,22 @@ impl CueTimeline {
             context.drop_strength = active.cue.drop_strength;
             context.seed = active.cue.seed;
         }
-        let next = self
+        if let Some((cue, grid)) = self.next_cue(now) {
+            context.next_intent = Some(cue.intent);
+            context.beats_until_next = Some((grid - now.beat_position).max(0.0));
+            context.next_drop_strength = cue.drop_strength;
+        }
+        context
+    }
+
+    /// The earliest resolved pending cue and the grid beat it activates at.
+    pub fn next_cue(&self, now: &CueSample) -> Option<(&SectionCue, f64)> {
+        let (at, pending) = self
             .pending
             .iter()
             .filter_map(|pending| Some((pending.activates_at?, pending)))
-            .min_by_key(|(at, pending)| (*at, pending.id));
-        if let Some((at, pending)) = next
-            && let Some(grid) = now.grid_of(at)
-        {
-            context.next_intent = Some(pending.cue.intent);
-            context.beats_until_next = Some((grid - now.beat_position).max(0.0));
-            context.next_drop_strength = pending.cue.drop_strength;
-        }
-        context
+            .min_by_key(|(at, pending)| (*at, pending.id))?;
+        Some((&pending.cue, now.grid_of(at)?))
     }
 
     /// Running and releasing overlays, in start order; W2 composes them by priority.
