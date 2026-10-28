@@ -23,6 +23,12 @@ const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
 const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_OPEN_FRACTION: f64 = 0.5;
+/// Slow enough to follow the beam by eye, inside even calm's movement slew limit.
+const PAN_SWEEP_SECONDS: f64 = 8.0;
+/// Straight upstage, perpendicular to the audience line at the plan's bottom edge.
+const AIM_HEADING_DEGREES: f64 = 0.0;
+/// Off straight down, so a hanging head's beam lands on the far wall.
+const AIM_LEAN_DEGREES: f64 = 45.0;
 pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
@@ -677,6 +683,15 @@ impl Engine {
     ) -> Result<()> {
         validate_identifier(&value.id)?;
         validate_properties(&value.values)?;
+        ensure!(
+            !(value.pan_sweep && value.values.pan.is_some()),
+            "a pan sweep replaces pan"
+        );
+        ensure!(
+            !(value.aim_upstage
+                && (value.pan_sweep || value.values.pan.is_some() || value.values.tilt.is_some())),
+            "an upstage aim replaces pan and tilt"
+        );
         if let Some(special) = &value.special_fx {
             special::validate(special)?;
         }
@@ -827,6 +842,15 @@ impl Engine {
                 };
                 if let Some(value) = value {
                     overlay_properties(&self.rig, id, state, &value.values);
+                    if value.pan_sweep {
+                        state.pan = pan_sweep_position(seconds);
+                    }
+                    if value.aim_upstage
+                        && let Some((pan, tilt)) =
+                            self.rig.aim(id, AIM_HEADING_DEGREES, AIM_LEAN_DEGREES)
+                    {
+                        (state.pan, state.tilt) = (pan, tilt);
+                    }
                     if let Some(multiplier) = value.intensity_multiplier {
                         state.intensity *= multiplier;
                     }
@@ -1031,6 +1055,13 @@ fn validate_properties(values: &PropertyValues) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Logical pan, so the encode applies the soft limits, yaw and mount exactly as for a loop.
+/// Phase follows the render clock, not the override, so a keep-alive re-send never jumps it.
+fn pan_sweep_position(seconds: f64) -> f64 {
+    let phase = (seconds / PAN_SWEEP_SECONDS).rem_euclid(1.0);
+    1.0 - (2.0 * phase - 1.0).abs()
 }
 
 /// Between layers the later one owns every channel it addresses.

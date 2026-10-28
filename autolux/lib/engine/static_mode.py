@@ -52,10 +52,26 @@ class StaticRig:
     fixtures: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
     # Fixture uuids and cell ids Starfire accepts a UV attribute on.
     uv_targets: tuple[str, ...] = ()
+    # Fixture uuids whose mode has a pan channel, the ones a highlight can sweep.
+    pan_targets: tuple[str, ...] = ()
 
     @property
     def targets(self) -> tuple[str, ...]:
         return (ALL_FIXTURES, *self.groups)
+
+    def published(self) -> dict:
+        """The running rig as the control state reports it to the dashboard."""
+        return {
+            'fixtures': [
+                {
+                    'fixture_uuid': fixture_uuid,
+                    'name': name,
+                    'cells': list(cells),
+                    'pan': fixture_uuid in self.pan_targets,
+                }
+                for fixture_uuid, name, cells in self.fixtures
+            ]
+        }
 
 
 def colour_hex(colour: tuple[float, float, float]) -> str:
@@ -180,13 +196,27 @@ class StaticLooks:
             # Clearing alone would reveal the held automatic look (warm-white standby when idle).
             self._set_floor()
 
-    def highlight(self, target: dict, colour: str = 'white', *, paused: bool = False) -> None:
+    def highlight(
+        self,
+        target: dict,
+        colour: str = 'white',
+        *,
+        sweep: bool = False,
+        aim: bool = False,
+        paused: bool = False,
+    ) -> None:
         """Locate {'fixture': uuid} or {'cell': id}: open white (or a swatch), beam home, no
-        strobe. One highlight at a time, so testing another fixture moves it."""
+        strobe. One highlight at a time, so testing another fixture moves it. On a mover, a
+        sweep pans between the soft limits and an aim points straight upstage, so the operator
+        can check yaw and mount against the plan."""
         if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
         if colour not in HIGHLIGHT_COLOURS:
             raise ValueError(f'unknown highlight colour {colour!r}')
+        if sweep and aim:
+            raise ValueError('a highlight sweeps or aims, not both')
+        if (sweep or aim) and target.get('fixture') not in self.rig.pan_targets:
+            raise ValueError(f'{target!r} has no pan')
         # Paused or blacked out, the rig is dark and the Locate would light nothing.
         if paused:
             raise ValueError('the show is paused')
@@ -196,24 +226,29 @@ class StaticLooks:
         values = {
             'intensity': 1.0,
             'colour': {'red': red, 'green': green, 'blue': blue},
-            'pan': 0.5,
-            'tilt': 0.5,
             'strobe_hz': 0.0,
         }
+        override = {
+            'id': HIGHLIGHT_ID,
+            'priority': STATIC_GROUP_PRIORITY + 1,
+            'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
+        }
+        # Starfire moves the head itself, through the logical pan the show's loops drive.
+        if sweep:
+            override['pan_sweep'] = True
+            values['tilt'] = 0.5
+        elif aim:
+            override['aim_upstage'] = True
+        else:
+            values.update(pan=0.5, tilt=0.5)
         (fixture_uuid,) = target.values()
         if fixture_uuid in self.rig.uv_targets:
             values['attributes'] = {UV_ATTRIBUTE: 0.0}
+        # Starfire resolves a cell id through its fixture target too.
         self._lighting.set_override(
-            {
-                'id': HIGHLIGHT_ID,
-                # Starfire resolves a cell id through its fixture target too.
-                'target': {'fixture': fixture_uuid},
-                'values': values,
-                'priority': STATIC_GROUP_PRIORITY + 1,
-                'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
-            }
+            {**override, 'target': {'fixture': fixture_uuid}, 'values': values}
         )
-        self._highlighted = {'target': dict(target), 'colour': colour}
+        self._highlighted = {'target': dict(target), 'colour': colour, 'sweep': sweep, 'aim': aim}
         self._highlight_ends = self._clock.monotonic() + HIGHLIGHT_SECONDS
 
     def clear_highlight(self) -> None:
