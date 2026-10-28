@@ -93,6 +93,11 @@ The show runs one fixture test at a time, so two open dashboards share it: a tes
 or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it
 (standby, sound stop, restart) the page stops holding it rather than relighting it.
 
+A mover's test row also has **Sweep** and **Aim**, which move the head through the same logical
+pan as the show, so yaw, mount and soft limits apply exactly as in a loop. Sweep: the beam should
+trace the arc drawn on the plan; if it sweeps the other way the yaw is wrong. Aim: the beam
+should point straight upstage; if it points elsewhere, the yaw or mount is wrong.
+
 Tests pin no geometry from `rig/room.mvr`: they use the frozen copies
 `autolux/tests/data/room.mvr` and `room.rig.pb` (Starfire's tests embed the same `room.rig.pb`),
 so editing the patch never breaks a test. One test checks that the committed `rig/room.rig.pb` is

@@ -539,6 +539,8 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                     },
                     priority: 0,
                     special_fx: None,
+                    pan_sweep: false,
+                    aim_upstage: false,
                 },
             },
         ),

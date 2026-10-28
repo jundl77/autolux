@@ -195,7 +195,14 @@ def _highlight_command(payload: dict) -> dict:
     colour = payload.get('colour', 'white')
     if colour not in HIGHLIGHT_COLOURS:
         raise ValueError(f'highlight colour must be one of {", ".join(HIGHLIGHT_COLOURS)}')
-    return {'target': dict(target), 'colour': colour}
+    sweep, aim = payload.get('sweep', False), payload.get('aim', False)
+    if type(sweep) is not bool or type(aim) is not bool:
+        raise ValueError('sweep and aim must be true or false')
+    if sweep and aim:
+        raise ValueError('a highlight sweeps or aims, not both')
+    if (sweep or aim) and 'fixture' not in target:
+        raise ValueError('sweep and aim move a whole fixture, not a cell')
+    return {'target': dict(target), 'colour': colour, 'sweep': sweep, 'aim': aim}
 
 
 def command_refusal(
@@ -211,12 +218,15 @@ def command_refusal(
 
     if command['action'] == 'highlight' and command['target'] is not None:
         # Starfire answers an unknown fixture with an ErrorReply, which stops the show.
-        fixtures = (
-            (f['fixture_uuid'], f['name'], f['cells']) for f in (rig or {}).get('fixtures', ())
-        )
-        if not names_target(fixtures, command['target']):
+        fixtures = (rig or {}).get('fixtures', ())
+        listed = ((f['fixture_uuid'], f['name'], f['cells']) for f in fixtures)
+        if not names_target(listed, command['target']):
             ((kind, name),) = command['target'].items()
             return f'no {kind} {name!r} in the running rig'
+        if command['sweep'] or command['aim']:
+            fixture = next(f for f in fixtures if f['fixture_uuid'] == command['target']['fixture'])
+            if not fixture['pan']:
+                return f'{fixture["name"]} has no pan'
         if paused:
             return 'the show is paused'
         if (static or {}).get('blackout'):

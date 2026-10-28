@@ -688,8 +688,9 @@
         refreshTimer = testEndTimer = null;
     };
 
-    function highlight(target, colour) {
-        const command = (testCommand = target ? { action: "highlight", target, colour } : { action: "highlight", target: null });
+    // motion is "sweep" or "aim": Starfire moves a mover's head through the show's logical pan.
+    function highlight(target, colour, motion) {
+        const command = (testCommand = target ? { action: "highlight", target, colour, ...(motion && { [motion]: true }) } : { action: "highlight", target: null });
         stopRefresh();
         lit = Boolean(target);
         testRefusal = "";
@@ -703,6 +704,8 @@
     }
 
     const clearTest = () => lit && highlight(null);
+    const MOTIONS = ["sweep", "aim"];
+    const litMotion = () => (lit && MOTIONS.find((motion) => testCommand[motion])) || undefined;
 
     const setApplyLabel = (children) => window.dash_clientside.set_props("fixture-apply", { children });
 
@@ -733,16 +736,22 @@
     // answers an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
 
-    // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
+    // A swatch lights the selection (or its picked cell), Sweep and Aim toggle a mover's motion
+    // (a swatch keeps it), ‹ › carry the test along the patch, Off clears it.
     function testControl(spec) {
         if (!rig?.selection || testBlocked(show)) return null;
         if (spec === "off") return highlight(null);
         const rows = fixtureRows(rig.draft, rig.settings);
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
+        if (MOTIONS.includes(spec)) {
+            const target = { fixture: row.fixture_uuid };
+            return running(target) ? highlight(target, (lit && testCommand.colour) || "white", litMotion() === spec ? undefined : spec) : null;
+        }
         if (spec in rig.settings.testColours) {
-            const target = selectedCell ? { cell: selectedCell } : { fixture: row.fixture_uuid };
-            return running(target) ? highlight(target, spec) : null;
+            const motion = litMotion();
+            const target = selectedCell && !motion ? { cell: selectedCell } : { fixture: row.fixture_uuid };
+            return running(target) ? highlight(target, spec, motion) : null;
         }
         const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
@@ -913,6 +922,7 @@
         invert,
         patchEdit,
         testControl,
+        patchForm,
         applyClick,
         schemaKeys,
         pathTo,
@@ -1268,7 +1278,7 @@
         return [h("h4", { text: `GDTF · ${spec}` }), visit(tree, 0)];
     }
 
-    function testStrip() {
+    function testStrip(mover) {
         const button = (spec, text, title, className) => h("button", { type: "button", "data-cfg-test": spec, className, title, text });
         return [
             h(
@@ -1276,6 +1286,10 @@
                 { className: "cfg-test" },
                 button("white", "Test", "Light the selected fixture or cell in white", "cfg-test-main"),
                 Object.entries(rig.settings.testColours).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--swatch:${hex}` })),
+                mover && [
+                    button("sweep", "Sweep", "Pan between the soft limits; the beam should trace the arc on the plan", "cfg-test-motion"),
+                    button("aim", "Aim", "Point straight upstage, away from the audience at the plan's bottom edge", "cfg-test-motion")
+                ],
                 button("off", "Off", "Clear the test"),
                 button("-1", "‹", "Previous fixture in patch order", "cfg-step"),
                 button("1", "›", "Next fixture in patch order")
@@ -1306,7 +1320,7 @@
             // ‹ › and Off still work: they move off or clear what the show does run.
             button.disabled = Boolean(blocked || (offline && !["off", "1", "-1"].includes(button.dataset.cfgTest)));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
-            button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
+            button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch || active[button.dataset.cfgTest] === true));
         }
         testNote(blocked || testRefusal || offline || "");
     }
@@ -1349,7 +1363,7 @@
                 .map(String);
         const span = row.address && row.channels ? `DMX ${row.address}–${row.address + row.channels - 1}` : null;
         return [
-            ...testStrip(),
+            ...testStrip(axes.some(([axis]) => axis === "Pan")),
             section(
                 "Patch",
                 span,

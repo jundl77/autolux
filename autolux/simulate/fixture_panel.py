@@ -143,7 +143,7 @@ FIXTURE_CSS = '''
 #config-panel .cfg-test button,#config-panel .cfg-cells button {padding:6px 10px;}
 #config-panel .cfg-test .cfg-swatch {width:26px;height:26px;padding:0;background:var(--swatch);border-color:#3b4d62;}
 #config-panel .cfg-test button.active {border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
-#config-panel .cfg-test .cfg-test-main.active {background:#284d71;color:#fff;}
+#config-panel .cfg-test .cfg-test-main.active,#config-panel .cfg-test .cfg-test-motion.active {background:#284d71;color:#fff;}
 .cfg-test-note {margin:8px 0 0;}
 .cfg-cells {grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:4px;}
 #config-panel .cfg-cells button.selected {border-color:var(--accent);background:#273b51;color:#fff;}

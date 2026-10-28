@@ -582,3 +582,5 @@ Login reports a group's `area` only when every member shares it, plus its mean X
 only on groups lying in one area of that column or row; no MIXED value is needed.
 
 2026-10-28 Operator cuts are immediate by user decision: FX Off, pause and standby drop the special that frame, with no fade, cap or tempo conversion; a special's own end still runs its row's release.
+
+2026-10-28 Mover tests: an override's `pan_sweep` replaces its pan with a triangle wave over the whole logical range (soft limit to soft limit, 8 s a cycle, phased on the render clock so a keep-alive never jumps it), and `aim_upstage` replaces pan and tilt with the logical pair that throws the beam to scene heading 0 (+Y, upstage), 45 degrees off the pan axis. Both feed the logical pan the loops drive, so the encode's yaw, mount and soft limits apply unchanged; Autolux sends them only for a fixture whose mode has Pan.

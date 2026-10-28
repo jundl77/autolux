@@ -159,6 +159,10 @@ message SetActiveEffect {
   map<string, AttributeValue> attributes = 12;
   // Rendered on the target; a group absent from the rig renders nothing.
   SpecialFX special_fx = 13;
+  // Pan runs low soft limit to high and back, one cycle per 8 s, in place of pan.
+  bool pan_sweep = 14;
+  // Pan and tilt aim straight upstage (+Y), 45 degrees off the pan axis, in place of both.
+  bool aim_upstage = 15;
 }
 
 // Fixture-agnostic accent; Starfire maps each axis onto the profiles' GDTF attribute families.
