@@ -213,7 +213,8 @@ end
 
 -- Spread turns the beam (focus - position) in its plane with X, positive towards +X; elevation
 -- turns it in its plane with Z, positive up. Both planes come from the rest beam, so a circle of
--- offsets stays a cone round a vertical beam. A beam along X spreads about Z, one along Z
+-- offsets stays a cone round a vertical beam; elevation applies first, so a horizontal beam's
+-- offsets are exactly heading and elevation. A beam along X spreads about Z, one along Z
 -- elevates about X. nil, nil for a cell without a pan range.
 function sf.aim_offset(cell, spread_degrees, elevation_degrees)
     assert(finite(spread_degrees) and finite(elevation_degrees), "aim offsets must be finite degrees")

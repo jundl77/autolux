@@ -658,7 +658,7 @@ impl FixtureRig {
     }
 
     /// The scene unit vector `aim_at` reads a logical pan and tilt as, so its inverse inside
-    /// the soft limits; a head without a tilt range leans along its pan axis. None for a cell
+    /// the soft limits; a head without a tilt range throws along its pan axis. None for a cell
     /// without a pan range.
     pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
         let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
