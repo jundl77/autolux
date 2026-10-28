@@ -12,6 +12,9 @@ Rgb = tuple[float, float, float]
 SLOTS = ('primary', 'secondary', 'accent', 'cold', 'black')
 BREAKDOWN_SUFFIX = '_breakdown'
 DROP_SUFFIX = '_drop'
+MONO_SUFFIX = '_mono'
+# A mono cold is primary held low, so builds and breakdowns keep white back for the hit.
+MONO_COLD_LEVEL = 0.4
 PALETTE_NAME = re.compile(r'[a-z0-9_]{1,64}')
 BLACK: Rgb = (0.0, 0.0, 0.0)
 COLOUR_SHARES = (('primary', 0.5), ('secondary', 0.3), ('accent', 0.2))
@@ -165,25 +168,42 @@ def load_palettes(directory: Path = PALETTE_DIRECTORY) -> tuple[tuple[Palette, .
     return tuple(tuple(row[column] for row in rows) for column in (1, 2, 3))
 
 
-PALETTES, BREAKDOWN_PALETTES, DROP_PALETTES = load_palettes()
-DEFAULT_PALETTE = PALETTES[0].name
-PALETTE_NAMES = tuple(palette.name for palette in PALETTES)
-
-
-def palette_table() -> tuple[Palette, ...]:
-    return tuple(
-        variant
-        for palette, breakdown, drop in zip(
-            PALETTES, BREAKDOWN_PALETTES, DROP_PALETTES, strict=True
-        )
-        for variant in (palette, breakdown, drop)
+def mono(palette: Palette) -> Palette:
+    """Colour A alone: secondary and accent take primary, cold is primary held low."""
+    cold = tuple(channel * MONO_COLD_LEVEL for channel in palette.primary)
+    return replace(
+        palette,
+        name=palette.name + MONO_SUFFIX,
+        secondary=palette.primary,
+        accent=palette.primary,
+        cold=cold,
     )
 
 
+PALETTES, BREAKDOWN_PALETTES, DROP_PALETTES = load_palettes()
+MONO_PALETTES = tuple(mono(palette) for palette in PALETTES)
+BREAKDOWN_MONO_PALETTES = tuple(mono(palette) for palette in BREAKDOWN_PALETTES)
+DEFAULT_PALETTE = PALETTES[0].name
+PALETTE_NAMES = tuple(palette.name for palette in PALETTES)
+_FAMILIES = tuple(
+    zip(
+        PALETTES,
+        BREAKDOWN_PALETTES,
+        DROP_PALETTES,
+        MONO_PALETTES,
+        BREAKDOWN_MONO_PALETTES,
+        strict=True,
+    )
+)
+
+
+def palette_table() -> tuple[Palette, ...]:
+    """The Login table: each base palette followed by its variants, the default first."""
+    return tuple(variant for family in _FAMILIES for variant in family)
+
+
 VARIANT_BASES: dict[str, str] = {
-    variant.name: palette.name
-    for palette, breakdown, drop in zip(PALETTES, BREAKDOWN_PALETTES, DROP_PALETTES, strict=True)
-    for variant in (palette, breakdown, drop)
+    variant.name: family[0].name for family in _FAMILIES for variant in family
 }
 
 
