@@ -1269,10 +1269,11 @@ async def test_an_intent_change_waits_for_the_rooms_next_downbeat_and_the_newest
     clock.advance(13.9)
     await queue.drain()
     assert selections(lighting) == [], 'switched before the downbeat reached the room'
-    assert light.current_intent is LightIntent.DROP
+    assert light.current_intent is not LightIntent.DROP, 'one switch clock: the room beat'
 
     clock.advance(0.2)
     await queue.drain()
+    assert light.current_intent is LightIntent.DROP
     [selected] = selections(lighting)
     assert selected['command']['autoloop'] == PREFERRED_AUTOLOOPS[LightIntent.DROP]
     assert selected['at_seconds'] == pytest.approx(downbeat_reaches_room, abs=0.15)
@@ -2071,3 +2072,48 @@ async def test_published_beats_carry_the_analysers_features_as_levels():
     first, second = sent_beats(lighting)
     assert 'features' not in first
     assert second['features'] == {'onset': 0.7, 'bass': 1.0, 'mid': 0.5, 'high': 0.0}
+
+
+async def test_the_room_switches_in_the_beat_publish_of_the_planned_start_beat():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    light._plan_cue = planned_cue
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [planned] = light._pending_intents
+    assert planned.switch_beat_index == planned.start_beat_index == 2
+    clock.advance(14.0 - 0.5 - 0.01)
+    await queue.drain()
+    assert light.current_intent is not LightIntent.DROP
+    clock.advance(0.5 + 0.02)
+    await queue.drain()
+    [published] = [e for e in lighting.events if e['command'].get('beat_index') == 2]
+    [selected] = selections(lighting)
+    assert selected['at_seconds'] == published['at_seconds']
+    assert light.current_intent is LightIntent.DROP
+
+
+async def test_a_late_section_switches_on_the_next_room_downbeat_as_starfire_does():
+    decoder = FakeDecoder()
+    light, queue, clock, _ = engine(decoder=decoder, playback_delay_sec=1.0)
+    light._plan_cue = planned_cue
+    await elapse(light, clock, 20.0)
+    for phase in (0, 1, 2):
+        await beat_at_phase(light, decoder, phase)
+        await elapse(light, clock, 0.5)
+        await queue.drain()
+    clock.advance(1.0)
+    await queue.drain()
+    # The room has heard the downbeat (index 1) the section starts on.
+    decoder._script.append([BarDecision(0, 'drop', light.audio_sec - 1.5)])
+    await beat_at_phase(light, decoder, 3)
+    [planned] = light._pending_intents
+    assert (planned.start_beat_index, planned.switch_beat_index) == (1, None)
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    assert planned.switch_beat_index == 5
+    clock.advance(1.1)
+    await queue.drain()
+    assert light.current_intent is LightIntent.DROP
