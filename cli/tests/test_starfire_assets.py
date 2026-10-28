@@ -241,11 +241,11 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
 
 
 def test_static_looks_for_the_room_rig_build_small_wire_accents():
-    from autolux.lib.engine.static_mode import StaticLooks, StaticRig
+    from autolux.lib.engine.static_mode import StaticLooks
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
     rig = assets.static_rig(DEFAULT_RIG)
-    assert rig == StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
+    assert (rig.groups, rig.uv_groups) == (('fx', 'movers', 'strip', 'wash'), ('wash',))
     lighting = RecordingStarfireClient()
     looks = StaticLooks(lighting, rig)
     looks.preset('uv')
@@ -264,6 +264,35 @@ def test_static_looks_for_the_room_rig_build_small_wire_accents():
     )
     assert (wash.colour.red, wash.colour.green, wash.colour.blue) == (0.0, 0.0, 0.0)
     assert {m.effect_id for m in messages} == {'static_all', 'static_wash', 'static_fx'}
+
+
+def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_starfire():
+    from autolux.lib.engine.static_mode import StaticLooks
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
+
+    rig = assets.static_rig(DEFAULT_RIG)
+    names = dict(rig.fixtures)
+    assert list(names) == [
+        entry.fixture_id for entry in assets.rig_definition(DEFAULT_RIG).fixtures
+    ]
+    assert names['wash_left'] == ('wash_left',)
+    assert names['zq06017'] == tuple(f'zq06017/Beam Segment {n}' for n in range(1, 9))
+    assert rig.uv_targets == ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
+    lighting = RecordingStarfireClient()
+    looks = StaticLooks(lighting, rig)
+    looks.highlight({'fixture': 'wash_left'}, 'warm')
+    looks.highlight({'cell': 'zq06017/Beam Segment 3'})
+    wash, segment = (protocol.build_command(event['command']) for event in lighting.events)
+    assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (
+        'wash_left',
+        0.0,
+        60.0,
+    )
+    assert (segment.fixture, segment.effect_id, dict(segment.attributes)) == (
+        'zq06017/Beam Segment 3',
+        'highlight',
+        {},
+    )
 
 
 SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'

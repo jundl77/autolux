@@ -206,3 +206,76 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
     for owned in ({'fx_auto': False}, {'intensity': 0.3}, {'intensity_auto': True}):
         with pytest.raises(ValueError, match='their own actions'):
             parse_control_command({'action': 'settings', 'settings': owned})
+
+
+RIG = {'fixtures': [{'name': 'par', 'cells': ['par']}, {'name': 'bar', 'cells': ['bar/a']}]}
+
+
+def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    assert parse_control_command({'action': 'highlight', 'target': {'fixture': 'par'}}) == {
+        'action': 'highlight',
+        'target': {'fixture': 'par'},
+        'colour': 'white',
+    }
+    assert parse_control_command(
+        {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
+    ) == {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
+    assert parse_control_command({'action': 'highlight', 'target': None}) == {
+        'action': 'highlight',
+        'target': None,
+    }
+    for target in ({}, {'fixture': 'par', 'cell': 'par'}, {'group': 'wash'}, {'fixture': 3}, 'par'):
+        with pytest.raises(ValueError, match='highlight target'):
+            parse_control_command({'action': 'highlight', 'target': target})
+    with pytest.raises(ValueError, match='highlight target'):
+        parse_control_command({'action': 'highlight'})
+    with pytest.raises(ValueError, match='colour'):
+        parse_control_command({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'uv'})
+
+
+@pytest.mark.parametrize(
+    ('target', 'paused', 'blackout', 'refusal'),
+    [
+        ({'fixture': 'par'}, False, False, None),
+        ({'cell': 'bar/a'}, False, False, None),
+        ({'fixture': 'bar/a'}, False, False, "no fixture 'bar/a' in the running rig"),
+        ({'cell': 'bar'}, False, False, "no cell 'bar' in the running rig"),
+        ({'fixture': 'par'}, True, False, 'the show is paused'),
+        ({'fixture': 'par'}, False, True, 'blackout is on'),
+        (None, True, True, None),
+    ],
+)
+def test_a_highlight_is_refused_for_a_fixture_the_rig_lacks_or_a_dark_rig(
+    target, paused, blackout, refusal
+):
+    from autolux.lib.ui_bridge import command_refusal
+
+    command = {'action': 'highlight', 'target': target, 'colour': 'white'}
+    static = {'blackout': blackout}
+    assert command_refusal(command, 'drop', paused, 'auto', static, RIG) == refusal
+
+
+def test_an_unknown_fixture_never_reaches_the_show():
+    buffer = EventBuffer()
+    buffer.set_control_state(
+        paused=False, master_brightness=1.0, settings={}, static={'blackout': False}, rig=RIG
+    )
+    commands = queue.Queue(maxsize=4)
+    server = SnapshotServer(buffer, 0, commands, handoff_timeout=None)
+    server.start()
+    try:
+        connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+        body = {'action': 'highlight', 'target': {'fixture': 'ghost'}}
+        reply, text = _request(connection, 'POST', body, JSON)
+        assert (reply.status, json.loads(text)) == (
+            409,
+            {'error': "no fixture 'ghost' in the running rig"},
+        )
+        reply, _ = _request(connection, 'POST', {**body, 'target': {'fixture': 'par'}}, JSON)
+        assert reply.status == 202
+    finally:
+        server.stop()
+    assert commands.get_nowait()['target'] == {'fixture': 'par'}
+    assert commands.empty()
