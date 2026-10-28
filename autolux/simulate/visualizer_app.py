@@ -34,10 +34,10 @@ from autolux.lib.ui_bridge import (
     SNAPSHOT_HOST,
     SNAPSHOT_PATH,
     advertise_dashboard_mdns,
+    serve_viewer,
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.mvr_schema import LOOP_ROLE
 from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
@@ -572,8 +572,10 @@ def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
     tag = selection.get('intent') or cfg['label'].lower()
     if selection.get('look') not in (None, selection.get('intent')):
         tag = f'{tag} · {selection.get("level")}'
+    # The dot is the loop's own bank: a level remap can play a breakdown loop under a DROP.
+    bank = name.split('/', 1)[0] if name else None
     value = [
-        _dot(cfg['primary']),
+        _dot(INTENT_CONFIG.get(bank, cfg)['primary']),
         name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
         html.Span(tag, className='status-tag'),
     ]
@@ -1101,25 +1103,6 @@ STATIC_SELECTED_TAB_STYLE = {
 }
 
 
-def special_groups_view(groups: dict, roles: dict | None = None) -> list:
-    if not groups:
-        return ['FX: Starfire reported no groups']
-    roles = roles or {}
-    return [
-        html.Span('FX', className='control-label'),
-        *[
-            part
-            for name, axes in sorted(groups.items())
-            for part in (
-                '  ',
-                name,
-                ' ',
-                html.Span(' · '.join([roles.get(name, LOOP_ROLE), *axes]), className='status-tag'),
-            )
-        ],
-    ]
-
-
 def _build_static_fx():
     # Catalogue rows that fit the chosen target; picking one holds it until Clear FX.
     return html.Div(
@@ -1626,8 +1609,12 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .chart-panel { min-width: 0; background: #111923; border: 1px solid #273344; border-radius: 8px; overflow: hidden; }
 .chart-panel h3 { margin: 16px 16px 7px; font-size: 13px; font-weight: 600; }
 .panel-description { margin: 0 16px 4px; color: #9baabb; font-size: 11px; line-height: 1.5; min-height: 50px; }
+/* Held open when empty: a one-line notice coming or going must not move the controls below. */
+#telemetry-alerts { min-height: 36px; margin-bottom: 12px; }
+.notice-count { margin-right: 6px; font-weight: 600; }
 .telemetry-notice { padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
-                    color: #f6c177; margin-bottom: 12px; font-size: 12px; }
+                    color: #f6c177; font-size: 12px; white-space: nowrap; overflow: hidden;
+                    text-overflow: ellipsis; }
 .diagnostics-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
                     border-bottom: 1px solid #273344; }
 .diagnostics { padding: 16px 18px; min-width: 0; }
@@ -1877,14 +1864,14 @@ CALLBACK_RESOLVED_JS = (
 )
 
 GATE_JS = (
-    'function(n, selected) {'
+    'function(n, selected, control) {'
     + _GATE_STATE_JS
     + '''
     const changed = gate.tab !== selected || gate.hidden;
     gate.tab = selected;
     gate.hidden = document.hidden;
     if (changed) gate.viewAt = gate.metricsAt = 0;
-    if (selected === 'config' || document.hidden) return ds.no_update;
+    if (document.hidden) return ds.no_update;
     const now = Date.now();
     const free = (stream) => {
         const since = gate.inflight[stream];
@@ -1898,7 +1885,7 @@ GATE_JS = (
         delete gate.inflight[stream];
         return true;
     };
-    const metrics = now - (gate.metricsAt || 0) >= '''
+    const metrics = selected !== 'config' && now - (gate.metricsAt || 0) >= '''
     + str(TELEMETRY_REFRESH_SECONDS * 1000)
     + ''';
     if (!free('anchor') || (selected === 'telemetry' && !metrics)) return ds.no_update;
@@ -1907,7 +1894,11 @@ GATE_JS = (
     + ''';
     if (timeline) gate.viewAt = now;
     if (metrics) gate.metricsAt = now;
-    return {tick: n, tab: selected, timeline: timeline, metrics: metrics};
+    // The rig changes only on a show restart, so it is fetched once per rig revision.
+    if (control && 'rig' in control) gate.rig = control.rig_revision;
+    const request = {tick: n, tab: selected, timeline: timeline, metrics: metrics};
+    if ('rig' in gate) request.rig = gate.rig;
+    return request;
 }'''
 )
 
@@ -2040,7 +2031,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             [
                 html.Div(html.H2('Fixture setup'), className='section-heading'),
                 html.P('Fixture setup is unavailable in this session.', className='subtitle'),
-                html.P(id='special-groups', className='subtitle'),
             ],
             id='config-panel',
             style={'display': 'none'},
@@ -2195,6 +2185,20 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         ],
         className='dashboard',
     )
+    layout = app.layout
+
+    def serve_layout():
+        # The first poll filling these would push the controls below them down under a
+        # pointer already aimed at them: a click in that first moment hit the master fader.
+        snap, now = _with_base_palette(snapshot_source.snapshot()), time.time()
+        layout['show-status'].children = _build_show_status(snap, now)
+        layout['telemetry-alerts'].children = system_metrics.build_telemetry_notices(snap, now=now)
+        if fixture_store is not None:
+            # A browser reload after Save must open the saved patch, not the one loaded at start.
+            layout['fixture-draft'].data, layout['fixture-revision'].data = fixture_store.load()
+        return layout
+
+    app.layout = serve_layout
 
     app.clientside_callback(
         '''function(selected) {
@@ -2238,6 +2242,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('gate', 'data'),
         Input('tick', 'n_intervals'),
         Input('dashboard-tab', 'value'),
+        State('control-state', 'data'),
     )
 
     @app.callback(
@@ -2258,7 +2263,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         prevent_initial_call=True,
     )
     def refresh(requested):
-        if not requested or requested.get('tab') not in ('control', 'telemetry'):
+        if not requested or requested.get('tab') not in ('control', 'telemetry', 'config'):
             raise dash.exceptions.PreventUpdate
         snap = _with_base_palette(snapshot_source.snapshot())
         now = time.time()
@@ -2267,12 +2272,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
         due = requested.get('metrics')
-        if on_control or due:
-            sync = _anchor(snap)
-            status = _build_show_status(snap, now)
-            show_timing = _build_show_timing(snap)
-            decoder = _build_decoder(snap)
-            cooldowns = _build_cooldowns(snap)
+        # The Config tab's fixture test reads only the control state (highlight, paused, blackout).
+        if on_control or due or requested['tab'] == 'config':
             control = {
                 key: snap.get(key)
                 for key in (
@@ -2284,6 +2285,9 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                     'mode',
                     'static',
                     'special_groups',
+                    'highlight',
+                    'rig_revision',
+                    'session',
                 )
             }
             control['settings_text'] = settings_text(control['settings'] or {})
@@ -2292,6 +2296,17 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 target: [{'label': fx_row_label(row), 'value': row} for row in rows]
                 for target, rows in fx_rows.items()
             }
+            # Only the test's Cells list needs the running rig's names.
+            if requested['tab'] == 'config' and requested.get('rig', ...) != snap.get(
+                'rig_revision'
+            ):
+                control['rig'] = snap.get('rig')
+        if on_control or due:
+            sync = _anchor(snap)
+            status = _build_show_status(snap, now)
+            show_timing = _build_show_timing(snap)
+            decoder = _build_decoder(snap)
+            cooldowns = _build_cooldowns(snap)
             if requested.get('timeline') or not on_control:
                 timeline = _build_timeline(snap)
         if due:
@@ -2443,15 +2458,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
 
     _register_static_callbacks(app)
 
-    @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))
-    def show_special_groups(selected):
-        if selected != 'config':
-            raise dash.exceptions.PreventUpdate
-        snapshot = snapshot_source.snapshot()
-        return special_groups_view(
-            snapshot.get('special_groups') or {}, snapshot.get('group_roles') or {}
-        )
-
     app.clientside_callback(
         ANIMATION_JS,
         Output('anim', 'data'),
@@ -2475,7 +2481,7 @@ def run_app(
             port,
             DASHBOARD_BIND_ADDRESS,
         )
-        app.run(host=DASHBOARD_BIND_ADDRESS, port=port, debug=False)
+        serve_viewer(app.server, port)
 
 
 def main(argv=None) -> None:

@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -7,9 +8,12 @@ import pytest
 
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy
+from autolux.tests.test_mvr import named_groups
+from cli.starfire_assets import rig_bytes, rig_definition
 
 ROOT = Path(__file__).resolve().parents[2]
 LIBRARY = ROOT / 'rig/library'
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 MODES = {'rgb.gdtf': {'3ch': {'channels': 3}}, 'mover.gdtf': {'12ch': {'channels': 12}}}
 
 
@@ -64,12 +68,29 @@ def test_identical_addresses_in_distinct_universes_are_independent():
 @pytest.fixture
 def rig_file(tmp_path):
     path = tmp_path / 'rig.mvr'
-    path.write_bytes((ROOT / 'rig/room.mvr').read_bytes())
+    path.write_bytes(ROOM.read_bytes())
     return path
 
 
 def store_for(path, validate):
-    return FixtureStore(path, LIBRARY, validate)
+    """A store whose repo rig is a scratch copy of the room; `validate` sees each staged rig."""
+    library = path.parent / 'rig/library'
+    shutil.copytree(LIBRARY, library)
+    shutil.copy(ROOM, library.parent / 'room.mvr')
+    shutil.copy(ROOM.with_suffix('.rig.pb'), library.parent / 'room.rig.pb')
+
+    def export(staged):
+        validate(staged)
+        return rig_bytes(staged)
+
+    return FixtureStore(path, library, export, library.parent / 'room.mvr')
+
+
+def written(store) -> list[bytes]:
+    return [
+        path.read_bytes()
+        for path in (store.rig_path, store.repo_rig, store.repo_rig.with_suffix('.rig.pb'))
+    ]
 
 
 def fixture_node(draft, name):
@@ -115,7 +136,84 @@ def test_save_validates_staged_content_before_atomic_replace(rig_file):
     assert saved_revision == hashlib.sha256(rig_file.read_bytes()).hexdigest()
     assert saved_revision != revision
     assert address_node(reloaded, 'wash_right')['text'] == '200'
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
+
+
+def test_save_writes_the_store_the_repo_rig_and_its_rig_definition_together(rig_file):
+
+    def validate(_staged):
+        # Nothing is replaced until Starfire has accepted the staged rig.
+        assert written(store) == before
+
+    store = store_for(rig_file, validate)
+    before = written(store)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    _, saved_revision = store.save(draft, revision)
+    stored, repo, exported = written(store)
+    assert stored == repo != before[0]
+    assert saved_revision == hashlib.sha256(stored).hexdigest()
+    assert exported == rig_definition(store.repo_rig).SerializeToString() != before[2]
+    assert list(rig_file.parent.rglob('.rig-*')) == []
+
+
+def test_save_warns_when_the_tracked_rig_differs_from_the_store(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    assert not store.repo_rig_diverged()
+    store.repo_rig.write_bytes(store.repo_rig.read_bytes() + b' ')
+    assert store.repo_rig_diverged()
+    assert not FixtureStore(rig_file, store.library_path, rig_bytes).repo_rig_diverged()
+
+
+def test_a_store_without_a_repo_rig_saves_only_itself(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    repo = written(store)[1:]
+    alone = FixtureStore(rig_file, store.library_path, rig_bytes)
+    draft, revision = alone.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    alone.save(draft, revision)
+    assert written(store)[1:] == repo
+    assert rig_file.read_bytes() != ROOM.read_bytes()
+
+
+@pytest.mark.parametrize('failing', [2, 3])
+def test_a_failed_repo_replace_leaves_the_store_the_show_reads_unchanged(
+    rig_file, monkeypatch, failing
+):
+    import os
+
+    before = rig_file.read_bytes()
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    calls = []
+
+    def replace(source, target):
+        calls.append(target)
+        if len(calls) == failing:
+            raise PermissionError('file locked')
+        os.replace(source, target)
+
+    monkeypatch.setattr('autolux.lighting.fixture_setup.os.replace', replace)
+    with pytest.raises(PermissionError, match='file locked'):
+        store.save(draft, revision)
+    # The store is the last replace, so it never moved before the failing one.
+    assert store.rig_path not in calls[:-1]
+    assert rig_file.read_bytes() == before
+    assert list(rig_file.parent.rglob('.rig-*')) == []
+
+
+def test_a_save_on_a_stale_revision_writes_none_of_the_three_files(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    store.save(copy.deepcopy(draft), revision)
+    saved = written(store)
+    address_node(draft, 'wash_right')['text'] = '300'
+    with pytest.raises(ValueError, match='Reload'):
+        store.save(draft, revision)
+    assert written(store) == saved
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 @pytest.mark.parametrize('error_type', [ValueError, TimeoutError, OSError])
@@ -131,7 +229,7 @@ def test_rejected_or_interrupted_validation_preserves_saved_rig(rig_file, error_
     with pytest.raises(error_type, match='validation failed'):
         store.save(draft, revision)
     assert rig_file.read_bytes() == before
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 @pytest.mark.parametrize(
@@ -190,7 +288,7 @@ def test_external_edit_during_validation_is_not_overwritten(rig_file):
     with pytest.raises(ValueError, match='during validation'):
         store.save(draft, revision)
     assert rig_file.read_bytes() == external
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 def test_failed_replace_preserves_saved_data_and_cleans_temporary_file(rig_file, monkeypatch):
@@ -206,7 +304,7 @@ def test_failed_replace_preserves_saved_data_and_cleans_temporary_file(rig_file,
     with pytest.raises(PermissionError, match='file locked'):
         store.save(draft, revision)
     assert rig_file.read_bytes() == before
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
@@ -231,6 +329,49 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
     assert address_node(store.load()[0], 'wash_right')['text'] == str(winners[0])
 
 
+def test_a_fixture_is_its_uuid_so_renaming_or_swapping_names_moves_only_labels(rig_file):
+    def exported():
+        rig = rig_definition(rig_file)
+        groups = {group.group_id: list(group.fixture_uuids) for group in rig.groups}
+        return {fixture.fixture_uuid: fixture for fixture in rig.fixtures}, groups
+
+    before, groups = exported()
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    left, right = fixture_node(draft, 'spot_left'), fixture_node(draft, 'spot_right')
+    left['attributes']['name'], right['attributes']['name'] = 'spot_right', 'spot_left'
+    draft, revision = store.save(draft, revision)
+    wash = fixture_node(draft, 'wash_left')
+    wash['attributes']['name'] = 'wash_house_left'
+    store.save(draft, revision)
+    after, regrouped = exported()
+    relabelled = {
+        left['attributes']['uuid']: 'spot_right',
+        right['attributes']['uuid']: 'spot_left',
+        wash['attributes']['uuid']: 'wash_house_left',
+    }
+    assert {identity: fixture.name for identity, fixture in after.items()} == {
+        identity: relabelled.get(identity, fixture.name) for identity, fixture in before.items()
+    }
+    # Address, Matrix, stage area, cells and movement all stay with the uuid, as do the groups.
+    for identity, fixture in after.items():
+        fixture.name = before[identity].name
+    assert after == before
+    assert regrouped == groups
+
+
+@pytest.mark.parametrize(
+    'attribute,refusal', [('uuid', 'uuid duplicates'), ('name', 'unique, short fixture name')]
+)
+def test_a_patch_repeating_a_uuid_or_a_name_is_refused(rig_file, attribute, refusal):
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    left, right = fixture_node(draft, 'spot_left'), fixture_node(draft, 'spot_right')
+    right['attributes'][attribute] = left['attributes'][attribute]
+    with pytest.raises(ValueError, match=refusal):
+        store.save(draft, revision)
+
+
 def test_class_order_follows_positions_not_document_order_after_moving_a_fixture(rig_file):
     store = store_for(rig_file, lambda _staged: None)
     draft, revision = store.load()
@@ -240,14 +381,50 @@ def test_class_order_follows_positions_not_document_order_after_moving_a_fixture
     children['children'][first], children['children'][second] = spots[1], spots[0]
     store.save(draft, revision)
     fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
-    assert mvr.groups(fixtures)[0]['movers'] == ['spot_left', 'spot_right']
+    assert named_groups(fixtures)[0]['movers'] == ['spot_left', 'spot_right']
+
+
+def test_a_browser_plan_drag_moves_the_stage_area_and_group_order_on_save(rig_file):
+    import json
+
+    from proto.starfire import rig_pb2 as rig_wire
+
+    # The Matrix fixture_draft.test.cjs checks the browser writes for this drag.
+    drag = json.loads((ROOT / 'autolux/tests/data/plan_drag.json').read_text(encoding='utf-8'))
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    spot = fixture_node(draft, drag['fixture'])
+    next(node for node in spot['children'] if node['tag'] == 'Matrix')['text'] = drag['matrix']
+    store.save(draft, revision)
+    areas = {
+        fixture.name: rig_wire.StageArea.Name(fixture.area)
+        for fixture in rig_definition(rig_file).fixtures
+    }
+    # From (-300, 0), on a cut and so up centre, to x 600: the right third, still upstage.
+    assert areas['spot_left'] == 'STAGE_AREA_UP_RIGHT'
+    fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
+    assert named_groups(fixtures)[0]['movers'] == ['spot_right', 'spot_left']
+
+
+def test_a_page_load_serves_the_saved_patch_not_the_boot_time_one(rig_file):
+    from autolux.simulate.visualizer_app import build_app
+    from autolux.tests.test_show_control import _Recorder
+
+    store = FixtureStore(rig_file, LIBRARY, rig_bytes)
+    app = build_app(_Recorder(), fixture_store=store)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    saved, saved_revision = store.save(draft, revision)
+    page = app.layout()
+    assert page['fixture-revision'].data == saved_revision != revision
+    assert page['fixture-draft'].data == saved
 
 
 def test_config_names_the_library_folder_it_lists():
     from autolux.simulate.fixture_panel import library_folder
 
     assert library_folder(LIBRARY) == 'rig/library'
-    listed = FixtureStore(ROOT / 'rig/room.mvr', LIBRARY, lambda _: None).library()
+    listed = FixtureStore(ROOM, LIBRARY, lambda _: None).library()
     assert set(listed) == {path.name for path in LIBRARY.glob('*.gdtf')}
 
 
@@ -257,7 +434,7 @@ STALE_KINTA = 'CHAUVET DJ@chauvet_mini_kinta_irc_4ch.gdtf'
 
 def _stale_store(path: Path) -> bytes:
     """The room as an old store holds it: the Kinta under its old name, with a stale profile."""
-    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     stale = mvr.gdtf_description(scene, KINTA).replace(
         'Name="Mini Kinta IRC"', 'Name="chauvet_mini_kinta_irc_4ch"', 1
     )
@@ -297,7 +474,7 @@ def test_a_start_refreshes_stale_store_profiles_from_the_library_and_keeps_the_p
     assert kinta['gdtf_spec'] == KINTA
     assert f'refreshed {STALE_KINTA} from the library as {KINTA}' in caplog.text
     # The other profiles already match the library, so nothing else changes and a rerun is a no-op.
-    assert after == (ROOT / 'rig/room.mvr').read_bytes()
+    assert after == ROOM.read_bytes()
     assert refresh_profiles(store, LIBRARY) == []
     assert store.read_bytes() == after
 

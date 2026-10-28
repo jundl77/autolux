@@ -74,7 +74,29 @@ def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group()
     ]
     assert all(row.children[1].className == 'fader' for row in rows)
     assert all(slider.min == 0 and slider.max == 1 for slider in sliders)
-    assert build_app(_Recorder()).layout['group-masters'].children is None
+    assert build_app(_Recorder()).layout()['group-masters'].children is None
+
+
+def test_a_page_load_renders_what_the_first_poll_would_above_the_controls():
+    # Anything the first poll adds above the controls moves them under a click already aimed.
+    page = build_app(_Recorder()).layout()
+    texts = [item.children[0].children for item in page['show-status'].children]
+    assert texts[0] == 'Health' and 'Render FPS' in texts
+    assert [notice.children for notice in page['telemetry-alerts'].children] == [
+        ['No system telemetry yet. Graphs will populate when measurements arrive.']
+    ]
+
+
+def test_telemetry_notices_share_one_line_most_severe_first_with_a_count_and_the_full_text_in_its_title():
+    from autolux.simulate.system_metrics import build_telemetry_notices
+
+    (notice,) = build_telemetry_notices({'shed': {'level': 'LIGHT', 'sheds_per_min': 3}})
+    text = (
+        'Analysis is holding the last intent. · Analysis skips: 3/min.'
+        ' · No system telemetry yet. Graphs will populate when measurements arrive.'
+    )
+    count, line = notice.children
+    assert (count.children, line, notice.title) == ('3 ·', text, text)
 
 
 class _Browser:
@@ -428,13 +450,13 @@ def test_switching_tabs_only_changes_the_view():
 
 def test_the_intensity_segments_and_palette_choices_carry_the_show_values():
     app = build_app(_Recorder())
-    options = app.layout['control-intensity'].options
+    options = app.layout()['control-intensity'].options
     assert [(o['label'], o['value']) for o in options] == [
         ('calm', INTENSITY_CALM),
         ('balanced', INTENSITY_BALANCED),
         ('wild', INTENSITY_WILD),
     ]
-    choices = [o['value'] for o in app.layout['control-palette'].options]
+    choices = [o['value'] for o in app.layout()['control-palette'].options]
     assert choices == [PALETTE_POLICY, *PALETTE_NAMES]
 
 
@@ -483,6 +505,53 @@ def test_static_targets_and_uv_chips_follow_the_published_rig():
     assert uv_off
     uv_rig = {'targets': ['all', 'uv_bar'], 'blacklight': True}
     assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False]
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run fixture_patch.js')
+def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_click():
+    source = (Path(__file__).parents[1] / 'simulate/assets/fixture_patch.js').read_text('utf8')
+    script = (
+        'const labels = [];\n'
+        'const listen = () => {};\n'
+        'globalThis.document = {addEventListener: listen};\n'
+        'globalThis.window = {addEventListener: listen,\n'
+        '    autoluxControl: {dispatch: async () => ({})},\n'
+        '    dash_clientside: {set_props: (id, props) =>\n'
+        "        id === 'fixture-apply' && labels.push(props.children)}};\n"
+        f'{source}\n'
+        'const patch = window.dash_clientside.fixture_patch;\n'
+        "const sync = (state, saved) => patch.syncTest(state, 'control', saved);\n"
+        '(async () => {\n'
+        "    const seen = {none: sync(null, 'a'), older: sync({rig_revision: 'a'}, 'b')};\n"
+        "    seen.saved = sync({rig_revision: 'a', session: 'one'}, 'a');\n"
+        '    seen.clicks = [0, 1].map(() => window.dash_clientside.fixture_patch_model.applyClick());\n'
+        '    await new Promise((resolve) => setTimeout(resolve, 0));\n'
+        "    seen.restart = [sync({rig_revision: 'a', session: 'one'}, 'a'), sync(null, 'a'),\n"
+        "        sync({rig_revision: 'a', session: 'two'}, 'a')];\n"
+        '    console.log(JSON.stringify({...seen, labels}));\n'
+        '    process.exit(0);\n'
+        '})();'
+    )
+    # Through stdin: the whole module is longer than a Windows command line.
+    result = subprocess.run(
+        [NODE, '-'], input=script, capture_output=True, text=True, encoding='utf8', check=True
+    )
+    seen = json.loads(result.stdout)
+    # [banner, disabled]: no show means nothing to restart; the banner only names an older rig.
+    assert seen['none'] == ['', True]
+    assert seen['saved'] == ['', False]
+    assert seen['older'] == [
+        'The show runs an older rig. Restart show loads the saved patch.',
+        False,
+    ]
+    assert seen['clicks'] == [None, {'action': 'restart_show'}]
+    assert seen['labels'] == [
+        'Click again to restart; lights go dark until it is back',
+        'Restart show',
+    ]
+    # A same-revision restart holds until the next session reports, not the full minute.
+    restarting = ['Restarting the show on the saved patch.', True]
+    assert seen['restart'] == [restarting, restarting, ['', False]]
 
 
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
@@ -575,8 +644,8 @@ globalThis.fetch = async (url) => { urls.push(url); return answers.shift(); };
 """
     )
     assert result == {
-        'refused': {'error': 'the show is paused'},
-        'stalled': {'error': 'the show answered 504'},
+        'refused': {'error': 'the show is paused', 'status': 409},
+        'stalled': {'error': 'the show answered 504', 'status': 504},
         'urls': ['http://autolux.local:8766/control'] * 2,
         'shown': {'paused': False},
     }
@@ -625,13 +694,44 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
 
     app = build_app(_Recorder())
     graphs = [f'metric-{panel}' for panel, *_ in system_metrics.PANELS]
-    assert all(app.layout[graph] is not None for graph in graphs)
+    assert all(app.layout()[graph] is not None for graph in graphs)
     refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
     gate = {'tab': 'control', 'metrics': True, 'timeline': False}
     reply = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()
     figures = reply['response']['telemetry-figures']['data']
     assert len(figures) == len(graphs)
     assert all('data' in figure and 'layout' in figure for figure in figures)
+
+
+def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
+    highlight = {'target': {'fixture': 'spot_left'}, 'colour': 'red'}
+    rig = {'fixtures': [{'fixture_uuid': 'spot_left', 'name': 'spot_left', 'cells': ['spot_left']}]}
+    snapshot = {
+        'paused': True,
+        'static': {'blackout': False},
+        'highlight': highlight,
+        'rig': rig,
+        'rig_revision': 'r1',
+    }
+    app = build_app(_Recorder(snapshot))
+    refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
+
+    def poll(**held):
+        gate = {'tab': 'config', 'metrics': False, 'timeline': False, **held}
+        return _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()['response']
+
+    response = poll()
+    assert list(response) == ['control-state']
+    state = response['control-state']['data']
+    assert (state['paused'], state['static'], state['highlight'], state['rig']) == (
+        True,
+        {'blackout': False},
+        highlight,
+        rig,
+    )
+    # A page holding this revision's rig is not sent it again; an older revision is.
+    assert 'rig' not in poll(rig='r1')['control-state']['data']
+    assert poll(rig='r0')['control-state']['data']['rig'] == rig
 
 
 def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_the_show():
@@ -731,6 +831,17 @@ def test_the_fx_picker_lists_only_the_rows_that_fit_the_target():
     assert synced == [['static-fx-row', 'drift'], ['static-fx-row', None]]
 
 
+def test_afterglow_under_drop_shows_the_breakdown_colour():
+    from autolux.simulate.visualizer_app import INTENT_CONFIG, _build_show_status
+
+    effect = {'name': 'breakdown/afterglow', 'selection': {'intent': 'drop', 'look': 'breakdown'}}
+    status = _build_show_status({'intent': 'drop', 'current_effect': effect}, now=0.0)
+    value = next(item for item in status if item.children[0].children == 'Autoloop').children[1]
+    dot, name, _ = value.children
+    assert name == 'Afterglow'
+    assert dot.style['background'] == INTENT_CONFIG['breakdown']['primary']
+
+
 def test_the_status_line_shows_the_active_fx():
     from autolux.simulate.visualizer_app import _build_show_status
 
@@ -749,26 +860,6 @@ def test_the_status_line_shows_the_active_fx():
     assert labels.index('FX') == labels.index('Colors') + 1
     static = {'static': {'special_fx': {'name': 'cold_drift', 'group': 'wash'}}}
     assert items(static)['FX'] == 'Static · Cold drift · wash'
-
-
-def test_the_config_rig_area_lists_each_groups_fx_capabilities():
-    from autolux.simulate.visualizer_app import special_groups_view
-
-    line = special_groups_view(
-        {'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']}, {'fx': 'accent'}
-    )
-    assert [getattr(part, 'children', part) for part in line] == [
-        'FX',
-        '  ',
-        'fx',
-        ' ',
-        'accent · colour · pulse · speed',
-        '  ',
-        'wash',
-        ' ',
-        'loop · colour',
-    ]
-    assert special_groups_view({}) == ['FX: Starfire reported no groups']
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -958,7 +1049,7 @@ def test_no_chip_click_rewrites_the_clear_buttons_class():
 
 def test_clear_all_leads_the_static_action_row_in_the_quiet_style():
     app = build_app(_Recorder())
-    row = app.layout['static-control'].children[0]
+    row = app.layout()['static-control'].children[0]
     clear = row.children[0]
     assert (clear.id, clear.className, clear.disabled) == ('static-clear', 'ghost-button', True)
     assert 'static-clear.disabled' in app.callback_map
@@ -1137,7 +1228,7 @@ def test_the_auto_tab_has_fx_auto_and_off_chips():
     from autolux.simulate.visualizer_app import FX_AUTO_IDS
 
     app = build_app(_Recorder())
-    assert [app.layout[name].children for name in FX_AUTO_IDS] == ['Auto', 'Off']
+    assert [app.layout()[name].children for name in FX_AUTO_IDS] == ['Auto', 'Off']
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -1180,7 +1271,7 @@ window.dash_clientside = {{
 def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
     from autolux.simulate.visualizer_app import _build_cooldowns
 
-    assert build_app(_Recorder()).layout['special-cooldowns'] is not None
+    assert build_app(_Recorder()).layout()['special-cooldowns'] is not None
 
     def cooldown(group, last, total, remaining):
         return {

@@ -12,11 +12,14 @@ from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
+from autolux.lighting import mvr
 from autolux.lighting.autoloop_catalogue import (
     AutoloopMetaError,
     read_autoloop_meta,
     required_autoloops,
 )
+from autolux.lighting.fixture_setup import rig_revision
+from autolux.lighting.gdtf import read_bounded
 from autolux.lighting.palettes import palette_records
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
 from cli.starfire import (
@@ -66,11 +69,16 @@ def selected_rig(path=None, library=None):
     return Path(path) if path else saved_rig(Path(library or FIXTURE_LIBRARY))
 
 
-def fixture_setup(args):
+def fixture_setup(args, rig, expected_universe=None):
     return {
         'binary': Path(args.starfire_binary).resolve(),
+        # Save runs the start check with these, so it refuses what this show would refuse.
+        'autoloops': Path(args.autoloops).resolve(),
+        'expected_universe': expected_universe,
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
         'library': Path(args.library).resolve(),
+        # Hashed before the renderer reads the rig: a later edit can only show as stale.
+        'rig_revision': rig_revision(read_bounded(Path(rig), mvr.MAX_MVR_BYTES)),
     }
 
 
@@ -414,7 +422,11 @@ class StarfireRuntime:
             except subprocess.TimeoutExpired:
                 LOGGER.warning('[prod] Starfire shutdown timed out; terminating owned renderer')
                 child.kill()
-                child.wait(timeout=self.stop_timeout)
+                try:
+                    child.wait(timeout=self.stop_timeout)
+                except subprocess.TimeoutExpired:
+                    # The job close below still ends it; a relaunch meets any survivor as a conflict.
+                    LOGGER.error('[prod] Starfire survived its kill')
             for thread in self._threads:
                 if thread.ident is not None:
                     thread.join(timeout=self.stop_timeout)

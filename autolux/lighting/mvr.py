@@ -273,8 +273,8 @@ def mode_cells(owned: list[tuple[tuple[str, ...], list[int]]]) -> list[dict]:
     ]
 
 
-def cell_id(fixture: str, geometry: str, cell_count: int) -> str:
-    return fixture if cell_count == 1 else f'{fixture}/{geometry}'
+def cell_id(fixture_uuid: str, geometry: str, cell_count: int) -> str:
+    return fixture_uuid if cell_count == 1 else f'{fixture_uuid}/{geometry}'
 
 
 def gdtf_modes(description: str, label: str = 'GDTF') -> dict[str, dict]:
@@ -636,7 +636,8 @@ def patched_fixtures(scene: Scene) -> list[dict]:
             movement[axis] = {'min': low, 'max': high, 'inverted': inverted}
         fixtures.append(
             {
-                'uuid': identity,
+                # Lookups match uuids case-blind, but the identity carried on is the file's text.
+                'fixture_uuid': node.uuid,
                 'name': node.name,
                 'gdtf_spec': specs[identity],
                 'gdtf_mode': (node.gdtf_mode or '').strip(),
@@ -657,7 +658,7 @@ def _venue_x(fixture) -> float:
 
 
 def groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
-    """Each class's members left to right: ascending scene X of their placed positions.
+    """Each class's member uuids left to right: ascending scene X of their placed positions.
 
     Equal positions keep file order; a group whose members all share one X (no positions, or
     every fixture at the origin) has no spatial order, so it keeps file order and warns.
@@ -674,7 +675,7 @@ def groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
             )
         else:
             placed = sorted(placed, key=_venue_x)
-        result[group] = [fixture['name'] for fixture in placed]
+        result[group] = [fixture['fixture_uuid'] for fixture in placed]
     return result, warnings
 
 
@@ -726,26 +727,23 @@ def add_fixture(
     gdtf_mode: str,
     universe: int,
     address: int,
-    fixture_id: int,
+    patch_number: int,
     fixture_class: str = '',
     matrix=IDENTITY_MATRIX,
-    identity: str | None = None,
 ) -> ElementTree.Element:
     parent = _class_layer(scene, fixture_class)
     children = parent.find('ChildList')
     if children is None:
         children = ElementTree.SubElement(parent, 'ChildList')
-    node = ElementTree.SubElement(
-        children, 'Fixture', uuid=identity or str(uuid.uuid4()).upper(), name=name
-    )
+    node = ElementTree.SubElement(children, 'Fixture', uuid=str(uuid.uuid4()).upper(), name=name)
     values = [('Matrix', format_matrix(matrix))]
     if fixture_class:
         values.append(('Classing', class_uuid(scene, fixture_class)))
     values += [
         ('GDTFSpec', gdtf_spec),
         ('GDTFMode', gdtf_mode),
-        ('FixtureID', str(fixture_id)),
-        ('FixtureIDNumeric', str(fixture_id)),
+        ('FixtureID', str(patch_number)),
+        ('FixtureIDNumeric', str(patch_number)),
         ('UnitNumber', '0'),
     ]
     for tag, text in values:

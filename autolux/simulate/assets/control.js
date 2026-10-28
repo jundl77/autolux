@@ -145,6 +145,10 @@
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(command),
+            // A command sent as the page unloads (the Config test's clear on a reload) must outlive
+            // the page; without it Chrome may cancel the request and a test stays lit until
+            // Starfire's 60 s dead-man.
+            keepalive: true,
             signal: AbortSignal.timeout(POST_TIMEOUT_MS),
         });
     }
@@ -155,8 +159,9 @@
         try {
             reply = await response.json();
         } catch (error) {}
-        if (!response.ok && !(reply && reply.error)) {
-            reply = {error: 'the show answered ' + response.status};
+        if (!response.ok) {
+            // The status tells a refusal (409: the command cannot apply now) from a stall.
+            reply = {error: (reply && reply.error) || 'the show answered ' + response.status, status: response.status};
         }
         return reply;
     }

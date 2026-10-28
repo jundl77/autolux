@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -39,6 +39,11 @@ VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
 _VIEWER_POLL_SEC = 0.2
+_RETRY_POLL_SEC = 0.25
+# A relaunched viewer waits this long for the last session's viewer to let go of the port.
+VIEWER_BIND_SEC = 30.0
+# Its exit code when it never could: the controller faults the session on it, not on any exit.
+VIEWER_PORT_TAKEN = 3
 
 
 @contextmanager
@@ -85,7 +90,7 @@ def parse_control_command(payload) -> dict:
     if not isinstance(payload, dict):
         raise TypeError('a control command must be an object')
     action = payload.get('action')
-    if action in ('pause', 'play', 'next_autoloop'):
+    if action in ('pause', 'play', 'next_autoloop', 'restart_show'):
         return {'action': action}
     if action == 'master':
         level = payload.get('level')
@@ -124,6 +129,8 @@ def parse_control_command(payload) -> dict:
         return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
+    if action == 'highlight':
+        return {'action': action, **_highlight_command(payload)}
     raise ValueError(f'unknown control action {action!r}')
 
 
@@ -172,11 +179,49 @@ def _static_command(payload: dict) -> dict:
     return look
 
 
+def _highlight_command(payload: dict) -> dict:
+    from autolux.lib.engine.static_mode import HIGHLIGHT_COLOURS
+
+    if 'target' in payload and payload['target'] is None:
+        return {'target': None}
+    target = payload.get('target')
+    if (
+        not isinstance(target, dict)
+        or len(target) != 1
+        or not target.keys() <= {'fixture', 'cell'}
+        or not isinstance(next(iter(target.values())), str)
+    ):
+        raise ValueError('a highlight target is {fixture: name}, {cell: id} or null to clear')
+    colour = payload.get('colour', 'white')
+    if colour not in HIGHLIGHT_COLOURS:
+        raise ValueError(f'highlight colour must be one of {", ".join(HIGHLIGHT_COLOURS)}')
+    return {'target': dict(target), 'colour': colour}
+
+
 def command_refusal(
-    command: dict, intent: str | None, paused: bool | None, mode: str | None
+    command: dict,
+    intent: str | None,
+    paused: bool | None,
+    mode: str | None,
+    static: dict | None,
+    rig: dict | None,
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
+    from autolux.lib.engine.static_mode import names_target
 
+    if command['action'] == 'highlight' and command['target'] is not None:
+        # Starfire answers an unknown fixture with an ErrorReply, which stops the show.
+        fixtures = (
+            (f['fixture_uuid'], f['name'], f['cells']) for f in (rig or {}).get('fixtures', ())
+        )
+        if not names_target(fixtures, command['target']):
+            ((kind, name),) = command['target'].items()
+            return f'no {kind} {name!r} in the running rig'
+        if paused:
+            return 'the show is paused'
+        if (static or {}).get('blackout'):
+            return 'blackout is on'
+        return None
     if command['action'] != 'next_autoloop':
         return None
     if paused:
@@ -205,6 +250,14 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     # Headers and body go out as two writes; Nagle would hold the body for the client's delayed ACK.
     disable_nagle_algorithm = True
+
+    def setup(self) -> None:
+        super().setup()
+        self.server.connections.add(self.connection)
+
+    def finish(self) -> None:
+        self.server.connections.discard(self.connection)
+        super().finish()
 
     def handle(self) -> None:
         try:
@@ -284,6 +337,9 @@ class _Handler(BaseHTTPRequestHandler):
         if timeout is not None and not _await_handoff(commands, timeout):
             self._reply(504, {'error': 'the show has not taken the command yet'})
             return
+        if 'refused' in command:
+            self._reply(409, {'error': command['refused']})
+            return
         self._reply(202, {'accepted': command['action']})
 
     def _refuse(self, status: int, length: int) -> None:
@@ -342,6 +398,7 @@ class SnapshotServer:
         self._http = _Http((host, port), _Handler)
         self._http.event_buffer = event_buffer
         self._http.commands = commands
+        self._http.connections = set()
         self._http.dashboard_port = dashboard_port
         self._http.handoff_timeout = handoff_timeout
         self._thread = threading.Thread(
@@ -358,6 +415,11 @@ class SnapshotServer:
     def stop(self) -> None:
         self._http.shutdown()
         self._http.server_close()
+        # A browser reuses its keep-alive socket, which would reach this stopped show's queue
+        # and never the next session's: the second Config-tab restart did nothing.
+        for connection in list(self._http.connections):
+            with suppress(OSError):
+                connection.shutdown(socket.SHUT_RDWR)
 
 
 def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
@@ -374,8 +436,13 @@ def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
             '--rig-store',
             str(fixture_setup['rig_store']),
         ]
-        if fixture_setup.get('library') is not None:
-            command.extend(['--library', str(fixture_setup['library'])])
+        for flag, key in (
+            ('--library', 'library'),
+            ('--autoloops', 'autoloops'),
+            ('--expected-universe', 'expected_universe'),
+        ):
+            if fixture_setup.get(key) is not None:
+                command.extend([flag, str(fixture_setup[key])])
     return command + ['--port', str(ui_port), '--snapshot-port', str(snapshot_port(ui_port))]
 
 
@@ -429,10 +496,65 @@ class UiBridge:
         while self._viewer.poll() is None:
             time.sleep(_VIEWER_POLL_SEC)
 
+    def dashboard_lost(self) -> bool:
+        return self._viewer.poll() == VIEWER_PORT_TAKEN
+
     def stop(self) -> None:
         self._stopping = True
         kill_tree(self._viewer)
         self._server.stop()
+        # The venv launcher can exit before the interpreter it started lets go of the port.
+        try:
+            _within(_KILL_GRACE_SEC, lambda: _probe(self._ui_port))
+        except OSError as error:
+            LOGGER.warning(f'[ui] the dashboard port {self._ui_port} is still taken ({error!r})')
+
+
+def _probe(port: int) -> None:
+    with socket.socket() as probe:
+        if os.name != 'nt':
+            # Else a closed listener's TIME_WAIT reads as taken; Windows binds through it anyway.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind((DASHBOARD_BIND_ADDRESS, port))
+
+
+def _within(seconds: float, attempt, *, clock=time.monotonic, sleep=time.sleep):
+    """attempt() until it stops raising OSError; a relaunch races the last session's sockets."""
+    deadline = clock() + seconds
+    while True:
+        try:
+            return attempt()
+        except OSError:
+            if clock() >= deadline:
+                raise
+            sleep(_RETRY_POLL_SEC)
+
+
+def serve_viewer(wsgi_app, port: int, *, clock=time.monotonic, sleep=time.sleep) -> None:
+    from werkzeug.serving import ThreadedWSGIServer
+
+    class Server(ThreadedWSGIServer):
+        # On Windows SO_REUSEADDR binds over a live listener, so a dying viewer's port would
+        # read as free and two viewers would share it.
+        allow_reuse_address = os.name != 'nt'
+
+        # Werkzeug turns a failed bind into a bare exit(1); retry here, below that.
+        def server_bind(self):
+            def attempt():
+                try:
+                    super(Server, self).server_bind()
+                except OSError:
+                    self.socket.close()
+                    self.socket = socket.socket(self.address_family, self.socket_type)
+                    raise
+
+            try:
+                _within(VIEWER_BIND_SEC, attempt, clock=clock, sleep=sleep)
+            except OSError as error:
+                LOGGER.error(f'[ui] the dashboard port {port} stayed taken ({error!r})')
+                raise SystemExit(VIEWER_PORT_TAKEN) from error
+
+    Server(DASHBOARD_BIND_ADDRESS, port, wsgi_app).serve_forever()
 
 
 def start(
@@ -444,13 +566,16 @@ def start(
 ) -> UiBridge | None:
     try:
         # Bound like the dashboard so its page can POST controls here directly.
-        server = SnapshotServer(
-            event_buffer,
-            snapshot_port(ui_port),
-            commands,
-            host=DASHBOARD_BIND_ADDRESS,
-            dashboard_port=ui_port,
-            handoff_timeout=HANDOFF_TIMEOUT_SEC,
+        server = _within(
+            _KILL_GRACE_SEC,
+            lambda: SnapshotServer(
+                event_buffer,
+                snapshot_port(ui_port),
+                commands,
+                host=DASHBOARD_BIND_ADDRESS,
+                dashboard_port=ui_port,
+                handoff_timeout=HANDOFF_TIMEOUT_SEC,
+            ),
         )
         server.start()
     except OSError as error:

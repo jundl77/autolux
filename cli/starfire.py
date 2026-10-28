@@ -12,7 +12,7 @@ from pathlib import Path
 
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
-from cli.starfire_assets import native_rig, rig_definition
+from cli.starfire_assets import native_rig, rig_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
@@ -90,6 +90,8 @@ def add_subparser(subparsers) -> None:
     ui.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT)
     ui.add_argument('--rig-store', type=Path, default=DEFAULT_FIXTURE_STORE)
     ui.add_argument('--library', type=Path, default=FIXTURE_LIBRARY)
+    ui.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
+    ui.add_argument('--expected-universe', type=int, help="The show's one DMX universe")
     ui.add_argument('--snapshot-port', type=int, help='Read the running controller snapshot')
     ui.set_defaults(func=run_ui)
 
@@ -167,7 +169,7 @@ async def run_native(args: argparse.Namespace) -> None:
 
 
 async def export_rig(args: argparse.Namespace) -> None:
-    args.output.write_bytes(rig_definition(args.input).SerializeToString())
+    args.output.write_bytes(rig_bytes(args.input))
 
 
 async def convert_report(args: argparse.Namespace) -> None:
@@ -185,9 +187,10 @@ async def convert_report(args: argparse.Namespace) -> None:
     print(f'Source-time replay: {args.output} ({len(replay["events"])} commands; accents omitted)')
 
 
-def _validate_patch(binary: Path, patch: Path) -> None:
+def _validate_patch(binary: Path, patch: Path) -> bytes:
     try:
         with native_rig(patch) as exported:
+            definition = exported.read_bytes()
             completed = subprocess.run(
                 [str(binary), 'rig', str(exported)],
                 cwd=ROOT,
@@ -203,6 +206,19 @@ def _validate_patch(binary: Path, patch: Path) -> None:
         raise RuntimeError('Starfire fixture validation timed out') from error
     if completed.returncode != 0:
         raise ValueError(completed.stderr.strip() or 'Starfire rejected the fixture patch')
+    return definition
+
+
+def patch_validator(binary: Path, autoloops: Path, expected_universe: int | None = None):
+    """Save runs the show's start check too, so a patch the show would refuse fails at Save."""
+    from cli.starfire_runtime import validate_starfire
+
+    def validate(patch: Path) -> bytes:
+        definition = _validate_patch(binary, patch)
+        validate_starfire(binary, patch, autoloops, expected_universe=expected_universe)
+        return definition
+
+    return validate
 
 
 def run_import(args: argparse.Namespace) -> None:
@@ -240,7 +256,10 @@ def run_ui(args: argparse.Namespace) -> None:
             pass
     refresh_profiles(patch, library)
     _validate_patch(binary, patch)
-    store = FixtureStore(patch, library, lambda candidate: _validate_patch(binary, candidate))
+    # Only the default store mirrors to the tracked rig; another --rig-store is not the room.
+    repo_rig = DEFAULT_RIG if patch == DEFAULT_FIXTURE_STORE else None
+    validate = patch_validator(binary, args.autoloops.resolve(), args.expected_universe)
+    store = FixtureStore(patch, library, validate, repo_rig)
     source = EventBuffer()
     if args.snapshot_port is not None:
         from autolux.simulate.visualizer_app import SnapshotPoller

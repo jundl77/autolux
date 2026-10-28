@@ -12,7 +12,7 @@ use starfire::protocol::wire;
 const HALF_TURN: [f64; 12] = [-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
 
 fn fixture(profile: &str, address: usize) -> serde_json::Value {
-    json!({"id":"test", "profile":profile, "universe":0, "address":address})
+    json!({"fixture_uuid":"test", "profile":profile, "universe":0, "address":address})
 }
 
 fn rig(fixtures: serde_json::Value) -> FixtureRig {
@@ -203,26 +203,51 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
 }
 
 #[test]
-fn standing_head_reverses_movement_like_dmx_inversion_and_hanging_does_not() {
-    const STANDING: [f64; 12] = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0];
-    let spot = |matrix: [f64; 12], inverted: bool| {
+fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_yaw() {
+    // Independent of the encoder: decode the DMX to body angles and carry the beam through the
+    // Matrix. Physical pan 0 faces local +Y and turns clockwise about local +Z; mid tilt is on
+    // the pan axis (the mirror the tilt inversion assumes) and tilts towards the pan heading.
+    let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
+        let (sin, cos) = f64::to_radians(yaw).sin_cos();
+        let flip = if hanging { 1.0 } else { -1.0 };
+        // Standing is the Config pane's flip about local Y: X and Z negated, facing kept.
+        let [u, v, w] = [
+            [flip * cos, flip * sin, 0.0],
+            [-sin, cos, 0.0],
+            [0.0, 0.0, flip],
+        ];
         let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
-        patch["matrix"] = json!(matrix);
-        patch["pan"] = json!({"inverted": inverted});
+        patch["matrix"] = json!([u, v, w, [0.0; 3]].concat());
+        patch["pan"] = json!({"min": 0.1, "max": 0.8, "inverted": inverted});
         patch["tilt"] = json!({"inverted": inverted});
-        rig(json!([patch]))
-    };
-    let standing = spot(STANDING, false);
-    let hanging_inverted = spot(HALF_TURN, true);
-    let hanging = spot(HALF_TURN, false);
-    let standing_inverted = spot(STANDING, true);
-    for (pan, tilt) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
-        let mut states = standing.empty_states();
+        let rig = rig(json!([patch]));
+        let mut states = rig.empty_states();
         let state = states.get_mut("test").unwrap();
         (state.pan, state.tilt) = (pan, tilt);
-        let encode = |rig: &FixtureRig| rig.encode(&states).unwrap()[&0][..4].to_vec();
-        assert_eq!(encode(&standing), encode(&hanging_inverted));
-        assert_eq!(encode(&standing_inverted), encode(&hanging));
+        let frame = &rig.encode(&states).unwrap()[&0];
+        let angle = |at: usize, travel: f64| {
+            f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 * travel
+        };
+        let (pan, tilt) = (
+            angle(0, 540.0).to_radians(),
+            (angle(2, 270.0) - 135.0).to_radians(),
+        );
+        let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
+        [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
+    };
+    for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, 270.0, -90.0] {
+        for inverted in [false, true] {
+            for state in [(0.0, 0.2), (0.3, 0.9), (0.5, 0.35), (0.85, 0.6), (1.0, 0.0)] {
+                let expected = beam(true, 0.0, inverted, state);
+                for hanging in [true, false] {
+                    let actual = beam(hanging, yaw, inverted, state);
+                    assert!(
+                        (0..2).all(|axis| (actual[axis] - expected[axis]).abs() < 1e-3),
+                        "hanging {hanging} yaw {yaw} inverted {inverted} {state:?}: {actual:?} vs {expected:?}"
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -289,8 +314,8 @@ fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_the_fx_derby_
 fn fixture_and_group_order_are_explicit_and_unknown_targets_fail() {
     let rig = support::rig(json!({
         "fixtures":[
-            {"id":"z", "profile":"generic_dimmer", "universe":0, "address":1},
-            {"id":"a", "profile":"generic_dimmer", "universe":0, "address":2}
+            {"fixture_uuid":"z", "profile":"generic_dimmer", "universe":0, "address":1},
+            {"fixture_uuid":"a", "profile":"generic_dimmer", "universe":0, "address":2}
         ],
         "groups":{"wash":["a", "z"]}
     }));
@@ -314,10 +339,10 @@ fn patch_rejects_overlap_invalid_addresses_profiles_and_duplicate_ids() {
         json!([fixture("generic_dimmer", 1), fixture("generic_dimmer", 2)]),
         json!([
             fixture("generic_rgb", 1),
-            {"id":"other", "profile":"generic_dimmer", "universe":0, "address":3}
+            {"fixture_uuid":"other", "profile":"generic_dimmer", "universe":0, "address":3}
         ]),
-        json!([{"id":"test", "profile":"generic_dimmer", "universe":32768, "address":1}]),
-        json!([{"id":"", "profile":"generic_dimmer", "universe":0, "address":1}]),
+        json!([{"fixture_uuid":"test", "profile":"generic_dimmer", "universe":32768, "address":1}]),
+        json!([{"fixture_uuid":"", "profile":"generic_dimmer", "universe":0, "address":1}]),
     ];
     for fixtures in invalid {
         let definition = json!({ "fixtures": fixtures });
@@ -326,6 +351,60 @@ fn patch_rejects_overlap_invalid_addresses_profiles_and_duplicate_ids() {
     for members in [json!([]), json!(["test", "test"]), json!(["missing"])] {
         let definition = json!({"fixtures":[fixture("generic_rgb",1)],"groups":{"wash":members}});
         assert!(!accepts(definition));
+    }
+}
+
+const LEFT: &str = "75D557BC-32F9-592A-810D-652F0ECF68D7";
+const RIGHT: &str = "0BD68C96-850C-57EA-86E0-1780E40FF826";
+
+fn labelled(names: [&str; 2], ids: [&str; 2]) -> serde_json::Value {
+    json!({
+        "fixtures": [
+            {"fixture_uuid": ids[0], "name": names[0], "profile": "generic_dimmer", "universe": 0, "address": 1},
+            {"fixture_uuid": ids[1], "name": names[1], "profile": "generic_dimmer", "universe": 0, "address": 2}
+        ],
+        "groups": {"wash": [ids[0], ids[1]]}
+    })
+}
+
+#[test]
+fn a_fixture_is_its_uuid_and_swapping_labels_moves_nothing_else() {
+    let rig = support::rig(labelled(["spot_left", "spot_right"], [LEFT, RIGHT]));
+    let swapped = support::rig(labelled(["spot_right", "spot_left"], [LEFT, RIGHT]));
+    for rig in [&rig, &swapped] {
+        assert_eq!(rig.cell_ids(), [LEFT, RIGHT]);
+        assert_eq!(rig.groups()["wash"], [LEFT, RIGHT]);
+        assert_eq!(rig.resolve(&Target::Fixture(LEFT.into())).unwrap(), [LEFT]);
+        // Wire targets carry uuids; only autoloops resolve labels.
+        assert!(rig.resolve(&Target::Fixture("spot_left".into())).is_err());
+        let mut states = rig.empty_states();
+        states.insert(LEFT.into(), full_light());
+        assert_eq!(rig.encode(&states).unwrap()[&0][..2], [255, 0]);
+    }
+    assert_eq!(rig.uuid_of_label("spot_left"), Some(LEFT));
+    assert_eq!(swapped.uuid_of_label("spot_left"), Some(RIGHT));
+    assert_eq!(swapped.label(LEFT), "spot_right");
+    assert_eq!(swapped.uuid_of_label(LEFT), None);
+}
+
+#[test]
+fn a_rig_repeating_a_uuid_or_a_label_is_refused() {
+    for (spec, refusal) in [
+        (
+            labelled(["a", "b"], [LEFT, LEFT]),
+            format!("duplicate fixture uuid {LEFT} (b)"),
+        ),
+        (
+            labelled(["a", "a"], [LEFT, RIGHT]),
+            "duplicate fixture name a".to_owned(),
+        ),
+        (
+            labelled(["", "b"], [LEFT, RIGHT]),
+            "identifiers must contain".to_owned(),
+        ),
+    ] {
+        let error = format!("{:#}", support::try_rig(spec).unwrap_err());
+        assert!(error.contains(&refusal), "{error}");
     }
 }
 
@@ -345,8 +424,8 @@ fn patch_rejects_bad_calibration() {
 #[test]
 fn universes_have_independent_addresses_and_boundary_channels() {
     let rig = rig(json!([
-        {"id":"first", "profile":"generic_dimmer", "universe":0, "address":512},
-        {"id":"second", "profile":"generic_dimmer", "universe":32767, "address":512}
+        {"fixture_uuid":"first", "profile":"generic_dimmer", "universe":0, "address":512},
+        {"fixture_uuid":"second", "profile":"generic_dimmer", "universe":32767, "address":512}
     ]));
     let mut states = rig.empty_states();
     states.insert("first".into(), full_light());
@@ -418,7 +497,8 @@ fn pixel_bar(mode: &str, cells: Vec<wire::fixture::Cell>) -> wire::RigDefinition
     wire::RigDefinition {
         fixtures: vec![wire::Fixture {
             area: wire::StageArea::Centre as i32,
-            fixture_id: "bar".into(),
+            fixture_uuid: "bar".into(),
+            name: "bar".into(),
             profile_id: "bar".into(),
             address: 1,
             cells,
@@ -426,7 +506,7 @@ fn pixel_bar(mode: &str, cells: Vec<wire::fixture::Cell>) -> wire::RigDefinition
         }],
         groups: vec![wire::FixtureGroup {
             group_id: "strip".into(),
-            fixture_ids: vec!["bar".into()],
+            fixture_uuids: vec!["bar".into()],
             ..Default::default()
         }],
         profiles: vec![support::compiled_profile(
@@ -483,7 +563,7 @@ fn each_channel_owning_geometry_is_a_cell_encoded_from_its_own_state() {
 
     let rig = FixtureRig::from_wire(&pixel_bar("Pixels", Vec::new())).unwrap();
     let cells = ["bar/Pixel 1", "bar/Pixel 2"];
-    assert_eq!(rig.fixture_ids(), ["bar"]);
+    assert_eq!(rig.fixture_uuids(), ["bar"]);
     assert_eq!(rig.cell_ids(), cells);
     assert_eq!(rig.resolve(&Target::Group("strip".into())).unwrap(), cells);
     assert_eq!(rig.resolve(&Target::Fixture("bar".into())).unwrap(), cells);
@@ -573,7 +653,7 @@ fn a_login_whose_declared_cells_differ_from_the_profile_is_refused() {
 #[test]
 fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_cells() {
     for exported in [
-        include_bytes!("../../rig/room.rig.pb").as_slice(),
+        include_bytes!("../../autolux/tests/data/room.rig.pb").as_slice(),
         include_bytes!("../../autolux/tests/data/generic_rig/generic.rig.pb"),
     ] {
         let definition = wire::RigDefinition::decode(exported).unwrap();
@@ -586,12 +666,12 @@ fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_c
         FixtureRig::from_wire(&definition).unwrap();
     }
     let room = support::room();
-    assert_eq!(room.fixture_ids().len(), 8);
+    assert_eq!(room.fixture_uuids().len(), 8);
     assert_eq!(room.cell_ids().len(), 15);
     assert_eq!(
         room.resolve(&Target::Group("strip".into())).unwrap(),
         (1..=8)
-            .map(|segment| format!("zq06017/Beam Segment {segment}"))
+            .map(|segment| format!("{}/Beam Segment {segment}", support::room_uuid("zq06017")))
             .collect::<Vec<_>>()
     );
 }

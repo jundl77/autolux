@@ -1,4 +1,4 @@
-#show-control, .dash-dropdown-content, .cooldowns, .show-status {
+#show-control, #config-panel, .dash-dropdown-content, .cooldowns, .show-status {
     --accent: #73b6ff;
     --fill: #18212d;
     --fill-hover: #1f2a38;
@@ -47,7 +47,8 @@
 .legend > span { display: inline-flex; align-items: center; gap: 8px; }
 
 #show-control { color: var(--text); font-size: 14px; }
-.show-status { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+/* Single-line tiles keep its height steady; min-height grows rather than clips under larger fonts. */
+.show-status { min-height: 63px; overflow: hidden; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
                gap: 16px; padding: 8px 0 16px; border-bottom: 1px solid var(--line);
                color: var(--text); font-size: 14px; }
 .status-tag { color: var(--muted); font-size: 11px; }

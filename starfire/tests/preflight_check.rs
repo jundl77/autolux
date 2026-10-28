@@ -24,7 +24,7 @@ fn check(rig: &Path, autoloops: &Path) -> Output {
 fn preflight_renders_every_shipped_autoloop_and_reports_patch_universes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = check(
-        &root.join("../rig/room.rig.pb"),
+        &root.join("../autolux/tests/data/room.rig.pb"),
         &root.join("../show/autoloops"),
     );
     assert!(
@@ -85,7 +85,10 @@ fn preflight_executes_render_callbacks_in_every_autoloop() {
     )
     .unwrap();
 
-    let output = check(&root.join("../rig/room.rig.pb"), directory.path());
+    let output = check(
+        &root.join("../autolux/tests/data/room.rig.pb"),
+        directory.path(),
+    );
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     assert!(error.contains("test/z_failure"), "{error}");

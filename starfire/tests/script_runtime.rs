@@ -15,8 +15,8 @@ fn rig() -> FixtureRig {
     support::rig(
         serde_json::from_str(
             r#"{"schema_version":1,"fixtures":[
-          {"id":"left","profile":"generic_rgb","universe":0,"address":1},
-          {"id":"right","profile":"generic_rgb","universe":0,"address":4}],
+          {"fixture_uuid":"left","profile":"generic_rgb","universe":0,"address":1},
+          {"fixture_uuid":"right","profile":"generic_rgb","universe":0,"address":4}],
           "groups":{"wash":["right","left"]}}"#,
         )
         .unwrap(),
@@ -140,9 +140,9 @@ fn mirror_pairs_and_sides_follow_the_groups_left_to_right_order() {
     let rig = support::rig(
         serde_json::from_str(
             r#"{"schema_version":1,"fixtures":[
-          {"id":"a","profile":"generic_rgb","universe":0,"address":1},
-          {"id":"b","profile":"generic_rgb","universe":0,"address":4},
-          {"id":"c","profile":"generic_rgb","universe":0,"address":7}],
+          {"fixture_uuid":"a","profile":"generic_rgb","universe":0,"address":1},
+          {"fixture_uuid":"b","profile":"generic_rgb","universe":0,"address":4},
+          {"fixture_uuid":"c","profile":"generic_rgb","universe":0,"address":7}],
           "groups":{"row":["c","a","b"]}}"#,
         )
         .unwrap(),
@@ -191,7 +191,7 @@ fn at(x: f64, y: f64) -> String {
 
 fn placed(id: &str, address: u32, x: f64, y: f64) -> String {
     format!(
-        r#"{{"id":"{id}","profile":"generic_rgb","universe":0,"address":{address},"matrix":{}}}"#,
+        r#"{{"fixture_uuid":"{id}","profile":"generic_rgb","universe":0,"address":{address},"matrix":{}}}"#,
         at(x, y)
     )
 }
@@ -568,6 +568,31 @@ fn an_unknown_fixture_is_still_an_error() {
         autoloop.render(&snapshot(0.0), &techno()).unwrap_err()
     );
     assert!(error.contains("unknown fixture ghost"), "{error}");
+}
+
+#[test]
+fn loops_name_a_fixture_by_label_and_render_it_by_uuid() {
+    let room = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
+    let spot = room.uuid_of_label("spot_left").unwrap();
+    let source = format!(
+        r#"return {{render = function(ctx)
+          assert(sf.fixture_of("spot_left") == "{spot}")
+          assert(sf.position("spot_left") == sf.position("{spot}"))
+          assert(sf.members(sf.fixture("spot_left"))[1] == "{spot}")
+          return {{sf.dimmer(sf.fixture("spot_left"), 1), sf.dimmer({{ fixture = "kinta" }}, 1)}}
+        end}}"#
+    );
+    let effects = catalog(&source)
+        .instantiate("test", "autoloop", &room, &support::palettes())
+        .unwrap()
+        .render(&snapshot(0.0), &techno())
+        .unwrap();
+    let targets: Vec<_> = effects.into_iter().map(|effect| effect.target).collect();
+    let kinta = room.uuid_of_label("kinta").unwrap();
+    assert_eq!(
+        targets,
+        [Target::Fixture(spot.into()), Target::Fixture(kinta.into())]
+    );
 }
 
 #[test]

@@ -136,7 +136,7 @@ fn cli(input: &Path) -> Process {
         .arg(input)
         .args([
             "--rig",
-            "../rig/room.rig.pb",
+            "../autolux/tests/data/room.rig.pb",
             "--autoloops",
             "../show/autoloops",
         ]);
@@ -207,7 +207,7 @@ fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
     let rig = directory.path().join("rig.pb");
     let shared = directory.path().join("capture");
     let source = serde_json::to_vec(&replay(0.0)).unwrap();
-    let patch = include_bytes!("../../rig/room.rig.pb");
+    let patch = include_bytes!("../../autolux/tests/data/room.rig.pb");
     fs::write(&input, &source).unwrap();
     fs::write(&rig, patch).unwrap();
     for destination in [&input, &rig, &shared] {

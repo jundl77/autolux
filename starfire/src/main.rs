@@ -129,7 +129,7 @@ fn run(arguments: Arguments) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "fixtures": rig.fixture_ids(), "cells": rig.cell_ids(), "groups": rig.groups(),
+                    "fixtures": rig.fixture_uuids(), "cells": rig.cell_ids(), "groups": rig.groups(),
                     "universes": universes, "checked_autoloops": autoloops,
                     "missing_groups": missing_groups,
                 }))?
@@ -157,7 +157,7 @@ fn run(arguments: Arguments) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "fixtures": rig.fixture_ids(), "cells": rig.cell_ids(), "groups": rig.groups(), "universes": universes,
+                    "fixtures": rig.fixture_uuids(), "cells": rig.cell_ids(), "groups": rig.groups(), "universes": universes,
                 }))?
             );
         }
@@ -354,7 +354,8 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+        let rig =
+            FixtureRig::decode(include_bytes!("../../autolux/tests/data/room.rig.pb")).unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();

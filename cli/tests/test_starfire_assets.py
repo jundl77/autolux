@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').re
     encoding='utf-8'
 )
 SPEC = 'Generic@Test Dimmer@1.0.gdtf'
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 
 
 @pytest.fixture
@@ -48,14 +50,14 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]
-    assert fixture.fixture_id == 'front'
+    assert uuid.UUID(fixture.fixture_uuid).version == 4 and fixture.name == 'front'
     assert fixture.profile_id == f'{SPEC}#16 bit'
     assert fixture.pan.inverted
     assert (fixture.pan.minimum, fixture.pan.maximum) == (0, 1)
     assert not fixture.HasField('tilt')
     assert list(fixture.matrix[:3]) == [-1, 0, 0]
     assert login.rig.groups[0].group_id == 'movers'
-    assert login.rig.groups[0].fixture_ids == ['front']
+    assert login.rig.groups[0].fixture_uuids == [fixture.fixture_uuid]
     [profile] = login.rig.profiles
     assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
@@ -69,10 +71,12 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
 
 
 def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts():
-    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
-    scene = mvr.read(DEFAULT_RIG.read_bytes())
+    login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
+    scene = mvr.read(ROOM.read_bytes())
     fixtures = mvr.patched_fixtures(scene)
-    assert [fixture.fixture_id for fixture in login.rig.fixtures] == [f['name'] for f in fixtures]
+    assert [(fixture.fixture_uuid, fixture.name) for fixture in login.rig.fixtures] == [
+        (f['fixture_uuid'], f['name']) for f in fixtures
+    ]
     assert [list(fixture.matrix) for fixture in login.rig.fixtures] == [
         f['matrix'] for f in fixtures
     ]
@@ -150,7 +154,9 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
 
 
 @pytest.mark.parametrize(
-    'rig', [ROOT / 'rig/room.mvr', ROOT / 'autolux/tests/data/generic_rig/generic.mvr']
+    # The repo rig stays here: Save and export-rig must keep its committed rig.pb in step.
+    'rig',
+    [DEFAULT_RIG, ROOM, ROOT / 'autolux/tests/data/generic_rig/generic.mvr'],
 )
 def test_committed_native_rig_is_the_exported_login_rig(rig):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
@@ -197,7 +203,7 @@ def test_an_axis_without_extent_puts_every_fixture_in_its_centre():
 
 
 def test_the_room_rig_fixtures_lie_in_their_stage_areas():
-    # rig/room.mvr: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
+    # The frozen room: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
     # Y -2000..0 at -1333 / -667.
     expected = {
         'spot_left': 'STAGE_AREA_UP_CENTRE',  # (-300, 0)
@@ -209,14 +215,14 @@ def test_the_room_rig_fixtures_lie_in_their_stage_areas():
         'zq06017': 'STAGE_AREA_DOWN_CENTRE',  # (0, -2000), the strip bar
         'kinta': 'STAGE_AREA_UP_CENTRE',  # (0, -500)
     }
-    rig = assets.rig_definition(ROOT / 'rig/room.mvr')
+    rig = assets.rig_definition(ROOM)
     assert {
-        fixture.fixture_id: rig_wire.StageArea.Name(fixture.area) for fixture in rig.fixtures
+        fixture.name: rig_wire.StageArea.Name(fixture.area) for fixture in rig.fixtures
     } == expected
 
 
 def test_login_carries_the_palette_table_and_palette_commands_round_trip():
-    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
+    login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
     techno = login.palettes[0]
     # show/palettes/techno.toml: secondary = "#ff8c1a".
@@ -241,11 +247,11 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
 
 
 def test_static_looks_for_the_room_rig_build_small_wire_accents():
-    from autolux.lib.engine.static_mode import StaticLooks, StaticRig
+    from autolux.lib.engine.static_mode import StaticLooks
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
-    rig = assets.static_rig(DEFAULT_RIG)
-    assert rig == StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
+    rig = assets.static_rig(ROOM)
+    assert (rig.groups, rig.uv_groups) == (('fx', 'movers', 'strip', 'wash'), ('wash',))
     lighting = RecordingStarfireClient()
     looks = StaticLooks(lighting, rig)
     looks.preset('uv')
@@ -266,13 +272,44 @@ def test_static_looks_for_the_room_rig_build_small_wire_accents():
     assert {m.effect_id for m in messages} == {'static_all', 'static_wash', 'static_fx'}
 
 
+def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_starfire():
+    from autolux.lib.engine.static_mode import StaticLooks
+    from autolux.simulate.lighting_recorder import RecordingStarfireClient
+
+    rig = assets.static_rig(ROOM)
+    ids = {name: identity for identity, name, _ in rig.fixtures}
+    cells = {name: cells for _, name, cells in rig.fixtures}
+    assert list(ids.values()) == [
+        entry.fixture_uuid for entry in assets.rig_definition(ROOM).fixtures
+    ]
+    assert cells['wash_left'] == (ids['wash_left'],)
+    assert cells['zq06017'] == tuple(f'{ids["zq06017"]}/Beam Segment {n}' for n in range(1, 9))
+    washes = ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
+    assert rig.uv_targets == tuple(ids[name] for name in washes)
+    lighting = RecordingStarfireClient()
+    looks = StaticLooks(lighting, rig)
+    looks.highlight({'fixture': ids['wash_left']}, 'warm')
+    looks.highlight({'cell': cells['zq06017'][2]})
+    wash, segment = (protocol.build_command(event['command']) for event in lighting.events)
+    assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (
+        ids['wash_left'],
+        0.0,
+        60.0,
+    )
+    assert (segment.fixture, segment.effect_id, dict(segment.attributes)) == (
+        cells['zq06017'][2],
+        'highlight',
+        {},
+    )
+
+
 SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
 
 
 @pytest.mark.parametrize(
     ('folder', 'name', 'libraries'),
     [
-        (ROOT / 'rig', 'room', [ROOT / 'rig/library']),
+        (ROOM.parent, 'room', [ROOT / 'rig/library']),
         (SAMPLE_RIG, 'generic', [ROOT / 'rig/library', SAMPLE_RIG]),
     ],
 )
@@ -294,11 +331,12 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
 
 
 def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():
-    rig = assets.rig_definition(DEFAULT_RIG)
-    [bar] = [fixture for fixture in rig.fixtures if fixture.fixture_id == 'zq06017']
+    rig = assets.rig_definition(ROOM)
+    [bar] = [fixture for fixture in rig.fixtures if fixture.name == 'zq06017']
     assert (bar.universe, bar.address) == (0, 97)
     assert bar.profile_id.endswith('#24Channel')
     assert [(cell.geometry, list(cell.offsets)) for cell in bar.cells] == [
         (f'Beam Segment {n}', [3 * n - 2, 3 * n - 1, 3 * n]) for n in range(1, 9)
     ]
-    assert {group.group_id: list(group.fixture_ids) for group in rig.groups}['strip'] == ['zq06017']
+    groups = {group.group_id: list(group.fixture_uuids) for group in rig.groups}
+    assert groups['strip'] == [bar.fixture_uuid]
