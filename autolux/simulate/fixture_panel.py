@@ -82,7 +82,9 @@ FIXTURE_CSS = '''
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
-#mvr-plan .plan .plan-badge {fill:var(--muted);}
+#mvr-plan .plan .plan-badge rect {fill:var(--ink);}
+#mvr-plan .plan .plan-badge text {fill:var(--text);font-weight:600;}
+#mvr-plan .plan .plan-name {stroke:#0b121c;stroke-linejoin:round;paint-order:stroke;}
 #mvr-plan .plan .plan-caption {display:none;fill:var(--text);stroke:#0b121c;paint-order:stroke;}
 #mvr-plan .mvr-object:is(:hover,.selected) .plan-caption {display:inline;}
 #mvr-plan .plan-pan {fill:none;opacity:.2;pointer-events:none;}
