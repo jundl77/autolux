@@ -1683,6 +1683,54 @@ const SUITES = {
         await check('plan nav', 'a pinch zooms in about threefold', Math.abs(fit[2] / pinched[2] - 3) < 0.3, {pinched, fit});
     },
 
+    // A tiny hand-written preview of the plan's own first two fixtures, loaded as a file.
+    cfg_preview: async () => {
+        await cfgFresh();
+        const [lit, strobing] = (await rigFiles()).fixtures;
+        const cell = (fixture, x) => ({id: fixture.fixture_uuid, fixture: fixture.fixture_uuid, x, y: 0, z: 3});
+        const frame = (t, cells) => ({t, beat: t * 2, bank: 'drop', autoloop: 'chase', c: cells});
+        const lines = [
+            {kind: 'starfire_preview', frame_rate_hz: 10, duration_seconds: 0.1, frames: 2, beats_per_bar: 4,
+                cells: [cell(lit, -1), cell(strobing, 1)], groups: {pair: [0, 1]}},
+            frame(0, [[1, 1, 0, 0, 0, [0.6, -0.8, 0]], [0, 1, 1, 1, 0]]),
+            frame(0.1, [[0.5, 1, 0, 0, 0, [0, 0, -1]], [1, 0, 0, 1, 8]]),
+        ];
+        const file = join(PROFILE, 'preview.jsonl');
+        writeFileSync(file, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+        const {root} = await cdp('DOM.getDocument');
+        const {nodeId} = await cdp('DOM.querySelector', {nodeId: root.nodeId, selector: '#preview-upload input[type=file]'});
+        await cdp('DOM.setFileInputFiles', {nodeId, files: [file]});
+        const markOfUuid = (fixture) => `[...document.querySelectorAll('#mvr-plan svg.plan .mvr-object')].find((g) =>
+            g.querySelector('title')?.textContent === ${JSON.stringify(fixture.name)})`;
+        const loaded = await waitFor(`!!document.querySelector('#mvr-plan svg.plan .plan-beam')`, 8000);
+        await check('preview', 'a loaded file draws a beam on the plan', loaded, {status: await text('#preview-status')});
+        const look = (fixture) => ev(`(() => { const g = ${markOfUuid(fixture)};
+            return g && {fill: g.querySelector('circle').getAttribute('fill'), beam: g.querySelector('.plan-beam')?.getAttribute('stroke') ?? null,
+                strobe: !!g.querySelector('.plan-strobe')}; })()`);
+        const first = await look(lit);
+        await check('preview', 'the lit fixture is filled red and throws a red beam', sub(first, {fill: 'rgb(255,0,0)', beam: 'rgb(255,0,0)', strobe: false}), {first});
+        await check('preview', 'the dark fixture is filled black', sub(await look(strobing), {fill: 'rgb(0,0,0)', beam: null}), {dark: await look(strobing)});
+        await check('preview', 'a front elevation stands beside the plan', await ev(`document.querySelectorAll('#mvr-plan svg.elevation circle').length >= 2`));
+        await check('preview', 'the label names time, bar and base loop', (await text('#preview-label')) === '0:00.0 · bar 1.1 · drop/chase', {label: await text('#preview-label')});
+        await check('preview', 'the overview strip has sections, the group and strobe rows',
+            (await ev(`document.querySelectorAll('#preview-overview svg').length`)) === 3);
+        await shot('config_preview', '.mvr-card');
+        await shot('config_preview_strip', '#preview-card');
+        await ev(`window.dash_clientside.set_props('preview-frame', {value: 1})`);
+        const second = await waitFor(`(() => { const g = ${markOfUuid(strobing)}; return !!g?.querySelector('.plan-strobe'); })()`, 4000);
+        await check('preview', 'scrubbing to the next frame rings the strobing fixture', second, {second: await look(strobing)});
+        // Straight down is a dot on the plan, a full-length beam on the elevation.
+        await check('preview', 'an upright beam shows on the elevation', await ev(`(() => {
+            const line = document.querySelector('#mvr-plan svg.elevation .plan-beam');
+            return !!line && Number(line.getAttribute('y2')) - Number(line.getAttribute('y1')) > 2000; })()`));
+        await ev(`window.dash_clientside.set_props('preview-frame', {value: 0})`);
+        await click('#preview-play');
+        const played = await waitFor(`document.getElementById('preview-label').textContent.startsWith('0:00.1')
+            && document.getElementById('preview-play').textContent === 'Play'`, 4000);
+        await check('preview', 'Play steps to the last frame and stops there', played, {label: await text('#preview-label'), button: await text('#preview-play')});
+        await check('preview', 'loading, scrubbing and playing send no show commands', (await since()).length === 0, {seen: await since()});
+    },
+
     narrow: async () => {
         await fresh({width: 390});
         const views = [
