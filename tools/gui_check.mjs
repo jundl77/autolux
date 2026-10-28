@@ -1280,6 +1280,21 @@ const SUITES = {
             (await since()).length === 0 && (await note()) === refusal, {note: await note(), posted: posted()});
         await exactly('locate address', 'the keep-alive keeps the test at 300', () => ev('window.__tickKeepAlive()'), [at300]);
         await exactly('locate address', 'Test clears it', () => click(testButton('test')), [CLEAR]);
+
+        // spot_left has no FocusPoint: the first edit writes one, and each edit re-aims the lit test.
+        await typeInto(cfg('address'), '1');
+        await click(testButton('aim'));
+        const centre = [];
+        for (const axis of ['x', 'y', 'z']) centre.push(Number(await ev(`document.querySelector('${splitInput('focus', axis)}').value`)));
+        for (const [axis, value, focus] of [['x', '500', [500, centre[1], centre[2]]], ['z', '1000', [500, centre[1], 1000]]]) {
+            await arm();
+            await typeInto(splitInput('focus', axis), value);
+            await sleep(500);
+            const seen = await since();
+            await check('locate focus', `a focus ${axis.toUpperCase()} edit re-aims within 500 ms`,
+                seen.length === 1 && seen[0].aim && same(seen[0].pose?.focus, focus), {centre, focus, seen, note: await note()});
+        }
+        await exactly('locate focus', 'Test clears it', () => click(testButton('test')), [CLEAR]);
         await checkHighlightIds('locate');
     },
 
