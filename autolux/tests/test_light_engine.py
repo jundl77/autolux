@@ -30,6 +30,7 @@ class FakeAnalyser:
         self.since_beat = 0.0
         self.bpm = 128.0
         self.rms = 0.1
+        self.features = None
 
     def is_song_playing(self):
         return self.playing
@@ -50,6 +51,9 @@ class FakeAnalyser:
         from autolux.lib.analyser.music_analyser import SpectralBalance
 
         return SpectralBalance(centroid_hz=2000.0, bass_over_treble_db=15.0)
+
+    def get_beat_features(self):
+        return self.features
 
     def get_song_current_duration(self):
         import datetime
@@ -1971,3 +1975,99 @@ async def test_a_fader_drag_updates_live_but_writes_the_show_file_once_it_settle
     assert [settings.intensity for settings in writes] == [levels[-1]]
     assert caplog.text.count('show settings') == 1
     assert main.load_show_settings(tmp_path / 'show.json').intensity == levels[-1]
+
+
+def cue_events(lighting, kind='cue_section'):
+    return [e for e in lighting.events if e['command']['kind'] == kind]
+
+
+def planned_cue(planned):
+    from autolux.lib.engine.cue import BaseLook, Cue
+
+    return Cue(planned.start_beat_index, planned.intent, (BaseLook('drop', 'kick', 16),), 'techno')
+
+
+async def test_the_cue_is_sent_at_commit_time_on_the_sections_analysed_downbeat():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    light._plan_cue = planned_cue
+    await elapse(light, clock, 20.0)
+    for phase in (3, 0, 1):
+        if phase == 0:
+            start_sec = light.audio_sec
+        await beat_at_phase(light, decoder, phase)
+        await elapse(light, clock, 0.5)
+    decoder._script.append([BarDecision(0, 'drop', start_sec)])
+    committed_at = clock.monotonic()
+    await light.on_beat(1, 128.0, False)
+
+    [cue] = cue_events(lighting)
+    assert cue['at_seconds'] == committed_at, 'sent at once, ahead of the room'
+    assert cue['command']['value']['start_beat_index'] == 2
+    assert cue['command']['value']['intent'] == 'drop'
+    assert sent_beats(lighting) == [], 'the start beat itself is still on its way to the room'
+
+
+async def test_a_section_starting_on_a_beat_not_yet_analysed_is_cued_when_that_beat_arrives():
+    decoder = FakeDecoder()
+    light, _, clock, lighting = engine(decoder=decoder)
+    light._plan_cue = planned_cue
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 2, decision='buildup')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 3)
+    assert cue_events(lighting) == []
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [cue] = cue_events(lighting)
+    assert cue['command']['value']['start_beat_index'] == 3
+
+
+def test_the_start_beat_is_the_first_downbeat_at_the_section_start_and_never_a_guess():
+    from autolux.lib.engine.light_engine import AnalysedBeat
+
+    light, _, _, _ = engine()
+    light._last_bpm = 120.0
+    light._beat_ring.extend(
+        AnalysedBeat(sec, index, phase)
+        for sec, index, phase in [(10.0, 1, 3), (10.5, 2, 0), (11.0, 3, 1), (12.5, 6, 0)]
+    )
+    assert light._start_beat_index(10.6) == 2, 'up to half a beat early'
+    assert light._start_beat_index(10.8) == 6
+    assert light._start_beat_index(13.0) is None
+    light._beat_ring.clear()
+    light._beat_ring.extend([AnalysedBeat(10.0, 1, None), AnalysedBeat(10.5, 2, None)])
+    assert light._start_beat_index(10.4) == 2, 'without a phase, the beat at the start'
+
+
+async def test_clearing_the_command_queue_clears_every_cue_at_once():
+    decoder = FakeDecoder()
+    light, queue, clock, lighting = engine(decoder=decoder)
+    light._plan_cue = planned_cue
+    resets = []
+    light._reset_plan_state = lambda: resets.append(True)
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    assert light._pending_intents
+    light.on_digital_silence()
+    [cleared] = cue_events(lighting, 'clear_cues')
+    assert cleared['at_seconds'] == clock.monotonic()
+    assert light._pending_intents == [] and resets == [True]
+    assert queue.pending == 0
+
+
+async def test_published_beats_carry_the_analysers_features_as_levels():
+    from autolux.lib.analyser.music_analyser import BeatFeatures
+
+    decoder = FakeDecoder()
+    light, _, _, lighting = engine(decoder=decoder, queue=False)
+    await beat_at_phase(light, decoder, 0)
+    light.analyser.features = BeatFeatures(
+        onset=0.7, bass_dbfs=-6.0, mid_dbfs=-36.0, high_dbfs=-90.0
+    )
+    await beat_at_phase(light, decoder, 1)
+    first, second = sent_beats(lighting)
+    assert 'features' not in first
+    assert second['features'] == {'onset': 0.7, 'bass': 1.0, 'mid': 0.5, 'high': 0.0}
