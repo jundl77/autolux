@@ -423,14 +423,11 @@ test("the plan draws each mover's pan limits where Starfire's encode sends the b
     const [limited] = edit(current, model.patchEdit(current, settings, spot.key, "Pan", ["54", "216"]).action);
     const sector = (tree) => marks(tree).spot_left.pan;
     assert.deepEqual(plain(sector(limited)), { span: 162, centre: -45 });
-    // Hung, the yaw only shifts the head's own angle: the sector stays put in the scene.
-    const turned = (tree, rotation, standing = false) => edit(tree, { action: "set-matrix", key: spot.key, position: [-300, 0, 0], rotation, standing })[0];
-    for (const yaw of [0, 90, 180]) assert.deepEqual(plain(sector(turned(limited, [yaw, 0, 0]))), { span: 162, centre: -45 }, `yaw ${yaw}`);
-    // A standing head turns the other way while Starfire still adds the yaw: its beam lands at
-    // heading −2·yaw − L, so the sector shows where a standing spot really points.
-    const turn = (degrees) => ((degrees % 360) + 360) % 360;
-    assert.equal(turn(sector(turned(limited, [90, 0, 0], true)).centre), 45);
-    assert.equal(turn(sector(turned(limited, [180, 0, 0], true)).centre), 225);
+    // The yaw and mount only change the head's own angle: the sector stays put in the scene.
+    const turned = (tree, rotation, standing) => edit(tree, { action: "set-matrix", key: spot.key, position: [-300, 0, 0], rotation, standing })[0];
+    for (const yaw of [0, 90, 180, 270]) {
+        for (const standing of [false, true]) assert.deepEqual(plain(sector(turned(limited, [yaw, 0, 0], standing))), { span: 162, centre: -45 }, `yaw ${yaw} standing ${standing}`);
+    }
     // An inversion reorders the pan inside the limits; the sector stays.
     const [inverted] = edit(limited, model.patchEdit(limited, settings, spot.key, "DMXInvertPan", true).action);
     assert.deepEqual(plain(sector(inverted)), plain(sector(limited)));
