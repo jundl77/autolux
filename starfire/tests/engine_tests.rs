@@ -76,6 +76,8 @@ fn lighting_override(id: &str, values: PropertyValues) -> LightingOverride {
         lifetime: OverrideLifetime::UntilCleared,
         priority: 0,
         special_fx: None,
+        pan_sweep: false,
+        aim_upstage: false,
     }
 }
 

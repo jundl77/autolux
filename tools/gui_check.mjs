@@ -368,7 +368,7 @@ const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
-const lightOn = (target, colour) => ({action: 'highlight', target, colour});
+const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim'});
 // The frozen room's MVR uuids: tests target a fixture by its uuid, whatever its name is now.
 const ROOM_UUID = {
     spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
@@ -1183,11 +1183,19 @@ const SUITES = {
             await click(testButton('red'));
             await click(testButton('1'));
         }, [lightOn({fixture: ROOM_UUID.spot_left}, 'red'), lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
-        await exactly('locate Off', 'click', () => click(testButton('off')), [CLEAR]);
+        for (const motion of ['sweep', 'aim']) {
+            await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
+            await check(`locate ${motion}`, 'lights its button', await waitFor(`document.querySelector('${testButton(motion)}').classList.contains('active')`, 3000));
+        }
+        await exactly('locate Off', 'clears the aim', () => click(testButton('off')), [CLEAR]);
+        await check('locate Off', 'the motion buttons go dark', await waitFor(`!document.querySelector('${testButton('aim')}').classList.contains('active')`, 3000));
+        await exactly('locate sweep', 'from dark lights white', () => click(testButton('sweep')), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', 'sweep')]);
+        await exactly('locate Off', 'clears the sweep', () => click(testButton('off')), [CLEAR]);
         await check('locate Off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
         await exactly('locate Off', 'a tick after Off sends nothing', () => ev('window.__tickKeepAlive()'), []);
 
         await selectFixture('zq06017');
+        await check('locate cells', 'a fixture without pan offers no Sweep or Aim', await ev(`!document.querySelector('${testButton('sweep')}') && !document.querySelector('${testButton('aim')}')`));
         const rig = (await harness('state')).rig;
         const cells = rig.fixtures.find((f) => f.name === 'zq06017').cells;
         const listing = `[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.dataset.cfgCell)`;

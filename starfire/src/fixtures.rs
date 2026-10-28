@@ -82,6 +82,21 @@ impl MovementRange {
         };
         self.min + position * (self.max - self.min)
     }
+
+    /// The logical position `map` sends nearest to `physical`, held inside the soft limits.
+    fn unmap(&self, physical: f64) -> f64 {
+        let span = self.max - self.min;
+        let position = if span > 0.0 {
+            ((physical - self.min) / span).clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
+        if self.inverted {
+            1.0 - position
+        } else {
+            position
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -507,6 +522,40 @@ impl FixtureRig {
     pub fn profile(&self, cell_id: &str) -> Option<&GdtfProfile> {
         let &(fixture, cell) = self.cells.get(cell_id)?;
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
+    }
+
+    /// Logical pan and tilt throwing the beam towards `heading_degrees`, the scene heading
+    /// clockwise from +Y the encode reads a logical pan as, leaning `lean_degrees` off the pan
+    /// axis. None for a cell without a pan range.
+    pub fn aim(
+        &self,
+        cell_id: &str,
+        heading_degrees: f64,
+        lean_degrees: f64,
+    ) -> Option<(f64, f64)> {
+        let fixture = &self.fixtures[self.cells.get(cell_id)?.0];
+        let profile = self.profile(cell_id)?;
+        let (from, to) = profile
+            .movement_range("Pan")
+            .filter(|(from, to)| from != to)?;
+        // A range past a full turn reaches the heading more than once; take the copy nearest
+        // the middle of the soft limits.
+        let turn = FULL_TURN_DEGREES / (to - from);
+        let position = (heading_degrees - from) / (to - from);
+        let centre = (fixture.pan.min + fixture.pan.max) / 2.0;
+        let position = position + ((centre - position) / turn).round() * turn;
+        // The encode mirrors a standing head itself, so the lean is the hanging one.
+        let hanging_tilt = MovementRange {
+            inverted: fixture.tilt.inverted ^ fixture.reversed,
+            ..fixture.tilt.clone()
+        };
+        let tilt = profile
+            .movement_range("Tilt")
+            .filter(|(from, to)| from != to)
+            .map_or(0.5, |(from, to)| {
+                hanging_tilt.unmap(0.5 + lean_degrees / (to - from))
+            });
+        Some((fixture.pan.unmap(position), tilt))
     }
 
     pub fn uuid_of_cell(&self, cell_id: &str) -> Option<&str> {

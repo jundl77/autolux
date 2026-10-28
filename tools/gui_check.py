@@ -54,13 +54,7 @@ COOLDOWNS = {'pars': (8.0, 3.0, 'colour_chase'), 'spots': (6.0, 60.0, 'pan_sweep
 
 def running_rig(path: Path) -> tuple[str, dict]:
     """What a show booted on the store at `path` reports: its revision and Starfire's rig."""
-    fixtures = static_rig(path).fixtures
-    return rig_revision(path.read_bytes()), {
-        'fixtures': [
-            {'fixture_uuid': fixture_uuid, 'name': name, 'cells': list(cells)}
-            for fixture_uuid, name, cells in fixtures
-        ]
-    }
+    return rig_revision(path.read_bytes()), static_rig(path).published()
 
 
 def _autoloop(intensity: float) -> dict:
@@ -191,7 +185,9 @@ class StubShow:
                 if c['kind'] == 'clear':
                     s['highlight'] = None
             elif a == 'highlight':
-                s['highlight'] = c['target'] and {'target': c['target'], 'colour': c['colour']}
+                s['highlight'] = c['target'] and {
+                    key: c[key] for key in ('target', 'colour', 'sweep', 'aim')
+                }
             elif a == 'restart_show':
                 # A new session and Starfire login: the test is gone and the rig is the store's.
                 s['rig_revision'], s['rig'] = running_rig(self.rig_path)

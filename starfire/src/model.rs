@@ -187,6 +187,13 @@ pub struct LightingOverride {
     #[serde(default)]
     pub priority: i32,
     pub special_fx: Option<Box<SpecialFx>>,
+    /// Pan runs the whole logical range, low soft limit to high and back, in place of `pan`.
+    #[serde(default)]
+    pub pan_sweep: bool,
+    /// Pan and tilt hold the beam straight upstage (+Y), 45 degrees off the pan axis, in place
+    /// of `pan` and `tilt`.
+    #[serde(default)]
+    pub aim_upstage: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
