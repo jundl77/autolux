@@ -1877,7 +1877,7 @@ CALLBACK_RESOLVED_JS = (
 )
 
 GATE_JS = (
-    'function(n, selected) {'
+    'function(n, selected, control) {'
     + _GATE_STATE_JS
     + '''
     const changed = gate.tab !== selected || gate.hidden;
@@ -1907,7 +1907,11 @@ GATE_JS = (
     + ''';
     if (timeline) gate.viewAt = now;
     if (metrics) gate.metricsAt = now;
-    return {tick: n, tab: selected, timeline: timeline, metrics: metrics};
+    // The rig changes only on a show restart, so it is fetched once per rig revision.
+    if (control && 'rig' in control) gate.rig = control.rig_revision;
+    const request = {tick: n, tab: selected, timeline: timeline, metrics: metrics};
+    if ('rig' in gate) request.rig = gate.rig;
+    return request;
 }'''
 )
 
@@ -2238,6 +2242,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('gate', 'data'),
         Input('tick', 'n_intervals'),
         Input('dashboard-tab', 'value'),
+        State('control-state', 'data'),
     )
 
     @app.callback(
@@ -2281,6 +2286,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                     'static',
                     'special_groups',
                     'highlight',
+                    'rig_revision',
                 )
             }
             control['settings_text'] = settings_text(control['settings'] or {})
@@ -2290,7 +2296,9 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 for target, rows in fx_rows.items()
             }
             # Only the test's Cells list needs the running rig's names.
-            if requested['tab'] == 'config':
+            if requested['tab'] == 'config' and requested.get('rig', ...) != snap.get(
+                'rig_revision'
+            ):
                 control['rig'] = snap.get('rig')
         if on_control or due:
             sync = _anchor(snap)

@@ -307,6 +307,22 @@ test("set-position refuses a matrix changed meanwhile and keeps Z and rotation",
     assert.equal(edit(current, { action: "set-position", key: spot.key, original_matrix: original, x_mm: 1.5, y_mm: 1 })[0], ds.no_update);
 });
 
+test("a pitched parent's plan drag is exact and an on-edge parent refuses it", () => {
+    const current = draft();
+    const layer = model.pathTo(current.scene, fixtureNode(current, "spot_left").key).find((node) => node.tag === "Layer");
+    const tilt = (degrees) => edit(current, { action: "set-child-text", key: layer.key, tag: "Matrix", value: model.formatMatrix(model.composeMatrix([0, 0, 0], [0, degrees, 0])) })[0];
+    const pitched = tilt(30);
+    const spot = fixtureNode(pitched, "spot_left");
+    const before = model.planMarks(pitched, settings).fixtures.find((mark) => mark.key === spot.key);
+    const drag = model.startPlanDrag(pitched, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    // 20 px up the screen is world +200 mm Y, which the 30° pitch shortens to cos 30° per local mm.
+    const move = model.planMove(drag, 100, 80);
+    const [moved] = edit(pitched, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
+    const after = model.planMarks(moved, settings).fixtures.find((mark) => mark.key === spot.key);
+    assert.deepEqual([Math.round(after.x - before.x), Math.round(after.y - before.y)], [0, 200]);
+    assert.equal(model.startPlanDrag(tilt(90), settings, spot.key, INVERSE, 100, 100, "0 0 10 10"), null);
+});
+
 test("the patch form validates each field and maps it to one draft action", () => {
     const current = draft();
     const key = fixtureNode(current, "wash_right").key;
@@ -321,6 +337,8 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [parked] = edit(current, { action: "set-address", key: child(child(spot, "Addresses"), "Address").key, universe: 1, address: 505 });
     assert.match(check("GDTFMode", "12ch", parked, spot.key).error, /1–501 for 12 channels/);
     assert.match(check("GDTFMode", "nope", current, spot.key).error, /Pick a mode/);
+    // A profile change keeping the mode is held to the same fit.
+    assert.match(check("GDTFSpec", child(spot, "GDTFSpec").text, parked, spot.key).error, /1–501 for 12 channels/);
     // Name: non-empty, unique, at most 128 bytes; any rename warns.
     assert.match(check("name", " ").error, /required/);
     assert.match(check("name", "spot_right").error, /Another fixture/);
@@ -337,6 +355,31 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [limited] = edit(current, check("Pan", ["0.1", "0.9"]).action);
     const movement = [...nodes(limited.scene)].find((node) => node.tag === "Movement");
     assert.deepEqual(plain(movement.attributes), { fixture: fixtureNode(current, "wash_right").attributes.uuid, axis: "Pan", minimum: "0.1", maximum: "0.9" });
+});
+
+test("a role move keeps each fixture where it hangs, out of a nested group and a yawed layer", () => {
+    const yawed = yawedLayer();
+    const list = model.pathTo(yawed.scene, fixtureNode(yawed, "spot_left").key).at(-2);
+    const [withGroup] = edit(yawed, { action: "add-child", key: list.key, tag: "GroupObject" });
+    const truss = [...nodes(withGroup.scene)].find((node) => node.tag === "GroupObject");
+    const value = model.formatMatrix(model.composeMatrix([250, -400, 3000], [30, 0, 0]));
+    let [current] = edit(withGroup, { action: "set-child-text", key: truss.key, tag: "Matrix", value });
+    if (!child([...nodes(current.scene)].find((node) => node.tag === "GroupObject"), "ChildList")) {
+        [current] = edit(current, { action: "add-child", key: [...nodes(current.scene)].find((node) => node.tag === "GroupObject").key, tag: "ChildList" });
+    }
+    // Hang spot_left on the truss by hand: the editor has no move-into-group action.
+    const spot = fixtureNode(current, "spot_left");
+    const parent = model.pathTo(current.scene, spot.key).at(-2);
+    parent.children.splice(parent.children.indexOf(spot), 1);
+    child([...nodes(current.scene)].find((node) => node.tag === "GroupObject"), "ChildList").children.push(spot);
+    const worlds = (tree) => Object.fromEntries(model.placedObjects(tree, settings).filter((entry) => entry.node.tag === "Fixture").map((entry) => [entry.node.attributes.name, entry.matrix]));
+    const [moved] = edit(current, model.patchEdit(current, settings, spot.key, "role", "accent").action);
+    assert.equal(layerOf(moved, "spot_left"), "accent");
+    const [before, after] = [worlds(current), worlds(moved)];
+    assert.deepEqual(Object.keys(after).sort(), Object.keys(before).sort());
+    for (const [name, matrix] of Object.entries(before)) matrix.forEach((value, index) => assert.ok(Math.abs(after[name][index] - value) < 1e-3, `${name}[${index}]`));
+    const inverse = model.invert(model.composeMatrix([250, -400, 3000], [30, 10, 5]));
+    model.multiply(inverse, model.composeMatrix([250, -400, 3000], [30, 10, 5])).forEach((value, index) => assert.ok(Math.abs(value - [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0][index]) < 1e-9));
 });
 
 test("a role moves its whole group, and a joining fixture lands in its group's layer", () => {
@@ -368,7 +411,7 @@ test("the test controls send highlight commands, hold them alive and clear once 
     ds.fixture_patch.syncTest(live, "config");
     assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: "spot_right" }, colour: "red" });
     // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command.
-    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [30000]);
+    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000]);
     [...timers.values()][0].run();
     assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
     // › steps in patch order (kinta at 40 follows spot_right at 13), keeping the lit colour.
@@ -388,7 +431,7 @@ test("the test controls send highlight commands, hold them alive and clear once 
     ds.fixture_patch.renderRig(null, current, settings);
     assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: "spot_right" }, colour: "blue" }, { action: "highlight", target: null }]);
     ds.fixture_patch.renderRig(spot.key, current, settings);
-    replies.push({ error: "no fixture 'spot_right' in the running rig" });
+    replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("white");
     await new Promise(setImmediate);
     assert.equal(timers.size, 0);
@@ -418,4 +461,28 @@ test("Apply restarts the show only on a second click within 5 s", async () => {
         ["fixture-apply", "Apply to show (restarts the show)"],
         ["fixture-show-rig", "Restarting the show on the saved patch."]
     ]);
+});
+
+test("a lit test follows the selection; late or unanswered replies never turn it off", async () => {
+    const current = draft();
+    const [spot, kinta] = ["spot_right", "kinta"].map((name) => fixtureNode(current, name));
+    const live = { paused: false, static: { blackout: false }, highlight: null };
+    timers.clear();
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    // An older test's late 409 must not stop the test that replaced it.
+    replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
+    model.testControl("red");
+    ds.fixture_patch.renderRig(kinta.key, current, settings);
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: "kinta" }, colour: "red" });
+    await new Promise(setImmediate);
+    assert.equal(timers.size, 1, "kinta's keep-alive survives spot_right's late refusal");
+    // No answer at all may mean lit: the keep-alive stays and a deselect still clears.
+    replies.push({ error: "the show is not answering" });
+    [...timers.values()][0].run();
+    await new Promise(setImmediate);
+    assert.equal(timers.size, 1);
+    ds.fixture_patch.renderRig(null, current, settings);
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
+    assert.equal(timers.size, 0);
 });

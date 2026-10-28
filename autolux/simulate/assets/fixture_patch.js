@@ -11,7 +11,7 @@
     const PLAN_MIN_SPAN_MM = 2000;
     const PLAN_LABEL_LIMIT = 48;
     const NAME_BYTES = 128;
-    const TEST_REFRESH_MS = 30000;
+    const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
     const APPLY_LABEL = "Apply to show (restarts the show)";
     const NEW_GROUP = "\u0000new";
@@ -27,6 +27,7 @@
     let selectedCell = null;
     let lit = false;
     let refreshTimer = null;
+    let testCommand = null;
     let applyTimer = null;
     let suppressedClick = null;
     let requestId = 0;
@@ -136,6 +137,7 @@
     }
 
     const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const cross = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
     const toDegrees = (radians) => (radians * 180) / Math.PI;
 
     function canonicalDegrees(angle) {
@@ -153,9 +155,8 @@
         });
         if (axes.includes(null)) return null;
         const [u, v, w] = axes;
-        const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
         const skew = Math.max(Math.abs(dot(u, v)), Math.abs(dot(v, w)), Math.abs(dot(u, w)));
-        if (skew > ORTHONORMAL_TOLERANCE || dot(cross, w) < 1 - ORTHONORMAL_TOLERANCE) return null;
+        if (skew > ORTHONORMAL_TOLERANCE || dot(cross(u, v), w) < 1 - ORTHONORMAL_TOLERANCE) return null;
         const pitch = toDegrees(Math.asin(Math.max(-1, Math.min(1, v[2])))) + 0;
         if (Math.abs(v[2]) > 1 - GIMBAL_TOLERANCE) return [canonicalDegrees(toDegrees(Math.atan2(u[1], u[0]))), pitch, 0];
         return [canonicalDegrees(toDegrees(Math.atan2(-v[0], v[1]))), pitch, canonicalDegrees(toDegrees(Math.atan2(-u[2], w[2])))];
@@ -387,12 +388,24 @@
         return parent.children.find(find) || locate(draft.scene, applyAction(draft, settings, { ...add, action: "add-child", key: parent.key })).node;
     }
 
+    // Affine inverse; MVR matrices may scale, so the general 3×3 inverse, not a transpose.
+    function invert(matrix) {
+        const [u, v, w] = [0, 3, 6].map((start) => matrix.slice(start, start + 3));
+        const rows = [cross(v, w), cross(w, u), cross(u, v)];
+        const det = dot(u, rows[0]);
+        return [...[0, 1, 2].flatMap((column) => rows.map((row) => row[column] / det)), ...rows.map((row) => -dot(row, matrix.slice(9)) / det)];
+    }
+
+    // The fixture keeps hanging where it is: its Matrix becomes relative to the new Layer.
     function moveToLayer(draft, settings, node, layer) {
         const children = childOf(layer, "ChildList") || insertChild(layer, "Layer", element("ChildList"), settings);
         const { parent } = locate(draft.scene, node.key);
         if (parent === children) return;
+        const world = placedObjects(draft, settings).find((entry) => entry.node === node).matrix;
+        const local = multiply(invert(parseMatrix(textOf(layer, "Matrix")) || [...IDENTITY]), world);
         parent.children.splice(parent.children.indexOf(node), 1);
         children.children.push(node);
+        applyAction(draft, settings, { action: "set-child-text", key: node.key, tag: "Matrix", value: formatMatrix(local) });
     }
 
     const classOf = (node) => textOf(node, "Classing").toUpperCase();
@@ -559,7 +572,9 @@
             }
             case "GDTFSpec": {
                 const tree = gdtfTree(draft, settings, value);
-                return { error: tree ? null : "Pick a profile in the scene or the library.", warning: tree && !modesOf(tree).includes(row.mode) ? "Now pick a mode of this profile." : null, action: child(field, value) };
+                const kept = tree && modesOf(tree).includes(row.mode);
+                const error = !tree ? "Pick a profile in the scene or the library." : kept ? fit(row.address, modeChannels(tree, row.mode)) : null;
+                return { error, warning: tree && !kept ? "Now pick a mode of this profile." : null, action: child(field, value) };
             }
             case "GDTFMode": {
                 const channels = modeChannels(gdtfTree(draft, settings, row.spec), value);
@@ -602,12 +617,13 @@
         if (note) note.textContent = text;
     }
 
-    // A refused test (409: not in the running rig, paused, blackout) is off.
+    // A refused test (409: not in the running rig, paused, blackout) is off; an unanswered one may
+    // be lit, so it stays lit for the clear. A late reply to an older test changes nothing.
     function dispatchTest(command) {
         window.autoluxControl?.dispatch(command).then((reply) => {
-            if (!reply?.error) return;
+            if (!reply?.error || command !== testCommand) return;
             testNote(`Test refused: ${reply.error}`);
-            if (command.target) stopRefresh();
+            if (command.target && reply.status === 409) stopRefresh();
         });
     }
 
@@ -618,7 +634,7 @@
     };
 
     function highlight(target, colour) {
-        const command = target ? { action: "highlight", target, colour } : { action: "highlight", target: null };
+        const command = (testCommand = target ? { action: "highlight", target, colour } : { action: "highlight", target: null });
         stopRefresh();
         lit = Boolean(target);
         // Starfire drops a test nobody refreshes after 60 s, so a held one is re-sent well inside that.
@@ -654,7 +670,7 @@
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
         if (spec in TEST_COLOURS) return highlight(selectedCell ? { cell: selectedCell } : { fixture: row.name }, spec);
-        const order = [...rows].sort((a, b) => a.universe - b.universe || a.address - b.address);
+        const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
         sendAction({ action: "select", key: next.key });
         return highlight({ fixture: next.name }, show.highlight?.colour || "white");
@@ -714,7 +730,8 @@
         },
 
         syncTest(state, tab) {
-            show = state;
+            // The control state carries the rig only when its revision changed; keep the last one.
+            show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
             if (tab !== "config") clearTest();
             paintTest();
         },
@@ -724,17 +741,16 @@
             const path = selection ? pathTo(draft.scene, selection) : null;
             if (rig?.selection && rig.selection !== selection) {
                 selectedCell = null;
-                if (!selection) clearTest();
+                const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
+                // The lit test follows the selection, so the old fixture is never kept alive.
+                if (!next) clearTest();
+                else if (testCommand.target.fixture !== next.name) highlight({ fixture: next.name }, testCommand.colour);
             }
             rig = { draft, settings, selection };
             if (typeof document.getElementById === "function") {
-                const scene = JSON.stringify(draft.scene);
                 for (const [id, draw] of [["mvr-plan", drawPlan], ["mvr-tree", drawTree]]) {
                     const container = document.getElementById(id);
-                    if (!container || (planDrag && id === "mvr-plan")) continue;
-                    if (drawn.get(container) !== scene) draw(container, draft, settings);
-                    drawn.set(container, scene);
-                    for (const node of container.querySelectorAll("[data-node-key]")) node.classList.toggle("selected", node.dataset.nodeKey === selection);
+                    if (container && !(planDrag && id === "mvr-plan")) redraw(container, draw);
                 }
                 const editor = document.getElementById("mvr-node-editor");
                 if (editor) {
@@ -812,6 +828,7 @@
         planSvg,
         startPlanDrag,
         planMove,
+        invert,
         patchEdit,
         testControl,
         applyClick,
@@ -966,6 +983,13 @@
         return parts.join("") + `<div class="plan-legend">${legend.join("")}</div>`;
     }
 
+    function redraw(container, draw) {
+        const scene = JSON.stringify(rig.draft.scene);
+        if (drawn.get(container) !== scene) draw(container, rig.draft, rig.settings);
+        drawn.set(container, scene);
+        for (const node of container.querySelectorAll("[data-node-key]")) node.classList.toggle("selected", node.dataset.nodeKey === rig.selection);
+    }
+
     function drawPlan(container, draft, settings) {
         container.innerHTML = planSvg(planMarks(draft, settings), settings);
     }
@@ -974,25 +998,25 @@
         const placed = placedObjects(draft, settings).find((entry) => entry.node.key === key && entry.node.tag === "Fixture");
         const original = placed && textOf(placed.node, "Matrix");
         const local = placed && parseMatrix(original);
-        return local ? { key, original, local, parent: placed.parent, inverse, clientX, clientY, viewBox, marks: planMarks(draft, settings), settings, moved: false } : null;
+        // A parent rolled or pitched on edge has no plan direction to move along.
+        if (!local || Math.abs(placed.parent[0] * placed.parent[4] - placed.parent[1] * placed.parent[3]) < GIMBAL_TOLERANCE) return null;
+        return { key, original, local, parent: placed.parent, inverse, clientX, clientY, viewBox, marks: planMarks(draft, settings), settings, moved: false };
     }
 
     // Screen → plan SVG through the inverse screen CTM; the plan's SVG y is MVR −Y.
     const toWorld = (inverse, x, y) => [inverse.a * x + inverse.c * y + inverse.e, -(inverse.b * x + inverse.d * y + inverse.f)];
 
-    // The pointer's world move taken into the parent's frame (projecting on its axes undoes its
-    // rotation), whole mm; Z and the fixture's own rotation stay. The preview keeps the plan's
+    // The pointer's world move solved in the parent's X/Y axes (exact under any tilt), whole mm;
+    // Z and the fixture's own rotation stay. The preview keeps the plan's
     // frame so the view does not rescale under the pointer.
     function planMove(drag, clientX, clientY) {
         const [x0, y0] = toWorld(drag.inverse, drag.clientX, drag.clientY);
         const [x1, y1] = toWorld(drag.inverse, clientX, clientY);
-        const along = (axis) => {
-            const vector = drag.parent.slice(3 * axis, 3 * axis + 3);
-            return (vector[0] * (x1 - x0) + vector[1] * (y1 - y0)) / dot(vector, vector);
-        };
+        const [ux, uy, , vx, vy] = drag.parent;
+        const det = ux * vy - uy * vx;
         const local = [...drag.local];
-        local[9] = Math.round(local[9] + along(0)) + 0;
-        local[10] = Math.round(local[10] + along(1)) + 0;
+        local[9] = Math.round(local[9] + ((x1 - x0) * vy - (y1 - y0) * vx) / det) + 0;
+        local[10] = Math.round(local[10] + (ux * (y1 - y0) - uy * (x1 - x0)) / det) + 0;
         const [x, y] = multiply(drag.parent, local).slice(9, 11);
         const fixtures = drag.marks.fixtures.map((mark) => (mark.key === drag.key ? { ...mark, x, y } : mark));
         return { x_mm: local[9], y_mm: local[10], markup: planSvg({ ...drag.marks, fixtures }, drag.settings, drag.viewBox) };
@@ -1003,7 +1027,9 @@
         planDrag = null;
         if (!current?.moved) return current;
         cancelAnimationFrame(current.frame);
-        current.container.innerHTML = current.html;
+        // The draft may have changed under the drag preview, so redraw from it, not from a copy.
+        drawn.delete(current.container);
+        redraw(current.container, drawPlan);
         suppressedClick = current.container;
         setTimeout(() => suppressedClick === current.container && (suppressedClick = null));
         if (current.container.hasPointerCapture(current.pointerId)) current.container.releasePointerCapture(current.pointerId);
@@ -1369,7 +1395,7 @@
         suppressedClick = null;
         const svg = mark.ownerSVGElement;
         planDrag = startPlanDrag(rig.draft, rig.settings, mark.dataset.nodeKey, svg.getScreenCTM().inverse(), event.clientX, event.clientY, svg.getAttribute("viewBox"));
-        if (planDrag) Object.assign(planDrag, { container: svg.parentElement, pointerId: event.pointerId, html: svg.parentElement.innerHTML });
+        if (planDrag) Object.assign(planDrag, { container: svg.parentElement, pointerId: event.pointerId });
     });
 
     document.addEventListener("pointermove", (event) => {
@@ -1393,6 +1419,7 @@
         const current = endPlanDrag();
         if (!current.moved) return;
         const { x_mm, y_mm } = planMove(current, event.clientX, event.clientY);
+        if (x_mm === current.local[9] && y_mm === current.local[10]) return;
         sendAction({ action: "set-position", key: current.key, original_matrix: current.original, x_mm, y_mm });
     });
 
@@ -1487,7 +1514,12 @@
 
     const cancelDrags = () => (finish(), endPlanDrag());
     document.addEventListener("pointercancel", cancelDrags);
-    document.addEventListener("lostpointercapture", (event) => drag?.pointerId === event.pointerId && finish());
+    document.addEventListener("lostpointercapture", (event) => {
+        if (drag?.pointerId === event.pointerId) finish();
+        if (planDrag?.pointerId === event.pointerId) endPlanDrag();
+    });
+    // A hidden tab's timers may be throttled past Starfire's 60 s dead-man, so its test goes out.
+    document.addEventListener("visibilitychange", () => document.hidden && clearTest());
     document.addEventListener("keydown", (event) => {
         if (event.target.closest?.('#config-panel[aria-busy="true"]')) event.preventDefault();
         if (event.key === "Escape" && (drag || planDrag)) {

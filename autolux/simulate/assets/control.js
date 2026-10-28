@@ -151,8 +151,9 @@
         try {
             reply = await response.json();
         } catch (error) {}
-        if (!response.ok && !(reply && reply.error)) {
-            reply = {error: 'the show answered ' + response.status};
+        if (!response.ok) {
+            // The status tells a refusal (409: the command cannot apply now) from a stall.
+            reply = {error: (reply && reply.error) || 'the show answered ' + response.status, status: response.status};
         }
         return reply;
     }

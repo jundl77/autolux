@@ -575,8 +575,8 @@ globalThis.fetch = async (url) => { urls.push(url); return answers.shift(); };
 """
     )
     assert result == {
-        'refused': {'error': 'the show is paused'},
-        'stalled': {'error': 'the show answered 504'},
+        'refused': {'error': 'the show is paused', 'status': 409},
+        'stalled': {'error': 'the show answered 504', 'status': 504},
         'urls': ['http://autolux.local:8766/control'] * 2,
         'shown': {'paused': False},
     }
@@ -637,11 +637,21 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
 def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
     highlight = {'target': {'fixture': 'spot_left'}, 'colour': 'red'}
     rig = {'fixtures': [{'name': 'spot_left', 'cells': ['spot_left']}]}
-    snapshot = {'paused': True, 'static': {'blackout': False}, 'highlight': highlight, 'rig': rig}
+    snapshot = {
+        'paused': True,
+        'static': {'blackout': False},
+        'highlight': highlight,
+        'rig': rig,
+        'rig_revision': 'r1',
+    }
     app = build_app(_Recorder(snapshot))
     refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
-    gate = {'tab': 'config', 'metrics': False, 'timeline': False}
-    response = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()['response']
+
+    def poll(**held):
+        gate = {'tab': 'config', 'metrics': False, 'timeline': False, **held}
+        return _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()['response']
+
+    response = poll()
     assert list(response) == ['control-state']
     state = response['control-state']['data']
     assert (state['paused'], state['static'], state['highlight'], state['rig']) == (
@@ -650,6 +660,9 @@ def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
         highlight,
         rig,
     )
+    # A page holding this revision's rig is not sent it again; an older revision is.
+    assert 'rig' not in poll(rig='r1')['control-state']['data']
+    assert poll(rig='r0')['control-state']['data']['rig'] == rig
 
 
 def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_the_show():
