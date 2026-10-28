@@ -412,14 +412,22 @@ test("the plan draws each mover's pan limits as an arc around its facing", () =>
     assert.equal(before.wash_left.pan, null);
     const markup = model.planSvg(model.planMarks(current, settings), settings);
     assert.equal((markup.match(/class="plan-pan"/g) || []).length, 2);
-    // Limits 54–216° on 0–540°: a 162° arc, its middle 135° clockwise of the facing (counted
-    // anticlockwise in MVR), so the arc is the small one.
+    // Limits 54–216° on 0–540°: a 162° arc, its middle 135° clockwise of the facing.
     const spot = fixtureNode(current, "spot_left");
     const [limited] = edit(current, model.patchEdit(current, settings, spot.key, "Pan", ["54", "216"]).action);
     const pan = marks(limited).spot_left.pan;
     assert.ok(Math.abs(pan.span - 162) < 1e-9 && Math.abs(pan.offset + 135) < 1e-9, JSON.stringify(pan));
-    const arc = model.planSvg(model.planMarks(limited, settings), settings).match(/<title>spot_left[^]*?<path class="plan-pan" d="([^"]+)"/)[1];
-    assert.match(arc, / 0 0 0 /);
+    // The path's start, middle and end in SVG coordinates (y is MVR -Y); spot_left sits at (-300, 0).
+    const arcOf = (tree) => model.planSvg(model.planMarks(tree, settings), settings).match(/<title>spot_left[^]*?<path class="plan-pan" d="([^"]+)"/)[1];
+    const points = (d) => [[0, 1], [7, 8], [14, 15]].map((pair) => pair.map((index) => Number(d.match(/-?\d+/g)[index])));
+    // Hung facing downstage, the full 540° is a whole circle centred on the facing (below the mark).
+    const [start, middle, end] = points(arcOf(current));
+    assert.deepEqual(start, end);
+    assert.ok(middle[0] === -300 && middle[1] > 0 && start[1] < 0, arcOf(current));
+    // Limited, the middle turns 135° clockwise in plan (up and left of the mark), the ends symmetric.
+    const [from, centre, to] = points(arcOf(limited));
+    assert.ok(centre[0] < -300 && centre[1] < 0, arcOf(limited));
+    assert.ok(Math.abs(Math.hypot(from[0] - centre[0], from[1] - centre[1]) - Math.hypot(to[0] - centre[0], to[1] - centre[1])) <= 2, arcOf(limited));
 });
 
 test("a role move keeps each fixture where it hangs, out of a nested group and a yawed layer", () => {

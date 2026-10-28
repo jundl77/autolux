@@ -1070,14 +1070,16 @@
         return parts.join("") + `<div class="plan-legend">${legend.join("")}</div>`;
     }
 
-    // The pan limits as an arc around the mark; a range of a full turn or more is a near circle.
+    // The pan limits as an arc around the mark, a full turn or more as a circle. Two segments
+    // through the middle, as an SVG arc whose ends meet draws nothing.
     function panArc(mark, n, radius, stroke) {
         if (!mark.pan) return "";
-        const half = (Math.min(mark.pan.span, 359.9) * Math.PI) / 360;
+        const half = (Math.min(mark.pan.span, 360) * Math.PI) / 360;
         const centre = Math.atan2(mark.facing[1], mark.facing[0]) + (mark.pan.offset * Math.PI) / 180;
-        // Plan SVG y is MVR -Y, so the arc runs from centre - half to centre + half against the sweep.
+        // Plan SVG y is MVR -Y, so an anticlockwise MVR arc is sweep flag 0.
         const point = (angle) => `${n(mark.x + radius * Math.cos(angle))} ${n(-mark.y - radius * Math.sin(angle))}`;
-        return `<path class="plan-pan" d="M ${point(centre - half)} A ${n(radius)} ${n(radius)} 0 ${half > Math.PI / 2 ? 1 : 0} 0 ${point(centre + half)}" stroke="${stroke}"/>`;
+        const segment = (angle) => `A ${n(radius)} ${n(radius)} 0 0 0 ${point(angle)}`;
+        return `<path class="plan-pan" d="M ${point(centre - half)} ${segment(centre)} ${segment(centre + half)}" stroke="${stroke}"/>`;
     }
 
     function redraw(container, draw) {
