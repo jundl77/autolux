@@ -1325,11 +1325,12 @@
         const local = matrix && placement(matrix);
         const uuid = (node.attributes.uuid || "").toUpperCase();
         const axes = ["Pan", "Tilt"].map((axis) => [axis, physicalRange(tree, row.mode, axis)]).filter(([, range]) => range);
+        // Sorted, as a GDTF range may run from its high end.
         const limits = (axis, [from, to]) =>
-            ["minimum", "maximum"].map((name, index) => {
-                const share = Number(movementFor(draft, uuid, axis)?.attributes[name] ?? index);
-                return String(Math.round((from + share * (to - from)) * 10) / 10);
-            });
+            ["minimum", "maximum"]
+                .map((name, index) => Math.round((from + Number(movementFor(draft, uuid, axis)?.attributes[name] ?? index) * (to - from)) * 10) / 10)
+                .sort((a, b) => a - b)
+                .map(String);
         const span = row.address && row.channels ? `DMX ${row.address}–${row.address + row.channels - 1}` : null;
         return [
             ...testStrip(),
