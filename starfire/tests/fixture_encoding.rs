@@ -203,68 +203,49 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
 }
 
 #[test]
-fn standing_head_reverses_movement_like_dmx_inversion_and_hanging_does_not() {
-    const STANDING: [f64; 12] = [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0];
-    let spot = |matrix: [f64; 12], inverted: bool| {
-        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
-        patch["matrix"] = json!(matrix);
-        patch["pan"] = json!({"inverted": inverted});
-        patch["tilt"] = json!({"inverted": inverted});
-        rig(json!([patch]))
-    };
-    let standing = spot(STANDING, false);
-    let hanging_inverted = spot(HALF_TURN, true);
-    let hanging = spot(HALF_TURN, false);
-    let standing_inverted = spot(STANDING, true);
-    for (pan, tilt) in [(0.1, 0.2), (0.5, 0.5), (0.9, 0.7)] {
-        let mut states = standing.empty_states();
-        let state = states.get_mut("test").unwrap();
-        (state.pan, state.tilt) = (pan, tilt);
-        let encode = |rig: &FixtureRig| rig.encode(&states).unwrap()[&0][..4].to_vec();
-        assert_eq!(encode(&standing), encode(&hanging_inverted));
-        assert_eq!(encode(&standing_inverted), encode(&hanging));
-    }
-}
-
-#[test]
-fn standing_and_hanging_heads_send_a_logical_pan_to_the_same_stage_heading_at_any_yaw() {
-    const TRAVEL: f64 = 540.0;
-    let encode = |hanging: bool, yaw: f64, tilt_inverted: bool, pan: f64| {
+fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_yaw() {
+    // Independent of the encoder: decode the DMX to body angles and carry the beam through the
+    // Matrix. Physical pan 0 faces local +Y and turns clockwise about local +Z; mid tilt is on
+    // the pan axis (the mirror the tilt inversion assumes) and tilts towards the pan heading.
+    let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
         let flip = if hanging { 1.0 } else { -1.0 };
-        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
-        // Standing is the pane's flip about local Y: X and Z negated, facing kept.
-        let axes = [
+        // Standing is the Config pane's flip about local Y: X and Z negated, facing kept.
+        let [u, v, w] = [
             [flip * cos, flip * sin, 0.0],
             [-sin, cos, 0.0],
             [0.0, 0.0, flip],
         ];
-        patch["matrix"] = json!([axes.concat(), vec![0.0; 3]].concat());
-        patch["tilt"] = json!({"inverted": tilt_inverted});
+        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+        patch["matrix"] = json!([u, v, w, [0.0; 3]].concat());
+        patch["pan"] = json!({"min": 0.1, "max": 0.8, "inverted": inverted});
+        patch["tilt"] = json!({"inverted": inverted});
         let rig = rig(json!([patch]));
         let mut states = rig.empty_states();
         let state = states.get_mut("test").unwrap();
-        (state.pan, state.tilt) = (pan, 0.3);
-        rig.encode(&states).unwrap()[&0][..4].to_vec()
+        (state.pan, state.tilt) = (pan, tilt);
+        let frame = &rig.encode(&states).unwrap()[&0];
+        let angle = |at: usize, travel: f64| {
+            f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 * travel
+        };
+        let (pan, tilt) = (
+            angle(0, 540.0).to_radians(),
+            (angle(2, 270.0) - 135.0).to_radians(),
+        );
+        let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
+        [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
     };
-    for yaw in [0.0, 90.0, 180.0, 270.0] {
-        for pan in [0.1, 0.5, 0.9] {
-            for hanging in [true, false] {
-                let frame = encode(hanging, yaw, false, pan);
-                let head = f64::from(u16::from_be_bytes([frame[0], frame[1]])) / 65535.0 * TRAVEL;
-                // Clockwise yaw-relative pan from above; a standing head turns it the other way
-                // and its reversed tilt throws the beam a half turn round.
-                let heading = if hanging {
-                    head - yaw
-                } else {
-                    180.0 - head - yaw
-                };
-                let error = (heading - pan * TRAVEL).rem_euclid(360.0);
-                assert!(
-                    error.min(360.0 - error) < 0.02,
-                    "{hanging} {yaw} {pan}: {heading}"
-                );
-                assert_eq!(frame[2..], encode(true, yaw, !hanging, pan)[2..]);
+    for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, 270.0, -90.0] {
+        for inverted in [false, true] {
+            for state in [(0.0, 0.2), (0.3, 0.9), (0.5, 0.35), (0.85, 0.6), (1.0, 0.0)] {
+                let expected = beam(true, 0.0, inverted, state);
+                for hanging in [true, false] {
+                    let actual = beam(hanging, yaw, inverted, state);
+                    assert!(
+                        (0..2).all(|axis| (actual[axis] - expected[axis]).abs() < 1e-3),
+                        "hanging {hanging} yaw {yaw} inverted {inverted} {state:?}: {actual:?} vs {expected:?}"
+                    );
+                }
             }
         }
     }
