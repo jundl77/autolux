@@ -161,6 +161,7 @@ pub struct Engine {
     strobe_max_rate_hz: f64,
     strobe_max_burst_seconds: f64,
     strobe_started_seconds: BTreeMap<String, f64>,
+    strobe_phases: StrobePhases,
     palette: ActivePalette,
     intensity: f64,
     last_render_seconds: Option<f64>,
@@ -197,6 +198,7 @@ impl Engine {
             strobe_max_rate_hz: MAX_STROBE_HZ,
             strobe_max_burst_seconds: f64::INFINITY,
             strobe_started_seconds: BTreeMap::new(),
+            strobe_phases: StrobePhases::default(),
             palette,
             intensity: 1.0,
             last_render_seconds: None,
@@ -460,7 +462,7 @@ impl Engine {
         }
 
         let mut encoded_states = states.clone();
-        apply_software_strobe(time_seconds, &mut encoded_states);
+        apply_software_strobe(&mut self.strobe_phases, time_seconds, &mut encoded_states);
         // A test's pose stands in for its fixture's loaded placement; the newest pose wins.
         let rig = self
             .overrides
@@ -1174,16 +1176,28 @@ pub fn extinguish(states: &mut FixtureStates) {
     }
 }
 
-fn apply_software_strobe(seconds: f64, states: &mut FixtureStates) {
-    for state in states.values_mut() {
-        if state.strobe_hz > 0.0 {
-            let cycles = seconds * state.strobe_hz;
-            let phase = if cycles.is_finite() {
-                cycles.fract()
-            } else {
-                seconds.rem_euclid(1.0 / state.strobe_hz) * state.strobe_hz
-            };
-            if phase >= STROBE_OPEN_FRACTION {
+/// Each strobing cell's gate phase in cycles. Accumulating rate x frame time keeps a rate sweep
+/// continuous: a phase of time x rate would gate at rate + time x d(rate)/dt, aliasing past the cap.
+#[derive(Default)]
+struct StrobePhases {
+    last_seconds: Option<f64>,
+    cycles: BTreeMap<String, f64>,
+}
+
+fn apply_software_strobe(phases: &mut StrobePhases, seconds: f64, states: &mut FixtureStates) {
+    let elapsed = phases.last_seconds.map_or(0.0, |last| seconds - last);
+    phases.last_seconds = Some(seconds);
+    for (id, state) in states.iter_mut() {
+        if state.strobe_hz <= 0.0 {
+            phases.cycles.remove(id);
+        } else {
+            // A strobe starts open, so its first frame is a flash.
+            let phase = phases
+                .cycles
+                .entry(id.clone())
+                .and_modify(|phase| *phase = (*phase + state.strobe_hz * elapsed).fract())
+                .or_insert(0.0);
+            if *phase >= STROBE_OPEN_FRACTION {
                 state.intensity = 0.0;
                 state.attribute_brightness = 0.0;
             }
