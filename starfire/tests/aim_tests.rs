@@ -10,19 +10,21 @@ use starfire::protocol::wire;
 use starfire::script::{AutoloopCatalog, LuaAutoloop};
 
 const HEAD: &str = "scanner";
+const BAR: &str = "bar";
 const PAN_TRAVEL: f64 = 540.0;
 const TILT_TRAVEL: f64 = 270.0;
 // One 8-bit step is 2.1 degrees of pan and 1.1 of tilt: about 0.04 of a unit vector together.
 const DMX_STEP: f64 = 0.05;
 const EXACT: f64 = 1e-9;
 
-/// Heads are the compiled `beam_scanner` test description (Pan 0..540, Tilt 0..270, 8 bit);
-/// washes are Generic RGB.
+/// Heads are the compiled `beam_scanner` test description (Pan 0..540, Tilt 0..270, 8 bit),
+/// bars the two-pixel `pixel_bar`, washes Generic RGB.
 fn rig(fixtures: Value, groups: Value) -> FixtureRig {
     let mut definition = support::definition(&json!({ "fixtures": fixtures, "groups": groups }));
-    definition
-        .profiles
-        .push(support::compiled_profile("beam_scanner#6ch", HEAD));
+    definition.profiles.extend([
+        support::compiled_profile("beam_scanner#6ch", HEAD),
+        support::compiled_profile("pixel_bar#Pixels", BAR),
+    ]);
     FixtureRig::from_wire(&definition).unwrap()
 }
 
@@ -72,6 +74,17 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
+}
+
+fn degrees_between(a: [f64; 3], b: [f64; 3]) -> f64 {
+    dot(a, b).clamp(-1.0, 1.0).acos().to_degrees()
+}
+
+/// The unit beam at `heading` degrees clockwise from +Y, leaning `lean` degrees off straight down.
+fn hanging_beam(heading: f64, lean: f64) -> [f64; 3] {
+    let (sin_h, cos_h) = heading.to_radians().sin_cos();
+    let (sin_l, cos_l) = lean.to_radians().sin_cos();
+    [sin_l * sin_h, sin_l * cos_h, -cos_l]
 }
 
 fn assert_near(actual: [f64; 3], expected: [f64; 3], tolerance: f64, context: &str) {
@@ -152,6 +165,53 @@ fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limit
                 }
             }
         }
+    }
+}
+
+#[test]
+fn a_point_outside_the_soft_limits_clamps_to_the_nearest_edge() {
+    // Soft limits: headings 54..162 degrees, leans 0..54 degrees.
+    let position = [0.0, 0.0, 3000.0];
+    let mut fixture = head("head", 0, mounted(true, 0.0, position), [0.0; 3]);
+    fixture["pan"] = json!({"min": 0.1, "max": 0.3});
+    fixture["tilt"] = json!({"min": 0.5, "max": 0.7});
+    let rig = rig(json!([fixture]), Value::Null);
+    for ((heading, lean), (edge_heading, edge_lean)) in [
+        ((180.0, 30.0), (162.0, 30.0)),
+        ((20.0, 30.0), (54.0, 30.0)),
+        ((300.0, 30.0), (54.0, 30.0)),
+        ((100.0, 80.0), (100.0, 54.0)),
+    ] {
+        let point = add(
+            position,
+            hanging_beam(heading, lean).map(|value| 3000.0 * value),
+        );
+        let (pan, tilt) = rig.aim_at("head", point).unwrap();
+        assert_near(
+            rig.beam_direction("head", pan, tilt).unwrap(),
+            hanging_beam(edge_heading, edge_lean),
+            EXACT,
+            &format!("heading {heading} lean {lean}"),
+        );
+    }
+}
+
+#[test]
+fn a_point_at_the_head_itself_rests_along_the_pan_axis() {
+    for (hanging, axis) in [(true, -1.0), (false, 1.0)] {
+        let position = [700.0, -300.0, if hanging { 3000.0 } else { 0.0 }];
+        let rig = rig(
+            json!([head("head", 0, mounted(hanging, 37.0, position), position)]),
+            Value::Null,
+        );
+        let (pan, tilt) = rig.aim("head").unwrap();
+        assert_eq!(tilt, 0.5, "hanging {hanging}");
+        assert_near(
+            rig.beam_direction("head", pan, tilt).unwrap(),
+            [0.0, 0.0, axis],
+            EXACT,
+            &format!("hanging {hanging}"),
+        );
     }
 }
 
@@ -276,6 +336,12 @@ fn fails(rig: &FixtureRig, body: &str) -> String {
     format!("{error:#}")
 }
 
+fn beams(rig: &FixtureRig, aims: &[(String, f64, f64)]) -> Vec<[f64; 3]> {
+    aims.iter()
+        .map(|(cell, pan, tilt)| rig.beam_direction(cell, *pan, *tilt).unwrap())
+        .collect()
+}
+
 fn assert_same_aims(actual: &[(String, f64, f64)], expected: &[(String, f64, f64)], context: &str) {
     assert_eq!(actual.len(), expected.len(), "{context}");
     for ((cell, pan, tilt), (expected_cell, expected_pan, expected_tilt)) in
@@ -291,16 +357,13 @@ fn assert_same_aims(actual: &[(String, f64, f64)], expected: &[(String, f64, f64
 }
 
 #[test]
-fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_a_wash_aims_nowhere() {
+fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_only_cells_with_pan_aim() {
     let rig = rig(
         json!([
-            head(
-                "head",
-                0,
-                mounted(true, 37.0, [-1000.0, 500.0, 4000.0]),
-                [-2000.0, 3000.0, 0.0]
-            ),
+            head("head", 0, mounted(true, 37.0, [-1000.0, 500.0, 4000.0]), [-2000.0, 3000.0, 0.0]),
             wash("wash", 1, [3000.0, -500.0, 3000.0]),
+            {"fixture_uuid": "bar", "profile": BAR, "universe": 0, "address": 13,
+             "matrix": mounted(true, 0.0, [1000.0, 0.0, 3000.0])},
         ]),
         Value::Null,
     );
@@ -314,10 +377,11 @@ fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_a_wash_aims_nowhere() {
             assert(x == {x:?} and y == {y:?} and z == {z:?}, "the stage centre without a focus point")
             for _, aim in ipairs {{
                 table.pack(sf.aim("wash", 1, 2, 0)),
+                table.pack(sf.aim("bar/Pixel 1", 1, 2, 0)),
                 table.pack(sf.aim_offset("wash", 10, 5)),
                 table.pack(sf.aim_direction("wash", 0, 0, 1)),
             }} do
-                assert(aim.n == 2 and aim[1] == nil and aim[2] == nil, "a wash aims nowhere")
+                assert(aim.n == 2 and aim[1] == nil and aim[2] == nil, "a cell without pan aims nowhere")
             end
             return {{sf.pan_tilt(sf.fixture("head"), sf.aim("head", 1.5, 2, 0))}}"#
         ),
@@ -325,19 +389,22 @@ fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_a_wash_aims_nowhere() {
     let aims = render(&mut autoloop, &elapsed(0.0));
     let (pan, tilt) = rig.aim_at("head", [1500.0, 2000.0, 0.0]).unwrap();
     assert_same_aims(&aims, &[("head".into(), pan, tilt)], "sf.aim");
-    let error = fails(
-        &rig,
-        r#"return {sf.pan_tilt(sf.fixture("head"), sf.aim("head", 0/0, 0, 0))}"#,
-    );
-    assert!(error.contains("aim point must be finite"), "{error}");
-    let error = fails(
-        &rig,
-        r#"return {sf.pan_tilt(sf.fixture("head"), sf.aim("nobody", 0, 0, 0))}"#,
-    );
-    assert!(error.contains("unknown cell nobody"), "{error}");
+    for (call, error) in [
+        (r#"sf.aim("head", 0/0, 0, 0)"#, "aim point must be finite"),
+        (r#"sf.aim("nobody", 0, 0, 0)"#, "unknown cell nobody"),
+        // A multi-cell fixture is not one cell, though sf.position and sf.focus place it.
+        (r#"sf.aim("bar", 0, 0, 0)"#, "unknown cell bar"),
+    ] {
+        let message = fails(
+            &rig,
+            &format!(r#"return {{sf.pan_tilt(sf.fixture("head"), {call})}}"#),
+        );
+        assert!(message.contains(error), "{call}: {message}");
+    }
 }
 
-/// Heads whose rest beams run straight down, straight up, upstage, cross-stage and on a slant.
+/// Heads whose rest beams run straight down, straight up, upstage, cross-stage, on a slant, and
+/// from the side across and down with no Y component and with one.
 fn rest_beams() -> FixtureRig {
     rig(
         json!([
@@ -371,13 +438,25 @@ fn rest_beams() -> FixtureRig {
                 mounted(true, 0.0, [1000.0, -500.0, 3000.0]),
                 [-500.0, 2500.0, 0.0]
             ),
+            head(
+                "side",
+                5,
+                mounted(true, 90.0, [-3000.0, 0.0, 3000.0]),
+                [-1000.0, 0.0, 1500.0]
+            ),
+            head(
+                "diagonal",
+                6,
+                mounted(true, 0.0, [-3000.0, -2000.0, 3000.0]),
+                [-1000.0, -1000.0, 1500.0]
+            ),
         ]),
         Value::Null,
     )
 }
 
 #[test]
-fn aim_offset_spreads_towards_x_and_elevates_towards_z_round_any_rest_beam() {
+fn aim_offset_spreads_across_and_elevates_up_round_any_rest_beam() {
     let rig = rest_beams();
     let cells = ["down", "up", "upstage", "across", "slant"];
     let spreads = [-35.0, 0.0, 20.0];
@@ -404,29 +483,29 @@ fn aim_offset_spreads_towards_x_and_elevates_towards_z_round_any_rest_beam() {
                 let context = format!("{cell} spread {spread} elevation {elevation}");
                 let (sin_s, cos_s) = f64::to_radians(spread).sin_cos();
                 let (sin_e, cos_e) = f64::to_radians(elevation).sin_cos();
-                // Along Z the elevation turns about X; along X the spread turns about Z.
+                // A plumb beam elevates about X; a cross-stage one spreads clockwise from above.
                 let expected = match cell {
                     "down" => Some([cos_e * sin_s, sin_e, -cos_e * cos_s]),
                     "up" => Some([cos_e * sin_s, -sin_e, cos_e * cos_s]),
                     "upstage" => Some([cos_e * sin_s, cos_e * cos_s, sin_e]),
-                    "across" => Some([cos_e * cos_s, cos_e * sin_s, sin_e]),
+                    "across" => Some([cos_e * cos_s, -cos_e * sin_s, sin_e]),
                     _ => None,
                 };
                 if let Some(expected) = expected {
                     assert_near(beam, expected, EXACT, &context);
                 } else if elevation == 0.0 {
-                    let turned = dot(beam, slant).clamp(-1.0, 1.0).acos().to_degrees();
-                    assert!((turned - spread.abs()).abs() < 1e-7, "{context}: {turned}");
+                    // Spread stays level across the heading, towards +X when positive.
+                    let across = cross(slant, [0.0, 0.0, 1.0]);
                     assert!(
-                        dot(cross(slant, [1.0, 0.0, 0.0]), beam).abs() < EXACT,
+                        (degrees_between(beam, slant) - spread.abs()).abs() < 1e-7,
                         "{context}"
                     );
+                    assert!(dot(cross(slant, across), beam).abs() < EXACT, "{context}");
                     assert!(spread == 0.0 || (beam[0] - slant[0]).signum() == spread.signum());
                 } else if spread == 0.0 {
-                    let turned = dot(beam, slant).clamp(-1.0, 1.0).acos().to_degrees();
                     assert!(
-                        (turned - elevation.abs()).abs() < 1e-7,
-                        "{context}: {turned}"
+                        (degrees_between(beam, slant) - elevation.abs()).abs() < 1e-7,
+                        "{context}"
                     );
                     assert!(
                         dot(cross(slant, [0.0, 0.0, 1.0]), beam).abs() < EXACT,
@@ -444,6 +523,65 @@ fn aim_offset_spreads_towards_x_and_elevates_towards_z_round_any_rest_beam() {
             }
         }
     }
+}
+
+/// How a cell's beam turns from rest at each `(spread, elevation)`, as the parts of each turned
+/// beam perpendicular to the rest beam.
+fn turns(rest: [f64; 3], turned: &[[f64; 3]]) -> Vec<[f64; 3]> {
+    turned
+        .iter()
+        .map(|beam| {
+            let along = dot(*beam, rest);
+            [0, 1, 2].map(|axis| beam[axis] - along * rest[axis])
+        })
+        .collect()
+}
+
+#[test]
+fn spread_and_elevation_turn_at_right_angles_so_a_side_stand_circles() {
+    let rig = rest_beams();
+    let mut autoloop = autoloop(
+        &rig,
+        r#"local effects = {}
+        for _, cell in ipairs { "side", "diagonal" } do
+            for _, offset in ipairs { {0, 0}, {10, 0}, {0, 10} } do
+                effects[#effects + 1] = sf.pan_tilt(sf.fixture(cell), sf.aim_offset(cell, offset[1], offset[2]))
+            end
+        end
+        local circle = { shape = "circle", size = 10, measure = 4 }
+        return sf.scene { effects, sf.phaser(sf.fixture("side"), ctx, circle) }"#,
+    );
+    let quarter = 10.0_f64.to_radians().sin();
+    let rest_beams = beams(&rig, &render(&mut autoloop, &elapsed(0.0))[..6]);
+    for (index, cell) in ["side", "diagonal"].into_iter().enumerate() {
+        let [rest, spread, elevation] = rest_beams[3 * index..3 * index + 3] else {
+            unreachable!()
+        };
+        let [spread, elevation] = turns(rest, &[spread, elevation])[..] else {
+            unreachable!()
+        };
+        assert!(
+            dot(spread, elevation).abs() < EXACT,
+            "{cell}: {spread:?} {elevation:?}"
+        );
+        for turn in [spread, elevation] {
+            assert!(
+                (dot(turn, turn).sqrt() - quarter).abs() < EXACT,
+                "{cell}: {turn:?}"
+            );
+        }
+    }
+    // A quarter cycle apart the circle's turns are as long and at right angles: not a line.
+    let side = rest_beams[0];
+    let circle: Vec<_> = [0.0, 1.0]
+        .map(|beats| beams(&rig, &render(&mut autoloop, &elapsed(beats))[6..])[0])
+        .into();
+    let [first, second] = turns(side, &circle)[..] else {
+        unreachable!()
+    };
+    assert!(dot(first, second).abs() < EXACT, "{first:?} {second:?}");
+    assert!((dot(first, first) - dot(second, second)).abs() < EXACT);
+    assert!((dot(first, first).sqrt() - quarter).abs() < EXACT);
 }
 
 #[test]
@@ -480,19 +618,29 @@ fn aim_direction_throws_the_beam_along_the_vector_whatever_the_focus() {
     assert!(error.contains("finite nonzero vector"), "{error}");
 }
 
-/// Hanging heads a, b, c, d across the stage at x = -3, -1, 1, 3 m, each focused at `focus(x)`,
-/// as group "row"; "mixed" is the outer two with a wash between them.
+/// Hanging heads a, b, c, d across the stage at x = -3, -1, 1, 3 m and m on the centreline, each
+/// focused at `focus(x)`. Groups: "row" a..d, "odd" a, m, d, "mixed" a, d and a wash between
+/// them, and "ends" a..d between washes outside them at x = -5 and 5 m.
 fn row(focus: impl Fn(f64) -> [f64; 3]) -> FixtureRig {
-    let mut fixtures: Vec<Value> = ["a", "b", "c", "d"]
+    let mut fixtures: Vec<Value> = ["a", "b", "c", "d", "m"]
         .into_iter()
-        .zip([-3000.0, -1000.0, 1000.0, 3000.0])
+        .zip([-3000.0, -1000.0, 1000.0, 3000.0, 0.0])
         .enumerate()
         .map(|(slot, (id, x))| head(id, slot, mounted(true, 0.0, [x, 0.0, 4000.0]), focus(x)))
         .collect();
-    fixtures.push(wash("wash", 4, [0.0, 0.0, 4000.0]));
+    fixtures.extend([
+        wash("wash", 5, [0.0, 0.0, 4000.0]),
+        wash("wash_left", 6, [-5000.0, 0.0, 4000.0]),
+        wash("wash_right", 7, [5000.0, 0.0, 4000.0]),
+    ]);
     rig(
         Value::Array(fixtures),
-        json!({"row": ["a", "b", "c", "d"], "mixed": ["a", "wash", "d"]}),
+        json!({
+            "row": ["a", "b", "c", "d"],
+            "odd": ["a", "m", "d"],
+            "mixed": ["a", "wash", "d"],
+            "ends": ["wash_left", "a", "b", "c", "d", "wash_right"],
+        }),
     )
 }
 
@@ -533,28 +681,63 @@ fn fans_and_crosses_spread_partners_by_stage_position_whichever_way_they_throw()
                 &format!("{throw} {label}"),
             );
         }
-        let beams: Vec<_> = chunks[0]
-            .iter()
-            .map(|(cell, pan, tilt)| rig.beam_direction(cell, *pan, *tilt).unwrap())
-            .collect();
+        let fanned = beams(&rig, chunks[0]);
         for (index, cell) in ["a", "b", "c", "d"].into_iter().enumerate() {
             let (pan, tilt) = rig.aim(cell).unwrap();
             let rest = rig.beam_direction(cell, pan, tilt).unwrap();
             let outward = if index < 2 { -1.0 } else { 1.0 };
             assert!(
-                (beams[index][0] - rest[0]) * outward > 0.0,
+                (fanned[index][0] - rest[0]) * outward > 0.0,
                 "{throw} {cell} spreads outward"
             );
         }
         for (left, right) in [(0, 3), (1, 2)] {
-            let [x, y, z] = beams[right];
-            assert_near(beams[left], [-x, y, z], EXACT, &format!("{throw} mirror"));
+            let [x, y, z] = fanned[right];
+            assert_near(fanned[left], [-x, y, z], EXACT, &format!("{throw} mirror"));
         }
     }
 }
 
 #[test]
-fn phase_spreads_ranks_across_the_cycle_and_mirror_partners_share_one() {
+fn washes_at_the_ends_of_a_group_neither_widen_the_row_nor_take_a_rank() {
+    let rig = row(|x| [x, 2000.0, 0.0]);
+    let mut autoloop = autoloop(
+        &rig,
+        r#"local fan = { shape = "fan", size = 24 }
+        local circle = { shape = "circle", size = 10, measure = 4, phase = 1 }
+        return sf.scene {
+            sf.phaser(sf.group("ends"), ctx, fan), sf.phaser(sf.group("row"), ctx, fan),
+            sf.phaser(sf.group("ends"), ctx, circle), sf.phaser(sf.group("row"), ctx, circle),
+        }"#,
+    );
+    let aims = render(&mut autoloop, &elapsed(1.3));
+    let chunks: Vec<_> = aims.chunks(4).collect();
+    assert_same_aims(chunks[0], chunks[1], "fan");
+    assert_same_aims(chunks[2], chunks[3], "circle");
+}
+
+#[test]
+fn a_centre_member_circles_rather_than_nodding_in_a_line() {
+    let rig = row(|x| [x, 2000.0, 0.0]);
+    let mut autoloop = autoloop(
+        &rig,
+        r#"return sf.phaser(sf.group("odd"), ctx, { shape = "circle", size = 10, measure = 4 })"#,
+    );
+    let (pan, tilt) = rig.aim("m").unwrap();
+    let rest = rig.beam_direction("m", pan, tilt).unwrap();
+    let circle: Vec<_> = [0.0, 1.0]
+        .map(|beats| beams(&rig, &render(&mut autoloop, &elapsed(beats)))[1])
+        .into();
+    let [first, second] = turns(rest, &circle)[..] else {
+        unreachable!()
+    };
+    assert!(dot(first, second).abs() < EXACT, "{first:?} {second:?}");
+    assert!((dot(first, first) - dot(second, second)).abs() < EXACT);
+    assert!(dot(first, first) > 0.01, "{first:?}");
+}
+
+#[test]
+fn phase_runs_the_wave_in_selection_order_and_mirror_partners_share_a_rank() {
     let rig = row(|x| [x, 2000.0, 0.0]);
     let phasers = |phase: f64| {
         autoloop(
@@ -568,26 +751,78 @@ fn phase_spreads_ranks_across_the_cycle_and_mirror_partners_share_one() {
             ),
         )
     };
-    let (mut spread, mut together) = (phasers(1.0), phasers(0.0));
-    // In beats of the 4-beat cycle: two ranks with wings, four without, and tilt_wave has none.
-    let shifts = [
+    let mut together = phasers(0.0);
+    // Lags in beats of the 4-beat cycle: two ranks with wings, four without, and tilt_wave has
+    // no wings by default. A positive phase delays later members, a negative one leads them.
+    let lags = [
         [0.0, 2.0, 2.0, 0.0],
         [0.0, 1.0, 2.0, 3.0],
         [0.0, 1.0, 2.0, 3.0],
     ];
-    for beats in [0.0, 1.3] {
-        let aims = render(&mut spread, &elapsed(beats));
-        for (chunk, shifts) in shifts.iter().enumerate() {
-            for (member, shift) in shifts.iter().enumerate() {
-                let index = 4 * chunk + member;
-                let expected = &render(&mut together, &elapsed(beats + shift))[index..=index];
-                assert_same_aims(
-                    &aims[index..=index],
-                    expected,
-                    &format!("phaser {chunk} member {member}"),
-                );
+    for (phase, direction) in [(1.0, -1.0), (-1.0, 1.0)] {
+        let mut spread = phasers(phase);
+        for beats in [4.0, 5.3] {
+            let aims = render(&mut spread, &elapsed(beats));
+            for (chunk, lags) in lags.iter().enumerate() {
+                for (member, lag) in lags.iter().enumerate() {
+                    let index = 4 * chunk + member;
+                    let expected =
+                        &render(&mut together, &elapsed(beats + direction * lag))[index..=index];
+                    let context = format!("phase {phase} phaser {chunk} member {member}");
+                    assert_same_aims(&aims[index..=index], expected, &context);
+                }
             }
         }
+    }
+}
+
+#[test]
+fn a_phaser_can_rest_on_a_point_or_along_a_direction_instead_of_the_focus() {
+    let rig = row(|x| [x, 2000.0, 0.0]);
+    let mut autoloop = autoloop(
+        &rig,
+        r#"local wall = { 0, 1, -1 }
+        return sf.scene {
+            sf.phaser(sf.group("row"), ctx, { shape = "fan", size = 0, at = { 0.5, 3, 0 } }),
+            sf.phaser(sf.group("row"), ctx, { shape = "fan", size = 0, direction = wall }),
+            sf.phaser(sf.group("row"), ctx, { shape = "circle", size = 10, measure = 4, wings = false, direction = wall }),
+            sf.each(sf.group("row"), function(head)
+                return sf.pan_tilt(head, sf.aim_offset(head, 10, 0, wall))
+            end),
+        }"#,
+    );
+    let aims = render(&mut autoloop, &elapsed(0.0));
+    let chunks: Vec<_> = aims.chunks(4).collect();
+    for (index, cell) in ["a", "b", "c", "d"].into_iter().enumerate() {
+        let position = [-3000.0, -1000.0, 1000.0, 3000.0][index];
+        let towards = unit([500.0 - position, 3000.0, -4000.0]);
+        assert_near(
+            beams(&rig, chunks[0])[index],
+            towards,
+            EXACT,
+            &format!("{cell} at"),
+        );
+        assert_near(
+            beams(&rig, chunks[1])[index],
+            unit([0.0, 1.0, -1.0]),
+            EXACT,
+            cell,
+        );
+    }
+    // At the start of its cycle a circle is the plain spread round the same rest beam.
+    assert_same_aims(chunks[2], chunks[3], "circle along a direction");
+    for (spec, error) in [
+        ("at = { 0, 0, 0 }, direction = { 0, 0, -1 }", "not both"),
+        ("direction = { 0, 0, 0 }", "finite nonzero"),
+        ("at = { 0, 0 }", "phaser at must be finite"),
+    ] {
+        let message = fails(
+            &rig,
+            &format!(
+                r#"return sf.phaser(sf.group("row"), ctx, {{ shape = "fan", size = 5, {spec} }})"#
+            ),
+        );
+        assert!(message.contains(error), "{spec}: {message}");
     }
 }
 
@@ -615,6 +850,13 @@ fn every_shape_is_a_pure_periodic_function_of_the_elapsed_beats() {
             assert_same_aims(&aims, &render(&mut first, &cycle_later), shape);
             let cells: Vec<_> = aims.iter().map(|(cell, ..)| cell.as_str()).collect();
             assert_eq!(cells, ["a", "d"], "{shape}: the wash has no pan range");
+            if shape == "ballyhoo" {
+                // Partners move on their own phases, not as one mirrored figure.
+                let [left, [x, y, z]] = beams(&rig, &aims)[..] else {
+                    unreachable!()
+                };
+                assert!((0..3).any(|axis| (left[axis] - [-x, y, z][axis]).abs() > 1e-3));
+            }
             seen.push(aims);
         }
         assert!(
@@ -625,32 +867,34 @@ fn every_shape_is_a_pure_periodic_function_of_the_elapsed_beats() {
 }
 
 #[test]
-fn measures_snap_to_powers_of_two_and_malformed_specs_are_refused() {
+fn measures_outside_the_powers_of_two_and_malformed_specs_are_refused() {
     let rig = row(|x| [x, 2000.0, 0.0]);
-    let circle = |measure: &str| {
-        autoloop(
+    let phaser = |spec: &str| format!(r#"return sf.phaser(sf.group("row"), ctx, {{ {spec} }})"#);
+    for measure in [1, 2, 4, 8, 16, 32] {
+        let mut autoloop = autoloop(
             &rig,
-            &format!(
-                r#"return sf.phaser(sf.group("row"), ctx, {{ shape = "circle", size = 10, measure = {measure} }})"#
-            ),
-        )
-    };
-    for (asked, snapped) in [
-        ("0.3", "1"),
-        ("3", "4"),
-        ("6", "8"),
-        ("11", "8"),
-        ("12", "16"),
-        ("100", "32"),
-    ] {
-        let (mut asked_loop, mut snapped_loop) = (circle(asked), circle(snapped));
-        for beats in [0.5, 2.25, 7.0] {
-            assert_eq!(
-                render(&mut asked_loop, &elapsed(beats)),
-                render(&mut snapped_loop, &elapsed(beats)),
-                "measure {asked}"
-            );
-        }
+            &phaser(&format!(
+                r#"shape = "circle", size = 10, measure = {measure}"#
+            )),
+        );
+        assert_eq!(render(&mut autoloop, &elapsed(0.5)).len(), 4);
+    }
+    let mut tilt_only = autoloop(
+        &rig,
+        &phaser(r#"shape = "tilt_wave", tilt_size = 8, measure = 16"#),
+    );
+    assert_eq!(render(&mut tilt_only, &elapsed(0.5)).len(), 4);
+    for measure in ["0", "0.3", "3", "6", "12", "100"] {
+        let message = fails(
+            &rig,
+            &phaser(&format!(
+                r#"shape = "circle", size = 10, measure = {measure}"#
+            )),
+        );
+        assert!(
+            message.contains("measure must be 1, 2, 4, 8, 16 or 32 beats"),
+            "{measure}: {message}"
+        );
     }
     for (spec, error) in [
         (
@@ -662,19 +906,16 @@ fn measures_snap_to_powers_of_two_and_malformed_specs_are_refused() {
             "only a fan or cross holds still",
         ),
         (
-            r#"shape = "circle", size = 10, measure = 0"#,
-            "measure must be positive",
-        ),
-        (
             r#"shape = "fan", size = 10, phase = 1.5"#,
-            "phase must be within 0..1",
+            "phase must be within -1..1",
         ),
         (r#"shape = "fan""#, "sizes and centres must be finite"),
+        (
+            r#"shape = "tilt_wave", measure = 4"#,
+            "sizes and centres must be finite",
+        ),
     ] {
-        let message = fails(
-            &rig,
-            &format!(r#"return sf.phaser(sf.group("row"), ctx, {{ {spec} }})"#),
-        );
+        let message = fails(&rig, &phaser(spec));
         assert!(message.contains(error), "{spec}: {message}");
     }
 }
