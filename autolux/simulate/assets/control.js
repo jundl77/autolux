@@ -1,14 +1,13 @@
 // Operator commands go straight from the browser to the show's control bridge.
-// Payloads mirror control_command / static_control_command in visualizer_app.py.
 (function () {
     'use strict';
 
-    const RETRY_DIRECT_MS = 30000;
+    // Long enough for the show's echo of a click to land, so older polls cannot flip it back.
+    const HOLD_MS = 2000;
     const config = () => window.autoluxControlConfig || {};
     const holds = {};
     const latest = {};
     const inflight = {};
-    let directDownAt = -Infinity;
     // Nothing leaves the page before the operator's first pointer or key press: a restored
     // value, the first poll or a component settling on load must never command the show.
     let operatorActed = false;
@@ -110,7 +109,8 @@
         return null;
     }
 
-    // Mirrors static_fx_command: the row already held on the target sends nothing.
+    // The row already held on the target sends nothing, so a poll syncing the picker never
+    // re-fires it.
     function staticFxCommand(row, target, state) {
         const active = ((state && state.static) || {}).special_fx || {};
         if (!row || (active.name === row && active.group === target)) {
@@ -127,6 +127,7 @@
         intensity: (level) => ({action: 'intensity', level: level}),
         intensityAuto: (enabled) => ({action: 'intensity_auto', enabled: enabled}),
         fxAuto: (enabled) => ({action: 'fx_auto', enabled: enabled}),
+        settings: (changes) => ({action: 'settings', settings: changes}),
         static: staticCommand,
         staticFx: staticFxCommand,
         staticFxClear: () => ({action: 'static', kind: 'special_fx_clear'}),
@@ -158,24 +159,8 @@
                 command, new Error().stack);
             return {dropped: 'no operator input yet'};
         }
-        const {direct, bridgePort} = config();
-        if (direct && bridgePort && Date.now() - directDownAt >= RETRY_DIRECT_MS) {
-            let response = null;
-            try {
-                response = await post(
-                    location.protocol + '//' + location.hostname + ':' + bridgePort + '/control',
-                    command
-                );
-            } catch (error) {
-                // Only a network or CORS failure lands here; a JSON POST is preflighted, so the
-                // bridge never ran it and the relay may send it instead.
-                directDownAt = Date.now();
-            }
-            if (response) {
-                return readReply(response);
-            }
-        }
-        return readReply(await post(config().relayPath || '/control-relay', command));
+        const url = location.protocol + '//' + location.hostname + ':' + config().bridgePort;
+        return readReply(await post(url + '/control', command));
     }
 
     function setStatus(statusId, text) {
@@ -219,32 +204,53 @@
         return inflight[key];
     }
 
+    const isDict = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+    // A dict holds only the fields it names (one setting), merged over what the poll reports.
+    const merged = (base, value) => (isDict(base) && isDict(value) ? {...base, ...value} : value);
+
     function hold(values) {
         const at = Date.now();
         Object.entries(values).forEach(([key, value]) => {
-            holds[key] = {value: value, at: at};
+            holds[key] = {value: merged(holds[key] && holds[key].value, value), at: at};
         });
     }
 
-    // Mirrors ControlExpectations.apply: a held value wins until the show reports it or it expires.
+    // A held value wins over every poll for HOLD_MS, so an echo of an older click arriving
+    // late cannot flip the control back.
     function view(state) {
         if (!state) {
             return state;
         }
         const now = Date.now();
-        const holdMs = config().holdMs || 2000;
         const shown = {...state};
         Object.entries(holds).forEach(([key, {value, at}]) => {
-            if (JSON.stringify(state[key]) === JSON.stringify(value) || now - at >= holdMs) {
+            if (now - at >= HOLD_MS) {
                 delete holds[key];
             } else {
-                shown[key] = value;
+                shown[key] = merged(state[key], value);
             }
         });
         return shown;
     }
 
-    // Mirrors _cooldown_bar: a bar elapsedSeconds after the poll that reported remaining.
+    const FX_CHIPS = ['control-fx-auto', 'control-fx-off'];
+    const FOLLOW_CHIPS = ['control-intensity-auto', 'control-intensity-set'];
+    const fxClasses = (on) => [on ? 'active' : '', on ? '' : 'active'];
+    // Following the music greys the segments but keeps the chosen level lit.
+    const followClasses = (on) => [on ? 'active' : '', on ? 'following' : ''];
+
+    // Both the click and the poll paint the chips through set_props, which applies at once: a
+    // poll's Output computed before a click would land after it and flip the chip back.
+    function paintFx(on) {
+        FX_CHIPS.forEach((id, index) => window.dash_clientside.set_props(
+            id, {className: on === null ? '' : fxClasses(on)[index]}));
+    }
+    function paintFollow(on) {
+        FOLLOW_CHIPS.forEach((id, index) => window.dash_clientside.set_props(
+            id, {className: followClasses(on)[index]}));
+    }
+
+    // A bar elapsedSeconds after the poll that reported remaining.
     function cooldownView(total, remaining, elapsedSeconds) {
         const left = Math.max(0, remaining - elapsedSeconds);
         const ready = left <= 0;
@@ -275,8 +281,8 @@
     // Per group, so a fire is told apart from Dash handing this element another group's entry.
     const cooldownSeen = {};
 
-    // Fills the FX Effects bars up between polls and flashes a bar whose group just fired.
-    // Dash may reuse a bar's element for another entry, so a poll is spotted by its data
+    // Draws the FX Effects bars from their data attributes, filling them up between polls, and
+    // flashes a bar whose group just fired. Dash may reuse a bar's element for another entry, so a poll is spotted by its data
     // attributes changing, not by the node.
     function tickCooldowns() {
         const now = performance.now();
@@ -298,16 +304,9 @@
             const state = cooldownSeen[data.group];
             const shown = cooldownView(polled.total, polled.remaining,
                 (now - state.polledAt) / 1000);
-            const fill = row.querySelector('.cooldown-fill');
-            const caption = row.querySelector('.cooldown-caption');
-            if (fill) {
-                fill.style.width = shown.fill;
-            }
-            // Edit React's own text node so its next render still lands in the page.
-            if (caption && caption.firstChild) {
-                caption.firstChild.nodeValue = shown.caption;
-            }
-            // Re-applied every tick: a Dash render resets className.
+            // Python renders neither, so React never overwrites them.
+            row.querySelector('.cooldown-fill').style.width = shown.fill;
+            row.querySelector('.cooldown-caption').textContent = shown.caption;
             row.classList.toggle('ready', shown.ready);
             row.classList.toggle('flash', now < state.flashUntil);
         });
@@ -319,6 +318,6 @@
 
     window.autoluxControl = {
         build, send, dispatch, sendLatest, hold, view, operatorActs, press, takePress,
-        cooldownView, cooldownFired,
+        paintFx, paintFollow, cooldownView, cooldownFired,
     };
 })();

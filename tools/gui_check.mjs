@@ -5,7 +5,6 @@ import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 const URL_ = process.env.GUI_URL;
-const BRIDGE = process.env.GUI_BRIDGE_PORT;
 const ONLY = process.env.GUI_ONLY || '';
 const SHOTS = process.env.GUI_SHOTS || '';
 const PROFILE = process.env.GUI_PROFILE;
@@ -67,9 +66,8 @@ const consoleLines = [];
 listeners.push((msg) => {
     if (msg.method === 'Network.requestWillBeSent') {
         const r = msg.params.request;
-        if (r.method === 'POST' && /\/control(-relay)?$/.test(r.url)) {
-            network.push({t: Date.now(), via: r.url.endsWith('-relay') ? 'relay' : 'direct',
-                body: r.postData});
+        if (r.method === 'POST' && r.url.endsWith('/control')) {
+            network.push({t: Date.now(), body: r.postData});
         }
     } else if (msg.method === 'Runtime.consoleAPICalled'
             && ['warning', 'error'].includes(msg.params.type)) {
@@ -88,12 +86,13 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', {source: `
     window.__flashes = [];
     new MutationObserver((records) => records.forEach((r) => {
         const el = r.target;
-        if (el.classList && el.classList.contains('cooldown-row') && el.classList.contains('flash')
-                && !(r.oldValue || '').includes('flash')) {
+        const flashing = !!el.classList && el.classList.contains('cooldown-row')
+            && el.classList.contains('flash');
+        if (flashing && !el.__flashing) {
             window.__flashes.push({group: el.dataset.group, at: performance.now()});
         }
-    })).observe(document, {subtree: true, attributes: true, attributeFilter: ['class'],
-                           attributeOldValue: true});
+        el.__flashing = flashing;
+    })).observe(document, {subtree: true, attributes: true, attributeFilter: ['class']});
 `});
 
 async function ev(expression) {
@@ -200,7 +199,7 @@ async function action(control, name, act, {expect = [], look = null, watch = WAT
     }
     const okCount = seen.length === expect.length && expect.every((e, i) => sub(seen[i], e));
     await check(control, name + ' -> ' + expect.length + ' command(s)', okCount,
-        {expected: expect, seen, network: network.slice(netMark).map((n) => n.via + ' ' + n.body)});
+        {expected: expect, seen, network: network.slice(netMark).map((n) => n.body)});
     return finish(control, name, look, bad, seen, firstBad);
 }
 async function finish(control, name, look, bad, seen, firstBad) {
@@ -287,6 +286,11 @@ const tab = (label) => click(`#dashboard-tab .tab:nth-child(${['Control', 'Telem
 const modeTab = (mode) => click(`#control-mode .tab:nth-child(${mode === 'auto' ? 1 : 2})`);
 const keysOf = (c) => Object.keys(c || {}).sort().join(',');
 const flashes = () => ev('window.__flashes.splice(0)');
+// The chosen level's fill, and a #show-control colour token resolved the same way.
+const levelFill = () => ev(`getComputedStyle(document.querySelector('#control-intensity .selected .dash-options-list-option-text')).backgroundColor`);
+const tokenColour = (name) => ev(`(() => { const probe = document.createElement('div');
+    probe.style.background = 'var(${name})'; document.getElementById('show-control').appendChild(probe);
+    const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })()`);
 
 // Clicks a slider's track at a fraction of its width.
 const slider = (selector, fraction) => click(selector, {fx: fraction});
@@ -297,11 +301,11 @@ const SUITES = {
         await shot('control');
         await action('polls', 'idle 5 s after load', async () => {});
         const captions = await ev(`[...document.querySelectorAll('#show-status .control-label')].map((e) => e.textContent)`);
-        const want = ['Health', 'Autoloop', 'Colors', 'FX', 'BPM', 'Render FPS', 'Strobe'];
+        const want = ['Health', 'Autoloop', 'Colors', 'FX', 'BPM', 'Render FPS'];
         await check('status line', 'shows every field', want.every((c) => captions.includes(c)),
             {captions, want});
-        await check('status line', 'BPM 124, Strobe in 12 s',
-            (await ev(`document.getElementById('show-status').textContent`)).match(/124.*in 12 s/) !== null,
+        await check('status line', 'BPM 124',
+            (await ev(`document.getElementById('show-status').textContent`)).includes('BPM124'),
             {status: await text('#show-status')});
         await check('FX row', 'reads "-" while idle', (await text('#status-fx .status-text')) === '-',
             {fx: await text('#status-fx')});
@@ -315,9 +319,15 @@ const SUITES = {
         }
         await action('intensity balanced', 'click the level already lit', () => click(levelLabel('balanced')),
             {look: shows('balanced')});
+        await check('intensity balanced', 'chosen by hand, it wears its own colour',
+            (await levelFill()) === (await tokenColour('--balanced')),
+            {fill: await levelFill(), balanced: await tokenColour('--balanced')});
         const autoOn = and(has('control-intensity-auto', 'active'), has('control-intensity-set', 'following'));
         await action('intensity AUTO', 'click on', () => click('#control-intensity-auto'),
             {expect: [{action: 'intensity_auto', enabled: true}], look: autoOn});
+        await check('intensity AUTO', 'the followed level wears the follow colour',
+            (await levelFill()) === (await tokenColour('--follow')),
+            {fill: await levelFill(), follow: await tokenColour('--follow')});
         await action('intensity calm', 'click while AUTO is on', () => click(levelLabel('calm')),
             {expect: [{action: 'intensity', level: LEVELS.calm}], look: and(shows('calm'), not(autoOn))});
         await action('intensity AUTO', 'Enter', () => key('#control-intensity-auto', 'Enter'),
@@ -533,47 +543,13 @@ const SUITES = {
         await type(field, String(before + 1));
         await sleep(1500);
         const masters = await ev(`[...document.querySelectorAll('#group-masters .setting-name')].map((e) => e.textContent)`);
-        await check('group masters', 'one fader per rig group', JSON.stringify(masters) === '["pars master","spots master"]', {masters});
+        await check('group masters', 'one fader per rig group', JSON.stringify(masters) === '["pars group master","spots group master"]', {masters});
         seen = await action('group master pars', 'click the track at 50%', () => slider('#group-masters .setting-row:nth-child(1) .fader-track', 0.5),
             {expect: [{action: 'settings'}]});
         const level = seen[0]?.settings?.group_masters?.pars;
         await check('group master pars', 'sends only group_masters, pars near 50%',
             keysOf(seen[0]?.settings) === 'group_masters' && keysOf(seen[0].settings.group_masters) === 'pars'
             && Math.abs(level - 0.5) < 0.06, {seen});
-    },
-
-    relay: async () => {
-        await fresh();
-        let failedOnce = false;
-        const onPause = async (msg) => {
-            if (msg.method !== 'Fetch.requestPaused') {
-                return;
-            }
-            if (!failedOnce) {
-                failedOnce = true;
-                await cdp('Fetch.failRequest', {requestId: msg.params.requestId, errorReason: 'ConnectionRefused'});
-            } else {
-                await cdp('Fetch.continueRequest', {requestId: msg.params.requestId});
-            }
-        };
-        listeners.push(onPause);
-        await cdp('Fetch.enable', {patterns: [{urlPattern: `*:${BRIDGE}/control*`}]});
-        try {
-            let seen = await action('relay intensity calm', 'click with the bridge down for one request', () => click(levelLabel('calm')),
-                {expect: [{action: 'intensity', level: LEVELS.calm}], look: shows('calm')});
-            await check('relay intensity calm', 'went by the relay, level only',
-                failedOnce && keysOf(seen[0]) === 'action,level' && network.slice(-1)[0]?.via === 'relay',
-                {seen, network: network.slice(-3)});
-            seen = await action('relay FX Off', 'click while direct is marked down', () => click('#control-fx-off'),
-                {expect: [{action: 'fx_auto', enabled: false}], look: has('control-fx-off', 'active')});
-            await check('relay FX Off', 'no other auto flag rides along', keysOf(seen[0]) === 'action,enabled', {seen});
-            seen = await action('relay intensity AUTO', 'click', () => click('#control-intensity-auto'),
-                {expect: [{action: 'intensity_auto', enabled: true}], look: has('control-intensity-auto', 'active')});
-            await check('relay status', 'no rejection shown', (await text('#control-status')) === '', {status: await text('#control-status')});
-        } finally {
-            await cdp('Fetch.disable');
-            listeners.splice(listeners.indexOf(onPause), 1);
-        }
     },
 
     load: async () => {

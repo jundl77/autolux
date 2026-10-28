@@ -605,10 +605,14 @@ async def test_an_intense_special_starts_the_strobe_cooldown_the_dashboard_count
     controller, _, clock = with_specials(
         discover_specials(), settings=settings, event_buffer=buffer
     )
-    assert buffer.snapshot()['strobe_cooldown_seconds'] == 0.0
+
+    def strobe_bar():
+        return next(row for row in buffer.snapshot()['special_cooldowns'] if row.get('strobe'))
+
+    assert strobe_bar()['remaining_seconds'] == 0.0
     await controller.change_effect(LightIntent.DROP)
     clock.advance(19.0)
-    assert buffer.snapshot()['strobe_cooldown_seconds'] == pytest.approx(41.0)
+    assert strobe_bar()['remaining_seconds'] == pytest.approx(41.0)
 
 
 async def test_a_new_drop_replaces_the_drop_special_under_the_same_id():

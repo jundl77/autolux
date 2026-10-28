@@ -68,7 +68,6 @@ class StubShow:
                 'special': None,
                 'special_groups': copy.deepcopy(GROUPS),
                 'group_roles': {},
-                'strobe_cooldown_seconds': 12.0,
                 'bpm': 124.0,
                 'decoder': {'classes': ['intro', 'build', 'drop'], 'posterior': [0.1, 0.3, 0.6]},
                 'static': {
@@ -245,18 +244,13 @@ def main(argv=None) -> int:
         rig = Path(scratch) / 'room.mvr'
         rig.write_bytes((ROOT / 'rig/room.mvr').read_bytes())
         store = FixtureStore(rig, ROOT / 'rig/library', lambda _: None)
-        app = build_app(
-            SnapshotPoller(host='127.0.0.1', port=bridge_port),
-            fixture_store=store,
-            direct_control=True,
-        )
+        app = build_app(SnapshotPoller(host='127.0.0.1', port=bridge_port), fixture_store=store)
         add_harness_routes(app, show)
         server = make_server('127.0.0.1', dash_port, app.server, threaded=True)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         env = {
             **os.environ,
             'GUI_URL': f'http://127.0.0.1:{dash_port}/',
-            'GUI_BRIDGE_PORT': str(bridge_port),
             'GUI_CHROME': CHROME,
             'GUI_PROFILE': str(Path(scratch) / 'chrome'),
             'GUI_ONLY': args.only or '',
