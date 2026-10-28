@@ -30,6 +30,8 @@ const CALLBACK_STALE_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_LIGHT_UPDATES: usize = 512;
 const HEALTH_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(30);
 const REPORT_QUEUE: usize = 4;
+// Well past scheduler jitter on a 1 ms tick: separates a sender stall from a receiver one.
+const LATE_TICK: Duration = Duration::from_millis(50);
 
 struct TimedLight {
     at: Instant,
@@ -197,6 +199,8 @@ struct MediaSender {
     transmitted_light: Option<[u8; protocol::DMX_CHANNELS]>,
     audio_dropped: u64,
     burst_dropped: u64,
+    burst_stalled_for: Duration,
+    burst_pending_bytes: usize,
 }
 
 impl MediaSender {
@@ -208,6 +212,8 @@ impl MediaSender {
             transmitted_light: None,
             audio_dropped: 0,
             burst_dropped: 0,
+            burst_stalled_for: Duration::ZERO,
+            burst_pending_bytes: 0,
         }
     }
 
@@ -226,7 +232,7 @@ impl MediaSender {
                 sequence_number: next,
                 channels: light.to_vec(),
             }))? {
-                self.count_dropped(1);
+                self.count_dropped(1, connection);
                 return Ok(());
             }
             self.light_sequence = next;
@@ -240,13 +246,19 @@ impl MediaSender {
                 .to_vec(),
             light_sequence_number: self.light_sequence,
         }))?;
-        self.count_dropped(dropped);
+        self.count_dropped(dropped, connection);
         Ok(())
     }
 
-    fn count_dropped(&mut self, packets: u64) {
+    fn count_dropped<S>(&mut self, packets: u64, connection: &Connection<S>) {
+        if packets == 0 {
+            return;
+        }
         self.audio_dropped += packets;
         self.burst_dropped += packets;
+        // Sampled at each drop: by the time the burst ends the socket has drained.
+        self.burst_stalled_for = self.burst_stalled_for.max(connection.write_stalled_for());
+        self.burst_pending_bytes = self.burst_pending_bytes.max(connection.pending_bytes());
     }
 
     /// A burst ends once the receiver has taken everything queued.
@@ -255,11 +267,38 @@ impl MediaSender {
             return None;
         }
         let packets = std::mem::take(&mut self.burst_dropped);
+        let stalled_for = std::mem::take(&mut self.burst_stalled_for);
+        let pending = std::mem::take(&mut self.burst_pending_bytes);
         Some(format!(
-            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total",
+            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total; socket accepted no bytes for {} ms with {pending} bytes pending",
             gap_seconds((packets * protocol::BLOCK_FRAMES as u64) as i64) * 1000.0,
-            self.audio_dropped
+            self.audio_dropped,
+            stalled_for.as_millis()
         ))
+    }
+}
+
+/// Names a stalled tx thread, which otherwise looks like a stalled receiver.
+#[derive(Default)]
+struct TickWatch {
+    last: Option<Instant>,
+    late: bool,
+}
+
+impl TickWatch {
+    /// Logs once per episode of consecutive late ticks.
+    fn tick(&mut self, now: Instant) -> Option<String> {
+        let lateness = self.last.replace(now).map_or(Duration::ZERO, |last| {
+            now.duration_since(last).saturating_sub(POLL_INTERVAL)
+        });
+        let first = lateness > LATE_TICK && !self.late;
+        self.late = lateness > LATE_TICK;
+        first.then(|| {
+            format!(
+                "Radius tx loop ran {} ms late; the sender thread stalled",
+                lateness.as_millis()
+            )
+        })
     }
 }
 
@@ -395,6 +434,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut reporter = Reporter::spawn(report_writer(config.run_id, config.health_file.clone()))?;
     let mut reported_discontinuities = 0;
     let mut reported_scheduling = false;
+    let mut ticks = TickWatch::default();
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -545,6 +585,9 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             last_metrics = Instant::now();
         }
         thread::sleep(POLL_INTERVAL);
+        if let Some(line) = ticks.tick(Instant::now()) {
+            reporter.log(line);
+        }
     }
     Ok(())
 }
@@ -661,6 +704,62 @@ mod tests {
             .collect();
         let survivors: Vec<u32> = (dropped as u32 + 1..=BLOCKS as u32).collect();
         assert_eq!(sequences, survivors, "only the oldest audio is dropped");
+    }
+
+    thread_local! {
+        static ADVANCED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    }
+
+    /// `frozen_clock` plus this thread's simulated elapsed time.
+    fn stepped_clock() -> Instant {
+        frozen_clock() + ADVANCED.get()
+    }
+
+    #[test]
+    fn stall_report_names_how_long_the_socket_accepted_nothing() {
+        let socket = FakeSocket::default();
+        socket.0.borrow_mut().0 = 1_000_000;
+        let mut connection = Connection::with_stream(socket.clone(), stepped_clock);
+        let mut media = MediaSender::new(7);
+        let light = [9; protocol::DMX_CHANNELS];
+        // Blocks arrive every 10 ms; the 2 s stalled-write limit is never reached.
+        for index in 0..150u64 {
+            ADVANCED.set(Duration::from_millis(10 * index));
+            let block = AudioBlock {
+                audio_frame_position: index * protocol::BLOCK_FRAMES as u64,
+                frames: protocol::BLOCK_FRAMES as u16,
+                ..Default::default()
+            };
+            media.send(&mut connection, &block, &light).unwrap();
+        }
+        assert!(media.audio_dropped > 0);
+        socket.0.borrow_mut().0 = 0;
+        ADVANCED.set(Duration::from_millis(1500));
+        connection.flush().unwrap();
+        let line = media.end_burst(&connection).unwrap();
+        // The first write was refused at 0 ms; the last drop happened at 1490 ms.
+        assert!(
+            line.contains("socket accepted no bytes for 1490 ms with "),
+            "{line}"
+        );
+        assert!(line.ends_with(" bytes pending"), "{line}");
+    }
+
+    #[test]
+    fn late_tx_ticks_log_once_per_episode() {
+        let start = frozen_clock();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut ticks = TickWatch::default();
+        assert_eq!(ticks.tick(at(0)), None);
+        assert_eq!(ticks.tick(at(2)), None);
+        assert_eq!(ticks.tick(at(53)), None, "50 ms late is within bounds");
+        assert_eq!(
+            ticks.tick(at(134)).as_deref(),
+            Some("Radius tx loop ran 80 ms late; the sender thread stalled")
+        );
+        assert_eq!(ticks.tick(at(300)), None, "same episode");
+        assert_eq!(ticks.tick(at(301)), None);
+        assert!(ticks.tick(at(900)).unwrap().contains("598 ms late"));
     }
 
     /// Show start through the whole chain on a simulated clock: 14 s of delay-ring

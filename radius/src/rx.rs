@@ -29,6 +29,41 @@ const CALLBACK_STALE_TIMEOUT: Duration = Duration::from_secs(1);
 const HEALTH_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(30);
 // Longer than the transmitter's 2 s stall limit, so one stall logs once.
 const GAP_LOG_INTERVAL: Duration = Duration::from_secs(5);
+// Audio arrives every ~3 ms; 100 ms is a stall, not network jitter.
+const ARRIVAL_GAP: Duration = Duration::from_millis(100);
+
+/// Tells a stalled receive loop from a link that delivered nothing.
+#[derive(Default)]
+struct ArrivalWatch {
+    audio_at: Option<Instant>,
+    iteration_at: Option<Instant>,
+    longest_iteration: Duration,
+}
+
+impl ArrivalWatch {
+    fn iteration(&mut self, now: Instant) {
+        if let Some(at) = self.iteration_at.replace(now) {
+            self.longest_iteration = self.longest_iteration.max(now.duration_since(at));
+        }
+    }
+
+    fn audio(&mut self, now: Instant) -> Option<String> {
+        let longest_iteration = std::mem::take(&mut self.longest_iteration);
+        let gap = now.duration_since(self.audio_at.replace(now)?);
+        (gap > ARRIVAL_GAP).then(|| {
+            let cause = if longest_iteration * 2 >= gap {
+                "the receive loop stalled"
+            } else {
+                "nothing arrived"
+            };
+            format!(
+                "Radius audio arrival gap {} ms; longest receive loop iteration {} ms; {cause}",
+                gap.as_millis(),
+                longest_iteration.as_millis()
+            )
+        })
+    }
+}
 
 /// Resolves lighting before admission. TCP guarantees each reference targets the
 /// most recent preceding light state; no independently advancing lighting clock.
@@ -397,7 +432,9 @@ fn run_connected(
     let mut health_error_at: Option<Instant> = None;
     let mut gap_logged_at: Option<Instant> = None;
     let output_started = Instant::now();
+    let mut arrivals = ArrivalWatch::default();
     while !stop.load(Ordering::Acquire) {
+        arrivals.iteration(Instant::now());
         for message in connection.poll()? {
             message.validate(config.run_id)?;
             match message {
@@ -432,6 +469,9 @@ fn run_connected(
                             audio_max_gap.max(Instant::now().duration_since(at).as_secs_f64());
                     }
                     audio_at = Some(Instant::now());
+                    if let Some(line) = arrivals.audio(Instant::now()) {
+                        eprintln!("{line}");
+                    }
                 }
                 _ => bail!("unexpected Radius client message after Login"),
             }
@@ -542,6 +582,34 @@ fn run_connected(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arrival_gap_names_a_stalled_loop_or_a_silent_link() {
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut arrivals = ArrivalWatch::default();
+        arrivals.iteration(at(0));
+        assert_eq!(arrivals.audio(at(0)), None, "first audio has no gap");
+        arrivals.iteration(at(1));
+        arrivals.iteration(at(100));
+        assert_eq!(arrivals.audio(at(100)), None, "100 ms is within bounds");
+        for ms in 101..=400 {
+            arrivals.iteration(at(ms));
+        }
+        assert_eq!(
+            arrivals.audio(at(400)).as_deref(),
+            Some(
+                "Radius audio arrival gap 300 ms; longest receive loop iteration 1 ms; nothing arrived"
+            )
+        );
+        arrivals.iteration(at(950));
+        assert_eq!(
+            arrivals.audio(at(950)).as_deref(),
+            Some(
+                "Radius audio arrival gap 550 ms; longest receive loop iteration 550 ms; the receive loop stalled"
+            )
+        );
+    }
 
     #[test]
     fn temporary_blackout_preserves_the_held_look_and_future_updates() {
