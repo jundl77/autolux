@@ -2181,15 +2181,20 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         ],
         className='dashboard',
     )
-    if fixture_store is not None:
-        layout = app.layout
+    layout = app.layout
 
-        def serve_layout():
+    def serve_layout():
+        # The first poll filling these would push the controls below them down under a
+        # pointer already aimed at them: a click in that first moment hit the master fader.
+        snap, now = _with_base_palette(snapshot_source.snapshot()), time.time()
+        layout['show-status'].children = _build_show_status(snap, now)
+        layout['telemetry-alerts'].children = system_metrics.build_telemetry_notices(snap, now=now)
+        if fixture_store is not None:
             # A browser reload after Save must open the saved patch, not the one loaded at start.
             layout['fixture-draft'].data, layout['fixture-revision'].data = fixture_store.load()
-            return layout
+        return layout
 
-        app.layout = serve_layout
+    app.layout = serve_layout
 
     app.clientside_callback(
         '''function(selected) {
