@@ -90,6 +90,8 @@ def add_subparser(subparsers) -> None:
     ui.add_argument('--port', type=int, default=DEFAULT_DASHBOARD_PORT)
     ui.add_argument('--rig-store', type=Path, default=DEFAULT_FIXTURE_STORE)
     ui.add_argument('--library', type=Path, default=FIXTURE_LIBRARY)
+    ui.add_argument('--autoloops', type=Path, default=DEFAULT_AUTOLOOPS)
+    ui.add_argument('--expected-universe', type=int, help="The show's one DMX universe")
     ui.add_argument('--snapshot-port', type=int, help='Read the running controller snapshot')
     ui.set_defaults(func=run_ui)
 
@@ -207,6 +209,18 @@ def _validate_patch(binary: Path, patch: Path) -> bytes:
     return definition
 
 
+def patch_validator(binary: Path, autoloops: Path, expected_universe: int | None = None):
+    """Save runs the show's start check too, so a patch the show would refuse fails at Save."""
+    from cli.starfire_runtime import validate_starfire
+
+    def validate(patch: Path) -> bytes:
+        definition = _validate_patch(binary, patch)
+        validate_starfire(binary, patch, autoloops, expected_universe=expected_universe)
+        return definition
+
+    return validate
+
+
 def run_import(args: argparse.Namespace) -> None:
     from autolux.lighting.gdtf import import_fixture
 
@@ -244,9 +258,8 @@ def run_ui(args: argparse.Namespace) -> None:
     _validate_patch(binary, patch)
     # Only the default store mirrors to the tracked rig; another --rig-store is not the room.
     repo_rig = DEFAULT_RIG if patch == DEFAULT_FIXTURE_STORE else None
-    store = FixtureStore(
-        patch, library, lambda candidate: _validate_patch(binary, candidate), repo_rig
-    )
+    validate = patch_validator(binary, args.autoloops.resolve(), args.expected_universe)
+    store = FixtureStore(patch, library, validate, repo_rig)
     source = EventBuffer()
     if args.snapshot_port is not None:
         from autolux.simulate.visualizer_app import SnapshotPoller

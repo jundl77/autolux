@@ -415,8 +415,13 @@ def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:
             '--rig-store',
             str(fixture_setup['rig_store']),
         ]
-        if fixture_setup.get('library') is not None:
-            command.extend(['--library', str(fixture_setup['library'])])
+        for flag, key in (
+            ('--library', 'library'),
+            ('--autoloops', 'autoloops'),
+            ('--expected-universe', 'expected_universe'),
+        ):
+            if fixture_setup.get(key) is not None:
+                command.extend([flag, str(fixture_setup[key])])
     return command + ['--port', str(ui_port), '--snapshot-port', str(snapshot_port(ui_port))]
 
 

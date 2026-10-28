@@ -69,9 +69,12 @@ def selected_rig(path=None, library=None):
     return Path(path) if path else saved_rig(Path(library or FIXTURE_LIBRARY))
 
 
-def fixture_setup(args, rig):
+def fixture_setup(args, rig, expected_universe=None):
     return {
         'binary': Path(args.starfire_binary).resolve(),
+        # Save runs the start check with these, so it refuses what this show would refuse.
+        'autoloops': Path(args.autoloops).resolve(),
+        'expected_universe': expected_universe,
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
         'library': Path(args.library).resolve(),
         # Hashed before the renderer reads the rig: a later edit can only show as stale.

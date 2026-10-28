@@ -24,7 +24,9 @@ def test_the_session_reports_the_revision_of_the_rig_it_loads():
     import argparse
     import hashlib
 
-    args = argparse.Namespace(starfire_binary='starfire.exe', rig=None, library='rig/library')
+    args = argparse.Namespace(
+        starfire_binary='starfire.exe', rig=None, library='rig/library', autoloops='show/autoloops'
+    )
     revision = starfire_runtime.fixture_setup(args, ROOM)['rig_revision']
     assert revision == hashlib.sha256(ROOM.read_bytes()).hexdigest()
 

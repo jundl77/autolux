@@ -217,3 +217,29 @@ def test_dashboard_http_readiness_and_bounded_shutdown(tmp_path, shutdown):
             kill_tree(process)
         source.stop()
     assert process.poll() is not None
+
+
+def test_save_refuses_a_patch_the_show_start_would_refuse(tmp_path):
+    from autolux.lighting import mvr
+    from autolux.lighting.fixture_setup import FixtureStore
+
+    binary = starfire.ROOT / 'target/debug' / ('starfire.exe' if os.name == 'nt' else 'starfire')
+    if not binary.is_file():
+        pytest.skip('Build Starfire to exercise the Save start check')
+    rig = tmp_path / 'rig.mvr'
+    rig.write_bytes((starfire.ROOT / 'autolux/tests/data/room.mvr').read_bytes())
+    validate = starfire.patch_validator(binary, starfire.DEFAULT_AUTOLOOPS, expected_universe=0)
+    store = FixtureStore(rig, starfire.FIXTURE_LIBRARY, validate)
+    draft, revision = store.load()
+    # What the raw inspector's set-address writes for universe 2, address 89.
+    wash = next(
+        node
+        for node in mvr._nodes(draft['scene'])
+        if node['tag'] == 'Fixture' and node['attributes'].get('name') == 'wash_right'
+    )
+    addresses = next(child for child in wash['children'] if child['tag'] == 'Addresses')
+    addresses['children'][0]['text'] = str(512 + 89)
+    before = rig.read_bytes()
+    with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\]'):
+        store.save(draft, revision)
+    assert rig.read_bytes() == before

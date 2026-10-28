@@ -279,3 +279,19 @@ def test_an_unknown_fixture_never_reaches_the_show():
         server.stop()
     assert commands.get_nowait()['target'] == {'fixture': 'par'}
     assert commands.empty()
+
+
+def test_the_config_viewer_gets_the_show_start_check_inputs_for_save():
+    from autolux.lib.ui_bridge import viewer_command
+
+    setup = {
+        'binary': 'starfire.exe',
+        'rig_store': 'rig.mvr',
+        'library': 'lib',
+        'autoloops': 'loops',
+        'expected_universe': 0,
+    }
+    command = viewer_command(8765, setup)
+    assert command[command.index('--autoloops') + 1] == 'loops'
+    assert command[command.index('--expected-universe') + 1] == '0'
+    assert '--expected-universe' not in viewer_command(8765, {**setup, 'expected_universe': None})
