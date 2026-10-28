@@ -133,11 +133,15 @@
         staticFxClear: () => ({action: 'static', kind: 'special_fx_clear'}),
     };
 
+    // A host that drops packets silently would otherwise hang the fader's one request in flight.
+    const POST_TIMEOUT_MS = 3000;
+
     function post(url, command) {
         return fetch(url, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(command),
+            signal: AbortSignal.timeout(POST_TIMEOUT_MS),
         });
     }
 
@@ -170,9 +174,24 @@
         }
     }
 
-    function report(reply, statusId, heldKeys) {
+    // A refused command drops only what it held: the fields of a settings hold that other
+    // clicks still hold stay held.
+    function release(held) {
+        Object.entries(held || {}).forEach(([key, value]) => {
+            const kept = holds[key] && holds[key].value;
+            if (isDict(value) && isDict(kept)) {
+                Object.keys(value).forEach((field) => delete kept[field]);
+                if (Object.keys(kept).length) {
+                    return;
+                }
+            }
+            delete holds[key];
+        });
+    }
+
+    function report(reply, statusId, held) {
         if (reply && reply.error) {
-            (heldKeys || []).forEach((key) => delete holds[key]);
+            release(held);
             setStatus(statusId, 'Rejected: ' + reply.error);
         } else {
             setStatus(statusId, '');
@@ -180,10 +199,11 @@
         return reply;
     }
 
-    function dispatch(command, statusId, heldKeys) {
+    // held: what the caller passed to hold() for this command, released if it fails.
+    function dispatch(command, statusId, held) {
         return send(command).then(
-            (reply) => report(reply, statusId, heldKeys),
-            () => report({error: 'the show is not answering'}, statusId, heldKeys)
+            (reply) => report(reply, statusId, held),
+            () => report({error: 'the show is not answering'}, statusId, held)
         );
     }
 
@@ -214,6 +234,7 @@
             const live = holds[key] && at - holds[key].at < HOLD_MS ? holds[key].value : undefined;
             holds[key] = {value: merged(live, value), at: at};
         });
+        return values;
     }
 
     // A held value wins over every poll for HOLD_MS, so an echo of an older click arriving

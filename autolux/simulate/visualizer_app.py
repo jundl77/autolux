@@ -729,8 +729,8 @@ GROUP_MASTER_JS = '''function(level, state) {
     const current = group in masters ? masters[group] : 1.0;
     if (settings && Math.abs(level - current) >= 0.005) {
         const changes = {group_masters: {...masters, [group]: level}};
-        control.hold({settings: changes});
-        control.dispatch(control.build.settings(changes), 'control-status', ['settings']);
+        const held = control.hold({settings: changes});
+        control.dispatch(control.build.settings(changes), 'control-status', held);
     }
     return Math.round(level * 100) + '%';
 }'''
@@ -823,11 +823,10 @@ SETTINGS_FORM_JS = (
             const shown = state.settings;
             if (triggered.includes('control-' + name) && shown
                     && typed !== (state.settings_text || {})[name] && value !== shown[name]) {
-                window.autoluxControl.hold(
+                const held = window.autoluxControl.hold(
                     {settings: {[name]: value}, settings_text: {[name]: typed}});
                 window.autoluxControl.dispatch(
-                    window.autoluxControl.build.settings({[name]: value}), 'control-status',
-                    ['settings', 'settings_text']);
+                    window.autoluxControl.build.settings({[name]: value}), 'control-status', held);
             }
             return '';
         });
@@ -1243,8 +1242,8 @@ AUTO_CONTROLS_JS = (
             const status = 'control-status';
             if (triggered.includes('control-toggle.n_clicks')) {
                 const paused = !!shown.paused;
-                control.hold({paused: !paused});
-                control.dispatch(control.build.toggle(paused), status, ['paused']);
+                control.dispatch(
+                    control.build.toggle(paused), status, control.hold({paused: !paused}));
                 return paused
                     ? ['\u23f8\ufe0e', 'icon-button playing']
                     : ['\u25b6\ufe0e', 'icon-button paused'];
@@ -1267,22 +1266,22 @@ AUTO_CONTROLS_JS = (
                 ? control.takePress(action) : undefined;
             const fxAuto = take('fx_auto', 'control-fx-auto.n_clicks', 'control-fx-off.n_clicks');
             if (fxAuto !== undefined) {
-                control.hold({settings: {fx_auto: fxAuto}});
+                const held = control.hold({settings: {fx_auto: fxAuto}});
                 control.paintFx(fxAuto);
-                control.dispatch(control.build.fxAuto(fxAuto), status, ['settings']);
+                control.dispatch(control.build.fxAuto(fxAuto), status, held);
             }
             const follow = take('intensity_auto', 'control-intensity-auto.n_clicks');
             if (follow !== undefined) {
-                control.hold({settings: {intensity_auto: follow}});
+                const held = control.hold({settings: {intensity_auto: follow}});
                 control.paintFollow(follow);
-                control.dispatch(control.build.intensityAuto(follow), status, ['settings']);
+                control.dispatch(control.build.intensityAuto(follow), status, held);
             }
             const level = take('intensity', 'control-intensity.value');
             if (level !== undefined) {
                 // A level picked by hand takes the show off follow-the-music.
-                control.hold({settings: {intensity: level, intensity_auto: false}});
+                const held = control.hold({settings: {intensity: level, intensity_auto: false}});
                 control.paintFollow(false);
-                control.dispatch(control.build.intensity(level), status, ['settings']);
+                control.dispatch(control.build.intensity(level), status, held);
             }
             return [nu, nu];
         }"""
@@ -1336,8 +1335,7 @@ def _register_static_controls(app) -> None:
             const before = classes[presets.indexOf(chip)] || '';
             const command = control.build.static(chip, target);
             if (command.kind === 'clear') {
-                control.hold({mode: 'auto'});
-                control.dispatch(command, 'static-status', ['mode']);
+                control.dispatch(command, 'static-status', control.hold({mode: 'auto'}));
                 return presets.map(() => '');
             }
             control.dispatch(command, 'static-status').then((reply) => {
@@ -1391,14 +1389,14 @@ FX_PICK_JS = """function(row, clears, target, state) {
     const triggered = (window.dash_clientside.callback_context.triggered || [])
         .map((t) => t.prop_id);
     if (triggered.includes('static-fx-clear.n_clicks')) {
-        control.hold({static: {...statics, special_fx: null}});
-        control.dispatch(control.build.staticFxClear(), 'static-status', ['static']);
+        const held = control.hold({static: {...statics, special_fx: null}});
+        control.dispatch(control.build.staticFxClear(), 'static-status', held);
         return null;
     }
     const command = control.build.staticFx(row, target, shown);
     if (command) {
-        control.hold({static: {...statics, special_fx: {name: row, group: target}}});
-        control.dispatch(command, 'static-status', ['static']);
+        const held = control.hold({static: {...statics, special_fx: {name: row, group: target}}});
+        control.dispatch(command, 'static-status', held);
     }
     return window.dash_clientside.no_update;
 }"""

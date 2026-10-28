@@ -567,8 +567,8 @@ const answers = [
 globalThis.fetch = async (url) => { urls.push(url); return answers.shift(); };
 (async () => {
     control.operatorActs();
-    control.hold({paused: true});
-    const refused = await control.dispatch(control.build.toggle(false), null, ['paused']);
+    const refused = await control.dispatch(
+        control.build.toggle(false), null, control.hold({paused: true}));
     const stalled = await control.dispatch(control.build.next(), null);
     console.log(JSON.stringify({refused, stalled, urls, shown: control.view({paused: false})}));
 })();
@@ -579,6 +579,37 @@ globalThis.fetch = async (url) => { urls.push(url); return answers.shift(); };
         'stalled': {'error': 'the show answered 504'},
         'urls': ['http://autolux.local:8766/control'] * 2,
         'shown': {'paused': False},
+    }
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_an_unreachable_bridge_says_so_and_drops_only_the_failed_commands_hold():
+    result = _run_control_js(
+        """
+window.autoluxControlConfig = {bridgePort: 8766};
+globalThis.location = {protocol: 'http:', hostname: 'autolux.local'};
+const status = [];
+window.dash_clientside = {set_props: (id, props) => status.push([id, props.children])};
+const signals = [];
+globalThis.fetch = async (url, options) => {
+    signals.push(options.signal instanceof AbortSignal && !options.signal.aborted);
+    throw new TypeError('Failed to fetch');
+};
+(async () => {
+    control.operatorActs();
+    control.hold({settings: {fx_auto: false}});
+    await control.dispatch(control.build.intensity(0.3), 'control-status',
+        control.hold({settings: {intensity: 0.3}}));
+    console.log(JSON.stringify({status, signals, shown: control.view({settings: {}})}));
+})();
+"""
+    )
+    assert result == {
+        'status': [['control-status', 'Rejected: the show is not answering']],
+        # Every request carries a timeout, so a host that drops packets cannot hang it.
+        'signals': [True],
+        # The FX click's hold outlives the failed level.
+        'shown': {'settings': {'fx_auto': False}},
     }
 
 
