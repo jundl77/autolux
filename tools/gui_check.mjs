@@ -1562,6 +1562,95 @@ const SUITES = {
         await check('pane', 'no bridge command from the pane edits', (await since()).length === 0, {seen: await since()});
     },
 
+    cfg_plan_nav: async () => {
+        await cfgFresh();
+        const plan = `document.querySelector('#mvr-plan svg.plan')`;
+        const view = () => ev(`(() => { const b = ${plan}.viewBox.baseVal; return [b.x, b.y, b.width, b.height]; })()`);
+        const fitted = () => ev(`${plan}.dataset.fit.split(' ').map(Number)`);
+        const labelPx = () => ev(`(() => { const t = document.querySelector('#mvr-plan .plan-name'); return t.getBBox().height * ${plan}.getScreenCTM().d; })()`);
+        const near = (a, b, tolerance = 1.5) => Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
+        // A screen point on plan background, clear of every mark.
+        const empty = () => ev(`(() => { const r = ${plan}.getBoundingClientRect();
+            for (let fy = 0.1; fy < 1; fy += 0.1) for (let fx = 0.1; fx < 1; fx += 0.1) {
+                const [x, y] = [r.x + r.width * fx, r.y + r.height * fy];
+                const hit = document.elementFromPoint(x, y);
+                if (hit?.closest('svg.plan') && !hit.closest('.mvr-object')) return {x, y};
+            } })()`);
+        const wheel = (x, y, deltaY) => cdp('Input.dispatchMouseEvent', {type: 'mouseWheel', x, y, deltaX: 0, deltaY});
+        const fit = await fitted();
+        await check('plan nav', 'the plan opens fitted to the rig', same(await view(), fit), {view: await view(), fit});
+        const label0 = await labelPx();
+
+        let m = await planMark('spot_left');
+        await wheel(m.x, m.y, -300);
+        await sleep(200);
+        const zoomed = await view();
+        let after = await planMark('spot_left');
+        await check('plan nav', 'wheel up zooms in', zoomed[2] < fit[2] * 0.6, {zoomed, fit});
+        await check('plan nav', 'the point under the cursor stays put', near(after, m), {before: m, after});
+        const label1 = await labelPx();
+        await check('plan nav', 'labels keep their on-screen size', Math.abs(label1 / label0 - 1) <= 0.1, {label0, label1});
+        await wheel(m.x, m.y, 5000);
+        await sleep(200);
+        await check('plan nav', 'zoom out stops at half the fit', Math.abs((await view())[2] - fit[2] * 2) < 1, {view: await view()});
+        await wheel(m.x, m.y, -700);
+        await sleep(200);
+
+        // Pan from plan background.
+        m = await planMark('spot_left');
+        const p = await empty();
+        await arm();
+        await pressAndMove(p.x, p.y, p.x + 80, p.y + 40);
+        await release(p.x + 80, p.y + 40);
+        await sleep(300);
+        after = await planMark('spot_left');
+        await check('plan nav', 'a drag on empty space pans the plan', near(after, {x: m.x + 80, y: m.y + 40}), {before: m, after});
+        await check('plan nav', 'a pan sends no draft action', (await takeActions()).length === 0);
+        const panned = await view();
+        await sleep(1500);
+        await check('plan nav', 'polls keep the view', same(await view(), panned), {panned, now: await view()});
+        await check('plan nav', 'selecting keeps the view', await selectFixture('spot_left') && same(await view(), panned), {panned, now: await view()});
+
+        // The same 300 mm drag cfg_drag makes at fit lands on the same mm when zoomed.
+        m = await planMark('spot_left');
+        await pressAndMove(m.x, m.y, m.x + 300 * m.a, m.y);
+        await release(m.x + 300 * m.a, m.y);
+        await waitFor('window.__actions.length > 0', 3000);
+        await sleep(600);
+        const moves = (await takeActions()).filter((a) => a.action === 'set-position');
+        await check('plan nav', 'a zoomed fixture drag commits X 0, Y 0 as at fit',
+            moves.length === 1 && moves[0].x_mm === 0 && moves[0].y_mm === 0, {moves, a: m.a});
+        await check('plan nav', 'the edit redraw keeps the view', same(await view(), panned), {panned, now: await view()});
+        await shot('plan_zoom', '#mvr-plan');
+
+        await click('#mvr-plan-fit');
+        await sleep(200);
+        await check('plan nav', 'Fit restores the fitted view', same(await view(), await fitted()), {view: await view()});
+        await wheel(m.x, m.y, -300);
+        await sleep(200);
+        const q = await empty();
+        await cdp('Input.dispatchMouseEvent', {type: 'mouseMoved', x: q.x, y: q.y});
+        for (const clickCount of [1, 2]) {
+            await mouse('mousePressed', q.x, q.y, {clickCount});
+            await mouse('mouseReleased', q.x, q.y, {clickCount});
+        }
+        await sleep(200);
+        await check('plan nav', 'a double-click on empty space fits', same(await view(), await fitted()), {view: await view()});
+
+        // Two touches spreading apart pinch-zoom in.
+        const touch = (type, spread) => cdp('Input.dispatchTouchEvent', {type, touchPoints: type === 'touchEnd' ? [] :
+            [{x: q.x - spread, y: q.y, id: 1}, {x: q.x + spread, y: q.y, id: 2}]});
+        await touch('touchStart', 20);
+        for (const spread of [30, 45, 60]) {
+            await touch('touchMove', spread);
+            await sleep(50);
+        }
+        await touch('touchEnd');
+        await sleep(200);
+        const pinched = await view();
+        await check('plan nav', 'a pinch zooms in about threefold', Math.abs(fit[2] / pinched[2] - 3) < 0.3, {pinched, fit});
+    },
+
     narrow: async () => {
         await fresh({width: 390});
         const views = [

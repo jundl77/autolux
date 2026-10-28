@@ -272,6 +272,32 @@ test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", ()
     assert.equal((markup.match(/class="ring"/g) || []).length, 6 * 17);
 });
 
+test("zooming keeps the point under the cursor, clamps to 0.5x..8x of the fit, and keeps marks their fitted size", () => {
+    const fit = { x: -1000, y: 0, w: 2000, h: 1000 };
+    const at = [500, 250];
+    const near = model.zoomPlan(fit, fit, at, at, 0.5);
+    assert.deepEqual(plain(near), { x: -250, y: 125, w: 1000, h: 500 });
+    // The cursor point sits at the same fraction of the view before and after.
+    assert.deepEqual([(at[0] - near.x) / near.w, (at[1] - near.y) / near.h], [(at[0] - fit.x) / fit.w, (at[1] - fit.y) / fit.h]);
+    assert.equal(model.zoomPlan(near, fit, at, at, 1e-3).w, fit.w / 8);
+    assert.equal(model.zoomPlan(near, fit, at, at, 1e3).w, fit.w * 2);
+    // A pan is a unit scale: the point that was at `at` moves to `anchor`.
+    assert.deepEqual(plain(model.zoomPlan(fit, fit, [0, 0], [100, 50], 1)), { x: -1100, y: -50, w: 2000, h: 1000 });
+
+    const plan = model.planMarks(draft(), settings);
+    const fitted = model.planSvg(plan, settings);
+    const [view, fitBox] = fitted.match(/viewBox="([^"]+)" data-fit="([^"]+)"/).slice(1);
+    assert.equal(view, fitBox);
+    const [x, y, w, h] = fitBox.split(" ").map(Number);
+    const zoomed = model.planSvg(plan, settings, model.zoomPlan({ x, y, w, h }, { x, y, w, h }, [0, 1000], [0, 1000], 0.2));
+    const size = (markup, pattern) => Number(markup.slice(markup.indexOf("<svg class=\"plan\"")).match(pattern)[1]);
+    for (const pattern of [/<circle cx="[^"]+" cy="[^"]+" r="([^"]+)"/, /font-size="([^"]+)"/]) {
+        assert.ok(Math.abs(size(zoomed, pattern) - size(fitted, pattern) / 5) < 0.1, String(pattern));
+    }
+    assert.match(zoomed, />0.05 m<\/text>/);
+    assert.match(zoomed, new RegExp(`data-fit="${fitBox}"`));
+});
+
 const matrixOf = (tree, name) => model.parseMatrix(child(fixtureNode(tree, name), "Matrix")?.text ?? "");
 const layerOf = (tree, name) => model.placedObjects(tree, settings).find((entry) => entry.node.attributes.name === name).layer;
 // 10 mm per screen pixel, SVG origin at pixel (50, 50): a plain inverse screen CTM.
@@ -288,7 +314,7 @@ test("a plan drag maps screen to world to the rotated parent's frame in whole mm
     const rotated = yawedLayer();
     const spot = fixtureNode(rotated, "spot_left");
     const before = model.planMarks(rotated, settings).fixtures.find((mark) => mark.key === spot.key);
-    const drag = model.startPlanDrag(rotated, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(rotated, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     // +30 px right, -20 px up the screen: world +300 mm X and, SVG y being -Y, +200 mm Y.
     const move = model.planMove(drag, 130.04, 80);
     // The layer is yawed 90°: world +X is the layer's -Y and world +Y its +X.
@@ -297,17 +323,16 @@ test("a plan drag maps screen to world to the rotated parent's frame in whole mm
     const [moved] = edit(rotated, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     const after = model.planMarks(moved, settings).fixtures.find((mark) => mark.key === spot.key);
     assert.deepEqual([Math.round(after.x - before.x), Math.round(after.y - before.y)], [300, 200]);
-    assert.equal(model.startPlanDrag(rotated, settings, rotated.scene.key, INVERSE, 0, 0, ""), null);
+    assert.equal(model.startPlanDrag(rotated, settings, rotated.scene.key, INVERSE, 0, 0, null), null);
 });
 
 test("the plan keeps its frozen viewBox while a drag previews the mark and the area grid", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_left");
-    const frozen = "-1200 -400 2400 2900";
-    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 0, 0, frozen);
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 0, 0, { x: -1200, y: -400, w: 2400, h: 2900 });
     // Far outside the rig: a live layout would grow the view, the frozen one must not.
     const { markup } = model.planMove(drag, 900, 0);
-    assert.match(markup, new RegExp(`viewBox="${frozen}"`));
+    assert.match(markup, /viewBox="-1200 -400 2400 2900"/);
     const x = model.placedObjects(current, settings).find((entry) => entry.node === spot).matrix[9] + 9000;
     assert.match(markup, new RegExp(`<circle cx="${x}" `));
     assert.match(markup, new RegExp(`class="plan-areas"[^]*?<rect x="-900" y="0" width="${x + 900}"`));
@@ -317,7 +342,7 @@ test("a fixture with no Matrix drags from the identity", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_left");
     spot.children.splice(spot.children.indexOf(child(spot, "Matrix")), 1);
-    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     const move = model.planMove(drag, 110, 100);
     const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     assert.equal(child(fixtureNode(moved, "spot_left"), "Matrix").text, `{1,0,0}{0,1,0}{0,0,1}{${move.x_mm},${move.y_mm},0}`);
@@ -343,13 +368,13 @@ test("a pitched parent's plan drag is exact and an on-edge parent refuses it", (
     const pitched = tilt(30);
     const spot = fixtureNode(pitched, "spot_left");
     const before = model.planMarks(pitched, settings).fixtures.find((mark) => mark.key === spot.key);
-    const drag = model.startPlanDrag(pitched, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(pitched, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     // 20 px up the screen is world +200 mm Y, which the 30° pitch shortens to cos 30° per local mm.
     const move = model.planMove(drag, 100, 80);
     const [moved] = edit(pitched, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     const after = model.planMarks(moved, settings).fixtures.find((mark) => mark.key === spot.key);
     assert.deepEqual([Math.round(after.x - before.x), Math.round(after.y - before.y)], [0, 200]);
-    assert.equal(model.startPlanDrag(tilt(90), settings, spot.key, INVERSE, 100, 100, "0 0 10 10"), null);
+    assert.equal(model.startPlanDrag(tilt(90), settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 }), null);
 });
 
 test("the patch form validates each field and maps it to one draft action", () => {
@@ -743,7 +768,7 @@ test("a plan drag writes the Matrix the server's area and group-order test reads
     const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "data/plan_drag.json"), "utf8"));
     const current = draft();
     const spot = fixtureNode(current, fixture.fixture);
-    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, { x: 0, y: 0, w: 10, h: 10 });
     const move = model.planMove(drag, 100 + fixture.right_px, 100);
     const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
     assert.equal(child(fixtureNode(moved, fixture.fixture), "Matrix").text, fixture.matrix);

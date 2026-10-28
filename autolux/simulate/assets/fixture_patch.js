@@ -10,6 +10,7 @@
     const MAX_UNIVERSES = 32768;
     const PLAN_MIN_SPAN_MM = 2000;
     const PLAN_LABEL_LIMIT = 48;
+    const PLAN_ZOOM = [0.5, 8];
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
@@ -25,6 +26,9 @@
     const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
     let planDrag = null;
+    // The plan's view as an SVG user-space box; null follows the rig's fit.
+    let planView = null;
+    let planNav = null;
     // What the DOM handlers act on: the draft and selection last drawn, the show last polled.
     let rig = null;
     let show = null;
@@ -972,6 +976,7 @@
         placedObjects,
         planMarks,
         planSvg,
+        zoomPlan,
         startPlanDrag,
         planMove,
         invert,
@@ -1049,11 +1054,12 @@
 
     const escapeXml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-    // The largest 1, 2 or 5 × 10^k metres within a fifth of the plan.
+    // The largest 1, 2 or 5 × 10^k metres within a fifth of the plan; the tolerance absorbs
+    // float products such as 5 × 0.01 > 0.05.
     function scaleMetres(spanMm) {
         const target = spanMm / 5000;
         const power = 10 ** Math.floor(Math.log10(target));
-        return [5, 2, 1].map((unit) => unit * power).find((value) => value <= target);
+        return [5, 2, 1].map((unit) => unit * power).find((value) => value <= target * (1 + 1e-9));
     }
 
     // Draws the nine-area stage grid (equal thirds of the fixtures' bounding box) and its area
@@ -1089,36 +1095,51 @@
         ].join("");
     }
 
-    function planSvg({ fixtures, others }, settings, viewBox) {
+    // The view scaled by `scale` (zoom clamped to PLAN_ZOOM of the fit) that shows SVG point
+    // `anchor` where `box` shows `at`: wheel zoom, pan and pinch are all this one move.
+    function zoomPlan(box, fit, anchor, at, scale) {
+        const w = Math.min(fit.w / PLAN_ZOOM[0], Math.max(fit.w / PLAN_ZOOM[1], box.w * scale));
+        const s = w / box.w;
+        return { x: anchor[0] - (at[0] - box.x) * s, y: anchor[1] - (at[1] - box.y) * s, w, h: box.h * s };
+    }
+
+    function planSvg({ fixtures, others }, settings, view) {
         const all = [...fixtures, ...others];
         const xs = all.length ? all.map((mark) => mark.x) : [0];
         const ys = all.length ? all.map((mark) => -mark.y) : [0];
         const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
         const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, maxY - minY);
         // Marks shrink as the plan fills; names show while they fit, else on hover or tap.
-        const r = span * 0.018 * Math.min(1, Math.sqrt(PLAN_LABEL_LIMIT / Math.max(1, fixtures.length)));
+        const fitR = span * 0.018 * Math.min(1, Math.sqrt(PLAN_LABEL_LIMIT / Math.max(1, fixtures.length)));
         const labelled = fixtures.length <= PLAN_LABEL_LIMIT;
-        const n = Math.round;
-        const font = n(Math.max(r * 1.3, span * 0.014));
+        const fitFont = Math.round(Math.max(fitR * 1.3, span * 0.014));
         // The longest label sets how much edge room the plan needs, so none is ever clipped.
+        const maxLabel = labelled ? Math.max(0, ...fixtures.map((mark) => mark.name.length * fitFont * 0.58)) : 0;
+        const fitPad = span * 0.12;
+        const padX = Math.max(fitPad, fitR * 1.4 + maxLabel + fitPad * 0.3);
+        const padTop = Math.max(fitPad, fitFont * 1.4);
+        const fit = { x: minX - padX, y: minY - padTop, w: maxX - minX + 2 * padX, h: maxY - minY + padTop + 2 * fitPad };
+        const box = view || fit;
+        // Sizes divide by the zoom so marks and text keep their fitted on-screen size, and
+        // coordinates gain decimals as the zoom makes a millimetre visible.
+        const zoom = fit.w / box.w;
+        const q = 10 ** Math.max(0, Math.ceil(Math.log10(zoom)));
+        const n = (value) => Math.round(value * q) / q;
+        const [r, font, pad] = [fitR / zoom, n(fitFont / zoom), fitPad / zoom];
         const charWidth = font * 0.58;
-        const maxLabel = labelled ? Math.max(0, ...fixtures.map((mark) => mark.name.length * charWidth)) : 0;
-        const pad = span * 0.12;
-        const padX = Math.max(pad, r * 1.4 + maxLabel + pad * 0.3);
-        const padTop = Math.max(pad, font * 1.4);
-        const [left, top, width, height] = [minX - padX, minY - padTop, maxX - minX + 2 * padX, maxY - minY + padTop + 2 * pad];
+        const rect = ({ x, y, w, h }, round = n) => [x, y, w, h].map(round).join(" ");
         const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
         const colour = Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
         const counts = fixtures.reduce((total, mark) => ({ ...total, [mark.group]: (total[mark.group] || 0) + 1 }), {});
         const edge = n(maxY + r * 2);
-        const metres = scaleMetres(span);
-        const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
+        const metres = scaleMetres(span / zoom);
+        const [barX, barY] = [n(box.x + box.w - pad * 0.3 - metres * 1000), n(box.y + box.h - pad * 0.4)];
         const parts = [
-            `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox || `${n(left)} ${n(top)} ${n(width)} ${n(height)}`}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}" style="--r:${n(r)}">`,
+            `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${rect(box)}" data-fit="${rect(fit, Math.round)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}" style="--r:${n(r)}">`,
             areaGrid(fixtures, n, r, font),
             // MVR has no stage edge; the plan draws it at the most downstage object.
-            `<line class="plan-stage-edge" x1="${n(left)}" y1="${edge}" x2="${n(left + width)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
-            `<text x="${n(left + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,
+            `<line class="plan-stage-edge" x1="${n(box.x)}" y1="${edge}" x2="${n(box.x + box.w)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
+            `<text x="${n(box.x + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,
             `<g class="plan-scale"><line x1="${barX}" y1="${barY}" x2="${n(barX + metres * 1000)}" y2="${barY}" stroke-width="${n(r * 0.3)}"/><text x="${barX}" y="${n(barY - font * 0.5)}">${metres} m</text></g>`,
             `<g stroke-width="${n(r * 0.25)}">`
         ];
@@ -1134,7 +1155,7 @@
                 ? `<circle cx="${x}" cy="${y}" r="${n(r * 1.4)}" fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.3)}" stroke-dasharray="${n(r * 0.5)} ${n(r * 0.4)}"/>`
                 : "";
             // Near the right edge, a label would overflow it; anchor the text to the left of the mark instead.
-            const flip = labelled && x + r * 1.4 + mark.name.length * charWidth > left + width;
+            const flip = labelled && x + r * 1.4 + mark.name.length * charWidth > box.x + box.w;
             const label = labelled
                 ? `<text class="plan-name" x="${n(flip ? x - r * 1.4 : x + r * 1.4)}" y="${n(y + r * 0.4)}"${flip ? ' text-anchor="end"' : ""} stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>`
                 : "";
@@ -1162,20 +1183,30 @@
     }
 
     function drawPlan(container, draft, settings) {
-        container.innerHTML = planSvg(planMarks(draft, settings), settings);
+        container.innerHTML = planSvg(planMarks(draft, settings), settings, planView);
     }
 
-    function startPlanDrag(draft, settings, key, inverse, clientX, clientY, viewBox) {
+    function showPlan(view) {
+        planView = view;
+        const plan = document.getElementById("mvr-plan");
+        if (!plan || !rig) return;
+        drawn.delete(plan);
+        redraw(plan, drawPlan);
+    }
+
+    function startPlanDrag(draft, settings, key, inverse, clientX, clientY, view) {
         const placed = placedObjects(draft, settings).find((entry) => entry.node.key === key && entry.node.tag === "Fixture");
         const original = placed && textOf(placed.node, "Matrix");
         const local = placed && parseMatrix(original);
         // A parent rolled or pitched on edge has no plan direction to move along.
         if (!local || Math.abs(placed.parent[0] * placed.parent[4] - placed.parent[1] * placed.parent[3]) < GIMBAL_TOLERANCE) return null;
-        return { key, original, local, parent: placed.parent, inverse, clientX, clientY, viewBox, marks: planMarks(draft, settings), settings, moved: false };
+        return { key, original, local, parent: placed.parent, inverse, clientX, clientY, view, marks: planMarks(draft, settings), settings, moved: false };
     }
 
     // Screen → plan SVG through the inverse screen CTM; the plan's SVG y is MVR −Y.
-    const toWorld = (inverse, x, y) => [inverse.a * x + inverse.c * y + inverse.e, -(inverse.b * x + inverse.d * y + inverse.f)];
+    const toSvg = (inverse, x, y) => [inverse.a * x + inverse.c * y + inverse.e, inverse.b * x + inverse.d * y + inverse.f];
+    const toWorld = (inverse, x, y) => toSvg(inverse, x, y).map((value, axis) => (axis ? -value : value));
+    const svgBox = (svg) => ({ x: svg.viewBox.baseVal.x, y: svg.viewBox.baseVal.y, w: svg.viewBox.baseVal.width, h: svg.viewBox.baseVal.height });
 
     // The pointer's world move solved in the parent's X/Y axes (exact under any tilt), whole mm;
     // Z and the fixture's own rotation stay. The preview keeps the plan's
@@ -1190,7 +1221,7 @@
         local[10] = Math.round(local[10] + (ux * (y1 - y0) - uy * (x1 - x0)) / det) + 0;
         const [x, y] = multiply(drag.parent, local).slice(9, 11);
         const fixtures = drag.marks.fixtures.map((mark) => (mark.key === drag.key ? { ...mark, x, y } : mark));
-        return { x_mm: local[9], y_mm: local[10], markup: planSvg({ ...drag.marks, fixtures }, drag.settings, drag.viewBox) };
+        return { x_mm: local[9], y_mm: local[10], markup: planSvg({ ...drag.marks, fixtures }, drag.settings, drag.view) };
     }
 
     function endPlanDrag() {
@@ -1608,13 +1639,86 @@
 
     document.addEventListener("pointerdown", (event) => {
         const mark = event.target.closest?.("#mvr-plan .mvr-object");
-        if (!mark || !rig || event.button !== 0 || !event.isPrimary || mark.closest('[aria-busy="true"]')) return;
+        if (!mark || !rig || planNav || event.button !== 0 || !event.isPrimary || mark.closest('[aria-busy="true"]')) return;
         endPlanDrag();
         suppressedClick = null;
         const svg = mark.ownerSVGElement;
-        planDrag = startPlanDrag(rig.draft, rig.settings, mark.dataset.nodeKey, svg.getScreenCTM().inverse(), event.clientX, event.clientY, svg.getAttribute("viewBox"));
+        planDrag = startPlanDrag(rig.draft, rig.settings, mark.dataset.nodeKey, svg.getScreenCTM().inverse(), event.clientX, event.clientY, svgBox(svg));
         if (planDrag) Object.assign(planDrag, { container: svg.parentElement, pointerId: event.pointerId });
     });
+
+    // Empty plan space pans under one pointer and pinch-zooms under two; a second finger joins
+    // even on a mark. Each gesture maps from the view and screen CTM it started with, so a
+    // preview frame not yet drawn never skews it.
+    const planAt = (target) => target.closest?.("#mvr-plan svg.plan");
+    const svgFit = (svg) => Object.fromEntries(svg.dataset.fit.split(" ").map((value, index) => ["xywh"[index], Number(value)]));
+    function navCentre(points) {
+        const [a, b] = [...points.values()];
+        return b ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.hypot(a[0] - b[0], a[1] - b[1])] : [...a, 0];
+    }
+
+    function navBaseline() {
+        if (planNav.frame) showPlan(planView);
+        cancelAnimationFrame(planNav.frame);
+        const svg = document.querySelector("#mvr-plan svg.plan");
+        Object.assign(planNav, { frame: null, box: svgBox(svg), fit: svgFit(svg), inverse: svg.getScreenCTM().inverse(), start: new Map(planNav.points) });
+    }
+
+    function navLift(pointerId) {
+        if (!planNav?.points.delete(pointerId)) return;
+        if (planNav.points.size) return navBaseline();
+        const { moved, frame } = planNav;
+        planNav = null;
+        cancelAnimationFrame(frame);
+        if (frame) showPlan(planView);
+        const plan = document.getElementById("mvr-plan");
+        if (!moved || !plan) return;
+        suppressedClick = plan;
+        setTimeout(() => suppressedClick === plan && (suppressedClick = null));
+    }
+
+    document.addEventListener("pointerdown", (event) => {
+        if (!planAt(event.target) || !rig || planDrag || (!planNav && (event.button !== 0 || event.target.closest(".mvr-object")))) return;
+        planNav ||= { points: new Map(), moved: false };
+        planNav.points.set(event.pointerId, [event.clientX, event.clientY]);
+        navBaseline();
+    });
+
+    document.addEventListener("pointermove", (event) => {
+        const nav = planNav;
+        if (!nav?.points.has(event.pointerId)) return;
+        nav.points.set(event.pointerId, [event.clientX, event.clientY]);
+        const [x0, y0, d0] = navCentre(nav.start);
+        const [x, y, d] = navCentre(nav.points);
+        if (!nav.moved && Math.max(Math.hypot(x - x0, y - y0), Math.abs(d - d0)) < DRAG_THRESHOLD_PX) return;
+        nav.moved = true;
+        const plan = document.getElementById("mvr-plan");
+        if (!plan.hasPointerCapture(event.pointerId)) plan.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        planView = zoomPlan(nav.box, nav.fit, toSvg(nav.inverse, x0, y0), toSvg(nav.inverse, x, y), d0 && d ? d0 / d : 1);
+        nav.frame ||= requestAnimationFrame(() => {
+            nav.frame = null;
+            showPlan(planView);
+        });
+    });
+
+    document.addEventListener("pointerup", (event) => navLift(event.pointerId));
+
+    document.addEventListener(
+        "wheel",
+        (event) => {
+            const svg = planAt(event.target);
+            if (!svg || planDrag || planNav) return;
+            event.preventDefault();
+            const at = toSvg(svg.getScreenCTM().inverse(), event.clientX, event.clientY);
+            // A line or page delta counts as 16 px, about one wheel notch.
+            showPlan(zoomPlan(svgBox(svg), svgFit(svg), at, at, Math.exp(event.deltaY * (event.deltaMode ? 16 : 1) * 0.002)));
+        },
+        { passive: false }
+    );
+
+    document.addEventListener("dblclick", (event) => planAt(event.target) && !event.target.closest(".mvr-object") && showPlan(null));
+    document.addEventListener("click", (event) => event.target.closest?.("#mvr-plan-fit") && showPlan(null));
 
     document.addEventListener("pointermove", (event) => {
         if (!planDrag || planDrag.pointerId !== event.pointerId) return;
@@ -1743,11 +1847,14 @@
         if (field && field.tagName !== "SELECT") fieldCheck(field, false);
     });
 
-    const cancelDrags = () => (finish(), endPlanDrag());
+    const cancelDrags = () => (finish(), endPlanDrag(), (planNav = null));
     document.addEventListener("pointercancel", cancelDrags);
     document.addEventListener("lostpointercapture", (event) => {
         if (drag?.pointerId === event.pointerId) finish();
+        // A touch's implicit capture on its first target is lost when the plan takes it over.
+        if (event.target.id !== "mvr-plan") return;
         if (planDrag?.pointerId === event.pointerId) endPlanDrag();
+        navLift(event.pointerId);
     });
     // Only a page that goes away ends a test: macOS reports a covered window as hidden, which
     // ended a test while the operator looked at another window.

@@ -74,7 +74,9 @@ FIXTURE_CSS = '''
 #mvr-plan svg.plan {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .mvr-object {cursor:pointer;}
 #mvr-plan .mvr-object:has(circle) {cursor:grab;}
-#mvr-plan svg.plan {touch-action:none;user-select:none;}
+#mvr-plan svg.plan {touch-action:none;user-select:none;cursor:grab;}
+.mvr-card #mvr-summary {margin-left:auto;}
+#config-panel #mvr-plan-fit {padding:4px 10px;}
 #mvr-plan .plan circle {stroke:#e6edf3;}
 #mvr-plan .plan circle.ring {stroke:var(--ring);}
 .plan-key .plan-role {fill:var(--muted);stroke:var(--muted);}
@@ -292,6 +294,7 @@ def build_fixture_panel(app, store):
                                 [
                                     html.H3('MVR rig'),
                                     html.Span(id='mvr-summary', className='patch-muted'),
+                                    html.Button('Fit', id='mvr-plan-fit', type='button'),
                                 ],
                                 className='patch-heading',
                             ),
