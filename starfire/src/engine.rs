@@ -1,7 +1,7 @@
 //! Stateful playback and property composition; no wall clock or hardware I/O.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use anyhow::{Context, Result, ensure};
@@ -37,6 +37,8 @@ pub const MAX_SCRIPT_ERROR_BYTES: usize = 1024;
 /// A stepped value (strobe, preset, wheel slot) an overlay sets takes over half-way up its
 /// envelope, as a wheel-only colour does in a crossfade.
 const OVERLAY_SNAP_LEVEL: f64 = 0.5;
+/// A dip's nominal end and the next cue's activation come from different clock arithmetic.
+const ONE_TOLERANCE_BEATS: f64 = 1e-6;
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
 /// Semantic properties precede software strobe gating; DMX contains the final output.
@@ -918,6 +920,11 @@ impl Engine {
             return Ok(());
         }
         let beat = time.elapsed_musical_beats;
+        let sample = self.cue_sample(seconds)?;
+        let one = self
+            .cues
+            .next_cue(&sample)
+            .map(|(_, at)| beat + (at - time.beat_position).max(0.0));
         let mut layers: Vec<OverlayLayer> = self
             .cues
             .instances()
@@ -933,12 +940,19 @@ impl Engine {
                     elapsed_beats: instance.elapsed_beats(beat)?,
                     level: overlay_level(instance, beat),
                     intensity_htp: self.catalog.intensity_htp(&overlay.bank, &overlay.autoloop),
+                    holds_to_one: match instance.state {
+                        InstanceState::Running(span) => {
+                            one.is_some_and(|one| span.ends + ONE_TOLERANCE_BEATS >= one)
+                        }
+                        _ => false,
+                    },
                 })
             })
             .collect();
         layers.sort_by_key(|layer| (layer.priority, layer.order));
         let frame = self.frame_context(seconds, time)?;
         let palette = self.palette.slots_at(beat);
+        let mut held_dark = BTreeSet::new();
         for layer in layers {
             if layer.level <= 0.0 {
                 continue;
@@ -965,7 +979,14 @@ impl Engine {
                     layer.level,
                     layer.intensity_htp,
                 );
+                if layer.holds_to_one && !layer.intensity_htp && values.intensity.is_some() {
+                    held_dark.insert(id);
+                }
             }
+        }
+        if let Err(error) = self.move_in_black(&frame, &sample, states, &held_dark) {
+            self.cues
+                .record_overlay_error(format!("move in black failed: {error:#}"));
         }
         Ok(())
     }
@@ -992,6 +1013,76 @@ impl Engine {
                 palette,
             )?;
         layer_values(&self.rig, &effects)
+    }
+
+    /// A6 move in black: a cell an overlay holds dark up to the next cue takes everything but
+    /// intensity and strobe from that cue's first base loop at its start, so heads, wheels and
+    /// gobos are in place on the one. A lit cell keeps its own, so a wheel only turns in the
+    /// dark.
+    fn move_in_black(
+        &self,
+        frame: &RenderContext,
+        sample: &CueSample,
+        states: &mut FixtureStates,
+        held_dark: &BTreeSet<String>,
+    ) -> Result<()> {
+        let dark: Vec<&String> = held_dark
+            .iter()
+            .filter(|id| states.get(*id).is_some_and(|state| state.intensity <= 0.0))
+            .collect();
+        if dark.is_empty() {
+            return Ok(());
+        }
+        let Some((cue, one)) = self.cues.next_cue(sample) else {
+            return Ok(());
+        };
+        let entry = &cue.rotation[0];
+        // Only a cut to another loop shows the entry's look on the one: a running loop plays
+        // on, and a crossfade starts from the look before.
+        let cuts_to_new_loop = self.resolve_transition(&entry.transition) == Transition::Cut
+            && !self
+                .active
+                .as_ref()
+                .is_some_and(|active| active.bank == entry.bank && active.name == entry.autoloop);
+        if !cuts_to_new_loop {
+            return Ok(());
+        }
+        let bar = f64::from(frame.beats_per_bar);
+        let effects = self
+            .scripts
+            .get(&entry.bank, &entry.autoloop)?
+            .borrow_mut()
+            .render(
+                &RenderContext {
+                    beat_position: one,
+                    bar_phase: one.rem_euclid(bar),
+                    bar_index: (one / bar).floor() as u64,
+                    autoloop_elapsed_beats: 0.0,
+                    autoloop_speed_scaled_elapsed_beats: 0.0,
+                    section_intent: Some(cue.intent),
+                    section_elapsed_beats: Some(0.0),
+                    next_intent: None,
+                    beats_until_next: None,
+                    drop_strength: cue.drop_strength,
+                    next_drop_strength: None,
+                    seed: cue.seed,
+                    ..*frame
+                },
+                &self.palettes.slots(&cue.palette)?,
+            )?;
+        let cells = layer_values(&self.rig, &effects)?;
+        for id in dark {
+            let (Some(values), Some(state)) = (cells.get(id), states.get_mut(id)) else {
+                continue;
+            };
+            let positions = PropertyValues {
+                intensity: None,
+                strobe_hz: None,
+                ..values.clone()
+            };
+            overlay_properties(&self.rig, id, state, &positions);
+        }
+        Ok(())
     }
 
     fn set_override(
@@ -1439,6 +1530,8 @@ struct OverlayLayer {
     elapsed_beats: f64,
     level: f64,
     intensity_htp: bool,
+    /// Its nominal end reaches the next cue's activation: a dip before the one.
+    holds_to_one: bool,
 }
 
 /// The envelope at `beat` (elapsed musical beats, which never jump; the grid only schedules):

@@ -8,8 +8,8 @@ use std::time::Instant;
 
 use starfire::engine::{Engine, RenderedFrame, perceptual_to_linear_master};
 use starfire::model::{
-    Command, FixtureState, LightingOverride, OverlayCue, OverrideLifetime, PropertyValues, Rgb,
-    RotationEntry, SectionCue, SectionIntent, Target, Transition,
+    AttributeValue, Command, FixtureState, LightingOverride, OverlayCue, OverrideLifetime,
+    PropertyValues, Rgb, RotationEntry, SectionCue, SectionIntent, Target, Transition,
 };
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
@@ -517,6 +517,145 @@ fn pause_drops_a_releasing_overlay_and_keeps_a_running_one() {
         1.0,
         "running kept",
     );
+}
+
+/// The DMX byte that carries a cell's colour wheel, found as the one byte a red and a blue look
+/// differ in, with its value for each.
+struct Wheel {
+    universe: u16,
+    slot: usize,
+    red: u8,
+    blue: u8,
+}
+
+impl Wheel {
+    fn of(label: &str) -> Self {
+        let rig = support::stage();
+        let encode = |colour| {
+            let mut states = rig.empty_states();
+            let state = states.get_mut(&support::stage_uuid(label)).unwrap();
+            state.intensity = 1.0;
+            state.colour = colour;
+            rig.encode(&states).unwrap()
+        };
+        let (red, blue) = (encode(RED), encode(BLUE));
+        let differing: Vec<(u16, usize)> = red
+            .iter()
+            .flat_map(|(universe, bytes)| {
+                bytes
+                    .iter()
+                    .zip(&blue[universe])
+                    .enumerate()
+                    .filter(|(_, (red, blue))| red != blue)
+                    .map(|(slot, _)| (*universe, slot))
+            })
+            .collect();
+        assert_eq!(differing.len(), 1, "{label}: {differing:?}");
+        let (universe, slot) = differing[0];
+        Self {
+            universe,
+            slot,
+            red: red[&universe][slot],
+            blue: blue[&universe][slot],
+        }
+    }
+
+    fn in_frame(&self, frame: &RenderedFrame) -> u8 {
+        frame.dmx_frames_by_universe[&self.universe][self.slot]
+    }
+}
+
+/// The stage movers' Gobo1 is one continuous wheel channel.
+fn gobo(physical: f64) -> Option<AttributeValue> {
+    Some(AttributeValue::Number(physical))
+}
+
+#[test]
+fn a_dipped_head_moves_in_black_before_the_cue_and_a_lit_wheel_holds_its_slot() {
+    let (dipped, lit) = (Wheel::of("mover_left"), Wheel::of("mover_right"));
+    let (open, after) = (gobo(0.0), gobo(128.0));
+    let mut engine = playing("before");
+    let dip = OverlayCue {
+        attack_beats: 1.0,
+        ..overlay("dip", -2.0, 2.0)
+    };
+    send(&mut engine, 0.0, 8, "after", vec![dip]);
+    // Before the dip, on its first frame, and half-way down its attack: still lit.
+    for beat in [5.0, 6.0, 6.5] {
+        let frame = render(&mut engine, beat);
+        let what = format!("beat {beat}");
+        let head = state(&frame, "mover_left");
+        assert!(head.intensity > 0.0, "{what}");
+        near(head.pan, 0.2, &what);
+        near(head.tilt, 0.3, &what);
+        assert_eq!(head.attributes.get("Gobo1").cloned(), open, "{what}");
+        assert_eq!(dipped.in_frame(&frame), dipped.red, "{what}");
+    }
+    // Dark: the next cue's first look at its start, at intensity 0. The undipped head stays
+    // lit and its wheel holds its slot.
+    for beat in [7.0, 7.75] {
+        let frame = render(&mut engine, beat);
+        let what = format!("beat {beat}");
+        let head = state(&frame, "mover_left");
+        near(head.intensity, 0.0, &what);
+        near(head.pan, 0.9, &what);
+        near(head.tilt, 0.7, &what);
+        assert_eq!(head.attributes.get("Gobo1").cloned(), after, "{what}");
+        assert_eq!(dipped.in_frame(&frame), dipped.blue, "{what}");
+        near(state(&frame, "mover_right").intensity, 1.0, &what);
+        near(state(&frame, "mover_right").pan, 0.2, &what);
+        assert_eq!(lit.in_frame(&frame), lit.red, "{what}");
+    }
+    // On the one the dipped head has nothing left to move.
+    let frame = render(&mut engine, 8.0);
+    let head = state(&frame, "mover_left");
+    near(head.intensity, 1.0, "the one");
+    near(head.pan, 0.9, "the one");
+    assert_eq!(head.attributes.get("Gobo1").cloned(), after);
+    assert_eq!(dipped.in_frame(&frame), dipped.blue);
+}
+
+#[test]
+fn a_dip_that_ends_before_the_next_cue_moves_nothing() {
+    let mut engine = playing("before");
+    let every_bar = OverlayCue {
+        every_bars: 1,
+        ..overlay("dip", 1.0, 1.0)
+    };
+    send(&mut engine, 0.0, 4, "before", vec![every_bar]);
+    send(&mut engine, 0.0, 16, "after", vec![]);
+    render(&mut engine, 4.0);
+    let frame = render(&mut engine, 5.5);
+    let head = state(&frame, "mover_left");
+    near(head.intensity, 0.0, "dipped");
+    // The head comes back lit inside this section, so it keeps this section's look.
+    near(head.pan, 0.2, "held in the section");
+    assert_eq!(head.attributes.get("Gobo1").cloned(), gobo(0.0));
+}
+
+#[test]
+fn a_cue_that_keeps_the_running_loop_or_crossfades_into_its_entry_moves_nothing() {
+    let dip = || OverlayCue {
+        attack_beats: 0.0,
+        ..overlay("dip", -2.0, 2.0)
+    };
+    let crossfade = Transition::Crossfade {
+        duration_beats: 4.0,
+    };
+    for next in [
+        cue(8, "before", Transition::Cut, vec![dip()]),
+        cue(8, "after", crossfade, vec![dip()]),
+    ] {
+        let mut engine = playing("before");
+        send_cue(&mut engine, 0.0, next);
+        render(&mut engine, 6.0);
+        let frame = render(&mut engine, 7.0);
+        let head = state(&frame, "mover_left");
+        near(head.intensity, 0.0, "dipped");
+        // On the one the head shows the look before, so it waits there.
+        near(head.pan, 0.2, "held");
+        assert_eq!(head.attributes.get("Gobo1").cloned(), gobo(0.0));
+    }
 }
 
 /// Every frame's DMX for a scene with HTP and LTP overlays, a release and a dip before a cue.
