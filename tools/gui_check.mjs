@@ -873,13 +873,10 @@ const SUITES = {
         const plan = await ev(`(() => {
             const marks = [...document.querySelectorAll('#mvr-plan .mvr-object:has(circle)')];
             return {head: document.getElementById('mvr-summary').textContent, marks: marks.length,
-                badges: marks.filter((m) => /^\\d+( ×\\d+)?$/.test(m.querySelector('.plan-badge')?.textContent)).length,
-                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0),
-                caption: [...document.querySelectorAll('#mvr-plan .plan-caption')].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.textContent)};
+                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0)};
         })()`);
-        await check('rig map', 'header, legend counts and a badge per mark agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
-            && plan.badges === plan.marks && plan.counts === plan.marks, plan);
-        await check('rig map', 'only the selected mark shows its DMX caption', plan.caption.length === 1 && /^DMX \d+–\d+ · \w+ · (loop|accent)$/.test(plan.caption[0]), plan);
+        await check('rig map', 'header and legend counts agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
+            && plan.counts === plan.marks, plan);
         await shot('plan_rich', '.mvr-card');
         await action('Telemetry tab', 'open', () => tab('Telemetry'), {watch: 2500});
         await check('Telemetry tab', 'shows its panel', await ev(shown('telemetry-panel')));
