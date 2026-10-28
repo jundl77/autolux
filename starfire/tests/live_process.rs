@@ -96,9 +96,9 @@ impl Renderer {
             rig: Some(wire::RigDefinition {
                 fixtures: vec![wire::Fixture {
                     area: wire::StageArea::Centre as i32,
-                    fixture_id: "lamp".into(), name: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
+                    fixture_uuid: "lamp".into(), name: "lamp".into(), profile_id: "rgb".into(), address: 1, ..Default::default()
                 }],
-                groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_ids: vec!["lamp".into()], ..Default::default() }],
+                groups: vec![wire::FixtureGroup { group_id: "wash".into(), fixture_uuids: vec!["lamp".into()], ..Default::default() }],
                 profiles: vec![wire::FixtureProfile {
                     profile_id: "rgb".into(),
                     ..support::catalogue_profile("generic_rgb").unwrap()
@@ -326,11 +326,11 @@ fn login_rejects_a_capability_reply_over_the_real_time_cap() {
     let mut renderer = Renderer::start();
     let mut login = renderer.login.clone();
     let rig = login.rig.as_mut().unwrap();
-    let member = rig.fixtures[0].fixture_id.clone();
+    let member = rig.fixtures[0].fixture_uuid.clone();
     rig.groups = (0..64)
         .map(|index| wire::FixtureGroup {
             group_id: format!("{index:0>100}"),
-            fixture_ids: vec![member.clone()],
+            fixture_uuids: vec![member.clone()],
             ..Default::default()
         })
         .collect();

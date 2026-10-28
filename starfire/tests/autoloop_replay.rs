@@ -226,7 +226,7 @@ fn render(engine: &mut Engine, beats_after_anchor: f64) -> RenderedFrame {
 
 fn wash_level(engine: &mut Engine, beats_after_anchor: f64) -> f64 {
     render(engine, beats_after_anchor).fixture_properties_before_strobe
-        [&support::room_id("wash_left")]
+        [&support::room_uuid("wash_left")]
         .intensity
 }
 
@@ -477,7 +477,7 @@ fn standby_is_a_still_dim_warm_look_that_ignores_beat_and_loudness() {
                 assert_eq!(state.colour, WARM_WHITE, "{look}: {id} is not warm white");
             }
         }
-        for id in WASH.map(support::room_id) {
+        for id in WASH.map(support::room_uuid) {
             assert!(
                 reference.fixture_properties_before_strobe[&id].intensity > 0.0,
                 "{look}: {id} is dark"
@@ -510,7 +510,7 @@ fn atmospheric_and_breakdown_washes_swell_at_most_once_per_bar() {
         let frames: Vec<_> = (0..=BEATS * STEPS_PER_BEAT)
             .map(|step| render(&mut engine, step as f64 / STEPS_PER_BEAT as f64))
             .collect();
-        for id in WASH.map(support::room_id) {
+        for id in WASH.map(support::room_uuid) {
             let levels: Vec<_> = frames
                 .iter()
                 .map(|frame| frame.fixture_properties_before_strobe[&id].intensity)
@@ -660,7 +660,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     );
     assert_eq!(
         frame.fixture_properties_before_strobe
-            [&format!("{}/Beam Segment 1", support::room_id("zq06017"))]
+            [&format!("{}/Beam Segment 1", support::room_uuid("zq06017"))]
             .colour,
         Rgb {
             red: 0.0,

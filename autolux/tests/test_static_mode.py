@@ -661,8 +661,8 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
     assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue'}
     assert snapshot['rig'] == {
         'fixtures': [
-            {'id': 'par', 'name': 'par', 'cells': ['par']},
-            {'id': 'bar', 'name': 'bar', 'cells': ['bar/a', 'bar/b']},
+            {'fixture_uuid': 'par', 'name': 'par', 'cells': ['par']},
+            {'fixture_uuid': 'bar', 'name': 'bar', 'cells': ['bar/a', 'bar/b']},
         ]
     }
     assert snapshot['mode'] == 'auto'

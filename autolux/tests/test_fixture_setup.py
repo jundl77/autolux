@@ -332,8 +332,8 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
 def test_a_fixture_is_its_uuid_so_renaming_or_swapping_names_moves_only_labels(rig_file):
     def exported():
         rig = rig_definition(rig_file)
-        groups = {group.group_id: list(group.fixture_ids) for group in rig.groups}
-        return {fixture.fixture_id: fixture for fixture in rig.fixtures}, groups
+        groups = {group.group_id: list(group.fixture_uuids) for group in rig.groups}
+        return {fixture.fixture_uuid: fixture for fixture in rig.fixtures}, groups
 
     before, groups = exported()
     store = store_for(rig_file, lambda _staged: None)

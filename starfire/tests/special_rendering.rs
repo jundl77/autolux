@@ -16,7 +16,7 @@ const SCANNER: std::ops::Range<usize> = 10..16;
 fn synthetic_rig() -> wire::RigDefinition {
     let fixture = |id: &str, profile: &str, address| wire::Fixture {
         area: wire::StageArea::Centre as i32,
-        fixture_id: id.into(),
+        fixture_uuid: id.into(),
         name: id.into(),
         profile_id: profile.into(),
         universe: 0,
@@ -25,7 +25,7 @@ fn synthetic_rig() -> wire::RigDefinition {
     };
     let group = |id: &str, members: &[&str]| wire::FixtureGroup {
         group_id: id.into(),
-        fixture_ids: members.iter().map(|member| (*member).into()).collect(),
+        fixture_uuids: members.iter().map(|member| (*member).into()).collect(),
         ..Default::default()
     };
     let profile = |id: &str, source: &str| support::compiled_profile(source, id);
@@ -484,7 +484,7 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
     let address = definition
         .fixtures
         .iter()
-        .find(|fixture| &fixture.fixture_id == member)
+        .find(|fixture| &fixture.fixture_uuid == member)
         .unwrap()
         .address as usize
         - 1;
@@ -561,7 +561,7 @@ fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_i
     let address = definition
         .fixtures
         .iter()
-        .find(|fixture| &fixture.fixture_id == member)
+        .find(|fixture| &fixture.fixture_uuid == member)
         .unwrap()
         .address as usize
         - 1;
