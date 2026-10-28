@@ -55,9 +55,9 @@ FIXTURE_CSS = '''
 #config-panel button {background:#1e2c3d;color:#dce8f5;border:1px solid #3b4d62;border-radius:4px;padding:8px 12px;cursor:pointer;font-size:12px;}
 #config-panel button:disabled {opacity:.4;cursor:default;}
 #config-panel .patch-primary {background:#284d71;border-color:#4a7fab;}
-.patch-actions {display:flex;gap:8px;}
+.patch-actions {display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;}
 .patch-muted,#fixture-status {font-size:12px;color:#93a5b9;line-height:1.6;}
-#fixture-status {margin:12px 0;min-height:19px;}
+#fixture-status {margin:0;max-width:360px;text-align:right;}
 .patch-profile-info {min-height:65px;margin:12px 0 18px;font-size:12px;color:#93a5b9;line-height:1.7;}
 .patch-map {display:grid;grid-template-columns:repeat(var(--dmx-columns),minmax(0,1fr));grid-auto-rows:29px;gap:2px;margin-top:12px;}
 .patch-channel {background:#192432;color:#65798f;font-size:9px;display:flex;align-items:center;justify-content:center;border-radius:2px;}
@@ -185,6 +185,8 @@ def build_fixture_panel(app, store):
                     ),
                     html.Div(
                         [
+                            # The dirty state sits where the operator saves.
+                            html.P(id='fixture-status', role='status'),
                             html.Button('Reload saved', id='fixture-reload'),
                             html.Button('Save patch', id='fixture-save', className='patch-primary'),
                             html.Button(
@@ -355,7 +357,6 @@ def build_fixture_panel(app, store):
                 id='fixture-workspace',
                 className='patch-workspace',
             ),
-            html.P(id='fixture-status', role='status'),
             dcc.Store(id='fixture-draft', data=draft),
             dcc.Store(id='fixture-selection', data=None),
             dcc.Store(id='fixture-grid-action'),

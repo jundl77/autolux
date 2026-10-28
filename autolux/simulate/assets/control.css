@@ -1,4 +1,4 @@
-#show-control, .dash-dropdown-content, .cooldowns, .show-status {
+#show-control, #config-panel, .dash-dropdown-content, .cooldowns, .show-status {
     --accent: #73b6ff;
     --fill: #18212d;
     --fill-hover: #1f2a38;
