@@ -208,7 +208,12 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
             parse_control_command({'action': 'settings', 'settings': owned})
 
 
-RIG = {'fixtures': [{'name': 'par', 'cells': ['par']}, {'name': 'bar', 'cells': ['bar/a']}]}
+RIG = {
+    'fixtures': [
+        {'id': 'par', 'name': 'par', 'cells': ['par']},
+        {'id': 'bar', 'name': 'bar', 'cells': ['bar/a']},
+    ]
+}
 
 
 def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears():

@@ -1,5 +1,6 @@
 import copy
 import io
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -55,9 +56,18 @@ def placed_group(xs: list[float]) -> list[dict]:
     return mvr.patched_fixtures(scene)
 
 
+def named_groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
+    """mvr.groups with each member uuid read back as its fixture's name."""
+    names = {fixture['uuid']: fixture['name'] for fixture in fixtures}
+    groups, warnings = mvr.groups(fixtures)
+    return {group: [names[member] for member in members] for group, members in groups.items()}, (
+        warnings
+    )
+
+
 def test_group_members_run_left_to_right_by_position_whatever_the_file_order():
     fixtures = placed_group([900.0, -900.0, 300.0, -300.0])
-    assert mvr.groups(fixtures) == (
+    assert named_groups(fixtures) == (
         {'wash': ['wash_at_1', 'wash_at_3', 'wash_at_2', 'wash_at_0']},
         [],
     )
@@ -65,7 +75,7 @@ def test_group_members_run_left_to_right_by_position_whatever_the_file_order():
 
 def test_a_group_without_distinct_positions_keeps_file_order_and_warns():
     fixtures = placed_group([0.0, 0.0, 0.0])
-    assert mvr.groups(fixtures) == (
+    assert named_groups(fixtures) == (
         {'wash': ['wash_at_0', 'wash_at_1', 'wash_at_2']},
         ['Group wash has no distinct X positions; its members keep file order.'],
     )
@@ -186,7 +196,7 @@ def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
     scene, fixtures = load_rig(ROOM)
     assert validate(scene) == []
     assert len(fixtures) == 8
-    assert mvr.groups(fixtures)[0] == ROOM_GROUP_ORDER
+    assert named_groups(fixtures)[0] == ROOM_GROUP_ORDER
     first = mvr.draft(scene)
     saved = mvr.write(mvr.apply_draft(scene, first, LIBRARY))
     assert saved == content
@@ -234,6 +244,25 @@ def test_a_group_outside_the_role_layers_defaults_to_loop_with_a_warning():
     )
     assert roles['fx'] == 'loop' and errors == []
     assert warnings == ["Group fx sits in layer 'Room', not loop or accent; treating it as loop."]
+
+
+def test_each_added_fixture_gets_a_fresh_random_uuid():
+    scene = room_layers()
+    before = {fixture['uuid'] for fixture in mvr.patched_fixtures(scene)}
+    added = [
+        mvr.add_fixture(
+            scene,
+            name=f'kinta_{index}',
+            gdtf_spec='Chauvet DJ@Mini Kinta IRC@1.0.gdtf',
+            gdtf_mode='4ch',
+            universe=0,
+            address=200 + 4 * index,
+            fixture_id=9 + index,
+        ).get('uuid')
+        for index in range(2)
+    ]
+    assert [uuid.UUID(identity).version for identity in added] == [4, 4]
+    assert len(set(added) | before) == len(before) + 2
 
 
 def test_a_new_fixture_joins_the_layer_of_its_class():

@@ -357,7 +357,7 @@ impl LuaAutoloop {
         api.set(
             "members",
             lua.create_function(move |lua, value: Value| {
-                let target: Target = lua.from_value(value)?;
+                let target = targets.by_label(lua.from_value(value)?);
                 if matches!(&target, Target::Group(group) if !targets.groups().contains_key(group))
                 {
                     return lua.create_table();
@@ -377,7 +377,7 @@ impl LuaAutoloop {
         api.set(
             "mirror",
             lua.create_function(move |lua, value: Value| {
-                let target: Target = lua.from_value(value)?;
+                let target = spatial.by_label(lua.from_value(value)?);
                 let named: Vec<(String, String)> = match &target {
                     Target::Group(group) => {
                         spatial
@@ -418,7 +418,7 @@ impl LuaAutoloop {
         // MVR millimetres become metres here, at the Lua boundary only.
         let located = |rig: Rc<FixtureRig>| {
             move |value: &Value| -> mlua::Result<[f64; 3]> {
-                let position = cell_fact(value, |id| rig.spatial().position(id))?;
+                let position = cell_fact(&rig, value, |id| rig.spatial().position(id))?;
                 Ok(position.map(|mm| mm / MM_PER_METRE))
             }
         };
@@ -443,14 +443,16 @@ impl LuaAutoloop {
             "zone",
             lua.create_function(move |_, cell: Value| {
                 // Rig load refuses an unspecified area, so every known cell has a placement.
-                cell_fact(&cell, |id| areas.spatial().area(id)?.placement())
+                cell_fact(&areas, &cell, |id| areas.spatial().area(id)?.placement())
             })?,
         )?;
         let fixtures = Rc::clone(&shared);
         api.set(
             "fixture_of",
             lua.create_function(move |_, cell: Value| {
-                cell_fact(&cell, |id| fixtures.fixture_of(id).map(str::to_owned))
+                cell_fact(&fixtures, &cell, |id| {
+                    fixtures.fixture_of(id).map(str::to_owned)
+                })
             })?,
         )?;
         globals.set("sf", api)?;
@@ -546,6 +548,11 @@ impl LuaAutoloop {
             "autoloop must return a dense effect array"
         );
         let mut effects: Vec<Effect> = self.lua.from_value(Value::Table(result))?;
+        for effect in &mut effects {
+            effect.target = self
+                .rig
+                .by_label(std::mem::replace(&mut effect.target, Target::All));
+        }
         effects.retain(|effect| match &effect.target {
             Target::Group(group) => self.rig.groups().contains_key(group),
             _ => true,
@@ -576,10 +583,15 @@ fn cell_name(value: &Value) -> mlua::Result<String> {
     }
 }
 
-/// What the rig knows about the cell Lua names, which must exist.
-fn cell_fact<T>(value: &Value, fact: impl FnOnce(&str) -> Option<T>) -> mlua::Result<T> {
-    let id = cell_name(value)?;
-    fact(&id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))
+/// What the rig knows about the cell Lua names (by ID, or a fixture by label), which must exist.
+fn cell_fact<T>(
+    rig: &FixtureRig,
+    value: &Value,
+    fact: impl FnOnce(&str) -> Option<T>,
+) -> mlua::Result<T> {
+    let name = cell_name(value)?;
+    let id = rig.fixture_named(&name).unwrap_or(&name);
+    fact(id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {name}")))
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

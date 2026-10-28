@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 
 import pytest
@@ -49,14 +50,14 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]
-    assert fixture.fixture_id == 'front'
+    assert uuid.UUID(fixture.fixture_id).version == 4 and fixture.name == 'front'
     assert fixture.profile_id == f'{SPEC}#16 bit'
     assert fixture.pan.inverted
     assert (fixture.pan.minimum, fixture.pan.maximum) == (0, 1)
     assert not fixture.HasField('tilt')
     assert list(fixture.matrix[:3]) == [-1, 0, 0]
     assert login.rig.groups[0].group_id == 'movers'
-    assert login.rig.groups[0].fixture_ids == ['front']
+    assert login.rig.groups[0].fixture_ids == [fixture.fixture_id]
     [profile] = login.rig.profiles
     assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
@@ -73,7 +74,9 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
     login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     scene = mvr.read(ROOM.read_bytes())
     fixtures = mvr.patched_fixtures(scene)
-    assert [fixture.fixture_id for fixture in login.rig.fixtures] == [f['name'] for f in fixtures]
+    assert [(fixture.fixture_id, fixture.name) for fixture in login.rig.fixtures] == [
+        (f['uuid'], f['name']) for f in fixtures
+    ]
     assert [list(fixture.matrix) for fixture in login.rig.fixtures] == [
         f['matrix'] for f in fixtures
     ]
@@ -214,7 +217,7 @@ def test_the_room_rig_fixtures_lie_in_their_stage_areas():
     }
     rig = assets.rig_definition(ROOM)
     assert {
-        fixture.fixture_id: rig_wire.StageArea.Name(fixture.area) for fixture in rig.fixtures
+        fixture.name: rig_wire.StageArea.Name(fixture.area) for fixture in rig.fixtures
     } == expected
 
 
@@ -274,23 +277,27 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
     rig = assets.static_rig(ROOM)
-    names = dict(rig.fixtures)
-    assert list(names) == [entry.fixture_id for entry in assets.rig_definition(ROOM).fixtures]
-    assert names['wash_left'] == ('wash_left',)
-    assert names['zq06017'] == tuple(f'zq06017/Beam Segment {n}' for n in range(1, 9))
-    assert rig.uv_targets == ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
+    ids = {name: identity for identity, name, _ in rig.fixtures}
+    cells = {name: cells for _, name, cells in rig.fixtures}
+    assert list(ids.values()) == [
+        entry.fixture_id for entry in assets.rig_definition(ROOM).fixtures
+    ]
+    assert cells['wash_left'] == (ids['wash_left'],)
+    assert cells['zq06017'] == tuple(f'{ids["zq06017"]}/Beam Segment {n}' for n in range(1, 9))
+    washes = ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
+    assert rig.uv_targets == tuple(ids[name] for name in washes)
     lighting = RecordingStarfireClient()
     looks = StaticLooks(lighting, rig)
-    looks.highlight({'fixture': 'wash_left'}, 'warm')
-    looks.highlight({'cell': 'zq06017/Beam Segment 3'})
+    looks.highlight({'fixture': ids['wash_left']}, 'warm')
+    looks.highlight({'cell': cells['zq06017'][2]})
     wash, segment = (protocol.build_command(event['command']) for event in lighting.events)
     assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (
-        'wash_left',
+        ids['wash_left'],
         0.0,
         60.0,
     )
     assert (segment.fixture, segment.effect_id, dict(segment.attributes)) == (
-        'zq06017/Beam Segment 3',
+        cells['zq06017'][2],
         'highlight',
         {},
     )
@@ -325,10 +332,11 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
 
 def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():
     rig = assets.rig_definition(ROOM)
-    [bar] = [fixture for fixture in rig.fixtures if fixture.fixture_id == 'zq06017']
+    [bar] = [fixture for fixture in rig.fixtures if fixture.name == 'zq06017']
     assert (bar.universe, bar.address) == (0, 97)
     assert bar.profile_id.endswith('#24Channel')
     assert [(cell.geometry, list(cell.offsets)) for cell in bar.cells] == [
         (f'Beam Segment {n}', [3 * n - 2, 3 * n - 1, 3 * n]) for n in range(1, 9)
     ]
-    assert {group.group_id: list(group.fixture_ids) for group in rig.groups}['strip'] == ['zq06017']
+    groups = {group.group_id: list(group.fixture_ids) for group in rig.groups}
+    assert groups['strip'] == [bar.fixture_id]

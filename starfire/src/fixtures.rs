@@ -26,6 +26,7 @@ const MATRIX_VALUES: usize = 12;
 #[derive(Clone, Debug)]
 struct FixturePatch {
     id: String,
+    name: String,
     profile: String,
     universe: u16,
     address: usize,
@@ -154,6 +155,7 @@ pub struct FixtureRig {
     accent_cells: BTreeSet<String>,
     profiles: BTreeMap<String, Vec<GdtfCell>>,
     cells: BTreeMap<String, (usize, usize)>,
+    names: BTreeMap<String, usize>,
     spatial: Spatial,
 }
 
@@ -173,13 +175,14 @@ impl FixtureRig {
             .iter()
             .map(|fixture| -> Result<_> {
                 let home = home_orientation(&fixture.matrix)
-                    .with_context(|| format!("fixture {}", fixture.fixture_id))?;
+                    .with_context(|| format!("fixture {}", fixture.name))?;
                 let mut pan = MovementRange::from_wire(&fixture.pan);
                 let mut tilt = MovementRange::from_wire(&fixture.tilt);
                 pan.inverted ^= home.reversed;
                 tilt.inverted ^= home.reversed;
                 Ok(FixturePatch {
                     id: fixture.fixture_id.clone(),
+                    name: fixture.name.clone(),
                     profile: fixture.profile_id.clone(),
                     universe: u16::try_from(fixture.universe)
                         .context("fixture universe exceeds range")?,
@@ -197,9 +200,7 @@ impl FixtureRig {
                         .map_or([0.0; 3], |o| [o[0], o[1], o[2]]),
                     area: Some(fixture.area())
                         .filter(|&area| area != wire::StageArea::Unspecified)
-                        .with_context(|| {
-                            format!("fixture {} has no stage area", fixture.fixture_id)
-                        })?,
+                        .with_context(|| format!("fixture {} has no stage area", fixture.name))?,
                 })
             })
             .collect::<Result<_>>()?;
@@ -274,20 +275,29 @@ impl FixtureRig {
         }
 
         let mut ids = BTreeSet::new();
+        let mut names = BTreeMap::new();
         let mut cells = BTreeMap::new();
         let mut occupied = BTreeMap::<u16, BTreeSet<usize>>::new();
         for (index, patch) in fixtures.iter_mut().enumerate() {
             validate_identifier(&patch.id)?;
+            validate_identifier(&patch.name)?;
             validate_identifier(&patch.profile)?;
             ensure!(
                 ids.insert(patch.id.clone()),
-                "duplicate fixture ID {}",
-                patch.id
+                "duplicate fixture ID {} ({})",
+                patch.id,
+                patch.name
+            );
+            // Autoloops name fixtures by label, so a label must pick out one fixture.
+            ensure!(
+                names.insert(patch.name.clone(), index).is_none(),
+                "duplicate fixture name {}",
+                patch.name
             );
             ensure!(
                 patch.universe <= MAX_ARTNET_UNIVERSE,
                 "fixture {} has invalid universe",
-                patch.id
+                patch.name
             );
             let profile_cells = profiles
                 .get(&patch.profile)
@@ -296,7 +306,7 @@ impl FixtureRig {
             ensure!(
                 patch.declared_cells.is_empty() || declares(&patch.declared_cells, profile_cells),
                 "fixture {} declares cells that differ from its GDTF mode",
-                patch.id
+                patch.name
             );
             for (cell, layout) in profile_cells.iter().enumerate() {
                 let id = cell_id(&patch.id, &layout.geometry, profile_cells.len());
@@ -310,19 +320,19 @@ impl FixtureRig {
             ensure!(
                 (1..=DMX_CHANNELS).contains(&patch.address),
                 "fixture {} has invalid DMX address",
-                patch.id
+                patch.name
             );
             let end = patch.address - 1 + profile.footprint();
             ensure!(
                 end <= DMX_CHANNELS,
                 "fixture {} exceeds universe boundary",
-                patch.id
+                patch.name
             );
             for channel in (patch.address - 1)..end {
                 ensure!(
                     occupied.entry(patch.universe).or_default().insert(channel),
                     "fixture {} overlaps DMX channel {} in universe {}",
-                    patch.id,
+                    patch.name,
                     channel + 1,
                     patch.universe
                 );
@@ -330,11 +340,11 @@ impl FixtureRig {
             patch
                 .pan
                 .validate()
-                .with_context(|| format!("fixture {} pan bounds", patch.id))?;
+                .with_context(|| format!("fixture {} pan bounds", patch.name))?;
             patch
                 .tilt
                 .validate()
-                .with_context(|| format!("fixture {} tilt bounds", patch.id))?;
+                .with_context(|| format!("fixture {} tilt bounds", patch.name))?;
         }
         ensure!(
             cells.len() <= MAX_CELLS,
@@ -410,6 +420,7 @@ impl FixtureRig {
             accent_cells,
             profiles,
             cells,
+            names,
             spatial,
         })
     }
@@ -470,7 +481,8 @@ impl FixtureRig {
             Target::Group(group) => self.refuse_accent_group(group)?,
             Target::Fixture(id) => ensure!(
                 !cells.iter().any(|cell| self.is_accent_cell(cell)),
-                "accent fixture {id} plays specials only, never autoloops"
+                "accent fixture {} plays specials only, never autoloops",
+                self.label(id)
             ),
             Target::All => cells.retain(|cell| !self.is_accent_cell(cell)),
         }
@@ -495,6 +507,35 @@ impl FixtureRig {
     pub fn fixture_of(&self, cell_id: &str) -> Option<&str> {
         let &(fixture, _) = self.cells.get(cell_id)?;
         Some(&self.fixtures[fixture].id)
+    }
+
+    /// The fixture ID a label names; autoloops are written against labels.
+    pub fn fixture_named(&self, name: &str) -> Option<&str> {
+        Some(&self.fixtures[*self.names.get(name)?].id)
+    }
+
+    /// The target with a fixture label resolved to its ID; IDs and unknown names pass through.
+    pub fn by_label(&self, target: Target) -> Target {
+        match target {
+            Target::Fixture(name) => {
+                Target::Fixture(self.fixture_named(&name).map_or(name, str::to_owned))
+            }
+            target => target,
+        }
+    }
+
+    /// A fixture's or cell's ID with its fixture's label in place of the fixture ID, for
+    /// messages people read; unknown IDs come back unchanged.
+    pub fn label(&self, id: &str) -> String {
+        let fixture = self
+            .cells
+            .get(id)
+            .map(|&(fixture, _)| &self.fixtures[fixture])
+            .or_else(|| self.fixtures.iter().find(|fixture| fixture.id == id));
+        fixture.map_or_else(
+            || id.to_owned(),
+            |fixture| id.replacen(&fixture.id, &fixture.name, 1),
+        )
     }
 
     pub fn fixture_ids(&self) -> Vec<String> {

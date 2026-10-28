@@ -12,6 +12,7 @@ fn rig(source: &str) -> FixtureRig {
         fixtures: vec![wire::Fixture {
             area: wire::StageArea::Centre as i32,
             fixture_id: "fixture".into(),
+            name: "fixture".into(),
             profile_id: "profile".into(),
             address: 1,
             ..Default::default()

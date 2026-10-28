@@ -23,6 +23,15 @@ single native validator. `rig/room.rig.pb` and the synthetic sample rig
 `autolux/tests/data/generic_rig/generic.rig.pb` are the exports the Rust tests and goldens use; `cli/tests/test_starfire_assets.py` checks they equal
 the Login rig of their MVR.
 
+Identity is the MVR Fixture `uuid`; `name` is a label; `FixtureID`/`FixtureIDNumeric` are the
+console patch numbers and identify nothing. The uuid is `Fixture.fixture_id`, every cell ID
+derives from it (`uuid`, or `uuid/geometry` on a multi-cell fixture), group members are the
+uuids the `Classing` attribute places in each Class, and highlight, override and test targets
+carry it. `Fixture.name` reaches Starfire for logs and for autoloops, which name fixtures by
+label (`sf.fixture("kinta")`, resolved to the uuid in Starfire), so Starfire refuses a rig that
+repeats a uuid or a name. Renaming a fixture, or swapping two names, moves nothing else. Config
+gives each fixture it adds a fresh random (version 4) uuid.
+
 Patched = a `Fixture` anywhere under a Layer with `GDTFSpec` and an `Address`; its Matrix
 is composed through every parent (Layer, GroupObject, Truss, …). Starfire renders one
 Address on break 0 per fixture; other objects, unpatched fixtures and unreferenced GDTF

@@ -42,6 +42,7 @@ impl Venue {
             let fixture = format!("f{next:03}");
             self.definition.fixtures.push(wire::Fixture {
                 fixture_id: fixture.clone(),
+                name: fixture.clone(),
                 profile_id: "generic_rgb".into(),
                 universe: (next / PER_UNIVERSE) as u32,
                 address: ((next % PER_UNIVERSE) * 3 + 1) as u32,

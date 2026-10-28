@@ -657,7 +657,7 @@ def _venue_x(fixture) -> float:
 
 
 def groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
-    """Each class's members left to right: ascending scene X of their placed positions.
+    """Each class's member uuids left to right: ascending scene X of their placed positions.
 
     Equal positions keep file order; a group whose members all share one X (no positions, or
     every fixture at the origin) has no spatial order, so it keeps file order and warns.
@@ -674,7 +674,7 @@ def groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
             )
         else:
             placed = sorted(placed, key=_venue_x)
-        result[group] = [fixture['name'] for fixture in placed]
+        result[group] = [fixture['uuid'] for fixture in placed]
     return result, warnings
 
 

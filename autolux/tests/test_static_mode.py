@@ -512,7 +512,7 @@ async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_t
 HALL = StaticRig(
     groups=('wash',),
     uv_groups=('wash',),
-    fixtures=(('par', ('par',)), ('bar', ('bar/a', 'bar/b'))),
+    fixtures=(('par', 'par', ('par',)), ('bar', 'bar', ('bar/a', 'bar/b'))),
     uv_targets=('par',),
 )
 
@@ -661,8 +661,8 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
     assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue'}
     assert snapshot['rig'] == {
         'fixtures': [
-            {'name': 'par', 'cells': ['par']},
-            {'name': 'bar', 'cells': ['bar/a', 'bar/b']},
+            {'id': 'par', 'name': 'par', 'cells': ['par']},
+            {'id': 'bar', 'name': 'bar', 'cells': ['bar/a', 'bar/b']},
         ]
     }
     assert snapshot['mode'] == 'auto'
