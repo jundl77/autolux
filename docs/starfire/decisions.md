@@ -580,3 +580,5 @@ fixture's area (the rig carries no GDTF geometry offsets). Starfire applies no g
 Login reports a group's `area` only when every member shares it, plus its mean X
 (`centre_x_metres`, which accent alternation uses), so a role row with `zone` or `depth` plays
 only on groups lying in one area of that column or row; no MIXED value is needed.
+
+2026-10-28 Operator cuts are immediate by user decision: FX Off, pause and standby drop the special that frame, with no fade, cap or tempo conversion; a special's own end still runs its row's release.

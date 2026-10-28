@@ -204,8 +204,7 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
             0.25,
             &Command::ClearOverride {
                 id: "red".into(),
-                release_beats: None,
-                release_seconds: None,
+                instantaneous_release: false,
             },
         )
         .unwrap();

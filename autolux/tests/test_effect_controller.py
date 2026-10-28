@@ -5,8 +5,6 @@ import pytest
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.effect_controller import (
-    CUT_RELEASE_BEATS,
-    CUT_RELEASE_SECONDS,
     DROP_ACCENT_ID,
     SPECIAL_ID,
     SPECIAL_PRIORITY,
@@ -35,12 +33,7 @@ FULL_INTENSITY = ShowSettings(intensity=1.0)
 # Wild halves the intense cooldown; balanced keeps the setting as written.
 BALANCED = ShowSettings(intensity=0.7)
 BALANCED = ShowSettings(intensity=INTENSITY_BALANCED)
-CUT = {
-    'kind': 'clear_override',
-    'id': SPECIAL_ID,
-    'release_beats': CUT_RELEASE_BEATS,
-    'release_seconds': CUT_RELEASE_SECONDS,
-}
+CUT = {'kind': 'clear_override', 'id': SPECIAL_ID, 'instantaneous_release': True}
 
 
 async def test_applied_lighting_change_has_one_useful_info_line(effect_controller, caplog):
@@ -949,7 +942,7 @@ def _long_texture_on_a_drop(tmp_path):
     return control, controller, lighting, clock
 
 
-async def test_fx_off_fades_a_running_texture_out_at_once_and_spares_the_drop_strobe(tmp_path):
+async def test_fx_off_ends_a_running_texture_at_once_and_spares_the_drop_strobe(tmp_path):
     from types import SimpleNamespace
 
     control, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
@@ -967,7 +960,7 @@ async def test_fx_off_fades_a_running_texture_out_at_once_and_spares_the_drop_st
     assert accents(lighting, start) == [CUT], 'FX on restarts nothing; the next entry picks'
 
 
-async def test_standby_fades_a_running_texture_out_at_once_and_keeps_the_cooldown(tmp_path):
+async def test_standby_ends_a_running_texture_at_once_and_keeps_the_cooldown(tmp_path):
     _, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
     await controller.change_effect(LightIntent.DROP)
     start = len(lighting.events)

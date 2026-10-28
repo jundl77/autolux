@@ -131,14 +131,6 @@ impl ReleasingSpecial {
     fn level(&self, beat: f64) -> f64 {
         special::release_level(&self.special, self.from_level, beat - self.released_beat)
     }
-
-    /// Shortens the fade still to run to at most `cap` beats, falling from its level now.
-    fn cut(&mut self, beat: f64, cap: f64) {
-        let remaining = self.special.release_beats - (beat - self.released_beat);
-        self.from_level = self.level(beat);
-        self.released_beat = beat;
-        self.special.release_beats = remaining.min(cap);
-    }
 }
 
 pub struct Engine {
@@ -264,32 +256,14 @@ impl Engine {
             Command::SetOverride { value } => self.set_override(at_seconds, time, value)?,
             Command::ClearOverride {
                 id,
-                release_beats,
-                release_seconds,
+                instantaneous_release,
             } => {
                 validate_identifier(id)?;
-                for cap in [release_beats, release_seconds].into_iter().flatten() {
-                    ensure!(
-                        cap.is_finite() && *cap >= 0.0,
-                        "release caps must be finite and non-negative"
-                    );
-                }
-                // Applied at this frame's beat, never deferred: an operator cut must read at once.
-                let seconds_cap = release_seconds.map(|cap| cap * self.clock.beats_per_second());
-                let cap = [*release_beats, seconds_cap]
-                    .into_iter()
-                    .flatten()
-                    .reduce(f64::min);
-                if let Some(cap) = cap {
-                    // A special already fading under this ID (released, or replaced) is cut too.
-                    for releasing in self.releasing.iter_mut().filter(|r| r.id == *id) {
-                        releasing.cut(time.elapsed_musical_beats, cap);
-                    }
-                }
-                if let Some(mut removed) = self.overrides.remove(id) {
-                    if let (Some(cap), Some(special)) = (cap, removed.value.special_fx.as_mut()) {
-                        special.release_beats = special.release_beats.min(cap);
-                    }
+                let removed = self.overrides.remove(id);
+                if *instantaneous_release {
+                    // A special already fading under this ID (released, or replaced) goes too.
+                    self.releasing.retain(|releasing| releasing.id != *id);
+                } else if let Some(removed) = removed {
                     self.release(removed, time.elapsed_musical_beats);
                 }
             }

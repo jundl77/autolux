@@ -117,23 +117,21 @@ fn primary() -> starfire::model::Rgb {
 }
 
 fn unset(beat: f64, engine: &mut Engine) {
-    unset_within(beat, engine, None, None);
+    unset_with(beat, engine, false);
 }
 
-fn unset_within(
-    beat: f64,
-    engine: &mut Engine,
-    release_beats: Option<f32>,
-    release_seconds: Option<f32>,
-) {
+fn unset_instantly(beat: f64, engine: &mut Engine) {
+    unset_with(beat, engine, true);
+}
+
+fn unset_with(beat: f64, engine: &mut Engine, instantaneous_release: bool) {
     fire(
         engine,
         beat,
         &ClientMessage::UnsetActiveEffect(wire::UnsetActiveEffect {
             command_id: 1,
             effect_id: "special".into(),
-            release_beats,
-            release_seconds,
+            instantaneous_release,
         }),
     );
 }
@@ -309,43 +307,7 @@ fn attack_and_release_follow_the_musical_clock_without_snapping() {
 }
 
 #[test]
-fn a_capped_unset_shortens_a_long_release_but_never_lengthens_a_short_one() {
-    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
-    let red = SCANNER.start + 2;
-    let level = |level: f64| (primary().red * level * 255.0).round() as u8;
-    for (release_beats, cap, half_at) in [(64.0, 4.0, 2.0), (2.0, 4.0, 1.0)] {
-        let mut engine = engine(&rig);
-        let texture = wire::SpecialFx {
-            release_beats,
-            ..steady("primary", 1.0, 0.0)
-        };
-        fire(&mut engine, 0.0, &special("scanners", texture));
-        unset_within(4.0, &mut engine, Some(cap), None);
-        assert_eq!(dmx(&mut engine, 4.0 + half_at)[red], level(0.5));
-        assert_eq!(dmx(&mut engine, 4.0 + 2.0 * half_at)[red], 0);
-    }
-}
-
-#[test]
-fn an_operator_cut_fades_from_its_arrival_off_the_beat_within_the_shorter_cap() {
-    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
-    let red = SCANNER.start + 2;
-    let level = |level: f64| (primary().red * level * 255.0).round() as u8;
-    let mut engine = engine(&rig);
-    let texture = wire::SpecialFx {
-        release_beats: 64.0,
-        ..steady("primary", 1.0, 0.0)
-    };
-    fire(&mut engine, 0.0, &special("scanners", texture));
-    // 0.25 s is half a beat at 120 BPM, shorter than the one-beat cap.
-    unset_within(4.3, &mut engine, Some(1.0), Some(0.25));
-    assert_eq!(dmx(&mut engine, 4.3)[red], level(1.0));
-    assert_eq!(dmx(&mut engine, 4.55)[red], level(0.5));
-    assert_eq!(dmx(&mut engine, 4.8)[red], 0);
-}
-
-#[test]
-fn a_seconds_capped_cut_on_a_paused_clock_is_over_when_play_resumes() {
+fn an_operator_cut_drops_the_special_this_frame_off_the_beat() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let red = SCANNER.start + 2;
     let mut engine = engine(&rig);
@@ -355,31 +317,12 @@ fn a_seconds_capped_cut_on_a_paused_clock_is_over_when_play_resumes() {
     };
     fire(&mut engine, 0.0, &special("scanners", texture));
     assert_ne!(dmx(&mut engine, 4.0)[red], 0);
-    fire(&mut engine, 4.0, &paused(true));
-    unset_within(4.3, &mut engine, Some(1.0), Some(0.5));
-    fire(&mut engine, 4.3, &paused(false));
+    unset_instantly(4.3, &mut engine);
     assert_eq!(dmx(&mut engine, 4.3)[red], 0);
 }
 
 #[test]
-fn pausing_within_a_cut_fade_leaves_the_special_gone_on_play() {
-    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
-    let red = SCANNER.start + 2;
-    let mut engine = engine(&rig);
-    let texture = wire::SpecialFx {
-        release_beats: 64.0,
-        ..steady("primary", 1.0, 0.0)
-    };
-    fire(&mut engine, 0.0, &special("scanners", texture));
-    unset_within(4.0, &mut engine, Some(1.0), Some(0.5));
-    assert_ne!(dmx(&mut engine, 4.25)[red], 0);
-    fire(&mut engine, 4.25, &paused(true));
-    fire(&mut engine, 6.0, &paused(false));
-    assert_eq!(dmx(&mut engine, 6.0)[red], 0);
-}
-
-#[test]
-fn a_cut_also_shortens_a_special_already_fading_under_its_id() {
+fn a_cut_also_drops_a_special_already_fading_under_its_id() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let red = SCANNER.start + 2;
     let texture = wire::SpecialFx {
@@ -395,28 +338,10 @@ fn a_cut_also_shortens_a_special_already_fading_under_its_id() {
         } else {
             unset(4.0, &mut engine);
         }
-        unset_within(4.0, &mut engine, Some(1.0), None);
         assert_ne!(dmx(&mut engine, 4.5)[red], 0, "replace {replace}");
-        assert_eq!(dmx(&mut engine, 5.0)[red], 0, "replace {replace}");
+        unset_instantly(4.5, &mut engine);
+        assert_eq!(dmx(&mut engine, 4.5)[red], 0, "replace {replace}");
     }
-}
-
-#[test]
-fn a_cut_longer_than_the_fade_left_never_lengthens_it() {
-    let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
-    let red = SCANNER.start + 2;
-    let level = |level: f64| (primary().red * level * 255.0).round() as u8;
-    let mut engine = engine(&rig);
-    let texture = wire::SpecialFx {
-        release_beats: 4.0,
-        ..steady("primary", 1.0, 0.0)
-    };
-    fire(&mut engine, 0.0, &special("scanners", texture));
-    unset(4.0, &mut engine);
-    // Two beats of fade remain; a four-beat cap leaves them as they were.
-    unset_within(6.0, &mut engine, Some(4.0), None);
-    assert_eq!(dmx(&mut engine, 7.0)[red], level(0.25));
-    assert_eq!(dmx(&mut engine, 8.0)[red], 0);
 }
 
 fn paused(value: bool) -> ClientMessage {

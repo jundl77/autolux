@@ -211,9 +211,7 @@ pub enum Command {
     ClearOverride {
         id: String,
         #[serde(default)]
-        release_beats: Option<f64>,
-        #[serde(default)]
-        release_seconds: Option<f64>,
+        instantaneous_release: bool,
     },
     SetMaster {
         intensity: f64,
