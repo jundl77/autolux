@@ -569,11 +569,8 @@ its axis, with the per-group fallback: two separate concepts.
 
 2026-10-27 Stage areas: every fixture carries one `StageArea` of the standard nine-area stage
 grid (down/centre/up × left/centre/right, named from the audience), derived once by Autolux
-when it builds the rig from the MVR (`stage_areas` in `cli/starfire_assets.py`, which quotes
-the MVR 1.6 and GDTF 1.2 axes: -X house left, -Y downstage). MVR gives its scene origin no
-meaning, so the stage frame is the rig's own bounding box over all fixture positions: X and Y
-each cut into equal thirds, a fixture on a cut in the centre third, an axis without extent all
-centre. The nine-area grid is the lighting convention for blocking and focus, so a special
+when it builds the rig from the MVR (`stage_areas` in `cli/starfire_assets.py`); the frame and
+its cuts are in [rig-mvr.md](rig-mvr.md#plan-and-stage-directions). The nine-area grid is the lighting convention for blocking and focus, so a special
 row's `zone` (column) and `depth` (row) speak the language of a plot. Cells inherit their
 fixture's area (the rig carries no GDTF geometry offsets). Starfire applies no geometry rule:
 `sf.zone(cell)` returns the area's column (house_left/centre/house_right), row
@@ -583,5 +580,5 @@ fixture's area (the rig carries no GDTF geometry offsets). Starfire applies no g
 Login reports a group's `area` only when every member shares it, plus its mean X
 (`centre_x_metres`, which accent alternation uses), so a role row with `zone` or `depth` plays
 only on groups lying in one area of that column or row; no MIXED value is needed.
-Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
-its axis, with the per-group fallback: two separate concepts.
+
+2026-10-28 Operator cuts are immediate by user decision: FX Off, pause and standby drop the special that frame, with no fade, cap or tempo conversion; a special's own end still runs its row's release.

@@ -21,15 +21,13 @@ import pygdtf
 import pymvr
 
 from autolux.lighting import mvr_schema as schema
+from autolux.lighting.mvr_schema import LOOP_ROLE, ROLES
 
 SCENE_ENTRY = 'GeneralSceneDescription.xml'
 GDTF_DESCRIPTION = 'description.xml'
 GDTF_SUFFIX = '.gdtf'
 PROVIDER = schema.AUTOLUX_PROVIDER
 PROVIDER_VERSION = '0.1.0'
-LOOP_ROLE = schema.LOOP_ROLE
-ACCENT_ROLE = schema.ACCENT_ROLE
-ROLES = schema.ROLES
 DEFAULT_LAYER = LOOP_ROLE
 MAX_MVR_BYTES = 32 * 1024 * 1024
 MAX_SCENE_BYTES = 1024 * 1024

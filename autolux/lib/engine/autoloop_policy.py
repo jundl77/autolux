@@ -105,6 +105,11 @@ def arrival_of_peak(
     return arrival / peak if peak > 0 else None
 
 
+def soft_drop(arrival: float | None) -> bool:
+    """A drop known to arrive below MAXIMAL_ARRIVAL_OF_PEAK; an unknown arrival is not soft."""
+    return arrival is not None and arrival < MAXIMAL_ARRIVAL_OF_PEAK
+
+
 def loudness_trend(levels: Sequence[float]) -> str:
     levels = list(levels)[-LOUDNESS_TREND_BEATS:]
     if len(levels) < LOUDNESS_TREND_BEATS:
@@ -182,11 +187,11 @@ class AutoloopPolicy:
         long_since_drop = since_drop is None or since_drop >= LONG_SINCE_DROP_SECONDS
         long_build = context.build_bars >= LONG_BUILD_BARS
         arrival = context.arrival_of_peak
-        maximal_arrival = arrival is not None and arrival >= MAXIMAL_ARRIVAL_OF_PEAK
+        maximal_arrival = arrival is not None and not soft_drop(arrival)
         maximal_drop_last = self._last_drop_energy == 3
         facts = {
             None: True,
-            'arrival_below_peak': arrival is not None and not maximal_arrival,
+            'arrival_below_peak': soft_drop(arrival),
             'maximal_again': maximal_drop_last
             and long_build
             and long_since_drop

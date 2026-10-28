@@ -310,6 +310,7 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
             at_seconds,
             &Command::ClearOverride {
                 id: value.effect_id.clone(),
+                instantaneous_release: value.instantaneous_release,
             },
         ),
     }

@@ -33,6 +33,7 @@ FULL_INTENSITY = ShowSettings(intensity=1.0)
 # Wild halves the intense cooldown; balanced keeps the setting as written.
 BALANCED = ShowSettings(intensity=0.7)
 BALANCED = ShowSettings(intensity=INTENSITY_BALANCED)
+CUT = {'kind': 'clear_override', 'id': SPECIAL_ID, 'instantaneous_release': True}
 
 
 async def test_applied_lighting_change_has_one_useful_info_line(effect_controller, caplog):
@@ -576,7 +577,7 @@ async def test_standby_releases_the_special_with_the_accent():
     controller.enter_standby(120.0)
     assert accents(lighting, start) == [
         {'kind': 'clear_override', 'id': DROP_ACCENT_ID},
-        {'kind': 'clear_override', 'id': SPECIAL_ID},
+        CUT,
     ]
 
 
@@ -597,10 +598,14 @@ async def test_an_intense_special_starts_the_strobe_cooldown_the_dashboard_count
     controller, _, clock = with_specials(
         discover_specials(), settings=settings, event_buffer=buffer
     )
-    assert buffer.snapshot()['strobe_cooldown_seconds'] == 0.0
+
+    def strobe_bar():
+        return next(row for row in buffer.snapshot()['special_cooldowns'] if row.get('strobe'))
+
+    assert strobe_bar()['remaining_seconds'] == 0.0
     await controller.change_effect(LightIntent.DROP)
     clock.advance(19.0)
-    assert buffer.snapshot()['strobe_cooldown_seconds'] == pytest.approx(41.0)
+    assert strobe_bar()['remaining_seconds'] == pytest.approx(41.0)
 
 
 async def test_a_new_drop_replaces_the_drop_special_under_the_same_id():
@@ -873,3 +878,180 @@ async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
     assert rested['remaining_seconds'] == pytest.approx(140.0)
     clock.advance(140.0)
     assert all(row['ready'] for row in cooldowns().values())
+
+
+async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
+    import dataclasses
+
+    from autolux.lib.engine.static_mode import STATIC_SPECIAL_ID, StaticLooks, StaticRig
+
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
+    current = [FULL_INTENSITY]
+    # Own rows, not the catalogue, so the test does not hang on which intents ship an fx row.
+    controller = EffectController(
+        lighting, clock=clock, settings=lambda: current[0], specials=[SPIN, DROP_STROBE]
+    )
+    # Every drop here is loud: no arrival is measured, and an unknown arrival is never soft.
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID, DROP_ACCENT_ID]
+
+    current[0] = dataclasses.replace(FULL_INTENSITY, fx_auto=False)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.BUILDUP)
+    # Settings read directly, not the toggle: the section change releases it as usual.
+    assert accents(lighting, start) == [{'kind': 'clear_override', 'id': SPECIAL_ID}]
+    start = len(lighting.events)
+    clock.advance(STROBE_COOLDOWN_SECONDS + 1)
+    await controller.change_effect(LightIntent.DROP)
+    # A loud drop still bursts the strobe; only the special is left out.
+    [strobe] = accents(lighting, start)
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+    assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
+
+    # The operator's Static FX row does not ask the policy, so it still plays.
+    drift = Special('drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='primary', speed=0.5)
+    looks = StaticLooks(
+        lighting, StaticRig(groups=('fx',)), [drift], controller.special_capabilities
+    )
+    looks.special('drift', 'fx')
+    assert accents(lighting, start)[-1]['value']['id'] == STATIC_SPECIAL_ID
+    looks.clear_special()
+
+    current[0] = FULL_INTENSITY
+    await controller.change_effect(LightIntent.BUILDUP)
+    start = len(lighting.events)
+    clock.advance(STROBE_COOLDOWN_SECONDS + 1)
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting, start)] == [SPECIAL_ID, DROP_ACCENT_ID]
+
+
+def _long_texture_on_a_drop(tmp_path):
+    import dataclasses
+
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    control.settings = FULL_INTENSITY
+    clock = VirtualClock()
+    lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
+    texture = dataclasses.replace(SPIN, release_beats=64)
+    controller = EffectController(
+        lighting, clock=clock, settings=lambda: control.settings, specials=[texture, DROP_STROBE]
+    )
+    return control, controller, lighting, clock
+
+
+async def test_fx_off_ends_a_running_texture_at_once_and_spares_the_drop_strobe(tmp_path):
+    from types import SimpleNamespace
+
+    control, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting)] == [SPECIAL_ID, DROP_ACCENT_ID]
+    show = SimpleNamespace(effect_controller=controller)
+
+    start = len(lighting.events)
+    control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
+    await control.apply_pending(show)
+    assert accents(lighting, start) == [CUT], 'the drop strobe keeps its own burst'
+
+    control.commands.put_nowait({'action': 'fx_auto', 'enabled': True})
+    await control.apply_pending(show)
+    assert accents(lighting, start) == [CUT], 'FX on restarts nothing; the next entry picks'
+
+
+async def test_standby_ends_a_running_texture_at_once_and_keeps_the_cooldown(tmp_path):
+    _, controller, lighting, _ = _long_texture_on_a_drop(tmp_path)
+    await controller.change_effect(LightIntent.DROP)
+    start = len(lighting.events)
+    controller.enter_standby(120.0)
+    assert CUT in accents(lighting, start)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    assert accents(lighting, start) == [], 'the cooldown still holds both intense rows back'
+
+
+def _delayed_show(tmp_path, delay_sec=14.0):
+    from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
+    from autolux.lib.engine.light_engine import LightEngine
+
+    control, controller, lighting, clock = _long_texture_on_a_drop(tmp_path)
+    command_queue = DelayedCommandQueue(delay_sec, clock=clock)
+    light = LightEngine(
+        lighting, controller, command_queue, playback_delay_sec=delay_sec, clock=clock
+    )
+    return control, light, command_queue, lighting, clock
+
+
+async def _settle_audible_timeline(command_queue, clock, delay_sec=14.0):
+    clock.advance(delay_sec + 1.0)
+    await command_queue.drain()
+
+
+@pytest.mark.parametrize('cause', ['fx_off', 'standby', 'pause', 'static'])
+async def test_an_operator_cut_reaches_the_renderer_now_not_at_the_audible_position(
+    tmp_path, cause
+):
+    control, light, command_queue, lighting, clock = _delayed_show(tmp_path)
+    await light.effect_controller.change_effect(LightIntent.DROP)
+    clock.advance(3.0)
+    start = len(lighting.events)
+    if cause == 'fx_off':
+        control.commands.put_nowait({'action': 'fx_auto', 'enabled': False})
+        await control.apply_pending(light)
+    elif cause == 'pause':
+        light.pause()
+        kinds = [e['command']['kind'] for e in lighting.events[start:]]
+        assert kinds.index('set_paused') < kinds.index('clear_override'), 'cut on a paused clock'
+    elif cause == 'static':
+        light.enter_static()
+    else:
+        light.on_digital_silence()
+    cuts = [e for e in lighting.events[start:] if e['command'] == CUT]
+    assert [e['at_seconds'] for e in cuts] == [clock.monotonic()], 'sent on the cut, undelayed'
+    assert command_queue.pending == 0, 'nothing for the special waits on the delayed queue'
+    after = len(lighting.events)
+    await _settle_audible_timeline(command_queue, clock)
+    assert not [e for e in lighting.events[after:] if e['command']['kind'] == 'clear_override']
+
+
+async def test_fx_auto_round_trips_from_the_bridge_through_the_engine_to_show_json(tmp_path):
+    import json
+
+    from autolux.lib.main import ShowControl
+    from autolux.lib.ui_bridge import parse_control_command
+
+    control, light, _, _, lighting = _capped_show(tmp_path)
+    assert control.settings.fx_auto is True
+    sent = len(lighting.events)
+    control.commands.put_nowait(parse_control_command({'action': 'fx_auto', 'enabled': False}))
+    await control.apply_pending(light)
+    assert light.effect_controller._settings().fx_auto is False
+    assert len(lighting.events) == sent, 'switching FX off cuts nothing at once'
+    # The control's own clock settles the save; saving at once stands in for that wait.
+    control.save_settings()
+    saved = json.loads((tmp_path / 'show.json').read_text(encoding='utf-8'))
+    assert saved['settings']['fx_auto'] is False
+    assert ShowControl(tmp_path / 'show.json').settings.fx_auto is False
+    with pytest.raises(ValueError, match='fx_auto must be true or false'):
+        parse_control_command({'action': 'fx_auto', 'enabled': 'off'})
+
+
+async def test_a_settings_edit_keeps_fx_off_and_the_level_picked_since_its_page_last_polled(
+    tmp_path,
+):
+    from autolux.lib.ui_bridge import parse_control_command
+
+    control, light, _, _, _ = _capped_show(tmp_path)
+    for command in (
+        {'action': 'fx_auto', 'enabled': False},
+        {'action': 'intensity', 'level': 0.3},
+        {'action': 'settings', 'settings': {'crossfade_beats': 2.0}},
+        {'action': 'settings', 'settings': {'quiet_brightness': 0.25}},
+    ):
+        control.commands.put_nowait(parse_control_command(command))
+    await control.apply_pending(light)
+    settings = light.effect_controller._settings()
+    assert settings.fx_auto is False
+    assert settings.intensity == 0.3
+    assert (settings.crossfade_beats, settings.quiet_brightness) == (2.0, 0.25)

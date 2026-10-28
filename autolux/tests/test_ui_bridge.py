@@ -96,6 +96,21 @@ def test_the_frame_cadence_drain_applies_a_post_before_the_reply_well_inside_50_
     assert sorted(rounds)[len(rounds) // 2] < 0.05, rounds
 
 
+def test_each_accepted_command_logs_one_line_naming_its_sender(bridge, caplog):
+    connection, commands = bridge
+    _engine(commands, [])
+    headers = {**JSON, 'Origin': DASHBOARD, 'User-Agent': 'Phone ' + 'x' * 200}
+    with caplog.at_level('INFO', logger='autolux.lib.ui_bridge'):
+        _request(connection, 'POST', {'action': 'fx_auto', 'enabled': True}, headers)
+        _request(connection, 'POST', {'action': 'dance'}, headers)
+    commands.put(None)
+    lines = [record.getMessage() for record in caplog.records]
+    assert lines == [
+        f"[control] {{'action': 'fx_auto', 'enabled': True}} from 127.0.0.1 "
+        f'origin={DASHBOARD} agent=Phone ' + 'x' * 74
+    ]
+
+
 def test_a_stalled_engine_is_reported_instead_of_claiming_the_command_applied(bridge):
     connection, _ = bridge
     reply, body = _request(connection, 'POST', {'action': 'pause'}, JSON)
@@ -184,6 +199,10 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
     command = parse_control_command(
         {'action': 'settings', 'settings': {'group_masters': {'wash': 0.5}}}
     )
-    assert command['settings'].group_masters == {'wash': 0.5}
+    # A settings edit carries only the fields it changes; the engine merges them.
+    assert command['settings'] == {'group_masters': {'wash': 0.5}}
     with pytest.raises(ValueError, match='group master wash'):
         parse_control_command({'action': 'settings', 'settings': {'group_masters': {'wash': 2}}})
+    for owned in ({'fx_auto': False}, {'intensity': 0.3}, {'intensity_auto': True}):
+        with pytest.raises(ValueError, match='their own actions'):
+            parse_control_command({'action': 'settings', 'settings': owned})
