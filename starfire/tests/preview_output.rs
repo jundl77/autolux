@@ -3,7 +3,7 @@ mod support;
 use serde_json::{Value, json};
 use starfire::model::{Command, TimedCommand, Transition};
 use starfire::protocol::wire;
-use starfire::replay::{PREVIEW_KIND, REPLAY_SCHEMA_VERSION, Replay, write_preview};
+use starfire::replay::{PREVIEW_KIND, REPLAY_SCHEMA_VERSION, Replay, render_replay, write_preview};
 use starfire::script::AutoloopCatalog;
 
 const RED_HALF: &str = r#"return {render=function(ctx) return sf.scene {
@@ -129,8 +129,8 @@ fn a_higher_rate_only_adds_frames() {
     assert_eq!(lines[1 + 20], preview_lines(10)[1 + 10]);
 }
 
-#[test]
-fn a_moving_head_carries_its_beam_direction_and_gobo() {
+/// A hanging synthetic scanner (pan, tilt, RGB, a gobo wheel) above a generic wash.
+fn scanner_and_wash() -> starfire::fixtures::FixtureRig {
     let mut definition = support::definition(&json!({"fixtures": [
         {"fixture_uuid": "scanner", "profile": "beam_scanner", "universe": 0, "address": 1,
             "matrix": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3000.0]},
@@ -140,44 +140,146 @@ fn a_moving_head_carries_its_beam_direction_and_gobo() {
         "beam_scanner#6ch",
         "beam_scanner",
     ));
-    let rig = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap();
+    starfire::fixtures::FixtureRig::from_wire(&definition).unwrap()
+}
+
+/// `source` selected at 0 s on a 120 bpm grid, recorded at the show's 40 Hz.
+fn one_loop(source: &str, duration_seconds: f64) -> (AutoloopCatalog, Replay) {
     let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "down".into(),
+        autoloop_id: "under_test".into(),
         bank: "test".into(),
-        lua_source: r#"return {render=function(ctx) return sf.scene {
-            sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(0, 0, 1)),
-            sf.pan_tilt(sf.fixture("scanner"), 0.5, 0.5),
-            sf.channel_preset(sf.fixture("scanner"), "Gobo1", "Dots")} end}"#
-            .into(),
+        lua_source: source.into(),
     }])
     .unwrap();
     let select = TimedCommand {
         at_seconds: 0.0,
         command: Command::Select {
             bank: "test".into(),
-            autoloop: "down".into(),
+            autoloop: "under_test".into(),
             transition: Transition::Cut,
             palette: "techno".into(),
         },
     };
     let replay = Replay {
         schema_version: REPLAY_SCHEMA_VERSION,
-        duration_seconds: 0.0,
+        duration_seconds,
         frame_rate_hz: 40,
         palettes: support::palette_definitions(),
         events: vec![beat(0.0, 0), select],
     };
+    (catalog, replay)
+}
+
+fn frames_of(output: Vec<u8>) -> Vec<Value> {
+    String::from_utf8(output)
+        .unwrap()
+        .lines()
+        .skip(1)
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+#[test]
+fn a_moving_head_carries_its_beam_direction_and_gobo() {
+    let (catalog, replay) = one_loop(
+        r#"return {render=function(ctx) return sf.scene {
+            sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(0, 0, 1)),
+            sf.pan_tilt(sf.fixture("scanner"), 0.5, 0.5),
+            sf.channel_preset(sf.fixture("scanner"), "Gobo1", "Dots")} end}"#,
+        0.0,
+    );
     let mut output = Vec::new();
-    write_preview(&replay, rig, catalog, 10, &mut output).unwrap();
-    let frame: Value =
-        serde_json::from_str(String::from_utf8(output).unwrap().lines().nth(1).unwrap()).unwrap();
+    write_preview(&replay, scanner_and_wash(), catalog, 10, &mut output).unwrap();
     // A hanging head at the middle of its pan and tilt throws straight down; the wash has no
     // movement and no gobo, so its entry stops at strobe.
     assert_eq!(
-        frame["c"],
+        frames_of(output)[0]["c"],
         json!([
             [1.0, 0.0, 0.0, 1.0, 0.0, [0.0, 0.0, -1.0], "Dots"],
             [1.0, 0.0, 0.0, 1.0, 0.0]
         ])
     );
+}
+
+#[test]
+fn preview_frames_are_the_shows_own_frames_under_the_slew_limit_and_strobe_caps() {
+    // The pan target jumps every beat, so the slew limit is mid-chase in most frames, and the
+    // wash strobes long enough to meet the burst cap.
+    let (catalog, replay) = one_loop(
+        r#"return {render=function(ctx) return sf.scene {
+            sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(1, 1, 1)),
+            sf.pan_tilt(sf.fixture("scanner"), ctx.autoloop_elapsed_beats % 2 < 1 and 0 or 1, 0.8),
+            sf.strobe(sf.fixture("wash"), 8)} end}"#,
+        4.0,
+    );
+    // Balanced: movement slews at a share of full speed and strobe is allowed, scaled; a
+    // one-second burst cap ends the strobe inside the recording.
+    let mut replay = replay;
+    replay.events.insert(
+        0,
+        TimedCommand {
+            at_seconds: 0.0,
+            command: Command::SetIntensity { level: 0.7 },
+        },
+    );
+    replay.events.insert(
+        0,
+        TimedCommand {
+            at_seconds: 0.0,
+            command: Command::SetStrobeMaxBurstSeconds { seconds: 1.0 },
+        },
+    );
+    let rig = scanner_and_wash();
+    let shown = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
+    let mut output = Vec::new();
+    write_preview(&replay, rig.clone(), catalog, 10, &mut output).unwrap();
+    let frames = frames_of(output);
+    assert_eq!(frames.len(), shown.len().div_ceil(4));
+    let round = |value: f64| (value * 1000.0).round() / 1000.0 + 0.0;
+    let (mut chased, mut strobed) = (0, 0);
+    for (index, frame) in frames.iter().enumerate() {
+        let states = &shown[index * 4].fixture_properties_before_strobe;
+        let scanner = &states["scanner"];
+        let direction = rig
+            .beam_direction("scanner", scanner.pan, scanner.tilt)
+            .unwrap()
+            .map(round);
+        assert_eq!(frame["c"][0][5], json!(direction), "frame {index}");
+        assert_eq!(
+            frame["c"][1][4],
+            json!(round(states["wash"].strobe_hz)),
+            "frame {index}"
+        );
+        chased += usize::from(scanner.pan > 0.0 && scanner.pan < 1.0);
+        strobed += usize::from(states["wash"].strobe_hz > 0.0);
+    }
+    assert!(
+        chased > frames.len() / 2,
+        "the slew limit shapes {chased} frames"
+    );
+    assert!(
+        strobed > 0 && strobed < frames.len(),
+        "the burst cap ends the strobe ({strobed})"
+    );
+}
+
+#[test]
+fn a_preview_rate_that_does_not_divide_the_show_rate_is_refused() {
+    let (catalog, replay) = one_loop(RED_HALF, 1.0);
+    let error = write_preview(&replay, scanner_and_wash(), catalog, 30, &mut Vec::new())
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("must divide"), "{error}");
+}
+
+#[test]
+fn a_script_fault_is_flagged_on_every_dark_frame_and_named_once() {
+    let (catalog, replay) = one_loop(r#"return {render=function(ctx) error("boom") end}"#, 1.0);
+    let mut output = Vec::new();
+    let summary = write_preview(&replay, scanner_and_wash(), catalog, 10, &mut output).unwrap();
+    let frames = frames_of(output);
+    assert_eq!(summary.script_errors.len(), 1);
+    assert!(frames.iter().all(|frame| frame["fault"] == json!(true)));
+    assert!(frames[0]["error"].as_str().unwrap().contains("boom"));
+    assert!(frames[1..].iter().all(|frame| frame.get("error").is_none()));
 }

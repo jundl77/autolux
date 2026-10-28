@@ -184,8 +184,9 @@ pub struct PreviewSummary {
 /// then one frame per line at `rate_hz`, each cell `[i, r, g, b, strobe_hz, direction, gobo]`
 /// in header order. Intensity and strobe are the output after masters and limits. Direction
 /// (a unit vector in the MVR scene frame) and gobo leave the tail when absent; a missing
-/// direction before a gobo is null. Frames stream out as they render, so a long recording
-/// holds no frames in memory.
+/// direction before a gobo is null. The replay renders at its own rate, as the show does, and
+/// every (replay rate / `rate_hz`)-th frame is written as it renders, so a long recording holds
+/// no frames in memory.
 pub fn write_preview(
     replay: &Replay,
     rig: FixtureRig,
@@ -197,12 +198,14 @@ pub fn write_preview(
     use serde_json::{Value, json};
     use std::collections::{BTreeMap, BTreeSet};
 
-    // Loops, crossfades and limits all run on time, not frame count, so rendering at the
-    // preview rate shows what the 40 Hz show does at the same instants.
-    let replay = Replay {
-        frame_rate_hz: rate_hz,
-        ..replay.clone()
-    };
+    ensure!(
+        rate_hz > 0 && replay.frame_rate_hz.is_multiple_of(rate_hz),
+        "preview rate {rate_hz} Hz must divide the replay's {} Hz",
+        replay.frame_rate_hz
+    );
+    // The slew limit and strobe bursts step per rendered frame, so only the show's own rate
+    // reproduces them; the preview samples that render.
+    let stride = (replay.frame_rate_hz / rate_hz) as usize;
     let frame_count = replay.validate()?;
     let cells = rig.cell_ids();
     let index: BTreeMap<&str, usize> = cells
@@ -217,11 +220,9 @@ pub fn write_preview(
     let placed: Vec<Value> = cells
         .iter()
         .map(|id| {
-            let [x, y, z] = rig
-                .spatial()
-                .position(id)
-                .unwrap_or_default()
-                .map(|mm| preview_round(mm / 1000.0));
+            let [x, y, z] = rig.spatial().position(id).map_or([None; 3], |mm| {
+                mm.map(|mm| Some(preview_round(mm / 1000.0)))
+            });
             json!({"id": id, "fixture": rig.uuid_of_cell(id), "x": x, "y": y, "z": z})
         })
         .collect();
@@ -235,7 +236,7 @@ pub fn write_preview(
         .collect();
     let header = json!({
         "kind": PREVIEW_KIND, "frame_rate_hz": rate_hz,
-        "duration_seconds": replay.duration_seconds, "frames": frame_count,
+        "duration_seconds": replay.duration_seconds, "frames": frame_count.div_ceil(stride),
         "beats_per_bar": beats_per_bar, "cells": placed, "groups": groups,
     });
     serde_json::to_writer(&mut *output, &header)?;
@@ -244,8 +245,12 @@ pub fn write_preview(
     let mut engine = Engine::new(rig.clone(), catalog, PaletteTable::new(&replay.palettes)?)?;
     let mut events = replay.events.iter().peekable();
     let mut script_errors = BTreeSet::new();
+    let mut diagnostic_bytes: usize = 0;
+    // A fault first seen between written frames is named on the next one written.
+    let mut unwritten_error = None;
     for frame_index in 0..frame_count {
-        let time_seconds = (frame_index as f64 / f64::from(rate_hz)).min(replay.duration_seconds);
+        let time_seconds =
+            (frame_index as f64 / f64::from(replay.frame_rate_hz)).min(replay.duration_seconds);
         while events
             .peek()
             .is_some_and(|event| event.at_seconds <= time_seconds)
@@ -254,6 +259,20 @@ pub fn write_preview(
             engine.apply(event.at_seconds, &event.command)?;
         }
         let frame = engine.render_at(time_seconds)?;
+        if let Some(error) = &frame.script_error
+            && !script_errors.contains(error)
+        {
+            diagnostic_bytes = diagnostic_bytes.saturating_add(error.len());
+            ensure!(
+                diagnostic_bytes <= MAX_REPLAY_DIAGNOSTIC_BYTES,
+                "preview exceeds diagnostic memory budget"
+            );
+            script_errors.insert(error.clone());
+            unwritten_error = Some(error.clone());
+        }
+        if !frame_index.is_multiple_of(stride) {
+            continue;
+        }
         let states = &frame.fixture_properties_before_strobe;
         let values: Vec<Value> = cells
             .iter()
@@ -269,17 +288,19 @@ pub fn write_preview(
             "autoloop": frame.active_autoloop,
             "c": values,
         });
-        if let Some(error) = frame.script_error {
-            // A faulted loop renders dark; the flag keeps that from reading as restraint.
+        // A faulted loop renders dark; the flag keeps that from reading as restraint.
+        if frame.script_error.is_some() {
             line["fault"] = Value::Bool(true);
-            script_errors.insert(error);
+        }
+        if let Some(error) = unwritten_error.take() {
+            line["error"] = Value::String(error);
         }
         serde_json::to_writer(&mut *output, &line)?;
         output.write_all(b"\n")?;
     }
     output.flush()?;
     Ok(PreviewSummary {
-        frames: frame_count,
+        frames: frame_count.div_ceil(stride),
         script_errors,
     })
 }
