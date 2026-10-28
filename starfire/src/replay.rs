@@ -214,20 +214,29 @@ pub fn write_preview(
         Command::Beat { beats_per_bar, .. } => Some(beats_per_bar),
         _ => None,
     });
-    let header = json!({
-        "kind": PREVIEW_KIND,
-        "frame_rate_hz": rate_hz,
-        "duration_seconds": replay.duration_seconds,
-        "frames": frame_count,
-        "beats_per_bar": beats_per_bar,
-        "cells": cells.iter().map(|id| {
-            let [x, y, z] = rig.spatial().position(id).unwrap_or_default().map(|mm| preview_round(mm / 1000.0));
+    let placed: Vec<Value> = cells
+        .iter()
+        .map(|id| {
+            let [x, y, z] = rig
+                .spatial()
+                .position(id)
+                .unwrap_or_default()
+                .map(|mm| preview_round(mm / 1000.0));
             json!({"id": id, "fixture": rig.uuid_of_cell(id), "x": x, "y": y, "z": z})
-        }).collect::<Vec<_>>(),
-        "groups": rig.groups().iter().map(|(group, members)| {
-            let members: Vec<usize> = members.iter().filter_map(|id| index.get(id.as_str()).copied()).collect();
-            (group.clone(), members)
-        }).collect::<BTreeMap<_, _>>(),
+        })
+        .collect();
+    let groups: BTreeMap<&str, Vec<usize>> = rig
+        .groups()
+        .iter()
+        .map(|(group, members)| {
+            let members = members.iter().map(|id| index[id.as_str()]).collect();
+            (group.as_str(), members)
+        })
+        .collect();
+    let header = json!({
+        "kind": PREVIEW_KIND, "frame_rate_hz": rate_hz,
+        "duration_seconds": replay.duration_seconds, "frames": frame_count,
+        "beats_per_bar": beats_per_bar, "cells": placed, "groups": groups,
     });
     serde_json::to_writer(&mut *output, &header)?;
     output.write_all(b"\n")?;
