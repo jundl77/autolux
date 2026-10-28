@@ -56,8 +56,8 @@ def running_rig(path: Path) -> tuple[str, dict]:
     fixtures = static_rig(path).fixtures
     return rig_revision(path.read_bytes()), {
         'fixtures': [
-            {'id': identity, 'name': name, 'cells': list(cells)}
-            for identity, name, cells in fixtures
+            {'fixture_uuid': fixture_uuid, 'name': name, 'cells': list(cells)}
+            for fixture_uuid, name, cells in fixtures
         ]
     }
 
@@ -281,7 +281,16 @@ class RigFiles:
 
     def describe(self) -> dict:
         store = self.store.read_bytes()
-        fields = ('uuid', 'name', 'gdtf_spec', 'gdtf_mode', 'universe', 'address', 'class', 'layer')
+        fields = (
+            'fixture_uuid',
+            'name',
+            'gdtf_spec',
+            'gdtf_mode',
+            'universe',
+            'address',
+            'class',
+            'layer',
+        )
         fixtures = [
             {
                 **{key: fixture.get(key) for key in fields},

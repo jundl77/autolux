@@ -118,13 +118,13 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
                 inverted: range.get("inverted").and_then(Value::as_bool) == Some(true),
             })
         };
-        let id = fixture["id"].as_str().unwrap();
+        let uuid = fixture["fixture_uuid"].as_str().unwrap();
         rig.fixtures.push(wire::Fixture {
-            fixture_id: id.into(),
-            // A spec's fixtures are labelled by their ID unless one names them.
+            fixture_uuid: uuid.into(),
+            // A spec's fixtures are labelled by their uuid unless one names them.
             name: fixture
                 .get("name")
-                .map_or(id, |name| name.as_str().unwrap())
+                .map_or(uuid, |name| name.as_str().unwrap())
                 .into(),
             profile_id: profile.into(),
             universe: number(fixture, "universe"),
@@ -152,7 +152,7 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
         for (group, members) in groups {
             rig.groups.push(wire::FixtureGroup {
                 group_id: group.clone(),
-                fixture_ids: members
+                fixture_uuids: members
                     .as_array()
                     .unwrap()
                     .iter()
@@ -173,9 +173,9 @@ pub fn rig(spec: Value) -> FixtureRig {
     try_rig(spec).unwrap()
 }
 
-/// The room fixture's ID that `name` labels.
-pub fn room_id(name: &str) -> String {
-    room().fixture_named(name).unwrap().to_owned()
+/// The room fixture's uuid that `name` labels.
+pub fn room_uuid(name: &str) -> String {
+    room().uuid_of_label(name).unwrap().to_owned()
 }
 
 pub fn room_definition() -> wire::RigDefinition {

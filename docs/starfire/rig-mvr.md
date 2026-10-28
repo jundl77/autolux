@@ -24,7 +24,7 @@ single native validator. `rig/room.rig.pb` and the synthetic sample rig
 the Login rig of their MVR.
 
 Identity is the MVR Fixture `uuid`; `name` is a label; `FixtureID`/`FixtureIDNumeric` are the
-console patch numbers and identify nothing. The uuid is `Fixture.fixture_id`, every cell ID
+console patch numbers and identify nothing. The uuid is `Fixture.fixture_uuid`, every cell id
 derives from it (`uuid`, or `uuid/geometry` on a multi-cell fixture), group members are the
 uuids the `Classing` attribute places in each Class, and highlight, override and test targets
 carry it. `Fixture.name` reaches Starfire for logs and for autoloops, which name fixtures by

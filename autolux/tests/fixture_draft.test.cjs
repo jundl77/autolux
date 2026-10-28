@@ -34,10 +34,10 @@ const UUID = /^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{1
 const draft = () => structuredClone(data.draft);
 // The running show's rig as the control state reports it: the room as committed.
 const RUNNING = {
-    fixtures: data.patched.map(([id, name, , , cells]) => ({ id, name, cells: cells.length > 1 ? cells.map((geometry) => `${id}/${geometry}`) : [id] }))
+    fixtures: data.patched.map(([fixture_uuid, name, , , cells]) => ({ fixture_uuid, name, cells: cells.length > 1 ? cells.map((geometry) => `${fixture_uuid}/${geometry}`) : [fixture_uuid] }))
 };
 // Each room fixture's MVR uuid by its committed name.
-const ID = Object.fromEntries(data.patched.map(([id, name]) => [name, id]));
+const FIXTURE_UUID = Object.fromEntries(data.patched.map(([fixture_uuid, name]) => [name, fixture_uuid]));
 const nodes = function* (tree) {
     yield tree;
     for (const child of tree.children) yield* nodes(child);
@@ -52,7 +52,7 @@ function edit(current, action, { trigger = "fixture-grid-action", busy = "false"
 
 test("patched fixtures match the server's reading of the room rig", () => {
     const rows = model.fixtureRows(draft(), settings);
-    assert.deepEqual(plain(rows.map((row) => [row.id, row.name, row.universe, row.address, row.cells])), data.patched);
+    assert.deepEqual(plain(rows.map((row) => [row.fixture_uuid, row.name, row.universe, row.address, row.cells])), data.patched);
     assert.deepEqual(plain(model.occupancy(rows, settings, 0).errors), []);
     assert.equal(rows.find((row) => row.name === "spot_left").channels, 12);
 });
@@ -104,7 +104,7 @@ test("library adds create spec-complete fixtures and embed their GDTF", () => {
     assert.equal(selected, created[0].key);
     for (const node of created) {
         assert.match(node.attributes.uuid, UUID);
-        assert.ok(!Object.values(ID).includes(node.attributes.uuid), "a new fixture never reuses a uuid");
+        assert.ok(!Object.values(FIXTURE_UUID).includes(node.attributes.uuid), "a new fixture never reuses a uuid");
         for (const tag of ["Matrix", "GDTFMode", "FixtureID", "FixtureIDNumeric", "UnitNumber", "Addresses"]) {
             assert.ok(child(node, tag), tag);
         }
@@ -469,14 +469,14 @@ test("the test controls send highlight commands, hold them alive and clear once 
     ds.fixture_patch.syncTest({ ...live, static: { blackout: true } }, "config");
     assert.equal(model.testControl("red"), null);
     ds.fixture_patch.syncTest(live, "config");
-    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: ID.spot_right }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" });
     // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command, and the 10-minute end.
     assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000, 600000]);
     [...timers.values()][0].run();
     assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
     // › steps in patch order (kinta at 40 follows spot_right at 13), keeping the lit colour.
-    ds.fixture_patch.syncTest({ ...live, highlight: { target: { fixture: ID.spot_right }, colour: "red" } }, "config");
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: ID.kinta }, colour: "red" });
+    ds.fixture_patch.syncTest({ ...live, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" } }, "config");
+    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
     assert.equal(actions.at(-1).key, fixtureNode(current, "kinta").key);
     assert.equal(timers.size, 2);
     const sent = commands.length;
@@ -489,7 +489,7 @@ test("the test controls send highlight commands, hold them alive and clear once 
     model.testControl("blue");
     ds.fixture_patch.renderRig(null, current, settings);
     ds.fixture_patch.renderRig(null, current, settings);
-    assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: ID.spot_right }, colour: "blue" }, { action: "highlight", target: null }]);
+    assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "blue" }, { action: "highlight", target: null }]);
     ds.fixture_patch.renderRig(spot.key, current, settings);
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("white");
@@ -534,7 +534,7 @@ test("a lit test follows the selection; late or unanswered replies never turn it
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("red");
     ds.fixture_patch.renderRig(kinta.key, current, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: ID.kinta }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
     await new Promise(setImmediate);
     assert.equal(timers.size, 2, "kinta's keep-alive survives spot_right's late refusal");
     // No answer at all may mean lit: the keep-alive stays and a deselect still clears.
@@ -583,7 +583,7 @@ test("a held test ends after 10 minutes, and stops when the show drops it withou
     const current = draft();
     const spot = fixtureNode(current, "spot_right");
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
-    const lit = { ...live, highlight: { target: { fixture: ID.spot_right }, colour: "white" } };
+    const lit = { ...live, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "white" } };
     timers.clear();
     ds.fixture_patch.renderRig(spot.key, current, settings);
     ds.fixture_patch.syncTest(live, "config");
@@ -615,12 +615,12 @@ test("a plan drag writes the Matrix the server's area and group-order test reads
 
 test("› carries the operator's latest swatch, not the colour the last poll reported", () => {
     const current = draft();
-    const green = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: { target: { fixture: ID.spot_right }, colour: "green" } };
+    const green = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: { target: { fixture: FIXTURE_UUID.spot_right }, colour: "green" } };
     timers.clear();
     ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
     ds.fixture_patch.syncTest(green, "config");
     model.testControl("red");
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: ID.kinta }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
     model.testControl("off");
 });
 
@@ -633,12 +633,12 @@ test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixt
     ds.fixture_patch.syncTest(live, "config");
     // The label spot_right now sits on the old spot_left: its test lights that uuid.
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_right").key, swapped, settings);
-    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: ID.spot_left }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_left }, colour: "red" });
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_left").key, swapped, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: ID.spot_right }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" });
     const renamed = rename(current, "kinta", "kinta_new");
     ds.fixture_patch.renderRig(fixtureNode(renamed, "spot_right").key, renamed, settings);
-    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: ID.kinta }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
     // A fixture added since the show started has a uuid the show does not know.
     const spec = Object.keys(settings.library).find((name) => name.startsWith("Generic@Dimmer@"));
     const [added, , , fresh] = edit(renamed, null, { trigger: "fixture-add", profile: spec });

@@ -197,7 +197,7 @@ fn physical_pan_values_obey_patch_calibration() {
         )]),
         wire::Fixture {
             area: wire::StageArea::Centre as i32,
-            fixture_id: "mover".into(),
+            fixture_uuid: "mover".into(),
             name: "mover".into(),
             pan: Some(wire::fixture::MovementRange {
                 minimum: Some(0.25),
@@ -599,7 +599,7 @@ fn rig(channels: Vec<wire::DmxChannel>) -> FixtureRig {
         mode(channels),
         wire::Fixture {
             area: wire::StageArea::Centre as i32,
-            fixture_id: "fixture".into(),
+            fixture_uuid: "fixture".into(),
             name: "fixture".into(),
             ..Default::default()
         },

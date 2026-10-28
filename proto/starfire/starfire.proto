@@ -146,7 +146,7 @@ message SetActiveEffect {
   string effect_id = 2;
   oneof target {  // Omitted targets all fixtures.
     string group = 3;
-    string fixture = 4;  // A Fixture.fixture_id or one of its cell IDs, never a name.
+    string fixture = 4;  // A Fixture.fixture_uuid or one of its cell ids, never a name.
   }
   optional double intensity = 5;  // 0..1.
   RgbColor colour = 6;

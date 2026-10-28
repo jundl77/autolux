@@ -25,7 +25,7 @@ const MATRIX_VALUES: usize = 12;
 
 #[derive(Clone, Debug)]
 struct FixturePatch {
-    id: String,
+    fixture_uuid: String,
     name: String,
     profile: String,
     universe: u16,
@@ -160,11 +160,11 @@ pub struct FixtureRig {
 }
 
 /// A single-cell fixture's cell is the fixture itself; other cells are named after their geometry.
-pub fn cell_id(fixture_id: &str, geometry: &str, cell_count: usize) -> String {
+pub fn cell_id(fixture_uuid: &str, geometry: &str, cell_count: usize) -> String {
     if cell_count == 1 {
-        fixture_id.to_owned()
+        fixture_uuid.to_owned()
     } else {
-        format!("{fixture_id}/{geometry}")
+        format!("{fixture_uuid}/{geometry}")
     }
 }
 
@@ -181,7 +181,7 @@ impl FixtureRig {
                 pan.inverted ^= home.reversed;
                 tilt.inverted ^= home.reversed;
                 Ok(FixturePatch {
-                    id: fixture.fixture_id.clone(),
+                    fixture_uuid: fixture.fixture_uuid.clone(),
                     name: fixture.name.clone(),
                     profile: fixture.profile_id.clone(),
                     universe: u16::try_from(fixture.universe)
@@ -220,7 +220,7 @@ impl FixtureRig {
             );
             ensure!(
                 groups
-                    .insert(group.group_id.clone(), group.fixture_ids.clone())
+                    .insert(group.group_id.clone(), group.fixture_uuids.clone())
                     .is_none(),
                 "duplicate fixture group ID {}",
                 group.group_id
@@ -274,18 +274,18 @@ impl FixtureRig {
             validate_identifier(id)?;
         }
 
-        let mut ids = BTreeSet::new();
+        let mut uuids = BTreeSet::new();
         let mut names = BTreeMap::new();
         let mut cells = BTreeMap::new();
         let mut occupied = BTreeMap::<u16, BTreeSet<usize>>::new();
         for (index, patch) in fixtures.iter_mut().enumerate() {
-            validate_identifier(&patch.id)?;
+            validate_identifier(&patch.fixture_uuid)?;
             validate_identifier(&patch.name)?;
             validate_identifier(&patch.profile)?;
             ensure!(
-                ids.insert(patch.id.clone()),
-                "duplicate fixture ID {} ({})",
-                patch.id,
+                uuids.insert(patch.fixture_uuid.clone()),
+                "duplicate fixture uuid {} ({})",
+                patch.fixture_uuid,
                 patch.name
             );
             // Autoloops name fixtures by label, so a label must pick out one fixture.
@@ -309,7 +309,7 @@ impl FixtureRig {
                 patch.name
             );
             for (cell, layout) in profile_cells.iter().enumerate() {
-                let id = cell_id(&patch.id, &layout.geometry, profile_cells.len());
+                let id = cell_id(&patch.fixture_uuid, &layout.geometry, profile_cells.len());
                 validate_identifier(&id)?;
                 ensure!(
                     cells.insert(id.clone(), (index, cell)).is_none(),
@@ -361,7 +361,7 @@ impl FixtureRig {
             let mut unique = BTreeSet::new();
             for member in members {
                 ensure!(
-                    ids.contains(member),
+                    uuids.contains(member),
                     "group {group} contains unknown fixture {member}"
                 );
                 ensure!(
@@ -372,7 +372,11 @@ impl FixtureRig {
             // A master cell follows its pixels, so groups name the pixels only.
             let members = members
                 .iter()
-                .filter_map(|member| fixtures.iter().find(|fixture| fixture.id == *member))
+                .filter_map(|member| {
+                    fixtures
+                        .iter()
+                        .find(|fixture| fixture.fixture_uuid == *member)
+                })
                 .flat_map(|fixture| {
                     fixture
                         .cells
@@ -386,7 +390,7 @@ impl FixtureRig {
         }
         let placed = || {
             fixtures.iter().flat_map(|fixture| {
-                std::iter::once(&fixture.id)
+                std::iter::once(&fixture.fixture_uuid)
                     .chain(&fixture.cells)
                     .map(move |id| (id.clone(), fixture))
             })
@@ -440,7 +444,7 @@ impl FixtureRig {
                 }
                 self.fixtures
                     .iter()
-                    .find(|fixture| fixture.id == *id)
+                    .find(|fixture| fixture.fixture_uuid == *id)
                     .map(|fixture| fixture.cells.clone())
                     .with_context(|| format!("unknown fixture {id}"))
             }
@@ -504,44 +508,49 @@ impl FixtureRig {
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
     }
 
-    pub fn fixture_of(&self, cell_id: &str) -> Option<&str> {
+    pub fn uuid_of_cell(&self, cell_id: &str) -> Option<&str> {
         let &(fixture, _) = self.cells.get(cell_id)?;
-        Some(&self.fixtures[fixture].id)
+        Some(&self.fixtures[fixture].fixture_uuid)
     }
 
-    /// The fixture ID a label names; autoloops are written against labels.
-    pub fn fixture_named(&self, name: &str) -> Option<&str> {
-        Some(&self.fixtures[*self.names.get(name)?].id)
+    /// The fixture uuid a label names; autoloops are written against labels.
+    pub fn uuid_of_label(&self, name: &str) -> Option<&str> {
+        Some(&self.fixtures[*self.names.get(name)?].fixture_uuid)
     }
 
-    /// The target with a fixture label resolved to its ID; IDs and unknown names pass through.
+    /// The target with a fixture label resolved to its uuid; uuids, cell ids and unknown names
+    /// pass through.
     pub fn by_label(&self, target: Target) -> Target {
         match target {
             Target::Fixture(name) => {
-                Target::Fixture(self.fixture_named(&name).map_or(name, str::to_owned))
+                Target::Fixture(self.uuid_of_label(&name).map_or(name, str::to_owned))
             }
             target => target,
         }
     }
 
-    /// A fixture's or cell's ID with its fixture's label in place of the fixture ID, for
-    /// messages people read; unknown IDs come back unchanged.
+    /// A fixture uuid or cell id with the fixture's label in place of its uuid, for
+    /// messages people read; unknown ones come back unchanged.
     pub fn label(&self, id: &str) -> String {
         let fixture = self
             .cells
             .get(id)
             .map(|&(fixture, _)| &self.fixtures[fixture])
-            .or_else(|| self.fixtures.iter().find(|fixture| fixture.id == id));
+            .or_else(|| {
+                self.fixtures
+                    .iter()
+                    .find(|fixture| fixture.fixture_uuid == id)
+            });
         fixture.map_or_else(
             || id.to_owned(),
-            |fixture| id.replacen(&fixture.id, &fixture.name, 1),
+            |fixture| id.replacen(&fixture.fixture_uuid, &fixture.name, 1),
         )
     }
 
-    pub fn fixture_ids(&self) -> Vec<String> {
+    pub fn fixture_uuids(&self) -> Vec<String> {
         self.fixtures
             .iter()
-            .map(|fixture| fixture.id.clone())
+            .map(|fixture| fixture.fixture_uuid.clone())
             .collect()
     }
 

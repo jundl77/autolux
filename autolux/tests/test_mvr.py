@@ -58,7 +58,7 @@ def placed_group(xs: list[float]) -> list[dict]:
 
 def named_groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
     """mvr.groups with each member uuid read back as its fixture's name."""
-    names = {fixture['uuid']: fixture['name'] for fixture in fixtures}
+    names = {fixture['fixture_uuid']: fixture['name'] for fixture in fixtures}
     groups, warnings = mvr.groups(fixtures)
     return {group: [names[member] for member in members] for group, members in groups.items()}, (
         warnings
@@ -248,7 +248,7 @@ def test_a_group_outside_the_role_layers_defaults_to_loop_with_a_warning():
 
 def test_each_added_fixture_gets_a_fresh_random_uuid():
     scene = room_layers()
-    before = {fixture['uuid'] for fixture in mvr.patched_fixtures(scene)}
+    before = {fixture['fixture_uuid'] for fixture in mvr.patched_fixtures(scene)}
     added = [
         mvr.add_fixture(
             scene,

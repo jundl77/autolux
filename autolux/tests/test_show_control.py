@@ -636,7 +636,7 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
 
 def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
     highlight = {'target': {'fixture': 'spot_left'}, 'colour': 'red'}
-    rig = {'fixtures': [{'id': 'spot_left', 'name': 'spot_left', 'cells': ['spot_left']}]}
+    rig = {'fixtures': [{'fixture_uuid': 'spot_left', 'name': 'spot_left', 'cells': ['spot_left']}]}
     snapshot = {
         'paused': True,
         'static': {'blackout': False},

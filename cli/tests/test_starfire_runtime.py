@@ -763,7 +763,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
     if not binary.is_file():
         pytest.skip('Build Starfire to exercise the native protocol boundary')
     [bar] = [
-        f['uuid']
+        f['fixture_uuid']
         for f in mvr.patched_fixtures(mvr.read(ROOM.read_bytes()))
         if f['name'] == 'zq06017'
     ]

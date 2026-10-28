@@ -37,7 +37,7 @@ HIGHLIGHT_COLOURS = {**PRESET_COLOURS, 'green': (0.0, 1.0, 0.0)}
 
 
 def names_target(fixtures, target: dict) -> bool:
-    """Whether {'fixture': id} or {'cell': id} is one of these (id, name, cell ids) fixtures."""
+    """Whether {'fixture': uuid} or {'cell': id} is one of these (uuid, name, cell ids) fixtures."""
     return any(
         target in ({'fixture': fixture}, *({'cell': cell} for cell in cells))
         for fixture, _, cells in fixtures
@@ -48,9 +48,9 @@ def names_target(fixtures, target: dict) -> bool:
 class StaticRig:
     groups: tuple[str, ...] = ()
     uv_groups: tuple[str, ...] = ()
-    # (fixture id, name, its Starfire cell ids); a single-cell fixture's cell is the fixture.
+    # (fixture uuid, name, its Starfire cell ids); a single-cell fixture's cell is the fixture.
     fixtures: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
-    # Fixture and cell ids Starfire accepts a UV attribute on.
+    # Fixture uuids and cell ids Starfire accepts a UV attribute on.
     uv_targets: tuple[str, ...] = ()
 
     @property
@@ -181,7 +181,7 @@ class StaticLooks:
             self._set_floor()
 
     def highlight(self, target: dict, colour: str = 'white', *, paused: bool = False) -> None:
-        """Locate {'fixture': id} or {'cell': id}: open white (or a swatch), beam home, no
+        """Locate {'fixture': uuid} or {'cell': id}: open white (or a swatch), beam home, no
         strobe. One highlight at a time, so testing another fixture moves it."""
         if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
@@ -200,14 +200,14 @@ class StaticLooks:
             'tilt': 0.5,
             'strobe_hz': 0.0,
         }
-        (identity,) = target.values()
-        if identity in self.rig.uv_targets:
+        (fixture_uuid,) = target.values()
+        if fixture_uuid in self.rig.uv_targets:
             values['attributes'] = {UV_ATTRIBUTE: 0.0}
         self._lighting.set_override(
             {
                 'id': HIGHLIGHT_ID,
                 # Starfire resolves a cell id through its fixture target too.
-                'target': {'fixture': identity},
+                'target': {'fixture': fixture_uuid},
                 'values': values,
                 'priority': STATIC_GROUP_PRIORITY + 1,
                 'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},

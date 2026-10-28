@@ -90,7 +90,7 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
                 mode=compile_mode(description, mode),
             )
         entry = rig.fixtures.add(
-            fixture_id=fixture['uuid'],
+            fixture_uuid=fixture['fixture_uuid'],
             name=fixture['name'],
             profile_id=profile_id,
             universe=fixture['universe'],
@@ -107,7 +107,7 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
     for warning in warnings + order_warnings:
         LOGGER.warning('[rig] %s', warning)
     for group, members in groups.items():
-        rig.groups.add(group_id=group, fixture_ids=members, role=WIRE_ROLES[roles[group]])
+        rig.groups.add(group_id=group, fixture_uuids=members, role=WIRE_ROLES[roles[group]])
     return rig
 
 
@@ -138,15 +138,15 @@ def static_rig(path: Path) -> StaticRig:
                 for logical in dmx_mode.iter('LogicalChannel')
             )
         fixture['uv'] = lit_by_uv[spec, mode]
-    by_uuid = {fixture['uuid']: fixture for fixture in fixtures}
+    by_uuid = {fixture['fixture_uuid']: fixture for fixture in fixtures}
     groups = mvr.groups(fixtures)[0]
     # The ids come from the very RigDefinition Starfire loads, named by Starfire's cell rule.
     patched = [
         (
-            entry.fixture_id,
+            entry.fixture_uuid,
             entry.name,
             tuple(
-                mvr.cell_id(entry.fixture_id, cell.geometry, len(entry.cells))
+                mvr.cell_id(entry.fixture_uuid, cell.geometry, len(entry.cells))
                 for cell in entry.cells
             ),
         )
@@ -165,9 +165,9 @@ def static_rig(path: Path) -> StaticRig:
         # Starfire checks attributes per cell, and which cell of a multi-cell fixture owns the
         # UV channel is not known here, so only single-cell fixtures get UV zeroed.
         uv_targets=tuple(
-            identity
-            for identity, _, cells in patched
-            if by_uuid[identity]['uv'] and len(cells) == 1
+            fixture_uuid
+            for fixture_uuid, _, cells in patched
+            if by_uuid[fixture_uuid]['uv'] and len(cells) == 1
         ),
     )
 
