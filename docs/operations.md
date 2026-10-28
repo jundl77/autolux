@@ -95,8 +95,21 @@ or clears the other's. A held test ends by itself after 10 minutes, and when the
 
 A mover's test row also has **Sweep** and **Aim**, which move the head through the same logical
 pan as the show, so yaw, mount and soft limits apply exactly as in a loop. Sweep: the beam should
-trace the arc drawn on the plan; if it sweeps the other way the yaw is wrong. Aim: the beam
-should point straight upstage; if it points elsewhere, the yaw or mount is wrong.
+trace the arc drawn on the plan, tilted to the focus point's elevation; if it sweeps the other
+way the yaw is wrong. Aim: the beam should pass through the focus point; if it points elsewhere,
+the yaw or mount is wrong.
+
+Focus point: the MVR focus point the fixture aims at; Aim points at it. A mover's Placement has a
+**Focus point (mm)** row in scene coordinates. Until it is edited it shows the default, the
+stage centre on the floor (the middle of the fixtures' plan bounding box, where every head without
+a focus point converges), and the MVR has no FocusPoint; the first edit adds
+one beside the fixture and points the fixture's Focus at it.
+
+Edits reach the lit fixture instantly while testing; Save writes the patch; Restart show makes the
+loops use it. Every test of a mover carries the unsaved placement (Matrix, soft limits, inversion
+and focus point), and an edit to it re-sends the lit test within 150 ms, so Aim and Sweep follow a
+yaw, mount or focus change at once. Only the test sees the unsaved pose; the loops keep the rig
+the show loaded.
 
 Tests pin no geometry from `rig/room.mvr`: they use the frozen copies
 `autolux/tests/data/room.mvr` and `room.rig.pb` (Starfire's tests embed the same `room.rig.pb`),

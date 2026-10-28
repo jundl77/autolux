@@ -203,12 +203,14 @@ class StaticLooks:
         *,
         sweep: bool = False,
         aim: bool = False,
+        pose: dict | None = None,
         paused: bool = False,
     ) -> None:
         """Locate {'fixture': uuid} or {'cell': id}: open white (or a swatch), beam home, no
         strobe. One highlight at a time, so testing another fixture moves it. On a mover, a
-        sweep pans between the soft limits and an aim points straight upstage, so the operator
-        can check yaw and mount against the plan."""
+        sweep pans between the soft limits and an aim points at the focus point, so the operator
+        can check yaw and mount against the plan. A pose ({matrix, pan, tilt, focus} as the rig
+        patch has them) places the fixture for the test as the unsaved patch does."""
         if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
         if colour not in HIGHLIGHT_COLOURS:
@@ -217,6 +219,8 @@ class StaticLooks:
             raise ValueError('a highlight sweeps or aims, not both')
         if (sweep or aim) and target.get('fixture') not in self.rig.pan_targets:
             raise ValueError(f'{target!r} has no pan')
+        if pose is not None and 'fixture' not in target:
+            raise ValueError('a pose places a whole fixture, not a cell')
         # Paused or blacked out, the rig is dark and the Locate would light nothing.
         if paused:
             raise ValueError('the show is paused')
@@ -236,11 +240,12 @@ class StaticLooks:
         # Starfire moves the head itself, through the logical pan the show's loops drive.
         if sweep:
             override['pan_sweep'] = True
-            values['tilt'] = 0.5
         elif aim:
-            override['aim_upstage'] = True
+            override['aim_focus'] = True
         else:
             values.update(pan=0.5, tilt=0.5)
+        if pose is not None:
+            override['pose'] = pose
         (fixture_uuid,) = target.values()
         if fixture_uuid in self.rig.uv_targets:
             values['attributes'] = {UV_ATTRIBUTE: 0.0}

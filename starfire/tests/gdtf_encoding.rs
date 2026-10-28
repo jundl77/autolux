@@ -4,8 +4,8 @@ use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::gdtf::GdtfProfile;
 use starfire::model::{
-    AttributeValue, Command, FixtureState, LightingOverride, OverrideLifetime, PropertyValues, Rgb,
-    Target, Transition,
+    AttributeValue, Command, FixturePose, FixtureState, LightingOverride, MovementRange,
+    OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
@@ -255,7 +255,7 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
         id: "highlight".into(),
         target: Target::Fixture("mover".into()),
         values: PropertyValues {
-            tilt: Some(0.5),
+            intensity: Some(1.0),
             ..Default::default()
         },
         intensity_multiplier: None,
@@ -263,7 +263,8 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
         priority: 0,
         special_fx: None,
         pan_sweep: true,
-        aim_upstage: false,
+        aim_focus: false,
+        pose: None,
     };
     engine
         .apply(0.0, &Command::SetOverride { value: sweep })
@@ -288,47 +289,144 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
     );
 }
 
-#[test]
-fn an_upstage_aim_throws_the_beam_towards_plus_y_at_any_yaw_and_mount() {
-    // Independent of the encoder: decode the DMX to body angles and carry the beam through the
-    // Matrix, as fixture_encoding's mount test does. The pan range centre faces local +Y, the
-    // display, and pan turns clockwise about local +Z; mid tilt is on the pan axis and tilts
-    // towards the pan heading; standing is the rigid flip.
-    let probe = support::rig(serde_json::json!({"fixtures": [{
+/// A yawed MVR Matrix at `position`, flipped about its facing when standing.
+fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
+    let (sin, cos) = f64::to_radians(yaw).sin_cos();
+    let flip = if hanging { 1.0 } else { -1.0 };
+    [
+        [flip * cos, flip * sin, 0.0],
+        [-sin, cos, 0.0],
+        [0.0, 0.0, flip],
+        position,
+    ]
+    .concat()
+}
+
+/// The first frame's DMX for one Intimidator under a highlight that sweeps or aims.
+fn moved(matrix: &[f64], focus: [f64; 3], inverted: bool, motion: Motion) -> Vec<u8> {
+    let rig = support::rig(serde_json::json!({"fixtures": [{
         "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
-        "universe": 0, "address": 1,
+        "universe": 0, "address": 1, "matrix": matrix, "focus": focus,
+        "pan": {"min": 0.1, "max": 0.8, "inverted": inverted},
+        "tilt": {"inverted": inverted},
     }]}));
-    let ranges =
-        ["Pan", "Tilt"].map(|axis| probe.profile("test").unwrap().movement_range(axis).unwrap());
-    // The 16-bit channel pair at `at` as a body angle off its range centre.
-    let decode = |frame: &[u8], at: usize, (from, to): (f64, f64)| {
-        let share = f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
-        (from + share * (to - from) - (from + to) / 2.0).to_radians()
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    let highlight = LightingOverride {
+        id: "highlight".into(),
+        target: Target::Fixture("test".into()),
+        values: PropertyValues {
+            intensity: Some(1.0),
+            ..Default::default()
+        },
+        intensity_multiplier: None,
+        lifetime: OverrideLifetime::UntilCleared,
+        priority: 0,
+        special_fx: None,
+        pan_sweep: matches!(motion, Motion::Sweep),
+        aim_focus: !matches!(motion, Motion::Sweep),
+        pose: match motion {
+            Motion::Posed(pose) => Some(Box::new(pose)),
+            _ => None,
+        },
     };
-    let aimed = |hanging: bool, yaw: f64, inverted: bool| {
-        let (sin, cos) = f64::to_radians(yaw).sin_cos();
-        let flip = if hanging { 1.0 } else { -1.0 };
-        let [u, v, w] = [
-            [flip * cos, flip * sin, 0.0],
-            [-sin, cos, 0.0],
-            [0.0, 0.0, flip],
-        ];
-        let rig = support::rig(serde_json::json!({"fixtures": [{
-            "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
-            "universe": 0, "address": 1, "matrix": ([u, v, w, [0.0; 3]].concat()),
-            "pan": {"min": 0.1, "max": 0.8, "inverted": inverted},
-            "tilt": {"inverted": inverted},
-        }]}));
-        let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-            autoloop_id: "idle".into(),
-            bank: "test".into(),
-            lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
-        }])
+    engine
+        .apply(0.0, &Command::SetOverride { value: highlight })
         .unwrap();
-        let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
-        let aim = LightingOverride {
-            id: "highlight".into(),
-            target: Target::Fixture("test".into()),
+    engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0][..4].to_vec()
+}
+
+enum Motion {
+    Aim,
+    Sweep,
+    Posed(FixturePose),
+}
+
+/// The scene direction the frame throws the beam, decoded independently of the encoder and
+/// carried through the Matrix, as fixture_encoding's mount test does. The pan range centre faces
+/// local +Y, the display, and pan turns clockwise about local +Z; mid tilt runs along local -Z,
+/// the pan axis, and tilts towards the pan heading; standing is the rigid flip.
+fn beam(frame: &[u8], matrix: &[f64]) -> [f64; 3] {
+    // The 16-bit channel pair at `at` as a body angle off its range centre.
+    let angle = |at: usize, travel: f64| {
+        (f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 - 0.5) * travel
+    };
+    let (pan, tilt) = (angle(0, 540.0).to_radians(), angle(2, 270.0).to_radians());
+    let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos(), -tilt.cos()];
+    [0, 1, 2].map(|axis| (0..3).map(|row| matrix[3 * row + axis] * body[row]).sum())
+}
+
+fn towards(from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
+    let offset = [0, 1, 2].map(|axis| to[axis] - from[axis]);
+    let length = offset.iter().map(|value| value * value).sum::<f64>().sqrt();
+    offset.map(|value| value / length)
+}
+
+fn assert_through(beam: [f64; 3], direction: [f64; 3], context: &str) {
+    assert!(
+        (0..3).all(|axis| (beam[axis] - direction[axis]).abs() < 1e-3),
+        "{context}: beam {beam:?}, focus {direction:?}"
+    );
+}
+
+#[test]
+fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
+    for hanging in [true, false] {
+        let position = [1000.0, -500.0, if hanging { 3000.0 } else { 0.0 }];
+        let rise = if hanging { -2500.0 } else { 2500.0 };
+        for offset in [
+            [1500.0, 2500.0, rise],
+            [-2000.0, -800.0, rise],
+            [0.0, 2000.0, 0.0],
+        ] {
+            let focus = [0, 1, 2].map(|axis| position[axis] + offset[axis]);
+            for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, -90.0] {
+                let matrix = mounted(hanging, yaw, position);
+                for inverted in [false, true] {
+                    let aimed = moved(&matrix, focus, inverted, Motion::Aim);
+                    let context =
+                        format!("hanging {hanging} yaw {yaw} inverted {inverted} focus {offset:?}");
+                    assert_through(beam(&aimed, &matrix), towards(position, focus), &context);
+                    // A sweep pans on but holds the tilt that reaches the point's elevation.
+                    let swept = moved(&matrix, focus, inverted, Motion::Sweep);
+                    assert_eq!(swept[2..4], aimed[2..4], "{context}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
+    // The fixtures' plan bounding box runs x -2000..3000, y -1000..1000: centre (500, 0, 0).
+    let positions = [[-2000.0, 1000.0, 3000.0], [3000.0, -1000.0, 2500.0]];
+    let matrices = [
+        mounted(true, 37.0, positions[0]),
+        mounted(true, -90.0, positions[1]),
+    ];
+    let fixtures = [0, 1].map(|index| {
+        serde_json::json!({
+            "fixture_uuid": format!("head{index}"), "profile": "chauvet_intimidator_spot_110_12ch",
+            "universe": 0, "address": 1 + 12 * index, "matrix": matrices[index],
+        })
+    });
+    let rig = support::rig(serde_json::json!({ "fixtures": fixtures }));
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    for index in 0..2 {
+        let highlight = LightingOverride {
+            id: format!("highlight{index}"),
+            target: Target::Fixture(format!("head{index}")),
             values: PropertyValues {
                 intensity: Some(1.0),
                 ..Default::default()
@@ -338,28 +436,41 @@ fn an_upstage_aim_throws_the_beam_towards_plus_y_at_any_yaw_and_mount() {
             priority: 0,
             special_fx: None,
             pan_sweep: false,
-            aim_upstage: true,
+            aim_focus: true,
+            pose: None,
         };
         engine
-            .apply(0.0, &Command::SetOverride { value: aim })
+            .apply(0.0, &Command::SetOverride { value: highlight })
             .unwrap();
-        let frame = &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0];
-        let (pan, tilt) = (decode(frame, 0, ranges[0]), decode(frame, 2, ranges[1]));
-        let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
-        [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
-    };
-    let upstage = [0.0, f64::to_radians(45.0).sin()];
-    for yaw in [0.0, 37.0, 90.0, 130.0, 180.0, 233.0, 270.0, -90.0, -130.0] {
-        for hanging in [true, false] {
-            for inverted in [false, true] {
-                let beam = aimed(hanging, yaw, inverted);
-                assert!(
-                    (0..2).all(|axis| (beam[axis] - upstage[axis]).abs() < 1e-3),
-                    "hanging {hanging} yaw {yaw} inverted {inverted}: {beam:?}"
-                );
-            }
-        }
     }
+    let frame = &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0];
+    for index in 0..2 {
+        assert_through(
+            beam(&frame[12 * index..], &matrices[index]),
+            towards(positions[index], [500.0, 0.0, 0.0]),
+            &format!("head{index}"),
+        );
+    }
+}
+
+#[test]
+fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
+    let position = [0.0, 0.0, 3000.0];
+    let focus = [0.0, 2000.0, 1000.0];
+    let (loaded, edited) = (mounted(true, 0.0, position), mounted(true, 90.0, position));
+    let pose = FixturePose {
+        matrix: edited.clone(),
+        pan: MovementRange {
+            min: 0.1,
+            max: 0.8,
+            inverted: false,
+        },
+        tilt: MovementRange::default(),
+        focus: focus.to_vec(),
+    };
+    let posed = moved(&loaded, focus, false, Motion::Posed(pose));
+    assert_through(beam(&posed, &edited), towards(position, focus), "posed");
+    assert_ne!(posed, moved(&loaded, focus, false, Motion::Aim));
 }
 
 #[test]

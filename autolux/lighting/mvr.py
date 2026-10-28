@@ -612,12 +612,18 @@ def patched_fixtures(scene: Scene) -> list[dict]:
         for address in node.findall('Addresses/Address'):
             if schema.dmx_address((address.text or '').strip()) is None:
                 raise ValueError(f'{node.get("name", node.get("uuid"))}: invalid DMX address')
-    placed = [
+    objects = [
         (item, matrix, layer.name)
         for layer in library.layers
         for item, matrix in _library_objects(layer.child_list, _library_matrix(layer.matrix))
-        if isinstance(item, pymvr.Fixture)
     ]
+    placed = [entry for entry in objects if isinstance(entry[0], pymvr.Fixture)]
+    # A FocusPoint's position is its scene Matrix's o row.
+    focus_points = {
+        item.uuid.upper(): matrix[9:12]
+        for item, matrix, _ in objects
+        if isinstance(item, pymvr.FocusPoint)
+    }
     fixtures = []
     for node, matrix, layer in sorted(
         placed, key=lambda entry: order.get(entry[0].uuid.upper(), 0)
@@ -647,6 +653,7 @@ def patched_fixtures(scene: Scene) -> list[dict]:
                 'class': classes.get((node.classing or '').strip().upper(), ''),
                 'layer': layer or '',
                 'matrix': matrix,
+                'focus': focus_points.get((node.focus or '').strip().upper(), []),
                 **movement,
             }
         )

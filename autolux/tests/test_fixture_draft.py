@@ -65,6 +65,12 @@ def test_fixture_draft_integrity(tmp_path):
             ]
             for fixture in mvr.patched_fixtures(room)
         ],
+        'poses': {
+            fixture['fixture_uuid']: {
+                key: fixture[key] for key in ('matrix', 'pan', 'tilt', 'focus')
+            }
+            for fixture in mvr.patched_fixtures(room)
+        },
     }
     source = tmp_path / 'draft.json'
     source.write_text(json.dumps(data), encoding='utf-8')

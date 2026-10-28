@@ -557,7 +557,7 @@ def test_a_highlight_is_one_open_white_override_at_home_with_uv_zeroed_and_a_dea
 
 @pytest.mark.parametrize(
     ('motion', 'flag', 'values'),
-    [('sweep', 'pan_sweep', {'tilt': 0.5}), ('aim', 'aim_upstage', {})],
+    [('sweep', 'pan_sweep', {}), ('aim', 'aim_focus', {})],
 )
 def test_a_mover_sweeps_or_aims_through_starfire_in_place_of_the_home_pan(motion, flag, values):
     looks, lighting = highlight_looks()
@@ -631,6 +631,7 @@ def test_each_highlight_swatch_sends_its_colour(colour, rgb):
         ({'fixture': 'par'}, 'sweep', False, False, 'has no pan'),
         ({'cell': 'bar/a'}, 'aim', False, False, 'has no pan'),
         ({'fixture': 'spot'}, 'both', False, False, 'not both'),
+        ({'cell': 'bar/a'}, 'posed', False, False, 'whole fixture'),
     ],
 )
 def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
@@ -640,7 +641,12 @@ def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
     looks.set_blackout(blackout)
     lighting.events.clear()
     # A motion row lights white and asks for that motion; 'both' asks for the two at once.
-    motions = {'sweep': {'sweep': True}, 'aim': {'aim': True}, 'both': {'sweep': True, 'aim': True}}
+    motions = {
+        'sweep': {'sweep': True},
+        'aim': {'aim': True},
+        'both': {'sweep': True, 'aim': True},
+        'posed': {'pose': {}},
+    }
     motion = motions.get(colour, {})
     with pytest.raises(ValueError, match=reason):
         looks.highlight(target, 'white' if motion else colour, paused=paused, **motion)
@@ -657,7 +663,13 @@ async def test_the_published_highlight_ends_at_standby_sound_stop_and_expiry_and
     control = ShowControl(tmp_path / 'show.json', buffer)
     light, _, clock, lighting = static_engine()
     light.static_looks = StaticLooks(lighting, HALL, clock=clock)
-    locate = {'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white', **STILL}
+    locate = {
+        'action': 'highlight',
+        'target': {'fixture': 'par'},
+        'colour': 'white',
+        **STILL,
+        'pose': None,
+    }
 
     async def published(command=None):
         control.commands.put_nowait(command or {'action': 'master', 'level': 1.0})
@@ -695,7 +707,13 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
         return buffer.snapshot()
 
     snapshot = await apply(
-        {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'blue', **STILL}
+        {
+            'action': 'highlight',
+            'target': {'cell': 'bar/a'},
+            'colour': 'blue',
+            **STILL,
+            'pose': None,
+        }
     )
     assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue', **STILL}
     assert snapshot['rig'] == {
@@ -718,7 +736,13 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
     for clear in clears:
         await light.resume()
         await apply(
-            {'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white', **STILL}
+            {
+                'action': 'highlight',
+                'target': {'fixture': 'par'},
+                'colour': 'white',
+                **STILL,
+                'pose': None,
+            }
         )
         assert light.static_looks.highlighted is not None
         lighting.events.clear()
@@ -730,6 +754,12 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
 
     await apply({'action': 'pause'})
     snapshot = await apply(
-        {'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white', **STILL}
+        {
+            'action': 'highlight',
+            'target': {'fixture': 'par'},
+            'colour': 'white',
+            **STILL,
+            'pose': None,
+        }
     )
     assert snapshot['highlight'] is None, 'paused, the engine refuses what the bridge let through'

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import queue
 import re
@@ -202,7 +203,43 @@ def _highlight_command(payload: dict) -> dict:
         raise ValueError('a highlight sweeps or aims, not both')
     if (sweep or aim) and 'fixture' not in target:
         raise ValueError('sweep and aim move a whole fixture, not a cell')
-    return {'target': dict(target), 'colour': colour, 'sweep': sweep, 'aim': aim}
+    pose = payload.get('pose')
+    if pose is not None:
+        if 'fixture' not in target:
+            raise ValueError('a pose places a whole fixture, not a cell')
+        _check_pose(pose)
+    return {'target': dict(target), 'colour': colour, 'sweep': sweep, 'aim': aim, 'pose': pose}
+
+
+def _check_pose(pose) -> None:
+    """Checked as a rig load checks a fixture, since Starfire stops the show on a pose it refuses."""
+    from autolux.lighting import mvr
+
+    def numbers(values, counts) -> bool:
+        return (
+            isinstance(values, list)
+            and len(values) in counts
+            and all(type(value) in (int, float) and math.isfinite(value) for value in values)
+        )
+
+    if (
+        not isinstance(pose, dict)
+        or pose.keys() != {'matrix', 'pan', 'tilt', 'focus'}
+        or not numbers(pose['matrix'], (12,))
+        or not numbers(pose['focus'], (0, 3))
+    ):
+        raise ValueError('a pose is {matrix: 12 numbers, pan, tilt, focus: [] or [x, y, z]}')
+    mvr.home_orientation(pose['matrix'])
+    for axis in mvr.MOVEMENT_AXES:
+        limits = pose[axis]
+        if (
+            not isinstance(limits, dict)
+            or limits.keys() != {'min', 'max', 'inverted'}
+            or type(limits['inverted']) is not bool
+            or not numbers([limits['min'], limits['max']], (2,))
+            or not 0 <= limits['min'] <= limits['max'] <= 1
+        ):
+            raise ValueError(f'pose {axis} needs 0 <= min <= max <= 1 and inverted true or false')
 
 
 def command_refusal(

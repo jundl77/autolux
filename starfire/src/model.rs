@@ -187,13 +187,45 @@ pub struct LightingOverride {
     #[serde(default)]
     pub priority: i32,
     pub special_fx: Option<Box<SpecialFx>>,
-    /// Pan runs the whole logical range, low soft limit to high and back, in place of `pan`.
+    /// Pan runs the whole logical range, low soft limit to high and back, and tilt reaches the
+    /// focus point's elevation, in place of `pan` and `tilt`.
     #[serde(default)]
     pub pan_sweep: bool,
-    /// Pan and tilt hold the beam straight upstage (+Y), 45 degrees off the pan axis, in place
-    /// of `pan` and `tilt`.
+    /// Pan and tilt throw the beam through the fixture's focus point, in place of `pan` and
+    /// `tilt`.
     #[serde(default)]
-    pub aim_upstage: bool,
+    pub aim_focus: bool,
+    /// The target fixture encodes with this in place of its loaded placement.
+    #[serde(default)]
+    pub pose: Option<Box<FixturePose>>,
+}
+
+/// A rig fixture's placement fields: MVR Matrix, soft limits and focus point position (mm).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixturePose {
+    pub matrix: Vec<f64>,
+    pub pan: MovementRange,
+    pub tilt: MovementRange,
+    pub focus: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MovementRange {
+    pub min: f64,
+    pub max: f64,
+    pub inverted: bool,
+}
+
+impl Default for MovementRange {
+    fn default() -> Self {
+        Self {
+            min: 0.0,
+            max: 1.0,
+            inverted: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

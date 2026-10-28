@@ -368,13 +368,20 @@ const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
-const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim'});
 // The frozen room's MVR uuids: tests target a fixture by its uuid, whatever its name is now.
 const ROOM_UUID = {
     spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
     spot_right: '0BD68C96-850C-57EA-86E0-1780E40FF826',
     zq06017: 'B3F12D06-678A-51FE-AD71-BC2BC260EB9F',
 };
+// A mover's test carries its draft placement: the room hangs both turned to the audience, no
+// soft limits and no MVR Focus.
+const roomPose = (x) => {
+    const full = {min: 0, max: 1, inverted: false};
+    return {matrix: [-1, 0, 0, 0, -1, 0, 0, 0, 1, x, 0, 0], pan: full, tilt: full, focus: []};
+};
+const ROOM_POSE = {[ROOM_UUID.spot_left]: roomPose(-300), [ROOM_UUID.spot_right]: roomPose(300)};
+const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim', pose: ROOM_POSE[target.fixture] ?? null});
 const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
 const markOf = (name) => `[...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) =>

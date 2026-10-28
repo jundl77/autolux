@@ -40,6 +40,9 @@ message Fixture {
   repeated Cell cells = 10;
   StageArea area = 11;  // Every cell lies in its fixture's area.
   string name = 12;     // The MVR Fixture name.
+  // The position (mm) of the MVR FocusPoint its Focus names; empty is the stage centre: the
+  // centre of the fixtures' plan bounding box (the box the stage areas are cut from) at Z 0.
+  repeated double focus = 13;
 
   // One addressable unit. A single-cell fixture's cell id is its fixture_uuid; otherwise the
   // cell id is "fixture_uuid/geometry".

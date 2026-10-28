@@ -215,7 +215,13 @@ RIG = {
         {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True},
     ]
 }
-STILL = {'sweep': False, 'aim': False}
+STILL = {'sweep': False, 'aim': False, 'pose': None}
+POSE = {
+    'matrix': [0, 1, 0, -1, 0, 0, 0, 0, 1, 100, 200, 3000],
+    'pan': {'min': 0.1, 'max': 0.8, 'inverted': True},
+    'tilt': {'min': 0, 'max': 1, 'inverted': False},
+    'focus': [],
+}
 
 
 def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears():
@@ -261,6 +267,36 @@ def test_a_highlight_sweeps_or_aims_a_whole_fixture_and_never_both():
     ):
         with pytest.raises(ValueError, match=reason):
             parse_control_command(payload)
+
+
+def test_a_highlight_carries_the_draft_pose_of_a_whole_fixture_checked_as_a_rig_load_is():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    spot = {'action': 'highlight', 'target': {'fixture': 'spot'}}
+    focused = {**POSE, 'focus': [0, 2000, 0]}
+    for pose in (POSE, focused):
+        assert parse_control_command({**spot, 'aim': True, 'pose': pose}) == {
+            **spot,
+            'colour': 'white',
+            **STILL,
+            'aim': True,
+            'pose': pose,
+        }
+    pitched = [1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0]
+    for pose, reason in (
+        ({**POSE, 'matrix': POSE['matrix'][:9]}, 'a pose is'),
+        ({**POSE, 'focus': [1, 2]}, 'a pose is'),
+        ({**POSE, 'focus': [0, float('nan'), 0]}, 'a pose is'),
+        ({**POSE, 'scale': 1}, 'a pose is'),
+        ({**POSE, 'matrix': pitched}, 'pitch'),
+        ({**POSE, 'matrix': [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]}, 'orthogonal'),
+        ({**POSE, 'pan': {'min': 0.9, 'max': 0.1, 'inverted': False}}, 'pose pan'),
+        ({**POSE, 'tilt': {'min': 0, 'max': 1, 'inverted': 0}}, 'pose tilt'),
+    ):
+        with pytest.raises(ValueError, match=reason):
+            parse_control_command({**spot, 'pose': pose})
+    with pytest.raises(ValueError, match='whole fixture'):
+        parse_control_command({**spot, 'target': {'cell': 'bar/a'}, 'pose': POSE})
 
 
 @pytest.mark.parametrize(
