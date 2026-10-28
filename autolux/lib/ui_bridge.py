@@ -124,6 +124,8 @@ def parse_control_command(payload) -> dict:
         return {'action': action, 'enabled': payload['enabled']}
     if action == 'static':
         return {'action': action, **_static_command(payload)}
+    if action == 'highlight':
+        return {'action': action, **_highlight_command(payload)}
     raise ValueError(f'unknown control action {action!r}')
 
 
@@ -172,11 +174,50 @@ def _static_command(payload: dict) -> dict:
     return look
 
 
+def _highlight_command(payload: dict) -> dict:
+    from autolux.lib.engine.static_mode import HIGHLIGHT_COLOURS
+
+    if 'target' in payload and payload['target'] is None:
+        return {'target': None}
+    target = payload.get('target')
+    if (
+        not isinstance(target, dict)
+        or len(target) != 1
+        or not target.keys() <= {'fixture', 'cell'}
+        or not isinstance(next(iter(target.values())), str)
+    ):
+        raise ValueError('a highlight target is {fixture: name}, {cell: id} or null to clear')
+    colour = payload.get('colour', 'white')
+    if colour not in HIGHLIGHT_COLOURS:
+        raise ValueError(f'highlight colour must be one of {", ".join(HIGHLIGHT_COLOURS)}')
+    return {'target': dict(target), 'colour': colour}
+
+
 def command_refusal(
-    command: dict, intent: str | None, paused: bool | None, mode: str | None
+    command: dict,
+    intent: str | None,
+    paused: bool | None,
+    mode: str | None,
+    static: dict | None,
+    rig: dict | None,
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
 
+    if command['action'] == 'highlight' and command['target'] is not None:
+        # Starfire answers an unknown fixture with an ErrorReply, which stops the show.
+        fixtures = (rig or {}).get('fixtures', ())
+        if not any(
+            command['target']
+            in ({'fixture': fixture['name']}, *({'cell': cell} for cell in fixture['cells']))
+            for fixture in fixtures
+        ):
+            ((kind, name),) = command['target'].items()
+            return f'no {kind} {name!r} in the running rig'
+        if paused:
+            return 'the show is paused'
+        if (static or {}).get('blackout'):
+            return 'blackout is on'
+        return None
     if command['action'] != 'next_autoloop':
         return None
     if paused:

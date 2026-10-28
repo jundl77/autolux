@@ -40,6 +40,12 @@ ECHO_SECONDS = 1.0
 CHROME = os.environ.get('CHROME', r'C:\Program Files\Google\Chrome\Application\chrome.exe')
 GROUPS = {'pars': ['colour', 'dimmer'], 'spots': ['pan', 'tilt']}
 FX_ROWS = {ALL_FIXTURES: ['strobe_chase'], 'pars': ['colour_chase', 'strobe_chase'], 'spots': []}
+RIG = {
+    'fixtures': [
+        {'name': 'par-1', 'cells': ['par-1']},
+        {'name': 'bar-1', 'cells': ['bar-1/a', 'bar-1/b']},
+    ]
+}
 # group -> (cooldown total, seconds since it last fired at start, last row)
 COOLDOWNS = {'pars': (8.0, 3.0, 'colour_chase'), 'spots': (6.0, 60.0, 'pan_sweep')}
 
@@ -70,6 +76,8 @@ class StubShow:
                 'group_roles': {},
                 'bpm': 124.0,
                 'decoder': {'classes': ['intro', 'build', 'drop'], 'posterior': [0.1, 0.3, 0.6]},
+                'highlight': None,
+                'rig': copy.deepcopy(RIG),
                 'static': {
                     'targets': [ALL_FIXTURES, *GROUPS],
                     'blacklight': True,
@@ -113,7 +121,13 @@ class StubShow:
         with self._lock:
             static = self.state['static']
             mode = 'static' if static['looks'] or static['special_fx'] else 'auto'
-            return self.state['intent'], self.state['paused'], mode
+            return (
+                self.state['intent'],
+                self.state['paused'],
+                mode,
+                copy.deepcopy(static),
+                self.state['rig'],
+            )
 
     def take(self, command: dict) -> None:
         with self._lock:
@@ -126,6 +140,8 @@ class StubShow:
             settings, static = s['settings'], s['static']
             if a in ('pause', 'play'):
                 s['paused'] = a == 'pause'
+                if a == 'pause':
+                    s['highlight'] = None
             elif a == 'master':
                 s['master_brightness'] = c['level']
             elif a == 'intensity':
@@ -138,6 +154,10 @@ class StubShow:
                 s['palette'] = {'name': c['name'], 'pinned': c['name'] != 'auto'}
             elif a == 'static':
                 self._apply_static(static, c)
+                if c['kind'] == 'clear':
+                    s['highlight'] = None
+            elif a == 'highlight':
+                s['highlight'] = c['target'] and {'target': c['target'], 'colour': c['colour']}
 
     @staticmethod
     def _apply_static(static: dict, c: dict) -> None:

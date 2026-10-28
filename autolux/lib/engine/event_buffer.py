@@ -45,6 +45,8 @@ class EventBuffer:
             'settings': None,
             'mode': None,
             'static': None,
+            'highlight': None,
+            'rig': None,
         }
         self._palette: dict | None = None
         self._special: dict | None = None
@@ -162,6 +164,8 @@ class EventBuffer:
         settings: dict,
         mode: str = 'auto',
         static: dict | None = None,
+        highlight: dict | None = None,
+        rig: dict | None = None,
     ) -> None:
         with self._lock:
             self._control_state = {
@@ -170,14 +174,21 @@ class EventBuffer:
                 'settings': dict(settings),
                 'mode': mode,
                 'static': copy.deepcopy(static),
+                'highlight': copy.deepcopy(highlight),
+                'rig': copy.deepcopy(rig),
             }
 
-    def operator_state(self) -> tuple[str | None, bool | None, str | None]:
+    def operator_state(
+        self,
+    ) -> tuple[str | None, bool | None, str | None, dict | None, dict | None]:
         with self._lock:
+            # set_control_state replaces these whole, so the references are never mutated.
             return (
                 self._current_intent,
                 self._control_state['paused'],
                 self._control_state['mode'],
+                self._control_state['static'],
+                self._control_state['rig'],
             )
 
     def set_palette(self, name: str, *, pinned: bool) -> None:

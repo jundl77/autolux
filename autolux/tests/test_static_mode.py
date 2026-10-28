@@ -11,6 +11,7 @@ from autolux.lib.engine.effect_definitions import (
 )
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 from autolux.lib.engine.static_mode import (
+    HIGHLIGHT_ID,
     STATIC_FLOOR_PRIORITY,
     STATIC_GROUP_PRIORITY,
     STATIC_PRIORITY,
@@ -506,3 +507,142 @@ async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_t
     assert all(look['value'].keys() == {'id', 'target', 'values', 'priority'} for _, look in looks)
     assert queue.pending == 0, 'operator looks must never wait behind the playback delay'
     assert control.commands.unfinished_tasks == 0, 'each command is marked handed to the engine'
+
+
+HALL = StaticRig(
+    groups=('wash',),
+    uv_groups=('wash',),
+    fixtures=(('par', ('par',)), ('bar', ('bar/a', 'bar/b'))),
+    uv_targets=('par',),
+)
+
+
+def highlight_looks():
+    lighting = RecordingStarfireClient()
+    return StaticLooks(lighting, HALL), lighting
+
+
+def test_a_highlight_is_one_open_white_override_at_home_with_uv_zeroed_and_a_dead_man_expiry():
+    looks, lighting = highlight_looks()
+    looks.highlight({'fixture': 'par'})
+    assert overrides(lighting) == [
+        {
+            'kind': 'set_override',
+            'value': {
+                'id': HIGHLIGHT_ID,
+                'target': {'fixture': 'par'},
+                'values': {
+                    'intensity': 1.0,
+                    'colour': {'red': 1.0, 'green': 1.0, 'blue': 1.0},
+                    'pan': 0.5,
+                    'tilt': 0.5,
+                    'strobe_hz': 0.0,
+                    'attributes': {'ColorAdd_UV': 0.0},
+                },
+                'priority': STATIC_GROUP_PRIORITY + 1,
+                'lifetime': {'kind': 'seconds', 'duration_seconds': 60.0},
+            },
+        }
+    ]
+    assert looks.highlighted == {'target': {'fixture': 'par'}, 'colour': 'white'}
+    assert not looks.active, 'a Locate must not hold the automatic show'
+
+
+def test_testing_another_fixture_moves_the_one_highlight_and_clear_releases_it():
+    looks, lighting = highlight_looks()
+    looks.highlight({'fixture': 'par'})
+    looks.highlight({'cell': 'bar/b'}, 'red')
+    moved = overrides(lighting)[-1]['value']
+    assert (moved['id'], moved['target'], 'attributes' in moved['values']) == (
+        HIGHLIGHT_ID,
+        {'fixture': 'bar/b'},
+        False,
+    )
+    assert looks.highlighted == {'target': {'cell': 'bar/b'}, 'colour': 'red'}
+    looks.clear_highlight()
+    looks.clear_highlight()
+    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': HIGHLIGHT_ID}
+    assert [o['kind'] for o in overrides(lighting)].count('clear_override') == 1
+    assert looks.highlighted is None
+
+
+@pytest.mark.parametrize(
+    ('colour', 'rgb'),
+    [('warm', (1.0, 0.55, 0.2)), ('blue', (0.0, 0.0, 1.0)), ('green', (0.0, 1.0, 0.0))],
+)
+def test_each_highlight_swatch_sends_its_colour(colour, rgb):
+    looks, lighting = highlight_looks()
+    looks.highlight({'fixture': 'bar'}, colour)
+    sent_colour = overrides(lighting)[-1]['value']['values']['colour']
+    assert tuple(sent_colour.values()) == rgb
+
+
+@pytest.mark.parametrize(
+    ('target', 'colour', 'paused', 'blackout', 'reason'),
+    [
+        ({'fixture': 'ghost'}, 'white', False, False, 'unknown fixture or cell'),
+        ({'cell': 'bar'}, 'white', False, False, 'unknown fixture or cell'),
+        ({'fixture': 'par'}, 'uv', False, False, 'unknown highlight colour'),
+        ({'fixture': 'par'}, 'white', True, False, 'the show is paused'),
+        ({'fixture': 'par'}, 'white', False, True, 'blackout is on'),
+    ],
+)
+def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
+    target, colour, paused, blackout, reason
+):
+    looks, lighting = highlight_looks()
+    looks.set_blackout(blackout)
+    lighting.events.clear()
+    with pytest.raises(ValueError, match=reason):
+        looks.highlight(target, colour, paused=paused)
+    assert lighting.events == []
+
+
+async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_other_overrides(
+    tmp_path,
+):
+    from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.lib.main import ShowControl
+
+    buffer = EventBuffer()
+    control = ShowControl(tmp_path / 'show.json', buffer)
+    light, _, _, lighting = static_engine()
+    light.static_looks = StaticLooks(lighting, HALL)
+
+    async def apply(command):
+        control.commands.put_nowait(command)
+        await control.apply_pending(light)
+        return buffer.snapshot()
+
+    snapshot = await apply({'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'blue'})
+    assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue'}
+    assert snapshot['rig'] == {
+        'fixtures': [
+            {'name': 'par', 'cells': ['par']},
+            {'name': 'bar', 'cells': ['bar/a', 'bar/b']},
+        ]
+    }
+    assert snapshot['mode'] == 'auto'
+    assert (await apply({'action': 'highlight', 'target': None}))['highlight'] is None
+    assert overrides(lighting)[-1] == {'kind': 'clear_override', 'id': HIGHLIGHT_ID}
+
+    clears = [
+        lambda: apply({'action': 'static', 'kind': 'clear'}),
+        lambda: apply({'action': 'pause'}),
+        light.on_digital_silence,
+        light._show_sound_stop,
+    ]
+    for clear in clears:
+        await light.resume()
+        await apply({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white'})
+        assert light.static_looks.highlighted is not None
+        lighting.events.clear()
+        result = clear()
+        if result is not None:
+            await result
+        assert light.static_looks.highlighted is None
+        assert {'kind': 'clear_override', 'id': HIGHLIGHT_ID} in overrides(lighting)
+
+    await apply({'action': 'pause'})
+    snapshot = await apply({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white'})
+    assert snapshot['highlight'] is None, 'paused, the engine refuses what the bridge let through'

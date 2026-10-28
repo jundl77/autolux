@@ -134,6 +134,13 @@ def static_rig(path: Path) -> StaticRig:
         fixture['uv'] = lit_by_uv[spec, mode]
     by_name = {fixture['name']: fixture for fixture in fixtures}
     groups = mvr.groups(fixtures)[0]
+    # The ids come from the very RigDefinition Starfire loads, named by Starfire's cell rule.
+    patched = {
+        entry.fixture_id: tuple(
+            mvr.cell_id(entry.fixture_id, cell.geometry, len(entry.cells)) for cell in entry.cells
+        )
+        for entry in rig_definition(path).fixtures
+    }
     return StaticRig(
         groups=tuple(sorted(groups)),
         uv_groups=tuple(
@@ -142,6 +149,12 @@ def static_rig(path: Path) -> StaticRig:
                 for group, members in groups.items()
                 if all(by_name[name]['uv'] for name in members)
             )
+        ),
+        fixtures=tuple(patched.items()),
+        # Starfire checks attributes per cell, and which cell of a multi-cell fixture owns the
+        # UV channel is not known here, so only single-cell fixtures get UV zeroed.
+        uv_targets=tuple(
+            name for name, cells in patched.items() if by_name[name]['uv'] and len(cells) == 1
         ),
     )
 

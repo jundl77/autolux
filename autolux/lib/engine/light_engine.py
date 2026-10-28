@@ -195,6 +195,7 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
+        self.static_looks.clear_highlight()
         # Pause before the cut so play does not revive it.
         self.lighting_client.set_paused(True)
         self.effect_controller.forget_special(instantaneous=True)
@@ -412,6 +413,7 @@ class LightEngine(IMusicAnalyserHandler):
         # Paused, the beat clock is frozen: a crossfade would only start on play and blend the
         # old look in. The paused frame is dark, so the cut shows nothing.
         self.effect_controller.enter_standby(None if self._paused else self._last_bpm)
+        self.static_looks.clear_highlight()
         if self._static_mode:
             self.static_looks.resend()
 
@@ -496,6 +498,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._forget_room_look()
         self._showing_standby = False
         self.lighting_client.stop()
+        self.static_looks.clear_highlight()
         if self._static_mode:
             self.static_looks.resend()
 

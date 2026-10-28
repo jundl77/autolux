@@ -18,6 +18,9 @@ STATIC_GROUP_PRIORITY = STATIC_PRIORITY + 1
 STATIC_LOOK_PREFIX = 'static_'
 STATIC_SPECIAL_ID = 'static_special'
 STATIC_SPECIAL_RELEASE_BEATS = 4.0
+HIGHLIGHT_ID = 'highlight'
+# Dead-man expiry: a Locate left on by a dashboard that went away goes out by itself.
+HIGHLIGHT_SECONDS = 60.0
 ALL_FIXTURES = 'all'
 UV_ATTRIBUTE = 'ColorAdd_UV'
 UV_FULL = 255.0
@@ -29,12 +32,17 @@ PRESET_COLOURS = {
     'blue': (0.0, 0.0, 1.0),
 }
 PRESETS = (*PRESET_COLOURS, 'uv', 'blackout', 'off')
+HIGHLIGHT_COLOURS = {**PRESET_COLOURS, 'green': (0.0, 1.0, 0.0)}
 
 
 @dataclass(frozen=True)
 class StaticRig:
     groups: tuple[str, ...] = ()
     uv_groups: tuple[str, ...] = ()
+    # (fixture name, its Starfire cell ids); a single-cell fixture's cell is the fixture.
+    fixtures: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # Fixture names and cell ids Starfire accepts a UV attribute on.
+    uv_targets: tuple[str, ...] = ()
 
     @property
     def targets(self) -> tuple[str, ...]:
@@ -62,6 +70,7 @@ class StaticLooks:
         self._special: Special | None = None
         self._floor = False
         self.blackout = False
+        self.highlighted: dict | None = None
 
     @property
     def active(self) -> bool:
@@ -154,10 +163,55 @@ class StaticLooks:
             # Clearing alone would reveal the held automatic look (warm-white standby when idle).
             self._set_floor()
 
+    def highlight(self, target: dict, colour: str = 'white', *, paused: bool = False) -> None:
+        """Locate {'fixture': name} or {'cell': id}: open white (or a swatch), beam home, no
+        strobe. One highlight at a time, so testing another fixture moves it."""
+        if not any(
+            target in ({'fixture': name}, *({'cell': cell} for cell in cells))
+            for name, cells in self.rig.fixtures
+        ):
+            raise ValueError(f'unknown fixture or cell {target!r}')
+        if colour not in HIGHLIGHT_COLOURS:
+            raise ValueError(f'unknown highlight colour {colour!r}')
+        # Paused or blacked out, the rig is dark and the Locate would light nothing.
+        if paused:
+            raise ValueError('the show is paused')
+        if self.blackout:
+            raise ValueError('blackout is on')
+        red, green, blue = HIGHLIGHT_COLOURS[colour]
+        values = {
+            'intensity': 1.0,
+            'colour': {'red': red, 'green': green, 'blue': blue},
+            'pan': 0.5,
+            'tilt': 0.5,
+            'strobe_hz': 0.0,
+        }
+        (name,) = target.values()
+        if name in self.rig.uv_targets:
+            values['attributes'] = {UV_ATTRIBUTE: 0.0}
+        self._lighting.set_override(
+            {
+                'id': HIGHLIGHT_ID,
+                # Starfire resolves a cell id through its fixture target too.
+                'target': {'fixture': name},
+                'values': values,
+                'priority': STATIC_GROUP_PRIORITY + 1,
+                'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
+            }
+        )
+        self.highlighted = {'target': dict(target), 'colour': colour}
+
+    def clear_highlight(self) -> None:
+        if self.highlighted is not None:
+            self.highlighted = None
+            self._lighting.clear_override(HIGHLIGHT_ID)
+
     def set_blackout(self, enabled: bool) -> None:
         if enabled == self.blackout:
             return
         self.blackout = enabled
+        if enabled:
+            self.clear_highlight()
         self._lighting.set_blackout(enabled)
 
     def resend(self) -> None:

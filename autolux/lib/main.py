@@ -96,6 +96,7 @@ def apply_static(light_engine, command: dict) -> None:
         looks.clear_special()
     elif kind == 'clear':
         looks.clear()
+        looks.clear_highlight()
 
 
 class ShowControl:
@@ -170,6 +171,17 @@ class ShowControl:
             except ValueError as error:
                 LOGGER.warning('[main] static command refused: %s', error)
             await light_engine.sync_static()
+        elif action == 'highlight':
+            looks = light_engine.static_looks
+            try:
+                if command['target'] is None:
+                    looks.clear_highlight()
+                else:
+                    looks.highlight(
+                        command['target'], command['colour'], paused=light_engine.paused
+                    )
+            except ValueError as error:
+                LOGGER.warning('[main] highlight refused: %s', error)
         elif action == 'palette':
             light_engine.effect_controller.pin_palette(
                 None if command['name'] == PALETTE_POLICY else command['name']
@@ -235,6 +247,13 @@ class ShowControl:
                 settings=self.settings.to_dict(),
                 mode=light_engine.mode,
                 static=light_engine.static_looks.state(),
+                highlight=light_engine.static_looks.highlighted,
+                rig={
+                    'fixtures': [
+                        {'name': name, 'cells': list(cells)}
+                        for name, cells in light_engine.static_looks.rig.fixtures
+                    ]
+                },
             )
 
 
