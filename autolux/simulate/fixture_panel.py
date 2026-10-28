@@ -139,7 +139,6 @@ FIXTURE_CSS = '''
 .cfg-check {display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px;}
 #config-panel .cfg-section .cfg-check input {width:auto;margin:0;accent-color:var(--accent);}
 .cfg-test {display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
-.cfg-test .cfg-step {margin-left:auto;}
 #config-panel .cfg-test button,#config-panel .cfg-cells button {padding:6px 10px;}
 /* The Control tab's segmented style. Each segment draws its own 1px ring into the 1px gaps, so a
    row wrapped on a phone keeps its dividers and outline. */

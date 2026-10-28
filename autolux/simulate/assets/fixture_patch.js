@@ -676,8 +676,9 @@
     function dispatchTest(command) {
         window.autoluxControl?.dispatch(command).then((reply) => {
             if (!reply?.error || command !== testCommand) return;
-            testNote((testRefusal = `Test refused: ${reply.error}`));
+            testRefusal = `Test refused: ${reply.error}`;
             if (command.target && reply.status === 409) stopRefresh();
+            paintTest();
         });
     }
 
@@ -700,6 +701,7 @@
             testEndTimer = setTimeout(() => highlight(null), TEST_MAX_MS);
         }
         dispatchTest(command);
+        paintTest();
         return command;
     }
 
@@ -737,7 +739,7 @@
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
 
     // Test toggles the selection (or its picked cell) in white, a swatch lights or recolours it,
-    // Sweep and Aim toggle a mover's motion (a swatch keeps it), ‹ › carry the test along the patch.
+    // Sweep and Aim toggle a mover's motion (a swatch keeps it).
     function testControl(spec) {
         if (!rig?.selection || testBlocked(show)) return null;
         if (spec === "test" && lit) return highlight(null);
@@ -754,14 +756,6 @@
             const target = selectedCell && !motion ? { cell: selectedCell } : { fixture: row.fixture_uuid };
             return running(target) ? highlight(target, spec, motion) : null;
         }
-        const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
-        const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
-        sendAction({ action: "select", key: next.key });
-        if (!running({ fixture: next.fixture_uuid })) {
-            clearTest();
-            return null;
-        }
-        return highlight({ fixture: next.fixture_uuid }, (lit && testCommand.colour) || show.highlight?.colour || "white");
     }
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });
@@ -1266,9 +1260,7 @@
                         button("sweep", "Sweep", "Pan between the soft limits"),
                         button("aim", "Aim", "Point straight upstage, away from the audience at the plan's bottom edge")
                     ]
-                ),
-                button("-1", "‹", "Previous fixture in patch order", "cfg-step"),
-                button("1", "›", "Next fixture in patch order")
+                )
             ),
             h("div", { className: "cfg-note cfg-test-note" })
         ];
@@ -1290,11 +1282,13 @@
         cells?.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
         const offline = row && !running({ fixture: row.fixture_uuid }) ? `${row.name} · not in the running show` : null;
-        const active = show?.highlight;
-        const here = Boolean(active) && (active.target?.fixture === row?.fixture_uuid || ids.includes(active.target?.cell));
+        // The page's own test, lit at the click: waiting for the show's echo left Test dark long
+        // enough that the operator's second click cleared it.
+        const active = lit ? testCommand : null;
+        const here = Boolean(active) && (active.target.fixture === row?.fixture_uuid || ids.includes(active.target.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
-            // ‹ › and a lit Test still work: they move off or clear what the show does run.
-            button.disabled = Boolean(blocked || (offline && !["1", "-1", ...(lit ? ["test"] : [])].includes(button.dataset.cfgTest)));
+            // A lit Test still clears what the show does run.
+            button.disabled = Boolean(blocked || (offline && !(lit && button.dataset.cfgTest === "test")));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch || active[button.dataset.cfgTest] === true));
         }

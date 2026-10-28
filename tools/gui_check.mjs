@@ -1176,16 +1176,8 @@ const SUITES = {
         await check('locate swatch', 'the lit swatch is filled, the last one not', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
             && !document.querySelector('${testButton('blue')}').classList.contains('active')`, 3000));
         await check('locate swatch', 'one keep-alive, whatever the clicks', (await keepAlive()).held === 1, await keepAlive());
-        await exactly('locate ›', 'next in patch order (spot_right), no clear first', () => click(testButton('1')), [lightOn({fixture: ROOM_UUID.spot_right}, 'green')]);
-        await check('locate ›', 'the selection follows the test', await waitFor(`document.querySelector('${cfg('name')}').value === 'spot_right'`, 2000));
-        await exactly('locate ‹', 'back to spot_left', () => click(testButton('-1')), [lightOn({fixture: ROOM_UUID.spot_left}, 'green')]);
-        await exactly('locate ‹', 'wraps from the first to the last (zq06017 at 97)', () => click(testButton('-1')), [lightOn({fixture: ROOM_UUID.zq06017}, 'green')]);
-        await exactly('locate ›', 'wraps back to spot_left', () => click(testButton('1')), [lightOn({fixture: ROOM_UUID.spot_left}, 'green')]);
-        // The operator's latest colour must travel with ›, even before the show echoes it.
-        await exactly('locate ›', 'right after a swatch carries that swatch', async () => {
-            await click(testButton('red'));
-            await click(testButton('1'));
-        }, [lightOn({fixture: ROOM_UUID.spot_left}, 'red'), lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
+        await exactly('locate selection', 'the lit test follows to spot_right', () => selectFixture('spot_right'), [lightOn({fixture: ROOM_UUID.spot_right}, 'green')]);
+        await exactly('locate swatch red', 'click', () => click(testButton('red')), [lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
         for (const motion of ['sweep', 'aim']) {
             await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
             await check(`locate ${motion}`, 'lights its button', await waitFor(`document.querySelector('${testButton(motion)}').classList.contains('active')`, 3000));
@@ -1265,6 +1257,64 @@ const SUITES = {
         await check('locate paused', 'play enables them again', await waitFor(`[...document.querySelectorAll('#fixture-info [data-cfg-test]')].every((b) => !b.disabled)`, 3000)
             && (await note()) === '', {note: await note()});
         await checkHighlightIds('locate');
+    },
+
+    // The first Test click after a load, a selection change or a restart sends one command and lights.
+    cfg_first_press: async () => {
+        const pick = async (name) => {
+            await planSettled();
+            await ev(`(() => {
+                document.querySelectorAll('[data-harness-mark]').forEach((e) => e.removeAttribute('data-harness-mark'));
+                ${markOf(name)}.querySelector('circle').setAttribute('data-harness-mark', '');
+            })()`);
+            await click('[data-harness-mark]');
+            return waitFor(`document.querySelector('${cfg('name')}')?.value === ${JSON.stringify(name)}
+                && !!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 5000);
+        };
+        const once = async (name, uuid, pause = 0) => {
+            await sleep(pause);
+            await arm();
+            await click(testButton('test'));
+            // Lit before the show's echo (1 s here): a dark button invites the click that clears it.
+            const lit = await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 300);
+            await sleep(1500);
+            const seen = await since();
+            await check('first press', `${name} -> one highlight, exactly`, seen.length === 1 && same(seen[0], lightOn({fixture: uuid}, 'white')),
+                {seen, posted: posted(), note: await text('#fixture-info .cfg-test-note')});
+            await check('first press', `${name} -> lights Test at once`, lit, {note: await text('#fixture-info .cfg-test-note')});
+        };
+        const off = async () => {
+            await arm();
+            await click(testButton('test'));
+            await sleep(1500);
+            await check('first press', 'the next click clears', same(await since(), [CLEAR]), {seen: await since()});
+        };
+        await cfgFresh();
+        await check('first press', 'select spot_left', await pick('spot_left'));
+        await once('right after the pane renders', ROOM_UUID.spot_left);
+        await off();
+        await cfgFresh();
+        await check('first press', 'select spot_left', await pick('spot_left'));
+        await once('3 s after the pane renders', ROOM_UUID.spot_left, 3000);
+        await off();
+        await check('first press', 'select spot_right', await pick('spot_right'));
+        await once('right after a selection change', ROOM_UUID.spot_right);
+        await off();
+        await check('first press', 'select spot_left', await pick('spot_left'));
+        await once('3 s after a selection change', ROOM_UUID.spot_left, 3000);
+        await off();
+        // A restart in progress: the page loads while the show reports nothing.
+        await harness('rig', {restore: true});
+        await fresh({blank: true});
+        await tab('Config');
+        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+        await pick('spot_left');
+        await sleep(1500);
+        await check('first press', 'mid-restart Test is off and says why', await ev(`document.querySelector('${testButton('test')}').disabled`)
+            && (await text('#fixture-info .cfg-test-note')) !== '', {note: await text('#fixture-info .cfg-test-note')});
+        await harness('control', {blank: false});
+        await waitFor(`!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 5000);
+        await once('after the rig appears', ROOM_UUID.spot_left);
     },
 
     cfg_apply: async () => {
