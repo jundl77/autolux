@@ -41,9 +41,6 @@ RESTART_BACKOFF_SECONDS = (5, 15, 60)
 HEALTHY_RUN_SECONDS = 600
 
 
-FAULTS = (RuntimeError, OSError, ValueError, subprocess.SubprocessError)
-
-
 class ShowFault(RuntimeError):
     """A show that played and then failed; the session loop restarts it."""
 
@@ -252,7 +249,7 @@ async def run_shows(session, stop_requested, *, clock=time.monotonic, sleep=asyn
         started = clock()
         try:
             outcome = await session()
-        except FAULTS as error:
+        except Exception as error:
             # A first show that never played is a setup problem for the operator, not a fault.
             if not ran and not isinstance(error, ShowFault):
                 raise
@@ -273,7 +270,11 @@ async def run_shows(session, stop_requested, *, clock=time.monotonic, sleep=asyn
             delay = RESTART_BACKOFF_SECONDS[min(faults, len(RESTART_BACKOFF_SECONDS) - 1)]
             faults += 1
             LOGGER.error(
-                '[prod] show fault %d in a row: %s; restarting in %d s', faults, outcome, delay
+                '[prod] show fault %d in a row: %s; restarting in %d s',
+                faults,
+                outcome,
+                delay,
+                exc_info=outcome,
             )
         resume = clock() + delay
         while clock() < resume and not stop_requested():
@@ -460,12 +461,13 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
                 app_ran = True
                 await app.run()
                 main.write_report(app, report)
-        except FAULTS as error:
+        # Any error once the show played, a bug included: nobody is at the terminal mid-party.
+        except Exception as error:
             if not played:
                 raise
             # A failed teardown must not bring back a show the operator stopped.
             if app._stop_requested and not app.restart_requested:
-                LOGGER.error('[prod] the show stopped with an error: %s', error)
+                LOGGER.exception('[prod] the show stopped with an error')
                 return 'stop'
             raise ShowFault(error) from error
         return 'restart' if app.restart_requested else 'stop'

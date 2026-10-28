@@ -309,7 +309,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
                     raise OSError('capture device unavailable')
                 self.health_check()
                 if failure == 'controller_run':
-                    raise RuntimeError('show failed')
+                    raise KeyError('show failed')
                 self.restart_requested = failure == 'restart_request'
                 self._stop_requested = failure == 'teardown_on_stop'
             finally:
@@ -328,7 +328,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             health_monitor, 'HealthMonitor', Mock(side_effect=RuntimeError('monitor setup failed'))
         )
     if failure == 'controller_run':
-        # A show that ran and then failed is a fault the session loop restarts, not a setup error.
+        # A show that ran and then failed, on any error, is a fault the session loop restarts.
         with pytest.raises(production.ShowFault, match='show failed'):
             await production._run_session(args)
     elif failure == 'restart_request':
@@ -443,7 +443,8 @@ async def test_faults_back_off_and_a_healthy_run_resets_the_wait(caplog):
 
 async def test_a_fault_storm_including_failed_relaunches_waits_60_s_each():
     fault = production.ShowFault('capture resyncs')
-    setup = RuntimeError('receiver unreachable')
+    # Any failed relaunch retries, not only the expected classes.
+    setup = KeyError('receiver unreachable')
     shows = _Shows((0, fault), (0, setup), (0, setup), (0, fault), (0, setup), (0, 'stop'))
     await shows.run()
     gaps = [later - earlier for earlier, later in zip(shows.starts, shows.starts[1:])]

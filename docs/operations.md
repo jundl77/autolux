@@ -10,9 +10,9 @@ same clean shutdown (dashboard viewer, Starfire, then the Radius receiver), and 
 starts on the current store with a fresh viewer:
 
 - **Restart show** in the Config tab starts the next session at once.
-- A fault that ends a running show (Starfire, Radius link, capture) restarts it after 5 s,
-  then 15 s, then 60 s for each further fault; a session that ran 10 minutes resets the wait.
-  A failed teardown, a relaunch that fails to start, or a relaunch whose dashboard does not come
+- Any error that ends a running show (Starfire, Radius link, capture, a bug) restarts it after
+  5 s, then 15 s, then 60 s for each further fault; a session that ran 10 minutes resets the
+  wait. The log carries each fault's traceback. A failed teardown, a relaunch that fails to start, or a relaunch whose dashboard does not come
   back counts as a fault. A first show that fails before it plays (devices, configuration)
   exits, since it needs the operator.
 - Ctrl-C, `autolux stop` or `--duration` (one deadline for the whole run) ends the session and
