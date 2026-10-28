@@ -39,6 +39,11 @@ VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
 _VIEWER_POLL_SEC = 0.2
+_RETRY_POLL_SEC = 0.25
+# A relaunched viewer waits this long for the last session's viewer to let go of the port.
+VIEWER_BIND_SEC = 30.0
+# Its exit code when it never could: the controller faults the session on it, not on any exit.
+VIEWER_PORT_TAKEN = 3
 
 
 @contextmanager
@@ -474,10 +479,65 @@ class UiBridge:
         while self._viewer.poll() is None:
             time.sleep(_VIEWER_POLL_SEC)
 
+    def dashboard_lost(self) -> bool:
+        return self._viewer.poll() == VIEWER_PORT_TAKEN
+
     def stop(self) -> None:
         self._stopping = True
         kill_tree(self._viewer)
         self._server.stop()
+        # The venv launcher can exit before the interpreter it started lets go of the port.
+        try:
+            _within(_KILL_GRACE_SEC, lambda: _probe(self._ui_port))
+        except OSError as error:
+            LOGGER.warning(f'[ui] the dashboard port {self._ui_port} is still taken ({error!r})')
+
+
+def _probe(port: int) -> None:
+    with socket.socket() as probe:
+        if os.name != 'nt':
+            # Else a closed listener's TIME_WAIT reads as taken; Windows binds through it anyway.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind((DASHBOARD_BIND_ADDRESS, port))
+
+
+def _within(seconds: float, attempt, *, clock=time.monotonic, sleep=time.sleep):
+    """attempt() until it stops raising OSError; a relaunch races the last session's sockets."""
+    deadline = clock() + seconds
+    while True:
+        try:
+            return attempt()
+        except OSError:
+            if clock() >= deadline:
+                raise
+            sleep(_RETRY_POLL_SEC)
+
+
+def serve_viewer(wsgi_app, port: int, *, clock=time.monotonic, sleep=time.sleep) -> None:
+    from werkzeug.serving import ThreadedWSGIServer
+
+    class Server(ThreadedWSGIServer):
+        # On Windows SO_REUSEADDR binds over a live listener, so a dying viewer's port would
+        # read as free and two viewers would share it.
+        allow_reuse_address = os.name != 'nt'
+
+        # Werkzeug turns a failed bind into a bare exit(1); retry here, below that.
+        def server_bind(self):
+            def attempt():
+                try:
+                    super(Server, self).server_bind()
+                except OSError:
+                    self.socket.close()
+                    self.socket = socket.socket(self.address_family, self.socket_type)
+                    raise
+
+            try:
+                _within(VIEWER_BIND_SEC, attempt, clock=clock, sleep=sleep)
+            except OSError as error:
+                LOGGER.error(f'[ui] the dashboard port {port} stayed taken ({error!r})')
+                raise SystemExit(VIEWER_PORT_TAKEN) from error
+
+    Server(DASHBOARD_BIND_ADDRESS, port, wsgi_app).serve_forever()
 
 
 def start(
@@ -489,13 +549,16 @@ def start(
 ) -> UiBridge | None:
     try:
         # Bound like the dashboard so its page can POST controls here directly.
-        server = SnapshotServer(
-            event_buffer,
-            snapshot_port(ui_port),
-            commands,
-            host=DASHBOARD_BIND_ADDRESS,
-            dashboard_port=ui_port,
-            handoff_timeout=HANDOFF_TIMEOUT_SEC,
+        server = _within(
+            _KILL_GRACE_SEC,
+            lambda: SnapshotServer(
+                event_buffer,
+                snapshot_port(ui_port),
+                commands,
+                host=DASHBOARD_BIND_ADDRESS,
+                dashboard_port=ui_port,
+                handoff_timeout=HANDOFF_TIMEOUT_SEC,
+            ),
         )
         server.start()
     except OSError as error:

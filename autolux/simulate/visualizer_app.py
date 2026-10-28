@@ -34,6 +34,7 @@ from autolux.lib.ui_bridge import (
     SNAPSHOT_HOST,
     SNAPSHOT_PATH,
     advertise_dashboard_mdns,
+    serve_viewer,
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
@@ -2298,6 +2299,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                     'special_groups',
                     'highlight',
                     'rig_revision',
+                    'session',
                 )
             }
             control['settings_text'] = settings_text(control['settings'] or {})
@@ -2500,7 +2502,7 @@ def run_app(
             port,
             DASHBOARD_BIND_ADDRESS,
         )
-        app.run(host=DASHBOARD_BIND_ADDRESS, port=port, debug=False)
+        serve_viewer(app.server, port)
 
 
 def main(argv=None) -> None:

@@ -5,6 +5,28 @@ and SSH readiness within 60 seconds, or `--check-full` for builds, all tests,
 backtest and simulation. Both leave outputs stopped. Stop a show with Ctrl-C or
 `uv run autolux stop`.
 
+The show restarts itself; nothing outside Autolux relaunches it. Each session ends with the
+same clean shutdown (dashboard viewer, Starfire, then the Radius receiver), and the next one
+starts on the current store with a fresh viewer:
+
+- **Restart show** in the Config tab starts the next session at once.
+- Any error that ends a running show (Starfire, Radius link, capture, a bug) restarts it after
+  5 s, then 15 s, then 60 s for each further fault; a session that ran 10 minutes resets the
+  wait. The log carries each fault's traceback. A failed teardown, a relaunch that fails to
+  start, or a relaunch whose dashboard does not come back counts as a fault: a relaunched viewer
+  waits up to 30 s for the old one's port, then the session faults so the backoff gives the old
+  viewer more time. A first show that fails before its first health check passes (devices,
+  configuration, a receiver or Starfire that is down) exits, since it needs the operator; a
+  first show without a dashboard runs on with a warning.
+- Ctrl-C, `autolux stop` or `--duration` (one deadline for the whole run) ends the session and
+  exits. The stop flag is checked during the wait and before each relaunch, so `autolux stop`
+  also ends a show waiting to restart. The process holds the controller lock throughout, so a
+  second show cannot start in between.
+
+Each session logs `[prod] session N starting: <run dir>` and keeps its logs and its `--report`
+(written as `<run dir>/<report file name>`) in its own run directory. Before a relaunch the
+controller confirms over SSH that the old receiver released the output PC's hardware.
+
 ## Health
 
 The dashboard at `http://autolux.local:8765` groups playback, tempo, intent and effect
@@ -56,17 +78,16 @@ checkout or merge aborts. If `rig/room.mvr` already differs from the store when 
 or checkout brought another rig), the Save status warns that it replaced it.
 
 A running show reads its rig once at login, so a saved patch reaches the lights only on the
-next session. While the show runs an older rig, the Config tab says so and **Apply to show**
-(a second click within 5 s confirms it) asks it to exit cleanly, as `autolux stop` does. The
-lights go dark until the next session is up: the show supervisor restarts the show after any
-exit until its stop flag `.live/supervisor.stop` exists, on the saved store. Without a
-supervisor, start the show again by hand.
+next session. While the show runs an older rig, the Config tab says so beside **Restart show**,
+which is enabled whenever a show runs (a second click within 5 s confirms it). The show shuts
+down cleanly and starts again on the saved store; the lights go dark until it is back. Under
+`autolux run` (not `--prod`) the button only ends the show.
 
 A fixture is its MVR uuid, and its name is a label. Renaming a fixture, or swapping the names of
 two, changes labels only: position, address, group and a running test stay with the uuid, so a
-renamed fixture tests before Apply. Names stay unique because autoloops name fixtures by label.
-A fixture added in Config gets a fresh uuid, which the show learns only on Apply; until then
-the Config tab does not test it.
+renamed fixture tests before a restart. Names stay unique because autoloops name fixtures by
+label. A fixture added in Config gets a fresh uuid, which the show learns only after **Restart
+show**; until then the Config tab does not test it.
 
 The show runs one fixture test at a time, so two open dashboards share it: a test from one moves
 or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it

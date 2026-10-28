@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -74,7 +75,7 @@ class StubShow:
     """The engine's side of the bridge: fixed data, a monotonic clock for cooldowns.
 
     It boots on the store at `rig_path`; restart_show reboots it on whatever the store holds
-    then, as the supervisor restarting a real show would.
+    then, as a real show's next session would.
     """
 
     def __init__(self, rig_path: Path, clock=time.monotonic):
@@ -192,8 +193,9 @@ class StubShow:
             elif a == 'highlight':
                 s['highlight'] = c['target'] and {'target': c['target'], 'colour': c['colour']}
             elif a == 'restart_show':
-                # A new Starfire login: the test is gone and the rig is the store's.
+                # A new session and Starfire login: the test is gone and the rig is the store's.
                 s['rig_revision'], s['rig'] = running_rig(self.rig_path)
+                s['session'] = uuid.uuid4().hex
                 s['highlight'] = None
 
     @staticmethod

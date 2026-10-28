@@ -302,3 +302,132 @@ def test_the_config_viewer_gets_the_show_start_check_inputs_for_save():
     assert command[command.index('--autoloops') + 1] == 'loops'
     assert command[command.index('--expected-universe') + 1] == '0'
     assert '--expected-universe' not in viewer_command(8765, {**setup, 'expected_universe': None})
+
+
+def test_restart_show_reaches_the_engine_as_the_bare_action(bridge):
+    connection, commands = bridge
+    taken = []
+    _engine(commands, taken)
+    headers = {**JSON, 'Origin': DASHBOARD}
+    reply, body = _request(connection, 'POST', {'action': 'restart_show', 'extra': 1}, headers)
+    commands.put(None)
+    assert (reply.status, json.loads(body)) == (202, {'accepted': 'restart_show'})
+    assert taken == [{'action': 'restart_show'}]
+
+
+def test_a_restarted_session_kills_its_viewer_and_brings_up_a_fresh_one(monkeypatch, caplog):
+    import socket
+
+    from autolux.lib import ui_bridge
+
+    events = []
+
+    class Viewer:
+        pid = 1
+
+        def __init__(self):
+            self.killed = threading.Event()
+
+        def wait(self):
+            self.killed.wait()
+            return 1
+
+    def spawn(command):
+        events.append('spawn')
+        return Viewer()
+
+    def kill(viewer):
+        events.append('kill')
+        viewer.killed.set()
+
+    monkeypatch.setattr(ui_bridge, '_spawn', spawn)
+    monkeypatch.setattr(ui_bridge, 'kill_tree', kill)
+    monkeypatch.setattr(ui_bridge, '_probe', lambda port: events.append(('port free', port)))
+    monkeypatch.setattr(ui_bridge, 'DASHBOARD_BIND_ADDRESS', '127.0.0.1')
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        bridge_port = probe.getsockname()[1]
+    ui_port = bridge_port - 1
+    with caplog.at_level('WARNING'):
+        for _ in range(2):
+            session = ui_bridge.start(EventBuffer(), ui_port, commands=queue.Queue())
+            assert session is not None, 'the bridge port was not free again for the next session'
+            session.stop()
+            session._watcher.join(2)
+    # Each stop waits for the old viewer's port before the next session spawns its viewer.
+    assert events == ['spawn', 'kill', ('port free', ui_port)] * 2
+    assert 'viewer process exited' not in caplog.text
+
+
+def test_a_relaunch_retries_a_taken_port_until_its_deadline():
+    from autolux.lib.ui_bridge import _within
+
+    now = [0.0]
+    attempts = []
+
+    def attempt(fails):
+        attempts.append(now[0])
+        if len(attempts) <= fails:
+            raise OSError('address in use')
+        return 'bound'
+
+    def run(fails):
+        attempts.clear()
+        now[0] = 0.0
+        return _within(
+            1.0,
+            lambda: attempt(fails),
+            clock=lambda: now[0],
+            sleep=lambda s: now.__setitem__(0, now[0] + s),
+        )
+
+    assert run(2) == 'bound' and attempts == [0.0, 0.25, 0.5]
+    with pytest.raises(OSError, match='address in use'):
+        run(100)
+    assert attempts == [0.0, 0.25, 0.5, 0.75, 1.0]
+
+
+def test_a_relaunched_viewer_waits_30_s_for_its_port_then_exits_as_port_taken(monkeypatch):
+    import http.server
+
+    from werkzeug import serving
+
+    from autolux.lib import ui_bridge
+
+    now = [0.0]
+    served = []
+
+    def bind(self):
+        if now[0] < taken_for:
+            raise OSError('address in use')
+
+    monkeypatch.setattr(http.server.HTTPServer, 'server_bind', bind)
+    monkeypatch.setattr(serving.ThreadedWSGIServer, 'server_activate', lambda self: None)
+    monkeypatch.setattr(
+        serving.ThreadedWSGIServer, 'serve_forever', lambda self: served.append(now[0])
+    )
+    fake = {'clock': lambda: now[0], 'sleep': lambda s: now.__setitem__(0, now[0] + s)}
+    taken_for = 10.0
+    ui_bridge.serve_viewer(object(), 8999, **fake)
+    assert served == [10.0]
+    now[0], taken_for = 0.0, float('inf')
+    with pytest.raises(SystemExit) as exited:
+        ui_bridge.serve_viewer(object(), 8999, **fake)
+    assert exited.value.code == ui_bridge.VIEWER_PORT_TAKEN and now[0] == ui_bridge.VIEWER_BIND_SEC
+    assert served == [10.0]
+
+
+def test_only_a_viewer_that_never_got_its_port_counts_as_a_lost_dashboard():
+    from types import SimpleNamespace
+
+    from autolux.lib import ui_bridge
+
+    def bridge(code):
+        viewer = SimpleNamespace(poll=lambda: code)
+        return SimpleNamespace(_viewer=viewer)
+
+    lost = [
+        ui_bridge.UiBridge.dashboard_lost(bridge(code))
+        for code in (None, 1, ui_bridge.VIEWER_PORT_TAKEN)
+    ]
+    assert lost == [False, False, True]

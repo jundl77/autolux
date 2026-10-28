@@ -189,11 +189,7 @@ def build_fixture_panel(app, store):
                             html.P(id='fixture-status', role='status'),
                             html.Button('Reload saved', id='fixture-reload'),
                             html.Button('Save patch', id='fixture-save', className='patch-primary'),
-                            html.Button(
-                                'Apply to show (restarts it; lights go dark until it is back)',
-                                id='fixture-apply',
-                                disabled=True,
-                            ),
+                            html.Button('Restart show', id='fixture-apply', disabled=True),
                         ],
                         className='patch-actions',
                     ),
@@ -414,7 +410,7 @@ def build_fixture_panel(app, store):
         Input('fixture-draft', 'data'),
         State('fixture-settings', 'data'),
     )
-    # The Control tab's poll also serves the Config tab: the test controls and the Apply banner
+    # The Control tab's poll also serves the Config tab: the test controls and the Restart banner
     # follow the show's state from it.
     app.clientside_callback(
         ClientsideFunction(namespace='fixture_patch', function_name='syncTest'),
