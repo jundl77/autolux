@@ -15,8 +15,9 @@ const MAX_ATTRIBUTE_VALUES: usize = 512;
 const MAX_ATTRIBUTE_ID_BYTES: usize = 512;
 pub const GOBO_ATTRIBUTE: &str = "Gobo1";
 const OPEN_GOBO: &str = "Open";
-/// Wheel slots cannot mix: a blend jumps half-way rather than crossing unrelated slots.
-const WHEEL_SNAP_AMOUNT: f64 = 0.5;
+/// Values that cannot mix (wheel slots, presets, snapping channels) all change at this point of
+/// a blend: a fade never crosses unrelated slots, and every wheel turns on the same frame.
+const SNAP_POINT: f64 = 0.5;
 const DMX_BYTE_BITS: usize = 8;
 const DMX_BYTE_MASK: u32 = 255;
 const CIE_LUMINANCE_SCALE: f64 = 100.0;
@@ -541,20 +542,54 @@ impl GdtfProfile {
         to: &AttributeValue,
         amount: f64,
     ) -> AttributeValue {
-        if let (AttributeValue::Number(first), AttributeValue::Number(last)) = (from, to) {
-            let functions = self.matching_functions(key);
-            if functions.len() == 1 {
-                let function = functions[0].1;
-                if !function.snap && function.sets.is_empty() {
-                    return AttributeValue::Number(lerp(*first, *last, amount));
-                }
-            }
+        if let (AttributeValue::Number(first), AttributeValue::Number(last)) = (from, to)
+            && self.mixes(key)
+        {
+            return AttributeValue::Number(lerp(*first, *last, amount));
         }
-        if amount < 1.0 {
+        if amount < SNAP_POINT {
             from.clone()
         } else {
             to.clone()
         }
+    }
+
+    /// A blend's attributes. A value only one side sets has nothing to mix with: a mixing one
+    /// shows from the start (destination) or until the end (source), a snapping one only on its
+    /// side of the snap point, where the other side's value for that channel shows instead.
+    pub fn blend_attributes(
+        &self,
+        from: &BTreeMap<String, AttributeValue>,
+        to: &BTreeMap<String, AttributeValue>,
+        amount: f64,
+    ) -> BTreeMap<String, AttributeValue> {
+        let mut blended = BTreeMap::new();
+        for (key, value) in to {
+            match from.get(key) {
+                Some(source) => {
+                    blended.insert(
+                        key.clone(),
+                        self.interpolate_attribute(key, source, value, amount),
+                    );
+                }
+                None if self.mixes(key) || amount >= SNAP_POINT => {
+                    blended.insert(key.clone(), value.clone());
+                }
+                None => {}
+            }
+        }
+        for (key, value) in from {
+            let until = if self.mixes(key) { 1.0 } else { SNAP_POINT };
+            if !to.contains_key(key) && amount < until && !self.shares_channel(key, &blended) {
+                blended.insert(key.clone(), value.clone());
+            }
+        }
+        blended
+    }
+
+    fn mixes(&self, key: &str) -> bool {
+        let functions = self.matching_functions(key);
+        functions.len() == 1 && !functions[0].1.snap && functions[0].1.sets.is_empty()
     }
 
     pub fn encode(&self, state: &FixtureState, output: &mut [u8]) -> Result<()> {
@@ -725,8 +760,9 @@ impl GdtfProfile {
         infos
     }
 
-    /// The Gobo1 ChannelSet at `slot`: 0 is the set named Open (any case), else the first;
-    /// n >= 1 is the n-th of the others in DMX order, wrapping. None without a named Gobo1 set.
+    /// The Gobo1 wheel slot at `slot`: 0 is the set named Open (any case), else the first;
+    /// n >= 1 is the n-th of the others in DMX order, wrapping. Only sets that select a wheel
+    /// slot count, never shake or spin ranges packed into Gobo1. None without such a set.
     pub fn gobo_name(&self, slot: u64) -> Option<String> {
         let (channel, position) = self.channels.iter().find_map(|channel| {
             channel
@@ -746,6 +782,7 @@ impl GdtfProfile {
             .iter()
             .filter(|set| {
                 set.first <= last
+                    && set.colour.is_some()
                     && !set.name.is_empty()
                     && function
                         .sets
@@ -778,7 +815,7 @@ impl GdtfProfile {
     pub fn blend_colour(&self, from: Rgb, to: Rgb, amount: f64) -> Rgb {
         if !self.wheel_only_colour {
             from.lerp(to, amount)
-        } else if amount < WHEEL_SNAP_AMOUNT {
+        } else if amount < SNAP_POINT {
             from
         } else {
             to
