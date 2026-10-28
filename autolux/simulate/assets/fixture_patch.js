@@ -32,7 +32,6 @@
     let refreshTimer = null;
     let testCommand = null;
     let testEndTimer = null;
-    let testEnded = "";
     // A refusal stays readable over the polls until the next test action.
     let testRefusal = "";
     let restartTimer = null;
@@ -40,6 +39,8 @@
     // The rig revision the show ran when a restart was taken; null when none is pending.
     let restartingFrom = null;
     let suppressedClick = null;
+    // The fixture pane's Advanced disclosure stays as the operator left it, across fixtures.
+    let advancedOpen = false;
     let requestId = 0;
     let keyCounter = 0;
     const drawn = new WeakMap();
@@ -178,7 +179,19 @@
         if (Math.abs(rotation[1]) > MAX_PITCH_DEGREES) {
             return `Pitch ${rotation[1].toFixed(1)}° exceeds ±${MAX_PITCH_DEGREES}°; save will be refused.`;
         }
-        return { pan: rotation[0], tilt: rotation[1], reversed: matrix[8] / Math.hypot(matrix[6], matrix[7], matrix[8]) < 0 };
+        return { pan: rotation[0], tilt: rotation[1], reversed: isStanding(matrix) };
+    }
+
+    // GDTF models a fixture hanging (beam down, local Z up); standing is that turned 180° about
+    // its X axis, which negates the local Y and Z axes. The flip is its own inverse.
+    const isStanding = (matrix) => matrix[8] < 0;
+    const flipped = (matrix) => matrix.map((value, index) => (index >= 3 && index < 9 ? -value : value));
+
+    // The pane's placement: the mount, and the rotation relative to it.
+    function placement(matrix) {
+        const standing = isStanding(matrix);
+        const rotation = rotationDegrees(standing ? flipped(matrix) : matrix);
+        return rotation && { standing, position: matrix.slice(9), rotation };
     }
 
     function composeMatrix(position, rotation) {
@@ -214,8 +227,10 @@
     const absoluteAddress = (universe, address) => String(universe * UNIVERSE_SIZE + address);
     const gdtfTree = (draft, settings, spec) => draft.gdtf[spec] || settings.library[spec]?.tree || null;
 
+    const modeNode = (tree, mode) => tree && [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "DMXMode" && entry.attributes.Name === mode);
+
     function modeChannels(tree, mode) {
-        const node = tree && [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "DMXMode" && entry.attributes.Name === mode);
+        const node = modeNode(tree, mode);
         if (!node) return null;
         let channels = 0;
         for (const [channel] of walk(node)) {
@@ -228,7 +243,7 @@
 
     // Mirrors mvr.mode_cells: the geometries Starfire addresses as cells, by first offset.
     function modeCells(tree, mode) {
-        const node = tree && [...walk(tree)].map(([entry]) => entry).find((entry) => entry.tag === "DMXMode" && entry.attributes.Name === mode);
+        const node = modeNode(tree, mode);
         if (!node) return [];
         const paths = {};
         const visit = (entry, parent) => {
@@ -258,6 +273,20 @@
             .map(([geometry, offsets]) => ({ geometry, first: Math.min(...offsets) }))
             .sort((a, b) => a.first - b.first || (a.geometry < b.geometry ? -1 : 1))
             .map((cell) => cell.geometry);
+    }
+
+    // Mirrors Starfire's movement_range: the mode's first Pan or Tilt function that has no channel
+    // sets (a set with no physical range or wheel slot is only a label), as [from, to] degrees.
+    function physicalRange(tree, mode, attribute) {
+        const node = modeNode(tree, mode);
+        const label = (set) => set.attributes.PhysicalFrom === undefined && set.attributes.PhysicalTo === undefined && !(Number(set.attributes.WheelSlotIndex ?? 0) > 0);
+        for (const [entry] of node ? walk(node) : []) {
+            if (entry.tag !== "ChannelFunction" || entry.attributes.Attribute !== attribute) continue;
+            if (entry.children.some((set) => set.tag === "ChannelSet" && !label(set))) continue;
+            const range = [Number(entry.attributes.PhysicalFrom ?? 0), Number(entry.attributes.PhysicalTo ?? 1)];
+            return range[0] !== range[1] && range.every(Number.isFinite) ? range : null;
+        }
+        return null;
     }
 
     function placedObjects(draft, settings) {
@@ -488,8 +517,13 @@
         "set-matrix"(draft, settings, action) {
             const values = [...action.position, ...action.rotation].map(Number);
             if (!values.every(Number.isFinite)) throw new Error("Position and rotation must be numbers.");
-            const value = formatMatrix(composeMatrix(values.slice(0, 3), values.slice(3)));
+            const matrix = composeMatrix(values.slice(0, 3), values.slice(3));
+            const value = formatMatrix(action.standing ? flipped(matrix) : matrix);
             return applyAction(draft, settings, { action: "set-child-text", key: action.key, tag: "Matrix", value });
+        },
+        // The pane's patch number is the MVR FixtureID; FixtureIDNumeric follows it.
+        "set-patch-number"(draft, settings, action, { node }) {
+            for (const tag of ["FixtureID", "FixtureIDNumeric"]) applyAction(draft, settings, { action: "set-child-text", key: node.key, tag, value: action.value });
         },
         "set-address"(draft, settings, action, { node }) {
             const [universe, address] = [Number(action.universe), Number(action.address)];
@@ -575,11 +609,9 @@
                 // The name is a label: groups, positions and a running test follow the uuid.
                 return { error, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
             }
-            case "FixtureID":
-            case "FixtureIDNumeric": {
-                // MVR's FixtureID is a string; only FixtureIDNumeric is a number.
+            case "FixtureID": {
                 const twin = others.find((entry) => textOf(entry, field) === value);
-                return { error: field === "FixtureID" || /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same ID.` : null, action: child(field, value) };
+                return { error: /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same number.` : null, action: { action: "set-patch-number", key, value } };
             }
             case "GDTFSpec": {
                 const tree = gdtfTree(draft, settings, value);
@@ -606,16 +638,25 @@
             case "matrix": {
                 const values = value.map((text) => (text.trim() === "" ? NaN : Number(text)));
                 const error = !values.every(Number.isFinite) ? "Position and rotation must be numbers." : Math.abs(values[4]) > MAX_PITCH_DEGREES ? `Pitch must be within ±${MAX_PITCH_DEGREES}°.` : null;
-                return { error, action: { action: "set-matrix", key, position: values.slice(0, 3), rotation: values.slice(3) } };
+                return { error, action: { action: "set-matrix", key, position: values.slice(0, 3), rotation: values.slice(3), standing: isStanding(parseMatrix(textOf(node, "Matrix")) || IDENTITY) } };
+            }
+            case "mount": {
+                const local = parseMatrix(textOf(node, "Matrix"));
+                const current = local && placement(local);
+                if (!current) return { error: "Set the rotation in Advanced." };
+                return { error: null, action: { action: "set-matrix", key, position: current.position, rotation: current.rotation, standing: value === "standing" } };
             }
             case "DMXInvertPan":
             case "DMXInvertTilt":
                 return { error: null, action: child(field, value ? "true" : null) };
             case "Pan":
             case "Tilt": {
-                const [minimum, maximum] = value.map(Number);
-                const valid = value.every((text) => text.trim() !== "") && minimum >= 0 && minimum <= maximum && maximum <= 1;
-                return { error: valid ? null : "Limits need 0 ≤ min ≤ max ≤ 1.", action: { action: "set-movement", key, axis: field, minimum, maximum } };
+                // Degrees within the GDTF's physical range, stored as the fraction of it Starfire maps.
+                const [from, to] = physicalRange(gdtfTree(draft, settings, row.spec), row.mode, field) || [0, 1];
+                const degrees = value.map((text) => (text.trim() === "" ? NaN : Math.min(Math.max(Number(text), Math.min(from, to)), Math.max(from, to))));
+                const error = !degrees.every(Number.isFinite) ? "Enter both limits." : degrees[0] > degrees[1] ? "Min is above max." : null;
+                const [minimum, maximum] = degrees.map((angle) => (angle - from) / (to - from)).sort((a, b) => a - b);
+                return { error, action: { action: "set-movement", key, axis: field, minimum, maximum } };
             }
         }
         return { error: `Unknown field ${field}.` };
@@ -649,11 +690,11 @@
         const command = (testCommand = target ? { action: "highlight", target, colour } : { action: "highlight", target: null });
         stopRefresh();
         lit = Boolean(target);
-        testEnded = testRefusal = "";
+        testRefusal = "";
         // Starfire drops a test nobody refreshes after 60 s, so a held one is re-sent well inside that.
         if (target) {
             refreshTimer = setInterval(() => dispatchTest(command), TEST_REFRESH_MS);
-            testEndTimer = setTimeout(() => (highlight(null), (testEnded = "Test ended after 10 minutes."), testNote(testEnded)), TEST_MAX_MS);
+            testEndTimer = setTimeout(() => highlight(null), TEST_MAX_MS);
         }
         dispatchTest(command);
         return command;
@@ -689,11 +730,6 @@
     // A new fixture (or a new uuid) is not in the rig the show runs until Apply, and Starfire
     // answers an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.id === target.fixture || fixture.cells.includes(target.cell));
-    // Targets carry ids; people read the running rig's labels.
-    const labelOf = (id) => {
-        const fixture = (show?.rig?.fixtures || []).find((entry) => entry.id === id || entry.cells.includes(id));
-        return fixture ? id.replace(fixture.id, fixture.name) : id;
-    };
 
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
     function testControl(spec) {
@@ -721,8 +757,7 @@
     ds.fixture_patch = {
         describeProfile(spec, settings) {
             const entry = settings.library[spec];
-            if (!entry) return "No fixture mode selected.";
-            return `${entry.manufacturer} · ${entry.modes[entry.default_mode].channels} DMX channels · ${entry.default_mode} · ${spec}`;
+            return entry ? `${entry.modes[entry.default_mode].channels} channels` : "";
         },
 
         renderPatch(draft, universe, selection, busy, settings) {
@@ -761,7 +796,7 @@
             const universes = [...new Set([0, universe, ...rows.map((row) => row.universe).filter((value) => value !== null)])].sort((a, b) => a - b);
             return [
                 blocks,
-                `${occupied.filter((owners) => owners.length).length} / ${settings.channelCount} channels patched`,
+                `${occupied.filter((owners) => owners.length).length} / ${settings.channelCount} channels`,
                 errors.map((error) => component("Div", { children: error })),
                 Boolean(errors.length) || busy === "true",
                 universes.map((number) => ({ label: `Universe ${number + 1}`, value: number })),
@@ -802,22 +837,19 @@
                     if (container && !(planDrag && id === "mvr-plan")) redraw(container, draw);
                 }
                 const editor = document.getElementById("mvr-node-editor");
-                if (editor) {
+                const title = document.getElementById("fixture-title");
+                if (editor && title) {
                     const sameNode = drawn.get(editor) === selection;
                     drawn.set(editor, selection);
-                    keepingState(editor, sameNode, () => editor.replaceChildren(...(path ? [...patchForm(draft, settings, path.at(-1)), ...inspector(draft, settings, path)] : [])));
+                    const node = path?.at(-1);
+                    const fixture = node && rows.some((entry) => entry.key === node.key);
+                    const name = h("label", { className: "cfg-field" }, h("input", { type: "text", value: node?.attributes.name ?? "", "data-cfg": "name", "aria-label": "Name", spellcheck: "false" }), h("small", { className: "cfg-note" }));
+                    title.replaceChildren(...(fixture ? [name] : node ? [h("h3", { text: node.tag })] : []));
+                    keepingState(editor, sameNode, () => editor.replaceChildren(...(path ? [...patchForm(draft, settings, node), advanced(inspector(draft, settings, path), !fixture)] : [])));
                     paintTest();
                 }
             }
-            const summary = `${rows.length} patched fixtures · ${placedObjects(draft, settings).length} scene objects · ${Object.keys(draft.gdtf).length} GDTF files`;
-            const layout = [{ display: "block" }, "patch-workspace has-selection"];
-            if (!path) return [...layout, "Select a fixture in the map, plan or tree.", true, summary];
-            const node = path.at(-1);
-            const row = rows.find((entry) => entry.key === node.key);
-            const detail = row
-                ? `${row.channels ?? "?"} channels · ${row.cells.length > 1 ? `${row.cells.length} cells: ${row.cells.join(", ")} · ` : ""}${row.address ?? "?"}–${(row.address ?? 0) + (row.channels ?? 1) - 1} · ${row.spec}`
-                : `${node.tag}${node.attributes.name ? ` · ${node.attributes.name}` : ""}`;
-            return [...layout, detail, path.length === 1, summary];
+            return [{ display: "block" }, "patch-workspace has-selection", !path || path.length === 1, `${rows.length} fixtures`];
         },
 
         editPatch(_add, _remove, _close, action, response, settings, busy, draft, revision, selection, profile, quantity, universe, address) {
@@ -925,6 +957,9 @@
                 continue;
             }
             const length = Math.hypot(matrix[3], matrix[4]);
+            const range = physicalRange(gdtfTree(draft, settings, textOf(node, "GDTFSpec")), textOf(node, "GDTFMode"), "Pan");
+            const limits = movementFor(draft, (node.attributes.uuid || "").toUpperCase(), "Pan")?.attributes;
+            const [minimum, maximum] = range ? [Number(limits?.minimum ?? 0), Number(limits?.maximum ?? 1)].map((share) => range[0] + share * (range[1] - range[0])) : [];
             fixtures.push({
                 key: node.key,
                 name,
@@ -933,7 +968,10 @@
                 x: matrix[9],
                 y: matrix[10],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
-                facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null
+                facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null,
+                // The pan limits in degrees around the facing, the physical range's middle on it;
+                // a standing head pans the other way round.
+                pan: range && length > 1e-6 ? { span: Math.abs(maximum - minimum), offset: ((minimum + maximum - range[0] - range[1]) / 2) * (isStanding(matrix) ? -1 : 1) } : null
             });
         }
         return { fixtures, others };
@@ -1022,7 +1060,7 @@
             const dash = mark.accent ? ` stroke-dasharray="${n(r * 0.5)} ${n(r * 0.35)}"` : "";
             const label = labelled ? `<text x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}">${escapeXml(mark.name)}</text>` : "";
             const title = mark.group ? `${mark.name} · ${mark.group}` : mark.name;
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(title)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"${dash}/>${label}</g>`);
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(title)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"${dash}/>${panArc(mark, n, r * 3.2, fill)}${label}</g>`);
         }
         parts.push("</g></svg>");
         const legend = groups.map((group) => {
@@ -1030,6 +1068,16 @@
             return `<span class="plan-key"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="${colour[group]}"${dash}/></svg>${escapeXml(group || "no group")}${accents.has(group) ? " · accent" : ""}</span>`;
         });
         return parts.join("") + `<div class="plan-legend">${legend.join("")}</div>`;
+    }
+
+    // The pan limits as an arc around the mark; a range of a full turn or more is a near circle.
+    function panArc(mark, n, radius, stroke) {
+        if (!mark.pan) return "";
+        const half = (Math.min(mark.pan.span, 359.9) * Math.PI) / 360;
+        const centre = Math.atan2(mark.facing[1], mark.facing[0]) + (mark.pan.offset * Math.PI) / 180;
+        // Plan SVG y is MVR -Y, so the arc runs from centre - half to centre + half against the sweep.
+        const point = (angle) => `${n(mark.x + radius * Math.cos(angle))} ${n(-mark.y - radius * Math.sin(angle))}`;
+        return `<path class="plan-pan" d="M ${point(centre - half)} A ${n(radius)} ${n(radius)} 0 ${half > Math.PI / 2 ? 1 : 0} 0 ${point(centre + half)}" stroke="${stroke}"/>`;
     }
 
     function redraw(container, draw) {
@@ -1191,21 +1239,23 @@
                 node.text ? h("div", { className: "mvr-gdtf-attribute", text: node.text }) : null,
                 node.children.map((child) => visit(child, depth + 1))
             );
-        return [h("h4", { text: `GDTF · ${spec}` }), muted("Read-only except DMX mode names and channel function/set ranges; a changed GDTF gains a Revision on save."), visit(tree, 0)];
+        return [h("h4", { text: `GDTF · ${spec}` }), visit(tree, 0)];
     }
 
     function testStrip() {
         const button = (spec, text, title, className) => h("button", { type: "button", "data-cfg-test": spec, className, title, text });
-        return h(
-            "div",
-            { className: "cfg-test" },
-            button("white", "Test", "Light the selected fixture or cell in white", "cfg-test-main"),
-            Object.entries(rig.settings.testColours).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--swatch:${hex}` })),
-            button("off", "Off", "Clear the test"),
-            button("-1", "‹", "Previous fixture in patch order"),
-            button("1", "›", "Next fixture in patch order"),
-            h("small", { className: "cfg-note cfg-test-note" })
-        );
+        return [
+            h(
+                "div",
+                { className: "cfg-test" },
+                button("white", "Test", "Light the selected fixture or cell in white", "cfg-test-main"),
+                Object.entries(rig.settings.testColours).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--swatch:${hex}` })),
+                button("off", "Off", "Clear the test"),
+                button("-1", "‹", "Previous fixture in patch order", "cfg-step"),
+                button("1", "›", "Next fixture in patch order")
+            ),
+            h("div", { className: "cfg-note cfg-test-note" })
+        ];
     }
 
     function paintTest() {
@@ -1218,8 +1268,8 @@
         const listed = JSON.stringify([row?.id, row?.name, ids]);
         if (cells.dataset.listed !== listed) {
             cells.dataset.listed = listed;
-            const offline = row?.cells.length ? `${row.cells.join(", ")} · not in the running show` : "No cells.";
-            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", className: "mvr-small", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.id, row.name)} to test`, text: cell.replace(row.id, row.name) })) : [muted(offline)]));
+            const offline = "Not in the running show.";
+            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.id, row.name)} to test`, text: cell.replace(row.id, row.name) })) : [muted(offline)]));
         }
         cells.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
@@ -1232,10 +1282,10 @@
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
         }
-        testNote(blocked || testRefusal || offline || (active ? `Testing ${labelOf(active.target?.fixture ?? active.target?.cell)} in ${active.colour}.` : testEnded));
+        testNote(blocked || testRefusal || offline || "");
     }
 
-    // Console-style patch form over the raw inspector; every field maps to one draft action.
+    // The console form: the test row, then one section per concern; each field maps to one draft action.
     function patchForm(draft, settings, node) {
         const row = fixtureRows(draft, settings).find((entry) => entry.key === node.key);
         if (!row) return [];
@@ -1246,45 +1296,80 @@
             control.value = value;
             return control;
         };
-        const numbers = (field, values, labels) =>
+        // Named inputs, labelled when `labels` is given.
+        const split = (names, values, labels, attributes = {}) =>
             h(
                 "div",
-                { className: `cfg-split cfg-${values.length}`, "data-cfg": field },
-                values.map((value, index) => h("label", {}, h("span", { text: labels[index] }), h("input", { type: "number", step: "any", value })))
+                { className: `cfg-split cfg-${values.length}`, ...attributes },
+                values.map((value, index) => h("label", {}, labels && h("span", { text: labels[index] }), h("input", { type: "number", step: "any", value, name: names[index], "aria-label": labels?.[index] ?? names[index] })))
             );
         // A label only wraps one control; groups of inputs or buttons sit in a plain div.
-        const field = (label, control, wide, tag = "label") => h(tag, { className: wide ? "cfg-field wide" : "cfg-field" }, h("span", { text: label }), control, h("small", { className: "cfg-note" }));
+        const field = (label, control, wide, tag = "label") => h(tag, { className: wide ? "cfg-field wide" : "cfg-field" }, h("span", {}, label), control, h("small", { className: "cfg-note" }));
+        const section = (heading, value, ...fields) => h("section", { className: "cfg-section" }, h("h4", {}, heading, value ? h("small", { text: value }) : null), fields.flat());
         const check = (tag, label) => h("label", { className: "cfg-check" }, h("input", { type: "checkbox", "data-cfg": tag, checked: textOf(node, tag) === "true" }), label);
         const specs = [...new Set([...Object.keys(draft.gdtf), ...Object.keys(settings.library)])];
         const profile = (spec) => (settings.library[spec] ? `${settings.library[spec].manufacturer} ${settings.library[spec].name}` : spec);
         const tree = gdtfTree(draft, settings, row.spec);
         const classes = [...new Set(Object.values(classNames(draft)).filter(Boolean))].sort();
         const matrix = parseMatrix(textOf(node, "Matrix"));
-        const rotation = matrix && rotationDegrees(matrix);
+        const local = matrix && placement(matrix);
         const uuid = (node.attributes.uuid || "").toUpperCase();
-        const limits = (axis) => ["minimum", "maximum"].map((name, index) => movementFor(draft, uuid, axis)?.attributes[name] ?? String(index));
+        const axes = ["Pan", "Tilt"].map((axis) => [axis, physicalRange(tree, row.mode, axis)]).filter(([, range]) => range);
+        const limits = (axis, [from, to]) =>
+            ["minimum", "maximum"].map((name, index) => {
+                const share = Number(movementFor(draft, uuid, axis)?.attributes[name] ?? index);
+                return String(Math.round((from + share * (to - from)) * 10) / 10);
+            });
+        const span = row.address && row.channels ? `DMX ${row.address}–${row.address + row.channels - 1}` : null;
         return [
-            h(
-                "div",
-                { className: "cfg-form" },
-                testStrip(),
-                field("Name", input("name", row.name), true),
-                field("Fixture ID", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
-                field("Fixture ID (numeric)", input("FixtureIDNumeric", textOf(node, "FixtureIDNumeric"), { inputmode: "numeric" })),
-                field("GDTF profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
-                field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} ch`])], row.mode), true),
+            ...testStrip(),
+            section("Identity", null, field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" }))),
+            section(
+                "Patch",
+                span,
+                field("Profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
+                field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} channels`])], row.mode), true),
                 field("Universe", h("input", { type: "text", value: (row.universe ?? 0) + 1, readonly: true, tabindex: -1 })),
-                field("Address", input("address", row.address, { type: "number", min: 1, max: settings.channelCount + 1 - (row.channels ?? 1), step: 1 })),
+                field("Address", input("address", row.address, { type: "number", min: 1, max: settings.channelCount + 1 - (row.channels ?? 1), step: 1 }))
+            ),
+            section(
+                "Placement",
+                null,
+                ...(local
+                    ? [
+                          field("Mount", select("mount", [["hanging", "Hanging"], ["standing", "Standing"]], local.standing ? "standing" : "hanging")),
+                          h(
+                              "div",
+                              { className: "cfg-field wide", "data-cfg": "matrix" },
+                              h("span", { text: "Position (mm)" }),
+                              split(["x", "y", "z"], local.position.map(formatNumber), ["X", "Y", "Z"]),
+                              h("span", { text: "Rotation (°)" }),
+                              split(["yaw", "pitch", "roll"], local.rotation.map(formatNumber), ["Yaw", "Pitch", "Roll"]),
+                              h("small", { className: "cfg-note" })
+                          )
+                      ]
+                    : [muted("Rotation is set in Advanced.")])
+            ),
+            section(
+                "Group and role",
+                null,
                 field("Group", h("span", { className: "cfg-group" }, select("group", [["", "no group"], ...classes.map((name) => [name, name]), [NEW_GROUP, "new…"]], row.className), input("newGroup", "", { hidden: true, placeholder: "new group name" }))),
-                field("Role", select("role", settings.roles.map((role) => [role, role]), placed.layer, { disabled: !row.className })),
-                field("Position and rotation", rotation ? numbers("matrix", [...matrix.slice(9), ...rotation].map(formatNumber), ["X mm", "Y mm", "Z mm", "yaw °", "pitch °", "roll °"]) : muted("Matrix has no plain rotation; edit it below."), true, "div"),
-                field("Pan limits 0–1", numbers("Pan", limits("Pan"), ["min", "max"]), false, "div"),
-                field("Tilt limits 0–1", numbers("Tilt", limits("Tilt"), ["min", "max"]), false, "div"),
-                check("DMXInvertPan", "Invert pan"),
-                check("DMXInvertTilt", "Invert tilt"),
-                field("Cells · pick one to test it alone", h("div", { className: "cfg-cells" }), true, "div")
-            )
-        ];
+                field("Role", select("role", settings.roles.map((role) => [role, role]), placed.layer, { disabled: !row.className }))
+            ),
+            axes.length
+                ? section(
+                      "Movement",
+                      null,
+                      axes.map(([axis, range]) => field([`${axis} limits (°)`, h("small", { text: `${Math.min(...range)}–${Math.max(...range)}` })], split(["min", "max"], limits(axis, range), null, { "data-cfg": axis }), false, "div")),
+                      axes.map(([axis]) => check(`DMXInvert${axis}`, `Invert ${axis.toLowerCase()}`))
+                  )
+                : null,
+            section("Cells", String(row.cells.length), h("div", { className: "cfg-cells" }))
+        ].filter(Boolean);
+    }
+
+    function advanced(parts, always) {
+        return h("details", { className: "cfg-advanced", open: always || advancedOpen, "data-always": always }, h("summary", { text: "Advanced (raw MVR)" }), parts);
     }
 
     function fieldCheck(holder, send) {
@@ -1557,6 +1642,14 @@
             sendAction({ action: "set-address", key: address.dataset.mvrAddress, universe, address: start });
         }
     });
+
+    document.addEventListener(
+        "toggle",
+        (event) => {
+            if (event.target.classList?.contains("cfg-advanced") && event.target.dataset.always === undefined) advancedOpen = event.target.open;
+        },
+        true
+    );
 
     document.addEventListener("input", (event) => {
         const field = event.target.closest?.("#config-panel [data-cfg]");

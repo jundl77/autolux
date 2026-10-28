@@ -193,9 +193,9 @@ test("selecting a node changes only the inspector, never the rig layout", () => 
     const picked = ds.fixture_patch.renderRig(spot.key, current, settings);
     assert.deepEqual(plain(picked.slice(0, 2)), plain(idle.slice(0, 2)));
     assert.equal(picked.at(-1), idle.at(-1));
-    assert.equal(idle[3], true);
-    assert.equal(picked[3], false);
-    assert.match(picked[2], /channels/);
+    assert.equal(idle[2], true);
+    assert.equal(picked[2], false);
+    assert.equal(picked[3], "8 fixtures");
 });
 
 test("the rig plan marks each fixture at its MVR position, coloured by group, accents dashed", () => {
@@ -366,15 +366,55 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [relabelled] = edit(current, renamed.action);
     const row = (tree) => plain(model.fixtureRows(tree, settings).find((entry) => entry.key === key));
     assert.deepEqual({ ...row(relabelled), name: "wash_right" }, row(current));
-    // IDs: whole numbers, duplicates only warned.
-    assert.match(check("FixtureIDNumeric", child(spot, "FixtureIDNumeric").text).warning, /spot_left/);
-    assert.equal(check("FixtureID", "A-1").error, null, "MVR's FixtureID is a string");
-    assert.match(check("FixtureIDNumeric", "x").error, /whole number/);
+    // Patch number: a whole number, a duplicate only warned; FixtureIDNumeric follows FixtureID.
+    assert.match(check("FixtureID", child(spot, "FixtureID").text).warning, /spot_left has the same number/);
+    assert.match(check("FixtureID", "A-1").error, /whole number/);
+    const [numbered] = edit(current, check("FixtureID", "17").action);
+    assert.deepEqual(["FixtureID", "FixtureIDNumeric"].map((tag) => child(fixtureNode(numbered, "wash_right"), tag).text), ["17", "17"]);
     assert.match(check("matrix", ["0", "0", "0", "0", "61", "0"]).error, /±60°/);
-    assert.match(check("Pan", ["0.8", "0.2"]).error, /min ≤ max/);
-    const [limited] = edit(current, check("Pan", ["0.1", "0.9"]).action);
+    // Soft limits in degrees within the GDTF's physical range (the spot pans 0–540°, tilts 0–270°),
+    // stored as the share of it Starfire maps; edits past the range clamp to it.
+    assert.match(check("Pan", ["400", "100"], current, spot.key).error, /Min is above max/);
+    assert.match(check("Pan", ["", "100"], current, spot.key).error, /both limits/);
+    const [limited] = edit(current, check("Pan", ["54", "486"], current, spot.key).action);
     const movement = [...nodes(limited.scene)].find((node) => node.tag === "Movement");
-    assert.deepEqual(plain(movement.attributes), { fixture: fixtureNode(current, "wash_right").attributes.uuid, axis: "Pan", minimum: "0.1", maximum: "0.9" });
+    assert.deepEqual(plain(movement.attributes), { fixture: spot.attributes.uuid, axis: "Pan", minimum: "0.1", maximum: "0.9" });
+    assert.deepEqual(plain(check("Tilt", ["-20", "300"], current, spot.key)), { error: null, action: { action: "set-movement", key: spot.key, axis: "Tilt", minimum: 0, maximum: 1 } });
+});
+
+test("the mount toggle turns the fixture 180° about X and keeps its rotation relative to the mount", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    const matrix = (tree) => model.parseMatrix(child(fixtureNode(tree, "spot_left"), "Matrix").text);
+    const toggle = model.patchEdit(current, settings, spot.key, "mount", "standing");
+    assert.deepEqual(plain(toggle.action), { action: "set-matrix", key: spot.key, position: [-300, 0, 0], rotation: [180, 0, 0], standing: true });
+    const [standing] = edit(current, toggle.action);
+    // Hung turned around {-1,0,0}{0,-1,0}{0,0,1}: standing negates its local Y and Z.
+    assert.deepEqual(plain(matrix(standing)), [-1, 0, 0, 0, 1, 0, 0, 0, -1, -300, 0, 0]);
+    assert.equal(model.homeOrientation(matrix(standing)).reversed, true);
+    // A rotation edit on a standing fixture stays standing.
+    const [yawed] = edit(standing, model.patchEdit(standing, settings, spot.key, "matrix", ["-300", "0", "0", "90", "0", "0"]).action);
+    assert.ok(matrix(yawed)[8] < 0);
+    const [hanging] = edit(standing, model.patchEdit(standing, settings, spot.key, "mount", "hanging").action);
+    assert.deepEqual(plain(matrix(hanging)), plain(matrix(current)));
+});
+
+test("the plan draws each mover's pan limits as an arc around its facing", () => {
+    const current = draft();
+    const marks = (tree) => Object.fromEntries(model.planMarks(tree, settings).fixtures.map((mark) => [mark.name, mark]));
+    const before = marks(current);
+    assert.deepEqual(plain(before.spot_left.pan), { span: 540, offset: 0 });
+    assert.equal(before.wash_left.pan, null);
+    const markup = model.planSvg(model.planMarks(current, settings), settings);
+    assert.equal((markup.match(/class="plan-pan"/g) || []).length, 2);
+    // Limits 54–216° on 0–540°: a 162° arc, its middle 135° clockwise of the facing (counted
+    // anticlockwise in MVR), so the arc is the small one.
+    const spot = fixtureNode(current, "spot_left");
+    const [limited] = edit(current, model.patchEdit(current, settings, spot.key, "Pan", ["54", "216"]).action);
+    const pan = marks(limited).spot_left.pan;
+    assert.ok(Math.abs(pan.span - 162) < 1e-9 && Math.abs(pan.offset + 135) < 1e-9, JSON.stringify(pan));
+    const arc = model.planSvg(model.planMarks(limited, settings), settings).match(/<title>spot_left[^]*?<path class="plan-pan" d="([^"]+)"/)[1];
+    assert.match(arc, / 0 0 0 /);
 });
 
 test("a role move keeps each fixture where it hangs, out of a nested group and a yawed layer", () => {
