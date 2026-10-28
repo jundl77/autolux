@@ -178,13 +178,12 @@ function sf.each(target, make_effect)
 end
 
 -- ==== W3 aim ====
--- sf.aim(cell, x, y, z) -> pan, tilt (nil, nil without a pan range) and sf.focus(cell) -> x, y, z
--- are native (starfire::fixtures). Points are metres in the MVR scene frame: X cross-stage,
--- Y upstage, Z up.
+-- sf.aim(cell, x, y, z) -> pan, tilt (nil, nil for a cell without a pan range) and
+-- sf.focus(cell) -> x, y, z are native (starfire::fixtures). Points are metres in the MVR scene
+-- frame: X cross-stage, Y upstage, Z up.
 
 local X_AXIS, Z_AXIS = { 1, 0, 0 }, { 0, 0, 1 }
--- Parallel means float noise only; the fallbacks are for beams plotted exactly vertical or
--- exactly cross-stage.
+-- Parallel means float noise only; the fallback is for beams plotted exactly plumb.
 local PARALLEL = 1e-9
 
 local function cross(a, b)
@@ -211,18 +210,29 @@ local function rotate(v, axis, degrees)
         v[3] * c + k[3] * s + axis[3] * along }
 end
 
--- Spread turns the beam (focus - position) in its plane with X, positive towards +X; elevation
--- turns it in its plane with Z, positive up. Both planes come from the rest beam, so a circle of
--- offsets stays a cone round a vertical beam; elevation applies first, so a horizontal beam's
--- offsets are exactly heading and elevation. A beam along X spreads about Z, one along Z
--- elevates about X. nil, nil for a cell without a pan range.
-function sf.aim_offset(cell, spread_degrees, elevation_degrees)
+-- Elevation turns the rest beam in its vertical plane, positive up; a plumb beam turns about X.
+-- Spread turns it about the perpendicular in that plane, so the two offsets are at right angles
+-- for every beam and a circle of offsets is a cone. Positive spread moves any throw with a Y
+-- component towards +X, and a pure cross-stage throw clockwise seen from above. Elevation applies
+-- first, so a horizontal beam's offsets are exactly heading and elevation. `beam` = {dx, dy, dz}
+-- in metres is the rest beam, by default focus - position. nil, nil for a cell without a pan
+-- range.
+function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
     assert(finite(spread_degrees) and finite(elevation_degrees), "aim offsets must be finite degrees")
     local x, y, z = sf.position(cell)
-    local focus_x, focus_y, focus_z = sf.focus(cell)
-    local beam = { focus_x - x, focus_y - y, focus_z - z }
-    local spread_axis = rotation_axis(beam, X_AXIS, Z_AXIS)
+    if beam == nil then
+        local focus_x, focus_y, focus_z = sf.focus(cell)
+        beam = { focus_x - x, focus_y - y, focus_z - z }
+        -- A focus at the head itself gives nothing to turn; rest along the pan axis as sf.aim does.
+        if norm(beam) == 0 then return sf.aim(cell, x, y, z) end
+    else
+        assert(type(beam) == "table" and finite(beam[1]) and finite(beam[2]) and finite(beam[3])
+            and norm(beam) > 0, "a rest beam must be a finite nonzero {dx, dy, dz}")
+    end
     local elevation_axis = rotation_axis(beam, Z_AXIS, X_AXIS)
+    local spread_axis = cross(elevation_axis, beam)
+    local scale = (beam[2] < 0 and 1 or -1) / norm(spread_axis)
+    spread_axis = { spread_axis[1] * scale, spread_axis[2] * scale, spread_axis[3] * scale }
     beam = rotate(rotate(beam, elevation_axis, elevation_degrees), spread_axis, spread_degrees)
     return sf.aim(cell, x + beam[1], y + beam[2], z + beam[3])
 end
@@ -258,52 +268,65 @@ local PHASER_SHAPES = {
         return w * math.sin(FULL_TURN * t), 0.5 * math.sin(2 * FULL_TURN * t)
     end,
     tilt_wave = function(t) return 0, math.sin(FULL_TURN * t) end,
+    -- Each member's own phase on the fundamental keeps partners from reading as one mirrored circle.
     ballyhoo = function(t, _, w, ctx, index)
-        return w * (0.7 * math.sin(FULL_TURN * t) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index))),
-            0.7 * math.cos(FULL_TURN * t) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index, 1))
+        local fundamental = FULL_TURN * (t + _w3_hash(ctx, index, 2))
+        return w * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index))),
+            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index, 1))
     end,
 }
 local STATIC_SHAPES = { fan = true, cross = true }
-local LONGEST_MEASURE_EXPONENT = 5
-
--- 1, 2, 4, 8, 16 or 32 beats, nearest in ratio: cycles divide phrases, so counted from the
--- section start every member is back at its start on each phrase line.
-local function snap_measure(measure)
-    local exponent = math.floor(math.log(measure, 2) + 0.5)
-    return 2.0 ^ math.max(0, math.min(LONGEST_MEASURE_EXPONENT, exponent))
-end
+-- Cycles that divide a phrase, so counted from the section start every member is back at its
+-- start on each phrase line.
+local MEASURES = { [1] = true, [2] = true, [4] = true, [8] = true, [16] = true, [32] = true }
 
 -- spec = { shape = "fan"|"cross"|"circle"|"figure8"|"tilt_wave"|"ballyhoo",
---   size = spread degrees, tilt_size = elevation degrees (default size),
---   measure = beats per cycle, snapped as above (nil holds a fan or cross still),
---   phase = 0..1 spread of the cycle across the selection (default 0),
+--   size = spread degrees (tilt_wave needs none), tilt_size = elevation degrees (default size),
+--   measure = beats per cycle: 1, 2, 4, 8, 16 or 32 (nil holds a fan or cross still),
+--   phase = -1..1 cycles spread across the selection (default 0); positive runs the wave in
+--     selection order, left to right, negative the other way,
 --   wings = mirror partners share a rank and move outward (default true; false for tilt_wave),
---   centre_pan = spread degrees, centre_tilt = elevation degrees added to every member }
--- Member i cycles at t = frac(E / measure + phase * rank_i / ranks), E the beats since the
--- section start, else since the loop started. Change measure only where E is a multiple of both
--- measures (any bar line for measures up to 4), or t jumps. Returns sf.pan_tilt effects, none for
--- cells without a pan range.
+--   centre_pan = spread degrees, centre_tilt = elevation degrees added to every member,
+--   at = {x, y, z} metres every beam rests on, or direction = {dx, dy, dz} every beam rests
+--     along (default each member's focus) }
+-- Member i cycles at t = frac(E / measure - phase * rank_i / ranks), E the beats since the
+-- section start, else since the loop started. t restarts with every section, so it runs on
+-- unbroken only when the section's length is a multiple of the measure; likewise change measure
+-- only where E is a multiple of both measures. Returns sf.pan_tilt effects for the members with
+-- a pan range.
 function sf.phaser(target, ctx, spec)
     local shape = PHASER_SHAPES[spec.shape]
     assert(shape ~= nil, "unknown phaser shape")
     local size = spec.size
     local tilt_size = spec.tilt_size or size
+    if spec.shape == "tilt_wave" then size = size or 0 end
     local phase_spread = spec.phase or 0
     local centre_pan, centre_tilt = spec.centre_pan or 0, spec.centre_tilt or 0
     assert(finite(size) and finite(tilt_size) and finite(centre_pan) and finite(centre_tilt),
         "phaser sizes and centres must be finite degrees")
-    assert(finite(phase_spread) and phase_spread >= 0 and phase_spread <= 1, "phaser phase must be within 0..1")
+    assert(finite(phase_spread) and phase_spread >= -1 and phase_spread <= 1, "phaser phase must be within -1..1")
     local measure = spec.measure
     if measure == nil then
         assert(STATIC_SHAPES[spec.shape], "only a fan or cross holds still without a measure")
     else
-        assert(finite(measure) and measure > 0, "phaser measure must be positive beats")
-        measure = snap_measure(measure)
+        assert(MEASURES[measure], "phaser measure must be 1, 2, 4, 8, 16 or 32 beats")
     end
+    local at, direction = spec.at, spec.direction
+    assert(at == nil or direction == nil, "a phaser rests on a point or along a direction, not both")
+    assert(at == nil or type(at) == "table" and finite(at[1]) and finite(at[2]) and finite(at[3]),
+        "phaser at must be finite {x, y, z} metres")
     local wings = spec.wings
     if wings == nil then wings = spec.shape ~= "tilt_wave" end
 
-    local members = sf.members(target)
+    -- Only heads that can aim take part, so a wash in the group neither widens the row nor
+    -- takes a rank.
+    local members, aimable = {}, {}
+    for _, cell in ipairs(sf.members(target)) do
+        if sf.aim(cell, sf.focus(cell)) ~= nil then
+            members[#members + 1] = cell
+            aimable[cell] = true
+        end
+    end
     local rank, across, ranks = {}, {}, 0
     if wings then
         local xs, low, high = {}, math.huge, -math.huge
@@ -316,10 +339,12 @@ function sf.phaser(target, ctx, spec)
         -- where the plot is uneven; a member that is its own partner sits at 0.
         for _, pair in ipairs(sf.mirror(target)) do
             local first, second = pair[1].fixture, pair[2].fixture
-            local reach = half_width > 0 and (xs[second] - xs[first]) / (2 * half_width) or 0
-            rank[first], rank[second] = ranks, ranks
-            across[first], across[second] = -reach, reach
-            ranks = ranks + 1
+            if aimable[first] and aimable[second] then
+                local reach = half_width > 0 and (xs[second] - xs[first]) / (2 * half_width) or 0
+                rank[first], rank[second] = ranks, ranks
+                across[first], across[second] = -reach, reach
+                ranks = ranks + 1
+            end
         end
     end
     for _, cell in ipairs(members) do
@@ -331,12 +356,19 @@ function sf.phaser(target, ctx, spec)
     local elapsed = ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats or ctx.beat_position
     local effects = {}
     for index, cell in ipairs(members) do
-        local t = measure and (elapsed / measure + phase_spread * rank[cell] / ranks) % 1
+        local t = measure and (elapsed / measure - phase_spread * rank[cell] / ranks) % 1
         local u = across[cell]
-        local w = u > 0 and 1 or u < 0 and -1 or 0
+        -- A centre member circles the way the +X side does rather than nodding in a line.
+        local w = u < 0 and -1 or 1
         local spread, elevation = shape(t, u, w, ctx, index)
-        local pan, tilt = sf.aim_offset(cell, size * spread + centre_pan, tilt_size * elevation + centre_tilt)
-        if pan ~= nil then effects[#effects + 1] = sf.pan_tilt(sf.fixture(cell), pan, tilt) end
+        local beam = direction
+        if at ~= nil then
+            local x, y, z = sf.position(cell)
+            beam = { at[1] - x, at[2] - y, at[3] - z }
+        end
+        local pan, tilt = sf.aim_offset(cell, size * spread + centre_pan,
+            tilt_size * elevation + centre_tilt, beam)
+        effects[#effects + 1] = sf.pan_tilt(sf.fixture(cell), pan, tilt)
     end
     return effects
 end
