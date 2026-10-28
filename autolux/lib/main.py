@@ -207,8 +207,11 @@ class ShowControl:
                 light_engine.effect_controller.forget_special(instantaneous=True)
         elif action == 'restart_show':
             # Starfire reads the rig once per login; the supervisor restarts a show that exits.
-            LOGGER.info('[main] restart requested from the Config tab (rig changed)')
-            self._stop_show()
+            if self._stop_show is None:
+                LOGGER.warning('[main] restart refused: this show has no stop hook')
+            else:
+                LOGGER.info('[main] restart requested from the Config tab (rig changed)')
+                self._stop_show()
         elif action == 'settings':
             settings = dataclasses.replace(self.settings, **command['settings'])
             if settings != self.settings:

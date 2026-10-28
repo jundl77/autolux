@@ -262,12 +262,10 @@ def main(argv=None) -> int:
     bridge.start()
     threading.Thread(target=engine, args=(show, commands), daemon=True).start()
     with tempfile.TemporaryDirectory(prefix='autolux-gui-', ignore_cleanup_errors=True) as scratch:
-        # Save writes the repo rig beside the library, so both are scratch copies here.
-        repo = Path(scratch) / 'rig'
-        shutil.copytree(ROOT / 'rig/library', repo / 'library')
+        # No repo rig: a Save here must never write the tracked rig/room.mvr.
         rig = Path(scratch) / 'store.mvr'
         rig.write_bytes((ROOT / 'autolux/tests/data/room.mvr').read_bytes())
-        store = FixtureStore(rig, repo / 'library', rig_bytes)
+        store = FixtureStore(rig, ROOT / 'rig/library', rig_bytes)
         app = build_app(SnapshotPoller(host='127.0.0.1', port=bridge_port), fixture_store=store)
         add_harness_routes(app, show)
         server = make_server('127.0.0.1', dash_port, app.server, threaded=True)

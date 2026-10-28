@@ -194,6 +194,19 @@ async def test_restart_show_from_the_config_tab_exits_the_show_cleanly(
     assert 'restart requested from the Config tab (rig changed)' in caplog.text
 
 
+async def test_restart_show_without_a_stop_hook_is_refused_not_a_crash(
+    monkeypatch, tmp_path, caplog
+):
+    from autolux.lib.main import ShowControl
+
+    app = _built_app(monkeypatch, enable_ui=True, show_config_path=tmp_path / 'show.json')
+    control = ShowControl(tmp_path / 'show.json')
+    control.commands.put_nowait({'action': 'restart_show'})
+    with caplog.at_level('WARNING'):
+        await control.apply_pending(app.light_engine)
+    assert 'restart refused: this show has no stop hook' in caplog.text
+
+
 async def test_source_silence_keeps_the_monitor_audio_tail():
     from autolux.lib.delayed_monitor import DelayedMonitor
     from autolux.lib.main import PLAYBACK_DELAY_SEC

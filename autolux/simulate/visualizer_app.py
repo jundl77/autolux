@@ -2038,7 +2038,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     }
     selected_tab_style = {**tab_style, 'color': '#e6edf3', 'borderBottomColor': '#73b6ff'}
     config_panel = (
-        build_fixture_panel(app, fixture_store, snapshot_source)
+        build_fixture_panel(app, fixture_store)
         if fixture_store is not None
         else html.Section(
             [

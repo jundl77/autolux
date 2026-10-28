@@ -15,7 +15,6 @@ MAX_ARTNET_UNIVERSE = 32767
 MAX_FIXTURES = 512
 MAX_NAME_BYTES = 128
 ONE_ADDRESS_RULE = 'Starfire renders one Address on break 0 per fixture'
-REPO_RIG_NAME = 'room.mvr'
 RIG_DEFINITION_SUFFIX = '.rig.pb'
 LOGGER = logging.getLogger(__name__)
 
@@ -182,12 +181,18 @@ def rig_revision(content: bytes) -> str:
 
 
 class FixtureStore:
-    def __init__(self, rig_path: Path, library_path: Path, validate: Callable[[Path], bytes]):
-        """`validate` returns the RigDefinition Starfire accepted for the staged MVR."""
+    def __init__(
+        self,
+        rig_path: Path,
+        library_path: Path,
+        validate: Callable[[Path], bytes],
+        repo_rig: Path | None = None,
+    ):
+        """`validate` returns the RigDefinition Starfire accepted for the staged MVR; a save
+        mirrors the MVR and that definition to `repo_rig`, the tracked rig, when given."""
         self.rig_path = Path(rig_path)
         self.library_path = Path(library_path)
-        # The tracked rig the show seeds from sits beside the library its GDTF comes from.
-        self.repo_rig = self.library_path.parent / REPO_RIG_NAME
+        self.repo_rig = None if repo_rig is None else Path(repo_rig)
         self._validate = validate
         self._lock = threading.Lock()
 
@@ -213,15 +218,17 @@ class FixtureStore:
             try:
                 staged[self.rig_path] = _stage(self.rig_path, content)
                 definition = self._validate(staged[self.rig_path])
-                if self.repo_rig != self.rig_path:
+                if self.repo_rig is not None:
                     staged[self.repo_rig] = _stage(self.repo_rig, content)
-                exported = self.repo_rig.with_suffix(RIG_DEFINITION_SUFFIX)
-                staged[exported] = _stage(exported, definition)
+                    exported = self.repo_rig.with_suffix(RIG_DEFINITION_SUFFIX)
+                    staged[exported] = _stage(exported, definition)
                 # Another process may edit the rig while the native validator runs.
                 if rig_revision(self.rig_path.read_bytes()) != current:
                     raise ValueError('Fixture patch changed during validation. Reload and retry.')
-                for target, source in staged.items():
-                    os.replace(source, target)
+                # The store the show reads moves last: a failed repo replace (a Windows file
+                # lock) then leaves the patch unsaved, as the error the UI shows says.
+                for target in reversed(staged):
+                    os.replace(staged[target], target)
             finally:
                 for source in staged.values():
                     source.unlink(missing_ok=True)

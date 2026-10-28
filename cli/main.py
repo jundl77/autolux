@@ -35,6 +35,8 @@ async def run_cmd(args: argparse.Namespace):
     output_device_index = int(args.output_device) if args.output_device is not None else None
     run_id = secrets.randbits(64) or 1
     rig = selected_rig(args.rig, args.library)
+    # Hashed before Starfire reads the rig: an edit in between then shows as a stale rig, not hides.
+    setup = fixture_setup(args, rig)
     with StarfireRuntime(
         args.starfire_binary,
         rig,
@@ -51,7 +53,7 @@ async def run_cmd(args: argparse.Namespace):
             enable_ui=args.ui,
             ui_port=args.ui_port,
             report_path=args.report,
-            fixture_setup=fixture_setup(args, rig),
+            fixture_setup=setup,
             autoloops=discover_autoloops(args.autoloops),
             autoloop_meta=read_autoloop_meta(args.autoloops),
             selection_seed=run_id,

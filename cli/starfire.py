@@ -242,7 +242,11 @@ def run_ui(args: argparse.Namespace) -> None:
             pass
     refresh_profiles(patch, library)
     _validate_patch(binary, patch)
-    store = FixtureStore(patch, library, lambda candidate: _validate_patch(binary, candidate))
+    # Only the default store mirrors to the tracked rig; another --rig-store is not the room.
+    repo_rig = DEFAULT_RIG if patch == DEFAULT_FIXTURE_STORE else None
+    store = FixtureStore(
+        patch, library, lambda candidate: _validate_patch(binary, candidate), repo_rig
+    )
     source = EventBuffer()
     if args.snapshot_port is not None:
         from autolux.simulate.visualizer_app import SnapshotPoller

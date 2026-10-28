@@ -9,9 +9,6 @@ from autolux.lighting.fixture_setup import DMX_UNIVERSE_SIZE, MAX_ARTNET_UNIVERS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAP_COLUMNS = 32
 MAX_ADD_QUANTITY = 64
-# The loaded rig changes only when the show restarts, so a slow poll is enough.
-SHOW_RIG_POLL_MS = 2000
-STALE_RIG_BANNER = 'The show runs an older rig. Apply to show restarts it on the saved patch.'
 FIXTURE_COLORS = ('#527eaa', '#8664ae', '#408e83', '#b38449', '#a75c80', '#667cb2')
 FIXTURE_CSS = '''
 #config-panel {padding: 18px 0;}
@@ -152,13 +149,7 @@ def library_folder(path: Path) -> str:
         return str(path)
 
 
-def rig_banner(loaded: str | None, saved: str | None) -> tuple[str, bool]:
-    """The banner text and whether Apply is disabled; no show reporting a rig means nothing to apply."""
-    stale = loaded is not None and loaded != saved
-    return (STALE_RIG_BANNER if stale else '', not stale)
-
-
-def build_fixture_panel(app, store, snapshot_source):
+def build_fixture_panel(app, store):
     draft, revision = store.load()
     library = browser_library(store.library())
     profile_options = [
@@ -187,7 +178,7 @@ def build_fixture_panel(app, store, snapshot_source):
                             html.Button('Reload saved', id='fixture-reload'),
                             html.Button('Save patch', id='fixture-save', className='patch-primary'),
                             html.Button(
-                                'Apply to show (restarts the show)',
+                                'Apply to show (restarts it; lights go dark until it is back)',
                                 id='fixture-apply',
                                 disabled=True,
                             ),
@@ -198,7 +189,6 @@ def build_fixture_panel(app, store, snapshot_source):
                 className='patch-toolbar',
             ),
             html.P(id='fixture-show-rig', className='patch-conflicts'),
-            dcc.Interval(id='fixture-show-poll', interval=SHOW_RIG_POLL_MS),
             html.Div(
                 [
                     html.Div(
@@ -412,11 +402,15 @@ def build_fixture_panel(app, store, snapshot_source):
         Input('fixture-draft', 'data'),
         State('fixture-settings', 'data'),
     )
-    # The Control tab's poll also serves the Config tab, so the test controls show the show's state.
+    # The Control tab's poll also serves the Config tab: the test controls and the Apply banner
+    # follow the show's state from it.
     app.clientside_callback(
         ClientsideFunction(namespace='fixture_patch', function_name='syncTest'),
+        Output('fixture-show-rig', 'children'),
+        Output('fixture-apply', 'disabled'),
         Input('control-state', 'data'),
         Input('dashboard-tab', 'value'),
+        Input('fixture-revision', 'data'),
     )
     app.clientside_callback(
         ClientsideFunction(namespace='fixture_patch', function_name='editPatch'),
@@ -455,14 +449,5 @@ def build_fixture_panel(app, store, snapshot_source):
             return {'draft': saved, 'revision': version, 'reloaded': reloading}
         except (KeyError, AttributeError, TypeError, ValueError, OSError, RuntimeError) as error:
             return {'error': str(error)}
-
-    @app.callback(
-        Output('fixture-show-rig', 'children'),
-        Output('fixture-apply', 'disabled'),
-        Input('fixture-show-poll', 'n_intervals'),
-        Input('fixture-revision', 'data'),
-    )
-    def show_rig(_poll, saved_revision):
-        return rig_banner(snapshot_source.snapshot().get('rig_revision'), saved_revision)
 
     return panel

@@ -82,7 +82,7 @@ def store_for(path, validate):
         validate(staged)
         return rig_bytes(staged)
 
-    return FixtureStore(path, library, export)
+    return FixtureStore(path, library, export, library.parent / 'room.mvr')
 
 
 def written(store) -> list[bytes]:
@@ -153,6 +153,44 @@ def test_save_writes_the_store_the_repo_rig_and_its_rig_definition_together(rig_
     assert stored == repo != before[0]
     assert saved_revision == hashlib.sha256(stored).hexdigest()
     assert exported == rig_definition(store.repo_rig).SerializeToString() != before[2]
+    assert list(rig_file.parent.rglob('.rig-*')) == []
+
+
+def test_a_store_without_a_repo_rig_saves_only_itself(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    repo = written(store)[1:]
+    alone = FixtureStore(rig_file, store.library_path, rig_bytes)
+    draft, revision = alone.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    alone.save(draft, revision)
+    assert written(store)[1:] == repo
+    assert rig_file.read_bytes() != ROOM.read_bytes()
+
+
+@pytest.mark.parametrize('failing', [2, 3])
+def test_a_failed_repo_replace_leaves_the_store_the_show_reads_unchanged(
+    rig_file, monkeypatch, failing
+):
+    import os
+
+    before = rig_file.read_bytes()
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    calls = []
+
+    def replace(source, target):
+        calls.append(target)
+        if len(calls) == failing:
+            raise PermissionError('file locked')
+        os.replace(source, target)
+
+    monkeypatch.setattr('autolux.lighting.fixture_setup.os.replace', replace)
+    with pytest.raises(PermissionError, match='file locked'):
+        store.save(draft, revision)
+    # The store is the last replace, so it never moved before the failing one.
+    assert store.rig_path not in calls[:-1]
+    assert rig_file.read_bytes() == before
     assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
@@ -300,14 +338,6 @@ def test_config_names_the_library_folder_it_lists():
     assert library_folder(LIBRARY) == 'rig/library'
     listed = FixtureStore(ROOM, LIBRARY, lambda _: None).library()
     assert set(listed) == {path.name for path in LIBRARY.glob('*.gdtf')}
-
-
-def test_apply_is_offered_only_while_the_show_runs_an_older_rig():
-    from autolux.simulate.fixture_panel import STALE_RIG_BANNER, rig_banner
-
-    assert rig_banner('loaded', 'saved') == (STALE_RIG_BANNER, False)
-    assert rig_banner('saved', 'saved') == ('', True)
-    assert rig_banner(None, 'saved') == ('', True)
 
 
 KINTA = 'Chauvet DJ@Mini Kinta IRC@1.0.gdtf'

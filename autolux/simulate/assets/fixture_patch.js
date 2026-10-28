@@ -13,7 +13,9 @@
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
-    const APPLY_LABEL = "Apply to show (restarts the show)";
+    const APPLY_LABEL = "Apply to show (restarts it; lights go dark until it is back)";
+    const STALE_RIG = "The show runs an older rig. Apply to show restarts it on the saved patch.";
+    const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
     // The show's test colours (static_mode PRESET_COLOURS plus green) as the fixture emits them.
     const TEST_COLOURS = { white: "#ffffff", warm: "#ff8c33", red: "#ff0000", blue: "#0000ff", green: "#00ff00" };
@@ -29,6 +31,8 @@
     let refreshTimer = null;
     let testCommand = null;
     let applyTimer = null;
+    // The rig revision the show ran when a restart was taken; null when none is pending.
+    let restartingFrom = null;
     let suppressedClick = null;
     let requestId = 0;
     let keyCounter = 0;
@@ -658,7 +662,8 @@
             return null;
         }
         const command = { action: "restart_show" };
-        window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => reply?.error || window.dash_clientside.set_props("fixture-show-rig", { children: "Restarting the show on the saved patch." }));
+        const from = show?.rig_revision ?? null;
+        window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => reply?.error || ((restartingFrom = from), window.dash_clientside.set_props("fixture-show-rig", { children: RESTARTING })));
         return command;
     }
 
@@ -729,11 +734,16 @@
             ];
         },
 
-        syncTest(state, tab) {
+        syncTest(state, tab, saved) {
             // The control state carries the rig only when its revision changed; keep the last one.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
             if (tab !== "config") clearTest();
             paintTest();
+            // No show reporting a rig means nothing to apply; a restart holds until a new rig reports.
+            const loaded = state?.rig_revision ?? null;
+            if (loaded !== null && loaded !== restartingFrom) restartingFrom = null;
+            const stale = loaded !== null && loaded !== saved;
+            return restartingFrom !== null ? [RESTARTING, true] : [stale ? STALE_RIG : "", !stale];
         },
 
         renderRig(selection, draft, settings) {
