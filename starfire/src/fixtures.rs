@@ -589,18 +589,18 @@ impl FixtureRig {
             let pan = |position| {
                 let position = fixture.pan.map(position);
                 pan_range.map_or(position, |(from, to)| {
-                    // The yaw names the front, but pan zero throws the beam out of the back, so
-                    // a hanging head needs angle L + yaw + 180 for heading L. Standing turns pan
-                    // the other way round and tilt flips the beam a half turn: -L - yaw, the
-                    // mirror of the whole range, then the offset. Both canonical like the yaw.
-                    let yaw = fixture.pan_offset_degrees;
-                    let (position, negated_offset) = if fixture.reversed {
-                        (1.0 - position, from + to + yaw + HALF_TURN_DEGREES)
+                    if fixture.reversed {
+                        // Standing turns pan the other way round, and the room shows the beam
+                        // still leaving on the display side, so heading L needs head angle
+                        // -L - yaw: the mirror of the whole range, then this offset, canonical
+                        // like the yaw.
+                        let offset = HALF_TURN_DEGREES
+                            - (from + to + fixture.pan_offset_degrees + HALF_TURN_DEGREES)
+                                .rem_euclid(FULL_TURN_DEGREES);
+                        offset_pan(1.0 - position, offset, from, to)
                     } else {
-                        (position, -yaw)
-                    };
-                    let offset = HALF_TURN_DEGREES - negated_offset.rem_euclid(FULL_TURN_DEGREES);
-                    offset_pan(position, offset, from, to)
+                        offset_pan(position, fixture.pan_offset_degrees, from, to)
+                    }
                 })
             };
             let tilt = |position| {

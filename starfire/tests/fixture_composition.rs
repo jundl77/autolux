@@ -89,7 +89,7 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
     for start in [0, 12] {
         assert_eq!(
             &frame.dmx_frames_by_universe[&0][start..start + 12],
-            &[64, 0, 191, 255, 0, 111, 7, 51, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 111, 7, 51, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -160,7 +160,7 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][..4],
-        &[64, 0, 191, 255]
+        &[149, 85, 191, 255]
     );
     assert_eq!(
         &blackout.dmx_frames_by_universe[&0][6..12],

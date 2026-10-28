@@ -78,7 +78,7 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
     for start in [0, 12] {
         assert_eq!(
             &frame[start..start + 12],
-            &[64, 0, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
+            &[149, 85, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
         );
     }
     for start in [64, 72, 80, 88] {
@@ -105,7 +105,7 @@ fn blackout_preserves_movement_and_disables_all_device_programs() {
     states.get_mut("test").unwrap().intensity = 0.0;
     let dark_frame = rig.encode(&states).unwrap();
     assert_eq!(&dark_frame[&0][..4], &lit_frame[&0][..4]);
-    assert_eq!(&dark_frame[&0][..4], &[117, 85, 223, 255]);
+    assert_eq!(&dark_frame[&0][..4], &[32, 0, 223, 255]);
     assert_eq!(&dark_frame[&0][6..12], &[7, 0, 0, 0, 0, 0]);
 }
 
@@ -172,9 +172,9 @@ fn movement_calibration_maps_inverted_endpoints_without_touching_macros() {
     let rig = rig(json!([patch]));
     let mut states = rig.empty_states();
     states.get_mut("test").unwrap().pan = 0.0;
-    assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[106, 170, 128, 0]);
+    assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[191, 255, 128, 0]);
     states.get_mut("test").unwrap().pan = 1.0;
-    assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[149, 85, 128, 0]);
+    assert_eq!(&rig.encode(&states).unwrap()[&0][..4], &[64, 0, 128, 0]);
 }
 
 #[test]
@@ -199,17 +199,16 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
     }
     let mut states = turned.empty_states();
     states.get_mut("test").unwrap().pan = 0.5;
-    assert!((degrees(&unrotated.encode(&states).unwrap()[&0]) - 450.0).abs() < 0.01);
-    // A half turn cancels pan zero throwing out of the back.
-    assert!((degrees(&turned.encode(&states).unwrap()[&0]) - 270.0).abs() < 0.01);
+    assert!((degrees(&turned.encode(&states).unwrap()[&0]) - 450.0).abs() < 0.01);
 }
 
 #[test]
 fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_yaw() {
     // Independent of the encoder: decode the DMX to body angles and carry the beam through the
-    // Matrix. The Matrix's local +Y is the front, and physical pan 0 throws the beam out of the
-    // back, local -Y, turning clockwise about local +Z; mid tilt is on the pan axis (the mirror
-    // the tilt inversion assumes) and tilts towards the pan heading.
+    // Matrix. Physical pan 0 faces local +Y, the display, and turns clockwise about local +Z; mid
+    // tilt is on the pan axis (the mirror the tilt inversion assumes) and tilts towards the pan
+    // heading. Standing, the room's spots still throw on the display side: the tilt reversal
+    // keeps the lean rather than turning it a half turn.
     let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
         let flip = if hanging { 1.0 } else { -1.0 };
@@ -233,9 +232,9 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
         };
         let (pan, tilt) = (
             angle(0, 540.0).to_radians(),
-            (angle(2, 270.0) - 135.0).to_radians(),
+            (flip * (angle(2, 270.0) - 135.0)).to_radians(),
         );
-        let body = [-tilt.sin() * pan.sin(), -tilt.sin() * pan.cos()];
+        let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
         [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
     };
     for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, 270.0, -90.0] {

@@ -174,8 +174,6 @@ fn rig_with(mode: wire::DmxMode, fixture: wire::Fixture) -> FixtureRig {
             area: wire::StageArea::Centre as i32,
             profile_id: "test".into(),
             address: 1,
-            // A half turn keeps logical pan equal to the DMX, so short test ranges stay in range.
-            matrix: vec![-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
             ..fixture
         }],
         profiles: vec![wire::FixtureProfile {

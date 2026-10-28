@@ -193,7 +193,7 @@ fn typed_mover_encoding_preserves_safe_channels_and_applies_calibration() {
     );
     assert_eq!(
         &rig.encode(&states).unwrap()[&0][..12],
-        &[106, 170, 128, 0, 0, 111, 7, 128, 0, 0, 0, 0]
+        &[191, 255, 128, 0, 0, 111, 7, 128, 0, 0, 0, 0]
     );
     let colour = fixture.profiles[0]
         .mode

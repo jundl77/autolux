@@ -43,10 +43,9 @@ render as separate patches.
 `Matrix` rows are the local X, Y, Z axes in parent space, then the position in mm
 (Z up, right-handed). The rotation is read as `R = Rz(yaw) · Rx(pitch) · Ry(roll)`:
 
-- **yaw** is the direction the fixture's front (display) faces, measured on the plan: the
-  local +Y axis, anticlockwise from scene +Y. A head's pan zero throws the beam out of its back
-  (local -Y), so a hanging head reaches stage heading L
-  (clockwise from +Y) at pan angle L + yaw + 180; the pan home offset is canonical in
+- **yaw** is the direction the fixture's display faces on the plan (the local +Y axis,
+  anticlockwise from scene +Y); at pan centre the beam leaves that way. A hanging head reaches
+  stage heading L (clockwise from +Y) at pan angle L + yaw; the pan home offset is canonical in
   (-180°, 180°] (+180, never -180, so one orientation always gives the same DMX on 540°
   heads);
 - tilt home offset = **pitch**. This is an approximation: it is exact only at pan home,
@@ -55,11 +54,13 @@ render as separate patches.
   cancels it again) and mirrors pan over its whole travel with the yaw turned the other way,
   so a logical pan lands on the same stage heading as on a hanging head at any yaw; roll
   otherwise does not render;
-- identity = the GDTF default (hanging) orientation, front to upstage: offset 180, not
-  reversed. A standing head reaches heading L at pan angle -L - yaw.
+- a standing head pans the other way round, which Starfire accounts for: it reaches heading L
+  at pan angle -L - yaw, its beam still on the display side;
+- identity = the GDTF default (hanging) orientation, display to upstage: offset 0, not
+  reversed.
 
-Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180 (front to the
-audience), offset 0, not reversed. Standing on the floor: `Rx(180)` =
+Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180 (display to the
+audience), not reversed. Standing on the floor: `Rx(180)` =
 `{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` → yaw 180 and reversed; Config shows it as Standing,
 yaw 180, since its Mount toggle negates the local X and Z and so keeps the facing. The inspector shows the derived home under each Matrix.
 
@@ -78,7 +79,7 @@ The Config rig map is a standard plot from the same draft: plan view, audience a
 the dashed nine-area grid over the fixtures' bounding box, the stage edge at the most downstage
 object, a 1-2-5 metre scale
 bar, one ring per fixture coloured by group (golden-angle hues past the configured six) and
-dashed for an accent-layer group, an arrow along the local Y axis (yaw, the front), and a legend. Names
+dashed for an accent-layer group, an arrow along the local Y axis (yaw, the display), and a legend. Names
 label the marks up to 48 fixtures; past that marks shrink with density and names move to the
 hover/tap title, which keeps a 500-fixture map under 200 KB. It redraws whenever the draft
 changes, and reads positions only; the MVR changes only through the Config editor's writer.
