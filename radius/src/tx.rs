@@ -181,9 +181,10 @@ fn capture_failure(reason: Option<&str>, stats: &CaptureMetrics) -> String {
     );
     if let Some(gap) = stats.last_gap_frames {
         message += &format!(
-            " ({} discontinuities, limit {CAPTURE_DISCONTINUITY_LIMIT} within {} s; last gap {:.0} ms)",
-            stats.discontinuities,
+            ": {} discontinuities within {} s (limit {CAPTURE_DISCONTINUITY_LIMIT}; {} since start; last gap {:.0} ms)",
+            stats.window_discontinuities,
             CAPTURE_DISCONTINUITY_WINDOW.as_secs(),
+            stats.discontinuities,
             gap_seconds(gap) * 1000.0
         );
     }
@@ -867,15 +868,16 @@ mod tests {
     #[test]
     fn capture_fault_names_the_discontinuity_limit_and_last_gap() {
         let stats = CaptureMetrics {
-            discontinuities: 3,
+            discontinuities: 50,
+            window_discontinuities: 3,
             last_gap_frames: Some(441),
             ..Default::default()
         };
         assert_eq!(
             capture_failure(Some("capture discontinuities repeated too often"), &stats),
             concat!(
-                "Radius audio capture failed: capture discontinuities repeated too often ",
-                "(3 discontinuities, limit 3 within 10 s; last gap 10 ms); check the endpoint, ",
+                "Radius audio capture failed: capture discontinuities repeated too often: ",
+                "3 discontinuities within 10 s (limit 3; 50 since start; last gap 10 ms); check the endpoint, ",
                 "RDP audio redirection and receiver connectivity"
             )
         );
