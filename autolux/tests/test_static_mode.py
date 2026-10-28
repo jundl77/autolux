@@ -9,7 +9,7 @@ from autolux.lib.engine.effect_definitions import (
     PREFERRED_AUTOLOOPS,
     LightIntent,
 )
-from autolux.lib.engine.special_policy import Special
+from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 from autolux.lib.engine.static_mode import (
     STATIC_FLOOR_PRIORITY,
     STATIC_GROUP_PRIORITY,
@@ -29,7 +29,9 @@ CATALOGUE = discover_specials()
 
 def static_engine(**options):
     light, queue, clock, lighting = engine(**options)
-    light.static_looks = StaticLooks(lighting, ROOM, CATALOGUE)
+    light.static_looks = StaticLooks(
+        lighting, ROOM, CATALOGUE, light.effect_controller.special_capabilities
+    )
     return light, queue, clock, lighting
 
 
@@ -340,7 +342,8 @@ FX_GROUP = {
 def special_looks():
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=[FX_GROUP])
-    return StaticLooks(lighting, ROOM, CATALOGUE), lighting
+    capabilities = SpecialCapabilities.from_groups(lighting.groups())
+    return StaticLooks(lighting, ROOM, CATALOGUE, lambda: capabilities), lighting
 
 
 def test_the_fx_picker_offers_only_the_rows_that_fit_each_target():
@@ -430,7 +433,9 @@ async def test_a_picked_row_survives_section_changes_and_fx_auto_off(tmp_path):
     light, _, _, lighting = static_engine(decoder=decoder, queue=False)
     lighting.groups = lambda: [FX_GROUP]
     await beat_at_phase(light, decoder, 0, decision='breakdown')
-    control.commands.put_nowait({'action': 'static_fx', 'row': 'drift', 'target': 'all'})
+    control.commands.put_nowait(
+        {'action': 'static', 'kind': 'special_fx', 'row': 'drift', 'target': 'all'}
+    )
     await control.apply_pending(light)
     assert light.mode == 'static'
     assert light.static_looks.state()['special_fx'] == {'name': 'drift', 'group': 'all'}

@@ -605,10 +605,14 @@ async def test_an_intense_special_starts_the_strobe_cooldown_the_dashboard_count
     controller, _, clock = with_specials(
         discover_specials(), settings=settings, event_buffer=buffer
     )
-    assert buffer.snapshot()['strobe_cooldown_seconds'] == 0.0
+
+    def strobe_bar():
+        return next(row for row in buffer.snapshot()['special_cooldowns'] if row.get('strobe'))
+
+    assert strobe_bar()['remaining_seconds'] == 0.0
     await controller.change_effect(LightIntent.DROP)
     clock.advance(19.0)
-    assert buffer.snapshot()['strobe_cooldown_seconds'] == pytest.approx(41.0)
+    assert strobe_bar()['remaining_seconds'] == pytest.approx(41.0)
 
 
 async def test_a_new_drop_replaces_the_drop_special_under_the_same_id():
@@ -914,7 +918,9 @@ async def test_fx_off_picks_no_automatic_fx_but_keeps_the_drop_strobe():
 
     # The operator's Static FX row does not ask the policy, so it still plays.
     drift = Special('drift', (LightIntent.BREAKDOWN,), 'fx', colour_slot='primary', speed=0.5)
-    looks = StaticLooks(lighting, StaticRig(groups=('fx',)), [drift])
+    looks = StaticLooks(
+        lighting, StaticRig(groups=('fx',)), [drift], controller.special_capabilities
+    )
     looks.special('drift', 'fx')
     assert accents(lighting, start)[-1]['value']['id'] == STATIC_SPECIAL_ID
     looks.clear_special()

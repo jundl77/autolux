@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import StarfireClient
@@ -47,10 +47,15 @@ def colour_hex(colour: tuple[float, float, float]) -> str:
 
 class StaticLooks:
     def __init__(
-        self, lighting_client: StarfireClient, rig: StaticRig, specials: Sequence[Special] = ()
+        self,
+        lighting_client: StarfireClient,
+        rig: StaticRig,
+        specials: Sequence[Special] = (),
+        capabilities: Callable[[], SpecialCapabilities] = SpecialCapabilities,
     ):
         self._lighting = lighting_client
         self.rig = rig
+        self._capabilities = capabilities
         # Strobe rows stay the show's own drop accent; the operator never holds one.
         self._rows = {row.name: row for row in specials if row.strobe_hz is None}
         self._looks: dict[str, dict] = {}
@@ -62,13 +67,11 @@ class StaticLooks:
     def active(self) -> bool:
         return bool(self._looks) or self._floor or self.blackout or self._special is not None
 
-    def special_rows(
-        self, target: str, capabilities: SpecialCapabilities | None = None
-    ) -> list[str]:
+    def special_rows(self, target: str) -> list[str]:
         """Catalogue rows the operator may hold on target: the rows the automatic show could
         place on that group (its own group, or its role where the fixtures render the row's
         axes), and on the whole rig any row it could place somewhere."""
-        capabilities = capabilities or self.special_capabilities()
+        capabilities = self._capabilities()
         return [
             name
             for name, row in self._rows.items()
@@ -98,9 +101,6 @@ class StaticLooks:
         if self._special is not None:
             self._special = None
             self._lighting.clear_override(STATIC_SPECIAL_ID)
-
-    def special_capabilities(self) -> SpecialCapabilities:
-        return SpecialCapabilities.from_groups(self._lighting.groups())
 
     def _send_special(self) -> None:
         special = self._special
@@ -177,7 +177,6 @@ class StaticLooks:
         self.set_blackout(False)
 
     def state(self) -> dict:
-        capabilities = self.special_capabilities()
         return {
             'targets': list(self.rig.targets),
             'blacklight': bool(self.rig.uv_groups),
@@ -185,9 +184,7 @@ class StaticLooks:
             'special_fx': None
             if self._special is None
             else {'name': self._special.name, 'group': self._special.group},
-            'fx_rows': {
-                target: self.special_rows(target, capabilities) for target in self.rig.targets
-            },
+            'fx_rows': {target: self.special_rows(target) for target in self.rig.targets},
             'looks': {
                 target: {
                     'colour': None if 'colour' not in look else colour_hex(look['colour']),

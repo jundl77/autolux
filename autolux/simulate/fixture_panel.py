@@ -70,7 +70,9 @@ FIXTURE_CSS = '''
 .plan-legend {display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:11px;color:#94a6b9;}
 .plan-key {display:inline-flex;align-items:center;gap:4px;}
 .plan-key circle {stroke:#e6edf3;stroke-width:1.2;}
-@media (max-width:700px) {.mvr-layout {grid-template-columns:1fr;} #mvr-plan svg.plan {height:260px;}}
+@media (max-width:700px) {.mvr-layout {grid-template-columns:1fr;} #mvr-plan svg.plan {height:260px;}
+.patch-workspace,.patch-workspace.has-selection {grid-template-columns:minmax(0,1fr);}
+.patch-library,.patch-map-card,.mvr-card,#fixture-info {grid-column:1;grid-row:auto;contain:none;}}
 #mvr-tree {max-height:340px;overflow:auto;font-size:12px;border:1px solid #273345;border-radius:4px;padding:6px;background:#0b121c;}
 #mvr-tree .mvr-tree-row,.mvr-editor .mvr-link {cursor:pointer;color:#c9d7e6;padding:2px 4px;border-radius:3px;white-space:nowrap;}
 #mvr-tree .mvr-tree-row:hover,.mvr-editor .mvr-link:hover {background:#1b2938;}

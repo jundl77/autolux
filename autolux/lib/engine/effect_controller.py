@@ -15,6 +15,7 @@ from autolux.lib.engine.autoloop_policy import (
     SelectionContext,
     look_intent,
     max_energy_for_intensity,
+    soft_drop,
 )
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -307,7 +308,7 @@ class EffectController:
 
     def enter_standby(self, bpm: float | None) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
-        self._forget_special(cut=True)
+        self.forget_special(cut=True)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
@@ -341,8 +342,6 @@ class EffectController:
     ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
-        # An unknown arrival is not soft, matching how intensity follow grades a drop.
-        soft = arrival_of_peak is not None and arrival_of_peak < MAXIMAL_ARRIVAL_OF_PEAK
         choice = self._special_policy.choose(
             intent,
             self.special_capabilities(),
@@ -350,7 +349,7 @@ class EffectController:
             soft_drop=(
                 f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
                 'of the track peak'
-                if soft
+                if soft_drop(arrival_of_peak)
                 else None
             ),
             now=now,
@@ -363,7 +362,7 @@ class EffectController:
         if choice.intense:
             self._last_intense_at = now
         if choice.special is None:
-            self._forget_special()
+            self.forget_special()
         else:
             self._special_policy.record(choice.special, now, self._capabilities)
             self._fire_special(choice.special)
@@ -393,34 +392,28 @@ class EffectController:
         # not the music's, so it belongs to the room's now.
         if not self._special_on:
             return
-        if cut:
-            self.lighting_client.clear_override(
-                SPECIAL_ID, release_beats=CUT_RELEASE_BEATS, release_seconds=CUT_RELEASE_SECONDS
-            )
-            LOGGER.info(
-                '[lighting] special %s cut over at most %g beats or %g s',
-                self._special.name,
-                CUT_RELEASE_BEATS,
-                CUT_RELEASE_SECONDS,
-            )
-        else:
-            self.lighting_client.clear_override(SPECIAL_ID)
-            LOGGER.info(
-                '[lighting] special %s released over %g beats',
-                self._special.name,
-                self._special.release_beats,
-            )
+        fade = (
+            {'release_beats': CUT_RELEASE_BEATS, 'release_seconds': CUT_RELEASE_SECONDS}
+            if cut
+            else {}
+        )
+        self.lighting_client.clear_override(SPECIAL_ID, **fade)
+        LOGGER.info(
+            '[lighting] special %s %s',
+            self._special.name,
+            f'cut over at most {CUT_RELEASE_BEATS:g} beats or {CUT_RELEASE_SECONDS:g} s'
+            if cut
+            else f'released over {self._special.release_beats:g} beats',
+        )
         self._special_on = False
         if self.event_buffer:
             self.event_buffer.set_special(None)
 
-    def _forget_special(self, *, cut: bool = False) -> None:
+    def forget_special(self, *, cut: bool = False) -> None:
+        """Release the running special (quickly if cut); nothing returns before the next entry
+        fires one."""
         self.release_special(cut=cut)
         self._special = None
-
-    def cut_special(self) -> None:
-        """Fade the running special out quickly; nothing returns before the next entry fires one."""
-        self._forget_special(cut=True)
 
     def _restore_special(self) -> None:
         if not self._settings().fx_auto:

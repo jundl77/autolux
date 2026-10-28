@@ -154,7 +154,12 @@ class LightEngine(IMusicAnalyserHandler):
         # Set by the show: applies an automatic level through the operator's path.
         self.on_auto_intensity: Callable[[float, str], None] | None = None
         self._static_mode = False
-        self.static_looks = StaticLooks(lighting_client, static_rig, effect_controller.specials)
+        self.static_looks = StaticLooks(
+            lighting_client,
+            static_rig,
+            effect_controller.specials,
+            effect_controller.special_capabilities,
+        )
         self._log_chain_latency()
 
     def set_analyser(self, analyser: MusicAnalyser):
@@ -190,9 +195,10 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
-        # Pause first so the cut lands on a stopped clock and the special ends at once.
+        # Pause first so the cut lands on a stopped clock (the seconds cap is zero beats on a
+        # paused clock, so the cut ends at once); cut it so play does not revive it.
         self.lighting_client.set_paused(True)
-        self.effect_controller.cut_special()
+        self.effect_controller.forget_special(cut=True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
     async def resume(self) -> None:

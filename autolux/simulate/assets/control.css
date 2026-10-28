@@ -1,4 +1,4 @@
-#show-control, .dash-dropdown-content, .cooldowns {
+#show-control, .dash-dropdown-content, .cooldowns, .show-status {
     --accent: #73b6ff;
     --fill: #18212d;
     --fill-hover: #1f2a38;
@@ -49,8 +49,7 @@
 #show-control { color: var(--text); font-size: 14px; }
 .show-status { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
                gap: 16px; padding: 8px 0 16px; border-bottom: 1px solid var(--line);
-               color: var(--text); font-size: 14px;
-               --line: #273344; --muted: #8293a6; --text: #e6edf3; }
+               color: var(--text); font-size: 14px; }
 .status-tag { color: var(--muted); font-size: 11px; }
 .status-track { grid-column: span 2; }
 .marquee { display: inline-flex; gap: 48px; animation: marquee linear infinite; }
@@ -114,15 +113,16 @@
 /* Auto leads the intensity levels, set apart by a slightly stronger divider. */
 #show-control .joined > button + fieldset {
     border-left-color: color-mix(in srgb, var(--muted) 55%, var(--line)); }
-#show-control .joined > button:hover:not(:disabled):not(.active) { background: var(--fill);
-                                                                     color: var(--text); }
-#show-control .joined > button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
-/* AUTO and FX auto share one blue: the show is driving. Hover previews it as a tint. */
+#show-control .joined > button:hover:not(:disabled):not(.active),
+.segmented .dash-options-list-option:not(.selected):hover .dash-options-list-option-text {
+    background: var(--fill); color: var(--text); }
+#show-control .joined > button:focus-visible,
+.segmented .dash-options-list-option:has(input:focus-visible) .dash-options-list-option-text {
+    outline: 1px solid var(--accent); outline-offset: -2px; }
+/* AUTO and FX auto share one blue: the show is driving. */
+#control-intensity-auto, #control-fx-auto { --tone: var(--auto); }
 #show-control #control-intensity-auto.active, #show-control #control-fx-auto.active {
-    background: var(--auto); color: var(--ink); box-shadow: var(--lift); }
-#show-control #control-intensity-auto:hover:not(:disabled):not(.active),
-#show-control #control-fx-auto:hover:not(:disabled):not(.active) {
-    background: color-mix(in srgb, var(--auto) 16%, transparent); color: var(--auto); }
+    background: var(--tone); color: var(--ink); box-shadow: var(--lift); }
 .segmented .dash-options-list-option { padding: 0; margin: 0; background: transparent;
                                        align-items: stretch; }
 .segmented .dash-options-list-option + .dash-options-list-option {
@@ -131,17 +131,15 @@
                                                overflow: hidden; }
 .segmented .dash-options-list-option-text { flex: 1; justify-content: center; padding: 0 12px;
                                             color: var(--muted); font-size: 14px; cursor: pointer; }
-.segmented .dash-options-list-option:not(.selected):hover .dash-options-list-option-text {
-    background: var(--fill); color: var(--text); }
 .segmented .selected .dash-options-list-option-text { background: var(--tone); color: var(--ink);
                                                      box-shadow: var(--lift); }
-.segmented .dash-options-list-option:has(input:focus-visible) .dash-options-list-option-text {
-    outline: 1px solid var(--accent); outline-offset: -2px; }
 
-/* Each level carries its own hand-picked colour; hover previews it as a tint. */
+/* Each level and the AUTO chips carry their own colour; hover previews it as a tint. */
 #control-intensity [data-option-index="0"] { --tone: var(--calm); }
 #control-intensity [data-option-index="1"] { --tone: var(--balanced); }
 #control-intensity [data-option-index="2"] { --tone: var(--wild); }
+#show-control #control-intensity-auto:hover:not(:disabled):not(.active),
+#show-control #control-fx-auto:hover:not(:disabled):not(.active),
 #control-intensity .dash-options-list-option:not(.selected):hover .dash-options-list-option-text {
     background: color-mix(in srgb, var(--tone) 16%, transparent); color: var(--tone); }
 /* Following the music: AUTO is filled green and the show's level wears the one muted follow
@@ -194,9 +192,6 @@
 .control-note { color: var(--muted); font-size: 11px; }
 .control-note:empty { display: none; }
 #static-fx { display: grid; gap: 8px; }
-#static-fx-set { display: grid; gap: 8px; }
-/* The row's own dimming already covers its segments. */
-#static-fx-set:disabled fieldset { opacity: 1; }
 .overlay-banner { display: flex; align-items: center; gap: 12px; min-height: 32px;
                   padding: 0 12px 0 4px; border-radius: 6px; background: #2a2418; color: #e8c58f;
                   font-size: 14px; }
@@ -221,22 +216,18 @@
 #show-control .fx-toggle > #control-fx-off.active { background: var(--fx-off); color: var(--text);
                                                     box-shadow: var(--lift); }
 /* A running FX reads in the accent; "-" keeps the plain text colour. */
-.status-item.fx-running .status-text { color: #73b6ff; }
+.status-item.fx-running .status-text { color: var(--accent); }
 
 /* FX Effects, one cooldown bar per fixture group, stacked soonest-ready first, drawn like the
    Section Confidence bars beside it: name and seconds on a line above a thin track. The fill is
    empty as the group fires, grows left to right as it recovers and stays full with "ready". Every
    bar shares one soft grey-white, quieter than the AUTO blue so a waiting cooldown never reads as
-   the show driving; the text sits off the fill, so it stays readable whatever the fill's length.
-   control.js adds .flash for 650 ms when a group fires: the track pulses twice toward --text with
-   a 1px ring in the bar's grey around it (the fill is empty then, so the track is what shows),
-   then settles to the empty bar. */
+   the show driving; the text sits off the fill, so it stays readable whatever the fill's length. */
 .cooldowns { display: grid; gap: 8px;
              /* --balanced 65% over --fill: pale, neutral, 6.0:1 against the track. */
              --bar-fill: #939ba3;
              /* The Section Confidence track (POSTERIOR_TRACK): both bar blocks read as one. */
              --bar-track: #161d27;
-             --bar-ring: var(--bar-fill);
              /* --text 85% over --fill (#c7ced5): a peak clearly above the grey dips, 1.8:1. */
              --bar-flash: color-mix(in srgb, var(--text) 85%, var(--fill)); }
 .cooldown-row { display: grid; gap: 4px; }
@@ -251,10 +242,11 @@
                   background: var(--bar-track); }
 .cooldown-fill { height: 100%; background: var(--bar-fill); }
 .cooldown-row.flash .cooldown-track { animation: cooldown-fire 600ms ease-out; }
-/* Two peaks 150 ms apart, each a hard lift toward --text ringed outside in the bar's grey (an
-   inset ring would vanish against the lifted peak), then back to the empty track. */
+/* control.js adds .flash when a group fires: two peaks 150 ms apart, each a hard lift toward --text
+   ringed outside in the bar's grey (an inset ring would vanish against the lifted peak; the fill
+   is empty then, so the track is what shows), then back to the empty track. */
 @keyframes cooldown-fire {
-    0%, 25% { background: var(--bar-flash); box-shadow: 0 0 0 1px var(--bar-ring); }
+    0%, 25% { background: var(--bar-flash); box-shadow: 0 0 0 1px var(--bar-fill); }
     12.5% { background: var(--bar-fill); box-shadow: none; }
     37.5% { background: var(--bar-fill); box-shadow: none; }
     100% { background: var(--bar-track); box-shadow: none; }

@@ -3,8 +3,6 @@ import http.client
 import itertools
 import json
 import logging
-import math
-import os
 import re
 import threading
 import time
@@ -12,12 +10,11 @@ from statistics import median
 
 import dash
 import plotly.graph_objects as go
-from dash import ALL, Input, Output, State, dcc, html
+from dash import Input, Output, State, dcc, html
 
 from autolux.lib.engine.effect_definitions import (
     BALANCED,
     CALM,
-    DEFAULT_INTENSITY,
     INTENSITY_BALANCED,
     INTENSITY_CALM,
     INTENSITY_WILD,
@@ -25,12 +22,11 @@ from autolux.lib.engine.effect_definitions import (
     WILD,
 )
 from autolux.lib.engine.event_buffer import STOP_PERSISTENCE_SEC
-from autolux.lib.engine.static_mode import ALL_FIXTURES, BLACK, PRESET_COLOURS, colour_hex
+from autolux.lib.engine.static_mode import ALL_FIXTURES, PRESET_COLOURS, colour_hex
 from autolux.lib.media_session import MEDIA_SESSION_SOURCE
 from autolux.lib.system_health import health_summary
 from autolux.lib.telemetry_history import TELEMETRY_STALE_SECONDS, finite
 from autolux.lib.ui_bridge import (
-    CONTROL_PATH,
     DASHBOARD_BIND_ADDRESS,
     DASHBOARD_MDNS_HOSTNAME,
     DEFAULT_DASHBOARD_PORT,
@@ -516,7 +512,6 @@ def _fx_text(snapshot: dict) -> str | None:
 
 
 def fx_row_label(name: str) -> str:
-    """A catalogue row's display name; FX_ROWS_JS mirrors it."""
     return name.replace('_', ' ').capitalize()
 
 
@@ -629,9 +624,6 @@ def _build_show_status(snapshot: dict, now: float) -> list:
         _status_item('BPM', f'{bpm:.0f}' if bpm else '—'),
         _status_item('Render FPS', render_rate_text(fps)),
     ]
-    cooldown = snapshot.get('strobe_cooldown_seconds')
-    if finite(cooldown):
-        items.append(_status_item('Strobe', f'in {cooldown:.0f} s' if cooldown > 0 else 'ready'))
     return items
 
 
@@ -671,9 +663,6 @@ SETTINGS_ORDER = (
     'strobe_burst_seconds',
     'drop_strobe_cooldown_seconds',
 )
-SETTING_IDS = {f'control-{name}': name for name in FORM_SETTINGS}
-BRIGHTNESS_TRIGGERS = ('control-brightness', 'control-brightness-live')
-INTENSITY_TRIGGERS = ('control-intensity',)
 # FX chips: automatic specials on or off.
 FX_AUTO_IDS = {'control-fx-auto': True, 'control-fx-off': False}
 INTENSITY_LEVELS = (
@@ -686,66 +675,7 @@ ACCENT = '#73b6ff'
 PLAIN_DECIMAL_TEXT = re.compile(r'-?(\d+\.?\d*|\.\d+)')
 NEEDS_A_NUMBER = '{label} needs a number'
 NOT_A_NUMBER = '{label}: "{raw}" is not a number'
-LIVE_FADER_INTERVAL_MS = 50
-CONTROL_SYNC_HOLD_MS = 1000
-CONTROL_EXPECT_SECONDS = 2.0
-DIRECT_CONTROL_ENV = 'AUTOLUX_DIRECT_CONTROL'
 GROUP_MASTER_ID = 'group-master'
-GROUP_MASTER_STEP = 0.01
-RELAY_PATH = '/control-relay'
-
-
-class ControlExpectations:
-    def __init__(self, hold_seconds: float = CONTROL_EXPECT_SECONDS, clock=time.monotonic):
-        self._hold_seconds = hold_seconds
-        self._clock = clock
-        self._lock = threading.Lock()
-        self._expected: dict[str, tuple[object, float]] = {}
-
-    def expect(self, **values) -> None:
-        now = self._clock()
-        with self._lock:
-            self._expected.update({key: (value, now) for key, value in values.items()})
-
-    def apply(self, snapshot: dict) -> dict:
-        now = self._clock()
-        held = {}
-        with self._lock:
-            for key, (value, at) in list(self._expected.items()):
-                reported = snapshot.get(key)
-                # A settings command names only the fields it changes.
-                partial = isinstance(value, dict) and isinstance(reported, dict)
-                confirmed = value.items() <= reported.items() if partial else reported == value
-                if confirmed or now - at >= self._hold_seconds:
-                    del self._expected[key]
-                else:
-                    held[key] = {**reported, **value} if partial else value
-        return {**snapshot, **held}
-
-
-def with_control_flags(snapshot: dict) -> dict:
-    # Lifted beside the settings they live in, so a held chip value can win over a stale poll.
-    settings = snapshot.get('settings') or {}
-    return {
-        **snapshot,
-        'intensity_auto': bool(settings.get('intensity_auto')),
-        'fx_auto': settings.get('fx_auto') is not False,
-    }
-
-
-def expected_control_values(command: dict, reply: dict) -> dict:
-    action = reply.get('accepted')
-    if action in ('pause', 'play'):
-        return {'paused': action == 'pause'}
-    if action == 'master':
-        return {'master_brightness': command['level']}
-    if action == 'settings':
-        return {'settings': command['settings']}
-    if action in ('intensity_auto', 'fx_auto'):
-        return {action: command['enabled']}
-    if action == 'palette' and command['name'] != PALETTE_POLICY:
-        return {'palette': {'name': command['name'], 'pinned': True}}
-    return {}
 
 
 def decimal_text(value: float) -> str:
@@ -757,7 +687,6 @@ def setting_text(name: str, value: float) -> str:
 
 
 def settings_text(settings: dict) -> dict:
-    """The text each numeric setting shows in its field."""
     return {
         name: setting_text(name, value)
         for name, value in settings.items()
@@ -765,83 +694,7 @@ def settings_text(settings: dict) -> dict:
     }
 
 
-def parse_decimal(name: str, raw) -> float:
-    text = '' if raw is None else str(raw).strip().replace(',', '.')
-    if not text:
-        raise ValueError(NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]))
-    if not PLAIN_DECIMAL_TEXT.fullmatch(text):
-        raise ValueError(NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw=raw))
-    return round(float(text) / 100, 6) if name in PERCENT_SETTINGS else float(text)
-
-
-def control_command(
-    trigger,
-    paused,
-    level,
-    settings,
-    *,
-    palette=None,
-    auto=False,
-) -> dict | None:
-    if trigger == 'control-intensity-auto':
-        return {'action': 'intensity_auto', 'enabled': not auto}
-    if trigger in FX_AUTO_IDS:
-        # Sent on every click: a stale poll must not decide that the show already has it.
-        return {'action': 'fx_auto', 'enabled': FX_AUTO_IDS[trigger]}
-    if trigger == 'control-toggle':
-        return {'action': 'play' if paused else 'pause'}
-    if trigger == 'control-next':
-        return {'action': 'next_autoloop'}
-    if trigger == 'control-palette':
-        return {'action': 'palette', 'name': palette}
-    if trigger in BRIGHTNESS_TRIGGERS:
-        return {'action': 'master', 'level': level}
-    if trigger in INTENSITY_TRIGGERS:
-        return {'action': 'intensity', 'level': level}
-    if trigger in SETTING_IDS:
-        return {
-            'action': 'settings',
-            'settings': {
-                name: parse_decimal(name, raw) for name, raw in zip(FORM_SETTINGS, settings)
-            },
-        }
-    return None
-
-
-def settings_edit(name: str, raw, state: dict) -> dict | None:
-    """The settings command for one edited field, or None when it still shows the show's value.
-
-    A field the poll filled (or the browser restored) reads exactly the show's own text, so
-    only an operator's change goes out, and only that field: the show keeps every other
-    setting as it has it, never a stale poll's copy.
-    """
-    current = state.get('settings')
-    if not current or str(raw).strip() == (state.get('settings_text') or {}).get(name):
-        return None
-    value = parse_decimal(name, raw)
-    if value == current.get(name):
-        return None
-    return {'action': 'settings', 'settings': {name: value}}
-
-
-def group_master_edit(group: str, level, state: dict) -> dict | None:
-    """The settings command for one group's master, or None when it still shows the show's level."""
-    current = state.get('settings')
-    if not current or level is None:
-        return None
-    masters = current.get('group_masters') or {}
-    if abs(level - masters.get(group, 1.0)) < GROUP_MASTER_STEP / 2:
-        return None
-    return {
-        'action': 'settings',
-        # Only the edited field: the engine merges it, so a stale poll of any other
-        # setting (an FX or Auto chip just pressed) is never sent back.
-        'settings': {'group_masters': {**masters, group: float(level)}},
-    }
-
-
 def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
-    """One fader per rig group, styled like Master brightness."""
     masters = (settings or {}).get('group_masters') or {}
     return [
         html.Div(
@@ -861,6 +714,26 @@ def group_master_rows(groups, settings: dict | None, *, disabled: bool) -> list:
         )
         for group in sorted(groups)
     ]
+
+
+# Sends only group_masters, with the one group changed: the engine merges it, so a stale
+# poll of any other setting is never sent back.
+GROUP_MASTER_JS = '''function(level, state) {
+    if (level === null || level === undefined) {
+        return '—';
+    }
+    const control = window.autoluxControl;
+    const settings = (control.view(state) || {}).settings;
+    const group = window.dash_clientside.callback_context.inputs_list[0].id.group;
+    const masters = (settings && settings.group_masters) || {};
+    const current = group in masters ? masters[group] : 1.0;
+    if (settings && Math.abs(level - current) >= 0.005) {
+        const changes = {group_masters: {...masters, [group]: level}};
+        control.hold({settings: changes});
+        control.dispatch(control.build.settings(changes), 'control-status', ['settings']);
+    }
+    return Math.round(level * 100) + '%';
+}'''
 
 
 def setting_range_text(name: str) -> str:
@@ -906,6 +779,62 @@ def _build_settings():
     )
 
 
+_SETTING_LIMITS = [
+    [
+        name,
+        setting_text(name, low),
+        setting_text(name, high),
+        SETTING_DISPLAY[name][1],
+        NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]),
+        NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw='{raw}'),
+    ]
+    for name in FORM_SETTINGS
+    for low, high in [SHOW_SETTING_RANGES[name]]
+]
+
+# Validates every field and sends the edited one, alone: the show keeps every other setting
+# as it has it, never a stale poll's copy. A field the poll filled reads exactly the show's
+# own text, so it sends nothing.
+SETTINGS_FORM_JS = (
+    r'''function(...values) {
+        const state = window.autoluxControl.view(values.pop()) || {};
+        const triggered = (window.dash_clientside.callback_context.triggered || [])
+            .map((t) => t.prop_id.split('.')[0]);
+        const decimal = new RegExp('^(?:' + '''
+    + json.dumps(PLAIN_DECIMAL_TEXT.pattern)
+    + r''' + ')$');
+        return '''
+    + json.dumps(_SETTING_LIMITS)
+    + r'''.map(([name, low, high, unit, needs, notNumber], index) => {
+            const raw = values[index];
+            const typed = raw === null || raw === undefined ? '' : String(raw).trim();
+            const text = typed.replace(',', '.');
+            if (!text) {
+                return 'Rejected: ' + needs;
+            }
+            if (!decimal.test(text)) {
+                return 'Rejected: ' + notNumber.replace('{raw}', raw);
+            }
+            const number = parseFloat(text);
+            if (number < parseFloat(low) || number > parseFloat(high)) {
+                return 'Rejected: must be within ' + low + '–' + high + ' ' + unit;
+            }
+            const value = unit === '%' ? Number((number / 100).toFixed(6)) : number;
+            const shown = state.settings;
+            if (triggered.includes('control-' + name) && shown
+                    && typed !== (state.settings_text || {})[name] && value !== shown[name]) {
+                window.autoluxControl.hold(
+                    {settings: {[name]: value}, settings_text: {[name]: typed}});
+                window.autoluxControl.dispatch(
+                    window.autoluxControl.build.settings({[name]: value}), 'control-status',
+                    ['settings', 'settings_text']);
+            }
+            return '';
+        });
+    }'''
+)
+
+
 def _register_settings_drawer(app) -> None:
     app.clientside_callback(
         '''function(clicks) {
@@ -917,43 +846,11 @@ def _register_settings_drawer(app) -> None:
         Input('settings-toggle', 'n_clicks'),
         prevent_initial_call=True,
     )
-    limits = [
-        [
-            setting_text(name, low),
-            setting_text(name, high),
-            SETTING_DISPLAY[name][1],
-            NEEDS_A_NUMBER.format(label=SETTING_LABELS[name]),
-            NOT_A_NUMBER.format(label=SETTING_LABELS[name], raw='{raw}'),
-        ]
-        for name in FORM_SETTINGS
-        for low, high in [SHOW_SETTING_RANGES[name]]
-    ]
     app.clientside_callback(
-        r'''function(...values) {
-            const decimal = new RegExp('^(?:' + '''
-        + json.dumps(PLAIN_DECIMAL_TEXT.pattern)
-        + r''' + ')$');
-            return '''
-        + json.dumps(limits)
-        + r'''.map(([low, high, unit, needs, notNumber], index) => {
-                const raw = values[index];
-                const text = raw === null || raw === undefined
-                    ? '' : String(raw).trim().replace(',', '.');
-                if (!text) {
-                    return 'Rejected: ' + needs;
-                }
-                if (!decimal.test(text)) {
-                    return 'Rejected: ' + notNumber.replace('{raw}', raw);
-                }
-                const value = parseFloat(text);
-                if (value < parseFloat(low) || value > parseFloat(high)) {
-                    return 'Rejected: must be within ' + low + '–' + high + ' ' + unit;
-                }
-                return '';
-            });
-        }''',
+        SETTINGS_FORM_JS,
         *[Output(f'control-{name}-error', 'children') for name in FORM_SETTINGS],
         *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
+        State('control-state', 'data'),
         prevent_initial_call=True,
     )
 
@@ -1061,7 +958,6 @@ def _build_control_card() -> list:
                             _fader('control-brightness', 'control-brightness-value', disabled=True),
                             className='fader',
                         ),
-                        dcc.Store(id='control-brightness-live'),
                     ],
                     className='control-row control-transport',
                 ),
@@ -1151,7 +1047,6 @@ def _build_control_card() -> list:
                 html.P(id='control-status', role='status', className='control-status'),
                 dcc.Store(id='control-state'),
                 dcc.Store(id='control-synced'),
-                dcc.Store(id='control-touched'),
                 dcc.Store(id='control-mode-synced'),
             ],
             id='show-control',
@@ -1189,7 +1084,6 @@ STATIC_BUTTONS = {
 }
 FX_CLEAR_ID = 'static-fx-clear'
 FX_ROW_ID = 'static-fx-row'
-HEX_COLOUR_TEXT = re.compile(r'#?[0-9a-fA-F]{6}')
 STATIC_TAB_STYLE = {
     'backgroundColor': 'transparent',
     'color': '#8293a6',
@@ -1206,53 +1100,6 @@ STATIC_SELECTED_TAB_STYLE = {
     'color': '#e6edf3',
     'borderBottomColor': ACCENT,
 }
-
-
-def static_control_command(trigger, target, colour) -> dict | None:
-    if trigger in STATIC_PRESET_IDS:
-        preset = STATIC_PRESET_IDS[trigger]
-        # Presets always light the whole rig, so a chosen group gets the chip as a look instead.
-        if target != ALL_FIXTURES and preset in PRESET_COLOURS:
-            return {
-                'action': 'static',
-                'kind': 'look',
-                'target': target,
-                'colour': colour_hex(PRESET_COLOURS[preset]),
-            }
-        if target != ALL_FIXTURES and preset == 'off':
-            return {'action': 'static', 'kind': 'look', 'target': target, 'dimmer': 0.0}
-        if target != ALL_FIXTURES and preset == 'uv':
-            return {
-                'action': 'static',
-                'kind': 'look',
-                'target': target,
-                'colour': colour_hex(BLACK),
-                'dimmer': 1.0,
-                'uv': True,
-            }
-        return {'action': 'static', 'kind': 'preset', 'preset': preset}
-    if trigger in STATIC_BUTTONS:
-        return {'action': 'static', 'kind': STATIC_BUTTONS[trigger]}
-    if trigger == 'static-colour':
-        text = (colour or '').strip()
-        if not HEX_COLOUR_TEXT.fullmatch(text):
-            raise ValueError(f'"{colour}" is not a #rrggbb colour')
-        return {
-            'action': 'static',
-            'kind': 'look',
-            'target': target,
-            'colour': '#' + text.lstrip('#').lower(),
-        }
-    return None
-
-
-def static_fx_command(row, target, state: dict) -> dict | None:
-    """The picker's payload; control.js build.staticFx mirrors it. The row already held on the
-    target sends nothing, so a poll syncing the picker never re-fires it."""
-    active = (state.get('static') or {}).get('special_fx') or {}
-    if not row or (active.get('name'), active.get('group')) == (row, target):
-        return None
-    return {'action': 'static_fx', 'row': row, 'target': target}
 
 
 def special_groups_view(groups: dict, roles: dict | None = None) -> list:
@@ -1342,7 +1189,7 @@ def _build_static_panel():
 
 OVERLAY_BANNER_JS = (
     '''function(state) {
-    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    state = window.autoluxControl.view(state);
     if (!state || state.mode !== 'static') {
         return [{display: 'none'}, ''];
     }
@@ -1360,7 +1207,7 @@ OVERLAY_BANNER_JS = (
 
 # Clear all has nothing to remove once the show is back on auto.
 CLEAR_GATE_JS = '''function(state) {
-    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+    state = window.autoluxControl.view(state);
     return !(state && state.mode === 'static');
 }'''
 
@@ -1377,27 +1224,16 @@ def _build_overlay_banner():
     )
 
 
-# While the show follows the music the segments grey out, but the level it chose stays lit.
-FOLLOW_SYNC_JS = '''function(state) {
-    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
-    const on = !!(state && state.intensity_auto);
-    return [on ? 'active' : '', on ? 'following' : ''];
+# Before the first poll neither FX chip is lit, as the show's choice is not known yet.
+CHIPS_SYNC_JS = '''function(state) {
+    const settings = (window.autoluxControl.view(state) || {}).settings;
+    window.autoluxControl.paintFx(settings ? settings.fx_auto !== false : null);
+    window.autoluxControl.paintFollow(!!(settings && settings.intensity_auto));
 }'''
 
 
-# Before the first poll neither chip is lit, as the show's choice is not known yet.
-FX_SYNC_JS = '''function(state) {
-    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
-    if (!state || !state.settings) {
-        return ['', ''];
-    }
-    const on = state.fx_auto !== false;
-    return [on ? 'active' : '', on ? '' : 'active'];
-}'''
-
-
-# The Auto tab's clicks in the browser path.
-DIRECT_AUTO_JS = (
+# The Auto tab's clicks flip their own look at once; the bridge round trip never gates it.
+AUTO_CONTROLS_JS = (
     """function(toggles, nexts, palette, intensity, follows, fxOn, fxOff, state) {
             const control = window.autoluxControl;
             const nu = window.dash_clientside.no_update;
@@ -1405,12 +1241,6 @@ DIRECT_AUTO_JS = (
                 .map((t) => t.prop_id);
             const shown = control.view(state) || {};
             const status = 'control-status';
-            const showFollowing = (on) => {
-                window.dash_clientside.set_props(
-                    'control-intensity-auto', {className: on ? 'active' : ''});
-                window.dash_clientside.set_props(
-                    'control-intensity-set', {className: on ? 'following' : ''});
-            };
             if (triggered.includes('control-toggle.n_clicks')) {
                 const paused = !!shown.paused;
                 control.hold({paused: !paused});
@@ -1437,38 +1267,31 @@ DIRECT_AUTO_JS = (
                 ? control.takePress(action) : undefined;
             const fxAuto = take('fx_auto', 'control-fx-auto.n_clicks', 'control-fx-off.n_clicks');
             if (fxAuto !== undefined) {
-                control.hold({fx_auto: fxAuto});
-                window.dash_clientside.set_props(
-                    'control-fx-auto', {className: fxAuto ? 'active' : ''});
-                window.dash_clientside.set_props(
-                    'control-fx-off', {className: fxAuto ? '' : 'active'});
-                control.dispatch(control.build.fxAuto(fxAuto), status, ['fx_auto']);
+                control.hold({settings: {fx_auto: fxAuto}});
+                control.paintFx(fxAuto);
+                control.dispatch(control.build.fxAuto(fxAuto), status, ['settings']);
             }
             const follow = take('intensity_auto', 'control-intensity-auto.n_clicks');
             if (follow !== undefined) {
-                control.hold({intensity_auto: follow});
-                showFollowing(follow);
-                control.dispatch(
-                    control.build.intensityAuto(follow), status, ['intensity_auto']);
+                control.hold({settings: {intensity_auto: follow}});
+                control.paintFollow(follow);
+                control.dispatch(control.build.intensityAuto(follow), status, ['settings']);
             }
             const level = take('intensity', 'control-intensity.value');
             if (level !== undefined) {
                 // A level picked by hand takes the show off follow-the-music.
-                if (shown.intensity_auto) {
-                    control.hold({intensity_auto: false});
-                    showFollowing(false);
-                }
-                control.dispatch(control.build.intensity(level), status);
+                control.hold({settings: {intensity: level, intensity_auto: false}});
+                control.paintFollow(false);
+                control.dispatch(control.build.intensity(level), status, ['settings']);
             }
             return [nu, nu];
         }"""
 )
 
 
-def _register_direct_auto_controls(app) -> None:
-    # Visual state flips here at click time; the bridge round trip never gates it.
+def _register_auto_controls(app) -> None:
     app.clientside_callback(
-        DIRECT_AUTO_JS,
+        AUTO_CONTROLS_JS,
         Output('control-toggle', 'children', allow_duplicate=True),
         Output('control-toggle', 'className', allow_duplicate=True),
         Input('control-toggle', 'n_clicks'),
@@ -1485,7 +1308,7 @@ def _register_direct_auto_controls(app) -> None:
 STATIC_CHIP_IDS = (*STATIC_PRESET_IDS, *STATIC_BUTTONS)
 
 
-def _register_direct_static_controls(app) -> None:
+def _register_static_controls(app) -> None:
     app.clientside_callback(
         """function(...args) {
             const control = window.autoluxControl;
@@ -1534,33 +1357,34 @@ def _register_direct_static_controls(app) -> None:
     )
 
 
-# The picker lists the rows that fit the target and shows the one held there.
+# The picker lists the rows that fit the target and shows the one held there. It writes the
+# picker's value only when that changes, through set_props: an Output would make the pick's own
+# callback wait for every in-flight poll.
 FX_ROWS_JS = (
     """function(target, state) {
-    state = window.autoluxControl ? window.autoluxControl.view(state) : state;
-    const statics = (state && state.static) || {};
-    if (!statics.fx_rows) {
-        return [[], null, ''];
+    state = window.autoluxControl.view(state);
+    const options = state && state.fx_options;
+    if (!options) {
+        return [[], ''];
     }
-    const rows = statics.fx_rows[target] || [];
-    const label = (row) => {
-        const words = row.replace(/_/g, ' ');
-        return words.charAt(0).toUpperCase() + words.slice(1);
-    };
-    const active = statics.special_fx;
+    const rows = options[target] || [];
+    const active = (state.static || {}).special_fx;
+    const held = active && active.group === target ? active.name : null;
+    if (held !== window.autoluxFxSynced) {
+        window.autoluxFxSynced = held;
+        window.dash_clientside.set_props('"""
+    + FX_ROW_ID
+    + """', {value: held});
+    }
     const name = target === """
     + json.dumps(ALL_FIXTURES)
     + """ ? 'The rig' : target;
-    return [
-        rows.map((row) => ({label: label(row), value: row})),
-        active && active.group === target ? active.name : null,
-        rows.length ? '' : name + ' has no FX that fits',
-    ];
+    return [rows, rows.length ? '' : name + ' has no FX that fits'];
 }"""
 )
 
 
-FX_DIRECT_JS = """function(row, clears, target, state) {
+FX_PICK_JS = """function(row, clears, target, state) {
     const control = window.autoluxControl;
     const shown = control.view(state) || {};
     const statics = shown.static || {};
@@ -1580,19 +1404,7 @@ FX_DIRECT_JS = """function(row, clears, target, state) {
 }"""
 
 
-def _register_direct_fx_controls(app) -> None:
-    app.clientside_callback(
-        FX_DIRECT_JS,
-        Output(FX_ROW_ID, 'value', allow_duplicate=True),
-        Input(FX_ROW_ID, 'value'),
-        Input(FX_CLEAR_ID, 'n_clicks'),
-        State('static-target', 'value'),
-        State('control-state', 'data'),
-        prevent_initial_call=True,
-    )
-
-
-def _register_static_callbacks(app, snapshot_source, expectations, can_control, direct) -> None:
+def _register_static_callbacks(app) -> None:
     app.clientside_callback(
         '''function(mode) {
             return [{display: mode === 'static' ? 'none' : 'block'},
@@ -1622,10 +1434,18 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
     app.clientside_callback(
         FX_ROWS_JS,
         Output(FX_ROW_ID, 'options'),
-        Output(FX_ROW_ID, 'value'),
         Output('static-fx-note', 'children'),
         Input('static-target', 'value'),
         Input('control-state', 'data'),
+    )
+    app.clientside_callback(
+        FX_PICK_JS,
+        Output(FX_ROW_ID, 'value'),
+        Input(FX_ROW_ID, 'value'),
+        Input(FX_CLEAR_ID, 'n_clicks'),
+        State('static-target', 'value'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
     )
 
     @app.callback(
@@ -1641,48 +1461,7 @@ def _register_static_callbacks(app, snapshot_source, expectations, can_control, 
         dash.set_props('control-mode', {'value': mode})
         return True
 
-    if direct:
-        _register_direct_static_controls(app)
-        _register_direct_fx_controls(app)
-        return
-
-    @app.callback(
-        Output('static-status', 'children'),
-        *[Input(name, 'n_clicks') for name in STATIC_PRESET_IDS],
-        *[Input(name, 'n_clicks') for name in STATIC_BUTTONS],
-        Input(FX_ROW_ID, 'value'),
-        Input(FX_CLEAR_ID, 'n_clicks'),
-        Input('static-colour', 'value'),
-        State('static-target', 'value'),
-        State('control-state', 'data'),
-        prevent_initial_call=True,
-    )
-    def send_static(*_):
-        colour = dash.ctx.inputs['static-colour.value']
-        target = dash.ctx.states['static-target.value']
-        state = dash.ctx.states.get('control-state.data') or {}
-        trigger = dash.ctx.triggered_id
-        if not can_control:
-            raise dash.exceptions.PreventUpdate
-        if trigger == 'static-colour' and not colour:
-            raise dash.exceptions.PreventUpdate
-        try:
-            if trigger == FX_CLEAR_ID:
-                command = {'action': 'static', 'kind': 'special_fx_clear'}
-            elif trigger == FX_ROW_ID:
-                command = static_fx_command(dash.ctx.inputs[f'{FX_ROW_ID}.value'], target, state)
-            else:
-                command = static_control_command(trigger, target, colour)
-        except ValueError as error:
-            return f'Rejected: {error}'
-        if command is None:
-            raise dash.exceptions.PreventUpdate
-        reply = snapshot_source.control(command)
-        if 'error' in reply:
-            return f'Rejected: {reply["error"]}'
-        if command.get('kind') == 'clear' and state:
-            expectations.expect(mode='auto')
-        return ''
+    _register_static_controls(app)
 
 
 def _metric_card(label, value, detail):
@@ -1785,38 +1564,28 @@ def _build_cooldowns(snapshot):
 
 
 def _cooldown_bar(row: dict):
-    # control.js ticks fill and caption down from these data attributes between polls and
-    # mirrors the arithmetic here (cooldownView); keep the two in step.
-    total, remaining = row['cooldown_seconds'], row['remaining_seconds']
-    # The bar fills: empty as the group fires, full once it is ready (or has no cooldown).
-    filled = 1.0 if row['ready'] or total <= 0 else 1.0 - min(1.0, max(0.0, remaining / total))
     label = row.get('label') or row['group']
     if row['last']:
-        label += ' · ' + row['last'].replace('_', ' ').capitalize()
+        label += ' · ' + fx_row_label(row['last'])
+    # control.js draws the fill, the caption and the ready look from the data attributes.
     return html.Div(
         [
             html.Div(
                 [
                     html.Span(label, className='cooldown-label'),
-                    html.Span(
-                        'ready' if row['ready'] else f'{math.ceil(remaining)} s',
-                        className='cooldown-caption',
-                    ),
+                    html.Span(className='cooldown-caption'),
                 ],
                 className='cooldown-head',
             ),
-            html.Div(
-                html.Div(className='cooldown-fill', style={'width': f'{filled:.1%}'}),
-                className='cooldown-track',
-            ),
+            html.Div(html.Div(className='cooldown-fill'), className='cooldown-track'),
         ],
-        className='cooldown-row ready' if row['ready'] else 'cooldown-row',
+        className='cooldown-row',
         # group and last let the ticker spot a fire even when Dash reuses this element.
         **{
             'data-group': row['group'],
             'data-last': row['last'] or '',
-            'data-total': total,
-            'data-remaining': remaining,
+            'data-total': row['cooldown_seconds'],
+            'data-remaining': row['remaining_seconds'],
             'data-ready': 'true' if row['ready'] else 'false',
         },
     )
@@ -2212,46 +1981,16 @@ class SnapshotPoller:
         finally:
             self._lock.release()
 
-    def control(self, command: dict) -> dict:
-        connection = http.client.HTTPConnection(self._host, self.port, timeout=self._timeout)
-        try:
-            connection.request(
-                'POST',
-                CONTROL_PATH,
-                json.dumps(command).encode(),
-                {'Content-Type': 'application/json'},
-            )
-            response = connection.getresponse()
-            body = response.read()
-        except (OSError, http.client.HTTPException):
-            return {'error': 'the show is not answering'}
-        finally:
-            connection.close()
-        try:
-            reply = json.loads(body)
-        except ValueError:
-            reply = None
-        if not isinstance(reply, dict):
-            return {'error': f'the show refused the command (HTTP {response.status})'}
-        return reply
 
-
-def control_page_config(snapshot_source, direct: bool) -> dict:
+def control_page_config(snapshot_source) -> dict:
     return {
-        'direct': direct,
         'bridgePort': getattr(snapshot_source, 'port', None),
-        'relayPath': RELAY_PATH,
-        'holdMs': int(CONTROL_EXPECT_SECONDS * 1000),
         'allFixtures': ALL_FIXTURES,
         'presetColours': {name: colour_hex(rgb) for name, rgb in PRESET_COLOURS.items()},
     }
 
 
-def build_app(
-    snapshot_source,
-    fixture_store: FixtureStore | None = None,
-    direct_control: bool | None = None,
-) -> dash.Dash:
+def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> dash.Dash:
     app = dash.Dash(
         __name__,
         title=TITLE,
@@ -2259,17 +1998,13 @@ def build_app(
         eager_loading=True,
         hooks={'request_pre': REQUEST_PRE_JS, 'callback_resolved': CALLBACK_RESOLVED_JS},
     )
-    can_control = callable(getattr(snapshot_source, 'control', None))
-    if direct_control is None:
-        direct_control = os.environ.get(DIRECT_CONTROL_ENV, '1') != '0'
-    direct = can_control and direct_control
     app.index_string = INDEX_TEMPLATE.replace('</style>', FIXTURE_CSS + '</style>').replace(
         '{%css%}',
         '{%css%}<script>window.autoluxControlConfig = '
-        + json.dumps(control_page_config(snapshot_source, direct))
+        + json.dumps(control_page_config(snapshot_source))
         + ';</script>',
     )
-    from flask import jsonify, request
+    from flask import request
     from prometheus_client import make_wsgi_app
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
@@ -2507,20 +2242,6 @@ def build_app(
         Input('dashboard-tab', 'value'),
     )
 
-    expectations = ControlExpectations()
-
-    @app.server.route(RELAY_PATH, methods=['POST'])
-    def relay_control():
-        command = request.get_json(silent=True)
-        if not can_control:
-            return jsonify({'error': 'this dashboard cannot control the show'}), 403
-        if not isinstance(command, dict):
-            return jsonify({'error': 'a command must be a JSON object'}), 400
-        reply = snapshot_source.control(command)
-        if 'error' not in reply:
-            expectations.expect(**expected_control_values(command, reply))
-        return jsonify(reply)
-
     @app.callback(
         [
             Output('sync', 'data'),
@@ -2541,9 +2262,7 @@ def build_app(
     def refresh(requested):
         if not requested or requested.get('tab') not in ('control', 'telemetry'):
             raise dash.exceptions.PreventUpdate
-        snap = expectations.apply(
-            with_control_flags(_with_base_palette(snapshot_source.snapshot()))
-        )
+        snap = _with_base_palette(snapshot_source.snapshot())
         now = time.time()
         sync = status = show_timing = decoder = cooldowns = dash.no_update
         timeline = dash.no_update
@@ -2556,24 +2275,25 @@ def build_app(
             show_timing = _build_show_timing(snap)
             decoder = _build_decoder(snap)
             cooldowns = _build_cooldowns(snap)
-            if can_control:
-                control = {
-                    key: snap.get(key)
-                    for key in (
-                        'paused',
-                        'master_brightness',
-                        'settings',
-                        'intent',
-                        'palette',
-                        'mode',
-                        'static',
-                        'special_groups',
-                        'intensity_auto',
-                        'fx_auto',
-                    )
-                }
-                settings = control['settings'] or {}
-                control['settings_text'] = settings_text(settings)
+            control = {
+                key: snap.get(key)
+                for key in (
+                    'paused',
+                    'master_brightness',
+                    'settings',
+                    'intent',
+                    'palette',
+                    'mode',
+                    'static',
+                    'special_groups',
+                )
+            }
+            control['settings_text'] = settings_text(control['settings'] or {})
+            fx_rows = (control['static'] or {}).get('fx_rows')
+            control['fx_options'] = fx_rows and {
+                target: [{'label': fx_row_label(row), 'value': row} for row in rows]
+                for target, rows in fx_rows.items()
+            }
             if requested.get('timeline') or not on_control:
                 timeline = _build_timeline(snap)
         if due:
@@ -2598,7 +2318,7 @@ def build_app(
     setting_names = json.dumps(list(FORM_SETTINGS))
     app.clientside_callback(
         '''function(state) {
-            state = window.autoluxControl ? window.autoluxControl.view(state) : state;
+            state = window.autoluxControl.view(state);
             const ready = !!state && state.paused !== null && state.paused !== undefined;
             const settable = !ready || !state.settings;
             const skippable = ready && !state.paused && !!state.intent
@@ -2622,6 +2342,7 @@ def build_app(
     app.clientside_callback(
         '''function(state, drag, value, synced) {
             const nu = window.dash_clientside.no_update;
+            state = window.autoluxControl.view(state);
             if (!state || state.master_brightness === null || !state.settings) {
                 throw window.dash_clientside.PreventUpdate;
             }
@@ -2630,23 +2351,20 @@ def build_app(
         + setting_names
         + ''';
             const text = state.settings_text || {};
-            const touched = Date.now() - (window.autoluxControlTouchedAt || 0) < '''
-        + str(CONTROL_SYNC_HOLD_MS)
-        + ''';
             const dragging = drag !== null && drag !== undefined && drag !== value;
             const focused = document.activeElement ? document.activeElement.id : '';
             const next = {...synced};
             const set = window.dash_clientside.set_props;
-            if (!touched && !dragging && state.master_brightness !== synced.master) {
+            if (!dragging && state.master_brightness !== synced.master) {
                 next.master = state.master_brightness;
                 set('control-brightness', {value: next.master});
             }
-            if (!touched && state.settings.intensity !== synced.intensity) {
+            if (state.settings.intensity !== synced.intensity) {
                 next.intensity = state.settings.intensity;
                 set('control-intensity', {value: next.intensity});
             }
             const fields = names.map((name) => {
-                if (touched || focused === 'control-' + name || text[name] === synced[name]) {
+                if (focused === 'control-' + name || text[name] === synced[name]) {
                     return nu;
                 }
                 next[name] = text[name];
@@ -2661,50 +2379,28 @@ def build_app(
         State('control-brightness', 'value'),
         State('control-synced', 'data'),
     )
-    if direct:
-        app.clientside_callback(
-            '''function(drag, released, state) {
-                const level = drag === null || drag === undefined ? released : drag;
-                if (level === null || level === undefined) {
-                    return '—';
-                }
-                const shown = window.autoluxControl.view(state) || {};
-                if (level !== shown.master_brightness && level !== window.autoluxMasterSent) {
-                    window.autoluxControlTouchedAt = Date.now();
-                    window.autoluxMasterSent = level;
-                    window.autoluxControl.hold({master_brightness: level});
-                    window.autoluxControl.sendLatest(
-                        'master', window.autoluxControl.build.master(level), 'control-status');
-                }
-                return Math.round(level * 100) + '%';
-            }''',
-            Output('control-brightness-value', 'children'),
-            Input('control-brightness', 'drag_value'),
-            Input('control-brightness', 'value'),
-            State('control-state', 'data'),
-            prevent_initial_call=True,
-        )
-        _register_direct_auto_controls(app)
-    else:
-        app.clientside_callback(
-            '''function(level) {
-                window.autoluxControlTouchedAt = Date.now();
-                const label = level === null || level === undefined
-                    ? '—' : Math.round(level * 100) + '%';
-                const now = Date.now();
-                if (level === null || level === undefined
-                        || now - (window.autoluxFaderSentAt || 0) < '''
-            + str(LIVE_FADER_INTERVAL_MS)
-            + ''') {
-                    return [label, window.dash_clientside.no_update];
-                }
-                window.autoluxFaderSentAt = now;
-                return [label, level];
-            }''',
-            Output('control-brightness-value', 'children'),
-            Output('control-brightness-live', 'data'),
-            Input('control-brightness', 'drag_value'),
-        )
+    app.clientside_callback(
+        '''function(drag, released, state) {
+            const level = drag === null || drag === undefined ? released : drag;
+            if (level === null || level === undefined) {
+                return '—';
+            }
+            const shown = window.autoluxControl.view(state) || {};
+            if (level !== shown.master_brightness && level !== window.autoluxMasterSent) {
+                window.autoluxMasterSent = level;
+                window.autoluxControl.hold({master_brightness: level});
+                window.autoluxControl.sendLatest(
+                    'master', window.autoluxControl.build.master(level), 'control-status');
+            }
+            return Math.round(level * 100) + '%';
+        }''',
+        Output('control-brightness-value', 'children'),
+        Input('control-brightness', 'drag_value'),
+        Input('control-brightness', 'value'),
+        State('control-state', 'data'),
+        prevent_initial_call=True,
+    )
+    _register_auto_controls(app)
     app.clientside_callback(
         '''function(level) {
             const presets = '''
@@ -2721,90 +2417,7 @@ def build_app(
         Output('control-palette', 'disabled'),
         Input('control-state', 'data'),
     )
-    app.clientside_callback(
-        FOLLOW_SYNC_JS,
-        Output('control-intensity-auto', 'className'),
-        Output('control-intensity-set', 'className'),
-        Input('control-state', 'data'),
-    )
-    app.clientside_callback(
-        FX_SYNC_JS,
-        *[Output(name, 'className') for name in FX_AUTO_IDS],
-        Input('control-state', 'data'),
-    )
-
-    operator_inputs = (
-        []
-        if direct
-        else [
-            Input('control-toggle', 'n_clicks'),
-            Input('control-next', 'n_clicks'),
-            Input('control-palette', 'value'),
-            Input('control-brightness', 'value'),
-            Input('control-brightness-live', 'data'),
-            Input('control-intensity', 'value'),
-            Input('control-intensity-auto', 'n_clicks'),
-            *[Input(name, 'n_clicks') for name in FX_AUTO_IDS],
-        ]
-    )
-
-    @app.callback(
-        Output('control-status', 'children'),
-        Output('control-state', 'data', allow_duplicate=True),
-        *operator_inputs,
-        *[Input(f'control-{name}', 'value') for name in FORM_SETTINGS],
-        State('control-state', 'data'),
-        prevent_initial_call=True,
-    )
-    def send_control(*_):
-        values = dash.ctx.inputs
-        state = dash.ctx.states.get('control-state.data') or {}
-        palette = values.get('control-palette.value')
-        released = values.get('control-brightness.value')
-        live = values.get('control-brightness-live.data')
-        intensity_picked = values.get('control-intensity.value')
-        settings = [values[f'control-{name}.value'] for name in FORM_SETTINGS]
-        intensity = (state.get('settings') or {}).get('intensity', DEFAULT_INTENSITY)
-        trigger = dash.ctx.triggered_id
-        faders = {
-            'control-brightness': (released, state.get('master_brightness')),
-            'control-brightness-live': (live, state.get('master_brightness')),
-            'control-intensity': (intensity_picked, intensity),
-        }
-        level, current = faders.get(trigger, (None, None))
-        if trigger in faders and (
-            level is None or (current is not None and abs(level - current) < 0.005)
-        ):
-            raise dash.exceptions.PreventUpdate
-        try:
-            if trigger in SETTING_IDS:
-                command = settings_edit(SETTING_IDS[trigger], values[f'{trigger}.value'], state)
-            else:
-                command = control_command(
-                    trigger,
-                    state.get('paused'),
-                    level,
-                    settings,
-                    palette=palette,
-                    auto=bool(state.get('intensity_auto')),
-                )
-        except ValueError as error:
-            return f'Rejected: {error}', dash.no_update
-        if command is None or not can_control:
-            raise dash.exceptions.PreventUpdate
-        shown = state.get('palette') or {}
-        if command['action'] == 'palette' and palette == (
-            shown.get('name') if shown.get('pinned') else PALETTE_POLICY
-        ):
-            raise dash.exceptions.PreventUpdate
-        reply = snapshot_source.control(command)
-        if 'error' in reply:
-            return f'Rejected: {reply["error"]}', dash.no_update
-        expected = expected_control_values(command, reply)
-        expectations.expect(**expected)
-        if 'paused' in expected:
-            return '', {**state, 'paused': expected['paused']}
-        return '', dash.no_update
+    app.clientside_callback(CHIPS_SYNC_JS, Input('control-state', 'data'))
 
     _register_settings_drawer(app)
 
@@ -2820,38 +2433,17 @@ def build_app(
         return group_master_rows(
             state.get('special_groups') or {},
             state.get('settings'),
-            disabled=not can_control or not state.get('settings'),
+            disabled=not state.get('settings'),
         )
 
     app.clientside_callback(
-        '''function(level) {
-            return level === null || level === undefined ? '—' : Math.round(level * 100) + '%';
-        }''',
+        GROUP_MASTER_JS,
         Output({'type': f'{GROUP_MASTER_ID}-value', 'group': dash.MATCH}, 'children'),
         Input({'type': GROUP_MASTER_ID, 'group': dash.MATCH}, 'value'),
-    )
-
-    @app.callback(
-        Output('control-status', 'children', allow_duplicate=True),
-        Input({'type': GROUP_MASTER_ID, 'group': ALL}, 'value'),
         State('control-state', 'data'),
-        prevent_initial_call=True,
     )
-    def send_group_master(_levels, state):
-        trigger = dash.ctx.triggered_id
-        if not can_control or not isinstance(trigger, dict):
-            raise dash.exceptions.PreventUpdate
-        level = dash.ctx.triggered[0]['value'] if dash.ctx.triggered else None
-        command = group_master_edit(trigger['group'], level, state or {})
-        if command is None:
-            raise dash.exceptions.PreventUpdate
-        reply = snapshot_source.control(command)
-        if 'error' in reply:
-            return f'Rejected: {reply["error"]}'
-        expectations.expect(**expected_control_values(command, reply))
-        return ''
 
-    _register_static_callbacks(app, snapshot_source, expectations, can_control, direct)
+    _register_static_callbacks(app)
 
     @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))
     def show_special_groups(selected):
