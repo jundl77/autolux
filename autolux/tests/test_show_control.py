@@ -74,7 +74,28 @@ def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group()
     ]
     assert all(row.children[1].className == 'fader' for row in rows)
     assert all(slider.min == 0 and slider.max == 1 for slider in sliders)
-    assert build_app(_Recorder()).layout['group-masters'].children is None
+    assert build_app(_Recorder()).layout()['group-masters'].children is None
+
+
+def test_a_page_load_renders_what_the_first_poll_would_above_the_controls():
+    # Anything the first poll adds above the controls moves them under a click already aimed.
+    page = build_app(_Recorder()).layout()
+    texts = [item.children[0].children for item in page['show-status'].children]
+    assert texts[0] == 'Health' and 'Render FPS' in texts
+    assert [notice.children for notice in page['telemetry-alerts'].children] == [
+        'No system telemetry yet. Graphs will populate when measurements arrive.'
+    ]
+
+
+def test_telemetry_notices_share_one_line_with_the_full_text_in_its_title():
+    from autolux.simulate.system_metrics import build_telemetry_notices
+
+    (notice,) = build_telemetry_notices({'shed': {'level': 'LIGHT', 'sheds_per_min': 3}})
+    text = (
+        'No system telemetry yet. Graphs will populate when measurements arrive.'
+        ' · Analysis is holding the last intent. · Analysis skips: 3/min.'
+    )
+    assert notice.children == notice.title == text
 
 
 class _Browser:
@@ -428,13 +449,13 @@ def test_switching_tabs_only_changes_the_view():
 
 def test_the_intensity_segments_and_palette_choices_carry_the_show_values():
     app = build_app(_Recorder())
-    options = app.layout['control-intensity'].options
+    options = app.layout()['control-intensity'].options
     assert [(o['label'], o['value']) for o in options] == [
         ('calm', INTENSITY_CALM),
         ('balanced', INTENSITY_BALANCED),
         ('wild', INTENSITY_WILD),
     ]
-    choices = [o['value'] for o in app.layout['control-palette'].options]
+    choices = [o['value'] for o in app.layout()['control-palette'].options]
     assert choices == [PALETTE_POLICY, *PALETTE_NAMES]
 
 
@@ -672,7 +693,7 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
 
     app = build_app(_Recorder())
     graphs = [f'metric-{panel}' for panel, *_ in system_metrics.PANELS]
-    assert all(app.layout[graph] is not None for graph in graphs)
+    assert all(app.layout()[graph] is not None for graph in graphs)
     refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
     gate = {'tab': 'control', 'metrics': True, 'timeline': False}
     reply = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()
@@ -1027,7 +1048,7 @@ def test_no_chip_click_rewrites_the_clear_buttons_class():
 
 def test_clear_all_leads_the_static_action_row_in_the_quiet_style():
     app = build_app(_Recorder())
-    row = app.layout['static-control'].children[0]
+    row = app.layout()['static-control'].children[0]
     clear = row.children[0]
     assert (clear.id, clear.className, clear.disabled) == ('static-clear', 'ghost-button', True)
     assert 'static-clear.disabled' in app.callback_map
@@ -1206,7 +1227,7 @@ def test_the_auto_tab_has_fx_auto_and_off_chips():
     from autolux.simulate.visualizer_app import FX_AUTO_IDS
 
     app = build_app(_Recorder())
-    assert [app.layout[name].children for name in FX_AUTO_IDS] == ['Auto', 'Off']
+    assert [app.layout()[name].children for name in FX_AUTO_IDS] == ['Auto', 'Off']
 
 
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
@@ -1249,7 +1270,7 @@ window.dash_clientside = {{
 def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
     from autolux.simulate.visualizer_app import _build_cooldowns
 
-    assert build_app(_Recorder()).layout['special-cooldowns'] is not None
+    assert build_app(_Recorder()).layout()['special-cooldowns'] is not None
 
     def cooldown(group, last, total, remaining):
         return {

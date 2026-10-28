@@ -1609,8 +1609,11 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .chart-panel { min-width: 0; background: #111923; border: 1px solid #273344; border-radius: 8px; overflow: hidden; }
 .chart-panel h3 { margin: 16px 16px 7px; font-size: 13px; font-weight: 600; }
 .panel-description { margin: 0 16px 4px; color: #9baabb; font-size: 11px; line-height: 1.5; min-height: 50px; }
-.telemetry-notice { padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
-                    color: #f6c177; margin-bottom: 12px; font-size: 12px; }
+/* Fixed even when empty: a notice coming or going must not move the controls below. */
+#telemetry-alerts { height: 36px; margin-bottom: 12px; }
+.telemetry-notice { height: 100%; padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
+                    color: #f6c177; font-size: 12px; white-space: nowrap; overflow: hidden;
+                    text-overflow: ellipsis; }
 .diagnostics-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
                     border-bottom: 1px solid #273344; }
 .diagnostics { padding: 16px 18px; min-width: 0; }
@@ -2181,15 +2184,20 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         ],
         className='dashboard',
     )
-    if fixture_store is not None:
-        layout = app.layout
+    layout = app.layout
 
-        def serve_layout():
+    def serve_layout():
+        # The first poll filling these would push the controls below them down under a
+        # pointer already aimed at them: a click in that first moment hit the master fader.
+        snap, now = _with_base_palette(snapshot_source.snapshot()), time.time()
+        layout['show-status'].children = _build_show_status(snap, now)
+        layout['telemetry-alerts'].children = system_metrics.build_telemetry_notices(snap, now=now)
+        if fixture_store is not None:
             # A browser reload after Save must open the saved patch, not the one loaded at start.
             layout['fixture-draft'].data, layout['fixture-revision'].data = fixture_store.load()
-            return layout
+        return layout
 
-        app.layout = serve_layout
+    app.layout = serve_layout
 
     app.clientside_callback(
         '''function(selected) {
