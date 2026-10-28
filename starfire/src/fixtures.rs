@@ -625,23 +625,28 @@ impl FixtureRig {
     }
 
     /// Logical pan and tilt throwing the beam through `point` (scene millimetres), held inside
-    /// the soft limits. None for a cell without a pan range.
+    /// the soft limits. A pan range past a full turn reaches a heading more than once; this takes
+    /// the copy nearest the middle of the soft limits, so a circle round a near-plumb beam, which
+    /// sweeps every heading, crosses the wrap point once per cycle. A point at the head itself
+    /// rests along the pan axis. None for a cell without a pan range.
     pub fn aim_at(&self, cell_id: &str, point: Position) -> Option<(f64, f64)> {
         let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
         let [x, y, z] = [0, 1, 2].map(|axis| point[axis] - placement.position[axis]);
         // The scene heading clockwise from +Y the encode reads a logical pan as, and the lean
         // off the pan axis, which runs down from a hanging head and up from a standing one.
         let heading_degrees = x.atan2(y).to_degrees();
-        let lean_degrees = x
-            .hypot(y)
-            .atan2(if placement.reversed { z } else { -z })
-            .to_degrees();
+        let lean_degrees = if [x, y, z] == [0.0; 3] {
+            // No direction at all; atan2(+0, -0) would read it as a half turn.
+            0.0
+        } else {
+            x.hypot(y)
+                .atan2(if placement.reversed { z } else { -z })
+                .to_degrees()
+        };
         let profile = self.profile(cell_id)?;
         let (from, to) = profile
             .movement_range("Pan")
             .filter(|(from, to)| from != to)?;
-        // A range past a full turn reaches the heading more than once; take the copy nearest
-        // the middle of the soft limits.
         let turn = FULL_TURN_DEGREES / (to - from);
         let position = (heading_degrees - from) / (to - from);
         let centre = (placement.pan.min + placement.pan.max) / 2.0;
@@ -657,9 +662,9 @@ impl FixtureRig {
         Some((placement.pan.unmap(position), tilt))
     }
 
-    /// The scene unit vector `aim_at` reads a logical pan and tilt as, so its inverse inside
-    /// the soft limits; a head without a tilt range throws along its pan axis. None for a cell
-    /// without a pan range.
+    /// The scene unit vector `aim_at` reads a logical pan and tilt as: the inverse of `aim_at`
+    /// wherever `aim_at` did not clamp. A head without a tilt range throws along its pan axis.
+    /// None for a cell without a pan range.
     pub fn beam_direction(&self, cell_id: &str, pan: f64, tilt: f64) -> Option<[f64; 3]> {
         let placement = &self.fixtures[self.cells.get(cell_id)?.0].placement;
         let profile = self.profile(cell_id)?;

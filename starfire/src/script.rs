@@ -465,9 +465,9 @@ impl LuaAutoloop {
                     ));
                 }
                 let point = [x, y, z].map(|metres| metres * MM_PER_METRE);
-                // A known cell without a pan range aims nowhere: nil, nil rather than an error.
+                // Only cells aim, and one without a pan range aims nowhere: nil, nil, not an error.
                 let aim = cell_fact(&aiming, &cell, |id| {
-                    aiming.focus(id).map(|_| aiming.aim_at(id, point))
+                    aiming.profile(id).map(|_| aiming.aim_at(id, point))
                 })?;
                 Ok(aim.unzip())
             })?,
