@@ -138,12 +138,12 @@ def test_renderer_settings_and_a_default_transition_use_the_replay_command_shape
     ]
 
 
-def test_an_unset_carries_only_the_release_caps_it_was_given():
+def test_an_unset_names_an_instantaneous_release_only_when_asked():
     calls = []
     client = StarfireClient(calls.append)
     client.clear_override('special')
-    client.clear_override('special', release_beats=1.0, release_seconds=0.5)
+    client.clear_override('special', instantaneous_release=True)
     assert calls == [
         {'kind': 'clear_override', 'id': 'special'},
-        {'kind': 'clear_override', 'id': 'special', 'release_beats': 1.0, 'release_seconds': 0.5},
+        {'kind': 'clear_override', 'id': 'special', 'instantaneous_release': True},
     ]

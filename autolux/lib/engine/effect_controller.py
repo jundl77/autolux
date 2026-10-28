@@ -53,10 +53,6 @@ DROP_ACCENT_PRIORITY = 100
 DROP_ACCENT_ID = 'drop_arrival'
 SPECIAL_PRIORITY = DROP_ACCENT_PRIORITY
 SPECIAL_ID = 'special'
-# FX off and standby must read in the room within half a second, whatever the tempo: a
-# four-beat fade at 90 BPM still looked like nothing happened.
-CUT_RELEASE_BEATS = 1.0
-CUT_RELEASE_SECONDS = 0.5
 OPERATOR_FADE_SECONDS = 0.1
 
 
@@ -308,7 +304,7 @@ class EffectController:
 
     def enter_standby(self, bpm: float | None) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
-        self.forget_special(cut=True)
+        self.forget_special(instantaneous=True)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
@@ -387,32 +383,27 @@ class EffectController:
             special.pulse_beats,
         )
 
-    def release_special(self, *, cut: bool = False) -> None:
+    def release_special(self, *, instantaneous: bool = False) -> None:
         # Sent straight to the renderer, never through the delayed queue: a cut is the operator's,
         # not the music's, so it belongs to the room's now.
         if not self._special_on:
             return
-        fade = (
-            {'release_beats': CUT_RELEASE_BEATS, 'release_seconds': CUT_RELEASE_SECONDS}
-            if cut
-            else {}
-        )
-        self.lighting_client.clear_override(SPECIAL_ID, **fade)
+        self.lighting_client.clear_override(SPECIAL_ID, instantaneous_release=instantaneous)
         LOGGER.info(
             '[lighting] special %s %s',
             self._special.name,
-            f'cut over at most {CUT_RELEASE_BEATS:g} beats or {CUT_RELEASE_SECONDS:g} s'
-            if cut
+            'instantaneous release'
+            if instantaneous
             else f'released over {self._special.release_beats:g} beats',
         )
         self._special_on = False
         if self.event_buffer:
             self.event_buffer.set_special(None)
 
-    def forget_special(self, *, cut: bool = False) -> None:
-        """Release the running special (quickly if cut); nothing returns before the next entry
+    def forget_special(self, *, instantaneous: bool = False) -> None:
+        """Release the running special (at once if instantaneous); nothing returns before the next entry
         fires one."""
-        self.release_special(cut=cut)
+        self.release_special(instantaneous=instantaneous)
         self._special = None
 
     def _restore_special(self) -> None:

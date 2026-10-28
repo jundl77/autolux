@@ -195,10 +195,9 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
-        # Pause first so the cut lands on a stopped clock (the seconds cap is zero beats on a
-        # paused clock, so the cut ends at once); cut it so play does not revive it.
+        # Pause first so the cut lands on a stopped clock; cut it so play does not revive it.
         self.lighting_client.set_paused(True)
-        self.effect_controller.forget_special(cut=True)
+        self.effect_controller.forget_special(instantaneous=True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
 
     async def resume(self) -> None:
