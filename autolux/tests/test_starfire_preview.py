@@ -91,18 +91,39 @@ def test_bars_start_where_the_renderers_grid_enters_them():
     assert bar_starts(load_preview(preview_text())) == [(1, 0), (2, 20)]
 
 
-def test_the_overview_shows_level_strobe_and_section_colour_over_the_track():
+def test_the_overview_bounds_each_groups_level_and_marks_strobe_over_the_track():
     overview = preview_overview(load_preview(preview_text()), columns=3)
-    # 21 frames in slices of 7: five dark then two at 0.75; all 0.75; one at 0.75 then six at 1.
+    # 21 frames in slices of 7: five dark then the pair at 1 and 0.5; the pair at 1 and 0.5;
+    # one at 1 and 0.5 then both at 1, the second strobing at 8 Hz.
     assert overview['columns'] == 3
-    assert overview['groups'] == {'wash': [0.214, 0.75, 0.964]}
-    assert overview['strobe'] == [0.0, 0.0, 0.857]
+    assert overview['groups'] == {'wash': {'low': [0.0, 0.5, 0.5], 'high': [1.0, 1.0, 1.0]}}
+    assert overview['headroom'] == 0.9
+    assert overview['strobe'] == [0.0, 0.0, 8.0]
+    assert overview['white'] == overview['faults'] == [0.0, 0.0, 0.0]
     assert overview['strobe_seconds'] == 0.6
     assert overview['group_strobe_seconds'] == {'wash': 0.6}
+    assert overview['phrases'] == [0]
     assert overview['sections'] == [
-        {'base': None, 'start': 0, 'end': 5, 'rgb': None},
-        {'base': 'drop/chase', 'start': 5, 'end': 21, 'rgb': [1.0, 0.0, 0.0]},
+        {'base': None, 'bank': None, 'start': 0, 'end': 5, 'colours': []},
+        {'base': 'drop/chase', 'bank': 'drop', 'start': 5, 'end': 21, 'colours': [[1.0, 0.0, 0.0]]},
     ]
+
+
+def test_a_section_of_two_looks_keeps_both_colours_and_white_counts_as_hits():
+    red, blue, white = (
+        [1.0, 1.0, 0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 1.0, 0.0],
+        [1.0, 1.0, 1.0, 1.0, 0.0],
+    )
+    frames = [
+        {'t': index / RATE_HZ, 'beat': index / 5, 'bank': 'drop', 'autoloop': 'chase', 'c': cells}
+        for index, cells in enumerate([[red, blue]] * 20 + [[white, blue]])
+    ]
+    overview = preview_overview(load_preview(preview_text(frames)), columns=3)
+    # Blue carries a frame more light than red: both stripes, strongest first, never the
+    # magenta of their mean.
+    assert overview['sections'][0]['colours'] == [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
+    assert overview['white'] == [0.0, 0.0, 0.143]
 
 
 def test_report_conversion_is_deterministic():

@@ -13,7 +13,7 @@ import math
 from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
-from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS
+from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS, STARFIRE_MAX_STROBE_HZ
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lighting.palettes import DEFAULT_PALETTE, palette_records
 
@@ -26,6 +26,14 @@ AUTOLOOP_BY_INTENT = {intent.value: loops[0] for intent, loops in DEFAULT_AUTOLO
 PREVIEW_KIND = 'starfire_preview'
 PREVIEW_CELL_FIELDS = 5
 OVERVIEW_COLUMNS = 240
+# Base loops peak at most here (the show grammar), leaving the rest for hits.
+HEADROOM = 0.9
+# A lit cell whose every channel reaches this reads as white, which hits own.
+WHITE_MIN_CHANNEL = 0.9
+PHRASE_BARS = 16
+SECTION_COLOURS = 2
+# A second colour narrower than this share of a section's light is an accent, not a stripe.
+SECOND_COLOUR_SHARE = 0.1
 
 
 def _nonnegative(value, name: str) -> float:
@@ -234,39 +242,48 @@ def bar_starts(preview: Preview) -> list[tuple[int, int]]:
 
 
 def _sections(preview: Preview) -> list[dict]:
+    """Runs of one base loop, each with its strongest colours by the light they carry."""
     sections = []
     for index, frame in enumerate(preview.frames):
         base = '/'.join(filter(None, (frame.get('bank'), frame.get('autoloop')))) or None
         if not sections or sections[-1]['base'] != base:
-            sections.append({'base': base, 'start': index, 'end': index + 1, 'light': [0.0] * 4})
+            sections.append(
+                {'base': base, 'bank': frame.get('bank'), 'start': index, 'end': index, 'light': {}}
+            )
         section = sections[-1]
         section['end'] = index + 1
         for intensity, red, green, blue, *_ in frame['c']:
-            light = section['light']
-            for channel, value in enumerate((intensity * red, intensity * green, intensity * blue)):
-                light[channel] += value
-            light[3] += intensity
+            if intensity > 0:
+                colour = (round(red, 2), round(green, 2), round(blue, 2))
+                section['light'][colour] = section['light'].get(colour, 0.0) + intensity
     for section in sections:
-        *rgb, weight = section.pop('light')
-        # The intensity-weighted hue at full brightness: the strip shows level separately.
-        peak = max(rgb) if weight > 0 else 0.0
-        section['rgb'] = [round(value / peak, 3) for value in rgb] if peak > 0 else None
+        light = section.pop('light')
+        total = sum(light.values())
+        # A blend of two looks reads wrong (red and blue as magenta); stripes keep both.
+        ranked = sorted(light.items(), key=lambda item: -item[1])[:SECTION_COLOURS]
+        section['colours'] = [
+            list(colour)
+            for rank, (colour, share) in enumerate(ranked)
+            if rank == 0 or share >= SECOND_COLOUR_SHARE * total
+        ]
     return sections
 
 
 def preview_overview(preview: Preview, columns: int = OVERVIEW_COLUMNS) -> dict:
     """The whole track at a glance, for judging restraint and contrast.
 
-    Columns are equal slices of the frames, each at least one frame. Per group, each column
-    holds its mean intensity; ``strobe`` is the share of a column's frames with any cell
-    strobing. Strobe seconds count frames with strobe, per group and overall. Sections are runs
-    of one base loop with their intensity-weighted colour, null when dark throughout.
+    Columns are equal slices of the frames, each at least one frame. Per group, ``low`` and
+    ``high`` bound its cells' intensity over a column. ``white`` is the share of a column's
+    frames with a lit white cell, as white is kept for hits; ``strobe`` the fastest strobe in
+    Hz; ``faults`` the share of frames dark from a script fault. Strobe seconds count frames
+    with strobe, per group and overall. Phrases are the first frames of every 16th bar.
     """
     frames = preview.frames
     count = min(columns, len(frames))
     groups = {name: members for name, members in preview.header['groups'].items() if members}
-    level = {name: [0.0] * count for name in groups}
-    strobe = [0.0] * count
+    low = {name: [1.0] * count for name in groups}
+    high = {name: [0.0] * count for name in groups}
+    white, faults, strobe = [0] * count, [0] * count, [0.0] * count
     sizes = [0] * count
     strobing = dict.fromkeys(groups, 0)
     strobing_any = 0
@@ -275,21 +292,31 @@ def preview_overview(preview: Preview, columns: int = OVERVIEW_COLUMNS) -> dict:
         sizes[column] += 1
         cells = frame['c']
         for name, members in groups.items():
-            level[name][column] += sum(cells[cell][0] for cell in members) / len(members)
+            levels = [cells[cell][0] for cell in members]
+            low[name][column] = min(low[name][column], *levels)
+            high[name][column] = max(high[name][column], *levels)
             strobing[name] += any(cells[cell][4] > 0 for cell in members)
-        if any(cell[4] > 0 for cell in cells):
-            strobe[column] += 1
-            strobing_any += 1
+        white[column] += any(cell[0] > 0 and min(cell[1:4]) >= WHITE_MIN_CHANNEL for cell in cells)
+        faults[column] += bool(frame.get('fault'))
+        fastest = max(cell[4] for cell in cells)
+        strobe[column] = max(strobe[column], fastest)
+        strobing_any += fastest > 0
+
+    def share(counts):
+        return [round(total / size, 3) for total, size in zip(counts, sizes, strict=True)]
+
     return {
         'columns': count,
-        'groups': {
-            name: [round(total / size, 3) for total, size in zip(row, sizes, strict=True)]
-            for name, row in level.items()
-        },
-        'strobe': [round(total / size, 3) for total, size in zip(strobe, sizes, strict=True)],
+        'headroom': HEADROOM,
+        'groups': {name: {'low': low[name], 'high': high[name]} for name in groups},
+        'white': share(white),
+        'strobe': strobe,
+        'strobe_max_hz': STARFIRE_MAX_STROBE_HZ,
+        'faults': share(faults),
         'strobe_seconds': round(strobing_any / preview.rate_hz, 3),
         'group_strobe_seconds': {
             name: round(frames_on / preview.rate_hz, 3) for name, frames_on in strobing.items()
         },
+        'phrases': [frame for bar, frame in bar_starts(preview) if (bar - 1) % PHRASE_BARS == 0],
         'sections': _sections(preview),
     }
