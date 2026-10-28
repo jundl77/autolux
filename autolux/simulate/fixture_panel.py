@@ -41,6 +41,9 @@ FIXTURE_CSS = '''
 #config-panel .cfg-title input {box-sizing:border-box;width:100%;background:transparent;color:var(--text);border:1px solid transparent;border-radius:4px;padding:3px 6px;margin-left:-7px;font:inherit;font-size:16px;font-weight:600;}
 #config-panel .cfg-title input:hover,#config-panel .cfg-title input:focus {border-color:var(--line);}
 .cfg-title h3 {margin:0;font-size:16px;}
+.cfg-empty {margin:0;color:var(--muted);font-size:13px;}
+/* Nothing selected: one line, no actions to aim at nothing. */
+#fixture-info:has(.cfg-empty) :is(#fixture-close,.cfg-footer) {display:none;}
 #config-panel[aria-busy="true"] {cursor:progress;}
 .patch-blocks {display:contents;}
 .patch-drag-label {position:fixed;z-index:1000;pointer-events:none;background:#152333;color:#e6edf3;border:1px solid #64b8a4;border-radius:4px;padding:6px 10px;font:12px Segoe UI;}
@@ -61,7 +64,7 @@ FIXTURE_CSS = '''
 .patch-actions {display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;}
 .patch-muted,#fixture-status {font-size:12px;color:#93a5b9;line-height:1.6;}
 #fixture-status {margin:0;max-width:360px;text-align:right;}
-.patch-profile-info {min-height:65px;margin:12px 0 18px;font-size:12px;color:#93a5b9;line-height:1.7;}
+.patch-profile-info {margin:8px 0 16px;font-size:12px;color:#93a5b9;line-height:1.7;}
 .patch-map {display:grid;grid-template-columns:repeat(var(--dmx-columns),minmax(0,1fr));grid-auto-rows:29px;gap:2px;margin-top:12px;}
 .patch-channel {background:#192432;color:#65798f;font-size:9px;display:flex;align-items:center;justify-content:center;border-radius:2px;}
 #config-panel .patch-block {padding:0 4px;border:0;border-radius:2px;color:#fff;font-size:10px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:1;}
@@ -115,6 +118,9 @@ FIXTURE_CSS = '''
 .cfg-field>span small {float:right;}
 .cfg-split+span {margin-top:8px;}
 #config-panel .cfg-section input,#config-panel .cfg-section select {box-sizing:border-box;width:100%;min-width:0;background:#0b121c;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:7px 9px;font:inherit;font-size:12px;}
+/* Spinners on hover only would make one field look unlike its neighbours. */
+#config-panel .cfg-section input[type="number"] {appearance:textfield;}
+#config-panel .cfg-section input::-webkit-inner-spin-button,#config-panel .cfg-section input::-webkit-outer-spin-button {-webkit-appearance:none;margin:0;}
 #config-panel .cfg-section input[readonly] {color:var(--muted);border-style:dashed;}
 #config-panel [aria-invalid="true"],#config-panel [aria-invalid="true"] input {border-color:#e69478;}
 .cfg-note {color:var(--muted);font-size:12px;line-height:1.4;}

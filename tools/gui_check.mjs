@@ -1356,9 +1356,12 @@ const SUITES = {
 
     cfg_pane: async () => {
         await cfgFresh();
+        const hidden = (selector) => ev(`getComputedStyle(document.querySelector('${selector}')).display === 'none'`);
+        await check('pane', 'with nothing selected it reads one line and offers no actions', (await text('#fixture-info .cfg-empty')) === 'Select a fixture on the plan'
+            && (await hidden('#fixture-close')) && (await hidden('#fixture-info .cfg-footer')));
         await check('pane', 'select spot_left', await selectFixture('spot_left'));
         const headings = () => ev(`[...document.querySelectorAll('#fixture-info .cfg-section > h4')].map((h) => h.firstChild.textContent)`);
-        await check('pane', 'a mover shows every section', same(await headings(), ['Identity', 'Patch', 'Placement', 'Group and role', 'Movement', 'Cells']),
+        await check('pane', 'a single-cell mover shows every section but Cells', same(await headings(), ['Patch', 'Placement', 'Group and role', 'Movement']),
             {headings: await headings()});
         await check('pane', 'the name is the heading', !!(await ev(`document.querySelector('#fixture-title [data-cfg="name"]')`)));
         await check('pane', 'the uuid is no field outside Advanced', await ev(`![...document.querySelectorAll('#fixture-info input')]
@@ -1380,7 +1383,7 @@ const SUITES = {
         await shot('pane_impl_mover', '#fixture-info');
 
         await selectFixture('wash_left');
-        await check('pane', 'a static fixture shows no Movement', same(await headings(), ['Identity', 'Patch', 'Placement', 'Group and role', 'Cells']),
+        await check('pane', 'a static fixture shows no Movement', same(await headings(), ['Patch', 'Placement', 'Group and role']),
             {headings: await headings()});
         await shot('pane_impl_static', '#fixture-info');
 

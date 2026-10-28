@@ -845,7 +845,7 @@
                     const node = path?.at(-1);
                     const fixture = node && rows.some((entry) => entry.key === node.key);
                     const name = h("label", { className: "cfg-field" }, h("input", { type: "text", value: node?.attributes.name ?? "", "data-cfg": "name", "aria-label": "Name", spellcheck: "false" }), h("small", { className: "cfg-note" }));
-                    title.replaceChildren(...(fixture ? [name] : node ? [h("h3", { text: node.tag })] : []));
+                    title.replaceChildren(fixture ? name : node ? h("h3", { text: node.tag }) : h("p", { className: "cfg-empty", text: "Select a fixture on the plan" }));
                     keepingState(editor, sameNode, () => editor.replaceChildren(...(path ? [...patchForm(draft, settings, node), advanced(inspector(draft, settings, path), !fixture)] : [])));
                     paintTest();
                 }
@@ -1276,12 +1276,12 @@
         if (!ids.includes(selectedCell)) selectedCell = null;
         const cells = document.querySelector("#fixture-info .cfg-cells");
         const listed = JSON.stringify([row?.fixture_uuid, row?.name, ids]);
-        if (cells.dataset.listed !== listed) {
+        // Offline, the test note already says so; the cells stay empty.
+        if (cells && cells.dataset.listed !== listed) {
             cells.dataset.listed = listed;
-            const offline = "Not in the running show.";
-            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.fixture_uuid, row.name)} to test`, text: cell.replace(row.fixture_uuid, row.name) })) : [muted(offline)]));
+            cells.replaceChildren(...ids.map((cell) => h("button", { type: "button", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.fixture_uuid, row.name)} to test`, text: cell.replace(row.fixture_uuid, row.name) })));
         }
-        cells.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
+        cells?.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
         const offline = row && !running({ fixture: row.fixture_uuid }) ? `${row.name} · not in the running show` : null;
         const active = show?.highlight;
@@ -1334,10 +1334,10 @@
         const span = row.address && row.channels ? `DMX ${row.address}–${row.address + row.channels - 1}` : null;
         return [
             ...testStrip(),
-            section("Identity", null, field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" }))),
             section(
                 "Patch",
                 span,
+                field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
                 field("Profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
                 field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} channels`])], row.mode), true),
                 field("Universe", h("input", { type: "text", value: (row.universe ?? 0) + 1, readonly: true, tabindex: -1 })),
@@ -1375,7 +1375,8 @@
                       axes.map(([axis]) => check(`DMXInvert${axis}`, `Invert ${axis.toLowerCase()}`))
                   )
                 : null,
-            section("Cells", String(row.cells.length), h("div", { className: "cfg-cells" }))
+            // A single cell is the fixture itself, which the Test row already covers.
+            row.cells.length > 1 ? section("Cells", String(row.cells.length), h("div", { className: "cfg-cells" })) : null
         ].filter(Boolean);
     }
 
