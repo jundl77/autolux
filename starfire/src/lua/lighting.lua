@@ -234,18 +234,16 @@ local function random_index(value)
     return value
 end
 
-local function splitmix(z)
-    z = z + 0x9E3779B97F4A7C15
-    z = (z ~ (z >> 30)) * 0xBF58476D1CE4E5B9
-    z = (z ~ (z >> 27)) * 0x94D049BB133111EB
-    return z ~ (z >> 31)
-end
-
 -- 0..1, a pure hash of the cue's seed and two integer indices: the same arguments give the same
--- value on every frame and every run.
+-- value on every frame and every run. SplitMix64's finaliser, two rounds.
 function sf.random(ctx, i, j)
     local x = ctx.seed ~ (random_index(i) * 0x9E3779B97F4A7C15) ~ (random_index(j) << 21)
-    return (splitmix(splitmix(x)) >> 11) / 9007199254740992.0
+    for _ = 1, 2 do
+        x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
+        x = (x ~ (x >> 27)) * 0x94D049BB133111EB
+        x = x ~ (x >> 31)
+    end
+    return (x >> 11) / 2.0 ^ 53
 end
 
 -- A neutral mid level before the analyser has measured a beat.
@@ -341,19 +339,6 @@ function sf.aim_direction(cell, dx, dy, dz)
     return sf.aim(cell, x + dx, y + dy, z + dz)
 end
 
--- Stands in for sf.random(ctx, a, b) until it lands; the same SplitMix64 recipe over ctx.seed.
-local function _w3_hash(ctx, a, b)
-    b = b or 0
-    assert(math.type(a) == "integer" and math.type(b) == "integer", "hash arguments must be integers")
-    local x = (ctx.seed or 0) ~ (a * 0x9E3779B97F4A7C15) ~ (b << 21)
-    for _ = 1, 2 do
-        x = (x ~ (x >> 30)) * 0xBF58476D1CE4E5B9
-        x = (x ~ (x >> 27)) * 0x94D049BB133111EB
-        x = x ~ (x >> 31)
-    end
-    return (x >> 11) / 2.0 ^ 53
-end
-
 -- Each shape gives (spread, elevation) per unit size at cycle position t (nil when static), for
 -- a member at signed stage position u (wings: outermost +-1, centreline 0; else 1) on side w.
 local PHASER_SHAPES = {
@@ -366,9 +351,9 @@ local PHASER_SHAPES = {
     tilt_wave = function(t) return 0, math.sin(FULL_TURN * t) end,
     -- Each member's own phase on the fundamental keeps partners from reading as one mirrored circle.
     ballyhoo = function(t, _, w, ctx, index)
-        local fundamental = FULL_TURN * (t + _w3_hash(ctx, index, 2))
-        return w * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index))),
-            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * _w3_hash(ctx, index, 1))
+        local fundamental = FULL_TURN * (t + sf.random(ctx, index, 2))
+        return w * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * sf.random(ctx, index))),
+            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * sf.random(ctx, index, 1))
     end,
 }
 local STATIC_SHAPES = { fan = true, cross = true }

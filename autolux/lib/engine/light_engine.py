@@ -97,8 +97,13 @@ class PlannedSection:
     start_sec: float
     song_sec: float | None
     arrival: float | None
-    # The analysed downbeat the section starts on; None until that beat is analysed.
+    # The analysed downbeat the section starts on; None until that beat is analysed, and for
+    # good when no analysed beat falls at the start (the section then switches at room time).
     start_beat_index: int | None = None
+    unplaceable: bool = False
+    # The room beat the room side switches on: the start, or for a start the room has already
+    # heard, the next downbeat (where Starfire starts the late cue).
+    switch_beat_index: int | None = None
 
 
 class LightEngine(IMusicAnalyserHandler):
@@ -140,6 +145,7 @@ class LightEngine(IMusicAnalyserHandler):
         self._last_bpm: float | None = None
         self._beat_index_never_reset: int = 0
         self._beat_ring: deque[AnalysedBeat] = deque(maxlen=BEAT_RING_SIZE)
+        self._room_beat_index: int = 0
         self._room_beat_phase: int | None = None
         self._room_beat_at: float = float('-inf')
         self._held_intent: LightIntent | None = None
@@ -551,6 +557,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._floor_armed = True
         self._audio_sec = 0.0
         self._beat_levels.clear()
+        # Its audio times are on the old source clock.
+        self._beat_ring.clear()
         self._track_started_audio_sec = 0.0
         if self.section_chain is not None:
             self.section_chain.reset()
@@ -631,7 +639,7 @@ class LightEngine(IMusicAnalyserHandler):
                 self.lighting_client.beat(
                     beat_index, phase, BEATS_PER_BAR, published_bpm, features=features
                 )
-            await self._on_room_beat(phase)
+            await self._on_room_beat(phase, beat_index)
             if bpm > 0:
                 self._measure_track_mood(measured, phase)
 
@@ -651,27 +659,82 @@ class LightEngine(IMusicAnalyserHandler):
             'high': band_to_normalized_level(measured.high_dbfs),
         }
 
-    async def _on_room_beat(self, phase: int | None) -> None:
+    async def _on_room_beat(self, phase: int | None, beat_index: int | None = None) -> None:
         self._room_beat_phase = phase
         self._room_beat_at = self._clock.monotonic()
+        if beat_index is not None:
+            self._room_beat_index = beat_index
+            # One switch clock: the room side changes on the beat Starfire starts the cue on.
+            await self._apply_due(
+                [
+                    planned
+                    for planned in self._pending_intents
+                    if planned.switch_beat_index is not None
+                    and planned.switch_beat_index <= beat_index
+                ]
+            )
         if phase == 0:
             await self._switch_held_intent()
 
+    async def _apply_due(self, due: list[PlannedSection]) -> None:
+        """Several due on one beat (after a gap): the latest wins, as in Starfire."""
+        if not due:
+            return
+        for passed in due[:-1]:
+            self._pending_intents.remove(passed)
+        planned = due[-1]
+        await self._apply_intent(
+            planned, planned.intent, planned.song_sec, planned.section_label, planned.arrival
+        )
+
+    def _start_window(self, start_sec: float, phased: bool) -> tuple[float, float]:
+        """From half a beat early, a bar long for a downbeat or a beat long without a phase."""
+        beat_sec = 60.0 / self._last_bpm if self._last_bpm else 0.0
+        opens = start_sec - beat_sec / 2
+        return opens, opens + (BEATS_PER_BAR * beat_sec if phased else beat_sec)
+
     def _start_beat_index(self, start_sec: float) -> int | None:
-        """The first analysed downbeat at the section start, half a beat early at most."""
-        half_beat = 30.0 / self._last_bpm if self._last_bpm else 0.0
+        """The analysed downbeat a section starting at start_sec starts on; without a decoder
+        phase, the beat at start_sec."""
         for beat in self._beat_ring:
-            # Without a decoder phase, the beat at start_sec is the start.
-            if beat.audio_sec >= start_sec - half_beat and beat.phase in (0, None):
+            if beat.phase not in (0, None):
+                continue
+            opens, closes = self._start_window(start_sec, beat.phase == 0)
+            if opens <= beat.audio_sec < closes:
                 return beat.beat_index
         return None
 
+    def _place(self, planned: PlannedSection) -> None:
+        if planned.start_beat_index is not None or planned.unplaceable:
+            return
+        planned.start_beat_index = self._start_beat_index(planned.start_sec)
+        if planned.start_beat_index is not None:
+            # About 9 s before the room hears it: Starfire starts it on its own clock.
+            self._send_cue(planned)
+            self._plan_switch(planned)
+        elif (
+            self._beat_ring
+            and self._beat_ring[-1].audio_sec >= (self._start_window(planned.start_sec, True)[1])
+        ):
+            planned.unplaceable = True
+
+    def _plan_switch(self, planned: PlannedSection) -> None:
+        start = planned.start_beat_index
+        if start is None or planned.switch_beat_index is not None:
+            return
+        if start > self._room_beat_index:
+            planned.switch_beat_index = start
+            return
+        for beat in self._beat_ring:
+            if beat.beat_index > self._room_beat_index and beat.phase in (0, None):
+                planned.switch_beat_index = beat.beat_index
+                return
+
     def _place_waiting_sections(self) -> None:
         for planned in self._pending_intents:
-            if planned.start_beat_index is None:
-                planned.start_beat_index = self._start_beat_index(planned.start_sec)
-                if planned.start_beat_index is not None:
-                    self._send_cue(planned)
+            self._place(planned)
+            # A late start waits for the next analysed downbeat.
+            self._plan_switch(planned)
 
     def _send_cue(self, planned: PlannedSection) -> None:
         cue = self._plan_cue(planned)
@@ -968,16 +1031,19 @@ class LightEngine(IMusicAnalyserHandler):
             return
         start_sec = self._audio_sec - age_sec
         planned = PlannedSection(fire_at, intent, section_label, start_sec, song_sec, arrival)
-        planned.start_beat_index = self._start_beat_index(start_sec)
         self._pending_intents.append(planned)
-        if planned.start_beat_index is not None:
-            # About 9 s before the room hears it: Starfire starts it on its own clock.
-            self._send_cue(planned)
+        self._place(planned)
         await self.command_queue.enqueue(
-            'intent',
-            lambda: self._apply_intent(planned, intent, song_sec, section_label, arrival),
-            delay_sec=fire_at - now,
+            'intent', lambda: self._apply_without_beats(planned), delay_sec=fire_at - now
         )
+
+    async def _apply_without_beats(self, planned: PlannedSection) -> None:
+        """Room time decides only for a section no analysed beat placed."""
+        if planned.switch_beat_index is None:
+            planned.unplaceable = True
+            await self._apply_intent(
+                planned, planned.intent, planned.song_sec, planned.section_label, planned.arrival
+            )
 
     def _note_lateness(self, late_sec: float) -> None:
         if late_sec > 0.0:
