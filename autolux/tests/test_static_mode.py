@@ -471,7 +471,10 @@ async def test_static_releases_the_auto_special_and_auto_brings_it_back():
 
     lighting.events.clear()
     light.enter_static()
-    assert overrides(lighting) == [{'kind': 'clear_override', 'id': 'special'}]
+    # Entering static is the operator's hand, so the special cuts at once.
+    assert overrides(lighting) == [
+        {'kind': 'clear_override', 'id': 'special', 'instantaneous_release': True}
+    ]
 
     lighting.events.clear()
     await light.leave_static()

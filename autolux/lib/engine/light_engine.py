@@ -195,7 +195,7 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] pause')
         self._paused = True
         self._held_intent = None
-        # Pause first so the cut lands on a stopped clock; cut it so play does not revive it.
+        # Pause before the cut so play does not revive it.
         self.lighting_client.set_paused(True)
         self.effect_controller.forget_special(instantaneous=True)
         self._send_brightness(BRIGHTNESS_FADE_SECONDS)
@@ -228,7 +228,7 @@ class LightEngine(IMusicAnalyserHandler):
         LOGGER.info('[engine] static mode')
         self._static_mode = True
         self._held_intent = None
-        self.effect_controller.release_special()
+        self.effect_controller.release_special(instantaneous=True)
         self._send_brightness(OPERATOR_FADE_SECONDS)
 
     async def leave_static(self) -> None:

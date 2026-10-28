@@ -988,7 +988,7 @@ async def _settle_audible_timeline(command_queue, clock, delay_sec=14.0):
     await command_queue.drain()
 
 
-@pytest.mark.parametrize('cause', ['fx_off', 'standby', 'pause'])
+@pytest.mark.parametrize('cause', ['fx_off', 'standby', 'pause', 'static'])
 async def test_an_operator_cut_reaches_the_renderer_now_not_at_the_audible_position(
     tmp_path, cause
 ):
@@ -1003,6 +1003,8 @@ async def test_an_operator_cut_reaches_the_renderer_now_not_at_the_audible_posit
         light.pause()
         kinds = [e['command']['kind'] for e in lighting.events[start:]]
         assert kinds.index('set_paused') < kinds.index('clear_override'), 'cut on a paused clock'
+    elif cause == 'static':
+        light.enter_static()
     else:
         light.on_digital_silence()
     cuts = [e for e in lighting.events[start:] if e['command'] == CUT]

@@ -401,8 +401,8 @@ class EffectController:
             self.event_buffer.set_special(None)
 
     def forget_special(self, *, instantaneous: bool = False) -> None:
-        """Release the running special (at once if instantaneous); nothing returns before the next entry
-        fires one."""
+        """Release the running special (at once if instantaneous); nothing returns before the
+        next entry fires one."""
         self.release_special(instantaneous=instantaneous)
         self._special = None
 
