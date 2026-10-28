@@ -15,6 +15,7 @@ use mlua::{Function, HookTriggers, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, 
 use serde::Serialize;
 
 use crate::fixtures::{FixtureRig, MAX_CELLS};
+use crate::gdtf::GOBO_ATTRIBUTE;
 use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
@@ -453,6 +454,42 @@ impl LuaAutoloop {
                 cell_fact(&fixtures, &cell, |id| {
                     fixtures.uuid_of_cell(id).map(str::to_owned)
                 })
+            })?,
+        )?;
+        let gobos = Rc::clone(&shared);
+        api.set(
+            "gobo",
+            lua.create_function(move |lua, (value, slot): (Value, i64)| {
+                let slot = u64::try_from(slot).map_err(|_| {
+                    mlua::Error::RuntimeError("gobo slot must be 0 or more".to_owned())
+                })?;
+                let target = gobos.by_label(lua.from_value(value)?);
+                if matches!(&target, Target::Group(group) if !gobos.groups().contains_key(group)) {
+                    return lua.create_table();
+                }
+                let mut effects = Vec::new();
+                for id in gobos
+                    .resolve_for_loop(&target)
+                    .map_err(mlua::Error::external)?
+                {
+                    let Some(name) = gobos
+                        .profile(&id)
+                        .and_then(|profile| profile.gobo_name(slot))
+                    else {
+                        continue;
+                    };
+                    let attributes = lua.create_table()?;
+                    attributes.set(GOBO_ATTRIBUTE, name)?;
+                    let values = lua.create_table()?;
+                    values.set("attributes", attributes)?;
+                    let member = lua.create_table()?;
+                    member.set("fixture", id)?;
+                    let effect = lua.create_table()?;
+                    effect.set("target", member)?;
+                    effect.set("values", values)?;
+                    effects.push(effect);
+                }
+                lua.create_sequence_from(effects)
             })?,
         )?;
         globals.set("sf", api)?;

@@ -177,4 +177,9 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
+-- ==== W4 vocabulary ====
+
+-- sf.gobo(target, slot) is native: one Gobo1 preset per member that has a gobo wheel. Slot 0
+-- is the open slot, 1.. the others in wheel order, wrapping, so any slot works on any rig.
+
 return sf, named_palettes, function(palette) active_palette = palette end, use_render_intensity
