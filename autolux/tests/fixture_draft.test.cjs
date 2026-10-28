@@ -552,3 +552,14 @@ test("a held test ends after 10 minutes, and stops when the show drops it withou
     ds.fixture_patch.renderRig(null, current, settings);
     assert.equal(commands.length, sent);
 });
+
+test("a plan drag writes the Matrix the server's area and group-order test reads", () => {
+    // data/plan_drag.json is this result; test_fixture_setup applies it on the server.
+    const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "data/plan_drag.json"), "utf8"));
+    const current = draft();
+    const spot = fixtureNode(current, fixture.fixture);
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const move = model.planMove(drag, 100 + fixture.right_px, 100);
+    const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
+    assert.equal(child(fixtureNode(moved, fixture.fixture), "Matrix").text, fixture.matrix);
+});

@@ -610,6 +610,37 @@ def test_a_highlight_the_rig_cannot_show_is_refused_and_sends_nothing(
     assert lighting.events == []
 
 
+async def test_the_published_highlight_ends_at_standby_sound_stop_and_expiry_and_no_restart_revives_it(
+    tmp_path,
+):
+    from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.lib.main import ShowControl
+
+    buffer = EventBuffer()
+    control = ShowControl(tmp_path / 'show.json', buffer)
+    light, _, clock, lighting = static_engine()
+    light.static_looks = StaticLooks(lighting, HALL, clock=clock)
+    locate = {'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'white'}
+
+    async def published(command=None):
+        control.commands.put_nowait(command or {'action': 'master', 'level': 1.0})
+        await control.apply_pending(light)
+        return buffer.snapshot()['highlight']
+
+    assert await published(locate) is not None
+    light.on_digital_silence()
+    light.on_signal_return()
+    assert await published() is None, 'standby ends it and the restart from scratch keeps it off'
+    assert await published(locate) is not None
+    light._show_sound_stop()
+    assert await published() is None
+    assert await published(locate) is not None
+    clock.advance(59.0)
+    assert await published() is not None
+    clock.advance(1.0)
+    assert await published() is None, "Starfire's 60 s expiry, on the engine clock"
+
+
 async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_other_overrides(
     tmp_path,
 ):

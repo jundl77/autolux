@@ -340,6 +340,28 @@ def test_class_order_follows_positions_not_document_order_after_moving_a_fixture
     assert mvr.groups(fixtures)[0]['movers'] == ['spot_left', 'spot_right']
 
 
+def test_a_browser_plan_drag_moves_the_stage_area_and_group_order_on_save(rig_file):
+    import json
+
+    from proto.starfire import rig_pb2 as rig_wire
+
+    # The Matrix fixture_draft.test.cjs checks the browser writes for this drag.
+    drag = json.loads((ROOT / 'autolux/tests/data/plan_drag.json').read_text(encoding='utf-8'))
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    spot = fixture_node(draft, drag['fixture'])
+    next(node for node in spot['children'] if node['tag'] == 'Matrix')['text'] = drag['matrix']
+    store.save(draft, revision)
+    areas = {
+        fixture.fixture_id: rig_wire.StageArea.Name(fixture.area)
+        for fixture in rig_definition(rig_file).fixtures
+    }
+    # From (-300, 0), on a cut and so up centre, to x 600: the right third, still upstage.
+    assert areas['spot_left'] == 'STAGE_AREA_UP_RIGHT'
+    fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
+    assert mvr.groups(fixtures)[0]['movers'] == ['spot_right', 'spot_left']
+
+
 def test_config_names_the_library_folder_it_lists():
     from autolux.simulate.fixture_panel import library_folder
 
