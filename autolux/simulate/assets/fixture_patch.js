@@ -782,7 +782,9 @@
             const rows = fixtureRows(draft, settings);
             const path = selection ? pathTo(draft.scene, selection) : null;
             if (rig?.selection && rig.selection !== selection) {
+                // A refusal is about the fixture it was for, so it goes with that selection.
                 selectedCell = null;
+                testRefusal = "";
                 const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
                 // The lit test follows the selection, so the old fixture is never kept alive.
                 if (!next || !running({ fixture: next.name })) clearTest();
