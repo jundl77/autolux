@@ -3,6 +3,7 @@
 import copy
 import math
 import threading
+import uuid
 from collections import deque
 from collections.abc import Callable
 
@@ -55,6 +56,8 @@ class EventBuffer:
         self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
         self._rig_revision: str | None = None
+        # Tells the page a restarted show from the one before it, even on the same rig.
+        self._session = uuid.uuid4().hex
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -311,6 +314,7 @@ class EventBuffer:
                 'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),
                 'rig_revision': self._rig_revision,
+                'session': self._session,
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }

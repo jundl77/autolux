@@ -485,6 +485,53 @@ def test_static_targets_and_uv_chips_follow_the_published_rig():
     assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False]
 
 
+@pytest.mark.skipif(NODE is None, reason='needs node to run fixture_patch.js')
+def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_click():
+    source = (Path(__file__).parents[1] / 'simulate/assets/fixture_patch.js').read_text('utf8')
+    script = (
+        'const labels = [];\n'
+        'const listen = () => {};\n'
+        'globalThis.document = {addEventListener: listen};\n'
+        'globalThis.window = {addEventListener: listen,\n'
+        '    autoluxControl: {dispatch: async () => ({})},\n'
+        '    dash_clientside: {set_props: (id, props) =>\n'
+        "        id === 'fixture-apply' && labels.push(props.children)}};\n"
+        f'{source}\n'
+        'const patch = window.dash_clientside.fixture_patch;\n'
+        "const sync = (state, saved) => patch.syncTest(state, 'control', saved);\n"
+        '(async () => {\n'
+        "    const seen = {none: sync(null, 'a'), older: sync({rig_revision: 'a'}, 'b')};\n"
+        "    seen.saved = sync({rig_revision: 'a', session: 'one'}, 'a');\n"
+        '    seen.clicks = [0, 1].map(() => window.dash_clientside.fixture_patch_model.applyClick());\n'
+        '    await new Promise((resolve) => setTimeout(resolve, 0));\n'
+        "    seen.restart = [sync({rig_revision: 'a', session: 'one'}, 'a'), sync(null, 'a'),\n"
+        "        sync({rig_revision: 'a', session: 'two'}, 'a')];\n"
+        '    console.log(JSON.stringify({...seen, labels}));\n'
+        '    process.exit(0);\n'
+        '})();'
+    )
+    # Through stdin: the whole module is longer than a Windows command line.
+    result = subprocess.run(
+        [NODE, '-'], input=script, capture_output=True, text=True, encoding='utf8', check=True
+    )
+    seen = json.loads(result.stdout)
+    # [banner, disabled]: no show means nothing to restart; the banner only names an older rig.
+    assert seen['none'] == ['', True]
+    assert seen['saved'] == ['', False]
+    assert seen['older'] == [
+        'The show runs an older rig. Restart show loads the saved patch.',
+        False,
+    ]
+    assert seen['clicks'] == [None, {'action': 'restart_show'}]
+    assert seen['labels'] == [
+        'Click again to restart; lights go dark until it is back',
+        'Restart show',
+    ]
+    # A same-revision restart holds until the next session reports, not the full minute.
+    restarting = ['Restarting the show on the saved patch.', True]
+    assert seen['restart'] == [restarting, restarting, ['', False]]
+
+
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
 
 
@@ -760,6 +807,17 @@ def test_the_fx_picker_lists_only_the_rows_that_fit_the_target():
     ]
     # The held row is written once, and again only when the target's held row changes.
     assert synced == [['static-fx-row', 'drift'], ['static-fx-row', None]]
+
+
+def test_afterglow_under_drop_shows_the_breakdown_colour():
+    from autolux.simulate.visualizer_app import INTENT_CONFIG, _build_show_status
+
+    effect = {'name': 'breakdown/afterglow', 'selection': {'intent': 'drop', 'look': 'breakdown'}}
+    status = _build_show_status({'intent': 'drop', 'current_effect': effect}, now=0.0)
+    value = next(item for item in status if item.children[0].children == 'Autoloop').children[1]
+    dot, name, _ = value.children
+    assert name == 'Afterglow'
+    assert dot.style['background'] == INTENT_CONFIG['breakdown']['primary']
 
 
 def test_the_status_line_shows_the_active_fx():

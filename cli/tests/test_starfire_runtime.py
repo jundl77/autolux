@@ -976,3 +976,18 @@ def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_ex
         {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}
     )
     assert cut.HasField('transition') and not cut.transition.HasField('crossfade_beats')
+
+
+def test_a_renderer_that_survives_its_kill_is_logged_not_raised(caplog):
+    import subprocess
+    from unittest.mock import Mock
+
+    runtime = starfire_runtime.StarfireRuntime.__new__(starfire_runtime.StarfireRuntime)
+    child = Mock(stdin=None, stdout=None)
+    child.wait.side_effect = subprocess.TimeoutExpired('starfire', 0)
+    runtime.process, runtime._outgoing, runtime._writer = child, queue.Queue(), None
+    runtime._threads, runtime._job, runtime.stop_timeout = [], None, 0
+    runtime.close()
+    child.kill.assert_called_once()
+    assert runtime.process is None
+    assert 'Starfire survived its kill' in caplog.text

@@ -530,17 +530,17 @@ test("the test controls send highlight commands, hold them alive and clear once 
     assert.equal(commands.length, refused);
 });
 
-test("Apply restarts the show only on a second click within 5 s", async () => {
+test("Restart show restarts the show only on a second click within 5 s", async () => {
     const sent = commands.length;
     timers.clear();
     assert.equal(model.applyClick(), null);
-    assert.deepEqual(labels.at(-1), ["fixture-apply", "Click again to restart"]);
+    assert.deepEqual(labels.at(-1), ["fixture-apply", "Click again to restart; lights go dark until it is back"]);
     // Left alone, the arm lapses and the next click only arms again.
     const [[id, lapse]] = [...timers];
     assert.equal(lapse.ms, 5000);
     timers.delete(id);
     lapse.run();
-    assert.deepEqual(labels.at(-1), ["fixture-apply", "Apply to show (restarts it; lights go dark until it is back)"]);
+    assert.deepEqual(labels.at(-1), ["fixture-apply", "Restart show"]);
     assert.equal(model.applyClick(), null);
     assert.equal(commands.length, sent);
     assert.deepEqual(plain(model.applyClick()), { action: "restart_show" });
@@ -548,7 +548,7 @@ test("Apply restarts the show only on a second click within 5 s", async () => {
     assert.equal(timers.size, 0);
     await new Promise(setImmediate);
     assert.deepEqual(labels.slice(-2), [
-        ["fixture-apply", "Apply to show (restarts it; lights go dark until it is back)"],
+        ["fixture-apply", "Restart show"],
         ["fixture-show-rig", "Restarting the show on the saved patch."]
     ]);
 });
@@ -577,36 +577,43 @@ test("a lit test follows the selection; late or unanswered replies never turn it
     assert.equal(timers.size, 0);
 });
 
-test("the Apply banner follows the show's rig revision and holds through a restart", async () => {
+test("the Restart banner names an older rig and holds until the next session reports", async () => {
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
-    const banner = (loaded, saved = "saved") => plain(ds.fixture_patch.syncTest({ ...live, rig_revision: loaded }, "config", saved));
-    const stale = "The show runs an older rig. Apply to show restarts it on the saved patch.";
+    const banner = (loaded, session = "one", saved = "saved") =>
+        plain(ds.fixture_patch.syncTest(loaded === null ? null : { ...live, rig_revision: loaded, session }, "config", saved));
+    const stale = "The show runs an older rig. Restart show loads the saved patch.";
     const restarting = "Restarting the show on the saved patch.";
     assert.deepEqual(banner("loaded"), [stale, false]);
-    assert.deepEqual(banner("saved"), ["", true]);
-    // No show reporting a rig: nothing to apply.
+    // Restart works on the saved rig too; only no show at all disables it.
+    assert.deepEqual(banner("saved"), ["", false]);
     assert.deepEqual(banner(null), ["", true]);
     banner("old");
     timers.clear();
     model.applyClick();
     model.applyClick();
     await new Promise(setImmediate);
-    // Down and still on the old rig both read as restarting; the next rig to report ends it.
+    // The old session, or none, reads as restarting; the next session ends it.
     assert.deepEqual(banner("old"), [restarting, true]);
     assert.deepEqual(banner(null), [restarting, true]);
-    assert.deepEqual(banner("saved"), ["", true]);
-    assert.deepEqual(banner("old"), [stale, false]);
-    // A show back on the same revision: the hold lapses after 60 s so Apply works again.
+    assert.deepEqual(banner("saved", "two"), ["", false]);
+    // A restart without a Save comes back on the same revision, and the new session still ends it.
     timers.clear();
     model.applyClick();
     model.applyClick();
     await new Promise(setImmediate);
-    assert.deepEqual(banner("old"), [restarting, true]);
+    assert.deepEqual(banner("saved", "two"), [restarting, true]);
+    assert.deepEqual(banner("saved", "three"), ["", false]);
+    // An engine that never takes the restart: the hold lapses after 60 s so Restart works again.
+    timers.clear();
+    model.applyClick();
+    model.applyClick();
+    await new Promise(setImmediate);
+    assert.deepEqual(banner("old", "three"), [restarting, true]);
     const [[id, hold]] = [...timers];
     assert.equal(hold.ms, 60000);
     timers.delete(id);
     hold.run();
-    assert.deepEqual(banner("old"), [stale, false]);
+    assert.deepEqual(banner("old", "three"), [stale, false]);
 });
 
 test("a held test ends after 10 minutes, and stops when the show drops it without an Off", () => {

@@ -13,8 +13,9 @@
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
-    const APPLY_LABEL = "Apply to show (restarts it; lights go dark until it is back)";
-    const STALE_RIG = "The show runs an older rig. Apply to show restarts it on the saved patch.";
+    const APPLY_LABEL = "Restart show";
+    const APPLY_ARMED = "Click again to restart; lights go dark until it is back";
+    const STALE_RIG = "The show runs an older rig. Restart show loads the saved patch.";
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
     const RESTART_HOLD_MS = 60000;
@@ -36,7 +37,7 @@
     let testRefusal = "";
     let restartTimer = null;
     let applyTimer = null;
-    // The rig revision the show ran when a restart was taken; null when none is pending.
+    // The show session a restart was taken in; null when none is pending.
     let restartingFrom = null;
     let suppressedClick = null;
     // The fixture pane's Advanced disclosure stays as the operator left it, across fixtures.
@@ -705,22 +706,22 @@
 
     const setApplyLabel = (children) => window.dash_clientside.set_props("fixture-apply", { children });
 
-    // A restart darkens the room, so one stray click mid-party only arms Apply; the second within 5 s restarts.
+    // A restart darkens the room, so one stray click mid-party only arms Restart; the second within 5 s restarts.
     function applyClick() {
         const armed = applyTimer !== null;
         clearTimeout(applyTimer);
         applyTimer = null;
-        setApplyLabel(armed ? APPLY_LABEL : "Click again to restart");
+        setApplyLabel(armed ? APPLY_LABEL : APPLY_ARMED);
         if (!armed) {
             applyTimer = setTimeout(() => ((applyTimer = null), setApplyLabel(APPLY_LABEL)), APPLY_CONFIRM_MS);
             return null;
         }
         const command = { action: "restart_show" };
-        const from = show?.rig_revision ?? null;
+        const from = show?.session ?? null;
         window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => {
             if (reply?.error) return;
             restartingFrom = from;
-            // A show back on the same revision must not hold Apply disabled for good.
+            // An engine that never takes the restart must not hold Restart disabled for good.
             clearTimeout(restartTimer);
             restartTimer = setTimeout(() => (restartingFrom = null), RESTART_HOLD_MS);
             window.dash_clientside.set_props("fixture-show-rig", { children: RESTARTING });
@@ -728,7 +729,7 @@
         return command;
     }
 
-    // A new fixture (or a new uuid) is not in the rig the show runs until Apply, and Starfire
+    // A new fixture (or a new uuid) is not in the rig the show runs until a restart, and Starfire
     // answers an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
 
@@ -812,11 +813,12 @@
             // The control state carries the rig only when its revision changed; keep the last one.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
             paintTest();
-            // No show reporting a rig means nothing to apply; a restart holds until a new rig reports.
+            // No show reporting a rig means nothing to restart. A restart holds until the next
+            // session reports, which may run the same revision: a restart without a Save.
             const loaded = state?.rig_revision ?? null;
-            if (loaded !== null && loaded !== restartingFrom) restartingFrom = null;
+            if (state?.session && state.session !== restartingFrom) restartingFrom = null;
             const stale = loaded !== null && loaded !== saved;
-            return restartingFrom !== null ? [RESTARTING, true] : [stale ? STALE_RIG : "", !stale];
+            return restartingFrom !== null ? [RESTARTING, true] : [stale ? STALE_RIG : "", loaded === null];
         },
 
         renderRig(selection, draft, settings) {

@@ -422,7 +422,11 @@ class StarfireRuntime:
             except subprocess.TimeoutExpired:
                 LOGGER.warning('[prod] Starfire shutdown timed out; terminating owned renderer')
                 child.kill()
-                child.wait(timeout=self.stop_timeout)
+                try:
+                    child.wait(timeout=self.stop_timeout)
+                except subprocess.TimeoutExpired:
+                    # The job close below still ends it; a relaunch meets any survivor as a conflict.
+                    LOGGER.error('[prod] Starfire survived its kill')
             for thread in self._threads:
                 if thread.ident is not None:
                     thread.join(timeout=self.stop_timeout)

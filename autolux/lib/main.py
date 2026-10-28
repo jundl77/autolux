@@ -101,10 +101,10 @@ def apply_static(light_engine, command: dict) -> None:
 
 class ShowControl:
     def __init__(
-        self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK, stop_show=None
+        self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK, restart_show=None
     ):
         self.config_path = Path(config_path)
-        self._stop_show = stop_show
+        self._restart_show = restart_show
         self.settings = load_show_settings(self.config_path)
         self.commands: queue.Queue = queue.Queue(maxsize=CONTROL_QUEUE_SIZE)
         self._event_buffer = event_buffer
@@ -206,12 +206,12 @@ class ShowControl:
             if not command['enabled']:
                 light_engine.effect_controller.forget_special(instantaneous=True)
         elif action == 'restart_show':
-            # Starfire reads the rig once per login; the supervisor restarts a show that exits.
-            if self._stop_show is None:
-                LOGGER.warning('[main] restart refused: this show has no stop hook')
+            # Starfire reads the rig once per login, so only a new session loads the saved patch.
+            if self._restart_show is None:
+                LOGGER.warning('[main] restart refused: this show has no restart hook')
             else:
-                LOGGER.info('[main] restart requested from the Config tab (rig changed)')
-                self._stop_show()
+                LOGGER.info('[main] restart requested from the Config tab')
+                self._restart_show()
         elif action == 'settings':
             settings = dataclasses.replace(self.settings, **command['settings'])
             if settings != self.settings:
@@ -300,6 +300,7 @@ class AutoluxController:
         self._fixture_setup = fixture_setup
         self.is_running: bool = False
         self._stop_requested = False
+        self.restart_requested = False
         self.health_check = None
         self.command_queue: DelayedCommandQueue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
 
@@ -338,7 +339,7 @@ class AutoluxController:
 
         self.track_source = TrackSource()
         self.media_session = MediaSessionListener(self._on_media_event)
-        self.control = ShowControl(show_config_path, self.event_buffer, stop_show=self.stop)
+        self.control = ShowControl(show_config_path, self.event_buffer, restart_show=self.restart)
         if self.event_buffer is not None and fixture_setup is not None:
             self.event_buffer.set_rig_revision(fixture_setup['rig_revision'])
         self.effect_controller: EffectController = EffectController(
@@ -495,6 +496,12 @@ class AutoluxController:
                 LOGGER.exception('[main] %s did not close cleanly', what)
         LOGGER.info("[main] Autolux stopped, clean shutdown")
 
+    def restart(self):
+        self.stop()
+        self.restart_requested = True
+
     def stop(self):
         self._stop_requested = True
+        # Ctrl-C during a restart's teardown ends the show rather than relaunching it.
+        self.restart_requested = False
         self.is_running = False

@@ -1,6 +1,7 @@
 """Production topology: controller here; audio/DMX receivers on the output PC."""
 
 import asyncio
+import itertools
 import json
 import logging
 import math
@@ -35,6 +36,13 @@ ROOT = Path(__file__).resolve().parents[1]
 READINESS_TIMEOUT_SECONDS = 45
 READINESS_WORKER_EXIT_TIMEOUT_SECONDS = 2
 DEFAULT_RECEIVER_BUFFER_MS = 500
+# A fault storm waits longer each time rather than flashing the room dark and back every few seconds.
+RESTART_BACKOFF_SECONDS = (5, 15, 60)
+HEALTHY_RUN_SECONDS = 600
+
+
+class ShowFault(RuntimeError):
+    """A show that played and then failed; the session loop restarts it."""
 
 
 def add_arguments(parser):
@@ -186,7 +194,7 @@ def resolve_devices(input_prefix, config):
     return int(inputs[0]['index'])
 
 
-async def run(args):
+async def run(args, *, clock=time.monotonic):
     if os.name != 'nt':
         raise RuntimeError('Production mode currently supports Windows.')
     if args.duration is not None and (not math.isfinite(args.duration) or args.duration <= 0):
@@ -207,7 +215,73 @@ async def run(args):
     if args.check or args.check_full:
         run_readiness_check(args)
         return
-    await _run_session(args)
+    from cli.windows_runtime import RoleLock
+
+    deadline = None if args.duration is None else clock() + args.duration
+    sessions = itertools.count(1)
+    # Held across sessions and waits, so a second show cannot start while this one restarts.
+    lock = RoleLock('controller')
+    try:
+        await run_shows(
+            lambda: _run_session(args, number=next(sessions), deadline=deadline),
+            lambda: stop_requested() or (deadline is not None and clock() >= deadline),
+        )
+    finally:
+        lock.close()
+
+
+def _stop_file():
+    try:
+        return Path(read_config(ROOT / '.live/current.json')['run_dir']) / 'stop'
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def stop_requested():
+    stop = _stop_file()
+    return stop is not None and stop.exists()
+
+
+async def run_shows(session, stop_requested, *, clock=time.monotonic, sleep=asyncio.sleep):
+    faults = 0
+    ran = False
+    while True:
+        started = clock()
+        try:
+            outcome = await session()
+        except Exception as error:
+            # A first show that never played is a setup problem for the operator, not a fault.
+            if not ran and not isinstance(error, ShowFault):
+                raise
+            outcome = error
+        ran = True
+        if faults and clock() - started >= HEALTHY_RUN_SECONDS:
+            LOGGER.info(
+                '[prod] healthy run of %d s; the fault backoff starts over', clock() - started
+            )
+            faults = 0
+        if outcome == 'stop':
+            LOGGER.info('[prod] show stopped; exiting')
+            return
+        delay = 0
+        if outcome == 'restart':
+            LOGGER.info('[prod] restarting on request from the Config tab')
+        else:
+            delay = RESTART_BACKOFF_SECONDS[min(faults, len(RESTART_BACKOFF_SECONDS) - 1)]
+            faults += 1
+            LOGGER.error(
+                '[prod] show fault %d in a row: %s; restarting in %d s',
+                faults,
+                outcome,
+                delay,
+                exc_info=outcome,
+            )
+        resume = clock() + delay
+        while clock() < resume and not stop_requested():
+            await sleep(min(1, resume - clock()))
+        if stop_requested():
+            LOGGER.info('[prod] stop requested; not restarting')
+            return
 
 
 def _readiness_worker(args, owned):
@@ -216,7 +290,13 @@ def _readiness_worker(args, owned):
     owned.wait()
     configure_logging(verbose=args.verbose)
     try:
-        asyncio.run(_run_session(args, checking=True))
+        from cli.windows_runtime import RoleLock
+
+        lock = RoleLock('controller')
+        try:
+            asyncio.run(_run_session(args, checking=True))
+        finally:
+            lock.close()
     except (RuntimeError, OSError, ValueError) as error:
         LOGGER.error('[prod] readiness failed: %s', error)
         raise SystemExit(1) from error
@@ -247,19 +327,34 @@ def run_readiness_check(args):
             worker.close()
 
 
-async def _run_session(args, *, checking=False):
+async def _run_session(args, *, checking=False, number=1, deadline=None):
     from contextlib import ExitStack
 
     from cli import main
     from cli.health_monitor import HealthLogger, HealthMonitor
     from cli.remote_runtime import RemoteRuntime
-    from cli.windows_runtime import RoleLock
 
     tx, rx = transport_settings(args, PLAYBACK_DELAY_SEC)
-    lock = RoleLock('controller')
     app = None
     app_ran = False
+    played = False
+    run_dir = (
+        ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+    )
+    report = args.report and str(run_dir / Path(args.report).name)
     try:
+        if not checking:
+            previous = _stop_file()
+            stale = previous is not None and previous.exists()
+            # First, so an `autolux stop` during startup reaches this session and not the last one.
+            run_dir.mkdir(parents=True)
+            (ROOT / '.live/current.json').write_text(
+                json.dumps({'run_dir': str(run_dir), 'pid': os.getpid()})
+            )
+            # A stop that read the old current.json just before this write landed there.
+            if previous is not None and not stale and previous.exists():
+                return 'stop'
+            LOGGER.info('[prod] session %d starting: %s', number, run_dir)
         processes = running_processes()
         check_conflicts([args.starfire_binary], processes)
         from autolux.lib.section_chain import artifacts_present
@@ -276,9 +371,6 @@ async def _run_session(args, *, checking=False):
             args.autoloops,
             expected_universe=tx['dmx_universe'],
         )
-        run_dir = (
-            ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
-        )
         remote = RemoteRuntime(
             rx,
             tx['peer_address'],
@@ -292,7 +384,6 @@ async def _run_session(args, *, checking=False):
             remote.prepare()
             LOGGER.info('[prod] Radius, Starfire, fixtures, model, capture and SSH checks passed')
             return
-        LOGGER.info('[prod] session logs: %s', run_dir)
         renderer = StarfireRuntime(
             args.starfire_binary,
             rig,
@@ -318,7 +409,7 @@ async def _run_session(args, *, checking=False):
             input_device_index=input_index,
             enable_ui=not args.no_ui,
             ui_port=args.ui_port,
-            report_path=args.report,
+            report_path=report,
             enable_monitoring=True,
             fixture_setup=fixture_setup(args, rig, tx['dmx_universe']),
             autoloops=discover_autoloops(args.autoloops),
@@ -326,49 +417,71 @@ async def _run_session(args, *, checking=False):
             selection_seed=tx['run_id'],
             static_rig=static_rig(rig),
         )
-        with ExitStack() as stack:
-            stack.enter_context(remote)
-            stack.enter_context(renderer)
-            monitor = HealthMonitor(run_dir / 'local/starfire/transport-health.json', tx['run_id'])
-            health_log = HealthLogger()
-            if args.no_ui:
-                from autolux.lib.ui_bridge import SnapshotServer
-
-                server = SnapshotServer(app.event_buffer, args.ui_port + 1, app.control.commands)
-                server.start()
-                stack.callback(server.stop)
-            (ROOT / '.live/current.json').write_text(
-                json.dumps({'run_dir': str(run_dir), 'pid': os.getpid()})
-            )
-            started = time.monotonic()
-
-            def check_health():
-                remote.check_health()
-                renderer.check_health()
-                state = monitor.snapshot()
-                state['starfire'] = renderer.snapshot()
-                app.light_engine.note_capture_discontinuities(
-                    (state.get('tx') or {}).get('capture_discontinuities_total')
+        try:
+            with ExitStack() as stack:
+                stack.enter_context(remote)
+                stack.enter_context(renderer)
+                monitor = HealthMonitor(
+                    run_dir / 'local/starfire/transport-health.json', tx['run_id']
                 )
-                app.event_buffer.set_system_health(state)
-                health_log.update(
-                    state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)
-                )
-                if (run_dir / 'stop').exists() or (
-                    args.duration and time.monotonic() - started >= args.duration
-                ):
-                    app.stop()
+                health_log = HealthLogger()
+                if args.no_ui:
+                    from autolux.lib.ui_bridge import SnapshotServer
 
-            main.global_app = app
-            app.health_check = check_health
-            app_ran = True
-            await app.run()
-            main.write_report(app, args.report)
+                    server = SnapshotServer(
+                        app.event_buffer, args.ui_port + 1, app.control.commands
+                    )
+                    server.start()
+                    stack.callback(server.stop)
+
+                def check_health():
+                    nonlocal played
+                    # A first session runs without a dashboard (the bridge warns); a relaunch's
+                    # missing one is the last viewer still dying, which the backoff waits out.
+                    if (
+                        number > 1
+                        and not args.no_ui
+                        and (app._ui is None or app._ui.dashboard_lost())
+                    ):
+                        raise RuntimeError('the dashboard did not come back with the relaunch')
+                    remote.check_health()
+                    renderer.check_health()
+                    state = monitor.snapshot()
+                    state['starfire'] = renderer.snapshot()
+                    app.light_engine.note_capture_discontinuities(
+                        (state.get('tx') or {}).get('capture_discontinuities_total')
+                    )
+                    app.event_buffer.set_system_health(state)
+                    health_log.update(
+                        state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)
+                    )
+                    # Only a passed health check counts: a first show that fails its first one
+                    # is a setup problem for the operator, like any other first-start fault.
+                    played = True
+                    if (run_dir / 'stop').exists() or (
+                        deadline is not None and time.monotonic() >= deadline
+                    ):
+                        app.stop()
+
+                main.global_app = app
+                app.health_check = check_health
+                app_ran = True
+                await app.run()
+                main.write_report(app, report)
+        # Any error once the show played, a bug included: nobody is at the terminal mid-party.
+        except Exception as error:
+            if not played:
+                raise
+            # A failed teardown must not bring back a show the operator stopped.
+            if app._stop_requested and not app.restart_requested:
+                LOGGER.exception('[prod] the show stopped with an error')
+                return 'stop'
+            raise ShowFault(error) from error
+        return 'restart' if app.restart_requested else 'stop'
     finally:
         if app is not None and not app_ran:
             app._shut_down()
         main.global_app = None
-        lock.close()
 
 
 async def status(args):

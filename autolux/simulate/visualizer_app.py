@@ -34,6 +34,7 @@ from autolux.lib.ui_bridge import (
     SNAPSHOT_HOST,
     SNAPSHOT_PATH,
     advertise_dashboard_mdns,
+    serve_viewer,
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
@@ -571,8 +572,10 @@ def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
     tag = selection.get('intent') or cfg['label'].lower()
     if selection.get('look') not in (None, selection.get('intent')):
         tag = f'{tag} · {selection.get("level")}'
+    # The dot is the loop's own bank: a level remap can play a breakdown loop under a DROP.
+    bank = name.split('/', 1)[0] if name else None
     value = [
-        _dot(cfg['primary']),
+        _dot(INTENT_CONFIG.get(bank, cfg)['primary']),
         name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
         html.Span(tag, className='status-tag'),
     ]
@@ -2275,6 +2278,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                     'special_groups',
                     'highlight',
                     'rig_revision',
+                    'session',
                 )
             }
             control['settings_text'] = settings_text(control['settings'] or {})
@@ -2468,7 +2472,7 @@ def run_app(
             port,
             DASHBOARD_BIND_ADDRESS,
         )
-        app.run(host=DASHBOARD_BIND_ADDRESS, port=port, debug=False)
+        serve_viewer(app.server, port)
 
 
 def main(argv=None) -> None:

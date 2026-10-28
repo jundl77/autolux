@@ -357,8 +357,9 @@ const slider = (selector, fraction) => click(selector, {fx: fraction});
 const STATUS = '#fixture-status';
 const UNSAVED = 'Unsaved changes';
 const SCENE_XML = 'GeneralSceneDescription.xml';
-const APPLY_LABEL = 'Apply to show (restarts it; lights go dark until it is back)';
-const STALE_RIG = 'The show runs an older rig. Apply to show restarts it on the saved patch.';
+const APPLY_LABEL = 'Restart show';
+const APPLY_ARMED = 'Click again to restart; lights go dark until it is back';
+const STALE_RIG = 'The show runs an older rig. Restart show loads the saved patch.';
 const NEW_GROUP = '\u0000new';
 const rigFiles = () => harness('rig');
 const cfg = (name) => `#fixture-info [data-cfg="${name}"]`;
@@ -555,6 +556,20 @@ const SUITES = {
         await check('Section Confidence', 'one bar per class at its posterior',
             JSON.stringify(bars) === JSON.stringify(['10%', '30%', '60%']), {bars});
 
+        // The stub reselects the loop on a level change, as the engine does.
+        const autoloopText = `[...document.querySelectorAll('#show-status .status-item')]
+            .find((e) => e.querySelector('.control-label')?.textContent === 'Autoloop')?.textContent`;
+        const autoloopBefore = await ev(autoloopText);
+        await click(levelLabel('calm'));
+        await check('status Autoloop', 'calm changes the autoloop label within two polls',
+            await waitFor(`(${autoloopText} || '').includes('Afterglow')`, ECHO_MS + 2 * POLL_MS),
+            {before: autoloopBefore, after: await ev(autoloopText)});
+        const autoloopDot = await ev(`[...document.querySelectorAll('#show-status .status-item')]
+            .find((e) => e.querySelector('.control-label')?.textContent === 'Autoloop')
+            ?.querySelector('.dot')?.style.background`);
+        await check('status Autoloop', 'afterglow under DROP shows the breakdown colour',
+            autoloopDot === 'rgb(123, 31, 162)', {dot: autoloopDot});
+        await fresh();
         for (const name of ['calm', 'wild', 'balanced']) {
             await action(`intensity ${name}`, 'click', () => click(levelLabel(name)),
                 {expect: [{action: 'intensity', level: LEVELS[name]}], look: shows(name)});
@@ -1215,17 +1230,17 @@ const SUITES = {
         const banner = () => text('#fixture-show-rig');
         const label = () => text('#fixture-apply');
         await sleep(1000);
-        await check('apply', 'disabled while the show runs the saved rig', (await applyDisabled()) && (await banner()) === '',
+        await check('apply', 'enabled without a banner while the show runs the saved rig', !(await applyDisabled()) && (await banner()) === '',
             {banner: await banner()});
         await selectFixture('wash_left');
         await formEdit('Patch number 42', () => typeInto(cfg('FixtureID'), '42'), {action: 'set-patch-number', value: '42'});
-        await check('apply', 'an unsaved edit does not enable Apply', await applyDisabled());
+        await check('apply', 'an unsaved edit raises no banner', (await banner()) === '', {banner: await banner()});
         await check('apply', 'Save', await save(), {status: await statusText()});
-        await check('apply', 'after a Save it enables with the banner', await waitFor(`!document.getElementById('fixture-apply').disabled
+        await check('apply', 'after a Save the banner names the older rig', await waitFor(`!document.getElementById('fixture-apply').disabled
             && document.getElementById('fixture-show-rig').textContent === ${JSON.stringify(STALE_RIG)}`, 3000), {banner: await banner()});
         await arm();
         await click('#fixture-apply');
-        await check('apply', 'the first click arms', await waitFor(`document.getElementById('fixture-apply').textContent === 'Click again to restart'`, 1000),
+        await check('apply', 'the first click arms', await waitFor(`document.getElementById('fixture-apply').textContent === ${JSON.stringify(APPLY_ARMED)}`, 1000),
             {label: await label()});
         await sleep(5500);
         await check('apply', '5 s later it disarms', (await label()) === APPLY_LABEL, {label: await label()});
@@ -1246,14 +1261,9 @@ const SUITES = {
         const state = await harness('state');
         await check('apply', 'the stub rebooted on the saved store', state.rig_revision === files.revision && running !== files.revision,
             {running, now: state.rig_revision, saved: files.revision});
-        await check('apply', 'the new revision clears the banner and disables Apply', await waitFor(`document.getElementById('fixture-apply').disabled
+        await check('apply', 'the new revision clears the banner and Restart stays enabled', await waitFor(`!document.getElementById('fixture-apply').disabled
             && document.getElementById('fixture-show-rig').textContent === ''`, 3000), {banner: await banner()});
         await check('apply', 'the label is back', (await label()) === APPLY_LABEL, {label: await label()});
-        await arm();
-        await click('#fixture-apply');
-        await click('#fixture-apply');
-        await sleep(1500);
-        await check('apply', 'clicks on the disabled button post nothing', posted().length === 0, {posted: posted()});
     },
 
     cfg_robust: async () => {
@@ -1334,7 +1344,7 @@ const SUITES = {
         await click(testButton('off'));
         await sleep(1000);
 
-        // A browser reload after a Save must show the saved patch, and offer Apply.
+        // A browser reload after a Save must show the saved patch, and say the show runs an older rig.
         await cfgFresh();
         await selectFixture('wash_left');
         await formEdit('Patch number 42', () => typeInto(cfg('FixtureID'), '42'), {action: 'set-patch-number', value: '42'});
@@ -1349,8 +1359,8 @@ const SUITES = {
         await check('reload after save', 'the reloaded page shows the saved patch',
             (await ev(`document.querySelector('${cfg('FixtureID')}').value`)) === '42',
             {shown: await ev(`document.querySelector('${cfg('FixtureID')}').value`)});
-        await check('reload after save', 'and offers Apply for it', !(await ev(`document.getElementById('fixture-apply').disabled`)),
-            {banner: await text('#fixture-show-rig')});
+        await check('reload after save', 'and offers Restart show for it', !(await ev(`document.getElementById('fixture-apply').disabled`))
+            && (await text('#fixture-show-rig')) === STALE_RIG, {banner: await text('#fixture-show-rig')});
         await checkHighlightIds('robust');
     },
 
