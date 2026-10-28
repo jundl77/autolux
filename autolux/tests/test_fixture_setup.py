@@ -362,6 +362,20 @@ def test_a_browser_plan_drag_moves_the_stage_area_and_group_order_on_save(rig_fi
     assert mvr.groups(fixtures)[0]['movers'] == ['spot_right', 'spot_left']
 
 
+def test_a_page_load_serves_the_saved_patch_not_the_boot_time_one(rig_file):
+    from autolux.simulate.visualizer_app import build_app
+    from autolux.tests.test_show_control import _Recorder
+
+    store = FixtureStore(rig_file, LIBRARY, rig_bytes)
+    app = build_app(_Recorder(), fixture_store=store)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    saved, saved_revision = store.save(draft, revision)
+    page = app.layout()
+    assert page['fixture-revision'].data == saved_revision != revision
+    assert page['fixture-draft'].data == saved
+
+
 def test_config_names_the_library_folder_it_lists():
     from autolux.simulate.fixture_panel import library_folder
 

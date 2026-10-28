@@ -2199,6 +2199,15 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         ],
         className='dashboard',
     )
+    if fixture_store is not None:
+        layout = app.layout
+
+        def serve_layout():
+            # A browser reload after Save must open the saved patch, not the one loaded at start.
+            layout['fixture-draft'].data, layout['fixture-revision'].data = fixture_store.load()
+            return layout
+
+        app.layout = serve_layout
 
     app.clientside_callback(
         '''function(selected) {
