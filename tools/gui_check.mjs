@@ -1231,7 +1231,7 @@ const SUITES = {
         await check('odd name', 'survives the plan SVG (label and tooltip)', svg?.label === NAME && svg?.title === NAME + ' · movers', {svg});
         await check('odd name', 'survives the DMX map', (await ev(`[...document.querySelectorAll('#fixture-channel-map .patch-block')].some((b) => b.dataset.fixtureName === ${JSON.stringify(NAME)} && b.textContent.startsWith(${JSON.stringify(NAME + ' · ')}))`)));
         await check('odd name', 'leaves no stray markup in the plan', (await ev(`document.querySelectorAll('#mvr-plan svg.plan').length === 1 && !document.querySelector('#mvr-plan svg.plan left, #mvr-plan svg.plan co')`)));
-        // A renamed fixture is not in the running rig until Apply: its test must not post that id.
+        // A renamed fixture is not in the running rig until a restart: its test must not post that id.
         await arm();
         await watchNote();
         await click(testButton('white'));
@@ -1299,7 +1299,7 @@ const SUITES = {
         await click(testButton('off'));
         await sleep(1000);
 
-        // A browser reload after a Save must show the saved patch, and offer Apply.
+        // A browser reload after a Save must show the saved patch, and say the show runs an older rig.
         await cfgFresh();
         await selectFixture('wash_left');
         await formEdit('Fixture ID (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
@@ -1315,8 +1315,8 @@ const SUITES = {
         await check('reload after save', 'the reloaded page shows the saved patch',
             (await ev(`document.querySelector('${cfg('FixtureIDNumeric')}').value`)) === '42',
             {shown: await ev(`document.querySelector('${cfg('FixtureIDNumeric')}').value`)});
-        await check('reload after save', 'and offers Apply for it', !(await ev(`document.getElementById('fixture-apply').disabled`)),
-            {banner: await text('#fixture-show-rig')});
+        await check('reload after save', 'and offers Restart show for it', !(await ev(`document.getElementById('fixture-apply').disabled`))
+            && (await text('#fixture-show-rig')) === STALE_RIG, {banner: await text('#fixture-show-rig')});
         await checkHighlightIds('robust');
     },
 

@@ -64,7 +64,7 @@ class StubShow:
     """The engine's side of the bridge: fixed data, a monotonic clock for cooldowns.
 
     It boots on the store at `rig_path`; restart_show reboots it on whatever the store holds
-    then, as the supervisor restarting a real show would.
+    then, as a real show's next session would.
     """
 
     def __init__(self, rig_path: Path, clock=time.monotonic):

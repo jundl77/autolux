@@ -687,7 +687,7 @@
         return command;
     }
 
-    // A renamed or new fixture is not in the rig the show runs until Apply, and Starfire answers
+    // A renamed or new fixture is not in the rig the show runs until a restart, and Starfire answers
     // an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.name === target.fixture || fixture.cells.includes(target.cell));
 
