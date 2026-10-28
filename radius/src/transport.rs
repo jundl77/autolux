@@ -47,6 +47,14 @@ impl<S> Connection<S> {
     pub fn refused_sends(&self) -> u64 {
         self.refused_sends
     }
+
+    /// How long queued bytes have waited without the socket accepting any.
+    pub fn write_stalled_for(&self) -> Duration {
+        if self.pending_bytes == 0 {
+            return Duration::ZERO;
+        }
+        (self.clock)().duration_since(self.last_write_progress)
+    }
 }
 
 impl<S: Read + Write> Connection<S> {

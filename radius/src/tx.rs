@@ -30,6 +30,8 @@ const CALLBACK_STALE_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_LIGHT_UPDATES: usize = 512;
 const HEALTH_ERROR_LOG_INTERVAL: Duration = Duration::from_secs(30);
 const REPORT_QUEUE: usize = 4;
+// Well past scheduler jitter on a 1 ms tick: separates a sender stall from a receiver one.
+const LATE_TICK: Duration = Duration::from_millis(50);
 
 struct TimedLight {
     at: Instant,
@@ -179,9 +181,10 @@ fn capture_failure(reason: Option<&str>, stats: &CaptureMetrics) -> String {
     );
     if let Some(gap) = stats.last_gap_frames {
         message += &format!(
-            " ({} discontinuities, limit {CAPTURE_DISCONTINUITY_LIMIT} within {} s; last gap {:.0} ms)",
-            stats.discontinuities,
+            ": {} discontinuities within {} s (limit {CAPTURE_DISCONTINUITY_LIMIT}; {} since start; last gap {:.0} ms)",
+            stats.window_discontinuities,
             CAPTURE_DISCONTINUITY_WINDOW.as_secs(),
+            stats.discontinuities,
             gap_seconds(gap) * 1000.0
         );
     }
@@ -197,6 +200,7 @@ struct MediaSender {
     transmitted_light: Option<[u8; protocol::DMX_CHANNELS]>,
     audio_dropped: u64,
     burst_dropped: u64,
+    burst_stalled_for: Duration,
 }
 
 impl MediaSender {
@@ -208,6 +212,7 @@ impl MediaSender {
             transmitted_light: None,
             audio_dropped: 0,
             burst_dropped: 0,
+            burst_stalled_for: Duration::ZERO,
         }
     }
 
@@ -226,7 +231,7 @@ impl MediaSender {
                 sequence_number: next,
                 channels: light.to_vec(),
             }))? {
-                self.count_dropped(1);
+                self.count_dropped(1, connection);
                 return Ok(());
             }
             self.light_sequence = next;
@@ -240,13 +245,18 @@ impl MediaSender {
                 .to_vec(),
             light_sequence_number: self.light_sequence,
         }))?;
-        self.count_dropped(dropped);
+        self.count_dropped(dropped, connection);
         Ok(())
     }
 
-    fn count_dropped(&mut self, packets: u64) {
+    fn count_dropped<S>(&mut self, packets: u64, connection: &Connection<S>) {
+        if packets == 0 {
+            return;
+        }
         self.audio_dropped += packets;
         self.burst_dropped += packets;
+        // Sampled at each drop: by the time the burst ends the socket has drained.
+        self.burst_stalled_for = self.burst_stalled_for.max(connection.write_stalled_for());
     }
 
     /// A burst ends once the receiver has taken everything queued.
@@ -255,11 +265,37 @@ impl MediaSender {
             return None;
         }
         let packets = std::mem::take(&mut self.burst_dropped);
+        let stalled_for = std::mem::take(&mut self.burst_stalled_for);
         Some(format!(
-            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total",
+            "Radius receiver stalled: dropped the oldest {packets} audio packets ({:.0} ms); {} total; socket accepted no bytes for {} ms",
             gap_seconds((packets * protocol::BLOCK_FRAMES as u64) as i64) * 1000.0,
-            self.audio_dropped
+            self.audio_dropped,
+            stalled_for.as_millis()
         ))
+    }
+}
+
+/// Names a stalled tx thread, which otherwise looks like a stalled receiver.
+#[derive(Default)]
+struct TickWatch {
+    last: Option<Instant>,
+    late: bool,
+}
+
+impl TickWatch {
+    /// Logs once per episode of consecutive late ticks.
+    fn tick(&mut self, now: Instant) -> Option<String> {
+        let lateness = self.last.replace(now).map_or(Duration::ZERO, |last| {
+            now.duration_since(last).saturating_sub(POLL_INTERVAL)
+        });
+        let first = lateness > LATE_TICK && !self.late;
+        self.late = lateness > LATE_TICK;
+        first.then(|| {
+            format!(
+                "Radius tx loop ran {} ms late; the sender thread stalled",
+                lateness.as_millis()
+            )
+        })
     }
 }
 
@@ -395,6 +431,7 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
     let mut reporter = Reporter::spawn(report_writer(config.run_id, config.health_file.clone()))?;
     let mut reported_discontinuities = 0;
     let mut reported_scheduling = false;
+    let mut ticks = TickWatch::default();
 
     while !shared.stop.load(Ordering::Acquire) {
         ensure!(
@@ -545,6 +582,9 @@ fn run(config: TxConfig, shared: &Shared) -> Result<()> {
             last_metrics = Instant::now();
         }
         thread::sleep(POLL_INTERVAL);
+        if let Some(line) = ticks.tick(Instant::now()) {
+            reporter.log(line);
+        }
     }
     Ok(())
 }
@@ -663,6 +703,61 @@ mod tests {
         assert_eq!(sequences, survivors, "only the oldest audio is dropped");
     }
 
+    thread_local! {
+        static ADVANCED: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    }
+
+    /// `frozen_clock` plus this thread's simulated elapsed time.
+    fn stepped_clock() -> Instant {
+        frozen_clock() + ADVANCED.get()
+    }
+
+    #[test]
+    fn stall_report_names_how_long_the_socket_accepted_nothing() {
+        let socket = FakeSocket::default();
+        socket.0.borrow_mut().0 = 1_000_000;
+        let mut connection = Connection::with_stream(socket.clone(), stepped_clock);
+        let mut media = MediaSender::new(7);
+        let light = [9; protocol::DMX_CHANNELS];
+        // Blocks arrive every 10 ms; the 2 s stalled-write limit is never reached.
+        for index in 0..150u64 {
+            ADVANCED.set(Duration::from_millis(10 * index));
+            let block = AudioBlock {
+                audio_frame_position: index * protocol::BLOCK_FRAMES as u64,
+                frames: protocol::BLOCK_FRAMES as u16,
+                ..Default::default()
+            };
+            media.send(&mut connection, &block, &light).unwrap();
+        }
+        assert!(media.audio_dropped > 0);
+        socket.0.borrow_mut().0 = 0;
+        ADVANCED.set(Duration::from_millis(1500));
+        connection.flush().unwrap();
+        let line = media.end_burst(&connection).unwrap();
+        // The first write was refused at 0 ms; the last drop happened at 1490 ms.
+        assert!(
+            line.ends_with("socket accepted no bytes for 1490 ms"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn late_tx_ticks_log_once_per_episode() {
+        let start = frozen_clock();
+        let at = |ms| start + Duration::from_millis(ms);
+        let mut ticks = TickWatch::default();
+        assert_eq!(ticks.tick(at(0)), None);
+        assert_eq!(ticks.tick(at(2)), None);
+        assert_eq!(ticks.tick(at(53)), None, "50 ms late is within bounds");
+        assert_eq!(
+            ticks.tick(at(134)).as_deref(),
+            Some("Radius tx loop ran 80 ms late; the sender thread stalled")
+        );
+        assert_eq!(ticks.tick(at(300)), None, "same episode");
+        assert_eq!(ticks.tick(at(301)), None);
+        assert!(ticks.tick(at(900)).unwrap().contains("598 ms late"));
+    }
+
     /// Show start through the whole chain on a simulated clock: 14 s of delay-ring
     /// silence (some dropped under backpressure), then music captured at
     /// 1 s, whose light Starfire renders 14 s later. The receiver must render that
@@ -773,15 +868,16 @@ mod tests {
     #[test]
     fn capture_fault_names_the_discontinuity_limit_and_last_gap() {
         let stats = CaptureMetrics {
-            discontinuities: 3,
+            discontinuities: 50,
+            window_discontinuities: 3,
             last_gap_frames: Some(441),
             ..Default::default()
         };
         assert_eq!(
             capture_failure(Some("capture discontinuities repeated too often"), &stats),
             concat!(
-                "Radius audio capture failed: capture discontinuities repeated too often ",
-                "(3 discontinuities, limit 3 within 10 s; last gap 10 ms); check the endpoint, ",
+                "Radius audio capture failed: capture discontinuities repeated too often: ",
+                "3 discontinuities within 10 s (limit 3; 50 since start; last gap 10 ms); check the endpoint, ",
                 "RDP audio redirection and receiver connectivity"
             )
         );

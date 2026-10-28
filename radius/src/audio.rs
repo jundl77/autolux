@@ -284,6 +284,8 @@ pub struct CaptureMetrics {
     pub queue_overflow_frames: u64,
     pub device_xruns: u64,
     pub discontinuities: u64,
+    /// Discontinuities inside the window as of the latest one: what the limit compares.
+    pub window_discontinuities: u64,
     pub last_gap_frames: Option<i64>,
     pub resync_silence_frames: u64,
     pub resync_dropped_frames: u64,
@@ -303,6 +305,7 @@ struct CaptureCounters {
     queue_overflow_frames: AtomicU64,
     discard_requested: AtomicBool,
     discontinuities: AtomicU64,
+    window_discontinuities: AtomicU64,
     last_gap_frames: AtomicI64,
     silence_frames: AtomicU64,
     dropped_frames: AtomicU64,
@@ -333,6 +336,7 @@ impl CaptureCounters {
             queue_overflow_frames: self.queue_overflow_frames.load(Relaxed),
             device_xruns: self.stream.device_xruns.load(Relaxed),
             discontinuities,
+            window_discontinuities: self.window_discontinuities.load(Relaxed),
             last_gap_frames: (discontinuities != 0).then(|| self.last_gap_frames.load(Relaxed)),
             resync_silence_frames: self.silence_frames.load(Relaxed),
             resync_dropped_frames: self.dropped_frames.load(Relaxed),
@@ -401,7 +405,8 @@ impl CaptureTimeline {
         Ok((flagged || gap.unsigned_abs() > CAPTURE_JITTER_DEAD_BAND_FRAMES).then_some(gap))
     }
 
-    fn repeats_too_often(&mut self, captured_at: u128) -> bool {
+    /// Records a discontinuity; returns how many fall within the window, this one included.
+    fn discontinuities_in_window(&mut self, captured_at: u128) -> usize {
         let window = CAPTURE_DISCONTINUITY_WINDOW.as_nanos();
         let recent = self
             .recent_discontinuities
@@ -411,7 +416,7 @@ impl CaptureTimeline {
             .count();
         self.recent_discontinuities.rotate_right(1);
         self.recent_discontinuities[0] = Some(captured_at);
-        recent + 1 >= CAPTURE_DISCONTINUITY_LIMIT
+        recent + 1
     }
 
     fn skip_repeated(&mut self, frames: usize) -> usize {
@@ -495,7 +500,11 @@ impl CaptureAssembler {
         };
         self.counters.last_gap_frames.store(gap, Relaxed);
         self.counters.discontinuities.fetch_add(1, Release);
-        if self.timeline.repeats_too_often(captured_at) {
+        let in_window = self.timeline.discontinuities_in_window(captured_at);
+        self.counters
+            .window_discontinuities
+            .store(in_window as u64, Relaxed);
+        if in_window >= CAPTURE_DISCONTINUITY_LIMIT {
             return Err(CAPTURE_REPEATED_DISCONTINUITY);
         }
         let queue_frames = |blocks: usize| (blocks * BLOCK_FRAMES) as u64;

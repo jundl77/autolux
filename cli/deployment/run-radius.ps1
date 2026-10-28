@@ -28,9 +28,33 @@ try {
     $errorLog = Join-Path $RunDirectory 'error.log'
     $child = Start-Process -FilePath $exe -ArgumentList ('"' + $config + '"') -WorkingDirectory $Bundle `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError $errorLog
+    # Relay stderr live over SSH into the controller's receiver-ssh.log, timestamped so
+    # receiver warnings line up with the controller log; without it they appear only at exit.
+    # Timestamps are relay time (up to 250 ms late); a line caught mid-write may split.
+    $reader = $null
+    try {
+        $reader = [IO.StreamReader]::new([IO.FileStream]::new($errorLog, [IO.FileMode]::Open,
+            [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite))
+    } catch {}
+    while (-not $child.WaitForExit(250)) {
+        if ($reader) {
+            # A broken relay must never reach the finally block's stop file.
+            try {
+                while ($null -ne ($line = $reader.ReadLine())) {
+                    [Console]::Out.WriteLine((Get-Date -Format 'HH:mm:ss.fff') + ' ' + $line)
+                }
+            } catch { $reader = $null }
+        }
+    }
     $child.WaitForExit()
     $child.Refresh()
-    Get-Content -LiteralPath $log,$errorLog -ErrorAction SilentlyContinue
+    if ($reader) {
+        Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+        $reader.ReadToEnd()
+        $reader.Dispose()
+    } else {
+        Get-Content -LiteralPath $log,$errorLog -ErrorAction SilentlyContinue
+    }
     exit $child.ExitCode
 } finally {
     if ($child -and -not $child.HasExited) {
