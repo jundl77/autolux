@@ -207,8 +207,16 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
     // Independent of the encoder: decode the DMX to body angles and carry the beam through the
     // Matrix. The pan range centre (270 of 540) faces local +Y, the display, and pan turns
     // clockwise about local +Z; mid tilt is on the pan axis (the mirror the tilt inversion
-    // assumes) and tilts towards the pan heading. Standing, the room's spots still throw on the display side: the tilt reversal
-    // keeps the lean rather than turning it a half turn.
+    // assumes) and tilts towards the pan heading. Standing is the rigid flip, so the reversed
+    // tilt leans the beam a half turn round.
+    let probe = rig(json!([fixture("chauvet_intimidator_spot_110_12ch", 1)]));
+    let ranges =
+        ["Pan", "Tilt"].map(|axis| probe.profile("test").unwrap().movement_range(axis).unwrap());
+    // The 16-bit channel pair at `at` as a body angle off its range centre.
+    let decode = |frame: &[u8], at: usize, (from, to): (f64, f64)| {
+        let share = f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
+        (from + share * (to - from) - (from + to) / 2.0).to_radians()
+    };
     let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
         let flip = if hanging { 1.0 } else { -1.0 };
@@ -227,25 +235,21 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
         let state = states.get_mut("test").unwrap();
         (state.pan, state.tilt) = (pan, tilt);
         let frame = &rig.encode(&states).unwrap()[&0];
-        let angle = |at: usize, travel: f64| {
-            f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 * travel
-        };
-        let (pan, tilt) = (
-            (angle(0, 540.0) - 270.0).to_radians(),
-            (flip * (angle(2, 270.0) - 135.0)).to_radians(),
-        );
+        let (pan, tilt) = (decode(frame, 0, ranges[0]), decode(frame, 2, ranges[1]));
         let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
         [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
     };
-    for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, 270.0, -90.0] {
+    let [(pan_from, pan_to), (tilt_from, tilt_to)] = ranges;
+    for yaw in [0.0, 37.0, 90.0, 130.0, 180.0, 233.0, 270.0, -90.0, -130.0] {
         for inverted in [false, true] {
             for state in [(0.0, 0.2), (0.3, 0.9), (0.5, 0.35), (0.85, 0.6), (1.0, 0.0)] {
                 let expected = beam(true, 0.0, inverted, state);
                 if !inverted {
                     // The logical pan is the scene heading clockwise from +Y within the limits,
                     // 0 at the range centre.
-                    let heading = f64::to_radians(540.0 * (0.1 + 0.7 * state.0) - 270.0);
-                    let lean = f64::to_radians(270.0 * state.1 - 135.0).sin();
+                    let heading =
+                        f64::to_radians((pan_to - pan_from) * (0.1 + 0.7 * state.0 - 0.5));
+                    let lean = f64::to_radians((tilt_to - tilt_from) * (state.1 - 0.5)).sin();
                     let scene = [lean * heading.sin(), lean * heading.cos()];
                     assert!(
                         (0..2).all(|axis| (scene[axis] - expected[axis]).abs() < 1e-3),
