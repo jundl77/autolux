@@ -15,8 +15,9 @@ starts on the current store with a fresh viewer:
   wait. The log carries each fault's traceback. A failed teardown, a relaunch that fails to
   start, or a relaunch whose dashboard does not come back counts as a fault: a relaunched viewer
   waits up to 30 s for the old one's port, then the session faults so the backoff gives the old
-  viewer more time. A first show that fails before it plays (devices, configuration) exits,
-  since it needs the operator; a first show without a dashboard runs on with a warning.
+  viewer more time. A first show that fails before its first health check passes (devices,
+  configuration, a receiver or Starfire that is down) exits, since it needs the operator; a
+  first show without a dashboard runs on with a warning.
 - Ctrl-C, `autolux stop` or `--duration` (one deadline for the whole run) ends the session and
   exits. The stop flag is checked during the wait and before each relaunch, so `autolux stop`
   also ends a show waiting to restart. The process holds the controller lock throughout, so a

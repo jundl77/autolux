@@ -436,8 +436,6 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
 
                 def check_health():
                     nonlocal played
-                    # The health check runs only from the play loop: audio and bridge are up.
-                    played = True
                     # A first session runs without a dashboard (the bridge warns); a relaunch's
                     # missing one is the last viewer still dying, which the backoff waits out.
                     if (
@@ -457,6 +455,9 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
                     health_log.update(
                         state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)
                     )
+                    # Only a passed health check counts: a first show that fails its first one
+                    # is a setup problem for the operator, like any other first-start fault.
+                    played = True
                     if (run_dir / 'stop').exists() or (
                         deadline is not None and time.monotonic() >= deadline
                     ):

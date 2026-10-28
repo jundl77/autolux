@@ -155,6 +155,7 @@ def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypa
         ('monitor_setup', False),
         ('controller_run', False),
         ('audio_open', False),
+        ('first_health', False),
         ('dashboard_lost', False),
         ('teardown', False),
         ('teardown_on_stop', False),
@@ -248,7 +249,8 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             events.append('rx_stop')
 
         def check_health(self):
-            pass
+            if failure == 'first_health':
+                raise RuntimeError('receiver link lost')
 
     class Renderer:
         def __init__(self, binary, rig, autoloops, artnet, directory, **kwargs):
@@ -335,8 +337,9 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
             await production._run_session(args)
     elif failure == 'dashboard_lost':
         # A relaunched viewer that never got its port fails the session; the loop backs off.
-        with pytest.raises(RuntimeError, match='dashboard did not come back'):
+        with pytest.raises(RuntimeError, match='dashboard did not come back') as raised:
             await production._run_session(args, number=2)
+        assert not isinstance(raised.value, production.ShowFault)
     elif failure == 'restart_request':
         assert await production._run_session(args) == 'restart'
     elif failure == 'teardown':
@@ -347,7 +350,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         # ...but never brings back a show the operator stopped.
         assert await production._run_session(args) == 'stop'
     elif failure:
-        # A first show that fails before it played (audio_open included) exits for the operator.
+        # A first show that fails before its first passed health check exits for the operator.
         with pytest.raises(
             (RuntimeError, OSError),
             match='fixture universes' if failure == 'universe_mismatch' else None,
@@ -376,7 +379,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     if 'starfire_stop' in events:
         assert events.index('starfire_stop') < events.index('rx_stop')
     if 'app_run' in events:
-        unhealthy = ('audio_open', 'dashboard_lost')
+        unhealthy = ('audio_open', 'first_health', 'dashboard_lost')
         assert ('capture_count' in events) == (failure not in unhealthy)
         assert events.index('app_stop') < events.index('starfire_stop')
         assert events.count('stop') == 1
