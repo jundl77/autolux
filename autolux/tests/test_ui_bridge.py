@@ -431,3 +431,42 @@ def test_only_a_viewer_that_never_got_its_port_counts_as_a_lost_dashboard():
         for code in (None, 1, ui_bridge.VIEWER_PORT_TAKEN)
     ]
     assert lost == [False, False, True]
+
+
+def test_a_stopped_show_closes_its_keep_alive_connections():
+    # A restart's first click leaves the browser's socket open to the stopped show's bridge;
+    # the next restart reused it and reached a queue no engine drains.
+    stopped = queue.Queue()
+    server = SnapshotServer(EventBuffer(), 0, stopped, handoff_timeout=None)
+    server.start()
+    connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+    reply, _ = _request(connection, 'POST', {'action': 'restart_show'}, JSON)
+    assert reply.status == 202
+    server.stop()
+    with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
+        _request(connection, 'POST', {'action': 'restart_show'}, JSON)
+    assert stopped.qsize() == 1
+
+
+def test_a_restart_the_engine_cannot_honour_answers_409_with_the_reason(tmp_path, caplog):
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    server = SnapshotServer(EventBuffer(), 0, control.commands, handoff_timeout=2)
+    server.start()
+    stop = threading.Event()
+
+    def engine():
+        while not stop.is_set():
+            asyncio.run(control.apply_pending(None))
+
+    threading.Thread(target=engine, daemon=True).start()
+    try:
+        connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+        reply, body = _request(connection, 'POST', {'action': 'restart_show'}, JSON)
+    finally:
+        stop.set()
+        server.stop()
+    assert reply.status == 409
+    assert json.loads(body) == {'error': 'this show has no restart hook'}
+    assert '[main] restart refused: this show has no restart hook' in caplog.text
