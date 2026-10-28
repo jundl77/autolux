@@ -39,7 +39,7 @@ fn replay(duration_seconds: f64) -> Replay {
 }
 
 fn render(input: &Replay) -> Vec<starfire::engine::RenderedFrame> {
-    render_replay(input, support::room(), support::show_catalog()).unwrap()
+    render_replay(input, support::stage(), support::show_catalog()).unwrap()
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn replay_memory_budget_is_checked_before_rendering() {
     input.frame_rate_hz = 50;
     input.duration_seconds -= 0.02;
     assert!(input.validate().is_ok());
-    let rig = support::room();
+    let rig = support::stage();
     let catalogue = support::show_catalog();
     assert!(
         render_replay(&input, rig, catalogue)
@@ -136,7 +136,7 @@ fn cli(input: &Path) -> Process {
         .arg(input)
         .args([
             "--rig",
-            "../autolux/tests/data/room.rig.pb",
+            "../autolux/tests/data/generic_rig/stage.rig.pb",
             "--autoloops",
             "../show/autoloops",
         ]);
@@ -164,7 +164,8 @@ fn native_cli_emits_paced_artnet_then_blackout_without_moving_fixtures() {
         let mut packet = [0; 530];
         let count = receiver.recv(&mut packet).unwrap();
         assert_eq!(count, packet.len());
-        let is_dark = [7, 19, 68, 76, 84, 92]
+        // The stage's wash and mover dimmer channels.
+        let is_dark = [4, 12, 20, 28, 39, 51]
             .iter()
             .all(|offset| packet[18 + offset] == 0);
         packets.push(packet);
@@ -176,8 +177,9 @@ fn native_cli_emits_paced_artnet_then_blackout_without_moving_fixtures() {
     assert!(packets.len() >= 2);
     let last = packets.last().unwrap();
     let before = &packets[packets.len() - 2];
-    assert_eq!(&last[18..22], &before[18..22]);
-    assert_eq!(&last[30..34], &before[30..34]);
+    // The movers' pan and tilt (channels 33-36 and 45-48) hold through the blackout.
+    assert_eq!(&last[50..54], &before[50..54]);
+    assert_eq!(&last[62..66], &before[62..66]);
     assert_eq!(&last[..8], b"Art-Net\0");
 }
 
@@ -207,7 +209,7 @@ fn native_cli_rejects_output_collisions_before_overwriting_inputs() {
     let rig = directory.path().join("rig.pb");
     let shared = directory.path().join("capture");
     let source = serde_json::to_vec(&replay(0.0)).unwrap();
-    let patch = include_bytes!("../../autolux/tests/data/room.rig.pb");
+    let patch = include_bytes!("../../autolux/tests/data/generic_rig/stage.rig.pb");
     fs::write(&input, &source).unwrap();
     fs::write(&rig, patch).unwrap();
     for destination in [&input, &rig, &shared] {

@@ -14,12 +14,10 @@ use starfire::script::AutoloopCatalog;
 const FLOAT_TOLERANCE: f64 = 1e-9;
 const GOLDEN_INTENSITY: f64 = 1.0;
 const SOFT_INTENSITY: f64 = 0.3;
-const ROOM_CELL_COUNT: usize = 15;
 const REPLAY_BPM: f64 = 120.0;
 const SECONDS_PER_BEAT: f64 = 60.0 / REPLAY_BPM;
 const MIN_REPLAY_SECONDS: f64 = 16.0 * 4.0 * SECONDS_PER_BEAT;
 const RAMP_PLATEAU_BEATS: f64 = 128.0;
-const WASH: [&str; 4] = ["wash_left", "wash_mid_left", "wash_mid_right", "wash_right"];
 const WRITE_GOLDEN_VAR: &str = "STARFIRE_WRITE_GOLDEN";
 const STANDBY_BANK: &str = "standby";
 const WARM_WHITE: Rgb = Rgb {
@@ -184,7 +182,7 @@ fn engine(bank: &str, autoloop: &str, select_beat: f64) -> Engine {
 
 fn engine_at_intensity(bank: &str, autoloop: &str, select_beat: f64, intensity: f64) -> Engine {
     let mut engine = Engine::new(
-        support::room(),
+        support::stage(),
         support::show_catalog(),
         support::palettes(),
     )
@@ -226,7 +224,7 @@ fn render(engine: &mut Engine, beats_after_anchor: f64) -> RenderedFrame {
 
 fn wash_level(engine: &mut Engine, beats_after_anchor: f64) -> f64 {
     render(engine, beats_after_anchor).fixture_properties_before_strobe
-        [&support::room_uuid("wash_left")]
+        [&support::stage().groups()["wash"][0]]
         .intensity
 }
 
@@ -255,7 +253,8 @@ fn check_replay(look: &Look) {
         replay.duration_seconds >= MIN_REPLAY_SECONDS,
         "{look}: replay under 16 bars"
     );
-    let first = render_replay(&replay, support::room(), support::show_catalog()).unwrap();
+    let first = render_replay(&replay, support::stage(), support::show_catalog()).unwrap();
+    let cell_count = support::stage().cell_ids().len();
     for frame in &first {
         assert!(
             frame.script_error.is_none(),
@@ -267,16 +266,13 @@ fn check_replay(look: &Look) {
             frame.active_autoloop.as_deref(),
             Some(look.autoloop.as_str())
         );
-        assert_eq!(
-            frame.fixture_properties_before_strobe.len(),
-            ROOM_CELL_COUNT
-        );
+        assert_eq!(frame.fixture_properties_before_strobe.len(), cell_count);
         for (id, state) in &frame.fixture_properties_before_strobe {
             assert!(state.strobe_hz == 0.0, "{look} strobes {id}");
         }
     }
 
-    let second = render_replay(&replay, support::room(), support::show_catalog()).unwrap();
+    let second = render_replay(&replay, support::stage(), support::show_catalog()).unwrap();
     let digest = dmx_digest(&first);
     assert_eq!(digest, dmx_digest(&second), "{look} is not deterministic");
 
@@ -285,8 +281,12 @@ fn check_replay(look: &Look) {
     without_duplicate.events.retain(|event| {
         event.at_seconds == 0.0 || !matches!(event.command, Command::Select { .. })
     });
-    let continued =
-        render_replay(&without_duplicate, support::room(), support::show_catalog()).unwrap();
+    let continued = render_replay(
+        &without_duplicate,
+        support::stage(),
+        support::show_catalog(),
+    )
+    .unwrap();
     assert_eq!(
         digest,
         dmx_digest(&continued),
@@ -296,7 +296,7 @@ fn check_replay(look: &Look) {
     // Frame rate changes sampling density, never the authored effect at a given time.
     let mut slower = replay.clone();
     slower.frame_rate_hz = replay.frame_rate_hz / 2;
-    let slower = render_replay(&slower, support::room(), support::show_catalog()).unwrap();
+    let slower = render_replay(&slower, support::stage(), support::show_catalog()).unwrap();
     for (index, frame) in slower.iter().enumerate() {
         assert_eq!(
             frame.dmx_frames_by_universe,
@@ -477,9 +477,9 @@ fn standby_is_a_still_dim_warm_look_that_ignores_beat_and_loudness() {
                 assert_eq!(state.colour, WARM_WHITE, "{look}: {id} is not warm white");
             }
         }
-        for id in WASH.map(support::room_uuid) {
+        for id in &support::stage().groups()["wash"] {
             assert!(
-                reference.fixture_properties_before_strobe[&id].intensity > 0.0,
+                reference.fixture_properties_before_strobe[id].intensity > 0.0,
                 "{look}: {id} is dark"
             );
         }
@@ -510,10 +510,10 @@ fn atmospheric_and_breakdown_washes_swell_at_most_once_per_bar() {
         let frames: Vec<_> = (0..=BEATS * STEPS_PER_BEAT)
             .map(|step| render(&mut engine, step as f64 / STEPS_PER_BEAT as f64))
             .collect();
-        for id in WASH.map(support::room_uuid) {
+        for id in &support::stage().groups()["wash"] {
             let levels: Vec<_> = frames
                 .iter()
-                .map(|frame| frame.fixture_properties_before_strobe[&id].intensity)
+                .map(|frame| frame.fixture_properties_before_strobe[id].intensity)
                 .collect();
             let count = peaks(&levels);
             assert!(
@@ -609,7 +609,7 @@ fn run_inline(autoloop_id: &str, source: &str) -> RenderedFrame {
         lua_source: source.into(),
     }])
     .unwrap();
-    let mut engine = Engine::new(support::room(), catalog, support::palettes()).unwrap();
+    let mut engine = Engine::new(support::stage(), catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -659,9 +659,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
     "#,
     );
     assert_eq!(
-        frame.fixture_properties_before_strobe
-            [&format!("{}/Beam Segment 1", support::room_uuid("zq06017"))]
-            .colour,
+        frame.fixture_properties_before_strobe[&support::stage().groups()["strip"][0]].colour,
         Rgb {
             red: 0.0,
             green: 0.85,
@@ -733,9 +731,9 @@ fn one_loop_under_two_palettes_changes_only_colour() {
 
 #[test]
 fn the_bar_emits_the_bytes_the_eight_pixel_fixtures_did() {
-    const BAR: std::ops::Range<usize> = 96..120;
-    // Captured from the room rig before the bar became one 24-channel fixture, when it was
-    // eight 3-channel fixtures at 97-120.
+    // The stage's bar at 57-80. The bytes were captured when it was eight 3-channel fixtures,
+    // before it became one 24-channel fixture.
+    const BAR: std::ops::Range<usize> = 56..80;
     let rain = [
         (
             0.5,
