@@ -205,17 +205,17 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
 #[test]
 fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_yaw() {
     // Independent of the encoder: decode the DMX to body angles and carry the beam through the
-    // Matrix. The pan range centre (270 of 540) faces local +Y, the display, and pan turns
+    // Matrix. Physical pan 0 (PhysicalFrom 0 of the profile) faces local +Y, the display, and pan turns
     // clockwise about local +Z; mid tilt is on the pan axis (the mirror the tilt inversion
     // assumes) and tilts towards the pan heading. Standing is the rigid flip, so the reversed
     // tilt leans the beam a half turn round.
     let probe = rig(json!([fixture("chauvet_intimidator_spot_110_12ch", 1)]));
     let ranges =
         ["Pan", "Tilt"].map(|axis| probe.profile("test").unwrap().movement_range(axis).unwrap());
-    // The 16-bit channel pair at `at` as a body angle off its range centre.
-    let decode = |frame: &[u8], at: usize, (from, to): (f64, f64)| {
+    // The 16-bit channel pair at `at` as a body angle off `zero`.
+    let decode = |frame: &[u8], at: usize, (from, to): (f64, f64), zero: f64| {
         let share = f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
-        (from + share * (to - from) - (from + to) / 2.0).to_radians()
+        (from + share * (to - from) - zero).to_radians()
     };
     let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
@@ -235,7 +235,11 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
         let state = states.get_mut("test").unwrap();
         (state.pan, state.tilt) = (pan, tilt);
         let frame = &rig.encode(&states).unwrap()[&0];
-        let (pan, tilt) = (decode(frame, 0, ranges[0]), decode(frame, 2, ranges[1]));
+        let tilt_centre = (ranges[1].0 + ranges[1].1) / 2.0;
+        let (pan, tilt) = (
+            decode(frame, 0, ranges[0], 0.0),
+            decode(frame, 2, ranges[1], tilt_centre),
+        );
         let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
         [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
     };
@@ -246,9 +250,9 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
                 let expected = beam(true, 0.0, inverted, state);
                 if !inverted {
                     // The logical pan is the scene heading clockwise from +Y within the limits,
-                    // 0 at the range centre.
+                    // 0 at physical pan 0.
                     let heading =
-                        f64::to_radians((pan_to - pan_from) * (0.1 + 0.7 * state.0 - 0.5));
+                        f64::to_radians(pan_from + (pan_to - pan_from) * (0.1 + 0.7 * state.0));
                     let lean = f64::to_radians((tilt_to - tilt_from) * (state.1 - 0.5)).sin();
                     let scene = [lean * heading.sin(), lean * heading.cos()];
                     assert!(
@@ -691,4 +695,48 @@ fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_c
             .map(|segment| format!("{}/Beam Segment {segment}", support::room_uuid("zq06017")))
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn a_pan_range_declared_from_minus_k_aims_heading_zero_at_dmx_share_k_of_the_range() {
+    // GDTF physical pan 0 is the modelled orientation wherever the declared range puts it. A
+    // standing head turned a half turn throws its beam where a hanging one does at physical 0.
+    for k in [200.0, 250.0, 300.0] {
+        for (matrix, focus_z) in [
+            (
+                [
+                    1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3000.0,
+                ],
+                0.0,
+            ),
+            (
+                [1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0],
+                1000.0,
+            ),
+        ] {
+            let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+            patch["matrix"] = json!(matrix);
+            patch["focus"] = json!([0.0, 2000.0, focus_z]);
+            let mut definition = support::definition(&json!({ "fixtures": [patch] }));
+            let channels = &mut definition.profiles[0].mode.as_mut().unwrap().channels;
+            for function in channels
+                .iter_mut()
+                .flat_map(|channel| &mut channel.functions)
+            {
+                if function.attribute == "Pan" {
+                    (function.physical_from, function.physical_to) = (-k, 540.0 - k);
+                }
+            }
+            let rig = FixtureRig::from_wire(&definition).unwrap();
+            let mut states = rig.empty_states();
+            let state = states.get_mut("test").unwrap();
+            (state.pan, state.tilt) = rig.aim("test").unwrap();
+            let frame = &rig.encode(&states).unwrap()[&0];
+            let share = f64::from(u16::from_be_bytes([frame[0], frame[1]])) / 65535.0;
+            assert!(
+                (share - k / 540.0).abs() < 1e-4,
+                "k {k} {matrix:?}: {share}"
+            );
+        }
+    }
 }
