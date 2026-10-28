@@ -456,6 +456,32 @@ impl LuaAutoloop {
                 })
             })?,
         )?;
+        let aiming = Rc::clone(&shared);
+        api.set(
+            "aim",
+            lua.create_function(move |_, (cell, x, y, z): (Value, f64, f64, f64)| {
+                if ![x, y, z].iter().all(|value| value.is_finite()) {
+                    return Err(mlua::Error::RuntimeError(
+                        "aim point must be finite metres".to_owned(),
+                    ));
+                }
+                let point = [x, y, z].map(|metres| metres * MM_PER_METRE);
+                // Only cells aim, and one without a pan range aims nowhere: nil, nil, not an error.
+                let aim = cell_fact(&aiming, &cell, |id| {
+                    aiming.profile(id).map(|_| aiming.aim_at(id, point))
+                })?;
+                Ok(aim.unzip())
+            })?,
+        )?;
+        let focusing = Rc::clone(&shared);
+        api.set(
+            "focus",
+            lua.create_function(move |_, cell: Value| {
+                let [x, y, z] = cell_fact(&focusing, &cell, |id| focusing.focus(id))?
+                    .map(|mm| mm / MM_PER_METRE);
+                Ok((x, y, z))
+            })?,
+        )?;
         let gobos = Rc::clone(&shared);
         api.set(
             "gobo",
