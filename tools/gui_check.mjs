@@ -831,6 +831,7 @@ const SUITES = {
         const groups = await text('#special-groups');
         await check('capabilities', 'lists each FX group with its axes', /pars.*colour.*dimmer/.test(groups) && /spots.*pan.*tilt/.test(groups), {groups});
         await shot('config');
+        await planSettled();
         await action('rig map', 'select a fixture', () => click('#mvr-plan .mvr-object circle'), {watch: 1500});
         await check('rig map', 'a plan click opens the patch form', await waitFor(`${shown('fixture-info')} && !!document.querySelector('#fixture-info .cfg-form')`, 5000));
         await shot('config_fixture');
