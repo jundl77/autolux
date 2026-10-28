@@ -191,13 +191,13 @@ async def test_restart_show_from_the_config_tab_exits_the_show_cleanly(
         await app.control.apply_pending(app.light_engine)
     # The same exit `autolux stop` takes, marked so the production loop starts the next show.
     assert (app._stop_requested, app.is_running, app.restart_requested) == (True, False, True)
-    assert 'restart requested from the Config tab (rig changed)' in caplog.text
+    assert 'restart requested from the Config tab' in caplog.text
     # A Ctrl-C while that session tears down is a stop: the loop must not relaunch it.
     app.stop()
     assert app.restart_requested is False
 
 
-async def test_restart_show_without_a_stop_hook_is_refused_not_a_crash(
+async def test_restart_show_without_a_restart_hook_is_refused_not_a_crash(
     monkeypatch, tmp_path, caplog
 ):
     from autolux.lib.main import ShowControl
@@ -207,7 +207,7 @@ async def test_restart_show_without_a_stop_hook_is_refused_not_a_crash(
     control.commands.put_nowait({'action': 'restart_show'})
     with caplog.at_level('WARNING'):
         await control.apply_pending(app.light_engine)
-    assert 'restart refused: this show has no stop hook' in caplog.text
+    assert 'restart refused: this show has no restart hook' in caplog.text
 
 
 async def test_source_silence_keeps_the_monitor_audio_tail():
