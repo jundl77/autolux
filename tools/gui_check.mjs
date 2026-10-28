@@ -1266,6 +1266,37 @@ const SUITES = {
         await checkHighlightIds('locate');
     },
 
+    // A held test stays lit through yaw edits and idle time until the operator turns it off.
+    cfg_test_hold: async () => {
+        await cfgFresh();
+        await selectFixture('spot_left');
+        await click(testButton('test'));
+        await click(testButton('aim'));
+        await waitFor(`document.querySelector('${testButton('aim')}').classList.contains('active')`, 3000);
+        await arm();
+        const started = Date.now();
+        for (const yaw of ['10', '20', '30']) {
+            await typeInto(splitInput('matrix', 'yaw'), yaw);
+            await sleep(6500);
+        }
+        // macOS reports a window another one covers as hidden; that is not the page going away.
+        await ev(`Object.defineProperty(document, 'hidden', {value: true, configurable: true}); document.dispatchEvent(new Event('visibilitychange'))`);
+        await sleep(Math.max(0, 30000 - (Date.now() - started)));
+        await ev(`delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))`);
+        const seen = await since();
+        await check('test hold', 'three yaw edits and 30 s send no clear', seen.length >= 3 && !seen.some((c) => c.target === null),
+            {seen: seen.map((c) => [c.target, c.aim, c.pose?.matrix])});
+        await check('test hold', 'every re-send keeps Aim', seen.every((c) => c.aim === true), {seen});
+        await check('test hold', 'Test and Aim stay lit', await ev(['test', 'aim'].map((spec) => `document.querySelector('${testButton(spec)}').classList.contains('active')`).join(' && ')));
+        await check('test hold', 'one keep-alive since the first click, never restarted by an edit', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
+        await arm();
+        await ev('window.__tickKeepAlive()');
+        await sleep(1000);
+        const tick = await since();
+        await check('test hold', 'a keep-alive tick re-sends the aimed test', tick.length === 1 && tick[0].aim === true && tick[0].target !== null, {tick});
+        await click(testButton('test'));
+    },
+
     // The first Test click after a load, a selection change or a restart sends one command and lights.
     cfg_first_press: async () => {
         const pick = async (name) => {

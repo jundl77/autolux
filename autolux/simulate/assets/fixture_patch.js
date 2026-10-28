@@ -19,8 +19,6 @@
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
     const RESTART_HOLD_MS = 60000;
-    // A forgotten Locate in a party room: the held test ends by itself after 10 minutes.
-    const TEST_MAX_MS = 600000;
     // Edits reach a lit test this soon after they settle, so a spin box does not flood the show.
     const POSE_SETTLE_MS = 150;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
@@ -34,7 +32,6 @@
     let lit = false;
     let refreshTimer = null;
     let testCommand = null;
-    let testEndTimer = null;
     let poseTimer = null;
     // A refusal stays readable over the polls until the next test action.
     let testRefusal = "";
@@ -735,9 +732,8 @@
     const stopRefresh = () => {
         lit = false;
         clearInterval(refreshTimer);
-        clearTimeout(testEndTimer);
         clearTimeout(poseTimer);
-        refreshTimer = testEndTimer = poseTimer = null;
+        refreshTimer = poseTimer = null;
     };
 
     // The pose a whole-fixture test carries: the unsaved patch's, so edits show before a restart.
@@ -750,13 +746,14 @@
     function highlight(target, colour, motion) {
         const pose = testPose(target);
         const command = (testCommand = target ? { action: "highlight", target, colour, ...(motion && { [motion]: true }), ...(pose && { pose }) } : { action: "highlight", target: null });
-        stopRefresh();
-        lit = Boolean(target);
+        clearTimeout(poseTimer);
         testRefusal = "";
-        // Starfire drops a test nobody refreshes after 60 s, so a held one is re-sent well inside that.
-        if (target) {
-            refreshTimer = setInterval(() => dispatchTest(command), TEST_REFRESH_MS);
-            testEndTimer = setTimeout(() => highlight(null), TEST_MAX_MS);
+        if (!target) stopRefresh();
+        // Starfire's 60 s dead-man only catches a vanished page: one tick, started at the first
+        // test and never reset by an edit or swatch, re-sends whatever test is lit now.
+        else if (!lit) {
+            lit = true;
+            refreshTimer = setInterval(() => dispatchTest(testCommand), TEST_REFRESH_MS);
         }
         dispatchTest(command);
         paintTest();
@@ -1752,8 +1749,9 @@
         if (drag?.pointerId === event.pointerId) finish();
         if (planDrag?.pointerId === event.pointerId) endPlanDrag();
     });
-    // A hidden tab's timers may be throttled past Starfire's 60 s dead-man, so its test goes out.
-    document.addEventListener("visibilitychange", () => document.hidden && clearTest());
+    // Only a page that goes away ends a test: macOS reports a covered window as hidden, which
+    // ended a test while the operator looked at another window.
+    window.addEventListener("pagehide", clearTest);
     document.addEventListener("keydown", (event) => {
         if (event.target.closest?.('#config-panel[aria-busy="true"]')) event.preventDefault();
         if (event.key === "Escape" && (drag || planDrag)) {

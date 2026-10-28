@@ -608,6 +608,20 @@ def test_the_highlight_state_lapses_with_starfires_60_s_expiry_on_the_engine_clo
     assert overrides(lighting)[-1]['kind'] == 'set_override', 'Starfire already dropped it'
 
 
+def test_the_pages_keep_alive_holds_the_highlight_state_past_ten_minutes_with_no_cap():
+    clock, lighting = VirtualClock(), RecordingStarfireClient()
+    looks = StaticLooks(lighting, HALL, clock=clock)
+    aim = {'target': {'fixture': 'spot'}, 'colour': 'red', 'sweep': False, 'aim': True}
+    for _ in range(60):
+        looks.highlight(aim['target'], 'red', aim=True)
+        clock.advance(15.0)
+        assert looks.highlighted == aim
+    clock.advance(44.9)
+    assert looks.highlighted == aim
+    clock.advance(0.1)
+    assert looks.highlighted is None, 'a page that stopped refreshing lapses with the dead-man'
+
+
 @pytest.mark.parametrize(
     ('colour', 'rgb'),
     [('warm', (1.0, 0.55, 0.2)), ('blue', (0.0, 0.0, 1.0)), ('green', (0.0, 1.0, 0.0))],
