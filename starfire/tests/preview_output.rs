@@ -128,3 +128,56 @@ fn a_higher_rate_only_adds_frames() {
     assert_eq!(lines[0]["frames"], json!(41));
     assert_eq!(lines[1 + 20], preview_lines(10)[1 + 10]);
 }
+
+#[test]
+fn a_moving_head_carries_its_beam_direction_and_gobo() {
+    let mut definition = support::definition(&json!({"fixtures": [
+        {"fixture_uuid": "scanner", "profile": "beam_scanner", "universe": 0, "address": 1,
+            "matrix": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3000.0]},
+        placed("wash", 7, 0.0),
+    ]}));
+    definition.profiles.push(support::compiled_profile(
+        "beam_scanner#6ch",
+        "beam_scanner",
+    ));
+    let rig = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap();
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "down".into(),
+        bank: "test".into(),
+        lua_source: r#"return {render=function(ctx) return sf.scene {
+            sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(0, 0, 1)),
+            sf.pan_tilt(sf.fixture("scanner"), 0.5, 0.5),
+            sf.channel_preset(sf.fixture("scanner"), "Gobo1", "Dots")} end}"#
+            .into(),
+    }])
+    .unwrap();
+    let select = TimedCommand {
+        at_seconds: 0.0,
+        command: Command::Select {
+            bank: "test".into(),
+            autoloop: "down".into(),
+            transition: Transition::Cut,
+            palette: "techno".into(),
+        },
+    };
+    let replay = Replay {
+        schema_version: REPLAY_SCHEMA_VERSION,
+        duration_seconds: 0.0,
+        frame_rate_hz: 40,
+        palettes: support::palette_definitions(),
+        events: vec![beat(0.0, 0), select],
+    };
+    let mut output = Vec::new();
+    write_preview(&replay, rig, catalog, 10, &mut output).unwrap();
+    let frame: Value =
+        serde_json::from_str(String::from_utf8(output).unwrap().lines().nth(1).unwrap()).unwrap();
+    // A hanging head at the middle of its pan and tilt throws straight down; the wash has no
+    // movement and no gobo, so its entry stops at strobe.
+    assert_eq!(
+        frame["c"],
+        json!([
+            [1.0, 0.0, 0.0, 1.0, 0.0, [0.0, 0.0, -1.0], "Dots"],
+            [1.0, 0.0, 0.0, 1.0, 0.0]
+        ])
+    );
+}

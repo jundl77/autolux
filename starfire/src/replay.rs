@@ -248,7 +248,10 @@ pub fn write_preview(
         let states = &frame.fixture_properties_before_strobe;
         let values: Vec<Value> = cells
             .iter()
-            .map(|id| preview_cell(&states[id], None))
+            .map(|id| {
+                let state = &states[id];
+                preview_cell(state, rig.beam_direction(id, state.pan, state.tilt))
+            })
             .collect();
         let mut line = json!({
             "t": preview_round(frame.time_seconds),
