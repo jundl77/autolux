@@ -310,23 +310,6 @@ def test_apply_is_offered_only_while_the_show_runs_an_older_rig():
     assert rig_banner(None, 'saved') == ('', True)
 
 
-def test_apply_posts_restart_show_to_the_bridge():
-    import queue
-
-    from autolux.lib.engine.event_buffer import EventBuffer
-    from autolux.lib.ui_bridge import SnapshotServer
-    from autolux.simulate.fixture_panel import request_restart
-
-    commands = queue.Queue()
-    bridge = SnapshotServer(EventBuffer(), 0, commands)
-    bridge.start()
-    try:
-        assert request_restart(bridge.port) == 'Restarting the show on the saved patch.'
-    finally:
-        bridge.stop()
-    assert commands.get_nowait() == {'action': 'restart_show'}
-
-
 KINTA = 'Chauvet DJ@Mini Kinta IRC@1.0.gdtf'
 STALE_KINTA = 'CHAUVET DJ@chauvet_mini_kinta_irc_4ch.gdtf'
 

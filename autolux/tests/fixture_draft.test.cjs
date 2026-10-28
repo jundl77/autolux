@@ -12,7 +12,8 @@ const commands = [];
 const replies = [];
 const timers = new Map();
 let timerId = 0;
-ds.set_props = (id, props) => actions.push(props.data);
+const labels = [];
+ds.set_props = (id, props) => (id === "fixture-grid-action" ? actions.push(props.data) : labels.push([id, props.children]));
 const autoluxControl = { dispatch: (command) => (commands.push(command), Promise.resolve(replies.shift() || {})) };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixture_patch.js"), "utf8"), {
     window: { dash_clientside: ds, addEventListener() {}, autoluxControl },
@@ -21,7 +22,9 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixt
     crypto: globalThis.crypto,
     TextEncoder,
     setInterval: (run, ms) => (timers.set(++timerId, { run, ms }), timerId),
-    clearInterval: (id) => timers.delete(id)
+    clearInterval: (id) => timers.delete(id),
+    setTimeout: (run, ms) => (timers.set(++timerId, { run, ms }), timerId),
+    clearTimeout: (id) => timers.delete(id)
 });
 const model = ds.fixture_patch_model;
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -392,4 +395,27 @@ test("the test controls send highlight commands, hold them alive and clear once 
     const refused = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     assert.equal(commands.length, refused);
+});
+
+test("Apply restarts the show only on a second click within 5 s", async () => {
+    const sent = commands.length;
+    timers.clear();
+    assert.equal(model.applyClick(), null);
+    assert.deepEqual(labels.at(-1), ["fixture-apply", "Click again to restart"]);
+    // Left alone, the arm lapses and the next click only arms again.
+    const [[id, lapse]] = [...timers];
+    assert.equal(lapse.ms, 5000);
+    timers.delete(id);
+    lapse.run();
+    assert.deepEqual(labels.at(-1), ["fixture-apply", "Apply to show (restarts the show)"]);
+    assert.equal(model.applyClick(), null);
+    assert.equal(commands.length, sent);
+    assert.deepEqual(plain(model.applyClick()), { action: "restart_show" });
+    assert.deepEqual(plain(commands.slice(sent)), [{ action: "restart_show" }]);
+    assert.equal(timers.size, 0);
+    await new Promise(setImmediate);
+    assert.deepEqual(labels.slice(-2), [
+        ["fixture-apply", "Apply to show (restarts the show)"],
+        ["fixture-show-rig", "Restarting the show on the saved patch."]
+    ]);
 });

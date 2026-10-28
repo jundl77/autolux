@@ -12,6 +12,8 @@
     const PLAN_LABEL_LIMIT = 48;
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 30000;
+    const APPLY_CONFIRM_MS = 5000;
+    const APPLY_LABEL = "Apply to show (restarts the show)";
     const NEW_GROUP = "\u0000new";
     // The show's test colours (static_mode PRESET_COLOURS plus green) as the fixture emits them.
     const TEST_COLOURS = { white: "#ffffff", warm: "#ff8c33", red: "#ff0000", blue: "#0000ff", green: "#00ff00" };
@@ -25,6 +27,7 @@
     let selectedCell = null;
     let lit = false;
     let refreshTimer = null;
+    let applyTimer = null;
     let suppressedClick = null;
     let requestId = 0;
     let keyCounter = 0;
@@ -626,6 +629,23 @@
 
     const clearTest = () => lit && highlight(null);
 
+    const setApplyLabel = (children) => window.dash_clientside.set_props("fixture-apply", { children });
+
+    // A restart darkens the room, so one stray click mid-party only arms Apply; the second within 5 s restarts.
+    function applyClick() {
+        const armed = applyTimer !== null;
+        clearTimeout(applyTimer);
+        applyTimer = null;
+        setApplyLabel(armed ? APPLY_LABEL : "Click again to restart");
+        if (!armed) {
+            applyTimer = setTimeout(() => ((applyTimer = null), setApplyLabel(APPLY_LABEL)), APPLY_CONFIRM_MS);
+            return null;
+        }
+        const command = { action: "restart_show" };
+        window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => reply?.error || window.dash_clientside.set_props("fixture-show-rig", { children: "Restarting the show on the saved patch." }));
+        return command;
+    }
+
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
     function testControl(spec) {
         if (!rig?.selection || testBlocked(show)) return null;
@@ -794,6 +814,7 @@
         planMove,
         patchEdit,
         testControl,
+        applyClick,
         schemaKeys,
         pathTo,
         template
@@ -1414,6 +1435,7 @@
         (event) => {
             const test = event.target.closest("#fixture-info [data-cfg-test]");
             if (test) return testControl(test.dataset.cfgTest);
+            if (event.target.closest("#fixture-apply")) return applyClick();
             const cell = event.target.closest("#fixture-info [data-cfg-cell]");
             if (cell) {
                 selectedCell = selectedCell === cell.dataset.cfgCell ? null : cell.dataset.cfgCell;

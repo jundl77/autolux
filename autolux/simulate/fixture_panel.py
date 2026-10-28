@@ -1,11 +1,8 @@
-import http.client
-import json
 from pathlib import Path
 
 import dash
 from dash import ClientsideFunction, Input, Output, State, dcc, html
 
-from autolux.lib.ui_bridge import CONTROL_PATH, SNAPSHOT_HOST
 from autolux.lighting import mvr, mvr_schema
 from autolux.lighting.fixture_setup import DMX_UNIVERSE_SIZE, MAX_ARTNET_UNIVERSE
 
@@ -14,7 +11,6 @@ MAP_COLUMNS = 32
 MAX_ADD_QUANTITY = 64
 # The loaded rig changes only when the show restarts, so a slow poll is enough.
 SHOW_RIG_POLL_MS = 2000
-RESTART_TIMEOUT_SEC = 2.0
 STALE_RIG_BANNER = 'The show runs an older rig. Apply to show restarts it on the saved patch.'
 FIXTURE_COLORS = ('#527eaa', '#8664ae', '#408e83', '#b38449', '#a75c80', '#667cb2')
 FIXTURE_CSS = '''
@@ -161,25 +157,6 @@ def rig_banner(loaded: str | None, saved: str | None) -> tuple[str, bool]:
     return (STALE_RIG_BANNER if stale else '', not stale)
 
 
-def request_restart(port: int) -> str:
-    connection = http.client.HTTPConnection(SNAPSHOT_HOST, port, timeout=RESTART_TIMEOUT_SEC)
-    try:
-        connection.request(
-            'POST',
-            CONTROL_PATH,
-            json.dumps({'action': 'restart_show'}),
-            {'Content-Type': 'application/json'},
-        )
-        status = connection.getresponse().status
-    except (OSError, http.client.HTTPException) as error:
-        return f'The show did not take the restart: {error}'
-    finally:
-        connection.close()
-    if status != 202:
-        return f'The show refused the restart (HTTP {status}).'
-    return 'Restarting the show on the saved patch.'
-
-
 def build_fixture_panel(app, store, snapshot_source):
     draft, revision = store.load()
     library = browser_library(store.library())
@@ -208,7 +185,11 @@ def build_fixture_panel(app, store, snapshot_source):
                         [
                             html.Button('Reload saved', id='fixture-reload'),
                             html.Button('Save patch', id='fixture-save', className='patch-primary'),
-                            html.Button('Apply to show', id='fixture-apply', disabled=True),
+                            html.Button(
+                                'Apply to show (restarts the show)',
+                                id='fixture-apply',
+                                disabled=True,
+                            ),
                         ],
                         className='patch-actions',
                     ),
@@ -479,11 +460,8 @@ def build_fixture_panel(app, store, snapshot_source):
         Output('fixture-apply', 'disabled'),
         Input('fixture-show-poll', 'n_intervals'),
         Input('fixture-revision', 'data'),
-        Input('fixture-apply', 'n_clicks'),
     )
-    def show_rig(_poll, saved_revision, _apply):
-        if dash.ctx.triggered_id == 'fixture-apply':
-            return request_restart(snapshot_source.port), True
+    def show_rig(_poll, saved_revision):
         return rig_banner(snapshot_source.snapshot().get('rig_revision'), saved_revision)
 
     return panel
