@@ -542,6 +542,20 @@ const SUITES = {
         await check('Section Confidence', 'one bar per class at its posterior',
             JSON.stringify(bars) === JSON.stringify(['10%', '30%', '60%']), {bars});
 
+        // The stub reselects the loop on a level change, as the engine does.
+        const autoloopText = `[...document.querySelectorAll('#show-status .status-item')]
+            .find((e) => e.querySelector('.control-label')?.textContent === 'Autoloop')?.textContent`;
+        const autoloopBefore = await ev(autoloopText);
+        await click(levelLabel('calm'));
+        await check('status Autoloop', 'calm changes the autoloop label within two polls',
+            await waitFor(`(${autoloopText} || '').includes('Afterglow')`, ECHO_MS + 2 * POLL_MS),
+            {before: autoloopBefore, after: await ev(autoloopText)});
+        const autoloopDot = await ev(`[...document.querySelectorAll('#show-status .status-item')]
+            .find((e) => e.querySelector('.control-label')?.textContent === 'Autoloop')
+            ?.querySelector('.dot')?.style.background`);
+        await check('status Autoloop', 'afterglow under DROP shows the breakdown colour',
+            autoloopDot === 'rgb(123, 31, 162)', {dot: autoloopDot});
+        await fresh();
         for (const name of ['calm', 'wild', 'balanced']) {
             await action(`intensity ${name}`, 'click', () => click(levelLabel(name)),
                 {expect: [{action: 'intensity', level: LEVELS[name]}], look: shows(name)});

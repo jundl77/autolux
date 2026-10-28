@@ -762,6 +762,17 @@ def test_the_fx_picker_lists_only_the_rows_that_fit_the_target():
     assert synced == [['static-fx-row', 'drift'], ['static-fx-row', None]]
 
 
+def test_afterglow_under_drop_shows_the_breakdown_colour():
+    from autolux.simulate.visualizer_app import INTENT_CONFIG, _build_show_status
+
+    effect = {'name': 'breakdown/afterglow', 'selection': {'intent': 'drop', 'look': 'breakdown'}}
+    status = _build_show_status({'intent': 'drop', 'current_effect': effect}, now=0.0)
+    value = next(item for item in status if item.children[0].children == 'Autoloop').children[1]
+    dot, name, _ = value.children
+    assert name == 'Afterglow'
+    assert dot.style['background'] == INTENT_CONFIG['breakdown']['primary']
+
+
 def test_the_status_line_shows_the_active_fx():
     from autolux.simulate.visualizer_app import _build_show_status
 
