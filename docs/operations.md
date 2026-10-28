@@ -117,9 +117,10 @@ the universe or overlaps a fixture where the show runs it, a universe the show d
 mode with other cells or fewer attributes is refused in the status line and the previous test
 stays lit. Only the test sees the unsaved pose; the loops keep the rig the show loaded.
 
-Tests pin no geometry from `rig/room.mvr`: they use the frozen copies
-`autolux/tests/data/room.mvr` and `room.rig.pb` (Starfire's tests embed the same `room.rig.pb`),
-so editing the patch never breaks a test. One test checks that the committed `rig/room.rig.pb` is
+Tests pin no geometry from `rig/room.mvr`. Starfire's tests use the generic stage
+`autolux/tests/data/generic_rig/stage.mvr` and `stage.rig.pb`, which is no venue's rig; the Python
+tests still use the frozen copies `autolux/tests/data/room.mvr` and `room.rig.pb`. Editing the
+patch never breaks a test. One test checks that the committed `rig/room.rig.pb` is
 the export of `rig/room.mvr`, which a Save keeps true, and `rig/library` still supplies GDTF.
 Refresh the frozen pair, and the goldens built on it, only to change what tests cover.
 

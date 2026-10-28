@@ -71,7 +71,7 @@ fn faded(kind: wire::ParameterType, value: f64, fade_seconds: f64) -> Operation 
 
 fn engine() -> Engine {
     Engine::new(
-        support::room(),
+        support::stage(),
         support::show_catalog(),
         support::palettes(),
     )
@@ -575,7 +575,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             })
             .collect(),
     };
-    let rig = support::room();
+    let rig = support::stage();
     let catalog = support::show_catalog();
     let expected = render_replay(&replay, rig.clone(), catalog.clone()).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
@@ -652,7 +652,7 @@ fn attribute_engine() -> Engine {
         lua_source,
     };
     Engine::new(
-        starfire::fixtures::FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap(),
+        starfire::fixtures::FixtureRig::from_wire(&support::stage_definition_as_loops()).unwrap(),
         AutoloopCatalog::from_definitions(&[
             definition(
                 "atmospheric",

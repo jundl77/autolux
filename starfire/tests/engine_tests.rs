@@ -1305,8 +1305,8 @@ fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
     near(rate(&mut engine, 5.0), 0.0);
 }
 
-fn room_engine(scripts: &[(&str, &str)]) -> Engine {
-    engine_on(support::room(), scripts)
+fn stage_engine(scripts: &[(&str, &str)]) -> Engine {
+    engine_on(support::stage(), scripts)
 }
 
 fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
@@ -1337,8 +1337,8 @@ fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
 
 #[test]
 fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
-    let room = support::room();
-    let mut engine = room_engine(&[(
+    let stage = support::stage();
+    let mut engine = stage_engine(&[(
         "lit",
         "return {render=function(ctx) return {sf.dimmer(sf.all(), 1)} end}",
     )]);
@@ -1347,8 +1347,8 @@ fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
         .render_at(0.0)
         .unwrap()
         .fixture_properties_before_strobe;
-    assert_eq!(states[&room.groups()["wash"][0]].intensity, 1.0);
-    for cell in &room.groups()["fx"] {
+    assert_eq!(states[&stage.groups()["wash"][0]].intensity, 1.0);
+    for cell in &stage.groups()["fx"] {
         assert_eq!(states[cell].intensity, 0.0, "{cell}");
     }
 }
@@ -1356,7 +1356,7 @@ fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
 #[test]
 fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
-    let rig = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
+    let rig = FixtureRig::from_wire(&support::stage_definition_as_loops()).unwrap();
     let fx_fixture = rig.groups()["fx"][0].clone();
     let mut engine = engine_on(
         rig,
@@ -1796,7 +1796,7 @@ fn group_master(group: &str, level: f64) -> starfire::protocol::wire::Parameter 
 
 #[test]
 fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
-    let mut engine = room_engine(&[(
+    let mut engine = stage_engine(&[(
         "lit",
         "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8), sf.colour(sf.all(), sf.rgb(1, 0.5, 0))} end}",
     )]);
@@ -1807,7 +1807,7 @@ fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
         .set_parameter(0.0, &group_master("wash", 0.5))
         .unwrap();
     let capped = engine.render_at(0.0).unwrap();
-    let wash = support::room().groups()["wash"].clone();
+    let wash = support::stage().groups()["wash"].clone();
     for (cell, state) in &before.fixture_properties_before_strobe {
         let expected = if wash.contains(cell) {
             state.intensity * perceptual_to_linear_master(0.5)
@@ -1837,7 +1837,7 @@ fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
 #[test]
 fn group_masters_reject_unknown_groups_values_outside_unit_and_stray_groups() {
     use starfire::protocol::wire;
-    let mut engine = room_engine(&[("empty", "return {render=function(ctx) return {} end}")]);
+    let mut engine = stage_engine(&[("empty", "return {render=function(ctx) return {} end}")]);
     assert!(
         engine
             .set_parameter(0.0, &group_master("ceiling", 0.5))

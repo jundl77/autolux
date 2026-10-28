@@ -17,13 +17,14 @@ pub fn palettes() -> PaletteTable {
     PaletteTable::new(&palette_definitions()).unwrap()
 }
 
-/// The frozen room tests pin; the live `rig/room.rig.pb` changes whenever the patch is saved.
-pub fn rig_folder() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../autolux/tests/data")
+/// The generic stage with every group a loop uses: two movers, four washes, a pixel bar and an
+/// accent, on a symmetric plot that is no venue's.
+pub fn stage_rig() -> PathBuf {
+    sample_rig().join("stage.rig.pb")
 }
 
-pub fn room() -> FixtureRig {
-    FixtureRig::load(&rig_folder().join("room.rig.pb")).unwrap()
+pub fn stage() -> FixtureRig {
+    FixtureRig::load(&stage_rig()).unwrap()
 }
 
 pub fn show_catalog() -> AutoloopCatalog {
@@ -51,21 +52,20 @@ pub fn catalogue_profile(fixture_type: &str) -> Option<wire::FixtureProfile> {
     let (_, spec) = SHIPPED_TYPES
         .iter()
         .find(|(name, _)| *name == fixture_type)?;
-    [
-        sample_rig().join("generic.rig.pb"),
-        rig_folder().join("room.rig.pb"),
-    ]
-    .into_iter()
-    .find_map(|file| {
-        let rig = wire::RigDefinition::decode(std::fs::read(file).unwrap().as_slice()).unwrap();
-        rig.profiles
-            .into_iter()
-            .find(|profile| profile.profile_id.split_once('#').map(|(file, _)| file) == Some(spec))
-            .map(|profile| wire::FixtureProfile {
-                profile_id: fixture_type.into(),
-                ..profile
-            })
-    })
+    [sample_rig().join("generic.rig.pb"), stage_rig()]
+        .into_iter()
+        .find_map(|file| {
+            let rig = wire::RigDefinition::decode(std::fs::read(file).unwrap().as_slice()).unwrap();
+            rig.profiles
+                .into_iter()
+                .find(|profile| {
+                    profile.profile_id.split_once('#').map(|(file, _)| file) == Some(spec)
+                })
+                .map(|profile| wire::FixtureProfile {
+                    profile_id: fixture_type.into(),
+                    ..profile
+                })
+        })
 }
 
 /// The short profile names these tests patch, and the GDTFSpec each one is shipped as.
@@ -174,23 +174,18 @@ pub fn rig(spec: Value) -> FixtureRig {
     try_rig(spec).unwrap()
 }
 
-/// The room fixture's uuid that `name` labels.
-pub fn room_uuid(name: &str) -> String {
-    room().uuid_of_label(name).unwrap().to_owned()
+/// The stage fixture's uuid that `name` labels.
+pub fn stage_uuid(name: &str) -> String {
+    stage().uuid_of_label(name).unwrap().to_owned()
 }
 
-pub fn room_definition() -> wire::RigDefinition {
-    wire::RigDefinition::decode(
-        std::fs::read(rig_folder().join("room.rig.pb"))
-            .unwrap()
-            .as_slice(),
-    )
-    .unwrap()
+pub fn stage_definition() -> wire::RigDefinition {
+    wire::RigDefinition::decode(std::fs::read(stage_rig()).unwrap().as_slice()).unwrap()
 }
 
-/// The room with its accent groups played as loop groups, for loops that must light the Kinta.
-pub fn room_definition_as_loops() -> wire::RigDefinition {
-    let mut definition = room_definition();
+/// The stage with its accent groups played as loop groups, for loops that must light the accent.
+pub fn stage_definition_as_loops() -> wire::RigDefinition {
+    let mut definition = stage_definition();
     for group in &mut definition.groups {
         group.role = wire::GroupRole::Loop as i32;
     }
