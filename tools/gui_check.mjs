@@ -1038,7 +1038,7 @@ const SUITES = {
         }
         await formEdit('pitch 60° (the limit)', () => typeInto(splitInput('matrix', 'pitch'), '60'),
             {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 60, 0], standing: false});
-        await formEdit('Pan limits min 54° (of 0–540°)', () => typeInto(splitInput('Pan', 'min'), '54'),
+        await formEdit('Pan limits min -166° (of -220–320°)', () => typeInto(splitInput('Pan', 'min'), '-166'),
             {action: 'set-movement', axis: 'Pan', minimum: 0.1, maximum: 1});
         await formRefusal('Tilt limits min 200° above max 100°', async () => {
             await ev(`document.querySelector('${splitInput('Tilt', 'max')}').value = '100'`);
@@ -1543,17 +1543,17 @@ const SUITES = {
             {headings: await headings()});
         await shot('pane_impl_static', '#fixture-info');
 
-        // Soft limits in degrees, clamped to the GDTF's 0–540° pan.
+        // Soft limits in degrees, clamped to the GDTF's -220–320° pan.
         await selectFixture('spot_left');
-        await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '0–540'
-            && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '540');
-        await formEdit('Pan max 600° clamps to 540°', () => typeInto(splitInput('Pan', 'max'), '600'), {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 1});
-        await formEdit('Pan min -20° clamps to 0°, max 270°', async () => {
-            await ev(`document.querySelector('${splitInput('Pan', 'min')}').value = '-20'`);
-            await typeInto(splitInput('Pan', 'max'), '270');
+        await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '-220–320'
+            && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '320');
+        await formEdit('Pan max 600° clamps to 320°', () => typeInto(splitInput('Pan', 'max'), '600'), {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 1});
+        await formEdit('Pan min -300° clamps to -220°, max 50°', async () => {
+            await ev(`document.querySelector('${splitInput('Pan', 'min')}').value = '-300'`);
+            await typeInto(splitInput('Pan', 'max'), '50');
         }, {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 0.5});
-        await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '0'
-            && document.querySelector('${splitInput('Pan', 'max')}').value === '270'`, 2000));
+        await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '-220'
+            && document.querySelector('${splitInput('Pan', 'max')}').value === '50'`, 2000));
 
         // Hanging -> standing turns the head 180° about its facing; it survives Save and Reload.
         await check('mount', 'spot_left reads hanging', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'hanging');
