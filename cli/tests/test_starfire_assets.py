@@ -241,18 +241,15 @@ def test_login_carries_the_palette_table_and_palette_commands_round_trip():
 
 
 def test_static_looks_for_the_room_rig_build_small_wire_accents():
-    from autolux.lib.clock import VirtualClock
-    from autolux.lib.engine.effect_definitions import ShowSettings
     from autolux.lib.engine.static_mode import StaticLooks, StaticRig
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
     rig = assets.static_rig(DEFAULT_RIG)
     assert rig == StaticRig(groups=('fx', 'movers', 'strip', 'wash'), uv_groups=('wash',))
     lighting = RecordingStarfireClient()
-    looks = StaticLooks(lighting, rig, VirtualClock(), ShowSettings)
+    looks = StaticLooks(lighting, rig)
     looks.preset('uv')
     looks.look('fx', colour=(1.0, 0.5, 0.0), dimmer=0.25)
-    looks.strobe()
     messages = []
     for event in lighting.events:
         message = protocol.build_command(event['command'])
@@ -266,12 +263,7 @@ def test_static_looks_for_the_room_rig_build_small_wire_accents():
         255.0,
     )
     assert (wash.colour.red, wash.colour.green, wash.colour.blue) == (0.0, 0.0, 0.0)
-    assert {m.effect_id for m in messages} == {
-        'static_all',
-        'static_wash',
-        'static_fx',
-        'static_strobe',
-    }
+    assert {m.effect_id for m in messages} == {'static_all', 'static_wash', 'static_fx'}
 
 
 SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
