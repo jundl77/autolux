@@ -18,8 +18,16 @@ VARIANT_SUFFIXES = ('', BREAKDOWN_SUFFIX, DROP_SUFFIX, MONO_SUFFIX, BREAKDOWN_SU
 # Starfire's palette table limits (starfire/src/palette.rs).
 MAX_PALETTES = 64
 MAX_PALETTE_NAME_BYTES = 64
-# A mono cold is primary held low, so builds and breakdowns keep white back for the hit.
-MONO_COLD_LEVEL = 0.4
+# A mono cold is primary held low, so builds and breakdowns keep white back for the hit. Linear
+# DMX: 0.4 still reads about 65 % bright and does not separate as a role.
+MONO_COLD_LEVEL = 0.15
+# Primary, secondary and accent stay coloured; white and greys are for sf.white() hits only. Also
+# what makes a wheel slot a white one.
+MIN_COLOUR_SATURATION = 0.05
+COLOUR_ROLES = ('primary', 'secondary', 'accent')
+# Primary and secondary this close in hue are one colour on purpose (the mono palettes), so a
+# wheel showing both on one slot is not worth a warning.
+SAME_HUE_DEGREES = 15.0
 PALETTE_NAME = re.compile(r'[a-z0-9_]{1,64}')
 BLACK: Rgb = (0.0, 0.0, 0.0)
 COLOUR_SHARES = (('primary', 0.5), ('secondary', 0.3), ('accent', 0.2))
@@ -40,7 +48,7 @@ class Mood:
         and energy.
 
     The shipped palettes (temperature / weight / drive): techno +0.60/+0.2/+0.9,
-    house +0.49/+0.3/+0.4, ice -0.65/+0.4/0, acid +0.37/+0.7/+0.8, sunset +0.39/-0.3/-0.8,
+    house +0.49/+0.3/+0.4, ice -0.80/+0.4/0, acid +0.52/+0.7/+0.8, sunset +0.39/-0.3/-0.8,
     uv -0.42/-0.8/+0.3, ember +0.87/-0.6/-0.2, mono_cold -0.09/+0.6/+0.5,
     mono_warm +0.42/+0.5/-0.6.
     """
@@ -126,7 +134,21 @@ def _colours(table, section: str, required: tuple[str, ...]) -> dict[str, Rgb]:
     missing = [slot for slot in required if slot not in table]
     if missing:
         raise PaletteError('missing ' + ', '.join(f'{section}.{slot}' for slot in missing))
-    return {slot: _rgb(value, f'{section}.{slot}') for slot, value in table.items()}
+    colours = {slot: _rgb(value, f'{section}.{slot}') for slot, value in table.items()}
+    for slot in COLOUR_ROLES:
+        if slot in colours and _saturation(colours[slot]) < MIN_COLOUR_SATURATION:
+            raise PaletteError(
+                f'{section}.{slot} {table[slot]} is white or grey; white is kept for hits'
+            )
+    return colours
+
+
+def _saturation(colour: Rgb) -> float:
+    return colorsys.rgb_to_hsv(*colour)[1]
+
+
+def _hue_degrees(colour: Rgb) -> float:
+    return colorsys.rgb_to_hsv(*colour)[0] * 360.0
 
 
 def parse_palette(document: dict, name: str) -> tuple[int, Palette, Palette, Palette]:
@@ -304,23 +326,54 @@ def nearest_slot(slots: list[tuple[str, Rgb]], colour: Rgb) -> str:
     )[0]
 
 
-def wheel_collisions(rig, palettes: tuple[Palette, ...] | None = None) -> list[str]:
-    """Where a patched wheel-only fixture type would show a palette's primary and secondary on
-    the same slot of every wheel, so colour A and colour B look the same on it. Mono palettes
-    mean to; skipped."""
+def _white_slots(slots: list[tuple[str, Rgb]]) -> set[str]:
+    return {
+        name for name, rgb in slots if max(rgb) > 0 and _saturation(rgb) < MIN_COLOUR_SATURATION
+    }
+
+
+def _same_hue(palette: Palette) -> bool:
+    distance = abs(_hue_degrees(palette.primary) - _hue_degrees(palette.secondary))
+    return min(distance, 360.0 - distance) <= SAME_HUE_DEGREES
+
+
+def wheel_warnings(rig, palettes: tuple[Palette, ...] | None = None) -> list[str]:
+    """One line per patched wheel-only fixture type: palettes whose primary and secondary land on
+    the same slot of every wheel (colour A and B look alike on it; same-hue palettes mean to),
+    and palette colours that land on a white slot, which is kept for hits. A variant is listed
+    only where its colours differ from its palette's."""
     palettes = PALETTES + BREAKDOWN_PALETTES + DROP_PALETTES if palettes is None else palettes
     patched = {fixture.profile_id for fixture in rig.fixtures}
-    collisions = []
+    warnings = []
     for profile in rig.profiles:
         wheels = wheel_slots(profile.mode) if profile.profile_id in patched else []
+        shared, white = {}, {role: {} for role in COLOUR_ROLES}
         for palette in palettes if wheels else ():
-            primary, secondary = (
-                [nearest_slot(slots, colour) for slots in wheels]
-                for colour in (palette.primary, palette.secondary)
-            )
-            if primary == secondary:
-                collisions.append(
-                    f'{profile.profile_id}: palette {palette.name} shows primary and secondary '
-                    f'on the same wheel slots ({", ".join(primary)}).'
+            picks = {
+                role: [nearest_slot(slots, getattr(palette, role)) for slots in wheels]
+                for role in COLOUR_ROLES
+            }
+            family = base_palette_name(palette.name)
+            if picks['primary'] == picks['secondary'] and not _same_hue(palette):
+                shared.setdefault(
+                    (family, palette.primary, palette.secondary),
+                    f'{palette.name} ({", ".join(picks["primary"])})',
                 )
-    return collisions
+            for role in COLOUR_ROLES:
+                if any(
+                    pick in _white_slots(slots)
+                    for pick, slots in zip(picks[role], wheels, strict=True)
+                ):
+                    white[role].setdefault((family, getattr(palette, role)), palette.name)
+        parts = []
+        if shared:
+            parts.append(
+                'primary and secondary share one wheel slot in ' + ', '.join(shared.values())
+            )
+        if landed := [
+            f'{role} of {", ".join(names.values())}' for role, names in white.items() if names
+        ]:
+            parts.append('a white slot, kept for hits, would show the ' + '; the '.join(landed))
+        if parts:
+            warnings.append(f'{profile.profile_id}: ' + '; '.join(parts) + '.')
+    return warnings

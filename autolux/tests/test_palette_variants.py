@@ -1,3 +1,4 @@
+import colorsys
 import re
 from pathlib import Path
 
@@ -7,8 +8,10 @@ from autolux.lighting.gdtf_compile import compile_mode
 from autolux.lighting.palettes import (
     BLACK,
     BREAKDOWN_PALETTES,
+    DROP_PALETTES,
     MAX_PALETTE_NAME_BYTES,
     MAX_PALETTES,
+    MIN_COLOUR_SATURATION,
     MONO_COLD_LEVEL,
     PALETTES,
     VARIANT_SUFFIXES,
@@ -18,8 +21,8 @@ from autolux.lighting.palettes import (
     load_palettes,
     nearest_slot,
     palette_table,
-    wheel_collisions,
     wheel_slots,
+    wheel_warnings,
 )
 from cli.starfire_assets import palette_definitions
 from proto.starfire import rig_pb2 as rig_wire
@@ -87,8 +90,17 @@ def test_more_palettes_than_starfires_table_holds_are_refused(tmp_path):
         load_palettes(tmp_path)
 
 
-def palette(primary, secondary) -> Palette:
-    return Palette('test', 0.0, 0.0, primary, secondary, (1.0, 1.0, 1.0), (0.5, 0.5, 1.0))
+RED, ORANGE, GREEN, YELLOW, BLUE = (
+    (1.0, 0.0, 0.0),
+    (1.0, 0.5, 0.0),
+    (0.0, 1.0, 0.0),
+    (0.6, 1.0, 0.0),
+    (0.0, 0.0, 1.0),
+)
+
+
+def palette(name, primary, secondary, accent=(1.0, 0.0, 0.5)) -> Palette:
+    return Palette(name, 0.0, 0.0, primary, secondary, accent, (0.5, 0.5, 1.0))
 
 
 def rig(*patched: tuple[str, rig_wire.DmxMode]) -> rig_wire.RigDefinition:
@@ -104,15 +116,43 @@ def wheel_spinner() -> rig_wire.DmxMode:
     return compile_mode(description, '3ch')
 
 
-def test_a_wheel_fixture_that_shows_primary_and_secondary_as_one_slot_is_reported():
-    red, orange, blue = (1.0, 0.0, 0.0), (1.0, 0.5, 0.0), (0.0, 0.0, 1.0)
-    two_tone, one_slot = palette(red, blue), palette(red, orange)
-    [collision] = wheel_collisions(rig(('wheel', wheel_spinner())), (two_tone, one_slot))
-    assert (
-        collision
-        == 'wheel: palette test shows primary and secondary on the same wheel slots (Red).'
+def white_for_green() -> rig_wire.DmxMode:
+    """wheel_spinner with an open white slot in place of green."""
+    mode = wheel_spinner()
+    open_slot = mode.channels[0].functions[0].sets[2]
+    open_slot.name = 'Open'
+    open_slot.wheel_slot_colour.CopyFrom(rig_wire.CieColor(x=0.3127, y=0.329, luminance=100.0))
+    return mode
+
+
+def test_a_wheel_that_shows_primary_and_secondary_as_one_slot_is_reported():
+    palettes = (palette('two_tone', RED, BLUE), palette('one_slot', RED, ORANGE))
+    assert wheel_warnings(rig(('wheel', wheel_spinner())), palettes) == [
+        'wheel: primary and secondary share one wheel slot in one_slot (Red).'
+    ]
+
+
+def test_a_palette_of_one_hue_on_purpose_is_not_reported():
+    pale_red = (1.0, 0.6, 0.6)
+    mono = palette('mono', RED, pale_red)
+    assert wheel_warnings(rig(('wheel', wheel_spinner())), (mono,)) == []
+
+
+def test_colours_landing_on_a_white_slot_are_reported_in_one_line_per_fixture_type():
+    pale = (1.0, 0.95, 0.9)
+    palettes = (
+        palette('pale', pale, BLUE),
+        palette('pale_drop', pale, BLUE),
+        palette('one_slot', RED, ORANGE, accent=(0.9, 0.9, 1.0)),
     )
-    assert wheel_collisions(rig(('wheel', wheel_spinner())), (two_tone,)) == []
+    patched = rig(('wheel', white_for_green()), ('plain', wheel_spinner()))
+    assert wheel_warnings(patched, palettes) == [
+        (
+            'wheel: primary and secondary share one wheel slot in one_slot (Red); a white slot, '
+            'kept for hits, would show the primary of pale, pale_drop; the accent of one_slot.'
+        ),
+        'plain: primary and secondary share one wheel slot in one_slot (Red).',
+    ]
 
 
 def two_wheels() -> rig_wire.DmxMode:
@@ -137,14 +177,12 @@ def test_every_wheel_is_checked_and_only_a_collision_on_all_of_them_is_reported(
         ['Black', 'Red', 'Green', 'Blue'],
         ['Black', 'Red', 'Blue'],
     ]
-    green, yellow = (0.0, 1.0, 0.0), (0.6, 1.0, 0.0)
     # Green and yellow share Color1's green slot but not Color2's slots.
-    assert [nearest_slot(slots, yellow) for slots in wheel_slots(mode)] == ['Green', 'Red']
-    assert [nearest_slot(slots, green) for slots in wheel_slots(mode)] == ['Green', 'Black']
-    red, orange = (1.0, 0.0, 0.0), (1.0, 0.5, 0.0)
-    assert wheel_collisions(rig(('wheels', mode)), (palette(green, yellow),)) == []
-    assert wheel_collisions(rig(('wheels', mode)), (palette(red, orange),)) == [
-        'wheels: palette test shows primary and secondary on the same wheel slots (Red, Red).'
+    assert [nearest_slot(slots, YELLOW) for slots in wheel_slots(mode)] == ['Green', 'Red']
+    assert [nearest_slot(slots, GREEN) for slots in wheel_slots(mode)] == ['Green', 'Black']
+    assert wheel_warnings(rig(('wheels', mode)), (palette('lime', GREEN, YELLOW),)) == []
+    assert wheel_warnings(rig(('wheels', mode)), (palette('fire', RED, ORANGE),)) == [
+        'wheels: primary and secondary share one wheel slot in fire (Red, Red).'
     ]
 
 
@@ -153,9 +191,7 @@ def test_a_slot_starfire_would_refuse_is_skipped_rather_than_crashing_login():
     mode.channels[0].functions[0].sets[1].wheel_slot_colour.y = 0.0
     [slots] = wheel_slots(mode)
     assert [name for name, _ in slots] == ['Black', 'Green', 'Blue']
-    assert (
-        wheel_collisions(rig(('wheel', mode)), (palette((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),)) == []
-    )
+    assert wheel_warnings(rig(('wheel', mode)), (palette('two_tone', RED, BLUE),)) == []
 
 
 def test_slot_colours_and_nearest_slots_match_starfires_encode():
@@ -177,8 +213,36 @@ def test_mixing_and_unpatched_wheels_are_not_reported():
     mixing = wheel_spinner()
     channel = mixing.channels.add(geometry_path=['Base'], offsets=[4])
     channel.functions.add(path='Base_ColorAdd_R.ColorAdd_R.ColorAdd_R', attribute='ColorAdd_R')
-    one_slot = palette((1.0, 0.0, 0.0), (1.0, 0.5, 0.0))
-    assert wheel_collisions(rig(('mixing', mixing)), (one_slot,)) == []
+    one_slot = palette('one_slot', RED, ORANGE)
+    assert wheel_warnings(rig(('mixing', mixing)), (one_slot,)) == []
     unpatched = rig()
     unpatched.profiles.add(profile_id='wheel', mode=wheel_spinner())
-    assert wheel_collisions(unpatched, (one_slot,)) == []
+    assert wheel_warnings(unpatched, (one_slot,)) == []
+
+
+@pytest.mark.parametrize(
+    ('section', 'slot', 'colour'),
+    [
+        ('slots', 'accent', '#ffffff'),
+        ('slots', 'primary', '#808080'),
+        ('drop', 'accent', '#fcfcff'),
+    ],
+)
+def test_a_white_or_grey_palette_colour_is_refused_at_load(tmp_path, section, slot, colour):
+    document = PALETTE_TOML.format(number=1) + '\n[drop]\naccent = "#ff0008"\n'
+    if section == 'slots':
+        document = re.sub(
+            rf'^{slot} = .*$', f'{slot} = "{colour}"', document, flags=re.MULTILINE, count=1
+        )
+    else:
+        document = document.replace('accent = "#ff0008"', f'accent = "{colour}"')
+    (tmp_path / 'glow.toml').write_text(document)
+    with pytest.raises(PaletteError, match=f'{section}.{slot} {colour} is white or grey'):
+        load_palettes(tmp_path)
+
+
+def test_every_shipped_palette_colour_clears_the_saturation_floor():
+    for variant in PALETTES + BREAKDOWN_PALETTES + DROP_PALETTES:
+        for role in ('primary', 'secondary', 'accent'):
+            colour = getattr(variant, role)
+            assert colorsys.rgb_to_hsv(*colour)[1] >= MIN_COLOUR_SATURATION, (variant.name, role)
