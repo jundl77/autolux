@@ -202,15 +202,12 @@ def command_refusal(
     rig: dict | None,
 ) -> str | None:
     from autolux.lib.engine.event_buffer import STANDBY_INTENT
+    from autolux.lib.engine.static_mode import names_target
 
     if command['action'] == 'highlight' and command['target'] is not None:
         # Starfire answers an unknown fixture with an ErrorReply, which stops the show.
-        fixtures = (rig or {}).get('fixtures', ())
-        if not any(
-            command['target']
-            in ({'fixture': fixture['name']}, *({'cell': cell} for cell in fixture['cells']))
-            for fixture in fixtures
-        ):
+        fixtures = ((f['name'], f['cells']) for f in (rig or {}).get('fixtures', ()))
+        if not names_target(fixtures, command['target']):
             ((kind, name),) = command['target'].items()
             return f'no {kind} {name!r} in the running rig'
         if paused:

@@ -8,7 +8,12 @@ import pytest
 
 from autolux.lighting import mvr, mvr_schema
 from autolux.lighting.gdtf import fixture_library
-from autolux.simulate.fixture_panel import FIXTURE_COLORS, MAP_COLUMNS, browser_library
+from autolux.simulate.fixture_panel import (
+    FIXTURE_COLORS,
+    MAP_COLUMNS,
+    TEST_COLOURS,
+    browser_library,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PARITY_ROTATIONS = [(0, 0, 0), (180, 0, 0), (-90, 0, 0), (270, 0, 0), (30, 20, -40), (60, 90, 0)]
@@ -35,6 +40,7 @@ def test_fixture_draft_integrity(tmp_path):
             'colors': FIXTURE_COLORS,
             'accentRole': mvr_schema.ACCENT_ROLE,
             'roles': mvr_schema.ROLES,
+            'testColours': TEST_COLOURS,
         },
         'parity': [
             {

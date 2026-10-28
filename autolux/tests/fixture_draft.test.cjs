@@ -294,6 +294,16 @@ test("the plan keeps its frozen viewBox while a drag previews the mark and the a
     assert.match(markup, new RegExp(`class="plan-areas"[^]*?<rect x="-900" y="0" width="${x + 900}"`));
 });
 
+test("a fixture with no Matrix drags from the identity", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_left");
+    spot.children.splice(spot.children.indexOf(child(spot, "Matrix")), 1);
+    const drag = model.startPlanDrag(current, settings, spot.key, INVERSE, 100, 100, "0 0 10 10");
+    const move = model.planMove(drag, 110, 100);
+    const [moved] = edit(current, { action: "set-position", key: spot.key, original_matrix: drag.original, x_mm: move.x_mm, y_mm: move.y_mm });
+    assert.equal(child(fixtureNode(moved, "spot_left"), "Matrix").text, `{1,0,0}{0,1,0}{0,0,1}{${move.x_mm},${move.y_mm},0}`);
+});
+
 test("set-position refuses a matrix changed meanwhile and keeps Z and rotation", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_left");
@@ -349,7 +359,8 @@ test("the patch form validates each field and maps it to one draft action", () =
     assert.equal(check("name", "wash_right").warning, null);
     // IDs: whole numbers, duplicates only warned.
     assert.match(check("FixtureIDNumeric", child(spot, "FixtureIDNumeric").text).warning, /spot_left/);
-    assert.match(check("FixtureID", "x").error, /whole number/);
+    assert.equal(check("FixtureID", "A-1").error, null, "MVR's FixtureID is a string");
+    assert.match(check("FixtureIDNumeric", "x").error, /whole number/);
     assert.match(check("matrix", ["0", "0", "0", "0", "61", "0"]).error, /±60°/);
     assert.match(check("Pan", ["0.8", "0.2"]).error, /min ≤ max/);
     const [limited] = edit(current, check("Pan", ["0.1", "0.9"]).action);
@@ -410,15 +421,15 @@ test("the test controls send highlight commands, hold them alive and clear once 
     assert.equal(model.testControl("red"), null);
     ds.fixture_patch.syncTest(live, "config");
     assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: "spot_right" }, colour: "red" });
-    // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command.
-    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000]);
+    // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command, and the 10-minute end.
+    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000, 600000]);
     [...timers.values()][0].run();
     assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
     // › steps in patch order (kinta at 40 follows spot_right at 13), keeping the lit colour.
     ds.fixture_patch.syncTest({ ...live, highlight: { target: { fixture: "spot_right" }, colour: "red" } }, "config");
     assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: "kinta" }, colour: "red" });
     assert.equal(actions.at(-1).key, fixtureNode(current, "kinta").key);
-    assert.equal(timers.size, 1);
+    assert.equal(timers.size, 2);
     const sent = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     ds.fixture_patch.syncTest(live, "telemetry");
@@ -476,12 +487,12 @@ test("a lit test follows the selection; late or unanswered replies never turn it
     ds.fixture_patch.renderRig(kinta.key, current, settings);
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: "kinta" }, colour: "red" });
     await new Promise(setImmediate);
-    assert.equal(timers.size, 1, "kinta's keep-alive survives spot_right's late refusal");
+    assert.equal(timers.size, 2, "kinta's keep-alive survives spot_right's late refusal");
     // No answer at all may mean lit: the keep-alive stays and a deselect still clears.
     replies.push({ error: "the show is not answering" });
     [...timers.values()][0].run();
     await new Promise(setImmediate);
-    assert.equal(timers.size, 1);
+    assert.equal(timers.size, 2);
     ds.fixture_patch.renderRig(null, current, settings);
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
     assert.equal(timers.size, 0);
@@ -506,4 +517,38 @@ test("the Apply banner follows the show's rig revision and holds through a resta
     assert.deepEqual(banner(null), [restarting, true]);
     assert.deepEqual(banner("saved"), ["", true]);
     assert.deepEqual(banner("old"), [stale, false]);
+    // A show back on the same revision: the hold lapses after 60 s so Apply works again.
+    timers.clear();
+    model.applyClick();
+    model.applyClick();
+    await new Promise(setImmediate);
+    assert.deepEqual(banner("old"), [restarting, true]);
+    const [[id, hold]] = [...timers];
+    assert.equal(hold.ms, 60000);
+    timers.delete(id);
+    hold.run();
+    assert.deepEqual(banner("old"), [stale, false]);
+});
+
+test("a held test ends after 10 minutes, and stops when the show drops it without an Off", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_right");
+    const live = { paused: false, static: { blackout: false }, highlight: null };
+    const lit = { ...live, highlight: { target: { fixture: "spot_right" }, colour: "white" } };
+    timers.clear();
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("white");
+    const [end] = [...timers.values()].filter((timer) => timer.ms === 600000);
+    end.run();
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
+    assert.equal(timers.size, 0);
+    // Standby, a sound stop or a restart clears the show's highlight: no relight, no clear.
+    model.testControl("white");
+    ds.fixture_patch.syncTest(lit, "config");
+    const sent = commands.length;
+    ds.fixture_patch.syncTest(live, "config");
+    assert.equal(timers.size, 0);
+    ds.fixture_patch.renderRig(null, current, settings);
+    assert.equal(commands.length, sent);
 });

@@ -36,6 +36,14 @@ PRESETS = (*PRESET_COLOURS, 'uv', 'blackout', 'off')
 HIGHLIGHT_COLOURS = {**PRESET_COLOURS, 'green': (0.0, 1.0, 0.0)}
 
 
+def names_target(fixtures, target: dict) -> bool:
+    """Whether {'fixture': name} or {'cell': id} is one of these (name, cell ids) fixtures."""
+    return any(
+        target in ({'fixture': name}, *({'cell': cell} for cell in cells))
+        for name, cells in fixtures
+    )
+
+
 @dataclass(frozen=True)
 class StaticRig:
     groups: tuple[str, ...] = ()
@@ -175,10 +183,7 @@ class StaticLooks:
     def highlight(self, target: dict, colour: str = 'white', *, paused: bool = False) -> None:
         """Locate {'fixture': name} or {'cell': id}: open white (or a swatch), beam home, no
         strobe. One highlight at a time, so testing another fixture moves it."""
-        if not any(
-            target in ({'fixture': name}, *({'cell': cell} for cell in cells))
-            for name, cells in self.rig.fixtures
-        ):
+        if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
         if colour not in HIGHLIGHT_COLOURS:
             raise ValueError(f'unknown highlight colour {colour!r}')

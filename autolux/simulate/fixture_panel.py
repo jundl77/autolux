@@ -3,12 +3,18 @@ from pathlib import Path
 import dash
 from dash import ClientsideFunction, Input, Output, State, dcc, html
 
+from autolux.lib.engine.static_mode import HIGHLIGHT_COLOURS
 from autolux.lighting import mvr, mvr_schema
 from autolux.lighting.fixture_setup import DMX_UNIVERSE_SIZE, MAX_ARTNET_UNIVERSE
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAP_COLUMNS = 32
 MAX_ADD_QUANTITY = 64
+# The swatches are the colours the show accepts for a test, as the fixture emits them.
+TEST_COLOURS = {
+    name: '#{:02x}{:02x}{:02x}'.format(*(round(255 * c) for c in rgb))
+    for name, rgb in HIGHLIGHT_COLOURS.items()
+}
 FIXTURE_COLORS = ('#527eaa', '#8664ae', '#408e83', '#b38449', '#a75c80', '#667cb2')
 FIXTURE_CSS = '''
 #config-panel {padding: 18px 0;}
@@ -362,6 +368,7 @@ def build_fixture_panel(app, store):
                     'colors': FIXTURE_COLORS,
                     'accentRole': mvr_schema.ACCENT_ROLE,
                     'roles': mvr_schema.ROLES,
+                    'testColours': TEST_COLOURS,
                 },
             ),
             dcc.Store(id='fixture-revision', data=revision),

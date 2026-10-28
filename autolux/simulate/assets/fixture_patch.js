@@ -17,8 +17,9 @@
     const STALE_RIG = "The show runs an older rig. Apply to show restarts it on the saved patch.";
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
-    // The show's test colours (static_mode PRESET_COLOURS plus green) as the fixture emits them.
-    const TEST_COLOURS = { white: "#ffffff", warm: "#ff8c33", red: "#ff0000", blue: "#0000ff", green: "#00ff00" };
+    const RESTART_HOLD_MS = 60000;
+    // A forgotten Locate in a party room: the held test ends by itself after 10 minutes.
+    const TEST_MAX_MS = 600000;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
@@ -30,6 +31,9 @@
     let lit = false;
     let refreshTimer = null;
     let testCommand = null;
+    let testEndTimer = null;
+    let testEnded = "";
+    let restartTimer = null;
     let applyTimer = null;
     // The rig revision the show ran when a restart was taken; null when none is pending.
     let restartingFrom = null;
@@ -566,13 +570,14 @@
             case "name": {
                 const twin = others.some((entry) => entry.attributes.name === value);
                 const error = !value.trim() ? "A name is required." : bytes(value) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : twin ? `Another fixture is named ${value}.` : null;
-                const warning = value !== row.name ? "Renaming changes which groups the show puts this fixture in and stops a test running on it." : null;
+                const warning = value !== row.name ? "Renaming changes the Class membership the show uses for groups and stops a test running on it." : null;
                 return { error, warning, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
             }
             case "FixtureID":
             case "FixtureIDNumeric": {
+                // MVR's FixtureID is a string; only FixtureIDNumeric is a number.
                 const twin = others.find((entry) => textOf(entry, field) === value);
-                return { error: /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same ID.` : null, action: child(field, value) };
+                return { error: field === "FixtureID" || /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same ID.` : null, action: child(field, value) };
             }
             case "GDTFSpec": {
                 const tree = gdtfTree(draft, settings, value);
@@ -634,15 +639,20 @@
     const stopRefresh = () => {
         lit = false;
         clearInterval(refreshTimer);
-        refreshTimer = null;
+        clearTimeout(testEndTimer);
+        refreshTimer = testEndTimer = null;
     };
 
     function highlight(target, colour) {
         const command = (testCommand = target ? { action: "highlight", target, colour } : { action: "highlight", target: null });
         stopRefresh();
         lit = Boolean(target);
+        testEnded = "";
         // Starfire drops a test nobody refreshes after 60 s, so a held one is re-sent well inside that.
-        if (target) refreshTimer = setInterval(() => dispatchTest(command), TEST_REFRESH_MS);
+        if (target) {
+            refreshTimer = setInterval(() => dispatchTest(command), TEST_REFRESH_MS);
+            testEndTimer = setTimeout(() => (highlight(null), (testEnded = "Test ended after 10 minutes."), testNote(testEnded)), TEST_MAX_MS);
+        }
         dispatchTest(command);
         return command;
     }
@@ -663,7 +673,14 @@
         }
         const command = { action: "restart_show" };
         const from = show?.rig_revision ?? null;
-        window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => reply?.error || ((restartingFrom = from), window.dash_clientside.set_props("fixture-show-rig", { children: RESTARTING })));
+        window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => {
+            if (reply?.error) return;
+            restartingFrom = from;
+            // A show back on the same revision must not hold Apply disabled for good.
+            clearTimeout(restartTimer);
+            restartTimer = setTimeout(() => (restartingFrom = null), RESTART_HOLD_MS);
+            window.dash_clientside.set_props("fixture-show-rig", { children: RESTARTING });
+        });
         return command;
     }
 
@@ -674,7 +691,7 @@
         const rows = fixtureRows(rig.draft, rig.settings);
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
-        if (spec in TEST_COLOURS) return highlight(selectedCell ? { cell: selectedCell } : { fixture: row.name }, spec);
+        if (spec in rig.settings.testColours) return highlight(selectedCell ? { cell: selectedCell } : { fixture: row.name }, spec);
         const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
         sendAction({ action: "select", key: next.key });
@@ -735,9 +752,11 @@
         },
 
         syncTest(state, tab, saved) {
+            if (tab !== "config") clearTest();
+            // The show dropped the test without an Off (standby, sound stop, restart): stop holding it.
+            else if (lit && show?.highlight && state && !state.highlight) stopRefresh();
             // The control state carries the rig only when its revision changed; keep the last one.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
-            if (tab !== "config") clearTest();
             paintTest();
             // No show reporting a rig means nothing to apply; a restart holds until a new rig reports.
             const loaded = state?.rig_revision ?? null;
@@ -1161,7 +1180,7 @@
             "div",
             { className: "cfg-test" },
             button("white", "Test", "Light the selected fixture or cell in white", "cfg-test-main"),
-            Object.entries(TEST_COLOURS).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--swatch:${hex}` })),
+            Object.entries(rig.settings.testColours).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--swatch:${hex}` })),
             button("off", "Off", "Clear the test"),
             button("-1", "‹", "Previous fixture in patch order"),
             button("1", "›", "Next fixture in patch order"),
@@ -1191,7 +1210,7 @@
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
         }
-        testNote(blocked || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : ""));
+        testNote(blocked || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
     }
 
     // Console-style patch form over the raw inspector; every field maps to one draft action.
