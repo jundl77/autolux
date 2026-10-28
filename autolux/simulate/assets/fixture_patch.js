@@ -11,6 +11,9 @@
     const PLAN_MIN_SPAN_MM = 2000;
     const PLAN_LABEL_LIMIT = 48;
     const PLAN_ZOOM = [0.5, 8];
+    const PREVIEW_BEAM_MM = 3000;
+    // A beat lights the scrubber's flash for its first quarter; a bar's first beat is brighter.
+    const BEAT_FLASH_SHARE = 0.25;
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
@@ -49,6 +52,8 @@
     let requestId = 0;
     let keyCounter = 0;
     const drawn = new WeakMap();
+    // A loaded recording: its header, frames and the fixture looks of the frame shown.
+    let recording = null;
 
     function* walk(node, parent = null) {
         yield [node, parent];
@@ -821,10 +826,75 @@
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });
 
+    // The whole track in rows under the scrubber: each base section in its colour, each group's
+    // mean intensity, and where anything strobes; the server computes the columns.
+    function drawOverview(overview, frameCount) {
+        const strip = document.getElementById("preview-overview");
+        if (!strip) return;
+        const row = (label, title, width, rects) =>
+            `<div title="${escapeXml(title)}">${escapeXml(label)}</div><svg viewBox="0 0 ${width} 1" preserveAspectRatio="none">${rects.join("")}</svg>`;
+        const column = (value, index, fill) => (value > 0 ? `<rect x="${index}" y="0" width="1.02" height="1" fill="${fill}" fill-opacity="${value}"/>` : "");
+        const sections = overview.sections.map(
+            (section) =>
+                `<rect x="${section.start}" y="0" width="${section.end - section.start}" height="1" fill="${section.rgb ? `rgb(${section.rgb.map((value) => Math.round(255 * value)).join(",")})` : "#1d2733"}"><title>${escapeXml(section.base || "idle")}</title></rect>`
+        );
+        strip.innerHTML = [
+            row("sections", "Base loop runs in their intensity-weighted colour", frameCount, sections),
+            ...Object.entries(overview.groups).map(([group, levels]) =>
+                row(group, `${group}: mean intensity; strobe ${overview.group_strobe_seconds[group]} s`, overview.columns, levels.map((value, index) => column(value, index, "#e6edf3")))
+            ),
+            row(`strobe ${overview.strobe_seconds} s`, "Share of each slice with any fixture strobing", overview.columns, overview.strobe.map((value, index) => column(value, index, "#f0c674"))),
+            '<span class="preview-cursor"></span>'
+        ].join("");
+    }
+
+    const previewClock = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
+
     ds.fixture_patch = {
         describeProfile(spec, settings) {
             const entry = settings.library[spec];
             return entry ? `${entry.modes[entry.default_mode].channels} channels` : "";
+        },
+
+        // The frames the server holds for this load; frame 0 shows once they are parsed.
+        async loadPreview(source) {
+            const text = await (await fetch(source.url, { cache: "no-store" })).text();
+            const [header, ...frames] = text
+                .split("\n")
+                .filter((line) => line.trim())
+                .map((line) => JSON.parse(line));
+            recording = { header, frames, looks: null };
+            drawOverview(source.overview, frames.length);
+            ds.set_props("preview-frame", { value: 0 });
+            ds.set_props("preview-clock", { disabled: true });
+            ds.set_props("preview-play", { children: "Play" });
+            return source.url;
+        },
+
+        showPreviewFrame(index) {
+            if (!recording) return ["", "preview-beat"];
+            const shown = Math.max(0, Math.min(index || 0, recording.frames.length - 1));
+            const frame = recording.frames[shown];
+            recording.looks = previewLooks(recording.header, frame);
+            // A redraw mid-gesture would drop the pointer's capture; the next frame catches up.
+            if (rig && !planDrag && !planNav) showPlan(planView);
+            const cursor = document.querySelector?.("#preview-overview .preview-cursor");
+            if (cursor) cursor.style.left = `calc(118px + ${shown / Math.max(1, recording.frames.length - 1)} * (100% - 118px))`;
+            const perBar = recording.header.beats_per_bar;
+            const whole = Math.floor(frame.beat);
+            const inBar = perBar ? ((whole % perBar) + perBar) % perBar : 0;
+            const flash = frame.beat - whole >= BEAT_FLASH_SHARE ? "preview-beat" : perBar && inBar === 0 ? "preview-beat on bar" : "preview-beat on";
+            const where = perBar ? `bar ${Math.floor(whole / perBar) + 1}.${inBar + 1}` : `beat ${whole + 1}`;
+            const base = [frame.bank, frame.autoloop].filter(Boolean).join("/") || "idle";
+            return [`${previewClock(frame.t)} · ${where} · ${base}${frame.fault ? " · dark from a script fault" : ""}`, flash];
+        },
+
+        // Play steps one frame per clock tick and stops at the end; Play at the end restarts.
+        stepPreview(_clicks, _ticks, value, max, paused) {
+            if (ds.callback_context.triggered_id === "preview-play") {
+                return paused ? [value >= max ? 0 : ds.no_update, false, "Pause"] : [ds.no_update, true, "Play"];
+            }
+            return value >= max ? [max, true, "Play"] : [value + 1, ds.no_update, ds.no_update];
         },
 
         renderPatch(draft, universe, selection, busy, settings) {
@@ -978,6 +1048,8 @@
         placedObjects,
         planMarks,
         planSvg,
+        previewLooks,
+        elevationSvg,
         zoomPlan,
         startPlanDrag,
         planMove,
@@ -1036,11 +1108,13 @@
             const group = classes[textOf(node, "Classing").toUpperCase()] || "";
             fixtures.push({
                 key: node.key,
+                uuid: (node.attributes.uuid || "").toUpperCase(),
                 name,
                 group,
                 accent: layer === settings.accentRole,
                 x: matrix[9],
                 y: matrix[10],
+                z: matrix[11],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
                 facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null
             });
@@ -1105,7 +1179,65 @@
         return { x: anchor[0] - (at[0] - box.x) * s, y: anchor[1] - (at[1] - box.y) * s, w, h: box.h * s };
     }
 
-    function planSvg({ fixtures, others }, settings, view) {
+    // A recording frame's look per fixture uuid: the mean of its cells' rgb·i fills the mark,
+    // their mean colour draws the beam at the brightest cell's opacity, any cell strobing rings it.
+    function previewLooks(header, frame) {
+        const looks = {};
+        header.cells.forEach((cell, index) => {
+            const [i, r, g, b, strobe, direction] = frame.c[index];
+            const look = (looks[cell.fixture.toUpperCase()] ||= { lit: [0, 0, 0], rgb: [0, 0, 0], cells: 0, i: 0, strobe: 0, direction: null });
+            [r, g, b].forEach((value, channel) => {
+                look.lit[channel] += value * i;
+                look.rgb[channel] += value;
+            });
+            look.cells += 1;
+            look.i = Math.max(look.i, i);
+            look.strobe = Math.max(look.strobe, strobe);
+            look.direction ||= direction || null;
+        });
+        for (const look of Object.values(looks)) {
+            const css = (channels) => `rgb(${channels.map((value) => Math.round((255 * value) / look.cells)).join(",")})`;
+            [look.fill, look.hue] = [css(look.lit), css(look.rgb)];
+        }
+        return looks;
+    }
+
+    // A beam is drawn PREVIEW_BEAM_MM along its direction, so in each view its length is the
+    // direction's share in that view's plane: an upright beam is a dot on the plan.
+    function lookGlyph(look, x, y, along, r, n) {
+        const beam = look.direction
+            ? `<line class="plan-beam" x1="${x}" y1="${y}" x2="${n(x + along[0] * PREVIEW_BEAM_MM)}" y2="${n(y - along[1] * PREVIEW_BEAM_MM)}" stroke="${look.hue}" stroke-opacity="${look.i}" stroke-width="${n(r * 0.5)}" stroke-linecap="round"/>`
+            : "";
+        const strobe = look.strobe > 0 ? `<circle class="plan-strobe" cx="${x}" cy="${y}" r="${n(r * 1.8)}" stroke-width="${n(r * 0.25)}" stroke-dasharray="${n(r * 0.4)} ${n(r * 0.3)}"/>` : "";
+        return { beam, strobe };
+    }
+
+    // The front elevation, seen from the audience: X across, Z up, the floor at Z = 0.
+    function elevationSvg(fixtures, looks) {
+        const xs = fixtures.length ? fixtures.map((mark) => mark.x) : [0];
+        const zs = fixtures.length ? fixtures.map((mark) => mark.z) : [0];
+        const [minX, maxX, top] = [Math.min(...xs), Math.max(...xs), Math.max(0, ...zs)];
+        const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, top);
+        const [pad, r] = [span * 0.15, span * 0.018];
+        const n = (value) => Math.round(value);
+        const box = [minX - pad, -top - pad, maxX - minX + 2 * pad, top + 2 * pad].map(n).join(" ");
+        const parts = [
+            `<svg class="elevation" xmlns="http://www.w3.org/2000/svg" viewBox="${box}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Front elevation, seen from the audience" font-size="${n(r * 1.3)}">`,
+            `<line class="plan-stage-edge" x1="${n(minX - pad)}" y1="0" x2="${n(maxX + pad)}" y2="0" stroke-width="${n(r * 0.3)}"/>`,
+            `<text x="${n(minX - pad * 0.8)}" y="${n(r * 2)}">floor</text>`,
+            `<g stroke-width="${n(r * 0.25)}">`
+        ];
+        for (const mark of fixtures) {
+            const look = looks[mark.uuid];
+            const [x, y] = [n(mark.x), n(-mark.z)];
+            const { beam, strobe } = look ? lookGlyph(look, x, y, [look.direction?.[0], look.direction?.[2]], r, n) : { beam: "", strobe: "" };
+            parts.push(`<g data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${beam}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${look ? look.fill : "#7f8ea3"}"/>${strobe}</g>`);
+        }
+        parts.push("</g></svg>");
+        return parts.join("");
+    }
+
+    function planSvg({ fixtures, others }, settings, view, looks = null) {
         const all = [...fixtures, ...others];
         const xs = all.length ? all.map((mark) => mark.x) : [0];
         const ys = all.length ? all.map((mark) => -mark.y) : [0];
@@ -1150,8 +1282,10 @@
             parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title><rect class="plan-object${mark.hollow ? " hollow" : ""}" x="${x}" y="${y}" width="${side}" height="${side}"/></g>`);
         }
         for (const mark of fixtures) {
+            const look = looks?.[mark.uuid];
             const [x, y, fill] = [n(mark.x), n(-mark.y), colour[mark.group]];
             const arrow = mark.facing ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
+            const { beam, strobe } = look ? lookGlyph(look, x, y, look.direction || [], r, n) : { beam: "", strobe: "" };
             // Role by glyph: every fixture is filled; an accent one also wears a dotted ring.
             const ring = mark.accent
                 ? `<circle cx="${x}" cy="${y}" r="${n(r * 1.4)}" fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.3)}" stroke-dasharray="${n(r * 0.5)} ${n(r * 0.4)}"/>`
@@ -1161,7 +1295,7 @@
             const label = labelled
                 ? `<text class="plan-name" x="${n(flip ? x - r * 1.4 : x + r * 1.4)}" y="${n(y + r * 0.4)}"${flip ? ' text-anchor="end"' : ""} stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>`
                 : "";
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"/>${ring}${label}</g>`);
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${beam}${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${look ? look.fill : fill}"/>${ring}${strobe}${label}</g>`);
         }
         parts.push("</g></svg>");
         const key = (glyph, text) => `<span class="plan-key"><svg viewBox="0 0 14 14" width="14" height="14">${glyph}</svg>${text}</span>`;
@@ -1184,8 +1318,14 @@
         for (const node of container.querySelectorAll("[data-node-key]")) node.classList.toggle("selected", node.dataset.nodeKey === rig.selection);
     }
 
+    // With a recording loaded, the plan wears the frame shown and the elevation stands beside it.
+    function planWithPreview(marks, settings, view) {
+        const looks = recording?.looks;
+        return planSvg(marks, settings, view, looks) + (looks ? elevationSvg(marks.fixtures, looks) : "");
+    }
+
     function drawPlan(container, draft, settings) {
-        container.innerHTML = planSvg(planMarks(draft, settings), settings, planView);
+        container.innerHTML = planWithPreview(planMarks(draft, settings), settings, planView);
     }
 
     function showPlan(view) {
@@ -1223,7 +1363,7 @@
         local[10] = Math.round(local[10] + (ux * (y1 - y0) - uy * (x1 - x0)) / det) + 0;
         const [x, y] = multiply(drag.parent, local).slice(9, 11);
         const fixtures = drag.marks.fixtures.map((mark) => (mark.key === drag.key ? { ...mark, x, y } : mark));
-        return { x_mm: local[9], y_mm: local[10], markup: planSvg({ ...drag.marks, fixtures }, drag.settings, drag.view) };
+        return { x_mm: local[9], y_mm: local[10], markup: planWithPreview({ ...drag.marks, fixtures }, drag.settings, drag.view) };
     }
 
     function endPlanDrag() {
