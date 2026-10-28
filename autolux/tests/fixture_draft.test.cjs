@@ -55,6 +55,11 @@ test("patched fixtures match the server's reading of the room rig", () => {
     assert.deepEqual(plain(rows.map((row) => [row.fixture_uuid, row.name, row.universe, row.address, row.cells])), data.patched);
     assert.deepEqual(plain(model.occupancy(rows, settings, 0).errors), []);
     assert.equal(rows.find((row) => row.name === "spot_left").channels, 12);
+    // The uuid is carried as the MVR writes it, as the server's export does.
+    const lower = draft();
+    const spot = fixtureNode(lower, "spot_left");
+    spot.attributes.uuid = spot.attributes.uuid.toLowerCase();
+    assert.equal(model.fixtureRows(lower, settings).find((row) => row.key === spot.key).fixture_uuid, spot.attributes.uuid);
 });
 
 test("matrix composition and decomposition agree with the server byte for byte", () => {

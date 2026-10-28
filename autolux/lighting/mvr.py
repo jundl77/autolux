@@ -636,7 +636,8 @@ def patched_fixtures(scene: Scene) -> list[dict]:
             movement[axis] = {'min': low, 'max': high, 'inverted': inverted}
         fixtures.append(
             {
-                'fixture_uuid': identity,
+                # Lookups match uuids case-blind, but the identity carried on is the file's text.
+                'fixture_uuid': node.uuid,
                 'name': node.name,
                 'gdtf_spec': specs[identity],
                 'gdtf_mode': (node.gdtf_mode or '').strip(),
