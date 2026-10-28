@@ -54,7 +54,7 @@ fn a_group_master_on_the_dimmerless_kinta_keeps_its_colour_and_at_zero_selects_b
     let fixture = definition
         .fixtures
         .iter()
-        .find(|fixture| fixture.fixture_id == member)
+        .find(|fixture| fixture.fixture_uuid == member)
         .unwrap();
     let (universe, colour, shutter) = (
         u16::try_from(fixture.universe).unwrap(),
@@ -95,7 +95,7 @@ fn a_cell_in_two_capped_groups_takes_the_product_of_their_masters() {
     let (shared, wash_only) = (&wash[0], &wash[1]);
     definition.groups.push(wire::FixtureGroup {
         group_id: "house".into(),
-        fixture_ids: vec![shared.clone(), fx.clone()],
+        fixture_uuids: vec![shared.clone(), fx.clone()],
         ..Default::default()
     });
     let mut engine = lit_engine(&definition);

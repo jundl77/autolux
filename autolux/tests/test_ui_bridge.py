@@ -210,8 +210,8 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
 
 RIG = {
     'fixtures': [
-        {'id': 'par', 'name': 'par', 'cells': ['par']},
-        {'id': 'bar', 'name': 'bar', 'cells': ['bar/a']},
+        {'fixture_uuid': 'par', 'name': 'par', 'cells': ['par']},
+        {'fixture_uuid': 'bar', 'name': 'bar', 'cells': ['bar/a']},
     ]
 }
 

@@ -141,7 +141,7 @@ fn scaled_rig() -> Value {
         let mover = index < SCALED_MOVER_COUNT;
         let pixel = index >= SCALED_FIXTURE_COUNT - SCALED_STRIP_COUNT;
         fixtures.push(json!({
-            "id": id,
+            "fixture_uuid": id,
             "profile": if mover {
                 "chauvet_intimidator_spot_110_12ch"
             } else if pixel {

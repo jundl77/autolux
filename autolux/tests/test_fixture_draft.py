@@ -52,7 +52,7 @@ def test_fixture_draft_integrity(tmp_path):
         ],
         'patched': [
             [
-                fixture['uuid'],
+                fixture['fixture_uuid'],
                 fixture['name'],
                 fixture['universe'],
                 fixture['address'],

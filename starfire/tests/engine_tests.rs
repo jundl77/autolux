@@ -10,8 +10,8 @@ use starfire::model::{
 use starfire::script::AutoloopCatalog;
 
 const RIG: &str = r#"{"schema_version":1,"fixtures":[
-    {"id":"left","profile":"generic_rgb","universe":0,"address":1},
-    {"id":"right","profile":"generic_rgb","universe":0,"address":4}],
+    {"fixture_uuid":"left","profile":"generic_rgb","universe":0,"address":1},
+    {"fixture_uuid":"right","profile":"generic_rgb","universe":0,"address":4}],
     "groups":{"wash":["left","right"]}}"#;
 const CONSTANT: &str =
     "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.5)} end}";

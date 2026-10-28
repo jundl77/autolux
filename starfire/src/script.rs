@@ -451,7 +451,7 @@ impl LuaAutoloop {
             "fixture_of",
             lua.create_function(move |_, cell: Value| {
                 cell_fact(&fixtures, &cell, |id| {
-                    fixtures.fixture_of(id).map(str::to_owned)
+                    fixtures.uuid_of_cell(id).map(str::to_owned)
                 })
             })?,
         )?;
@@ -590,7 +590,7 @@ fn cell_fact<T>(
     fact: impl FnOnce(&str) -> Option<T>,
 ) -> mlua::Result<T> {
     let name = cell_name(value)?;
-    let id = rig.fixture_named(&name).unwrap_or(&name);
+    let id = rig.uuid_of_label(&name).unwrap_or(&name);
     fact(id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {name}")))
 }
 

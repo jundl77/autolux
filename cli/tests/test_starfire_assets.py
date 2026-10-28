@@ -50,14 +50,14 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert login.artnet_destination == '127.0.0.1:6454'
     assert login.parameters == [parameter]
     fixture = login.rig.fixtures[0]
-    assert uuid.UUID(fixture.fixture_id).version == 4 and fixture.name == 'front'
+    assert uuid.UUID(fixture.fixture_uuid).version == 4 and fixture.name == 'front'
     assert fixture.profile_id == f'{SPEC}#16 bit'
     assert fixture.pan.inverted
     assert (fixture.pan.minimum, fixture.pan.maximum) == (0, 1)
     assert not fixture.HasField('tilt')
     assert list(fixture.matrix[:3]) == [-1, 0, 0]
     assert login.rig.groups[0].group_id == 'movers'
-    assert login.rig.groups[0].fixture_ids == [fixture.fixture_id]
+    assert login.rig.groups[0].fixture_uuids == [fixture.fixture_uuid]
     [profile] = login.rig.profiles
     assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
@@ -74,8 +74,8 @@ def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts
     login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     scene = mvr.read(ROOM.read_bytes())
     fixtures = mvr.patched_fixtures(scene)
-    assert [(fixture.fixture_id, fixture.name) for fixture in login.rig.fixtures] == [
-        (f['uuid'], f['name']) for f in fixtures
+    assert [(fixture.fixture_uuid, fixture.name) for fixture in login.rig.fixtures] == [
+        (f['fixture_uuid'], f['name']) for f in fixtures
     ]
     assert [list(fixture.matrix) for fixture in login.rig.fixtures] == [
         f['matrix'] for f in fixtures
@@ -280,7 +280,7 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     ids = {name: identity for identity, name, _ in rig.fixtures}
     cells = {name: cells for _, name, cells in rig.fixtures}
     assert list(ids.values()) == [
-        entry.fixture_id for entry in assets.rig_definition(ROOM).fixtures
+        entry.fixture_uuid for entry in assets.rig_definition(ROOM).fixtures
     ]
     assert cells['wash_left'] == (ids['wash_left'],)
     assert cells['zq06017'] == tuple(f'{ids["zq06017"]}/Beam Segment {n}' for n in range(1, 9))
@@ -338,5 +338,5 @@ def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():
     assert [(cell.geometry, list(cell.offsets)) for cell in bar.cells] == [
         (f'Beam Segment {n}', [3 * n - 2, 3 * n - 1, 3 * n]) for n in range(1, 9)
     ]
-    groups = {group.group_id: list(group.fixture_ids) for group in rig.groups}
-    assert groups['strip'] == [bar.fixture_id]
+    groups = {group.group_id: list(group.fixture_uuids) for group in rig.groups}
+    assert groups['strip'] == [bar.fixture_uuid]
