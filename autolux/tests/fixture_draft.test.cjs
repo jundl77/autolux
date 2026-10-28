@@ -217,12 +217,13 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     assert.match(grid(markup), /<rect x="-900" y="0" width="1800" height="2000"\/>/);
     const cuts = (markup) => [...grid(markup).matchAll(/<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"/g)].map((match) => match.slice(1).map(Number));
     assert.deepEqual(cuts(markup), [[-300, 0, -300, 2000], [300, 0, 300, 2000], [-900, 667, 900, 667], [-900, 1333, 900, 1333]]);
-    // Each area named at its cell's centre, upstage (the top of the plan) first.
+    // Each area named in its cell's bottom-left corner, inset 0.6 r (r = 36 mm here), upstage
+    // (the top of the plan) first.
     const names = (markup) => [...markup.matchAll(/<text class="plan-area-name" x="(-?\d+)" y="(-?\d+)">([^<]+)</g)].map((match) => [Number(match[1]), Number(match[2]), match[3]]);
     assert.deepEqual(names(markup), [
-        [-600, 333, "up left"], [0, 333, "up centre"], [600, 333, "up right"],
-        [-600, 1000, "centre left"], [0, 1000, "centre"], [600, 1000, "centre right"],
-        [-600, 1667, "down left"], [0, 1667, "down centre"], [600, 1667, "down right"]
+        [-878, 645, "up left"], [-278, 645, "up centre"], [322, 645, "up right"],
+        [-878, 1312, "centre left"], [-278, 1312, "centre"], [322, 1312, "centre right"],
+        [-878, 1978, "down left"], [-278, 1978, "down centre"], [322, 1978, "down right"]
     ]);
     assert.match(markup, /class="plan-stage-edge"/);
     // A 2 m span gets the largest 1-2-5 step within a fifth of it.
@@ -233,7 +234,7 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     const kinta = markup.slice(markup.indexOf("<title>kinta"));
     assert.match(kinta.slice(0, kinta.indexOf("</g>")), /fill="none" class="ring"/);
     assert.match(markup, /fx <b>1<\/b><\/span>/);
-    assert.match(kinta.slice(0, kinta.indexOf("</g>")), /class="plan-badge"[^>]*>\d+<\/text><text class="plan-caption"[^>]*>DMX \d+–\d+ · fx · accent</);
+    assert.match(kinta, /class="plan-badge"[^]*?>\d+<\/text><\/g><text class="plan-caption"[^>]*>DMX \d+–\d+ · fx · accent</);
     const offCentre = { ...byName.kinta, x: 4000 };
     // One row: no depth extent, so only the X cuts (4000..9000 at 5667 and 7333).
     const row = model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings);
@@ -244,7 +245,7 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     const lone = model.planSvg({ fixtures: [offCentre], others: [] }, settings);
     assert.ok(!grid(lone).includes("<rect"));
     assert.deepEqual(cuts(lone), []);
-    assert.deepEqual(names(lone), [[4000, -byName.kinta.y, "centre"]]);
+    assert.deepEqual(names(lone), [[4022, Math.round(-byName.kinta.y - 21.6), "centre"]]);
 });
 
 test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", () => {

@@ -1010,7 +1010,8 @@
     // Draws the nine-area stage grid (equal thirds of the fixtures' bounding box) and its area
     // names; it only draws lines and labels and never assigns areas, which come from
     // stage_areas in cli/starfire_assets.py. An axis without extent has no cuts and only its
-    // centre names.
+    // centre names. A name sits in its cell's bottom-left corner, off the centre lines that
+    // fixtures tend to share.
     const AREA_ROWS = ["up", "centre", "down"];
     const AREA_COLUMNS = ["left", "centre", "right"];
     const areaName = (row, column) => (row === "centre" && column === "centre" ? "centre" : `${row} ${column}`);
@@ -1020,12 +1021,13 @@
         const ys = fixtures.map((mark) => -mark.y);
         const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
         const cuts = (low, high) => (high > low ? [1, 2].map((k) => low + ((high - low) * k) / 3) : []);
-        // Each third's centre and index.
-        const thirds = (low, high) => (high > low ? [0, 1, 2].map((k) => [low + ((high - low) * (2 * k + 1)) / 6, k]) : [[low, 1]]);
+        // Each third's start, end and index.
+        const thirds = (low, high) => (high > low ? [0, 1, 2].map((k) => [low + ((high - low) * k) / 3, low + ((high - low) * (k + 1)) / 3, k]) : [[low, low, 1]]);
+        const inset = r * 0.6;
         const line = (ax, ay, bx, by) => `<line x1="${n(ax)}" y1="${n(ay)}" x2="${n(bx)}" y2="${n(by)}"/>`;
         // SVG y grows downstage, so the top row is upstage.
-        const names = thirds(y0, y1).flatMap(([y, row]) =>
-            thirds(x0, x1).map(([x, column]) => `<text class="plan-area-name" x="${n(x)}" y="${n(y)}">${areaName(AREA_ROWS[row], AREA_COLUMNS[column])}</text>`)
+        const names = thirds(y0, y1).flatMap(([, bottom, row]) =>
+            thirds(x0, x1).map(([x, , column]) => `<text class="plan-area-name" x="${n(x + inset)}" y="${n(bottom - inset)}">${areaName(AREA_ROWS[row], AREA_COLUMNS[column])}</text>`)
         );
         const box = x1 > x0 && y1 > y0 ? `<rect x="${n(x0)}" y="${n(y0)}" width="${n(x1 - x0)}" height="${n(y1 - y0)}"/>` : "";
         return [
@@ -1034,7 +1036,7 @@
             ...cuts(x0, x1).map((x) => line(x, y0, x, y1)),
             ...cuts(y0, y1).map((y) => line(x0, y, x1, y)),
             "</g>",
-            `<g font-size="${n(font * 0.7)}" text-anchor="middle" dominant-baseline="middle">${names.join("")}</g>`
+            `<g font-size="${n(font * 0.7)}">${names.join("")}</g>`
         ].join("");
     }
 
@@ -1075,8 +1077,8 @@
             const arrow = mark.facing ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
             // Role by shape: a loop fixture is filled, an accent one a ring in its group's tone.
             const shape = mark.accent ? ` fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.5)}"` : ` fill="${fill}"`;
-            const label = labelled ? `<text x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}">${escapeXml(mark.name)}</text>` : "";
-            const badge = mark.badge ? `<text class="plan-badge" x="${n(x - r * 1.2)}" y="${n(y - r * 0.9)}" text-anchor="end" font-size="${n(font * 0.75)}">${escapeXml(mark.badge)}</text>` : "";
+            const label = labelled ? `<text class="plan-name" x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}" stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>` : "";
+            const badge = mark.badge ? planBadge(mark.badge, x, y, r, font * 1.15, fill, n) : "";
             const caption = mark.caption ? `<text class="plan-caption" x="${x}" y="${n(y + r * 2.6 + font)}" text-anchor="middle" stroke-width="${n(font * 0.4)}">${escapeXml(mark.caption)}</text>` : "";
             parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}"${shape}/>${panArc(mark, n, r * 3.2, fill)}${label}${badge}${caption}</g>`);
         }
@@ -1087,6 +1089,19 @@
             ...settings.roles.map((role) => key(` class="plan-role${role === settings.accentRole ? " ring" : ""}"`, escapeXml(role)))
         ];
         return `<div class="plan-legend">${legend.join("")}</div>` + parts.join("");
+    }
+
+    // The patch number as a pill up and left of the mark, clear of it and of the name on its
+    // right. SVG has no text metrics before layout, so the width assumes ~0.62 em digits and is
+    // centred on the text to split any error between both sides.
+    function planBadge(text, x, y, r, size, stroke, n) {
+        const [width, height] = [text.length * size * 0.62 + size * 0.8, size * 1.35];
+        const [right, bottom] = [x - r * 1.3, y - r * 0.7];
+        const middle = right - width / 2;
+        return (
+            `<g class="plan-badge" font-size="${n(size)}"><rect x="${n(right - width)}" y="${n(bottom - height)}" width="${n(width)}" height="${n(height)}" rx="${n(height / 2)}" stroke="${stroke}" stroke-width="1" vector-effect="non-scaling-stroke"/>` +
+            `<text x="${n(middle)}" y="${n(bottom - height / 2)}" text-anchor="middle" dominant-baseline="central">${escapeXml(text)}</text></g>`
+        );
     }
 
     // The pan limits as an arc around the mark, a full turn or more as a circle. Two segments
