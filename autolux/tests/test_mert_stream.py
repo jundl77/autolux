@@ -1110,3 +1110,13 @@ def _ffmpeg_audio(path: str, rate: int) -> np.ndarray:
         check=True,
     )
     return np.frombuffer(out.stdout, dtype=np.float32)
+
+
+def test_best_device_is_cpu_when_cuda_reports_available_with_no_device(monkeypatch):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    monkeypatch.setattr(torch.cuda, 'device_count', lambda: 0)
+    assert M.best_device() == 'cpu'
+    monkeypatch.setattr(torch.cuda, 'device_count', lambda: 1)
+    assert M.best_device() == 'cuda'
