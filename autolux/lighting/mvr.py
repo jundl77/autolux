@@ -730,15 +730,12 @@ def add_fixture(
     patch_number: int,
     fixture_class: str = '',
     matrix=IDENTITY_MATRIX,
-    identity: str | None = None,
 ) -> ElementTree.Element:
     parent = _class_layer(scene, fixture_class)
     children = parent.find('ChildList')
     if children is None:
         children = ElementTree.SubElement(parent, 'ChildList')
-    node = ElementTree.SubElement(
-        children, 'Fixture', uuid=identity or str(uuid.uuid4()).upper(), name=name
-    )
+    node = ElementTree.SubElement(children, 'Fixture', uuid=str(uuid.uuid4()).upper(), name=name)
     values = [('Matrix', format_matrix(matrix))]
     if fixture_class:
         values.append(('Classing', class_uuid(scene, fixture_class)))
