@@ -33,6 +33,8 @@
     let testCommand = null;
     let testEndTimer = null;
     let testEnded = "";
+    // A refusal stays readable over the polls until the next test action.
+    let testRefusal = "";
     let restartTimer = null;
     let applyTimer = null;
     // The rig revision the show ran when a restart was taken; null when none is pending.
@@ -631,7 +633,7 @@
     function dispatchTest(command) {
         window.autoluxControl?.dispatch(command).then((reply) => {
             if (!reply?.error || command !== testCommand) return;
-            testNote(`Test refused: ${reply.error}`);
+            testNote((testRefusal = `Test refused: ${reply.error}`));
             if (command.target && reply.status === 409) stopRefresh();
         });
     }
@@ -647,7 +649,7 @@
         const command = (testCommand = target ? { action: "highlight", target, colour } : { action: "highlight", target: null });
         stopRefresh();
         lit = Boolean(target);
-        testEnded = "";
+        testEnded = testRefusal = "";
         // Starfire drops a test nobody refreshes after 60 s, so a held one is re-sent well inside that.
         if (target) {
             refreshTimer = setInterval(() => dispatchTest(command), TEST_REFRESH_MS);
@@ -1210,7 +1212,7 @@
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
         }
-        testNote(blocked || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
+        testNote(blocked || testRefusal || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
     }
 
     // Console-style patch form over the raw inspector; every field maps to one draft action.
