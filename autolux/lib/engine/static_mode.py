@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import StarfireClient
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
@@ -54,6 +54,10 @@ class StaticRig:
     uv_targets: tuple[str, ...] = ()
     # Fixture uuids whose mode has a pan channel, the ones a highlight can sweep.
     pan_targets: tuple[str, ...] = ()
+    # Each fixture's GDTF spec and mode, universe, address and matrix, by uuid.
+    patch: Mapping[str, dict] = field(default_factory=dict)
+    # Each spec's modes Starfire was sent: {spec: {mode: {channels, cells, attributes}}}.
+    modes: Mapping[str, dict] = field(default_factory=dict)
 
     @property
     def targets(self) -> tuple[str, ...]:
@@ -68,9 +72,11 @@ class StaticRig:
                     'name': name,
                     'cells': list(cells),
                     'pan': fixture_uuid in self.pan_targets,
+                    **self.patch.get(fixture_uuid, {}),
                 }
                 for fixture_uuid, name, cells in self.fixtures
-            ]
+            ],
+            'modes': self.modes,
         }
 
 
@@ -209,8 +215,9 @@ class StaticLooks:
         """Locate {'fixture': uuid} or {'cell': id}: open white (or a swatch), beam home, no
         strobe. One highlight at a time, so testing another fixture moves it. On a mover, a
         sweep pans between the soft limits and an aim points at the focus point, so the operator
-        can check yaw and mount against the plan. A pose ({matrix, pan, tilt, focus} as the rig
-        patch has them) places the fixture for the test as the unsaved patch does."""
+        can check yaw and mount against the plan. A pose ({matrix, pan, tilt, focus, universe,
+        address, gdtf_mode} as the rig patch has them) places and patches the fixture for the
+        test as the unsaved patch does."""
         if not names_target(self.rig.fixtures, target):
             raise ValueError(f'unknown fixture or cell {target!r}')
         if colour not in HIGHLIGHT_COLOURS:
@@ -244,9 +251,9 @@ class StaticLooks:
             override['aim_focus'] = True
         else:
             values.update(pan=0.5, tilt=0.5)
-        if pose is not None:
-            override['pose'] = pose
         (fixture_uuid,) = target.values()
+        if pose is not None:
+            override['pose'] = {**pose, 'gdtf_spec': self.rig.patch[fixture_uuid]['gdtf_spec']}
         if fixture_uuid in self.rig.uv_targets:
             values['attributes'] = {UV_ATTRIBUTE: 0.0}
         # Starfire resolves a cell id through its fixture target too.

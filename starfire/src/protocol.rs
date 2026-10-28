@@ -7,8 +7,8 @@ use prost::Message;
 
 use crate::engine::Engine;
 use crate::model::{
-    AttributeValue, Command, FixturePose, LightingOverride, OverrideLifetime, PropertyValues, Rgb,
-    SpecialFx, Target, Transition,
+    AttributeValue, Command, FixturePose, LightingOverride, MovementRange, OverrideLifetime,
+    PropertyValues, Rgb, SpecialFx, Target, Transition,
 };
 
 pub const MAX_LOGIN_BYTES: usize = 4 * 1024 * 1024;
@@ -305,12 +305,15 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                         pan_sweep: value.pan_sweep,
                         aim_focus: value.aim_focus,
                         pose: value.pose.as_ref().map(|pose| {
-                            Box::new(FixturePose::from_wire(
-                                &pose.matrix,
-                                &pose.pan,
-                                &pose.tilt,
-                                &pose.focus,
-                            ))
+                            Box::new(FixturePose {
+                                matrix: pose.matrix.clone(),
+                                pan: MovementRange::from_wire(&pose.pan),
+                                tilt: MovementRange::from_wire(&pose.tilt),
+                                focus: pose.focus.clone(),
+                                universe: pose.universe,
+                                address: pose.address,
+                                profile_id: pose.profile_id.clone(),
+                            })
                         }),
                     },
                 },

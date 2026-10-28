@@ -351,16 +351,16 @@
     }
 
     // The rig Fixture's placement fields as the save exports them (mvr.patched_fixtures), so a
-    // test can show the unsaved patch. None for a fixture without pan, or a rotation Starfire refuses.
+    // test can show the unsaved patch. None for a rotation Starfire refuses.
     function draftPose(draft, settings, row) {
-        const tree = gdtfTree(draft, settings, row.spec);
-        if (!physicalRange(tree, row.mode, "Pan") || typeof homeOrientation(row.matrix) !== "object") return undefined;
+        if (typeof homeOrientation(row.matrix) !== "object") return undefined;
         const node = locate(draft.scene, row.key).node;
         const limits = (axis) => {
             const movement = movementFor(draft, row.fixture_uuid.toUpperCase(), axis)?.attributes;
             return { min: Number(movement?.minimum ?? 0), max: Number(movement?.maximum ?? 1), inverted: textOf(node, `DMXInvert${axis}`) === "true" };
         };
-        return { matrix: row.matrix, pan: limits("Pan"), tilt: limits("Tilt"), focus: focusPoint(draft, settings, node)?.matrix.slice(9) ?? [] };
+        const focus = focusPoint(draft, settings, node)?.matrix.slice(9) ?? [];
+        return { matrix: row.matrix, pan: limits("Pan"), tilt: limits("Tilt"), focus, universe: row.universe, address: row.address, gdtf_mode: row.mode };
     }
 
     function rowError(row, label, settings) {
@@ -724,11 +724,13 @@
 
     // A refused test (409: not in the running rig, paused, blackout) is off; an unanswered one may
     // be lit, so it stays lit for the clear. A late reply to an older test changes nothing.
-    function dispatchTest(command) {
+    // A refused re-send for an edit leaves `previous`, the test before it, lit and refreshed.
+    function dispatchTest(command, previous) {
         window.autoluxControl?.dispatch(command).then((reply) => {
             if (!reply?.error || command !== testCommand) return;
             testRefusal = `Test refused: ${reply.error}`;
-            if (command.target && reply.status === 409) stopRefresh();
+            if (previous) testCommand = previous;
+            else if (command.target && reply.status === 409) stopRefresh();
             paintTest();
         });
     }
@@ -747,7 +749,7 @@
     }
 
     // motion is "sweep" or "aim": Starfire moves a mover's head through the show's logical pan.
-    function highlight(target, colour, motion) {
+    function highlight(target, colour, motion, previous) {
         const pose = testPose(target);
         const command = (testCommand = target ? { action: "highlight", target, colour, ...(motion && { [motion]: true }), ...(pose && { pose }) } : { action: "highlight", target: null });
         clearTimeout(poseTimer);
@@ -759,7 +761,7 @@
             lit = true;
             refreshTimer = setInterval(() => dispatchTest(testCommand), TEST_REFRESH_MS);
         }
-        dispatchTest(command);
+        dispatchTest(command, previous);
         paintTest();
         return command;
     }
@@ -900,7 +902,7 @@
             // An edit to the lit fixture's placement, limits or focus re-sends its test once settled.
             if (lit && JSON.stringify(testPose(testCommand.target)) !== JSON.stringify(testCommand.pose)) {
                 clearTimeout(poseTimer);
-                poseTimer = setTimeout(() => highlight(testCommand.target, testCommand.colour, litMotion()), POSE_SETTLE_MS);
+                poseTimer = setTimeout(() => highlight(testCommand.target, testCommand.colour, litMotion(), testCommand), POSE_SETTLE_MS);
             }
             if (typeof document.getElementById === "function") {
                 const plan = document.getElementById("mvr-plan");

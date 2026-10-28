@@ -156,6 +156,10 @@ def _transition(value):
     raise ValueError('Invalid Starfire transition')
 
 
+def profile_id(spec: str, mode: str) -> str:
+    return f'{spec}#{mode}'
+
+
 def movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
     if limits == {'min': 0.0, 'max': 1.0, 'inverted': False}:
         return None
@@ -203,6 +207,9 @@ def _active_effect(value):
             pan=movement(pose['pan']),
             tilt=movement(pose['tilt']),
             focus=pose['focus'],
+            universe=pose['universe'],
+            address=pose['address'],
+            profile_id=profile_id(pose['gdtf_spec'], pose['gdtf_mode']),
         )
     return wire.SetActiveEffect(
         effect_id=value.pop('id'),

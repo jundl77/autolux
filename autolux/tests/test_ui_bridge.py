@@ -208,19 +208,44 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
             parse_control_command({'action': 'settings', 'settings': owned})
 
 
+IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]
+
+
+def patched(spec, mode, address):
+    return {'gdtf_spec': spec, 'gdtf_mode': mode, 'universe': 0, 'address': address}
+
+
 RIG = {
     'fixtures': [
-        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par'], 'pan': False},
-        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a'], 'pan': False},
-        {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True},
-    ]
+        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par'], 'pan': False}
+        | patched('par.gdtf', '8ch', 1),
+        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a'], 'pan': False}
+        | patched('bar.gdtf', '8ch', 9),
+        {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True}
+        | patched('spot.gdtf', '12ch', 17),
+    ],
+    'modes': {
+        'par.gdtf': {'8ch': {'channels': 8, 'cells': ['Beam'], 'attributes': ['Dimmer']}},
+        'bar.gdtf': {'8ch': {'channels': 8, 'cells': ['a'], 'attributes': ['Dimmer']}},
+        'spot.gdtf': {
+            '12ch': {'channels': 12, 'cells': ['Beam'], 'attributes': ['Dimmer', 'Pan']},
+            '16ch': {'channels': 16, 'cells': ['Beam'], 'attributes': ['Dimmer', 'Pan', 'Zoom']},
+            '6ch': {'channels': 6, 'cells': ['Beam'], 'attributes': ['Dimmer']},
+            'split': {'channels': 12, 'cells': ['Head', 'Base'], 'attributes': ['Dimmer', 'Pan']},
+        },
+    },
 }
+for fixture in RIG['fixtures']:
+    fixture['matrix'] = IDENTITY
 STILL = {'sweep': False, 'aim': False, 'pose': None}
 POSE = {
     'matrix': [0, 1, 0, -1, 0, 0, 0, 0, 1, 100, 200, 3000],
     'pan': {'min': 0.1, 'max': 0.8, 'inverted': True},
     'tilt': {'min': 0, 'max': 1, 'inverted': False},
     'focus': [],
+    'universe': 0,
+    'address': 17,
+    'gdtf_mode': '12ch',
 }
 
 
@@ -288,6 +313,10 @@ def test_a_highlight_carries_the_draft_pose_of_a_whole_fixture_checked_as_a_rig_
         ({**POSE, 'focus': [1, 2]}, 'a pose is'),
         ({**POSE, 'focus': [0, float('nan'), 0]}, 'a pose is'),
         ({**POSE, 'scale': 1}, 'a pose is'),
+        ({**POSE, 'universe': None}, 'a pose is'),
+        ({**POSE, 'address': '17'}, 'a pose is'),
+        ({**POSE, 'address': 0}, 'a pose is'),
+        ({**POSE, 'gdtf_mode': None}, 'a pose is'),
         ({**POSE, 'matrix': pitched}, 'pitch'),
         ({**POSE, 'matrix': [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0]}, 'orthogonal'),
         ({**POSE, 'pan': {'min': 0.9, 'max': 0.1, 'inverted': False}}, 'pose pan'),
@@ -297,6 +326,28 @@ def test_a_highlight_carries_the_draft_pose_of_a_whole_fixture_checked_as_a_rig_
             parse_control_command({**spot, 'pose': pose})
     with pytest.raises(ValueError, match='whole fixture'):
         parse_control_command({**spot, 'target': {'cell': 'bar/a'}, 'pose': POSE})
+
+
+@pytest.mark.parametrize(
+    ('patch', 'refusal'),
+    [
+        ({}, None),
+        ({'address': 100, 'gdtf_mode': '16ch'}, None),
+        ({'address': 12}, 'mover overlaps strip in universe 1.'),
+        ({'address': 505}, 'mover: 12 channels do not fit at address 505.'),
+        ({'universe': 1}, 'universe 2 is not one the show outputs'),
+        ({'gdtf_mode': '24ch'}, "mover: GDTF mode '24ch' is not in spot.gdtf."),
+        ({'gdtf_mode': 'split'}, "mover: mode 'split' lacks the cells or attributes of '12ch'"),
+        ({'gdtf_mode': '6ch'}, "mover: mode '6ch' lacks the cells or attributes of '12ch'"),
+    ],
+)
+def test_a_pose_is_refused_where_starfires_rig_copy_would_refuse_its_patch(patch, refusal):
+    from autolux.lib.ui_bridge import command_refusal
+
+    command = {'action': 'highlight', 'target': {'fixture': 'spot'}, 'colour': 'white', **STILL}
+    command['pose'] = {**POSE, **patch}
+    reason = command_refusal(command, 'drop', False, 'auto', {'blackout': False}, RIG)
+    assert (reason or '').startswith(refusal or '') and bool(reason) == bool(refusal), reason
 
 
 @pytest.mark.parametrize(

@@ -477,10 +477,138 @@ fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
         },
         tilt: MovementRange::default(),
         focus: focus.to_vec(),
+        universe: 0,
+        address: 1,
+        profile_id: "chauvet_intimidator_spot_110_12ch".into(),
     };
     let posed = moved(&loaded, focus, false, Motion::Posed(pose));
     assert_through(beam(&posed, &edited), towards(position, focus), "posed");
     assert_ne!(posed, moved(&loaded, focus, false, Motion::Aim));
+}
+
+/// A red test of the room fixture `name`, without a pose and then with its loaded patch as
+/// `edit` changes it: the universe 0 frames, the second or its refusal.
+fn room_test(
+    definition: &wire::RigDefinition,
+    name: &str,
+    edit: impl FnOnce(&mut FixturePose),
+) -> (Vec<u8>, Result<Vec<u8>, String>) {
+    let fixture = definition.fixtures.iter().find(|f| f.name == name).unwrap();
+    let mut pose = FixturePose {
+        matrix: fixture.matrix.clone(),
+        pan: MovementRange::from_wire(&fixture.pan),
+        tilt: MovementRange::from_wire(&fixture.tilt),
+        focus: fixture.focus.clone(),
+        universe: fixture.universe,
+        address: fixture.address,
+        profile_id: fixture.profile_id.clone(),
+    };
+    edit(&mut pose);
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let rig = FixtureRig::from_wire(definition).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    let mut test = |pose: Option<FixturePose>| {
+        let value = LightingOverride {
+            id: "highlight".into(),
+            target: Target::Fixture(fixture.fixture_uuid.clone()),
+            values: PropertyValues {
+                intensity: Some(1.0),
+                colour: Some(Rgb {
+                    red: 1.0,
+                    green: 0.0,
+                    blue: 0.0,
+                }),
+                ..Default::default()
+            },
+            intensity_multiplier: None,
+            lifetime: OverrideLifetime::UntilCleared,
+            priority: 0,
+            special_fx: None,
+            pan_sweep: false,
+            aim_focus: false,
+            pose: pose.map(Box::new),
+        };
+        engine
+            .apply(0.0, &Command::SetOverride { value })
+            .map_err(|error| format!("{error:#}"))?;
+        Ok(engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0].clone())
+    };
+    (test(None).unwrap(), test(Some(pose)))
+}
+
+fn slots(frame: &[u8], address: usize, count: usize) -> &[u8] {
+    &frame[address - 1..address - 1 + count]
+}
+
+#[test]
+fn a_pose_at_a_new_address_moves_the_test_there_and_leaves_the_old_slots_dark() {
+    // The room's spot_left (12 channels) sits at 1; nothing is patched from 200.
+    let (loaded, posed) = room_test(&support::room_definition(), "spot_left", |pose| {
+        pose.address = 200;
+    });
+    let posed = posed.unwrap();
+    assert_ne!(
+        slots(&loaded, 1, 12),
+        [0; 12],
+        "the test lights the loaded slots"
+    );
+    assert_eq!(slots(&posed, 1, 12), [0; 12]);
+    assert_eq!(slots(&posed, 200, 12), slots(&loaded, 1, 12));
+}
+
+#[test]
+fn a_pose_in_another_mode_patches_that_modes_channel_count() {
+    // The bar in 7Channel, one cell like 4Channel, so a pose may switch between them.
+    let mut definition = support::room_definition();
+    let mode = |name: &str| {
+        let profiles = &support::room_definition().profiles;
+        let profile = profiles.iter().find(|p| p.dmx_mode == name).unwrap();
+        profile.profile_id.clone()
+    };
+    let bar = definition
+        .fixtures
+        .iter_mut()
+        .find(|f| f.name == "zq06017")
+        .unwrap();
+    bar.profile_id = mode("7Channel");
+    bar.cells.clear();
+    let (loaded, posed) = room_test(&definition, "zq06017", |pose| {
+        (pose.profile_id, pose.address) = (mode("4Channel"), 509);
+    });
+    let posed = posed.unwrap();
+    assert_ne!(slots(&posed, 509, 4), [0; 4]);
+    assert_eq!(slots(&posed, 97, 7), [0; 7]);
+    assert_ne!(slots(&loaded, 97, 7), [0; 7]);
+    // Seven channels do not fit where four do.
+    let (_, refused) = room_test(&definition, "zq06017", |pose| pose.address = 509);
+    assert!(refused.unwrap_err().contains("exceeds universe boundary"));
+}
+
+#[test]
+fn a_pose_that_overlaps_another_fixture_leaves_the_universe_or_changes_the_cells_is_refused() {
+    let definition = support::room_definition();
+    let refusal = |name: &str, edit: fn(&mut FixturePose)| room_test(&definition, name, edit).1;
+    // spot_right sits at 13.
+    let overlap = refusal("spot_left", |pose| pose.address = 5).unwrap_err();
+    assert!(
+        overlap.contains("overlaps DMX channel 13 in universe 0"),
+        "{overlap}"
+    );
+    let universe = refusal("spot_left", |pose| pose.universe = 1).unwrap_err();
+    assert!(
+        universe.contains("universe 1 is not one the show outputs"),
+        "{universe}"
+    );
+    let cells = refusal("zq06017", |pose| {
+        pose.profile_id = pose.profile_id.replace("24Channel", "7Channel");
+    })
+    .unwrap_err();
+    assert!(cells.contains("keep the fixture's cells"), "{cells}");
 }
 
 #[test]
