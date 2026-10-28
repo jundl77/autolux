@@ -186,6 +186,8 @@ pub struct GdtfProfile {
     channels: Vec<Channel>,
     order: Vec<usize>,
     footprint: usize,
+    /// Colour comes from wheels alone, so blends snap rather than mix.
+    wheel_only_colour: bool,
 }
 
 /// One channel-owning geometry of a mode, encoded from its own state into the shared footprint.
@@ -392,6 +394,7 @@ impl GdtfProfile {
                     geometry,
                     offsets: offsets(&channels),
                     profile: Self {
+                        wheel_only_colour: wheel_only_colour(&channels),
                         channels,
                         order,
                         footprint: self.footprint,
@@ -485,6 +488,7 @@ impl GdtfProfile {
             + 1;
         let order = dependency_order(&channels)?;
         Ok(Self {
+            wheel_only_colour: wheel_only_colour(&channels),
             channels,
             order,
             footprint,
@@ -772,22 +776,13 @@ impl GdtfProfile {
 
     /// A fade's or LTP layer's colour at `amount` of the way from `from` to `to`.
     pub fn blend_colour(&self, from: Rgb, to: Rgb, amount: f64) -> Rgb {
-        if !self.colour_is_wheel_only() {
+        if !self.wheel_only_colour {
             from.lerp(to, amount)
         } else if amount < WHEEL_SNAP_AMOUNT {
             from
         } else {
             to
         }
-    }
-
-    fn colour_is_wheel_only(&self) -> bool {
-        let functions = || self.channels.iter().flat_map(|channel| &channel.functions);
-        functions().any(is_colour_wheel)
-            && !functions().any(|function| {
-                function.attribute.starts_with("ColorAdd_")
-                    || function.attribute.starts_with("ColorSub_")
-            })
     }
 
     pub fn has_dark_wheel_slot(&self) -> bool {
@@ -1173,6 +1168,15 @@ pub fn numbered_attribute(attribute: &str, prefix: &str) -> bool {
     attribute
         .strip_prefix(prefix)
         .is_some_and(|index| !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn wheel_only_colour(channels: &[Channel]) -> bool {
+    let functions = || channels.iter().flat_map(|channel| &channel.functions);
+    functions().any(is_colour_wheel)
+        && !functions().any(|function| {
+            function.attribute.starts_with("ColorAdd_")
+                || function.attribute.starts_with("ColorSub_")
+        })
 }
 
 fn is_colour_wheel(function: &Function) -> bool {
