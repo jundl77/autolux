@@ -501,11 +501,11 @@ def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_clic
         "const sync = (state, saved) => patch.syncTest(state, 'control', saved);\n"
         '(async () => {\n'
         "    const seen = {none: sync(null, 'a'), older: sync({rig_revision: 'a'}, 'b')};\n"
-        "    seen.saved = sync({rig_revision: 'a'}, 'a');\n"
+        "    seen.saved = sync({rig_revision: 'a', session: 'one'}, 'a');\n"
         '    seen.clicks = [0, 1].map(() => window.dash_clientside.fixture_patch_model.applyClick());\n'
         '    await new Promise((resolve) => setTimeout(resolve, 0));\n'
-        "    seen.restart = [sync({rig_revision: 'a'}, 'a'), sync(null, 'a'),\n"
-        "        sync({rig_revision: 'a'}, 'a')];\n"
+        "    seen.restart = [sync({rig_revision: 'a', session: 'one'}, 'a'), sync(null, 'a'),\n"
+        "        sync({rig_revision: 'a', session: 'two'}, 'a')];\n"
         '    console.log(JSON.stringify({...seen, labels}));\n'
         '    process.exit(0);\n'
         '})();'
@@ -527,7 +527,7 @@ def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_clic
         'Click again to restart; lights go dark until it is back',
         'Restart show',
     ]
-    # A same-revision restart holds until the show has gone and come back, not the full minute.
+    # A same-revision restart holds until the next session reports, not the full minute.
     restarting = ['Restarting the show on the saved patch.', True]
     assert seen['restart'] == [restarting, restarting, ['', False]]
 

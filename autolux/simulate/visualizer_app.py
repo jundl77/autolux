@@ -2296,6 +2296,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                     'special_groups',
                     'highlight',
                     'rig_revision',
+                    'session',
                 )
             }
             control['settings_text'] = settings_text(control['settings'] or {})

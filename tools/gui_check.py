@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -178,8 +179,9 @@ class StubShow:
             elif a == 'highlight':
                 s['highlight'] = c['target'] and {'target': c['target'], 'colour': c['colour']}
             elif a == 'restart_show':
-                # A new Starfire login: the test is gone and the rig is the store's.
+                # A new session and Starfire login: the test is gone and the rig is the store's.
                 s['rig_revision'], s['rig'] = running_rig(self.rig_path)
+                s['session'] = uuid.uuid4().hex
                 s['highlight'] = None
 
     @staticmethod

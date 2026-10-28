@@ -19,7 +19,6 @@
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
     const RESTART_HOLD_MS = 60000;
-    const SHOW_GONE = Symbol("show gone");
     // A forgotten Locate in a party room: the held test ends by itself after 10 minutes.
     const TEST_MAX_MS = 600000;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
@@ -39,7 +38,7 @@
     let testRefusal = "";
     let restartTimer = null;
     let applyTimer = null;
-    // The rig revision the show ran when a restart was taken; null when none is pending.
+    // The show session a restart was taken in; null when none is pending.
     let restartingFrom = null;
     let suppressedClick = null;
     let requestId = 0;
@@ -676,11 +675,11 @@
             return null;
         }
         const command = { action: "restart_show" };
-        const from = show?.rig_revision ?? null;
+        const from = show?.session ?? null;
         window.autoluxControl?.dispatch(command, "fixture-show-rig").then((reply) => {
             if (reply?.error) return;
             restartingFrom = from;
-            // A show back on the same revision must not hold Restart disabled for good.
+            // An engine that never takes the restart must not hold Restart disabled for good.
             clearTimeout(restartTimer);
             restartTimer = setTimeout(() => (restartingFrom = null), RESTART_HOLD_MS);
             window.dash_clientside.set_props("fixture-show-rig", { children: RESTARTING });
@@ -773,11 +772,10 @@
             // The control state carries the rig only when its revision changed; keep the last one.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
             paintTest();
-            // No show reporting a rig means nothing to restart; a restart holds until a new rig reports.
+            // No show reporting a rig means nothing to restart. A restart holds until the next
+            // session reports, which may run the same revision: a restart without a Save.
             const loaded = state?.rig_revision ?? null;
-            // A show that went away and came back is the new session, even on the same revision.
-            if (loaded === null && restartingFrom !== null) restartingFrom = SHOW_GONE;
-            if (loaded !== null && loaded !== restartingFrom) restartingFrom = null;
+            if (state?.session && state.session !== restartingFrom) restartingFrom = null;
             const stale = loaded !== null && loaded !== saved;
             return restartingFrom !== null ? [RESTARTING, true] : [stale ? STALE_RIG : "", loaded === null];
         },
