@@ -151,6 +151,7 @@ pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
     groups: BTreeMap<String, Vec<String>>,
     accent_groups: BTreeSet<String>,
+    accent_cells: BTreeSet<String>,
     profiles: BTreeMap<String, Vec<GdtfCell>>,
     cells: BTreeMap<String, (usize, usize)>,
     spatial: Spatial,
@@ -387,10 +388,26 @@ impl FixtureRig {
         let spatial = Spatial::new(positions, areas, &cell_groups, |cell| {
             cells.get(cell).map_or(usize::MAX, |&(fixture, _)| fixture)
         });
+        for (group, members) in &cell_groups {
+            for accent in accent_groups.iter().filter(|accent| *accent != group) {
+                ensure!(
+                    !cell_groups[accent]
+                        .iter()
+                        .any(|cell| members.contains(cell)),
+                    "loop group {group} shares a fixture with accent group {accent}, which plays specials only"
+                );
+            }
+        }
+        let accent_cells = accent_groups
+            .iter()
+            .flat_map(|group| &cell_groups[group])
+            .cloned()
+            .collect();
         Ok(Self {
             fixtures,
             groups: cell_groups,
             accent_groups,
+            accent_cells,
             profiles,
             cells,
             spatial,
@@ -431,6 +448,33 @@ impl FixtureRig {
     /// Groups whose MVR Layer is `accent`: they play specials only, never autoloops.
     pub fn is_accent(&self, group: &str) -> bool {
         self.accent_groups.contains(group)
+    }
+
+    pub fn is_accent_cell(&self, cell_id: &str) -> bool {
+        self.accent_cells.contains(cell_id)
+    }
+
+    pub fn refuse_accent_group(&self, group: &str) -> Result<()> {
+        ensure!(
+            !self.is_accent(group),
+            "accent group {group} plays specials only, never autoloops"
+        );
+        Ok(())
+    }
+
+    /// The cells an autoloop's target lights. Naming an accent group or fixture is refused;
+    /// `all` passes over accent cells, which rig load keeps out of loop groups.
+    pub fn resolve_for_loop(&self, target: &Target) -> Result<Vec<String>> {
+        let mut cells = self.resolve(target)?;
+        match target {
+            Target::Group(group) => self.refuse_accent_group(group)?,
+            Target::Fixture(id) => ensure!(
+                !cells.iter().any(|cell| self.is_accent_cell(cell)),
+                "accent fixture {id} plays specials only, never autoloops"
+            ),
+            Target::All => cells.retain(|cell| !self.is_accent_cell(cell)),
+        }
+        Ok(cells)
     }
 
     pub fn validate_attributes(

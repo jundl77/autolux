@@ -371,7 +371,8 @@ def check_encoder_sha(actual: str, expected: str | None) -> None:
 def best_device() -> str:
     import torch
 
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    # torch reports CUDA available with zero devices when CUDA_VISIBLE_DEVICES is empty.
+    return "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
 
 
 def state_dict_sha(model) -> str:

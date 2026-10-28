@@ -1102,7 +1102,7 @@ fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureSta
     let mut states = rig.empty_states();
     // LuaAutoloop::render has already validated every effect.
     for effect in effects {
-        for id in rig.resolve(&effect.target)? {
+        for id in rig.resolve_for_loop(&effect.target)? {
             let state = states
                 .get_mut(&id)
                 .context("resolved fixture is absent from the rig")?;
