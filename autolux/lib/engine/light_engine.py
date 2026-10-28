@@ -889,10 +889,19 @@ class LightEngine(IMusicAnalyserHandler):
         if late_sec > 0.0:
             if not self._committing_late:
                 self._committing_late = True
+                decoder = self.section_decoder
+                bar_sec = decoder.bar_sec if decoder is not None else self._bar_seconds()
+                # More than a bar late is no tempo effect: after a track change the floor
+                # fires and the first decision is a backlog bar from the old track.
+                reason = (
+                    'stale decoder backlog after a track change, accepted'
+                    if late_sec > bar_sec
+                    else 'slow tempo, accepted'
+                )
                 LOGGER.warning(
                     f'[engine] the chain is older than the '
                     f'{self._playback_delay_sec:.2f}s playback delay — intents '
-                    f'commit {late_sec:.2f}s late (slow tempo, accepted)'
+                    f'commit {late_sec:.2f}s late ({reason})'
                 )
         elif self._committing_late:
             self._committing_late = False
