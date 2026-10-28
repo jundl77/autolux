@@ -726,7 +726,7 @@ def add_fixture(
     gdtf_mode: str,
     universe: int,
     address: int,
-    fixture_id: int,
+    patch_number: int,
     fixture_class: str = '',
     matrix=IDENTITY_MATRIX,
     identity: str | None = None,
@@ -744,8 +744,8 @@ def add_fixture(
     values += [
         ('GDTFSpec', gdtf_spec),
         ('GDTFMode', gdtf_mode),
-        ('FixtureID', str(fixture_id)),
-        ('FixtureIDNumeric', str(fixture_id)),
+        ('FixtureID', str(patch_number)),
+        ('FixtureIDNumeric', str(patch_number)),
         ('UnitNumber', '0'),
     ]
     for tag, text in values:

@@ -961,9 +961,9 @@ const SUITES = {
         const before = await rigFiles();
         await selectFixture('spot_left');
         await arm();
-        await formEdit('Fixture ID', () => typeInto(cfg('FixtureID'), '7'),
+        await formEdit('Patch number', () => typeInto(cfg('FixtureID'), '7'),
             {action: 'set-child-text', tag: 'FixtureID', value: '7'});
-        await formEdit('Fixture ID (numeric)', () => typeInto(cfg('FixtureIDNumeric'), '8'),
+        await formEdit('Patch number (numeric)', () => typeInto(cfg('FixtureIDNumeric'), '8'),
             {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '8'});
         await formEdit('Address 25', () => typeInto(cfg('address'), '25'),
             {action: 'set-address', universe: 1, address: 25});
@@ -1061,7 +1061,7 @@ const SUITES = {
 
         // Stale revision: the store changes behind the page; the page's Save must not land.
         await selectFixture('spot_left');
-        await formEdit('Fixture ID 9 (to save over a moved store)', () => typeInto(cfg('FixtureID'), '9'),
+        await formEdit('Patch number 9 (to save over a moved store)', () => typeInto(cfg('FixtureID'), '9'),
             {action: 'set-child-text', tag: 'FixtureID', value: '9'});
         await harness('rig', {bump: true});
         const bumped = await rigFiles();
@@ -1212,7 +1212,7 @@ const SUITES = {
         await check('apply', 'disabled while the show runs the saved rig', (await applyDisabled()) && (await banner()) === '',
             {banner: await banner()});
         await selectFixture('wash_left');
-        await formEdit('Fixture ID (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
+        await formEdit('Patch number (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
             {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
         await check('apply', 'an unsaved edit does not enable Apply', await applyDisabled());
         await check('apply', 'Save', await save(), {status: await statusText()});
@@ -1332,7 +1332,7 @@ const SUITES = {
         // A browser reload after a Save must show the saved patch, and offer Apply.
         await cfgFresh();
         await selectFixture('wash_left');
-        await formEdit('Fixture ID (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
+        await formEdit('Patch number (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
             {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
         await check('reload after save', 'Save', await save());
         await navigate('Page.reload');

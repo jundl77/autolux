@@ -366,7 +366,7 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [relabelled] = edit(current, renamed.action);
     const row = (tree) => plain(model.fixtureRows(tree, settings).find((entry) => entry.key === key));
     assert.deepEqual({ ...row(relabelled), name: "wash_right" }, row(current));
-    // IDs: whole numbers, duplicates only warned.
+    // Patch numbers: whole numbers, duplicates only warned.
     assert.match(check("FixtureIDNumeric", child(spot, "FixtureIDNumeric").text).warning, /spot_left/);
     assert.equal(check("FixtureID", "A-1").error, null, "MVR's FixtureID is a string");
     assert.match(check("FixtureIDNumeric", "x").error, /whole number/);

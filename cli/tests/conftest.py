@@ -21,7 +21,7 @@ def write_rig(tmp_path):
             gdtf_mode=mode or profile['default_mode'],
             universe=0,
             address=1,
-            fixture_id=1,
+            patch_number=1,
             fixture_class=fixture_class,
             matrix=mvr.compose_matrix([0.0, 0.0, 0.0], rotation),
         )

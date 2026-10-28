@@ -49,7 +49,7 @@ def placed_group(xs: list[float]) -> list[dict]:
             gdtf_mode='1ch',
             universe=0,
             address=index + 1,
-            fixture_id=index + 1,
+            patch_number=index + 1,
             fixture_class='wash',
             matrix=[*mvr.IDENTITY_MATRIX[:9], x, -1000.0, 3000.0],
         )
@@ -257,7 +257,7 @@ def test_each_added_fixture_gets_a_fresh_random_uuid():
             gdtf_mode='4ch',
             universe=0,
             address=200 + 4 * index,
-            fixture_id=9 + index,
+            patch_number=9 + index,
         ).get('uuid')
         for index in range(2)
     ]
@@ -274,7 +274,7 @@ def test_a_new_fixture_joins_the_layer_of_its_class():
         gdtf_mode='4ch',
         universe=0,
         address=200,
-        fixture_id=9,
+        patch_number=9,
         fixture_class='fx',
     )
     fixtures = mvr.patched_fixtures(scene)
