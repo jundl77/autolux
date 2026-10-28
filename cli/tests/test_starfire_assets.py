@@ -286,11 +286,22 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     assert cells['zq06017'] == tuple(f'{ids["zq06017"]}/Beam Segment {n}' for n in range(1, 9))
     washes = ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
     assert rig.uv_targets == tuple(ids[name] for name in washes)
+    assert rig.pan_targets == (ids['spot_left'], ids['spot_right'])
     lighting = RecordingStarfireClient()
     looks = StaticLooks(lighting, rig)
     looks.highlight({'fixture': ids['wash_left']}, 'warm')
     looks.highlight({'cell': cells['zq06017'][2]})
-    wash, segment = (protocol.build_command(event['command']) for event in lighting.events)
+    looks.highlight({'fixture': ids['spot_left']}, sweep=True)
+    looks.highlight({'fixture': ids['spot_left']}, aim=True)
+    wash, segment, sweep, aim = (
+        protocol.build_command(event['command']) for event in lighting.events
+    )
+    assert (sweep.pan_sweep, sweep.HasField('pan'), aim.aim_upstage, aim.HasField('tilt')) == (
+        True,
+        False,
+        True,
+        False,
+    )
     assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (
         ids['wash_left'],
         0.0,

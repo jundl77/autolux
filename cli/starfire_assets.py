@@ -126,18 +126,19 @@ def native_rig(path: Path):
 
 def static_rig(path: Path) -> StaticRig:
     scene, fixtures = load_rig(path)
-    lit_by_uv = {}
+    attributes = {}
     for fixture in fixtures:
         spec, mode = fixture['gdtf_spec'], fixture['gdtf_mode']
-        if (spec, mode) not in lit_by_uv:
+        if (spec, mode) not in attributes:
             root = mvr.gdtf_root(mvr.gdtf_description(scene, spec), spec)
-            lit_by_uv[spec, mode] = any(
-                logical.get('Attribute') == UV_ATTRIBUTE
+            attributes[spec, mode] = {
+                logical.get('Attribute')
                 for dmx_mode in root.iter('DMXMode')
                 if dmx_mode.get('Name') == mode
                 for logical in dmx_mode.iter('LogicalChannel')
-            )
-        fixture['uv'] = lit_by_uv[spec, mode]
+            }
+        fixture['uv'] = UV_ATTRIBUTE in attributes[spec, mode]
+        fixture['pan'] = 'Pan' in attributes[spec, mode]
     by_uuid = {fixture['fixture_uuid']: fixture for fixture in fixtures}
     groups = mvr.groups(fixtures)[0]
     # The ids come from the very RigDefinition Starfire loads, named by Starfire's cell rule.
@@ -168,6 +169,9 @@ def static_rig(path: Path) -> StaticRig:
             fixture_uuid
             for fixture_uuid, _, cells in patched
             if by_uuid[fixture_uuid]['uv'] and len(cells) == 1
+        ),
+        pan_targets=tuple(
+            fixture_uuid for fixture_uuid, _, _ in patched if by_uuid[fixture_uuid]['pan']
         ),
     )
 

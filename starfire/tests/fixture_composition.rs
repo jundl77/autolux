@@ -53,6 +53,8 @@ fn lighting_override(id: &str, target: Target, values: PropertyValues) -> Comman
             lifetime: OverrideLifetime::UntilCleared,
             priority: 0,
             special_fx: None,
+            pan_sweep: false,
+            aim_upstage: false,
         },
     }
 }
@@ -242,6 +244,8 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
                     lifetime: OverrideLifetime::UntilCleared,
                     priority: 1101,
                     special_fx: None,
+                    pan_sweep: false,
+                    aim_upstage: false,
                 },
             },
         )
@@ -267,6 +271,8 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
                     lifetime: OverrideLifetime::UntilCleared,
                     priority: 100,
                     special_fx: None,
+                    pan_sweep: false,
+                    aim_upstage: false,
                 },
             },
         )

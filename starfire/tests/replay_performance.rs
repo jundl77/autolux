@@ -116,6 +116,8 @@ fn mixed_show() -> Replay {
                     },
                     priority: 100,
                     special_fx: None,
+                    pan_sweep: false,
+                    aim_upstage: false,
                 },
             },
         );

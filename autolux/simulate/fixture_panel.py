@@ -78,15 +78,11 @@ FIXTURE_CSS = '''
 #mvr-plan .plan circle {stroke:#e6edf3;}
 #mvr-plan .plan circle.ring {stroke:var(--ring);}
 .plan-key .plan-role {fill:var(--muted);stroke:var(--muted);}
-.plan-key .plan-role.ring {fill:none;stroke-width:2;}
+.plan-key .plan-role.ring {fill:none;stroke-width:2;stroke-dasharray:2,2;}
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
-#mvr-plan .plan .plan-badge rect {fill:var(--ink);}
-#mvr-plan .plan .plan-badge text {fill:var(--text);font-weight:600;}
 #mvr-plan .plan .plan-name {stroke:#0b121c;stroke-linejoin:round;paint-order:stroke;}
-#mvr-plan .plan .plan-caption {display:none;fill:var(--text);stroke:#0b121c;paint-order:stroke;}
-#mvr-plan .mvr-object:is(:hover,.selected) .plan-caption {display:inline;}
 #mvr-plan .plan-pan {fill:none;opacity:.2;pointer-events:none;}
 #mvr-plan .mvr-object.selected .plan-pan {opacity:.9;}
 #mvr-plan .plan-areas {stroke:#3b4d62;}
@@ -120,6 +116,8 @@ FIXTURE_CSS = '''
 .cfg-section>h4 small {color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;}
 .cfg-field {display:grid;gap:6px;align-content:start;min-width:0;}
 .cfg-field.wide {grid-column:1 / -1;}
+/* A full-width row of two fields at 2:1, not the section's equal halves. */
+.cfg-field-pair {grid-column:1 / -1;display:grid;grid-template-columns:2fr 1fr;gap:14px 12px;}
 .cfg-field>span,.cfg-split span {color:var(--muted);font-size:12px;}
 .cfg-field>span small {float:right;}
 .cfg-split+span {margin-top:8px;}
@@ -143,7 +141,7 @@ FIXTURE_CSS = '''
 #config-panel .cfg-test button,#config-panel .cfg-cells button {padding:6px 10px;}
 #config-panel .cfg-test .cfg-swatch {width:26px;height:26px;padding:0;background:var(--swatch);border-color:#3b4d62;}
 #config-panel .cfg-test button.active {border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
-#config-panel .cfg-test .cfg-test-main.active {background:#284d71;color:#fff;}
+#config-panel .cfg-test .cfg-test-main.active,#config-panel .cfg-test .cfg-test-motion.active {background:#284d71;color:#fff;}
 .cfg-test-note {margin:8px 0 0;}
 .cfg-cells {grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:4px;}
 #config-panel .cfg-cells button.selected {border-color:var(--accent);background:#273b51;color:#fff;}

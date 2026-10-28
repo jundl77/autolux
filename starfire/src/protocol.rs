@@ -302,6 +302,8 @@ pub fn apply_command(engine: &mut Engine, at_seconds: f64, command: &ClientMessa
                         lifetime,
                         priority: value.priority,
                         special_fx: special,
+                        pan_sweep: value.pan_sweep,
+                        aim_upstage: value.aim_upstage,
                     },
                 },
             )

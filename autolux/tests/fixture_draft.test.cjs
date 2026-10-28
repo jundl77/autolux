@@ -15,9 +15,11 @@ let timerId = 0;
 const labels = [];
 ds.set_props = (id, props) => (id === "fixture-grid-action" ? actions.push(props.data) : labels.push([id, props.children]));
 const autoluxControl = { dispatch: (command) => (commands.push(command), Promise.resolve(replies.shift() || {})) };
+// No DOM: a test that builds the pane lends this page a createElement.
+const page = { addEventListener() {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixture_patch.js"), "utf8"), {
     window: { dash_clientside: ds, addEventListener() {}, autoluxControl },
-    document: { addEventListener() {} },
+    document: page,
     structuredClone,
     crypto: globalThis.crypto,
     TextEncoder,
@@ -234,7 +236,6 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     const kinta = markup.slice(markup.indexOf("<title>kinta"));
     assert.match(kinta.slice(0, kinta.indexOf("</g>")), /fill="none" class="ring"/);
     assert.match(markup, /fx <b>1<\/b><\/span>/);
-    assert.match(kinta, /class="plan-badge"[^]*?>\d+<\/text><\/g><text class="plan-caption"[^>]*>DMX \d+–\d+ · fx · accent</);
     const offCentre = { ...byName.kinta, x: 4000 };
     // One row: no depth extent, so only the X cuts (4000..9000 at 5667 and 7333).
     const row = model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings);
@@ -527,6 +528,28 @@ test("the test controls send highlight commands, hold them alive and clear once 
     const refused = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     assert.equal(commands.length, refused);
+});
+
+test("only a mover's test row offers Sweep and Aim, which toggle its motion and keep the swatch", () => {
+    const element = () => ({ attributes: {}, children: [], setAttribute(name, value) { this.attributes[name] = value; }, append(...children) { this.children.push(...children); } });
+    const specs = (nodes) => nodes.flatMap(function visit(node) { return typeof node === "object" ? [node.attributes["data-cfg-test"], ...node.children.flatMap(visit)] : []; }).filter(Boolean);
+    const current = draft();
+    page.createElement = element;
+    try {
+        ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
+        assert.ok(["sweep", "aim"].every((spec) => specs(model.patchForm(current, settings, fixtureNode(current, "spot_right"))).includes(spec)));
+        for (const still of ["kinta", "wash_left"]) assert.ok(!specs(model.patchForm(current, settings, fixtureNode(current, still))).some((spec) => spec === "sweep" || spec === "aim"), still);
+    } finally {
+        delete page.createElement;
+    }
+    ds.fixture_patch.syncTest({ rig: RUNNING, paused: false, static: { blackout: false }, highlight: null }, "config");
+    const spot = { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right } };
+    assert.deepEqual(plain(model.testControl("sweep")), { ...spot, colour: "white", sweep: true });
+    assert.deepEqual(plain(model.testControl("red")), { ...spot, colour: "red", sweep: true });
+    assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red", aim: true });
+    // A second click on the lit motion holds the light still; Off clears it all.
+    assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red" });
+    assert.deepEqual(plain(model.testControl("off")), { action: "highlight", target: null });
 });
 
 test("Restart show restarts the show only on a second click within 5 s", async () => {

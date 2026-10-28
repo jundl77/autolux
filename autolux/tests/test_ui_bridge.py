@@ -210,10 +210,12 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
 
 RIG = {
     'fixtures': [
-        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par']},
-        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a']},
+        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par'], 'pan': False},
+        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a'], 'pan': False},
+        {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True},
     ]
 }
+STILL = {'sweep': False, 'aim': False}
 
 
 def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears():
@@ -223,10 +225,11 @@ def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears
         'action': 'highlight',
         'target': {'fixture': 'par'},
         'colour': 'white',
+        **STILL,
     }
     assert parse_control_command(
         {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
-    ) == {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
+    ) == {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green', **STILL}
     assert parse_control_command({'action': 'highlight', 'target': None}) == {
         'action': 'highlight',
         'target': None,
@@ -238,6 +241,42 @@ def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears
         parse_control_command({'action': 'highlight'})
     with pytest.raises(ValueError, match='colour'):
         parse_control_command({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'uv'})
+
+
+def test_a_highlight_sweeps_or_aims_a_whole_fixture_and_never_both():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    spot = {'action': 'highlight', 'target': {'fixture': 'spot'}}
+    for motion in ('sweep', 'aim'):
+        assert parse_control_command({**spot, motion: True}) == {
+            **spot,
+            'colour': 'white',
+            **STILL,
+            motion: True,
+        }
+    for payload, reason in (
+        ({**spot, 'sweep': 1}, 'true or false'),
+        ({**spot, 'sweep': True, 'aim': True}, 'not both'),
+        ({**spot, 'target': {'cell': 'bar/a'}, 'aim': True}, 'not a cell'),
+    ):
+        with pytest.raises(ValueError, match=reason):
+            parse_control_command(payload)
+
+
+@pytest.mark.parametrize(
+    ('target', 'motion', 'refusal'),
+    [
+        ({'fixture': 'spot'}, 'sweep', None),
+        ({'fixture': 'spot'}, 'aim', None),
+        ({'fixture': 'par'}, 'sweep', 'front has no pan'),
+        ({'fixture': 'par'}, 'aim', 'front has no pan'),
+    ],
+)
+def test_sweep_and_aim_are_refused_for_a_fixture_without_pan(target, motion, refusal):
+    from autolux.lib.ui_bridge import command_refusal
+
+    command = {'action': 'highlight', 'target': target, 'colour': 'white', **STILL, motion: True}
+    assert command_refusal(command, 'drop', False, 'auto', {'blackout': False}, RIG) == refusal
 
 
 @pytest.mark.parametrize(
@@ -259,7 +298,7 @@ def test_a_highlight_is_refused_for_a_fixture_the_rig_lacks_or_a_dark_rig(
 ):
     from autolux.lib.ui_bridge import command_refusal
 
-    command = {'action': 'highlight', 'target': target, 'colour': 'white'}
+    command = {'action': 'highlight', 'target': target, 'colour': 'white', **STILL}
     static = {'blackout': blackout}
     assert command_refusal(command, 'drop', paused, 'auto', static, RIG) == refusal
 

@@ -368,7 +368,7 @@ const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
 const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
     ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
 const same = (a, b) => canon(a) === canon(b);
-const lightOn = (target, colour) => ({action: 'highlight', target, colour});
+const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim'});
 // The frozen room's MVR uuids: tests target a fixture by its uuid, whatever its name is now.
 const ROOM_UUID = {
     spot_left: '75D557BC-32F9-592A-810D-652F0ECF68D7',
@@ -379,6 +379,16 @@ const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
 const markOf = (name) => `[...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) =>
     (g.querySelector('title')?.textContent || '').split(' · ')[0] === ${JSON.stringify(name)})`;
+// Every fixture label's box, in viewport pixels, against the plan SVG's own box.
+const labelBoxesJs = `(() => {
+    const box = document.querySelector('#mvr-plan svg.plan')?.getBoundingClientRect();
+    return [...document.querySelectorAll('#mvr-plan .plan-name')].map((t) => {
+        const r = t.getBoundingClientRect();
+        return {text: t.textContent, left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+            inside: !box || (r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5)};
+    });
+})()`;
+const labelsInPlan = async () => (await ev(labelBoxesJs)).every((label) => label.inside);
 const takeActions = () => ev('window.__actions.splice(0)');
 const keepAlive = () => ev('({held: window.__keepAlive.size, delays: window.__keepAliveDelays.slice()})');
 const statusText = () => text(STATUS);
@@ -446,7 +456,7 @@ async function planMark(name) {
         const m = circle.ownerSVGElement.getScreenCTM();
         const [cx, cy] = [Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))];
         return {cx, cy, a: m.a, d: m.d, x: m.a * cx + m.c * cy + m.e, y: m.b * cx + m.d * cy + m.f,
-            ring: circle.classList.contains('ring')};
+            ring: !!mark.querySelector('circle.ring')};
     })()`);
 }
 const areaBox = () => ev(`(() => { const r = document.querySelector('#mvr-plan .plan-areas rect');
@@ -863,6 +873,7 @@ const SUITES = {
         const keys = await ev(`[...document.querySelectorAll('#mvr-plan .plan-legend .plan-key')].map((k) => k.textContent)`);
         await check('rig map', 'has a legend', keys.length > 0, {keys});
         await check('rig map', 'has a scale bar', /\d+(\.\d+)? m$/.test(await text('#mvr-plan .plan-scale')), {scale: await text('#mvr-plan .plan-scale')});
+        await check('rig map', 'no fixture label is clipped at a plan edge', await labelsInPlan(), {labels: await ev(labelBoxesJs)});
         await shot('config');
         await planSettled();
         await action('rig map', 'select a fixture', () => click('#mvr-plan .mvr-object circle'), {watch: 1500});
@@ -873,13 +884,10 @@ const SUITES = {
         const plan = await ev(`(() => {
             const marks = [...document.querySelectorAll('#mvr-plan .mvr-object:has(circle)')];
             return {head: document.getElementById('mvr-summary').textContent, marks: marks.length,
-                badges: marks.filter((m) => /^\\d+( ×\\d+)?$/.test(m.querySelector('.plan-badge')?.textContent)).length,
-                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0),
-                caption: [...document.querySelectorAll('#mvr-plan .plan-caption')].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.textContent)};
+                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0)};
         })()`);
-        await check('rig map', 'header, legend counts and a badge per mark agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
-            && plan.badges === plan.marks && plan.counts === plan.marks, plan);
-        await check('rig map', 'only the selected mark shows its DMX caption', plan.caption.length === 1 && /^DMX \d+–\d+ · \w+ · (loop|accent)$/.test(plan.caption[0]), plan);
+        await check('rig map', 'header and legend counts agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
+            && plan.counts === plan.marks, plan);
         await shot('plan_rich', '.mvr-card');
         await action('Telemetry tab', 'open', () => tab('Telemetry'), {watch: 2500});
         await check('Telemetry tab', 'shows its panel', await ev(shown('telemetry-panel')));
@@ -1039,8 +1047,7 @@ const SUITES = {
             {action: 'set-child-text', tag: 'DMXInvertTilt', value: 'true'});
         await check('patch form', 'spot_left is filled (loop) before its group changes', !(await planMark('spot_left')).ring);
         await formEdit('Group movers -> fx', () => choose(cfg('group'), 'fx'), {action: 'set-class', name: 'fx'});
-        await check('patch form', 'joining fx moves spot_left to the accent Layer', await waitFor(`(() => {
-            const c = ${markOf('spot_left')}?.querySelector('circle'); return !!c && c.classList.contains('ring'); })()`, 3000)
+        await check('patch form', 'joining fx moves spot_left to the accent Layer', await waitFor(`!!${markOf('spot_left')}?.querySelector('circle.ring')`, 3000)
             && (await ev(`document.querySelector('${cfg('role')}').value`)) === 'accent');
 
         await selectFixture('zq06017');
@@ -1068,8 +1075,8 @@ const SUITES = {
         await check('patch form', 'Save is enabled again', await waitFor(`!document.getElementById('fixture-save').disabled`, 2000));
         await formEdit('Role of wash -> accent', () => choose(cfg('role'), 'accent'), {action: 'set-role', role: 'accent'});
         await check('patch form', 'the whole wash group moves to the accent Layer', await waitFor(`['wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right']
-            .every((name) => [...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) => (g.querySelector('title')?.textContent || '').split(' · ')[0] === name)
-                ?.querySelector('circle').classList.contains('ring'))`, 3000));
+            .every((name) => !![...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) => (g.querySelector('title')?.textContent || '').split(' · ')[0] === name)
+                ?.querySelector('circle.ring'))`, 3000));
         await selectFixture('wash_right');
         await takeActions();
         await choose(cfg('group'), NEW_GROUP);
@@ -1176,11 +1183,19 @@ const SUITES = {
             await click(testButton('red'));
             await click(testButton('1'));
         }, [lightOn({fixture: ROOM_UUID.spot_left}, 'red'), lightOn({fixture: ROOM_UUID.spot_right}, 'red')]);
-        await exactly('locate Off', 'click', () => click(testButton('off')), [CLEAR]);
+        for (const motion of ['sweep', 'aim']) {
+            await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
+            await check(`locate ${motion}`, 'lights its button', await waitFor(`document.querySelector('${testButton(motion)}').classList.contains('active')`, 3000));
+        }
+        await exactly('locate Off', 'clears the aim', () => click(testButton('off')), [CLEAR]);
+        await check('locate Off', 'the motion buttons go dark', await waitFor(`!document.querySelector('${testButton('aim')}').classList.contains('active')`, 3000));
+        await exactly('locate sweep', 'from dark lights white', () => click(testButton('sweep')), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', 'sweep')]);
+        await exactly('locate Off', 'clears the sweep', () => click(testButton('off')), [CLEAR]);
         await check('locate Off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
         await exactly('locate Off', 'a tick after Off sends nothing', () => ev('window.__tickKeepAlive()'), []);
 
         await selectFixture('zq06017');
+        await check('locate cells', 'a fixture without pan offers no Sweep or Aim', await ev(`!document.querySelector('${testButton('sweep')}') && !document.querySelector('${testButton('aim')}')`));
         const rig = (await harness('state')).rig;
         const cells = rig.fixtures.find((f) => f.name === 'zq06017').cells;
         const listing = `[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.dataset.cfgCell)`;
