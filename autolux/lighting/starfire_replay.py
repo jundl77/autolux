@@ -196,8 +196,15 @@ def load_preview(text: str) -> Preview:
         isinstance(cell, dict) and isinstance(cell.get('fixture'), str) for cell in cells
     ):
         raise ValueError('preview cells must name their fixture')
-    if not isinstance(header.get('groups'), dict):
+    groups = header.get('groups')
+    if not isinstance(groups, dict):
         raise TypeError('preview groups must be an object')
+    if not all(
+        isinstance(members, list)
+        and all(type(cell) is int and 0 <= cell < len(cells) for cell in members)
+        for members in groups.values()
+    ):
+        raise ValueError('preview group members must be header cell indices')
     frames = [json.loads(line) for line in lines[1:]]
     if len(frames) != header.get('frames'):
         raise ValueError(

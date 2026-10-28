@@ -81,6 +81,11 @@ def test_the_loader_refuses_frames_that_do_not_match_the_header(frames, reason):
         load_preview(preview_text(frames))
 
 
+def test_the_loader_refuses_group_members_outside_the_header_cells():
+    with pytest.raises(ValueError, match='header cell indices'):
+        load_preview(preview_text().replace('"empty": []', '"empty": [2]'))
+
+
 def test_bars_start_where_the_renderers_grid_enters_them():
     # Five frames a beat, four beats a bar: a bar every 20 frames.
     assert bar_starts(load_preview(preview_text())) == [(1, 0), (2, 20)]
