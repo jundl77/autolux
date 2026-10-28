@@ -155,6 +155,7 @@ def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypa
         ('monitor_setup', False),
         ('controller_run', False),
         ('audio_open', False),
+        ('dashboard_lost', False),
         ('teardown', False),
         ('teardown_on_stop', False),
         ('restart_request', False),
@@ -286,6 +287,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
 
     class App:
         _stop_requested = restart_requested = False
+        _ui = SimpleNamespace(dashboard_lost=lambda: failure == 'dashboard_lost')
 
         def __init__(self, *_, **kwargs):
             assert not any(name in events for name in ('rx_start', 'starfire_start'))
@@ -331,6 +333,10 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         # A show that ran and then failed, on any error, is a fault the session loop restarts.
         with pytest.raises(production.ShowFault, match='show failed'):
             await production._run_session(args)
+    elif failure == 'dashboard_lost':
+        # A relaunched viewer that never got its port fails the session; the loop backs off.
+        with pytest.raises(RuntimeError, match='dashboard did not come back'):
+            await production._run_session(args, number=2)
     elif failure == 'restart_request':
         assert await production._run_session(args) == 'restart'
     elif failure == 'teardown':
@@ -358,7 +364,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     construction_failures = (*preflight_failures, 'controller_init')
     assert events.count('app_stop') == (0 if checking or failure in construction_failures else 1)
     # The controller lock belongs to run(), held across sessions; a session alone takes none.
-    direct = ('controller_run', 'restart_request', 'teardown', 'teardown_on_stop')
+    direct = ('controller_run', 'dashboard_lost', 'restart_request', 'teardown', 'teardown_on_stop')
     locked = not checking and failure not in direct
     assert events.count('unlock') == locked and (not locked or events[-1] == 'unlock')
     if failure in preflight_failures:
@@ -370,7 +376,8 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     if 'starfire_stop' in events:
         assert events.index('starfire_stop') < events.index('rx_stop')
     if 'app_run' in events:
-        assert ('capture_count' in events) == (failure != 'audio_open')
+        unhealthy = ('audio_open', 'dashboard_lost')
+        assert ('capture_count' in events) == (failure not in unhealthy)
         assert events.index('app_stop') < events.index('starfire_stop')
         assert events.count('stop') == 1
     else:

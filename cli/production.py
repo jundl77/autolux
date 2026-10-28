@@ -438,7 +438,13 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
                     nonlocal played
                     # The health check runs only from the play loop: audio and bridge are up.
                     played = True
-                    if number > 1 and not args.no_ui and app._ui is None:
+                    # A first session runs without a dashboard (the bridge warns); a relaunch's
+                    # missing one is the last viewer still dying, which the backoff waits out.
+                    if (
+                        number > 1
+                        and not args.no_ui
+                        and (app._ui is None or app._ui.dashboard_lost())
+                    ):
                         raise RuntimeError('the dashboard did not come back with the relaunch')
                     remote.check_health()
                     renderer.check_health()

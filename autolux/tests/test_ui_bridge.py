@@ -378,3 +378,49 @@ def test_a_relaunch_retries_a_taken_port_until_its_deadline():
     with pytest.raises(OSError, match='address in use'):
         run(100)
     assert attempts == [0.0, 0.25, 0.5, 0.75, 1.0]
+
+
+def test_a_relaunched_viewer_waits_30_s_for_its_port_then_exits_as_port_taken(monkeypatch):
+    import http.server
+
+    from werkzeug import serving
+
+    from autolux.lib import ui_bridge
+
+    now = [0.0]
+    served = []
+
+    def bind(self):
+        if now[0] < taken_for:
+            raise OSError('address in use')
+
+    monkeypatch.setattr(http.server.HTTPServer, 'server_bind', bind)
+    monkeypatch.setattr(serving.ThreadedWSGIServer, 'server_activate', lambda self: None)
+    monkeypatch.setattr(
+        serving.ThreadedWSGIServer, 'serve_forever', lambda self: served.append(now[0])
+    )
+    fake = {'clock': lambda: now[0], 'sleep': lambda s: now.__setitem__(0, now[0] + s)}
+    taken_for = 10.0
+    ui_bridge.serve_viewer(object(), 8999, **fake)
+    assert served == [10.0]
+    now[0], taken_for = 0.0, float('inf')
+    with pytest.raises(SystemExit) as exited:
+        ui_bridge.serve_viewer(object(), 8999, **fake)
+    assert exited.value.code == ui_bridge.VIEWER_PORT_TAKEN and now[0] == ui_bridge.VIEWER_BIND_SEC
+    assert served == [10.0]
+
+
+def test_only_a_viewer_that_never_got_its_port_counts_as_a_lost_dashboard():
+    from types import SimpleNamespace
+
+    from autolux.lib import ui_bridge
+
+    def bridge(code):
+        viewer = SimpleNamespace(poll=lambda: code)
+        return SimpleNamespace(_viewer=viewer)
+
+    lost = [
+        ui_bridge.UiBridge.dashboard_lost(bridge(code))
+        for code in (None, 1, ui_bridge.VIEWER_PORT_TAKEN)
+    ]
+    assert lost == [False, False, True]

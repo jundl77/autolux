@@ -40,6 +40,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
 _VIEWER_POLL_SEC = 0.2
 _RETRY_POLL_SEC = 0.25
+# A relaunched viewer waits this long for the last session's viewer to let go of the port.
+VIEWER_BIND_SEC = 30.0
+# Its exit code when it never could: the controller faults the session on it, not on any exit.
+VIEWER_PORT_TAKEN = 3
 
 
 @contextmanager
@@ -473,6 +477,9 @@ class UiBridge:
         while self._viewer.poll() is None:
             time.sleep(_VIEWER_POLL_SEC)
 
+    def dashboard_lost(self) -> bool:
+        return self._viewer.poll() == VIEWER_PORT_TAKEN
+
     def stop(self) -> None:
         self._stopping = True
         kill_tree(self._viewer)
@@ -502,6 +509,33 @@ def _within(seconds: float, attempt, *, clock=time.monotonic, sleep=time.sleep):
             if clock() >= deadline:
                 raise
             sleep(_RETRY_POLL_SEC)
+
+
+def serve_viewer(wsgi_app, port: int, *, clock=time.monotonic, sleep=time.sleep) -> None:
+    from werkzeug.serving import ThreadedWSGIServer
+
+    class Server(ThreadedWSGIServer):
+        # On Windows SO_REUSEADDR binds over a live listener, so a dying viewer's port would
+        # read as free and two viewers would share it.
+        allow_reuse_address = os.name != 'nt'
+
+        # Werkzeug turns a failed bind into a bare exit(1); retry here, below that.
+        def server_bind(self):
+            def attempt():
+                try:
+                    super(Server, self).server_bind()
+                except OSError:
+                    self.socket.close()
+                    self.socket = socket.socket(self.address_family, self.socket_type)
+                    raise
+
+            try:
+                _within(VIEWER_BIND_SEC, attempt, clock=clock, sleep=sleep)
+            except OSError as error:
+                LOGGER.error(f'[ui] the dashboard port {port} stayed taken ({error!r})')
+                raise SystemExit(VIEWER_PORT_TAKEN) from error
+
+    Server(DASHBOARD_BIND_ADDRESS, port, wsgi_app).serve_forever()
 
 
 def start(
