@@ -971,20 +971,18 @@
                 y: matrix[10],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
                 facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null,
-                pan: range && typeof home === "object" ? panSector(range, movementFor(draft, (node.attributes.uuid || "").toUpperCase(), "Pan")?.attributes, home) : null
+                pan: range && typeof home === "object" ? panSector(range, movementFor(draft, (node.attributes.uuid || "").toUpperCase(), "Pan")?.attributes) : null
             });
         }
         return { fixtures, others };
     }
 
     // Where Starfire's encode can send the beam: the soft limits bound the logical pan, a scene
-    // heading clockwise from +Y (an inversion only reorders it inside them); the yaw offsets it
-    // into the head's own angle, which a standing head turns the other way round. Returns the
-    // sector's span and its middle, anticlockwise from MVR +X.
-    function panSector([from, to], limits, home) {
+    // heading clockwise from +Y whatever the yaw or mount (an inversion only reorders it inside
+    // them). Returns the sector's span and its middle, anticlockwise from MVR +X.
+    function panSector([from, to], limits) {
         const [low, high] = [Number(limits?.minimum ?? 0), Number(limits?.maximum ?? 1)].map((share) => from + share * (to - from));
-        const heading = -home.pan + (home.reversed ? -1 : 1) * ((low + high) / 2 + home.pan);
-        return { span: Math.abs(high - low), centre: 90 - heading };
+        return { span: Math.abs(high - low), centre: 90 - (low + high) / 2 };
     }
 
     // Past the configured colours, golden-angle hues keep dozens of groups apart.

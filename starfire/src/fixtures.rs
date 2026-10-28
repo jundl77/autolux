@@ -34,6 +34,7 @@ struct FixturePatch {
     tilt: MovementRange,
     pan_offset_degrees: f64,
     tilt_offset_degrees: f64,
+    reversed: bool,
     declared_cells: Vec<wire::fixture::Cell>,
     cells: Vec<String>,
     position: Position,
@@ -176,9 +177,8 @@ impl FixtureRig {
             .map(|fixture| -> Result<_> {
                 let home = home_orientation(&fixture.matrix)
                     .with_context(|| format!("fixture {}", fixture.name))?;
-                let mut pan = MovementRange::from_wire(&fixture.pan);
+                let pan = MovementRange::from_wire(&fixture.pan);
                 let mut tilt = MovementRange::from_wire(&fixture.tilt);
-                pan.inverted ^= home.reversed;
                 tilt.inverted ^= home.reversed;
                 Ok(FixturePatch {
                     fixture_uuid: fixture.fixture_uuid.clone(),
@@ -191,6 +191,7 @@ impl FixtureRig {
                     tilt,
                     pan_offset_degrees: home.pan_offset_degrees,
                     tilt_offset_degrees: home.tilt_offset_degrees,
+                    reversed: home.reversed,
                     declared_cells: fixture.cells.clone(),
                     cells: Vec::new(),
                     // The Matrix's o row; an empty Matrix is identity, at the origin.
@@ -588,7 +589,17 @@ impl FixtureRig {
             let pan = |position| {
                 let position = fixture.pan.map(position);
                 pan_range.map_or(position, |(from, to)| {
-                    offset_pan(position, fixture.pan_offset_degrees, from, to)
+                    if fixture.reversed {
+                        // Standing turns pan the other way round and tilt flips the beam a half
+                        // turn, so heading L needs head angle 180 - L - yaw: the mirror of the
+                        // whole range, then this offset, canonical like the yaw.
+                        let offset = HALF_TURN_DEGREES
+                            - (from + to + fixture.pan_offset_degrees)
+                                .rem_euclid(FULL_TURN_DEGREES);
+                        offset_pan(1.0 - position, offset, from, to)
+                    } else {
+                        offset_pan(position, fixture.pan_offset_degrees, from, to)
+                    }
                 })
             };
             let tilt = |position| {

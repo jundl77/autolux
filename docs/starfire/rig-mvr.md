@@ -47,8 +47,10 @@ render as separate patches.
   so one orientation always gives the same DMX on 540° heads);
 - tilt home offset = **pitch**. This is an approximation: it is exact only at pan home,
   because a tilted base couples pan into tilt. |pitch| > 60° is refused;
-- a local Z axis pointing down **reverses** pan and tilt (as DMXInvertPan/Tilt would;
-  setting those flags too cancels it again); roll otherwise does not render;
+- a local Z axis pointing down **reverses** tilt (as DMXInvertTilt would; setting it too
+  cancels it again) and mirrors pan over its whole travel with the yaw turned the other way,
+  so a logical pan lands on the same stage heading as on a hanging head at any yaw; roll
+  otherwise does not render;
 - identity = the GDTF default (hanging) orientation = offset 0, not reversed.
 
 Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180, not

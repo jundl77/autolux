@@ -227,6 +227,50 @@ fn standing_head_reverses_movement_like_dmx_inversion_and_hanging_does_not() {
 }
 
 #[test]
+fn standing_and_hanging_heads_send_a_logical_pan_to_the_same_stage_heading_at_any_yaw() {
+    const TRAVEL: f64 = 540.0;
+    let encode = |hanging: bool, yaw: f64, tilt_inverted: bool, pan: f64| {
+        let (sin, cos) = f64::to_radians(yaw).sin_cos();
+        let flip = if hanging { 1.0 } else { -1.0 };
+        let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
+        // Standing is the pane's flip about local Y: X and Z negated, facing kept.
+        let axes = [
+            [flip * cos, flip * sin, 0.0],
+            [-sin, cos, 0.0],
+            [0.0, 0.0, flip],
+        ];
+        patch["matrix"] = json!([axes.concat(), vec![0.0; 3]].concat());
+        patch["tilt"] = json!({"inverted": tilt_inverted});
+        let rig = rig(json!([patch]));
+        let mut states = rig.empty_states();
+        let state = states.get_mut("test").unwrap();
+        (state.pan, state.tilt) = (pan, 0.3);
+        rig.encode(&states).unwrap()[&0][..4].to_vec()
+    };
+    for yaw in [0.0, 90.0, 180.0, 270.0] {
+        for pan in [0.1, 0.5, 0.9] {
+            for hanging in [true, false] {
+                let frame = encode(hanging, yaw, false, pan);
+                let head = f64::from(u16::from_be_bytes([frame[0], frame[1]])) / 65535.0 * TRAVEL;
+                // Clockwise yaw-relative pan from above; a standing head turns it the other way
+                // and its reversed tilt throws the beam a half turn round.
+                let heading = if hanging {
+                    head - yaw
+                } else {
+                    180.0 - head - yaw
+                };
+                let error = (heading - pan * TRAVEL).rem_euclid(360.0);
+                assert!(
+                    error.min(360.0 - error) < 0.02,
+                    "{hanging} {yaw} {pan}: {heading}"
+                );
+                assert_eq!(frame[2..], encode(true, yaw, !hanging, pan)[2..]);
+            }
+        }
+    }
+}
+
+#[test]
 fn rotated_fixed_fixtures_are_accepted_and_non_rotations_rejected() {
     let mut wash = fixture("generic_rgb", 1);
     wash["matrix"] = json!(HALF_TURN);
