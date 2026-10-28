@@ -959,8 +959,7 @@
             }
             const length = Math.hypot(matrix[3], matrix[4]);
             const range = physicalRange(gdtfTree(draft, settings, textOf(node, "GDTFSpec")), textOf(node, "GDTFMode"), "Pan");
-            const limits = movementFor(draft, (node.attributes.uuid || "").toUpperCase(), "Pan")?.attributes;
-            const [minimum, maximum] = range ? [Number(limits?.minimum ?? 0), Number(limits?.maximum ?? 1)].map((share) => range[0] + share * (range[1] - range[0])) : [];
+            const home = homeOrientation(matrix);
             fixtures.push({
                 key: node.key,
                 name,
@@ -970,12 +969,20 @@
                 y: matrix[10],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
                 facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null,
-                // The pan limits in degrees around the facing, the physical range's middle on it;
-                // a standing head pans the other way round.
-                pan: range && length > 1e-6 ? { span: Math.abs(maximum - minimum), offset: ((minimum + maximum - range[0] - range[1]) / 2) * (isStanding(matrix) ? -1 : 1) } : null
+                pan: range && typeof home === "object" ? panSector(range, movementFor(draft, (node.attributes.uuid || "").toUpperCase(), "Pan")?.attributes, home) : null
             });
         }
         return { fixtures, others };
+    }
+
+    // Where Starfire's encode can send the beam: the soft limits bound the logical pan, a scene
+    // heading clockwise from +Y (an inversion only reorders it inside them); the yaw offsets it
+    // into the head's own angle, which a standing head turns the other way round. Returns the
+    // sector's span and its middle, anticlockwise from MVR +X.
+    function panSector([from, to], limits, home) {
+        const [low, high] = [Number(limits?.minimum ?? 0), Number(limits?.maximum ?? 1)].map((share) => from + share * (to - from));
+        const heading = -home.pan + (home.reversed ? -1 : 1) * ((low + high) / 2 + home.pan);
+        return { span: Math.abs(high - low), centre: 90 - heading };
     }
 
     // Past the configured colours, golden-angle hues keep dozens of groups apart.
@@ -1076,7 +1083,7 @@
     function panArc(mark, n, radius, stroke) {
         if (!mark.pan) return "";
         const half = (Math.min(mark.pan.span, 360) * Math.PI) / 360;
-        const centre = Math.atan2(mark.facing[1], mark.facing[0]) + (mark.pan.offset * Math.PI) / 180;
+        const centre = (mark.pan.centre * Math.PI) / 180;
         // Plan SVG y is MVR -Y, so an anticlockwise MVR arc is sweep flag 0.
         const point = (angle) => `${n(mark.x + radius * Math.cos(angle))} ${n(-mark.y - radius * Math.sin(angle))}`;
         const segment = (angle) => `A ${n(radius)} ${n(radius)} 0 0 0 ${point(angle)}`;
