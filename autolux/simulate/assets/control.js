@@ -211,7 +211,8 @@
     function hold(values) {
         const at = Date.now();
         Object.entries(values).forEach(([key, value]) => {
-            holds[key] = {value: merged(holds[key] && holds[key].value, value), at: at};
+            const live = holds[key] && at - holds[key].at < HOLD_MS ? holds[key].value : undefined;
+            holds[key] = {value: merged(live, value), at: at};
         });
     }
 
@@ -282,8 +283,8 @@
     const cooldownSeen = {};
 
     // Draws the FX Effects bars from their data attributes, filling them up between polls, and
-    // flashes a bar whose group just fired. Dash may reuse a bar's element for another entry, so a poll is spotted by its data
-    // attributes changing, not by the node.
+    // flashes a bar whose group just fired. Dash may reuse a bar's element for another entry, so
+    // a poll is spotted by its data attributes changing, not by the node.
     function tickCooldowns() {
         const now = performance.now();
         document.querySelectorAll('.cooldown-row').forEach((row) => {
