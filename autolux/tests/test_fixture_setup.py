@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -7,9 +8,11 @@ import pytest
 
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy
+from cli.starfire_assets import rig_bytes, rig_definition
 
 ROOT = Path(__file__).resolve().parents[2]
 LIBRARY = ROOT / 'rig/library'
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 MODES = {'rgb.gdtf': {'3ch': {'channels': 3}}, 'mover.gdtf': {'12ch': {'channels': 12}}}
 
 
@@ -64,12 +67,29 @@ def test_identical_addresses_in_distinct_universes_are_independent():
 @pytest.fixture
 def rig_file(tmp_path):
     path = tmp_path / 'rig.mvr'
-    path.write_bytes((ROOT / 'rig/room.mvr').read_bytes())
+    path.write_bytes(ROOM.read_bytes())
     return path
 
 
 def store_for(path, validate):
-    return FixtureStore(path, LIBRARY, validate)
+    """A store whose repo rig is a scratch copy of the room; `validate` sees each staged rig."""
+    library = path.parent / 'rig/library'
+    shutil.copytree(LIBRARY, library)
+    shutil.copy(ROOM, library.parent / 'room.mvr')
+    shutil.copy(ROOM.with_suffix('.rig.pb'), library.parent / 'room.rig.pb')
+
+    def export(staged):
+        validate(staged)
+        return rig_bytes(staged)
+
+    return FixtureStore(path, library, export)
+
+
+def written(store) -> list[bytes]:
+    return [
+        path.read_bytes()
+        for path in (store.rig_path, store.repo_rig, store.repo_rig.with_suffix('.rig.pb'))
+    ]
 
 
 def fixture_node(draft, name):
@@ -115,7 +135,38 @@ def test_save_validates_staged_content_before_atomic_replace(rig_file):
     assert saved_revision == hashlib.sha256(rig_file.read_bytes()).hexdigest()
     assert saved_revision != revision
     assert address_node(reloaded, 'wash_right')['text'] == '200'
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
+
+
+def test_save_writes_the_store_the_repo_rig_and_its_rig_definition_together(rig_file):
+
+    def validate(_staged):
+        # Nothing is replaced until Starfire has accepted the staged rig.
+        assert written(store) == before
+
+    store = store_for(rig_file, validate)
+    before = written(store)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    _, saved_revision = store.save(draft, revision)
+    stored, repo, exported = written(store)
+    assert stored == repo != before[0]
+    assert saved_revision == hashlib.sha256(stored).hexdigest()
+    assert exported == rig_definition(store.repo_rig).SerializeToString() != before[2]
+    assert list(rig_file.parent.rglob('.rig-*')) == []
+
+
+def test_a_save_on_a_stale_revision_writes_none_of_the_three_files(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    address_node(draft, 'wash_right')['text'] = '200'
+    store.save(copy.deepcopy(draft), revision)
+    saved = written(store)
+    address_node(draft, 'wash_right')['text'] = '300'
+    with pytest.raises(ValueError, match='Reload'):
+        store.save(draft, revision)
+    assert written(store) == saved
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 @pytest.mark.parametrize('error_type', [ValueError, TimeoutError, OSError])
@@ -131,7 +182,7 @@ def test_rejected_or_interrupted_validation_preserves_saved_rig(rig_file, error_
     with pytest.raises(error_type, match='validation failed'):
         store.save(draft, revision)
     assert rig_file.read_bytes() == before
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 @pytest.mark.parametrize(
@@ -190,7 +241,7 @@ def test_external_edit_during_validation_is_not_overwritten(rig_file):
     with pytest.raises(ValueError, match='during validation'):
         store.save(draft, revision)
     assert rig_file.read_bytes() == external
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 def test_failed_replace_preserves_saved_data_and_cleans_temporary_file(rig_file, monkeypatch):
@@ -206,7 +257,7 @@ def test_failed_replace_preserves_saved_data_and_cleans_temporary_file(rig_file,
     with pytest.raises(PermissionError, match='file locked'):
         store.save(draft, revision)
     assert rig_file.read_bytes() == before
-    assert list(rig_file.parent.glob('.rig-*.mvr')) == []
+    assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
 def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
@@ -247,8 +298,33 @@ def test_config_names_the_library_folder_it_lists():
     from autolux.simulate.fixture_panel import library_folder
 
     assert library_folder(LIBRARY) == 'rig/library'
-    listed = FixtureStore(ROOT / 'rig/room.mvr', LIBRARY, lambda _: None).library()
+    listed = FixtureStore(ROOM, LIBRARY, lambda _: None).library()
     assert set(listed) == {path.name for path in LIBRARY.glob('*.gdtf')}
+
+
+def test_apply_is_offered_only_while_the_show_runs_an_older_rig():
+    from autolux.simulate.fixture_panel import STALE_RIG_BANNER, rig_banner
+
+    assert rig_banner('loaded', 'saved') == (STALE_RIG_BANNER, False)
+    assert rig_banner('saved', 'saved') == ('', True)
+    assert rig_banner(None, 'saved') == ('', True)
+
+
+def test_apply_posts_restart_show_to_the_bridge():
+    import queue
+
+    from autolux.lib.engine.event_buffer import EventBuffer
+    from autolux.lib.ui_bridge import SnapshotServer
+    from autolux.simulate.fixture_panel import request_restart
+
+    commands = queue.Queue()
+    bridge = SnapshotServer(EventBuffer(), 0, commands)
+    bridge.start()
+    try:
+        assert request_restart(bridge.port) == 'Restarting the show on the saved patch.'
+    finally:
+        bridge.stop()
+    assert commands.get_nowait() == {'action': 'restart_show'}
 
 
 KINTA = 'Chauvet DJ@Mini Kinta IRC@1.0.gdtf'
@@ -257,7 +333,7 @@ STALE_KINTA = 'CHAUVET DJ@chauvet_mini_kinta_irc_4ch.gdtf'
 
 def _stale_store(path: Path) -> bytes:
     """The room as an old store holds it: the Kinta under its old name, with a stale profile."""
-    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     stale = mvr.gdtf_description(scene, KINTA).replace(
         'Name="Mini Kinta IRC"', 'Name="chauvet_mini_kinta_irc_4ch"', 1
     )
@@ -297,7 +373,7 @@ def test_a_start_refreshes_stale_store_profiles_from_the_library_and_keeps_the_p
     assert kinta['gdtf_spec'] == KINTA
     assert f'refreshed {STALE_KINTA} from the library as {KINTA}' in caplog.text
     # The other profiles already match the library, so nothing else changes and a rerun is a no-op.
-    assert after == (ROOT / 'rig/room.mvr').read_bytes()
+    assert after == ROOM.read_bytes()
     assert refresh_profiles(store, LIBRARY) == []
     assert store.read_bytes() == after
 

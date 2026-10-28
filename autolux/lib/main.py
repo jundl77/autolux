@@ -100,8 +100,11 @@ def apply_static(light_engine, command: dict) -> None:
 
 
 class ShowControl:
-    def __init__(self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK):
+    def __init__(
+        self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK, stop_show=None
+    ):
         self.config_path = Path(config_path)
+        self._stop_show = stop_show
         self.settings = load_show_settings(self.config_path)
         self.commands: queue.Queue = queue.Queue(maxsize=CONTROL_QUEUE_SIZE)
         self._event_buffer = event_buffer
@@ -202,6 +205,10 @@ class ShowControl:
             self._unsaved_change_at = self._clock.monotonic()
             if not command['enabled']:
                 light_engine.effect_controller.forget_special(instantaneous=True)
+        elif action == 'restart_show':
+            # Starfire reads the rig once per login; the supervisor restarts a show that exits.
+            LOGGER.info('[main] restart requested from the Config tab (rig changed)')
+            self._stop_show()
         elif action == 'settings':
             settings = dataclasses.replace(self.settings, **command['settings'])
             if settings != self.settings:
@@ -328,7 +335,9 @@ class AutoluxController:
 
         self.track_source = TrackSource()
         self.media_session = MediaSessionListener(self._on_media_event)
-        self.control = ShowControl(show_config_path, self.event_buffer)
+        self.control = ShowControl(show_config_path, self.event_buffer, stop_show=self.stop)
+        if self.event_buffer is not None and fixture_setup is not None:
+            self.event_buffer.set_rig_revision(fixture_setup['rig_revision'])
         self.effect_controller: EffectController = EffectController(
             self.lighting_client,
             event_buffer=self.event_buffer,

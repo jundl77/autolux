@@ -110,11 +110,16 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
     return rig
 
 
+def rig_bytes(path: Path) -> bytes:
+    """The rig.pb export-rig commits and Save regenerates beside the repo rig."""
+    return rig_definition(Path(path)).SerializeToString()
+
+
 @contextmanager
 def native_rig(path: Path):
     with tempfile.TemporaryDirectory(prefix='starfire-rig-') as directory:
         exported = Path(directory) / 'rig.pb'
-        exported.write_bytes(rig_definition(Path(path)).SerializeToString())
+        exported.write_bytes(rig_bytes(path))
         yield exported
 
 

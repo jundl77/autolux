@@ -17,8 +17,9 @@ pub fn palettes() -> PaletteTable {
     PaletteTable::new(&palette_definitions()).unwrap()
 }
 
+/// The frozen room tests pin; the live `rig/room.rig.pb` changes whenever the patch is saved.
 pub fn rig_folder() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rig")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../autolux/tests/data")
 }
 
 pub fn room() -> FixtureRig {

@@ -14,6 +14,7 @@ GDTF_XML = (Path(__file__).parents[2] / 'autolux/tests/data/gdtf/dimmer.xml').re
     encoding='utf-8'
 )
 SPEC = 'Generic@Test Dimmer@1.0.gdtf'
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 
 
 @pytest.fixture
@@ -69,8 +70,8 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
 
 
 def test_room_assets_fit_one_login_without_losing_profile_definitions_or_scripts():
-    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
-    scene = mvr.read(DEFAULT_RIG.read_bytes())
+    login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
+    scene = mvr.read(ROOM.read_bytes())
     fixtures = mvr.patched_fixtures(scene)
     assert [fixture.fixture_id for fixture in login.rig.fixtures] == [f['name'] for f in fixtures]
     assert [list(fixture.matrix) for fixture in login.rig.fixtures] == [
@@ -150,7 +151,9 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
 
 
 @pytest.mark.parametrize(
-    'rig', [ROOT / 'rig/room.mvr', ROOT / 'autolux/tests/data/generic_rig/generic.mvr']
+    # The repo rig stays here: Save and export-rig must keep its committed rig.pb in step.
+    'rig',
+    [DEFAULT_RIG, ROOM, ROOT / 'autolux/tests/data/generic_rig/generic.mvr'],
 )
 def test_committed_native_rig_is_the_exported_login_rig(rig):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
@@ -197,7 +200,7 @@ def test_an_axis_without_extent_puts_every_fixture_in_its_centre():
 
 
 def test_the_room_rig_fixtures_lie_in_their_stage_areas():
-    # rig/room.mvr: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
+    # The frozen room: X -900..900 cuts at -300 / 300 (the spots and mid washes sit on them),
     # Y -2000..0 at -1333 / -667.
     expected = {
         'spot_left': 'STAGE_AREA_UP_CENTRE',  # (-300, 0)
@@ -209,14 +212,14 @@ def test_the_room_rig_fixtures_lie_in_their_stage_areas():
         'zq06017': 'STAGE_AREA_DOWN_CENTRE',  # (0, -2000), the strip bar
         'kinta': 'STAGE_AREA_UP_CENTRE',  # (0, -500)
     }
-    rig = assets.rig_definition(ROOT / 'rig/room.mvr')
+    rig = assets.rig_definition(ROOM)
     assert {
         fixture.fixture_id: rig_wire.StageArea.Name(fixture.area) for fixture in rig.fixtures
     } == expected
 
 
 def test_login_carries_the_palette_table_and_palette_commands_round_trip():
-    login = assets.load_login(DEFAULT_RIG, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
+    login = assets.load_login(ROOM, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
     assert [palette.name for palette in login.palettes][:2] == ['techno', 'techno_breakdown']
     techno = login.palettes[0]
     # show/palettes/techno.toml: secondary = "#ff8c1a".
@@ -244,7 +247,7 @@ def test_static_looks_for_the_room_rig_build_small_wire_accents():
     from autolux.lib.engine.static_mode import StaticLooks
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
-    rig = assets.static_rig(DEFAULT_RIG)
+    rig = assets.static_rig(ROOM)
     assert (rig.groups, rig.uv_groups) == (('fx', 'movers', 'strip', 'wash'), ('wash',))
     lighting = RecordingStarfireClient()
     looks = StaticLooks(lighting, rig)
@@ -270,11 +273,9 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     from autolux.lib.engine.static_mode import StaticLooks
     from autolux.simulate.lighting_recorder import RecordingStarfireClient
 
-    rig = assets.static_rig(DEFAULT_RIG)
+    rig = assets.static_rig(ROOM)
     names = dict(rig.fixtures)
-    assert list(names) == [
-        entry.fixture_id for entry in assets.rig_definition(DEFAULT_RIG).fixtures
-    ]
+    assert list(names) == [entry.fixture_id for entry in assets.rig_definition(ROOM).fixtures]
     assert names['wash_left'] == ('wash_left',)
     assert names['zq06017'] == tuple(f'zq06017/Beam Segment {n}' for n in range(1, 9))
     assert rig.uv_targets == ('wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right')
@@ -301,7 +302,7 @@ SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
 @pytest.mark.parametrize(
     ('folder', 'name', 'libraries'),
     [
-        (ROOT / 'rig', 'room', [ROOT / 'rig/library']),
+        (ROOM.parent, 'room', [ROOT / 'rig/library']),
         (SAMPLE_RIG, 'generic', [ROOT / 'rig/library', SAMPLE_RIG]),
     ],
 )
@@ -323,7 +324,7 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
 
 
 def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():
-    rig = assets.rig_definition(DEFAULT_RIG)
+    rig = assets.rig_definition(ROOM)
     [bar] = [fixture for fixture in rig.fixtures if fixture.fixture_id == 'zq06017']
     assert (bar.universe, bar.address) == (0, 97)
     assert bar.profile_id.endswith('#24Channel')

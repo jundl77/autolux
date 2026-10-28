@@ -122,7 +122,7 @@ async def test_next_replay_loads_saved_fixture_patch_unless_operator_selects_ano
     )
     await starfire.run_native(args)
     # A real patch: every start refreshes the saved store's profiles from the library.
-    saved.write_bytes((starfire.ROOT / 'rig/room.mvr').read_bytes())
+    saved.write_bytes((starfire.ROOT / 'autolux/tests/data/room.mvr').read_bytes())
     await starfire.run_native(args)
     args.rig = explicit
     await starfire.run_native(args)

@@ -354,7 +354,8 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig = FixtureRig::decode(include_bytes!("../../rig/room.rig.pb")).unwrap();
+        let rig =
+            FixtureRig::decode(include_bytes!("../../autolux/tests/data/room.rig.pb")).unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();

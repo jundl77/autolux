@@ -406,7 +406,7 @@ def test_the_spatial_traverse_is_a_calm_wash_the_policy_picks_and_names_no_accen
     root = Path(__file__).resolve().parents[2]
     source = (root / 'show/autoloops/atmospheric/traverse.lua').read_text(encoding='utf-8')
     named = set(re.findall(r'sf\.group\("([^"]+)"\)', source))
-    room = mvr.read((root / 'rig/room.mvr').read_bytes())
+    room = mvr.read((root / 'autolux/tests/data/room.mvr').read_bytes())
     roles = mvr.group_roles(mvr.patched_fixtures(room))[0]
     assert named == {'wash', 'strip', 'movers'}
     assert {roles[group] for group in named} == {mvr.LOOP_ROLE}
