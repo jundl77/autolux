@@ -402,6 +402,58 @@ fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
 }
 
 #[test]
+fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
+    // The fixtures' plan bounding box runs x -2000..3000, y -1000..1000: centre (500, 0, 0).
+    let positions = [[-2000.0, 1000.0, 3000.0], [3000.0, -1000.0, 2500.0]];
+    let matrices = [
+        mounted(true, 37.0, positions[0]),
+        mounted(true, -90.0, positions[1]),
+    ];
+    let fixtures = [0, 1].map(|index| {
+        serde_json::json!({
+            "fixture_uuid": format!("head{index}"), "profile": "chauvet_intimidator_spot_110_12ch",
+            "universe": 0, "address": 1 + 12 * index, "matrix": matrices[index],
+        })
+    });
+    let rig = support::rig(serde_json::json!({ "fixtures": fixtures }));
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "idle".into(),
+        bank: "test".into(),
+        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+    }])
+    .unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
+    for index in 0..2 {
+        let highlight = LightingOverride {
+            id: format!("highlight{index}"),
+            target: Target::Fixture(format!("head{index}")),
+            values: PropertyValues {
+                intensity: Some(1.0),
+                ..Default::default()
+            },
+            intensity_multiplier: None,
+            lifetime: OverrideLifetime::UntilCleared,
+            priority: 0,
+            special_fx: None,
+            pan_sweep: false,
+            aim_focus: true,
+            pose: None,
+        };
+        engine
+            .apply(0.0, &Command::SetOverride { value: highlight })
+            .unwrap();
+    }
+    let frame = &engine.render_at(0.0).unwrap().dmx_frames_by_universe[&0];
+    for index in 0..2 {
+        assert_through(
+            beam(&frame[12 * index..], &matrices[index]),
+            towards(positions[index], [500.0, 0.0, 0.0]),
+            &format!("head{index}"),
+        );
+    }
+}
+
+#[test]
 fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
     let position = [0.0, 0.0, 3000.0];
     let focus = [0.0, 2000.0, 1000.0];

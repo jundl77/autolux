@@ -23,8 +23,6 @@
     const TEST_MAX_MS = 600000;
     // Edits reach a lit test this soon after they settle, so a spin box does not flood the show.
     const POSE_SETTLE_MS = 150;
-    // Starfire's aim without an MVR Focus: level, straight upstage.
-    const DEFAULT_FOCUS_UPSTAGE_MM = 2000;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
@@ -341,6 +339,14 @@
     function focusPoint(draft, settings, node) {
         const uuid = textOf(node, "Focus").toUpperCase();
         return uuid ? placedObjects(draft, settings).find((entry) => entry.node.tag === "FocusPoint" && (entry.node.attributes.uuid || "").toUpperCase() === uuid) : undefined;
+    }
+
+    // Starfire's aim without an MVR Focus: the centre of the fixtures' plan bounding box (the box
+    // the stage areas are cut from) on the floor.
+    function stageCentre(draft, settings) {
+        const positions = fixtureRows(draft, settings).map((row) => row.matrix.slice(9, 11));
+        const centre = (axis) => (positions.length ? (Math.min(...positions.map((p) => p[axis])) + Math.max(...positions.map((p) => p[axis]))) / 2 : 0);
+        return [centre(0), centre(1), 0];
     }
 
     // The rig Fixture's placement fields as the save exports them (mvr.patched_fixtures), so a
@@ -1384,7 +1390,7 @@
         const uuid = (node.attributes.uuid || "").toUpperCase();
         const axes = ["Pan", "Tilt"].map((axis) => [axis, physicalRange(tree, row.mode, axis)]).filter(([, range]) => range);
         const mover = axes.some(([axis]) => axis === "Pan");
-        const focus = focusPoint(draft, settings, node)?.matrix.slice(9) ?? [placed.matrix[9], placed.matrix[10] + DEFAULT_FOCUS_UPSTAGE_MM, placed.matrix[11]];
+        const focus = focusPoint(draft, settings, node)?.matrix.slice(9) ?? stageCentre(draft, settings);
         // Sorted, as a GDTF range may run from its high end.
         const limits = (axis, [from, to]) =>
             ["minimum", "maximum"]

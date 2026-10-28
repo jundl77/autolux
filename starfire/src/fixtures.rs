@@ -25,8 +25,6 @@ const FULL_TURN_DEGREES: f64 = 360.0;
 const HALF_TURN_DEGREES: f64 = 180.0;
 const MAX_PITCH_DEGREES: f64 = 60.0;
 const MATRIX_VALUES: usize = 12;
-/// MVR's Focus is optional; without one a test aims level and straight upstage.
-const DEFAULT_FOCUS_UPSTAGE_MM: f64 = 2000.0;
 
 #[derive(Clone, Debug)]
 struct FixturePatch {
@@ -50,7 +48,8 @@ struct Placement {
     tilt_offset_degrees: f64,
     reversed: bool,
     position: Position,
-    focus: Position,
+    /// None aims at the rig's stage centre: MVR's Focus is optional.
+    focus: Option<Position>,
 }
 
 impl Placement {
@@ -64,12 +63,8 @@ impl Placement {
             .get(9..12)
             .map_or([0.0; 3], |o| [o[0], o[1], o[2]]);
         let focus = match pose.focus[..] {
-            [] => [
-                position[0],
-                position[1] + DEFAULT_FOCUS_UPSTAGE_MM,
-                position[2],
-            ],
-            [x, y, z] if [x, y, z].iter().all(|value| value.is_finite()) => [x, y, z],
+            [] => None,
+            [x, y, z] if [x, y, z].iter().all(|value| value.is_finite()) => Some([x, y, z]),
             _ => bail!("focus must be three finite numbers"),
         };
         Ok(Self {
@@ -218,6 +213,25 @@ pub struct FixtureRig {
     cells: BTreeMap<String, (usize, usize)>,
     names: BTreeMap<String, usize>,
     spatial: Spatial,
+    stage_centre: Position,
+}
+
+/// The centre of the fixtures' plan bounding box on the floor, the box the stage areas are cut
+/// from, so every head without a focus point converges on one spot.
+fn stage_centre(fixtures: &[FixturePatch]) -> Position {
+    let centre = |axis: usize| {
+        let values = fixtures
+            .iter()
+            .map(|fixture| fixture.placement.position[axis]);
+        let low = values.clone().fold(f64::INFINITY, f64::min);
+        let high = values.fold(f64::NEG_INFINITY, f64::max);
+        if low.is_finite() {
+            (low + high) / 2.0
+        } else {
+            0.0
+        }
+    };
+    [centre(0), centre(1), 0.0]
 }
 
 /// A single-cell fixture's cell is the fixture itself; other cells are named after their geometry.
@@ -464,6 +478,7 @@ impl FixtureRig {
             .cloned()
             .collect();
         Ok(Self {
+            stage_centre: stage_centre(&fixtures),
             fixtures,
             groups: cell_groups,
             accent_groups,
@@ -563,6 +578,7 @@ impl FixtureRig {
             .find(|fixture| fixture.fixture_uuid == fixture_uuid)
             .with_context(|| format!("a pose needs a fixture uuid, not {fixture_uuid}"))?;
         fixture.placement = Placement::from_pose(pose).context("pose")?;
+        rig.stage_centre = stage_centre(&rig.fixtures);
         Ok(rig)
     }
 
@@ -571,7 +587,8 @@ impl FixtureRig {
     pub fn aim(&self, cell_id: &str) -> Option<(f64, f64)> {
         let fixture = &self.fixtures[self.cells.get(cell_id)?.0];
         let placement = &fixture.placement;
-        let [x, y, z] = [0, 1, 2].map(|axis| placement.focus[axis] - placement.position[axis]);
+        let focus = placement.focus.unwrap_or(self.stage_centre);
+        let [x, y, z] = [0, 1, 2].map(|axis| focus[axis] - placement.position[axis]);
         // The scene heading clockwise from +Y the encode reads a logical pan as, and the lean
         // off the pan axis, which runs down from a hanging head and up from a standing one.
         let heading_degrees = x.atan2(y).to_degrees();

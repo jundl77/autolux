@@ -100,8 +100,9 @@ way the yaw is wrong. Aim: the beam should pass through the focus point; if it p
 the yaw or mount is wrong.
 
 Focus point: the MVR focus point the fixture aims at; Aim points at it. A mover's Placement has a
-**Focus point (mm)** row in scene coordinates. Until it is edited it shows the default, 2 m
-straight upstage of the fixture at its height, and the MVR has no FocusPoint; the first edit adds
+**Focus point (mm)** row in scene coordinates. Until it is edited it shows the default, the
+stage centre on the floor (the middle of the fixtures' plan bounding box, where every head without
+a focus point converges), and the MVR has no FocusPoint; the first edit adds
 one beside the fixture and points the fixture's Focus at it.
 
 Edits reach the lit fixture instantly while testing; Save writes the patch; Restart show makes the

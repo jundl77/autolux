@@ -518,7 +518,8 @@ test("the first Test click lights Test at once, and a refusal says why", async (
         assert.ok(lit());
         ds.fixture_patch.syncTest(live, "config");
         assert.ok(lit());
-        assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white" }]);
+        const pose = plain(model.draftPose(current, settings, model.fixtureRows(current, settings).find((entry) => entry.key === spot.key)));
+        assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white", pose }]);
         model.testControl("test");
         assert.ok(!lit());
         // After a selection change the first click is one command and lights Test too.
@@ -569,6 +570,19 @@ test("a mover's test pose is the placement the server exports, and a focus edit 
         assert.deepEqual(pose && plain(pose), row.name.startsWith("spot_") ? POSES[row.fixture_uuid] : undefined, row.name);
     }
     const spot = fixtureNode(current, "spot_left");
+    // Without a FocusPoint the pane shows the stage centre: the fixtures' plan box centre on the floor.
+    const plan = model.fixtureRows(current, settings).map((row) => row.matrix.slice(9, 11));
+    const middle = (axis) => (Math.min(...plan.map((p) => p[axis])) + Math.max(...plan.map((p) => p[axis]))) / 2;
+    const shown = (nodes) => nodes.flatMap(function visit(node) { return typeof node !== "object" ? [] : node.attributes["data-cfg"] === "focus" ? [node] : node.children.flatMap(visit); });
+    page.createElement = (tag) => ({ tag, attributes: {}, children: [], setAttribute(name, value) { this.attributes[name] = value; }, append(...children) { this.children.push(...children); } });
+    try {
+        const [row0] = shown(model.patchForm(current, settings, spot));
+        const inputs = (function all(node) { return typeof node !== "object" ? [] : node.tag === "input" ? [node] : node.children.flatMap(all); })(row0);
+        assert.deepEqual(inputs.map((input) => Number(input.attributes.value)), [middle(0), middle(1), 0]);
+    } finally {
+        delete page.createElement;
+    }
+    assert.notDeepEqual([middle(0), middle(1)], [plan[0][0], plan[0][1]]);
     const focus = model.patchEdit(current, settings, spot.key, "focus", ["-300", "2500", "0"]);
     assert.deepEqual(plain(focus.action), { action: "set-focus", key: spot.key, position: [-300, 2500, 0] });
     assert.equal(model.patchEdit(current, settings, spot.key, "focus", ["1", "", "2"]).error, "Enter X, Y and Z in mm.");
