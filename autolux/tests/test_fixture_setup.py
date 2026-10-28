@@ -156,6 +156,14 @@ def test_save_writes_the_store_the_repo_rig_and_its_rig_definition_together(rig_
     assert list(rig_file.parent.rglob('.rig-*')) == []
 
 
+def test_save_warns_when_the_tracked_rig_differs_from_the_store(rig_file):
+    store = store_for(rig_file, lambda _staged: None)
+    assert not store.repo_rig_diverged()
+    store.repo_rig.write_bytes(store.repo_rig.read_bytes() + b' ')
+    assert store.repo_rig_diverged()
+    assert not FixtureStore(rig_file, store.library_path, rig_bytes).repo_rig_diverged()
+
+
 def test_a_store_without_a_repo_rig_saves_only_itself(rig_file):
     store = store_for(rig_file, lambda _staged: None)
     repo = written(store)[1:]

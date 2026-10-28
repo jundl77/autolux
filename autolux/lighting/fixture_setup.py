@@ -199,6 +199,12 @@ class FixtureStore:
     def library(self) -> dict:
         return fixture_library(self.library_path)
 
+    def repo_rig_diverged(self) -> bool:
+        """The tracked rig differs from the store (a pull, a checkout), so a Save replaces it."""
+        if self.repo_rig is None or not self.repo_rig.is_file():
+            return False
+        return self.repo_rig.read_bytes() != self.rig_path.read_bytes()
+
     def load(self) -> tuple[dict, str]:
         with self._lock:
             content = read_bounded(self.rig_path, mvr.MAX_MVR_BYTES)

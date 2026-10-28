@@ -811,7 +811,7 @@
                 return [
                     response.draft,
                     response.revision,
-                    response.reloaded ? "Saved patch loaded." : "Patch saved. It will be used by the next session.",
+                    response.reloaded ? "Saved patch loaded." : `Patch saved. It will be used by the next session.${response.warning ? ` ${response.warning}` : ""}`,
                     response.reloaded ? null : remapSelection(draft, response.draft, selection)
                 ];
             }

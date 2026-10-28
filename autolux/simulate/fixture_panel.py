@@ -11,6 +11,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MAP_COLUMNS = 32
 MAX_ADD_QUANTITY = 64
 # The swatches are the colours the show accepts for a test, as the fixture emits them.
+REPO_RIG_REPLACED = (
+    'rig/room.mvr differed from the saved patch (a pull or checkout?) and Save replaced it; '
+    'check git diff rig/ before committing.'
+)
 TEST_COLOURS = {
     name: '#{:02x}{:02x}{:02x}'.format(*(round(255 * c) for c in rgb))
     for name, rgb in HIGHLIGHT_COLOURS.items()
@@ -452,8 +456,12 @@ def build_fixture_panel(app, store):
     def persist_patch(_reload, _save, edited, expected_revision):
         try:
             reloading = dash.ctx.triggered_id == 'fixture-reload'
+            diverged = not reloading and store.repo_rig_diverged()
             saved, version = store.load() if reloading else store.save(edited, expected_revision)
-            return {'draft': saved, 'revision': version, 'reloaded': reloading}
+            result = {'draft': saved, 'revision': version, 'reloaded': reloading}
+            if diverged:
+                result['warning'] = REPO_RIG_REPLACED
+            return result
         except (KeyError, AttributeError, TypeError, ValueError, OSError, RuntimeError) as error:
             return {'error': str(error)}
 
