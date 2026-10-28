@@ -40,6 +40,9 @@ const RUNNING = {
 };
 // Each room fixture's MVR uuid by its committed name.
 const FIXTURE_UUID = Object.fromEntries(data.patched.map(([fixture_uuid, name]) => [name, fixture_uuid]));
+// A mover's test carries its placement as the server exports it.
+const POSES = plain(data.poses);
+const posed = (name) => ({ pose: POSES[FIXTURE_UUID[name]] });
 const nodes = function* (tree) {
     yield tree;
     for (const child of tree.children) yield* nodes(child);
@@ -499,7 +502,7 @@ test("the test controls send highlight commands, hold them alive and clear once 
     ds.fixture_patch.syncTest({ ...live, static: { blackout: true } }, "config");
     assert.equal(model.testControl("red"), null);
     ds.fixture_patch.syncTest(live, "config");
-    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
     // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command, and the 10-minute end.
     assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000, 600000]);
     [...timers.values()][0].run();
@@ -519,7 +522,7 @@ test("the test controls send highlight commands, hold them alive and clear once 
     model.testControl("blue");
     ds.fixture_patch.renderRig(null, current, settings);
     ds.fixture_patch.renderRig(null, current, settings);
-    assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "blue" }, { action: "highlight", target: null }]);
+    assert.deepEqual(plain(commands.slice(-2)), [{ action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "blue", ...posed("spot_right") }, { action: "highlight", target: null }]);
     ds.fixture_patch.renderRig(spot.key, current, settings);
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("white");
@@ -543,13 +546,66 @@ test("only a mover's test row offers Sweep and Aim, which toggle its motion and 
         delete page.createElement;
     }
     ds.fixture_patch.syncTest({ rig: RUNNING, paused: false, static: { blackout: false }, highlight: null }, "config");
-    const spot = { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right } };
+    const spot = { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, ...posed("spot_right") };
     assert.deepEqual(plain(model.testControl("sweep")), { ...spot, colour: "white", sweep: true });
     assert.deepEqual(plain(model.testControl("red")), { ...spot, colour: "red", sweep: true });
     assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red", aim: true });
     // A second click on the lit motion holds the light still; Off clears it all.
     assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red" });
     assert.deepEqual(plain(model.testControl("off")), { action: "highlight", target: null });
+});
+
+test("a mover's test pose is the placement the server exports, and a focus edit adds the MVR FocusPoint", () => {
+    const current = draft();
+    for (const row of model.fixtureRows(current, settings)) {
+        const pose = model.draftPose(current, settings, row);
+        assert.deepEqual(pose && plain(pose), row.name.startsWith("spot_") ? POSES[row.fixture_uuid] : undefined, row.name);
+    }
+    const spot = fixtureNode(current, "spot_left");
+    const focus = model.patchEdit(current, settings, spot.key, "focus", ["-300", "2500", "0"]);
+    assert.deepEqual(plain(focus.action), { action: "set-focus", key: spot.key, position: [-300, 2500, 0] });
+    assert.equal(model.patchEdit(current, settings, spot.key, "focus", ["1", "", "2"]).error, "Enter X, Y and Z in mm.");
+    const [focused] = edit(current, focus.action);
+    const point = [...nodes(focused.scene)].find((node) => node.tag === "FocusPoint");
+    assert.match(point.attributes.uuid, UUID);
+    assert.equal(child(fixtureNode(focused, "spot_left"), "Focus").text, point.attributes.uuid);
+    assert.deepEqual(plain(point.children.map((entry) => entry.tag)), ["Matrix", "Geometries"]);
+    const row = model.fixtureRows(focused, settings).find((entry) => entry.key === spot.key);
+    assert.deepEqual(plain(model.draftPose(focused, settings, row).focus), [-300, 2500, 0]);
+    // A second edit moves the same point.
+    const [moved] = edit(focused, model.patchEdit(focused, settings, spot.key, "focus", ["0", "0", "0"]).action);
+    assert.equal([...nodes(moved.scene)].filter((node) => node.tag === "FocusPoint").length, 1);
+});
+
+test("an edit to the lit mover's yaw or focus re-sends its test with the new pose once settled", () => {
+    const current = draft();
+    const spot = fixtureNode(current, "spot_right");
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    timers.clear();
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("aim");
+    const settling = () => [...timers.values()].filter((timer) => timer.ms === 150);
+    const sent = commands.length;
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    assert.equal(settling().length, 0, "an unchanged draft sends nothing");
+    const yaw = (tree, degrees) => edit(tree, model.patchEdit(tree, settings, spot.key, "matrix", ["300", "0", "0", String(degrees), "0", "0"]).action)[0];
+    const [turned, more] = [yaw(current, 90), yaw(current, 120)];
+    ds.fixture_patch.renderRig(spot.key, turned, settings);
+    ds.fixture_patch.renderRig(spot.key, more, settings);
+    assert.equal(settling().length, 1, "edits in quick succession send once");
+    assert.equal(commands.length, sent);
+    settling()[0].run();
+    const row = (tree) => model.fixtureRows(tree, settings).find((entry) => entry.key === spot.key);
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white", aim: true, pose: plain(model.draftPose(more, settings, row(more))) });
+    assert.equal(Math.round(model.homeOrientation(commands.at(-1).pose.matrix).pan), 120);
+    const [focused] = edit(more, model.patchEdit(more, settings, spot.key, "focus", ["0", "3000", "0"]).action);
+    ds.fixture_patch.renderRig(spot.key, focused, settings);
+    settling()[0].run();
+    assert.deepEqual(plain(commands.at(-1).pose.focus), [0, 3000, 0]);
+    assert.equal(commands.at(-1).aim, true);
+    model.testControl("off");
+    assert.equal(settling().length, 0);
 });
 
 test("Restart show restarts the show only on a second click within 5 s", async () => {
@@ -692,9 +748,9 @@ test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixt
     ds.fixture_patch.syncTest(live, "config");
     // The label spot_right now sits on the old spot_left: its test lights that uuid.
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_right").key, swapped, settings);
-    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_left }, colour: "red" });
+    assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_left }, colour: "red", ...posed("spot_left") });
     ds.fixture_patch.renderRig(fixtureNode(swapped, "spot_left").key, swapped, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
     const renamed = rename(current, "kinta", "kinta_new");
     ds.fixture_patch.renderRig(fixtureNode(renamed, "spot_right").key, renamed, settings);
     assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });

@@ -15,6 +15,7 @@ from cli.starfire_protocol import (
     ROLE_NAMES,
     STAGE_AREAS,
     check_payload_size,
+    movement,
 )
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
@@ -33,14 +34,6 @@ def _read(path: Path, limit: int) -> bytes:
     if len(content) > limit:
         raise ValueError(f'Asset exceeds its {limit}-byte limit: {path}')
     return content
-
-
-def _movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
-    if limits == {'min': 0.0, 'max': 1.0, 'inverted': False}:
-        return None
-    return rig_wire.Fixture.MovementRange(
-        minimum=limits['min'], maximum=limits['max'], inverted=limits['inverted']
-    )
 
 
 def stage_areas(positions: list[tuple[float, float]]) -> list[int]:
@@ -96,12 +89,13 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
             universe=fixture['universe'],
             address=fixture['address'],
             matrix=fixture['matrix'],
+            focus=fixture['focus'],
             cells=[rig_wire.Fixture.Cell(**cell) for cell in cells[profile_id]],
             area=area,
         )
         for axis in mvr.MOVEMENT_AXES:
-            if (movement := _movement(fixture[axis])) is not None:
-                getattr(entry, axis).CopyFrom(movement)
+            if (limits := movement(fixture[axis])) is not None:
+                getattr(entry, axis).CopyFrom(limits)
     roles, _, warnings = mvr.group_roles(fixtures)
     groups, order_warnings = mvr.groups(fixtures)
     for warning in warnings + order_warnings:

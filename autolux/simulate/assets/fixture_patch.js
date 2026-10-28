@@ -21,6 +21,10 @@
     const RESTART_HOLD_MS = 60000;
     // A forgotten Locate in a party room: the held test ends by itself after 10 minutes.
     const TEST_MAX_MS = 600000;
+    // Edits reach a lit test this soon after they settle, so a spin box does not flood the show.
+    const POSE_SETTLE_MS = 150;
+    // Starfire's aim without an MVR Focus: level, straight upstage.
+    const DEFAULT_FOCUS_UPSTAGE_MM = 2000;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
@@ -33,6 +37,7 @@
     let refreshTimer = null;
     let testCommand = null;
     let testEndTimer = null;
+    let poseTimer = null;
     // A refusal stays readable over the polls until the next test action.
     let testRefusal = "";
     let restartTimer = null;
@@ -332,6 +337,25 @@
         });
     }
 
+    // The FocusPoint the fixture's MVR Focus names, and where it sits in the scene.
+    function focusPoint(draft, settings, node) {
+        const uuid = textOf(node, "Focus").toUpperCase();
+        return uuid ? placedObjects(draft, settings).find((entry) => entry.node.tag === "FocusPoint" && (entry.node.attributes.uuid || "").toUpperCase() === uuid) : undefined;
+    }
+
+    // The rig Fixture's placement fields as the save exports them (mvr.patched_fixtures), so a
+    // test can show the unsaved patch. None for a fixture without pan, or a rotation Starfire refuses.
+    function draftPose(draft, settings, row) {
+        const tree = gdtfTree(draft, settings, row.spec);
+        if (!physicalRange(tree, row.mode, "Pan") || typeof homeOrientation(row.matrix) !== "object") return undefined;
+        const node = locate(draft.scene, row.key).node;
+        const limits = (axis) => {
+            const movement = movementFor(draft, row.fixture_uuid.toUpperCase(), axis)?.attributes;
+            return { min: Number(movement?.minimum ?? 0), max: Number(movement?.maximum ?? 1), inverted: textOf(node, `DMXInvert${axis}`) === "true" };
+        };
+        return { matrix: row.matrix, pan: limits("Pan"), tilt: limits("Tilt"), focus: focusPoint(draft, settings, node)?.matrix.slice(9) ?? [] };
+    }
+
     function rowError(row, label, settings) {
         if (row.breaks.length !== 1 || Number(row.breaks[0]) !== 0) return `${label}: Starfire renders one Address on break 0 per fixture.`;
         const home = homeOrientation(row.matrix);
@@ -481,6 +505,22 @@
             for (const entry of placedObjects(draft, settings)) {
                 if (entry.node.tag === "Fixture" && classOf(entry.node) === group) moveToLayer(draft, settings, entry.node, layer);
             }
+        },
+        // A new FocusPoint sits beside its fixture; the position is in scene mm either way.
+        "set-focus"(draft, settings, action, { node }) {
+            const position = action.position.map(Number);
+            if (position.length !== 3 || !position.every(Number.isFinite)) throw new Error("The focus point needs X, Y and Z in mm.");
+            let point = focusPoint(draft, settings, node);
+            if (!point) {
+                const { parent } = locate(draft.scene, node.key);
+                const created = template(settings, "FocusPoint", "FocusPoint");
+                created.attributes.name = `${node.attributes.name || "fixture"} focus`;
+                insertChild(parent, schemaKeys(pathTo(draft.scene, parent.key), settings).at(-1), created, settings);
+                applyAction(draft, settings, { action: "set-child-text", key: node.key, tag: "Focus", value: created.attributes.uuid });
+                point = focusPoint(draft, settings, node);
+            }
+            const local = multiply(invert(point.parent), [...IDENTITY.slice(0, 9), ...position]);
+            return applyAction(draft, settings, { action: "set-child-text", key: point.node.key, tag: "Matrix", value: formatMatrix(local) });
         },
         "set-movement"(draft, settings, action, { node }) {
             const [minimum, maximum] = [action.minimum, action.maximum].map(Number);
@@ -642,6 +682,10 @@
                 const error = !values.every(Number.isFinite) ? "Position and rotation must be numbers." : Math.abs(values[4]) > MAX_PITCH_DEGREES ? `Pitch must be within ±${MAX_PITCH_DEGREES}°.` : null;
                 return { error, action: { action: "set-matrix", key, position: values.slice(0, 3), rotation: values.slice(3), standing: isStanding(parseMatrix(textOf(node, "Matrix")) || IDENTITY) } };
             }
+            case "focus": {
+                const values = value.map((text) => (text.trim() === "" ? NaN : Number(text)));
+                return { error: values.every(Number.isFinite) ? null : "Enter X, Y and Z in mm.", action: { action: "set-focus", key, position: values } };
+            }
             case "mount": {
                 const local = parseMatrix(textOf(node, "Matrix"));
                 const current = local && placement(local);
@@ -685,12 +729,20 @@
         lit = false;
         clearInterval(refreshTimer);
         clearTimeout(testEndTimer);
-        refreshTimer = testEndTimer = null;
+        clearTimeout(poseTimer);
+        refreshTimer = testEndTimer = poseTimer = null;
     };
+
+    // The pose a whole-fixture test carries: the unsaved patch's, so edits show before a restart.
+    function testPose(target) {
+        const row = target?.fixture && rig && fixtureRows(rig.draft, rig.settings).find((entry) => entry.fixture_uuid === target.fixture);
+        return row ? draftPose(rig.draft, rig.settings, row) : undefined;
+    }
 
     // motion is "sweep" or "aim": Starfire moves a mover's head through the show's logical pan.
     function highlight(target, colour, motion) {
-        const command = (testCommand = target ? { action: "highlight", target, colour, ...(motion && { [motion]: true }) } : { action: "highlight", target: null });
+        const pose = testPose(target);
+        const command = (testCommand = target ? { action: "highlight", target, colour, ...(motion && { [motion]: true }), ...(pose && { pose }) } : { action: "highlight", target: null });
         stopRefresh();
         lit = Boolean(target);
         testRefusal = "";
@@ -843,6 +895,11 @@
                 else if (testCommand.target.fixture !== next.fixture_uuid) highlight({ fixture: next.fixture_uuid }, testCommand.colour);
             }
             rig = { draft, settings, selection };
+            // An edit to the lit fixture's placement, limits or focus re-sends its test once settled.
+            if (lit && JSON.stringify(testPose(testCommand.target)) !== JSON.stringify(testCommand.pose)) {
+                clearTimeout(poseTimer);
+                poseTimer = setTimeout(() => highlight(testCommand.target, testCommand.colour, litMotion()), POSE_SETTLE_MS);
+            }
             if (typeof document.getElementById === "function") {
                 const plan = document.getElementById("mvr-plan");
                 if (plan && !planDrag) redraw(plan, drawPlan);
@@ -921,6 +978,7 @@
         planMove,
         invert,
         patchEdit,
+        draftPose,
         testControl,
         patchForm,
         applyClick,
@@ -1348,6 +1406,8 @@
         const local = matrix && placement(matrix);
         const uuid = (node.attributes.uuid || "").toUpperCase();
         const axes = ["Pan", "Tilt"].map((axis) => [axis, physicalRange(tree, row.mode, axis)]).filter(([, range]) => range);
+        const mover = axes.some(([axis]) => axis === "Pan");
+        const focus = focusPoint(draft, settings, node)?.matrix.slice(9) ?? [placed.matrix[9], placed.matrix[10] + DEFAULT_FOCUS_UPSTAGE_MM, placed.matrix[11]];
         // Sorted, as a GDTF range may run from its high end.
         const limits = (axis, [from, to]) =>
             ["minimum", "maximum"]
@@ -1356,7 +1416,7 @@
                 .map(String);
         const span = row.address && row.channels ? `DMX ${row.address}–${row.address + row.channels - 1}` : null;
         return [
-            ...testStrip(axes.some(([axis]) => axis === "Pan")),
+            ...testStrip(mover),
             section(
                 "Patch",
                 span,
@@ -1387,7 +1447,9 @@
                               h("small", { className: "cfg-note" })
                           )
                       ]
-                    : [muted("Rotation is set in Advanced.")])
+                    : [muted("Rotation is set in Advanced.")]),
+                // Unset, the field shows Starfire's default; the MVR gains a FocusPoint on the first edit.
+                mover && field("Focus point (mm)", split(["x", "y", "z"], focus.map(formatNumber), ["X", "Y", "Z"], { "data-cfg": "focus" }), true, "div")
             ),
             section(
                 "Group and role",

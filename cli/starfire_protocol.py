@@ -156,6 +156,14 @@ def _transition(value):
     raise ValueError('Invalid Starfire transition')
 
 
+def movement(limits: dict) -> rig_wire.Fixture.MovementRange | None:
+    if limits == {'min': 0.0, 'max': 1.0, 'inverted': False}:
+        return None
+    return rig_wire.Fixture.MovementRange(
+        minimum=limits['min'], maximum=limits['max'], inverted=limits['inverted']
+    )
+
+
 def _active_effect(value):
     value = dict(value)
     target = value.pop('target')
@@ -189,6 +197,13 @@ def _active_effect(value):
         raise ValueError('Effects set intensity directly; multipliers are not supported')
     if (special := value.pop('special_fx', None)) is not None:
         value['special_fx'] = _special_fx(special)
+    if (pose := value.pop('pose', None)) is not None:
+        value['pose'] = wire.SetActiveEffect.FixturePose(
+            matrix=pose['matrix'],
+            pan=movement(pose['pan']),
+            tilt=movement(pose['tilt']),
+            focus=pose['focus'],
+        )
     return wire.SetActiveEffect(
         effect_id=value.pop('id'),
         **target,

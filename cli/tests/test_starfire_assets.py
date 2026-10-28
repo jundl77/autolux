@@ -292,16 +292,30 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
     looks.highlight({'fixture': ids['wash_left']}, 'warm')
     looks.highlight({'cell': cells['zq06017'][2]})
     looks.highlight({'fixture': ids['spot_left']}, sweep=True)
-    looks.highlight({'fixture': ids['spot_left']}, aim=True)
+    pose = {
+        'matrix': [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 100.0, 200.0, 3000.0],
+        'pan': {'min': 0.1, 'max': 0.8, 'inverted': True},
+        'tilt': {'min': 0.0, 'max': 1.0, 'inverted': False},
+        'focus': [0.0, 2000.0, 0.0],
+    }
+    looks.highlight({'fixture': ids['spot_left']}, aim=True, pose=pose)
     wash, segment, sweep, aim = (
         protocol.build_command(event['command']) for event in lighting.events
     )
-    assert (sweep.pan_sweep, sweep.HasField('pan'), aim.aim_upstage, aim.HasField('tilt')) == (
-        True,
+    moved = (sweep.pan_sweep, sweep.HasField('pan'), sweep.HasField('tilt'), aim.aim_focus)
+    assert moved == (True, False, False, True)
+    # The pose reaches Starfire in the rig's own Fixture terms.
+    assert (list(aim.pose.matrix), list(aim.pose.focus), aim.HasField('tilt')) == (
+        pose['matrix'],
+        pose['focus'],
         False,
+    )
+    assert (aim.pose.pan.minimum, aim.pose.pan.inverted, aim.pose.HasField('tilt')) == (
+        0.1,
         True,
         False,
     )
+    assert not sweep.HasField('pose')
     assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (
         ids['wash_left'],
         0.0,

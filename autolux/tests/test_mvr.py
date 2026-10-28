@@ -3,6 +3,7 @@ import io
 import uuid
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pymvr
 import pytest
@@ -214,6 +215,30 @@ def test_a_fixture_uuid_reaches_starfire_as_the_mvr_writes_it(tmp_path):
     assert [f.fixture_uuid for f in exported.fixtures if f.name == 'spot_left'] == [written]
     movers = next(group for group in exported.groups if group.group_id == 'movers')
     assert written in movers.fixture_uuids
+
+
+def test_a_fixtures_focus_point_round_trips_and_reaches_starfire_as_its_scene_position(tmp_path):
+    scene = mvr.read(ROOM.read_bytes())
+    spot = next(node for node in scene.root.iter('Fixture') if node.get('name') == 'spot_left')
+    children = next(layer for layer in scene.root.iter('ChildList') if spot in layer)
+    point = ElementTree.SubElement(
+        children, 'FocusPoint', uuid=str(uuid.uuid4()).upper(), name='spot_left focus'
+    )
+    ElementTree.SubElement(point, 'Matrix').text = '{1,0,0}{0,1,0}{0,0,1}{-300,2500,0}'
+    ElementTree.SubElement(point, 'Geometries')
+    focus = ElementTree.Element('Focus')
+    focus.text = point.get('uuid')
+    spot.insert(list(spot).index(spot.find('GDTFMode')) + 1, focus)
+    content = mvr.write(scene)
+    scene = mvr.read(content)
+    assert validate(scene) == []
+    assert mvr.write(mvr.apply_draft(scene, mvr.draft(scene), LIBRARY)) == content
+    focused = {fixture['name']: fixture['focus'] for fixture in mvr.patched_fixtures(scene)}
+    assert (focused['spot_left'], focused['spot_right']) == ([-300.0, 2500.0, 0.0], [])
+    rig = tmp_path / 'room.mvr'
+    rig.write_bytes(content)
+    exported = {fixture.name: list(fixture.focus) for fixture in rig_definition(rig).fixtures}
+    assert (exported['spot_left'], exported['spot_right']) == ([-300.0, 2500.0, 0.0], [])
 
 
 def room_layers(move: dict[str, str] | None = None, rename: dict[str, str] | None = None):

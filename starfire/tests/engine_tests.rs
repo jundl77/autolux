@@ -77,7 +77,8 @@ fn lighting_override(id: &str, values: PropertyValues) -> LightingOverride {
         priority: 0,
         special_fx: None,
         pan_sweep: false,
-        aim_upstage: false,
+        aim_focus: false,
+        pose: None,
     }
 }
 

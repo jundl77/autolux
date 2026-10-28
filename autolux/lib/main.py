@@ -185,6 +185,7 @@ class ShowControl:
                         command['colour'],
                         sweep=command['sweep'],
                         aim=command['aim'],
+                        pose=command['pose'],
                         paused=light_engine.paused,
                     )
             except ValueError as error:
