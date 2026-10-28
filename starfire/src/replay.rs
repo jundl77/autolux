@@ -171,3 +171,147 @@ pub fn write_capture(path: &Path, frames: &[RenderedFrame]) -> Result<()> {
     output.flush()?;
     Ok(())
 }
+
+pub const PREVIEW_KIND: &str = "starfire_preview";
+const PREVIEW_DECIMALS: f64 = 1000.0;
+
+pub struct PreviewSummary {
+    pub frames: usize,
+    pub script_errors: std::collections::BTreeSet<String>,
+}
+
+/// The offline preview as JSON lines: a header naming the rig's cells, groups and bar length,
+/// then one frame per line at `rate_hz`, each cell `[i, r, g, b, strobe_hz, direction, gobo]`
+/// in header order. Intensity and strobe are the output after masters and limits. Direction
+/// (a unit vector in the MVR scene frame) and gobo leave the tail when absent; a missing
+/// direction before a gobo is null. Frames stream out as they render, so a long recording
+/// holds no frames in memory.
+pub fn write_preview(
+    replay: &Replay,
+    rig: FixtureRig,
+    catalog: AutoloopCatalog,
+    rate_hz: u32,
+    output: &mut impl Write,
+) -> Result<PreviewSummary> {
+    use crate::model::Command;
+    use serde_json::{Value, json};
+    use std::collections::{BTreeMap, BTreeSet};
+
+    // Loops, crossfades and limits all run on time, not frame count, so rendering at the
+    // preview rate shows what the 40 Hz show does at the same instants.
+    let replay = Replay {
+        frame_rate_hz: rate_hz,
+        ..replay.clone()
+    };
+    let frame_count = replay.validate()?;
+    let cells = rig.cell_ids();
+    let index: BTreeMap<&str, usize> = cells
+        .iter()
+        .enumerate()
+        .map(|(position, id)| (id.as_str(), position))
+        .collect();
+    let beats_per_bar = replay.events.iter().find_map(|event| match event.command {
+        Command::Beat { beats_per_bar, .. } => Some(beats_per_bar),
+        _ => None,
+    });
+    let header = json!({
+        "kind": PREVIEW_KIND,
+        "frame_rate_hz": rate_hz,
+        "duration_seconds": replay.duration_seconds,
+        "frames": frame_count,
+        "beats_per_bar": beats_per_bar,
+        "cells": cells.iter().map(|id| {
+            let [x, y, z] = rig.spatial().position(id).unwrap_or_default().map(|mm| preview_round(mm / 1000.0));
+            json!({"id": id, "fixture": rig.uuid_of_cell(id), "x": x, "y": y, "z": z})
+        }).collect::<Vec<_>>(),
+        "groups": rig.groups().iter().map(|(group, members)| {
+            let members: Vec<usize> = members.iter().filter_map(|id| index.get(id.as_str()).copied()).collect();
+            (group.clone(), members)
+        }).collect::<BTreeMap<_, _>>(),
+    });
+    serde_json::to_writer(&mut *output, &header)?;
+    output.write_all(b"\n")?;
+
+    let mut engine = Engine::new(rig.clone(), catalog, PaletteTable::new(&replay.palettes)?)?;
+    let mut events = replay.events.iter().peekable();
+    let mut script_errors = BTreeSet::new();
+    for frame_index in 0..frame_count {
+        let time_seconds = (frame_index as f64 / f64::from(rate_hz)).min(replay.duration_seconds);
+        while events
+            .peek()
+            .is_some_and(|event| event.at_seconds <= time_seconds)
+        {
+            let event = events.next().expect("peeked event exists");
+            engine.apply(event.at_seconds, &event.command)?;
+        }
+        let frame = engine.render_at(time_seconds)?;
+        let states = &frame.fixture_properties_before_strobe;
+        let values: Vec<Value> = cells
+            .iter()
+            .map(|id| preview_cell(&states[id], None))
+            .collect();
+        let mut line = json!({
+            "t": preview_round(frame.time_seconds),
+            "beat": preview_round(frame.beat_position),
+            "bank": frame.active_bank,
+            "autoloop": frame.active_autoloop,
+            "c": values,
+        });
+        if let Some(error) = frame.script_error {
+            // A faulted loop renders dark; the flag keeps that from reading as restraint.
+            line["fault"] = Value::Bool(true);
+            script_errors.insert(error);
+        }
+        serde_json::to_writer(&mut *output, &line)?;
+        output.write_all(b"\n")?;
+    }
+    output.flush()?;
+    Ok(PreviewSummary {
+        frames: frame_count,
+        script_errors,
+    })
+}
+
+fn preview_cell(
+    state: &crate::model::FixtureState,
+    direction: Option<[f64; 3]>,
+) -> serde_json::Value {
+    use crate::model::AttributeValue;
+    use serde_json::{Value, json};
+
+    let mut cell = [
+        state.intensity,
+        state.colour.red,
+        state.colour.green,
+        state.colour.blue,
+        state.strobe_hz,
+    ]
+    .map(|value| json!(preview_round(value)))
+    .to_vec();
+    // GDTF names gobo wheels Gobo1, Gobo2, …; a selected slot is its ChannelSet's name.
+    let gobo = state
+        .attributes
+        .iter()
+        .find_map(|(attribute, value)| match value {
+            AttributeValue::Preset(name)
+                if attribute.strip_prefix("Gobo").is_some_and(|wheel| {
+                    !wheel.is_empty() && wheel.bytes().all(|byte| byte.is_ascii_digit())
+                }) =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        });
+    if direction.is_some() || gobo.is_some() {
+        cell.push(direction.map_or(Value::Null, |vector| json!(vector.map(preview_round))));
+    }
+    if let Some(gobo) = gobo {
+        cell.push(json!(gobo));
+    }
+    Value::Array(cell)
+}
+
+/// Three decimals, with -0 written as 0.
+fn preview_round(value: f64) -> f64 {
+    (value * PREVIEW_DECIMALS).round() / PREVIEW_DECIMALS + 0.0
+}
