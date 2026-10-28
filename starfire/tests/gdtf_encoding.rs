@@ -291,8 +291,8 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
 #[test]
 fn an_upstage_aim_throws_the_beam_towards_plus_y_at_any_yaw_and_mount() {
     // Independent of the encoder: decode the DMX to body angles and carry the beam through the
-    // Matrix, as fixture_encoding's mount test does. Physical pan 0 faces local +Y, the display,
-    // and turns clockwise about local +Z; mid tilt is on the pan axis and tilts towards the pan
+    // Matrix, as fixture_encoding's mount test does. The pan range centre faces local +Y, the
+    // display, and pan turns clockwise about local +Z; mid tilt is on the pan axis and tilts towards the pan
     // heading, standing too.
     let aimed = |hanging: bool, yaw: f64, inverted: bool| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
@@ -337,7 +337,7 @@ fn an_upstage_aim_throws_the_beam_towards_plus_y_at_any_yaw_and_mount() {
             f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 * travel
         };
         let (pan, tilt) = (
-            angle(0, 540.0).to_radians(),
+            (angle(0, 540.0) - 270.0).to_radians(),
             (flip * (angle(2, 270.0) - 135.0)).to_radians(),
         );
         let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
