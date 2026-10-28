@@ -8,7 +8,9 @@ decisions, not delivery latency or unrecorded accents.
 
 from __future__ import annotations
 
+import json
 import math
+from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
 from autolux.lib.engine.effect_definitions import DEFAULT_AUTOLOOPS
@@ -20,6 +22,10 @@ DEFAULT_FRAME_RATE_HZ = 40
 MAX_FRAME_RATE_HZ = 100
 MAX_TEMPO_BPM = 1_000.0
 AUTOLOOP_BY_INTENT = {intent.value: loops[0] for intent, loops in DEFAULT_AUTOLOOPS.items()}
+# What `starfire preview` writes as its header's kind; a report has none.
+PREVIEW_KIND = 'starfire_preview'
+PREVIEW_CELL_FIELDS = 5
+OVERVIEW_COLUMNS = 240
 
 
 def _nonnegative(value, name: str) -> float:
@@ -150,4 +156,133 @@ def report_to_replay(report: dict, *, frame_rate_hz: int = DEFAULT_FRAME_RATE_HZ
         'frame_rate_hz': frame_rate_hz,
         'palettes': palette_records(),
         'events': commands,
+    }
+
+
+@dataclass(frozen=True)
+class Preview:
+    """`starfire preview` output: the header line, then one frame per line.
+
+    Each frame's ``c`` holds one ``[i, r, g, b, strobe_hz, direction?, gobo?]`` per header cell.
+    """
+
+    header: dict
+    frames: list[dict]
+
+    @property
+    def rate_hz(self) -> int:
+        return self.header['frame_rate_hz']
+
+
+def is_preview(text: str) -> bool:
+    first = text.partition('\n')[0]
+    try:
+        header = json.loads(first)
+    except ValueError:
+        return False
+    return isinstance(header, dict) and header.get('kind') == PREVIEW_KIND
+
+
+def load_preview(text: str) -> Preview:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines or not is_preview(lines[0]):
+        raise ValueError(f'not a {PREVIEW_KIND} file')
+    header = json.loads(lines[0])
+    rate = header.get('frame_rate_hz')
+    cells = header.get('cells')
+    if type(rate) is not int or not 1 <= rate <= MAX_FRAME_RATE_HZ:
+        raise ValueError(f'preview frame rate must be an integer in 1..{MAX_FRAME_RATE_HZ}')
+    if not isinstance(cells, list) or not all(
+        isinstance(cell, dict) and isinstance(cell.get('fixture'), str) for cell in cells
+    ):
+        raise ValueError('preview cells must name their fixture')
+    if not isinstance(header.get('groups'), dict):
+        raise TypeError('preview groups must be an object')
+    frames = [json.loads(line) for line in lines[1:]]
+    if len(frames) != header.get('frames'):
+        raise ValueError(
+            f'preview has {len(frames)} frames, its header says {header.get("frames")}'
+        )
+    for frame in frames:
+        values = frame.get('c') if isinstance(frame, dict) else None
+        if not isinstance(values, list) or len(values) != len(cells):
+            raise ValueError('every preview frame needs one entry per header cell')
+        if not all(isinstance(cell, list) and len(cell) >= PREVIEW_CELL_FIELDS for cell in values):
+            raise ValueError('a preview cell needs intensity, RGB and strobe')
+    return Preview(header, frames)
+
+
+def bar_starts(preview: Preview) -> list[tuple[int, int]]:
+    """(bar number from 1, first frame) for each bar the frames enter, on the renderer's grid."""
+    beats_per_bar = preview.header.get('beats_per_bar')
+    if not beats_per_bar:
+        return []
+    starts, previous = [], None
+    for index, frame in enumerate(preview.frames):
+        bar = math.floor(frame['beat'] / beats_per_bar)
+        if bar != previous:
+            starts.append((bar + 1, index))
+            previous = bar
+    return starts
+
+
+def _sections(preview: Preview) -> list[dict]:
+    sections = []
+    for index, frame in enumerate(preview.frames):
+        base = '/'.join(filter(None, (frame.get('bank'), frame.get('autoloop')))) or None
+        if not sections or sections[-1]['base'] != base:
+            sections.append({'base': base, 'start': index, 'end': index + 1, 'light': [0.0] * 4})
+        section = sections[-1]
+        section['end'] = index + 1
+        for intensity, red, green, blue, *_ in frame['c']:
+            light = section['light']
+            for channel, value in enumerate((intensity * red, intensity * green, intensity * blue)):
+                light[channel] += value
+            light[3] += intensity
+    for section in sections:
+        *rgb, weight = section.pop('light')
+        # The intensity-weighted hue at full brightness: the strip shows level separately.
+        peak = max(rgb) if weight > 0 else 0.0
+        section['rgb'] = [round(value / peak, 3) for value in rgb] if peak > 0 else None
+    return sections
+
+
+def preview_overview(preview: Preview, columns: int = OVERVIEW_COLUMNS) -> dict:
+    """The whole track at a glance, for judging restraint and contrast.
+
+    Columns are equal slices of the frames, each at least one frame. Per group, each column
+    holds its mean intensity; ``strobe`` is the share of a column's frames with any cell
+    strobing. Strobe seconds count frames with strobe, per group and overall. Sections are runs
+    of one base loop with their intensity-weighted colour, null when dark throughout.
+    """
+    frames = preview.frames
+    count = min(columns, len(frames))
+    groups = {name: members for name, members in preview.header['groups'].items() if members}
+    level = {name: [0.0] * count for name in groups}
+    strobe = [0.0] * count
+    sizes = [0] * count
+    strobing = dict.fromkeys(groups, 0)
+    strobing_any = 0
+    for index, frame in enumerate(frames):
+        column = index * count // len(frames)
+        sizes[column] += 1
+        cells = frame['c']
+        for name, members in groups.items():
+            level[name][column] += sum(cells[cell][0] for cell in members) / len(members)
+            strobing[name] += any(cells[cell][4] > 0 for cell in members)
+        if any(cell[4] > 0 for cell in cells):
+            strobe[column] += 1
+            strobing_any += 1
+    return {
+        'columns': count,
+        'groups': {
+            name: [round(total / size, 3) for total, size in zip(row, sizes, strict=True)]
+            for name, row in level.items()
+        },
+        'strobe': [round(total / size, 3) for total, size in zip(strobe, sizes, strict=True)],
+        'strobe_seconds': round(strobing_any / preview.rate_hz, 3),
+        'group_strobe_seconds': {
+            name: round(frames_on / preview.rate_hz, 3) for name, frames_on in strobing.items()
+        },
+        'sections': _sections(preview),
     }
