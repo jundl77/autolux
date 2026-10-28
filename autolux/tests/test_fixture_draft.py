@@ -18,7 +18,7 @@ def test_fixture_draft_integrity(tmp_path):
     node = shutil.which('node')
     if node is None:
         pytest.skip('Node is required for the browser-side draft integrity checks')
-    room = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    room = mvr.read((ROOT / 'autolux/tests/data/room.mvr').read_bytes())
     data = {
         'draft': mvr.draft(room),
         'settings': {

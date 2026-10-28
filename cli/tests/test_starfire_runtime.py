@@ -13,13 +13,24 @@ import pytest
 from autolux.lighting import mvr
 from cli import starfire_protocol as protocol
 from cli import starfire_runtime
-from cli.starfire import DEFAULT_RIG
+from cli.starfire import ROOT
 from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
+
+
+def test_the_session_reports_the_revision_of_the_rig_it_loads():
+    import argparse
+    import hashlib
+
+    args = argparse.Namespace(starfire_binary='starfire.exe', rig=None, library='rig/library')
+    revision = starfire_runtime.fixture_setup(args, ROOM)['rig_revision']
+    assert revision == hashlib.sha256(ROOM.read_bytes()).hexdigest()
+
 
 def edited_room(path: Path, old: str, new: str) -> Path:
-    scene = mvr.read(DEFAULT_RIG.read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     xml = mvr._xml_bytes(scene.root).decode('utf-8')
     assert old in xml
     scene.root = mvr._guard_xml(xml.replace(old, new, 1).encode('utf-8'), path.name)
@@ -451,7 +462,7 @@ def _fake_runtime(tmp_path, mode='normal', **kwargs):
     (scripts / 'drop/kick.lua').write_text('return {render=function(ctx) return {} end}')
     runtime = starfire_runtime.StarfireRuntime(
         sys.executable,
-        DEFAULT_RIG,
+        ROOM,
         scripts,
         '127.0.0.1:6454',
         tmp_path / 'run',
@@ -754,7 +765,7 @@ def test_real_renderer_accepts_python_protobuf_and_blackouts_on_eof(tmp_path):
         receiver.settimeout(3)
         runtime = starfire_runtime.StarfireRuntime(
             binary,
-            root / 'rig/room.mvr',
+            ROOM,
             root / 'show/autoloops',
             f'127.0.0.1:{receiver.getsockname()[1]}',
             tmp_path / 'native',
@@ -823,9 +834,7 @@ def test_production_rejects_multi_universe_patch_but_standalone_keeps_it(tmp_pat
     with pytest.raises(RuntimeError, match=r'fixture universes \[0, 1\].*Radius TX universe 0'):
         starfire_runtime.validate_starfire(binary, rig, autoloops, expected_universe=0)
     starfire_runtime.validate_starfire(binary, rig, autoloops)
-    starfire_runtime.validate_starfire(
-        binary, root / 'rig/room.mvr', autoloops, expected_universe=0
-    )
+    starfire_runtime.validate_starfire(binary, ROOM, autoloops, expected_universe=0)
 
 
 def test_preflight_renders_autoloops_against_the_selected_patch(tmp_path, caplog):
@@ -855,7 +864,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
-        starfire_runtime.validate_starfire(binary, root / 'rig/room.mvr', tmp_path)
+        starfire_runtime.validate_starfire(binary, ROOM, tmp_path)
 
 
 def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
@@ -892,7 +901,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
         match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
         'drop/slam, standby/warm_white$',
     ):
-        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
+        starfire_runtime.validate_starfire(binary, ROOM, tmp_path)
 
 
 def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, monkeypatch):
@@ -920,7 +929,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
     with pytest.raises(RuntimeError, match="cannot select.*drop/kick: texture 'neon'"):
-        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
+        starfire_runtime.validate_starfire(binary, ROOM, tmp_path)
 
 
 def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplog):
@@ -949,7 +958,7 @@ def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplo
         lambda *_, **__: SimpleNamespace(returncode=0, stdout=report, stderr=''),
     )
     with caplog.at_level('WARNING'):
-        starfire_runtime.validate_starfire(binary, DEFAULT_RIG, tmp_path)
+        starfire_runtime.validate_starfire(binary, ROOM, tmp_path)
     assert 'groups not in this rig: fx, lasers' in caplog.text
 
 

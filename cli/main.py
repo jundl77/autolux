@@ -51,7 +51,7 @@ async def run_cmd(args: argparse.Namespace):
             enable_ui=args.ui,
             ui_port=args.ui_port,
             report_path=args.report,
-            fixture_setup=fixture_setup(args),
+            fixture_setup=fixture_setup(args, rig),
             autoloops=discover_autoloops(args.autoloops),
             autoloop_meta=read_autoloop_meta(args.autoloops),
             selection_seed=run_id,

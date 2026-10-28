@@ -14,6 +14,7 @@ from autolux.lighting.mvr_validation import validate
 from cli.starfire_assets import rig_definition
 
 ROOT = Path(__file__).resolve().parents[2]
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 DATA = Path(__file__).parent / 'data'
 LIBRARY = fixture_library(ROOT / 'rig/library') | fixture_library(
     ROOT / 'autolux/tests/data/generic_rig'
@@ -181,8 +182,8 @@ def test_addresses_resolve_to_artnet_universe_and_address_within_range(text, exp
 
 
 def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
-    content = (ROOT / 'rig/room.mvr').read_bytes()
-    scene, fixtures = load_rig(ROOT / 'rig/room.mvr')
+    content = ROOM.read_bytes()
+    scene, fixtures = load_rig(ROOM)
     assert validate(scene) == []
     assert len(fixtures) == 8
     assert mvr.groups(fixtures)[0] == ROOM_GROUP_ORDER
@@ -194,7 +195,7 @@ def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
 
 def room_layers(move: dict[str, str] | None = None, rename: dict[str, str] | None = None):
     """The room scene with fixtures moved between layers and layers renamed."""
-    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     layers = {layer.get('name'): layer for layer in scene.root.iter('Layer')}
     for name, target in (move or {}).items():
         fixture = next(node for node in scene.root.iter('Fixture') if node.get('name') == name)
@@ -215,10 +216,10 @@ def test_room_groups_take_their_role_from_the_mvr_layer_and_round_trip():
         [],
         [],
     )
-    groups = {group.group_id: group.role for group in rig_definition(ROOT / 'rig/room.mvr').groups}
+    groups = {group.group_id: group.role for group in rig_definition(ROOM).groups}
     assert groups == {'movers': 0, 'wash': 0, 'strip': 0, 'fx': 1}
     content = mvr.write(scene)
-    assert mvr.write(mvr.read(content)) == content == (ROOT / 'rig/room.mvr').read_bytes()
+    assert mvr.write(mvr.read(content)) == content == ROOM.read_bytes()
 
 
 def test_a_class_split_across_layers_is_refused():
@@ -427,7 +428,7 @@ def test_gdtf_edits_are_limited_to_correctable_fields(change, message):
 
 
 def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
-    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     edited = mvr.draft(scene)
     spot = node(edited['scene'], 'Fixture', 'spot_left')
     child(spot, 'GDTFSpec')['text'] = 'Generic@Dimmer@1.0.gdtf'
@@ -438,7 +439,7 @@ def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
 
 
 def test_the_room_rig_written_by_pymvr_reads_back_to_the_same_patch_and_dmx(tmp_path):
-    shipped = ROOT / 'rig/room.mvr'
+    shipped = ROOM
     scene = mvr.read(shipped.read_bytes())
     source = pymvr.GeneralSceneDescription(io.BytesIO(shipped.read_bytes()))
     writer = pymvr.GeneralSceneDescriptionWriter()
@@ -455,4 +456,4 @@ def test_the_room_rig_written_by_pymvr_reads_back_to_the_same_patch_and_dmx(tmp_
     assert fixtures == original
     assert mvr.groups(fixtures)[0] == mvr.groups(original)[0]
     exported = rig_definition(rewritten).SerializeToString()
-    assert exported == (ROOT / 'rig/room.rig.pb').read_bytes()
+    assert exported == ROOM.with_suffix('.rig.pb').read_bytes()

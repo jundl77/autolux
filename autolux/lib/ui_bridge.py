@@ -85,7 +85,7 @@ def parse_control_command(payload) -> dict:
     if not isinstance(payload, dict):
         raise TypeError('a control command must be an object')
     action = payload.get('action')
-    if action in ('pause', 'play', 'next_autoloop'):
+    if action in ('pause', 'play', 'next_autoloop', 'restart_show'):
         return {'action': action}
     if action == 'master':
         level = payload.get('level')

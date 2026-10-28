@@ -15,6 +15,8 @@ MAX_ARTNET_UNIVERSE = 32767
 MAX_FIXTURES = 512
 MAX_NAME_BYTES = 128
 ONE_ADDRESS_RULE = 'Starfire renders one Address on break 0 per fixture'
+REPO_RIG_NAME = 'room.mvr'
+RIG_DEFINITION_SUFFIX = '.rig.pb'
 LOGGER = logging.getLogger(__name__)
 
 
@@ -157,27 +159,35 @@ def refresh_profiles(rig_path: Path, library_path: Path) -> list[str]:
     return sorted(renames)
 
 
-def _replace(path: Path, content: bytes) -> None:
+def _stage(path: Path, content: bytes) -> Path:
     with tempfile.NamedTemporaryFile(
-        mode='wb', prefix='.rig-', suffix='.mvr', dir=path.parent, delete=False
+        mode='wb', prefix='.rig-', suffix=path.suffix, dir=path.parent, delete=False
     ) as staged:
         staged.write(content)
         staged.flush()
         os.fsync(staged.fileno())
+    return Path(staged.name)
+
+
+def _replace(path: Path, content: bytes) -> None:
+    staged = _stage(path, content)
     try:
-        os.replace(staged.name, path)
+        os.replace(staged, path)
     finally:
-        Path(staged.name).unlink(missing_ok=True)
+        staged.unlink(missing_ok=True)
 
 
-def _revision(content: bytes) -> str:
+def rig_revision(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
 class FixtureStore:
-    def __init__(self, rig_path: Path, library_path: Path, validate: Callable[[Path], None]):
+    def __init__(self, rig_path: Path, library_path: Path, validate: Callable[[Path], bytes]):
+        """`validate` returns the RigDefinition Starfire accepted for the staged MVR."""
         self.rig_path = Path(rig_path)
         self.library_path = Path(library_path)
+        # The tracked rig the show seeds from sits beside the library its GDTF comes from.
+        self.repo_rig = self.library_path.parent / REPO_RIG_NAME
         self._validate = validate
         self._lock = threading.Lock()
 
@@ -187,37 +197,32 @@ class FixtureStore:
     def load(self) -> tuple[dict, str]:
         with self._lock:
             content = read_bounded(self.rig_path, mvr.MAX_MVR_BYTES)
-            return mvr.draft(mvr.read(content)), _revision(content)
+            return mvr.draft(mvr.read(content)), rig_revision(content)
 
     def save(self, edited: dict, expected_revision: str) -> tuple[dict, str]:
         library = self.library()
         with self._lock:
             before = read_bounded(self.rig_path, mvr.MAX_MVR_BYTES)
-            current = _revision(before)
+            current = rig_revision(before)
             if current != expected_revision:
                 raise ValueError('Fixture patch changed. Reload it before saving your edits.')
             scene = mvr.apply_draft(mvr.read(before), edited, library)
             require_renderable(scene)
             content = mvr.write(scene)
-            staged_path = None
+            staged = {}
             try:
-                with tempfile.NamedTemporaryFile(
-                    mode='wb',
-                    prefix='.rig-',
-                    suffix='.mvr',
-                    dir=self.rig_path.parent,
-                    delete=False,
-                ) as staged:
-                    staged_path = Path(staged.name)
-                    staged.write(content)
-                    staged.flush()
-                    os.fsync(staged.fileno())
-                self._validate(staged_path)
+                staged[self.rig_path] = _stage(self.rig_path, content)
+                definition = self._validate(staged[self.rig_path])
+                if self.repo_rig != self.rig_path:
+                    staged[self.repo_rig] = _stage(self.repo_rig, content)
+                exported = self.repo_rig.with_suffix(RIG_DEFINITION_SUFFIX)
+                staged[exported] = _stage(exported, definition)
                 # Another process may edit the rig while the native validator runs.
-                if _revision(self.rig_path.read_bytes()) != current:
+                if rig_revision(self.rig_path.read_bytes()) != current:
                     raise ValueError('Fixture patch changed during validation. Reload and retry.')
-                os.replace(staged_path, self.rig_path)
+                for target, source in staged.items():
+                    os.replace(source, target)
             finally:
-                if staged_path is not None:
-                    staged_path.unlink(missing_ok=True)
-        return mvr.draft(mvr.read(content)), _revision(content)
+                for source in staged.values():
+                    source.unlink(missing_ok=True)
+        return mvr.draft(mvr.read(content)), rig_revision(content)

@@ -12,11 +12,14 @@ from pathlib import Path
 
 from google.protobuf.message import DecodeError
 
+from autolux.lighting import mvr
 from autolux.lighting.autoloop_catalogue import (
     AutoloopMetaError,
     read_autoloop_meta,
     required_autoloops,
 )
+from autolux.lighting.fixture_setup import rig_revision
+from autolux.lighting.gdtf import read_bounded
 from autolux.lighting.palettes import palette_records
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ
 from cli.starfire import (
@@ -66,11 +69,13 @@ def selected_rig(path=None, library=None):
     return Path(path) if path else saved_rig(Path(library or FIXTURE_LIBRARY))
 
 
-def fixture_setup(args):
+def fixture_setup(args, rig):
     return {
         'binary': Path(args.starfire_binary).resolve(),
         'rig_store': Path(args.rig).resolve() if args.rig else DEFAULT_FIXTURE_STORE,
         'library': Path(args.library).resolve(),
+        # Hashed before the renderer reads the rig: a later edit can only show as stale.
+        'rig_revision': rig_revision(read_bounded(Path(rig), mvr.MAX_MVR_BYTES)),
     }
 
 

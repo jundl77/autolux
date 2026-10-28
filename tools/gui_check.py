@@ -35,6 +35,7 @@ from autolux.lib.ui_bridge import SnapshotServer
 from autolux.lighting.fixture_setup import FixtureStore
 from autolux.lighting.palettes import PALETTES
 from autolux.simulate.visualizer_app import SnapshotPoller, build_app
+from cli.starfire_assets import rig_bytes
 
 ECHO_SECONDS = 1.0
 CHROME = os.environ.get('CHROME', r'C:\Program Files\Google\Chrome\Application\chrome.exe')
@@ -241,9 +242,12 @@ def main(argv=None) -> int:
     bridge.start()
     threading.Thread(target=engine, args=(show, commands), daemon=True).start()
     with tempfile.TemporaryDirectory(prefix='autolux-gui-', ignore_cleanup_errors=True) as scratch:
-        rig = Path(scratch) / 'room.mvr'
-        rig.write_bytes((ROOT / 'rig/room.mvr').read_bytes())
-        store = FixtureStore(rig, ROOT / 'rig/library', lambda _: None)
+        # Save writes the repo rig beside the library, so both are scratch copies here.
+        repo = Path(scratch) / 'rig'
+        shutil.copytree(ROOT / 'rig/library', repo / 'library')
+        rig = Path(scratch) / 'store.mvr'
+        rig.write_bytes((ROOT / 'autolux/tests/data/room.mvr').read_bytes())
+        store = FixtureStore(rig, repo / 'library', rig_bytes)
         app = build_app(SnapshotPoller(host='127.0.0.1', port=bridge_port), fixture_store=store)
         add_harness_routes(app, show)
         server = make_server('127.0.0.1', dash_port, app.server, threaded=True)

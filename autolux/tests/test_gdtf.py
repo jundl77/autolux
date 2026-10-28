@@ -59,13 +59,14 @@ def test_a_library_archive_must_be_named_by_its_gdtf_spec(archive, tmp_path):
 
 
 ROOT = Path(__file__).parents[2]
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 SAMPLE_RIG = Path(__file__).parent / 'data' / 'generic_rig'
 
 
 def test_each_rig_embeds_the_archives_it_names_byte_for_byte():
     library = gdtf.fixture_library(ROOT / 'rig/library')
     sample = library | gdtf.fixture_library(SAMPLE_RIG)
-    for rig, available in ((ROOT / 'rig/room.mvr', library), (SAMPLE_RIG / 'generic.mvr', sample)):
+    for rig, available in ((ROOM, library), (SAMPLE_RIG / 'generic.mvr', sample)):
         scene = mvr.read(rig.read_bytes())
         for spec in mvr.referenced_specs(scene.root):
             assert scene.entries[spec][1] == available[spec]['archive'], spec

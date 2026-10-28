@@ -12,7 +12,7 @@ from pathlib import Path
 
 from autolux.lib.ui_bridge import DEFAULT_DASHBOARD_PORT
 from autolux.lighting.starfire_replay import DEFAULT_FRAME_RATE_HZ, report_to_replay
-from cli.starfire_assets import native_rig, rig_definition
+from cli.starfire_assets import native_rig, rig_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BINARY = ROOT / 'target' / 'release' / ('starfire.exe' if os.name == 'nt' else 'starfire')
@@ -167,7 +167,7 @@ async def run_native(args: argparse.Namespace) -> None:
 
 
 async def export_rig(args: argparse.Namespace) -> None:
-    args.output.write_bytes(rig_definition(args.input).SerializeToString())
+    args.output.write_bytes(rig_bytes(args.input))
 
 
 async def convert_report(args: argparse.Namespace) -> None:
@@ -185,9 +185,10 @@ async def convert_report(args: argparse.Namespace) -> None:
     print(f'Source-time replay: {args.output} ({len(replay["events"])} commands; accents omitted)')
 
 
-def _validate_patch(binary: Path, patch: Path) -> None:
+def _validate_patch(binary: Path, patch: Path) -> bytes:
     try:
         with native_rig(patch) as exported:
+            definition = exported.read_bytes()
             completed = subprocess.run(
                 [str(binary), 'rig', str(exported)],
                 cwd=ROOT,
@@ -203,6 +204,7 @@ def _validate_patch(binary: Path, patch: Path) -> None:
         raise RuntimeError('Starfire fixture validation timed out') from error
     if completed.returncode != 0:
         raise ValueError(completed.stderr.strip() or 'Starfire rejected the fixture patch')
+    return definition
 
 
 def run_import(args: argparse.Namespace) -> None:

@@ -573,7 +573,7 @@ fn a_login_whose_declared_cells_differ_from_the_profile_is_refused() {
 #[test]
 fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_cells() {
     for exported in [
-        include_bytes!("../../rig/room.rig.pb").as_slice(),
+        include_bytes!("../../autolux/tests/data/room.rig.pb").as_slice(),
         include_bytes!("../../autolux/tests/data/generic_rig/generic.rig.pb"),
     ] {
         let definition = wire::RigDefinition::decode(exported).unwrap();

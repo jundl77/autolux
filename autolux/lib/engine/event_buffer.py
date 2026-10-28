@@ -52,6 +52,7 @@ class EventBuffer:
         self._group_roles: dict[str, str] = {}
         self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
+        self._rig_revision: str | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
 
@@ -210,6 +211,10 @@ class EventBuffer:
         with self._lock:
             self._track = dict(track)
 
+    def set_rig_revision(self, revision: str) -> None:
+        with self._lock:
+            self._rig_revision = revision
+
     def set_system_health(self, state: dict) -> None:
         with self._lock:
             self._system_health = copy.deepcopy(state)
@@ -294,6 +299,7 @@ class EventBuffer:
                 'group_roles': dict(self._group_roles),
                 'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),
+                'rig_revision': self._rig_revision,
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),
             }
