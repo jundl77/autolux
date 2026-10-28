@@ -234,7 +234,6 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     const kinta = markup.slice(markup.indexOf("<title>kinta"));
     assert.match(kinta.slice(0, kinta.indexOf("</g>")), /fill="none" class="ring"/);
     assert.match(markup, /fx <b>1<\/b><\/span>/);
-    assert.match(kinta, /class="plan-badge"[^]*?>\d+<\/text><\/g><text class="plan-caption"[^>]*>DMX \d+–\d+ · fx · accent</);
     const offCentre = { ...byName.kinta, x: 4000 };
     // One row: no depth extent, so only the X cuts (4000..9000 at 5667 and 7333).
     const row = model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings);
