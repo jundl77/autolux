@@ -141,7 +141,7 @@ fn scaled_rig() -> Value {
         let mover = index < SCALED_MOVER_COUNT;
         let pixel = index >= SCALED_FIXTURE_COUNT - SCALED_STRIP_COUNT;
         fixtures.push(json!({
-            "id": id,
+            "fixture_uuid": id,
             "profile": if mover {
                 "chauvet_intimidator_spot_110_12ch"
             } else if pixel {
@@ -204,7 +204,7 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
 
 #[test]
 fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig = include_bytes!("../../rig/room.rig.pb");
+    let rig = include_bytes!("../../autolux/tests/data/room.rig.pb");
     assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
 }
 

@@ -206,3 +206,267 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
     for owned in ({'fx_auto': False}, {'intensity': 0.3}, {'intensity_auto': True}):
         with pytest.raises(ValueError, match='their own actions'):
             parse_control_command({'action': 'settings', 'settings': owned})
+
+
+RIG = {
+    'fixtures': [
+        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par']},
+        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a']},
+    ]
+}
+
+
+def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    assert parse_control_command({'action': 'highlight', 'target': {'fixture': 'par'}}) == {
+        'action': 'highlight',
+        'target': {'fixture': 'par'},
+        'colour': 'white',
+    }
+    assert parse_control_command(
+        {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
+    ) == {'action': 'highlight', 'target': {'cell': 'bar/a'}, 'colour': 'green'}
+    assert parse_control_command({'action': 'highlight', 'target': None}) == {
+        'action': 'highlight',
+        'target': None,
+    }
+    for target in ({}, {'fixture': 'par', 'cell': 'par'}, {'group': 'wash'}, {'fixture': 3}, 'par'):
+        with pytest.raises(ValueError, match='highlight target'):
+            parse_control_command({'action': 'highlight', 'target': target})
+    with pytest.raises(ValueError, match='highlight target'):
+        parse_control_command({'action': 'highlight'})
+    with pytest.raises(ValueError, match='colour'):
+        parse_control_command({'action': 'highlight', 'target': {'fixture': 'par'}, 'colour': 'uv'})
+
+
+@pytest.mark.parametrize(
+    ('target', 'paused', 'blackout', 'refusal'),
+    [
+        ({'fixture': 'par'}, False, False, None),
+        ({'cell': 'bar/a'}, False, False, None),
+        ({'fixture': 'bar/a'}, False, False, "no fixture 'bar/a' in the running rig"),
+        # Targets carry uuids; a label is not one.
+        ({'fixture': 'front'}, False, False, "no fixture 'front' in the running rig"),
+        ({'cell': 'bar'}, False, False, "no cell 'bar' in the running rig"),
+        ({'fixture': 'par'}, True, False, 'the show is paused'),
+        ({'fixture': 'par'}, False, True, 'blackout is on'),
+        (None, True, True, None),
+    ],
+)
+def test_a_highlight_is_refused_for_a_fixture_the_rig_lacks_or_a_dark_rig(
+    target, paused, blackout, refusal
+):
+    from autolux.lib.ui_bridge import command_refusal
+
+    command = {'action': 'highlight', 'target': target, 'colour': 'white'}
+    static = {'blackout': blackout}
+    assert command_refusal(command, 'drop', paused, 'auto', static, RIG) == refusal
+
+
+def test_an_unknown_fixture_never_reaches_the_show():
+    buffer = EventBuffer()
+    buffer.set_control_state(
+        paused=False, master_brightness=1.0, settings={}, static={'blackout': False}, rig=RIG
+    )
+    commands = queue.Queue(maxsize=4)
+    server = SnapshotServer(buffer, 0, commands, handoff_timeout=None)
+    server.start()
+    try:
+        connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+        body = {'action': 'highlight', 'target': {'fixture': 'ghost'}}
+        reply, text = _request(connection, 'POST', body, JSON)
+        assert (reply.status, json.loads(text)) == (
+            409,
+            {'error': "no fixture 'ghost' in the running rig"},
+        )
+        reply, _ = _request(connection, 'POST', {**body, 'target': {'fixture': 'par'}}, JSON)
+        assert reply.status == 202
+    finally:
+        server.stop()
+    assert commands.get_nowait()['target'] == {'fixture': 'par'}
+    assert commands.empty()
+
+
+def test_the_config_viewer_gets_the_show_start_check_inputs_for_save():
+    from autolux.lib.ui_bridge import viewer_command
+
+    setup = {
+        'binary': 'starfire.exe',
+        'rig_store': 'rig.mvr',
+        'library': 'lib',
+        'autoloops': 'loops',
+        'expected_universe': 0,
+    }
+    command = viewer_command(8765, setup)
+    assert command[command.index('--autoloops') + 1] == 'loops'
+    assert command[command.index('--expected-universe') + 1] == '0'
+    assert '--expected-universe' not in viewer_command(8765, {**setup, 'expected_universe': None})
+
+
+def test_restart_show_reaches_the_engine_as_the_bare_action(bridge):
+    connection, commands = bridge
+    taken = []
+    _engine(commands, taken)
+    headers = {**JSON, 'Origin': DASHBOARD}
+    reply, body = _request(connection, 'POST', {'action': 'restart_show', 'extra': 1}, headers)
+    commands.put(None)
+    assert (reply.status, json.loads(body)) == (202, {'accepted': 'restart_show'})
+    assert taken == [{'action': 'restart_show'}]
+
+
+def test_a_restarted_session_kills_its_viewer_and_brings_up_a_fresh_one(monkeypatch, caplog):
+    import socket
+
+    from autolux.lib import ui_bridge
+
+    events = []
+
+    class Viewer:
+        pid = 1
+
+        def __init__(self):
+            self.killed = threading.Event()
+
+        def wait(self):
+            self.killed.wait()
+            return 1
+
+    def spawn(command):
+        events.append('spawn')
+        return Viewer()
+
+    def kill(viewer):
+        events.append('kill')
+        viewer.killed.set()
+
+    monkeypatch.setattr(ui_bridge, '_spawn', spawn)
+    monkeypatch.setattr(ui_bridge, 'kill_tree', kill)
+    monkeypatch.setattr(ui_bridge, '_probe', lambda port: events.append(('port free', port)))
+    monkeypatch.setattr(ui_bridge, 'DASHBOARD_BIND_ADDRESS', '127.0.0.1')
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        bridge_port = probe.getsockname()[1]
+    ui_port = bridge_port - 1
+    with caplog.at_level('WARNING'):
+        for _ in range(2):
+            session = ui_bridge.start(EventBuffer(), ui_port, commands=queue.Queue())
+            assert session is not None, 'the bridge port was not free again for the next session'
+            session.stop()
+            session._watcher.join(2)
+    # Each stop waits for the old viewer's port before the next session spawns its viewer.
+    assert events == ['spawn', 'kill', ('port free', ui_port)] * 2
+    assert 'viewer process exited' not in caplog.text
+
+
+def test_a_relaunch_retries_a_taken_port_until_its_deadline():
+    from autolux.lib.ui_bridge import _within
+
+    now = [0.0]
+    attempts = []
+
+    def attempt(fails):
+        attempts.append(now[0])
+        if len(attempts) <= fails:
+            raise OSError('address in use')
+        return 'bound'
+
+    def run(fails):
+        attempts.clear()
+        now[0] = 0.0
+        return _within(
+            1.0,
+            lambda: attempt(fails),
+            clock=lambda: now[0],
+            sleep=lambda s: now.__setitem__(0, now[0] + s),
+        )
+
+    assert run(2) == 'bound' and attempts == [0.0, 0.25, 0.5]
+    with pytest.raises(OSError, match='address in use'):
+        run(100)
+    assert attempts == [0.0, 0.25, 0.5, 0.75, 1.0]
+
+
+def test_a_relaunched_viewer_waits_30_s_for_its_port_then_exits_as_port_taken(monkeypatch):
+    import http.server
+
+    from werkzeug import serving
+
+    from autolux.lib import ui_bridge
+
+    now = [0.0]
+    served = []
+
+    def bind(self):
+        if now[0] < taken_for:
+            raise OSError('address in use')
+
+    monkeypatch.setattr(http.server.HTTPServer, 'server_bind', bind)
+    monkeypatch.setattr(serving.ThreadedWSGIServer, 'server_activate', lambda self: None)
+    monkeypatch.setattr(
+        serving.ThreadedWSGIServer, 'serve_forever', lambda self: served.append(now[0])
+    )
+    fake = {'clock': lambda: now[0], 'sleep': lambda s: now.__setitem__(0, now[0] + s)}
+    taken_for = 10.0
+    ui_bridge.serve_viewer(object(), 8999, **fake)
+    assert served == [10.0]
+    now[0], taken_for = 0.0, float('inf')
+    with pytest.raises(SystemExit) as exited:
+        ui_bridge.serve_viewer(object(), 8999, **fake)
+    assert exited.value.code == ui_bridge.VIEWER_PORT_TAKEN and now[0] == ui_bridge.VIEWER_BIND_SEC
+    assert served == [10.0]
+
+
+def test_only_a_viewer_that_never_got_its_port_counts_as_a_lost_dashboard():
+    from types import SimpleNamespace
+
+    from autolux.lib import ui_bridge
+
+    def bridge(code):
+        viewer = SimpleNamespace(poll=lambda: code)
+        return SimpleNamespace(_viewer=viewer)
+
+    lost = [
+        ui_bridge.UiBridge.dashboard_lost(bridge(code))
+        for code in (None, 1, ui_bridge.VIEWER_PORT_TAKEN)
+    ]
+    assert lost == [False, False, True]
+
+
+def test_a_stopped_show_closes_its_keep_alive_connections():
+    # A restart's first click leaves the browser's socket open to the stopped show's bridge;
+    # the next restart reused it and reached a queue no engine drains.
+    stopped = queue.Queue()
+    server = SnapshotServer(EventBuffer(), 0, stopped, handoff_timeout=None)
+    server.start()
+    connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+    reply, _ = _request(connection, 'POST', {'action': 'restart_show'}, JSON)
+    assert reply.status == 202
+    server.stop()
+    with pytest.raises((http.client.RemoteDisconnected, ConnectionError)):
+        _request(connection, 'POST', {'action': 'restart_show'}, JSON)
+    assert stopped.qsize() == 1
+
+
+def test_a_restart_the_engine_cannot_honour_answers_409_with_the_reason(tmp_path, caplog):
+    from autolux.lib.main import ShowControl
+
+    control = ShowControl(tmp_path / 'show.json')
+    server = SnapshotServer(EventBuffer(), 0, control.commands, handoff_timeout=2)
+    server.start()
+    stop = threading.Event()
+
+    def engine():
+        while not stop.is_set():
+            asyncio.run(control.apply_pending(None))
+
+    threading.Thread(target=engine, daemon=True).start()
+    try:
+        connection = http.client.HTTPConnection('127.0.0.1', server.port, timeout=2)
+        reply, body = _request(connection, 'POST', {'action': 'restart_show'}, JSON)
+    finally:
+        stop.set()
+        server.stop()
+    assert reply.status == 409
+    assert json.loads(body) == {'error': 'this show has no restart hook'}
+    assert '[main] restart refused: this show has no restart hook' in caplog.text

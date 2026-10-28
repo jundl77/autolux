@@ -19,7 +19,7 @@ struct Frame {
     effects: usize,
 }
 
-/// Each cell's dimmer at `beats` into the loop, later effects winning as in the engine.
+/// Each cell's dimmer by label at `beats` into the loop, later effects winning as in the engine.
 fn render(rig: &FixtureRig, beats: f64) -> Frame {
     let mut autoloop = support::show_catalog()
         .instantiate(LOOP.0, LOOP.1, rig, &support::palettes())
@@ -36,7 +36,7 @@ fn render(rig: &FixtureRig, beats: f64) -> Frame {
     for effect in &effects {
         if let Some(level) = effect.values.intensity {
             for cell in rig.resolve(&effect.target).unwrap() {
-                levels.insert(cell, level);
+                levels.insert(rig.label(&cell), level);
             }
         }
     }
@@ -105,7 +105,7 @@ fn a_lone_fixture_rises_and_falls_once_per_half() {
     let rig = support::rig(
         serde_json::from_str(
             r#"{"schema_version":1,"fixtures":[
-          {"id":"solo","profile":"generic_rgb","universe":0,"address":1}],
+          {"fixture_uuid":"solo","profile":"generic_rgb","universe":0,"address":1}],
           "groups":{"wash":["solo"]}}"#,
         )
         .unwrap(),
@@ -137,7 +137,8 @@ fn truss() -> FixtureRig {
         let id = format!("w{index:03}");
         rig.fixtures.push(wire::Fixture {
             area: wire::StageArea::Centre as i32,
-            fixture_id: id.clone(),
+            fixture_uuid: id.clone(),
+            name: id.clone(),
             profile_id: "generic_rgb".into(),
             universe: (rank / 170) as u32,
             address: ((rank % 170) * 3 + 1) as u32,
@@ -150,7 +151,7 @@ fn truss() -> FixtureRig {
     }
     rig.groups.push(wire::FixtureGroup {
         group_id: "wash".into(),
-        fixture_ids: members,
+        fixture_uuids: members,
         ..Default::default()
     });
     FixtureRig::from_wire(&rig).unwrap()
@@ -193,7 +194,7 @@ fn a_rig_of_many_multi_cell_movers_pans_each_fixture_once() {
     let bar = room
         .fixtures
         .iter()
-        .find(|fixture| fixture.fixture_id == "zq06017")
+        .find(|fixture| fixture.name == "zq06017")
         .unwrap();
     let profile = room
         .profiles
@@ -209,7 +210,8 @@ fn a_rig_of_many_multi_cell_movers_pans_each_fixture_once() {
         let id = format!("m{index:02}");
         let x = (index as f64 - 29.5) * 500.0;
         definition.fixtures.push(wire::Fixture {
-            fixture_id: id.clone(),
+            fixture_uuid: id.clone(),
+            name: id.clone(),
             matrix: vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, x, 0.0, 3000.0],
             universe: index / 10,
             address: (index % 10) * 50 + 1,
@@ -219,7 +221,7 @@ fn a_rig_of_many_multi_cell_movers_pans_each_fixture_once() {
     }
     definition.groups.push(wire::FixtureGroup {
         group_id: "movers".into(),
-        fixture_ids: members,
+        fixture_uuids: members,
         ..Default::default()
     });
     let rig = FixtureRig::from_wire(&definition).unwrap();

@@ -23,6 +23,15 @@ single native validator. `rig/room.rig.pb` and the synthetic sample rig
 `autolux/tests/data/generic_rig/generic.rig.pb` are the exports the Rust tests and goldens use; `cli/tests/test_starfire_assets.py` checks they equal
 the Login rig of their MVR.
 
+Identity is the MVR Fixture `uuid`; `name` is a label; `FixtureID`/`FixtureIDNumeric` are the
+console patch numbers and identify nothing. The uuid is `Fixture.fixture_uuid`, every cell id
+derives from it (`uuid`, or `uuid/geometry` on a multi-cell fixture), group members are the
+uuids the `Classing` attribute places in each Class, and highlight, override and test targets
+carry it. `Fixture.name` reaches Starfire for logs and for autoloops, which name fixtures by
+label (`sf.fixture("kinta")`, resolved to the uuid in Starfire), so Starfire refuses a rig that
+repeats a uuid or a name. Renaming a fixture, or swapping two names, moves nothing else. Config
+gives each fixture it adds a fresh random (version 4) uuid.
+
 Patched = a `Fixture` anywhere under a Layer with `GDTFSpec` and an `Address`; its Matrix
 is composed through every parent (Layer, GroupObject, Truss, …). Starfire renders one
 Address on break 0 per fixture; other objects, unpatched fixtures and unreferenced GDTF
@@ -38,14 +47,16 @@ render as separate patches.
   so one orientation always gives the same DMX on 540° heads);
 - tilt home offset = **pitch**. This is an approximation: it is exact only at pan home,
   because a tilted base couples pan into tilt. |pitch| > 60° is refused;
-- a local Z axis pointing down **reverses** pan and tilt (as DMXInvertPan/Tilt would;
-  setting those flags too cancels it again); roll otherwise does not render;
+- a local Z axis pointing down **reverses** tilt (as DMXInvertTilt would; setting it too
+  cancels it again) and mirrors pan over its whole travel with the yaw turned the other way,
+  so a logical pan lands on the same stage heading as on a hanging head at any yaw; roll
+  otherwise does not render;
 - identity = the GDTF default (hanging) orientation = offset 0, not reversed.
 
 Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180, not
 reversed. This is how the room spots are entered. Standing on the floor: `Rx(180)` =
-`{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` (Config: pitch 0, roll 180, yaw 180 as decomposed) →
-yaw 180 and reversed. The inspector shows the derived home under each Matrix.
+`{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` → yaw 180 and reversed; Config shows it as Standing,
+yaw 180, since its Mount toggle negates the local X and Z and so keeps the facing. The inspector shows the derived home under each Matrix.
 
 Sheared, mirrored or degenerate matrices are rejected.
 

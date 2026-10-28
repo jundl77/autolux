@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
+RECEIVER_EXIT_TIMEOUT_SECONDS = 15
+# run-radius.ps1 holds this mutex for as long as the receiver owns the audio and DMX hardware.
+RECEIVER_MUTEX_PROBE = (
+    "try { [Threading.Mutex]::OpenExisting('Global\\Autolux-radius_rx').Dispose(); 'busy' }"
+    " catch [Threading.WaitHandleCannotBeOpenedException] { 'free' }"
+)
 
 
 @dataclass(frozen=True)
@@ -201,11 +207,30 @@ class RemoteRuntime:
                     )
             except subprocess.TimeoutExpired:
                 self.process.kill()
-                self.process.wait(timeout=5)
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    LOGGER.error('[prod] receiver SSH survived its kill')
             self.process = None
         if self._log:
             self._log.close()
             self._log = None
 
-    def __exit__(self, *_):
+    def wait_receiver_gone(self, *, clock=time.monotonic, sleep=time.sleep):
+        # The next session's receiver is refused the hardware mutex while this one holds it.
+        deadline = clock() + RECEIVER_EXIT_TIMEOUT_SECONDS
+        while self.ssh(RECEIVER_MUTEX_PROBE, timeout=8) != 'free':
+            if clock() >= deadline:
+                raise RuntimeError(f'The receiver on {self.host} still holds the hardware.')
+            sleep(0.5)
+
+    def __exit__(self, failing, *_):
+        started = self.process is not None
         self.close()
+        if started:
+            try:
+                self.wait_receiver_gone()
+            except (RuntimeError, OSError, subprocess.TimeoutExpired):
+                if failing is None:
+                    raise
+                LOGGER.exception('[prod] could not confirm the receiver stopped')

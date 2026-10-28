@@ -17,8 +17,9 @@ pub fn palettes() -> PaletteTable {
     PaletteTable::new(&palette_definitions()).unwrap()
 }
 
+/// The frozen room tests pin; the live `rig/room.rig.pb` changes whenever the patch is saved.
 pub fn rig_folder() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rig")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../autolux/tests/data")
 }
 
 pub fn room() -> FixtureRig {
@@ -117,8 +118,14 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
                 inverted: range.get("inverted").and_then(Value::as_bool) == Some(true),
             })
         };
+        let uuid = fixture["fixture_uuid"].as_str().unwrap();
         rig.fixtures.push(wire::Fixture {
-            fixture_id: fixture["id"].as_str().unwrap().into(),
+            fixture_uuid: uuid.into(),
+            // A spec's fixtures are labelled by their uuid unless one names them.
+            name: fixture
+                .get("name")
+                .map_or(uuid, |name| name.as_str().unwrap())
+                .into(),
             profile_id: profile.into(),
             universe: number(fixture, "universe"),
             address: number(fixture, "address"),
@@ -145,7 +152,7 @@ pub fn definition(spec: &Value) -> wire::RigDefinition {
         for (group, members) in groups {
             rig.groups.push(wire::FixtureGroup {
                 group_id: group.clone(),
-                fixture_ids: members
+                fixture_uuids: members
                     .as_array()
                     .unwrap()
                     .iter()
@@ -164,6 +171,11 @@ pub fn try_rig(spec: Value) -> anyhow::Result<FixtureRig> {
 
 pub fn rig(spec: Value) -> FixtureRig {
     try_rig(spec).unwrap()
+}
+
+/// The room fixture's uuid that `name` labels.
+pub fn room_uuid(name: &str) -> String {
+    room().uuid_of_label(name).unwrap().to_owned()
 }
 
 pub fn room_definition() -> wire::RigDefinition {

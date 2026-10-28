@@ -126,7 +126,7 @@ def test_one_client_failing_to_close_does_not_strand_the_rest(monkeypatch):
     app.lighting_client.stop.assert_called_once()
 
 
-def _built_buffer(monkeypatch, *, enable_ui, report_path):
+def _built_app(monkeypatch, **options):
     from autolux.lib import section_chain
 
     for module, name in (
@@ -139,19 +139,15 @@ def _built_buffer(monkeypatch, *, enable_ui, report_path):
     monkeypatch.setattr(section_chain, 'artifacts_present', lambda *a, **k: False)
     monkeypatch.setattr(asyncio, 'get_event_loop', MagicMock())
 
-    app = AutoluxController(
-        lighting_client=MagicMock(), enable_ui=enable_ui, report_path=report_path
-    )
-    return app.event_buffer
+    return AutoluxController(lighting_client=MagicMock(), **options)
 
 
 def test_a_session_report_keeps_the_whole_session(monkeypatch):
     from autolux.lib.clock import VirtualClock
     from autolux.lib.engine.event_buffer import EventBuffer
 
-    assert _built_buffer(monkeypatch, enable_ui=False, report_path='out.json')._window_sec == float(
-        'inf'
-    )
+    app = _built_app(monkeypatch, enable_ui=False, report_path='out.json')
+    assert app.event_buffer._window_sec == float('inf')
 
     def half_an_hour(window):
         clock = VirtualClock()
@@ -167,8 +163,51 @@ def test_a_session_report_keeps_the_whole_session(monkeypatch):
 
 
 def test_the_live_view_keeps_its_rolling_window(monkeypatch):
-    buffer = _built_buffer(monkeypatch, enable_ui=True, report_path=None)
+    buffer = _built_app(monkeypatch, enable_ui=True).event_buffer
     assert buffer._window_sec == 60.0
+
+
+def test_the_snapshot_carries_the_rig_revision_the_session_loaded(monkeypatch):
+    app = _built_app(monkeypatch, enable_ui=True, fixture_setup={'rig_revision': 'loaded'})
+    assert app.event_buffer.snapshot()['rig_revision'] == 'loaded'
+
+
+async def test_restart_show_from_the_config_tab_exits_the_show_cleanly(
+    monkeypatch, tmp_path, caplog
+):
+    from autolux.lib.ui_bridge import parse_control_command
+
+    app = _built_app(
+        monkeypatch,
+        enable_ui=True,
+        fixture_setup={'rig_revision': 'loaded'},
+        show_config_path=tmp_path / 'show.json',
+    )
+    app.is_running = True
+    command = parse_control_command({'action': 'restart_show', 'ignored': 1})
+    assert command == {'action': 'restart_show'}
+    app.control.commands.put_nowait(command)
+    with caplog.at_level('INFO'):
+        await app.control.apply_pending(app.light_engine)
+    # The same exit `autolux stop` takes, marked so the production loop starts the next show.
+    assert (app._stop_requested, app.is_running, app.restart_requested) == (True, False, True)
+    assert 'restart requested from the Config tab' in caplog.text
+    # A Ctrl-C while that session tears down is a stop: the loop must not relaunch it.
+    app.stop()
+    assert app.restart_requested is False
+
+
+async def test_restart_show_without_a_restart_hook_is_refused_not_a_crash(
+    monkeypatch, tmp_path, caplog
+):
+    from autolux.lib.main import ShowControl
+
+    app = _built_app(monkeypatch, enable_ui=True, show_config_path=tmp_path / 'show.json')
+    control = ShowControl(tmp_path / 'show.json')
+    control.commands.put_nowait({'action': 'restart_show'})
+    with caplog.at_level('WARNING'):
+        await control.apply_pending(app.light_engine)
+    assert 'restart refused: this show has no restart hook' in caplog.text
 
 
 async def test_source_silence_keeps_the_monitor_audio_tail():

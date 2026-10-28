@@ -1,5 +1,6 @@
 import copy
 import io
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from autolux.lighting.mvr_validation import validate
 from cli.starfire_assets import rig_definition
 
 ROOT = Path(__file__).resolve().parents[2]
+ROOM = ROOT / 'autolux/tests/data/room.mvr'
 DATA = Path(__file__).parent / 'data'
 LIBRARY = fixture_library(ROOT / 'rig/library') | fixture_library(
     ROOT / 'autolux/tests/data/generic_rig'
@@ -47,16 +49,25 @@ def placed_group(xs: list[float]) -> list[dict]:
             gdtf_mode='1ch',
             universe=0,
             address=index + 1,
-            fixture_id=index + 1,
+            patch_number=index + 1,
             fixture_class='wash',
             matrix=[*mvr.IDENTITY_MATRIX[:9], x, -1000.0, 3000.0],
         )
     return mvr.patched_fixtures(scene)
 
 
+def named_groups(fixtures) -> tuple[dict[str, list[str]], list[str]]:
+    """mvr.groups with each member uuid read back as its fixture's name."""
+    names = {fixture['fixture_uuid']: fixture['name'] for fixture in fixtures}
+    groups, warnings = mvr.groups(fixtures)
+    return {group: [names[member] for member in members] for group, members in groups.items()}, (
+        warnings
+    )
+
+
 def test_group_members_run_left_to_right_by_position_whatever_the_file_order():
     fixtures = placed_group([900.0, -900.0, 300.0, -300.0])
-    assert mvr.groups(fixtures) == (
+    assert named_groups(fixtures) == (
         {'wash': ['wash_at_1', 'wash_at_3', 'wash_at_2', 'wash_at_0']},
         [],
     )
@@ -64,7 +75,7 @@ def test_group_members_run_left_to_right_by_position_whatever_the_file_order():
 
 def test_a_group_without_distinct_positions_keeps_file_order_and_warns():
     fixtures = placed_group([0.0, 0.0, 0.0])
-    assert mvr.groups(fixtures) == (
+    assert named_groups(fixtures) == (
         {'wash': ['wash_at_0', 'wash_at_1', 'wash_at_2']},
         ['Group wash has no distinct X positions; its members keep file order.'],
     )
@@ -181,20 +192,33 @@ def test_addresses_resolve_to_artnet_universe_and_address_within_range(text, exp
 
 
 def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
-    content = (ROOT / 'rig/room.mvr').read_bytes()
-    scene, fixtures = load_rig(ROOT / 'rig/room.mvr')
+    content = ROOM.read_bytes()
+    scene, fixtures = load_rig(ROOM)
     assert validate(scene) == []
     assert len(fixtures) == 8
-    assert mvr.groups(fixtures)[0] == ROOM_GROUP_ORDER
+    assert named_groups(fixtures)[0] == ROOM_GROUP_ORDER
     first = mvr.draft(scene)
     saved = mvr.write(mvr.apply_draft(scene, first, LIBRARY))
     assert saved == content
     assert mvr._without_keys(mvr.draft(mvr.read(saved))) == mvr._without_keys(first)
 
 
+def test_a_fixture_uuid_reaches_starfire_as_the_mvr_writes_it(tmp_path):
+    scene = mvr.read(ROOM.read_bytes())
+    spot = next(node for node in scene.root.iter('Fixture') if node.get('name') == 'spot_left')
+    written = spot.get('uuid').lower()
+    spot.set('uuid', written)
+    rig = tmp_path / 'room.mvr'
+    rig.write_bytes(mvr.write(scene))
+    exported = rig_definition(rig)
+    assert [f.fixture_uuid for f in exported.fixtures if f.name == 'spot_left'] == [written]
+    movers = next(group for group in exported.groups if group.group_id == 'movers')
+    assert written in movers.fixture_uuids
+
+
 def room_layers(move: dict[str, str] | None = None, rename: dict[str, str] | None = None):
     """The room scene with fixtures moved between layers and layers renamed."""
-    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     layers = {layer.get('name'): layer for layer in scene.root.iter('Layer')}
     for name, target in (move or {}).items():
         fixture = next(node for node in scene.root.iter('Fixture') if node.get('name') == name)
@@ -215,10 +239,10 @@ def test_room_groups_take_their_role_from_the_mvr_layer_and_round_trip():
         [],
         [],
     )
-    groups = {group.group_id: group.role for group in rig_definition(ROOT / 'rig/room.mvr').groups}
+    groups = {group.group_id: group.role for group in rig_definition(ROOM).groups}
     assert groups == {'movers': 0, 'wash': 0, 'strip': 0, 'fx': 1}
     content = mvr.write(scene)
-    assert mvr.write(mvr.read(content)) == content == (ROOT / 'rig/room.mvr').read_bytes()
+    assert mvr.write(mvr.read(content)) == content == ROOM.read_bytes()
 
 
 def test_a_class_split_across_layers_is_refused():
@@ -235,6 +259,25 @@ def test_a_group_outside_the_role_layers_defaults_to_loop_with_a_warning():
     assert warnings == ["Group fx sits in layer 'Room', not loop or accent; treating it as loop."]
 
 
+def test_each_added_fixture_gets_a_fresh_random_uuid():
+    scene = room_layers()
+    before = {fixture['fixture_uuid'] for fixture in mvr.patched_fixtures(scene)}
+    added = [
+        mvr.add_fixture(
+            scene,
+            name=f'kinta_{index}',
+            gdtf_spec='Chauvet DJ@Mini Kinta IRC@1.0.gdtf',
+            gdtf_mode='4ch',
+            universe=0,
+            address=200 + 4 * index,
+            patch_number=9 + index,
+        ).get('uuid')
+        for index in range(2)
+    ]
+    assert [uuid.UUID(identity).version for identity in added] == [4, 4]
+    assert len(set(added) | before) == len(before) + 2
+
+
 def test_a_new_fixture_joins_the_layer_of_its_class():
     scene = room_layers()
     mvr.add_fixture(
@@ -244,7 +287,7 @@ def test_a_new_fixture_joins_the_layer_of_its_class():
         gdtf_mode='4ch',
         universe=0,
         address=200,
-        fixture_id=9,
+        patch_number=9,
         fixture_class='fx',
     )
     fixtures = mvr.patched_fixtures(scene)
@@ -427,7 +470,7 @@ def test_gdtf_edits_are_limited_to_correctable_fields(change, message):
 
 
 def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
-    scene = mvr.read((ROOT / 'rig/room.mvr').read_bytes())
+    scene = mvr.read(ROOM.read_bytes())
     edited = mvr.draft(scene)
     spot = node(edited['scene'], 'Fixture', 'spot_left')
     child(spot, 'GDTFSpec')['text'] = 'Generic@Dimmer@1.0.gdtf'
@@ -438,7 +481,7 @@ def test_library_gdtf_is_embedded_when_a_draft_starts_using_it():
 
 
 def test_the_room_rig_written_by_pymvr_reads_back_to_the_same_patch_and_dmx(tmp_path):
-    shipped = ROOT / 'rig/room.mvr'
+    shipped = ROOM
     scene = mvr.read(shipped.read_bytes())
     source = pymvr.GeneralSceneDescription(io.BytesIO(shipped.read_bytes()))
     writer = pymvr.GeneralSceneDescriptionWriter()
@@ -455,4 +498,4 @@ def test_the_room_rig_written_by_pymvr_reads_back_to_the_same_patch_and_dmx(tmp_
     assert fixtures == original
     assert mvr.groups(fixtures)[0] == mvr.groups(original)[0]
     exported = rig_definition(rewritten).SerializeToString()
-    assert exported == (ROOT / 'rig/room.rig.pb').read_bytes()
+    assert exported == ROOM.with_suffix('.rig.pb').read_bytes()

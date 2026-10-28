@@ -96,11 +96,15 @@ def apply_static(light_engine, command: dict) -> None:
         looks.clear_special()
     elif kind == 'clear':
         looks.clear()
+        looks.clear_highlight()
 
 
 class ShowControl:
-    def __init__(self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK):
+    def __init__(
+        self, config_path: Path, event_buffer=None, clock: Clock = SYSTEM_CLOCK, restart_show=None
+    ):
         self.config_path = Path(config_path)
+        self._restart_show = restart_show
         self.settings = load_show_settings(self.config_path)
         self.commands: queue.Queue = queue.Queue(maxsize=CONTROL_QUEUE_SIZE)
         self._event_buffer = event_buffer
@@ -170,6 +174,17 @@ class ShowControl:
             except ValueError as error:
                 LOGGER.warning('[main] static command refused: %s', error)
             await light_engine.sync_static()
+        elif action == 'highlight':
+            looks = light_engine.static_looks
+            try:
+                if command['target'] is None:
+                    looks.clear_highlight()
+                else:
+                    looks.highlight(
+                        command['target'], command['colour'], paused=light_engine.paused
+                    )
+            except ValueError as error:
+                LOGGER.warning('[main] highlight refused: %s', error)
         elif action == 'palette':
             light_engine.effect_controller.pin_palette(
                 None if command['name'] == PALETTE_POLICY else command['name']
@@ -190,6 +205,15 @@ class ShowControl:
             self._unsaved_change_at = self._clock.monotonic()
             if not command['enabled']:
                 light_engine.effect_controller.forget_special(instantaneous=True)
+        elif action == 'restart_show':
+            # Starfire reads the rig once per login, so only a new session loads the saved patch.
+            if self._restart_show is None:
+                # The bridge answers the waiting request with this, so the panel never holds on a no-op.
+                command['refused'] = 'this show has no restart hook'
+                LOGGER.warning('[main] restart refused: %s', command['refused'])
+            else:
+                LOGGER.info('[main] restart requested from the Config tab')
+                self._restart_show()
         elif action == 'settings':
             settings = dataclasses.replace(self.settings, **command['settings'])
             if settings != self.settings:
@@ -235,6 +259,13 @@ class ShowControl:
                 settings=self.settings.to_dict(),
                 mode=light_engine.mode,
                 static=light_engine.static_looks.state(),
+                highlight=light_engine.static_looks.highlighted,
+                rig={
+                    'fixtures': [
+                        {'fixture_uuid': fixture_uuid, 'name': name, 'cells': list(cells)}
+                        for fixture_uuid, name, cells in light_engine.static_looks.rig.fixtures
+                    ]
+                },
             )
 
 
@@ -271,6 +302,7 @@ class AutoluxController:
         self._fixture_setup = fixture_setup
         self.is_running: bool = False
         self._stop_requested = False
+        self.restart_requested = False
         self.health_check = None
         self.command_queue: DelayedCommandQueue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
 
@@ -309,7 +341,9 @@ class AutoluxController:
 
         self.track_source = TrackSource()
         self.media_session = MediaSessionListener(self._on_media_event)
-        self.control = ShowControl(show_config_path, self.event_buffer)
+        self.control = ShowControl(show_config_path, self.event_buffer, restart_show=self.restart)
+        if self.event_buffer is not None and fixture_setup is not None:
+            self.event_buffer.set_rig_revision(fixture_setup['rig_revision'])
         self.effect_controller: EffectController = EffectController(
             self.lighting_client,
             event_buffer=self.event_buffer,
@@ -464,6 +498,12 @@ class AutoluxController:
                 LOGGER.exception('[main] %s did not close cleanly', what)
         LOGGER.info("[main] Autolux stopped, clean shutdown")
 
+    def restart(self):
+        self.stop()
+        self.restart_requested = True
+
     def stop(self):
         self._stop_requested = True
+        # Ctrl-C during a restart's teardown ends the show rather than relaunching it.
+        self.restart_requested = False
         self.is_running = False
