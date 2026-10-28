@@ -105,8 +105,8 @@ impl Renderer {
                 }],
             }),
             autoloops: vec![
-                wire::AutoloopDefinition { autoloop_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into() },
-                wire::AutoloopDefinition { autoloop_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into() },
+                wire::AutoloopDefinition { autoloop_id: "energy".into(), bank: "test".into(), lua_source: "return {render=function(ctx) return sf.scene {sf.colour(sf.all(), sf.rgb(1,0,0)), sf.dimmer(sf.all(), (ctx.normalized_rms_level or 1) * 0.5)} end}".into(), intensity_htp: false },
+                wire::AutoloopDefinition { autoloop_id: "fault".into(), bank: "test".into(), lua_source: "return {render=function(ctx) if ctx.time_seconds > 0 then error('test script fault') end return sf.scene {} end}".into(), intensity_htp: false },
             ],
             output: Some(wire::login::Output::ArtnetDestination(socket.local_addr().unwrap().to_string())),
             parameters: vec![],

@@ -38,6 +38,16 @@ enum MessageType {
   HEARTBEAT = 13;
   METRICS = 14;
   DISCARD_DELAYED_AUDIO = 15;
+  CUE_SECTION = 17;
+  CLEAR_CUES = 18;
+}
+
+enum SectionIntent {
+  SECTION_INTENT_UNSPECIFIED = 0;
+  ATMOSPHERIC = 1;
+  BREAKDOWN = 2;
+  BUILDUP = 3;
+  DROP = 4;
 }
 
 enum ParameterType {
@@ -118,7 +128,7 @@ message ErrorReply {
 
 // [CLIENT -> SERVER]
 // One autoloop plays at a time; repeating its identity never restarts it.
-// An empty ID enters idle, clears effects and outputs darkness.
+// An empty ID enters idle, clears effects and outputs darkness. Either way every cue is cleared.
 message PlayAutoloop {
   uint64 command_id = 1;
   string autoloop_id = 2;
@@ -212,6 +222,57 @@ message UpdateBeat {
   uint64 beat_index = 4;
   optional uint32 bar_phase = 5;
   uint32 beats_per_bar = 6;
+  BeatFeatures features = 7;  // Absent until the analyser has measured a beat.
+}
+
+// Measured by Autolux over the beat that starts at beat_index; each 0..1.
+message BeatFeatures {
+  float onset = 1;  // Spectral-flux onset strength at the beat, normalised per track.
+  float bass = 2;   // 20-150 Hz band level.
+  float mid = 3;    // 150-2500 Hz band level.
+  float high = 4;   // 2500-16000 Hz band level.
+}
+
+// [CLIENT -> SERVER]
+// The plan for one section, sent when Autolux decides it, ahead of the room. Starfire starts it
+// on the first frame at or past start_beat_index on its own clock; a cue whose start has already
+// passed starts on the next bar line, its rotation still counted from the true start. A cue drops
+// every pending cue starting at or after its start. At most 4 cues wait.
+message CueSection {
+  uint64 command_id = 1;
+  uint64 start_beat_index = 2;  // An UpdateBeat.beat_index whose bar_phase is 0.
+  SectionIntent intent = 3;
+  repeated BaseLook rotation = 4;  // 1..8 entries, played in order from the start, then cycled.
+  repeated Overlay overlays = 5;   // 0..8.
+  string palette = 6;              // Crossfaded over the first entry's transition, as PlayAutoloop.
+  optional double drop_strength = 7;  // 0..1, DROP only: the arrival against the track peak.
+  uint32 seed = 8;                    // For sf.random; Autolux draws it from its seeded RNG.
+
+  message BaseLook {
+    string autoloop_id = 1;
+    uint32 bars = 2;  // At least 1; entries change on these bar lines counted from the start.
+    // Into this entry; the first entry's enters the section.
+    PlayAutoloop.Transition transition = 3;
+  }
+
+  // A scheduled Lua layer above the base look and below every SetActiveEffect. Whether its
+  // intensity is HTP is the autoloop's own Login metadata.
+  message Overlay {
+    string autoloop_id = 1;
+    sint32 priority = 2;  // Higher composes later; ties keep list order.
+    // From the section start; -64..0 is pre-roll, only when every_bars is 0.
+    double begin_beats = 3;
+    double length_beats = 4;   // Positive.
+    uint32 every_bars = 5;     // 0 plays once; otherwise repeats every this many bars while active.
+    double attack_beats = 6;   // 0 is a snap.
+    double release_beats = 7;  // Runs after length, or when the cue is replaced; 0 is a snap.
+  }
+}
+
+// [CLIENT -> SERVER]
+// Drops every pending cue and ends the active one; its overlays release, the base look plays on.
+message ClearCues {
+  uint64 command_id = 1;
 }
 
 // [CLIENT -> SERVER]
@@ -236,6 +297,10 @@ message Metrics {
   string runtime_error = 9;
   uint64 last_processed_command_id = 10;  // Includes accepted and rejected commands.
   fixed64 run_id = 11;
+  uint32 pending_cues = 12;
+  // Overlay failures and cap refusals, at most 256 bytes; they never stop the show.
+  string overlay_error = 13;
+  uint32 active_overlay_count = 14;
 }
 
 // Supplied source is sandboxed and bounded by Starfire; no file loading at runtime.
@@ -243,6 +308,8 @@ message AutoloopDefinition {
   string autoloop_id = 1;  // Unique across all banks; PlayAutoloop uses only this ID.
   string bank = 2;         // Grouping metadata.
   string lua_source = 3;
+  // As an overlay, intensity takes the higher of below and overlay; else LTP.
+  bool intensity_htp = 4;
 }
 
 // Shared by initialization and runtime updates. Independent of the active autoloop.

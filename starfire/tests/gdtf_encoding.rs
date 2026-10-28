@@ -248,6 +248,7 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
         autoloop_id: "idle".into(),
         bank: "test".into(),
         lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
@@ -314,6 +315,7 @@ fn moved(matrix: &[f64], focus: [f64; 3], inverted: bool, motion: Motion) -> Vec
         autoloop_id: "idle".into(),
         bank: "test".into(),
         lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
@@ -430,6 +432,7 @@ fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
         autoloop_id: "idle".into(),
         bank: "test".into(),
         lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
@@ -526,6 +529,7 @@ fn room_test(
         autoloop_id: "idle".into(),
         bank: "test".into(),
         lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let rig = FixtureRig::from_wire(definition).unwrap();
@@ -1020,6 +1024,7 @@ fn engine(channels: Vec<wire::DmxChannel>, source: &str) -> Engine {
         autoloop_id: "test".into(),
         bank: "test".into(),
         lua_source: source.into(),
+        intensity_htp: false,
     }])
     .unwrap();
     let mut engine = Engine::new(rig(channels), catalog, support::palettes()).unwrap();
@@ -1233,8 +1238,8 @@ fn encoding_faults_latch_darkness_keep_safe_movement_and_allow_a_healthy_autoloo
             "return {{render=function(ctx) if ctx.time_seconds == 0 then return {{sf.dimmer(sf.all(), 0.5), sf.pan_tilt(sf.all(), 0.25, 0.5)}} end; return {{sf.dimmer(sf.all(), 1), sf.pan_tilt(sf.all(), 0.9, 0.5), {extra_effect}}} end}}"
         );
         let catalog = AutoloopCatalog::from_definitions(&[
-            wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "broken".into(), lua_source: broken },
-            wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "healthy".into(), lua_source: "return {render=function(ctx) return {sf.dimmer(sf.all(), 0.75), sf.pan_tilt(sf.all(), 0.75, 0.5)} end}".into() },
+            wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "broken".into(), lua_source: broken, intensity_htp: false },
+            wire::AutoloopDefinition { bank: "test".into(), autoloop_id: "healthy".into(), lua_source: "return {render=function(ctx) return {sf.dimmer(sf.all(), 0.75), sf.pan_tilt(sf.all(), 0.75, 0.5)} end}".into(), intensity_htp: false },
         ]).unwrap();
         let mut engine = Engine::new(rig(channels), catalog, support::palettes()).unwrap();
         engine

@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Target, TimedCommand, Transition,
 };
-use starfire::replay::{REPLAY_SCHEMA_VERSION, Replay};
+use starfire::replay::Replay;
 
 const SHOW_DURATION_SECONDS: f64 = 90.0;
 const FRAME_RATE_HZ: u32 = 40;
@@ -52,6 +52,7 @@ fn mixed_show() -> Replay {
                 } else {
                     FINAL_TEMPO_BPM
                 },
+                features: None,
             },
         );
     }
@@ -126,7 +127,6 @@ fn mixed_show() -> Replay {
     push(SHOW_DURATION_SECONDS, Command::Stop);
     events.sort_by(|left, right| left.at_seconds.total_cmp(&right.at_seconds));
     Replay {
-        schema_version: REPLAY_SCHEMA_VERSION,
         duration_seconds: SHOW_DURATION_SECONDS,
         frame_rate_hz: FRAME_RATE_HZ,
         palettes: support::palette_definitions(),

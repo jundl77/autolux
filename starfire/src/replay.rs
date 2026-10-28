@@ -14,7 +14,6 @@ use crate::model::{DMX_CHANNELS, MAX_FRAME_RATE_HZ, TimedCommand};
 use crate::palette::{PaletteDefinition, PaletteTable};
 use crate::script::AutoloopCatalog;
 
-pub const REPLAY_SCHEMA_VERSION: u32 = 1;
 pub const MAX_REPLAY_INPUT_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_REPLAY_EVENTS: usize = 100_000;
 pub const MAX_REPLAY_FRAMES: usize = 100_000;
@@ -27,7 +26,6 @@ const CAPTURE_VERSION: u32 = 1;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Replay {
-    pub schema_version: u32,
     pub duration_seconds: f64,
     pub frame_rate_hz: u32,
     pub palettes: Vec<PaletteDefinition>,
@@ -51,10 +49,6 @@ impl Replay {
     }
 
     pub fn validate(&self) -> Result<usize> {
-        ensure!(
-            self.schema_version == REPLAY_SCHEMA_VERSION,
-            "unsupported replay schema"
-        );
         ensure!(
             self.duration_seconds.is_finite() && self.duration_seconds >= 0.0,
             "replay duration must be finite and nonnegative"

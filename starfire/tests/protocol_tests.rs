@@ -3,6 +3,7 @@ mod support;
 use std::io::{Cursor, Read};
 
 use prost::Message;
+use starfire::cue::MAX_OVERLAY_ERROR_BYTES;
 use starfire::engine::{Engine, MAX_SCRIPT_ERROR_BYTES};
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Target, TimedCommand, Transition,
@@ -142,6 +143,7 @@ fn login_with_sources(count: usize, source_bytes: usize) -> Operation {
                 autoloop_id: format!("atmospheric/loop_{index}"),
                 bank: "atmospheric".to_owned(),
                 lua_source: "-".repeat(source_bytes),
+                intensity_htp: false,
             })
             .collect(),
         palettes: vec![wire::Palette {
@@ -260,6 +262,9 @@ fn metrics_at_maximum_field_lengths_fit_the_realtime_limit() {
         runtime_error: "r".repeat(MAX_ERROR_BYTES),
         last_processed_command_id: u64::MAX,
         run_id: u64::MAX,
+        pending_cues: u32::MAX,
+        overlay_error: "o".repeat(MAX_OVERLAY_ERROR_BYTES),
+        active_overlay_count: u32::MAX,
     });
     let mut frame = Vec::new();
     metrics.write(&mut frame).unwrap();
@@ -458,6 +463,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
                 bar_phase: Some(2),
                 beats_per_bar: 4,
                 bpm: 140.0,
+                features: None,
             },
         ),
         (
@@ -563,7 +569,6 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
         (2.0, play("", ""), Command::Stop),
     ];
     let replay = Replay {
-        schema_version: 1,
         duration_seconds: 2.0,
         frame_rate_hz: 40,
         palettes: support::palette_definitions(),
@@ -650,6 +655,7 @@ fn attribute_engine() -> Engine {
         autoloop_id: id.into(),
         bank: bank.into(),
         lua_source,
+        intensity_htp: false,
     };
     Engine::new(
         starfire::fixtures::FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap(),
