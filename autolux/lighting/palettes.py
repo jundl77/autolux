@@ -220,3 +220,81 @@ def palette_records() -> list[dict]:
         }
         for palette in palette_table()
     ]
+
+
+# Starfire's wheel colour (gdtf.rs cie_to_rgb): CIE xyY to clamped sRGB, then peak-normalised.
+XYZ_TO_SRGB = (
+    (3.2404542, -1.5371385, -0.4985314),
+    (-0.969266, 1.8760108, 0.041556),
+    (0.0556434, -0.2040259, 1.0572252),
+)
+
+
+def _normalised(colour) -> Rgb:
+    peak = max(colour)
+    return tuple(channel / peak for channel in colour) if peak > 0 else BLACK
+
+
+def _slot_rgb(colour) -> Rgb:
+    luminance = colour.luminance / 100
+    x, y = colour.x, colour.y
+    xyz = (x * luminance / y, luminance, (1 - x - y) * luminance / y)
+    linear = [min(1.0, max(0.0, sum(w * v for w, v in zip(row, xyz)))) for row in XYZ_TO_SRGB]
+    return _normalised(
+        [c * 12.92 if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055 for c in linear]
+    )
+
+
+def _wheel_slots(mode) -> list[tuple[str, Rgb]]:
+    """The slots of a compiled mode whose colour is only a wheel, as Starfire picks among them:
+    the lowest-DMX unconditional colour-wheel function's sets. Empty if the mode mixes colour."""
+    functions = [function for channel in mode.channels for function in channel.functions]
+    if any(f.attribute.startswith(('ColorAdd_', 'ColorSub_')) for f in functions):
+        return []
+    for channel in mode.channels:
+        ordered = sorted(channel.functions, key=lambda function: function.dmx_from)
+        for index, function in enumerate(ordered):
+            coloured = [s for s in function.sets if s.HasField('wheel_slot_colour')]
+            if not function.attribute.startswith('Color') or not coloured:
+                continue
+            if function.HasField('mode_master'):
+                continue
+            end = next(
+                (f.dmx_from - 1 for f in ordered[index + 1 :] if f.dmx_from > function.dmx_from),
+                None,
+            )
+            return [
+                (s.name, _slot_rgb(s.wheel_slot_colour))
+                for s in coloured
+                if end is None or s.dmx_from <= end
+            ]
+    return []
+
+
+def _nearest_slot(slots: list[tuple[str, Rgb]], colour: Rgb) -> str:
+    requested = _normalised(colour)
+    # Starfire keeps the highest-DMX slot of equally near ones.
+    return min(
+        reversed(slots),
+        key=lambda slot: sum((a - b) ** 2 for a, b in zip(slot[1], requested, strict=True)),
+    )[0]
+
+
+def wheel_collisions(rig, palettes: tuple[Palette, ...] | None = None) -> list[str]:
+    """Where a patched wheel-only fixture type would show a palette's primary and secondary as
+    one slot, so colour A and colour B look the same on it. Mono palettes mean to; skipped."""
+    palettes = PALETTES + BREAKDOWN_PALETTES + DROP_PALETTES if palettes is None else palettes
+    patched = {fixture.profile_id for fixture in rig.fixtures}
+    collisions = []
+    for profile in rig.profiles:
+        slots = _wheel_slots(profile.mode) if profile.profile_id in patched else []
+        for palette in palettes if slots else ():
+            primary, secondary = (
+                _nearest_slot(slots, colour) for colour in (palette.primary, palette.secondary)
+            )
+            if primary == secondary:
+                collisions.append(
+                    f'{profile.profile_id}: palette {palette.name} shows primary and secondary '
+                    f'as the one wheel slot {primary!r}.'
+                )
+    return collisions
