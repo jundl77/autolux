@@ -14,7 +14,7 @@ use starfire::script::AutoloopCatalog;
 
 fn simple_rig() -> serde_json::Value {
     json!({"schema_version":1,"fixtures":[
-        {"id":"light","profile":"generic_dimmer","universe":0,"address":1}
+        {"fixture_uuid":"light","profile":"generic_dimmer","universe":0,"address":1}
     ]})
 }
 
@@ -149,7 +149,7 @@ fn fixture_and_group_counts_and_identifiers_cannot_expand_frame_storage_unbounde
     rig["fixtures"] = json!(
         (0..=MAX_FIXTURES)
             .map(|index| json!({
-                "id":format!("light_{index}"),"profile":"generic_dimmer","universe":index,
+                "fixture_uuid":format!("light_{index}"),"profile":"generic_dimmer","universe":index,
                 "address":1
             }))
             .collect::<Vec<_>>()
@@ -166,9 +166,9 @@ fn fixture_and_group_counts_and_identifiers_cannot_expand_frame_storage_unbounde
     assert!(error.to_string().contains("group count"));
 
     let mut rig = simple_rig();
-    rig["fixtures"][0]["id"] = json!("é".repeat(64));
+    rig["fixtures"][0]["fixture_uuid"] = json!("é".repeat(64));
     assert!(support::try_rig(rig.clone()).is_ok());
-    rig["fixtures"][0]["id"] = json!("é".repeat(65));
+    rig["fixtures"][0]["fixture_uuid"] = json!("é".repeat(65));
     let error = support::try_rig(rig.clone()).unwrap_err();
     assert!(error.to_string().contains("identifiers"));
 

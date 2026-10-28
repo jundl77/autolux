@@ -8,6 +8,7 @@ import pytest
 
 from autolux.lighting import mvr
 from autolux.lighting.fixture_setup import FixtureStore, channel_occupancy
+from autolux.tests.test_mvr import named_groups
 from cli.starfire_assets import rig_bytes, rig_definition
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -328,6 +329,49 @@ def test_concurrent_saves_from_one_revision_allow_only_one_winner(rig_file):
     assert address_node(store.load()[0], 'wash_right')['text'] == str(winners[0])
 
 
+def test_a_fixture_is_its_uuid_so_renaming_or_swapping_names_moves_only_labels(rig_file):
+    def exported():
+        rig = rig_definition(rig_file)
+        groups = {group.group_id: list(group.fixture_uuids) for group in rig.groups}
+        return {fixture.fixture_uuid: fixture for fixture in rig.fixtures}, groups
+
+    before, groups = exported()
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    left, right = fixture_node(draft, 'spot_left'), fixture_node(draft, 'spot_right')
+    left['attributes']['name'], right['attributes']['name'] = 'spot_right', 'spot_left'
+    draft, revision = store.save(draft, revision)
+    wash = fixture_node(draft, 'wash_left')
+    wash['attributes']['name'] = 'wash_house_left'
+    store.save(draft, revision)
+    after, regrouped = exported()
+    relabelled = {
+        left['attributes']['uuid']: 'spot_right',
+        right['attributes']['uuid']: 'spot_left',
+        wash['attributes']['uuid']: 'wash_house_left',
+    }
+    assert {identity: fixture.name for identity, fixture in after.items()} == {
+        identity: relabelled.get(identity, fixture.name) for identity, fixture in before.items()
+    }
+    # Address, Matrix, stage area, cells and movement all stay with the uuid, as do the groups.
+    for identity, fixture in after.items():
+        fixture.name = before[identity].name
+    assert after == before
+    assert regrouped == groups
+
+
+@pytest.mark.parametrize(
+    'attribute,refusal', [('uuid', 'uuid duplicates'), ('name', 'unique, short fixture name')]
+)
+def test_a_patch_repeating_a_uuid_or_a_name_is_refused(rig_file, attribute, refusal):
+    store = store_for(rig_file, lambda _staged: None)
+    draft, revision = store.load()
+    left, right = fixture_node(draft, 'spot_left'), fixture_node(draft, 'spot_right')
+    right['attributes'][attribute] = left['attributes'][attribute]
+    with pytest.raises(ValueError, match=refusal):
+        store.save(draft, revision)
+
+
 def test_class_order_follows_positions_not_document_order_after_moving_a_fixture(rig_file):
     store = store_for(rig_file, lambda _staged: None)
     draft, revision = store.load()
@@ -337,7 +381,7 @@ def test_class_order_follows_positions_not_document_order_after_moving_a_fixture
     children['children'][first], children['children'][second] = spots[1], spots[0]
     store.save(draft, revision)
     fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
-    assert mvr.groups(fixtures)[0]['movers'] == ['spot_left', 'spot_right']
+    assert named_groups(fixtures)[0]['movers'] == ['spot_left', 'spot_right']
 
 
 def test_a_browser_plan_drag_moves_the_stage_area_and_group_order_on_save(rig_file):
@@ -353,13 +397,13 @@ def test_a_browser_plan_drag_moves_the_stage_area_and_group_order_on_save(rig_fi
     next(node for node in spot['children'] if node['tag'] == 'Matrix')['text'] = drag['matrix']
     store.save(draft, revision)
     areas = {
-        fixture.fixture_id: rig_wire.StageArea.Name(fixture.area)
+        fixture.name: rig_wire.StageArea.Name(fixture.area)
         for fixture in rig_definition(rig_file).fixtures
     }
     # From (-300, 0), on a cut and so up centre, to x 600: the right third, still upstage.
     assert areas['spot_left'] == 'STAGE_AREA_UP_RIGHT'
     fixtures = mvr.patched_fixtures(mvr.read(rig_file.read_bytes()))
-    assert mvr.groups(fixtures)[0]['movers'] == ['spot_right', 'spot_left']
+    assert named_groups(fixtures)[0]['movers'] == ['spot_right', 'spot_left']
 
 
 def test_a_page_load_serves_the_saved_patch_not_the_boot_time_one(rig_file):

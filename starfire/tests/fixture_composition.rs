@@ -183,7 +183,7 @@ fn held_colour_changes_only_target_colour_and_clear_reveals_baseline() {
             0.0,
             &lighting_override(
                 "red",
-                Target::Fixture("spot_left".into()),
+                Target::Fixture(support::room_uuid("spot_left")),
                 PropertyValues {
                     colour: Some(Rgb {
                         red: 1.0,
@@ -302,7 +302,7 @@ fn a_loop_group_sharing_a_fixture_with_an_accent_group_is_refused_at_rig_load() 
         .groups
         .push(starfire::protocol::wire::FixtureGroup {
             group_id: "house".into(),
-            fixture_ids: vec![kinta],
+            fixture_uuids: vec![kinta],
             ..Default::default()
         });
     let error = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap_err();

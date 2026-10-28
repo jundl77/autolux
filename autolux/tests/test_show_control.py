@@ -683,7 +683,7 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
 
 def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
     highlight = {'target': {'fixture': 'spot_left'}, 'colour': 'red'}
-    rig = {'fixtures': [{'name': 'spot_left', 'cells': ['spot_left']}]}
+    rig = {'fixtures': [{'fixture_uuid': 'spot_left', 'name': 'spot_left', 'cells': ['spot_left']}]}
     snapshot = {
         'paused': True,
         'static': {'blackout': False},
@@ -807,6 +807,17 @@ def test_the_fx_picker_lists_only_the_rows_that_fit_the_target():
     ]
     # The held row is written once, and again only when the target's held row changes.
     assert synced == [['static-fx-row', 'drift'], ['static-fx-row', None]]
+
+
+def test_afterglow_under_drop_shows_the_breakdown_colour():
+    from autolux.simulate.visualizer_app import INTENT_CONFIG, _build_show_status
+
+    effect = {'name': 'breakdown/afterglow', 'selection': {'intent': 'drop', 'look': 'breakdown'}}
+    status = _build_show_status({'intent': 'drop', 'current_effect': effect}, now=0.0)
+    value = next(item for item in status if item.children[0].children == 'Autoloop').children[1]
+    dot, name, _ = value.children
+    assert name == 'Afterglow'
+    assert dot.style['background'] == INTENT_CONFIG['breakdown']['primary']
 
 
 def test_the_status_line_shows_the_active_fx():

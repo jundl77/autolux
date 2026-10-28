@@ -24,8 +24,10 @@ message RigDefinition {
   repeated FixtureProfile profiles = 3;
 }
 
+// Identity is the MVR Fixture uuid; name is a label (unique, so autoloops can name it) that
+// may change without touching anything keyed by the fixture.
 message Fixture {
-  string fixture_id = 1;
+  string fixture_uuid = 1;  // The MVR Fixture uuid, as the MVR writes it.
   string profile_id = 2;
   uint32 universe = 3;  // Art-Net universe, starting at zero.
   uint32 address = 4;   // DMX address, starting at one.
@@ -37,9 +39,10 @@ message Fixture {
   // them, otherwise they must match the profile.
   repeated Cell cells = 10;
   StageArea area = 11;  // Every cell lies in its fixture's area.
+  string name = 12;     // The MVR Fixture name.
 
-  // One addressable unit. A single-cell fixture's cell takes the fixture ID; otherwise the
-  // cell ID is "fixture_id/geometry".
+  // One addressable unit. A single-cell fixture's cell id is its fixture_uuid; otherwise the
+  // cell id is "fixture_uuid/geometry".
   message Cell {
     string geometry = 1;
     repeated uint32 offsets = 2;  // One-based offsets within the fixture footprint, ascending.
@@ -55,8 +58,8 @@ message Fixture {
 // Members are fixtures; each contributes all of its cells in offset order.
 message FixtureGroup {
   string group_id = 1;
-  repeated string fixture_ids = 2;
-  GroupRole role = 3;  // The MVR Layer the group's fixtures sit in.
+  repeated string fixture_uuids = 2;  // From the members' Classing.
+  GroupRole role = 3;                 // The MVR Layer the group's fixtures sit in.
 }
 
 // Loop groups carry the autoloops; accent groups only play specials, so no autoloop may

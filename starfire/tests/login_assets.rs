@@ -10,7 +10,7 @@ use starfire::protocol::{ClientMessage, apply_command, wire};
 use starfire::script::AutoloopCatalog;
 
 const FRAME_RATE_HZ: u32 = 40;
-const RGB_RIG: &str = r#"{"schema_version":1,"fixtures":[{"id":"wash","profile":"generic_rgb","universe":0,"address":1},{"id":"mover","profile":"generic_rgb","universe":0,"address":4},{"id":"pixel","profile":"generic_rgb","universe":0,"address":7}],"groups":{"wash":["wash"],"movers":["mover"],"strip":["pixel"]}}"#;
+const RGB_RIG: &str = r#"{"schema_version":1,"fixtures":[{"fixture_uuid":"wash","profile":"generic_rgb","universe":0,"address":1},{"fixture_uuid":"mover","profile":"generic_rgb","universe":0,"address":4},{"fixture_uuid":"pixel","profile":"generic_rgb","universe":0,"address":7}],"groups":{"wash":["wash"],"movers":["mover"],"strip":["pixel"]}}"#;
 
 fn rig() -> wire::RigDefinition {
     wire::RigDefinition {
@@ -19,7 +19,8 @@ fn rig() -> wire::RigDefinition {
             .enumerate()
             .map(|(index, id)| wire::Fixture {
                 area: wire::StageArea::Centre as i32,
-                fixture_id: id.into(),
+                fixture_uuid: id.into(),
+                name: id.into(),
                 profile_id: "generic_rgb".into(),
                 address: 1 + index as u32 * 3,
                 ..Default::default()
@@ -29,7 +30,7 @@ fn rig() -> wire::RigDefinition {
             .into_iter()
             .map(|(group, id)| wire::FixtureGroup {
                 group_id: group.into(),
-                fixture_ids: vec![id.into()],
+                fixture_uuids: vec![id.into()],
                 ..Default::default()
             })
             .collect(),
@@ -138,7 +139,7 @@ fn typed_patch_rejects_overlaps_unknown_groups_and_ambiguous_profiles() {
     value.fixtures[0].profile_id = "missing".into();
     candidates.push(value);
     let mut value = rig();
-    value.groups[0].fixture_ids = vec!["missing".into()];
+    value.groups[0].fixture_uuids = vec!["missing".into()];
     candidates.push(value);
     let mut value = rig();
     value.groups.push(value.groups[0].clone());

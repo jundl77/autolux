@@ -573,8 +573,10 @@ def _autoloop_status(snapshot: dict, cfg: dict, name: str | None, detail: str):
     tag = selection.get('intent') or cfg['label'].lower()
     if selection.get('look') not in (None, selection.get('intent')):
         tag = f'{tag} · {selection.get("level")}'
+    # The dot is the loop's own bank: a level remap can play a breakdown loop under a DROP.
+    bank = name.split('/', 1)[0] if name else None
     value = [
-        _dot(cfg['primary']),
+        _dot(INTENT_CONFIG.get(bank, cfg)['primary']),
         name.rsplit('/', 1)[-1].replace('_', ' ').title() if name else '—',
         html.Span(tag, className='status-tag'),
     ]

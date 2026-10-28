@@ -41,7 +41,8 @@ impl Venue {
             let next = self.definition.fixtures.len();
             let fixture = format!("f{next:03}");
             self.definition.fixtures.push(wire::Fixture {
-                fixture_id: fixture.clone(),
+                fixture_uuid: fixture.clone(),
+                name: fixture.clone(),
                 profile_id: "generic_rgb".into(),
                 universe: (next / PER_UNIVERSE) as u32,
                 address: ((next % PER_UNIVERSE) * 3 + 1) as u32,
@@ -54,7 +55,7 @@ impl Venue {
         }
         self.definition.groups.push(wire::FixtureGroup {
             group_id: id,
-            fixture_ids: members,
+            fixture_uuids: members,
             role: role as i32,
         });
     }

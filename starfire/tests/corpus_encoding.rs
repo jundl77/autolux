@@ -11,14 +11,15 @@ fn rig(source: &str) -> FixtureRig {
     FixtureRig::from_wire(&wire::RigDefinition {
         fixtures: vec![wire::Fixture {
             area: wire::StageArea::Centre as i32,
-            fixture_id: "fixture".into(),
+            fixture_uuid: "fixture".into(),
+            name: "fixture".into(),
             profile_id: "profile".into(),
             address: 1,
             ..Default::default()
         }],
         groups: vec![wire::FixtureGroup {
             group_id: "group".into(),
-            fixture_ids: vec!["fixture".into()],
+            fixture_uuids: vec!["fixture".into()],
             ..Default::default()
         }],
         profiles: vec![support::compiled_profile(source, "profile")],

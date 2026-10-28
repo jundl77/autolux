@@ -201,7 +201,7 @@ def import_fixture(
             gdtf_mode=mode_name,
             universe=0,
             address=1,
-            fixture_id=1,
+            patch_number=1,
         )
         patch.write_bytes(mvr.write(scene))
         validate(patch)

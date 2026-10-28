@@ -83,6 +83,12 @@ which is enabled whenever a show runs (a second click within 5 s confirms it). T
 down cleanly and starts again on the saved store; the lights go dark until it is back. Under
 `autolux run` (not `--prod`) the button only ends the show.
 
+A fixture is its MVR uuid, and its name is a label. Renaming a fixture, or swapping the names of
+two, changes labels only: position, address, group and a running test stay with the uuid, so a
+renamed fixture tests before a restart. Names stay unique because autoloops name fixtures by
+label. A fixture added in Config gets a fresh uuid, which the show learns only after **Restart
+show**; until then the Config tab does not test it.
+
 The show runs one fixture test at a time, so two open dashboards share it: a test from one moves
 or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it
 (standby, sound stop, restart) the page stops holding it rather than relighting it.

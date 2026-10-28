@@ -129,7 +129,7 @@ fn run(arguments: Arguments) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "fixtures": rig.fixture_ids(), "cells": rig.cell_ids(), "groups": rig.groups(),
+                    "fixtures": rig.fixture_uuids(), "cells": rig.cell_ids(), "groups": rig.groups(),
                     "universes": universes, "checked_autoloops": autoloops,
                     "missing_groups": missing_groups,
                 }))?
@@ -157,7 +157,7 @@ fn run(arguments: Arguments) -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
-                    "fixtures": rig.fixture_ids(), "cells": rig.cell_ids(), "groups": rig.groups(), "universes": universes,
+                    "fixtures": rig.fixture_uuids(), "cells": rig.cell_ids(), "groups": rig.groups(), "universes": universes,
                 }))?
             );
         }

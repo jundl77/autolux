@@ -298,7 +298,7 @@
             const channels = modeChannels(tree, mode);
             const cells = modeCells(tree, mode);
             const className = classes[textOf(node, "Classing").toUpperCase()] || "";
-            return [{ key: node.key, name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
+            return [{ key: node.key, fixture_uuid: node.attributes.uuid || "", name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
         });
     }
 
@@ -371,7 +371,7 @@
         const count = entry.modes[entry.default_mode].channels;
         const children = firstLayerChildren(draft, settings);
         const names = new Set(fixtureRows(draft, settings).map((row) => row.name));
-        let fixtureId = Math.max(0, ...[...walk(draft.scene)].filter(([node]) => node.tag === "FixtureIDNumeric").map(([node]) => Number(node.text) || 0));
+        let patchNumber = Math.max(0, ...[...walk(draft.scene)].filter(([node]) => node.tag === "FixtureIDNumeric").map(([node]) => Number(node.text) || 0));
         const added = [];
         for (let index = 0; index < quantity; index++) {
             const start = address == null ? firstFreeAddress(draft, settings, universe - 1, count) : address;
@@ -380,11 +380,11 @@
             const fixture = template(settings, "Fixture", "Fixture");
             fixture.attributes.name = `${entry.name}_${suffix}`;
             names.add(fixture.attributes.name);
-            fixtureId += 1;
+            patchNumber += 1;
             for (const [tag, text] of [["Matrix", formatMatrix(IDENTITY)], ["GDTFSpec", spec], ["GDTFMode", entry.default_mode]]) {
                 insertChild(fixture, "Fixture", element(tag, {}, text), settings);
             }
-            childOf(fixture, "FixtureID").text = childOf(fixture, "FixtureIDNumeric").text = String(fixtureId);
+            childOf(fixture, "FixtureID").text = childOf(fixture, "FixtureIDNumeric").text = String(patchNumber);
             const addresses = insertChild(fixture, "Fixture", element("Addresses"), settings);
             addresses.children.push(element("Address", { break: "0" }, absoluteAddress(universe - 1, start)));
             children.children.push(fixture);
@@ -573,14 +573,14 @@
             case "name": {
                 const twin = others.some((entry) => entry.attributes.name === value);
                 const error = !value.trim() ? "A name is required." : bytes(value) > NAME_BYTES ? `Names are at most ${NAME_BYTES} bytes.` : twin ? `Another fixture is named ${value}.` : null;
-                const warning = value !== row.name ? "Renaming changes the Class membership the show uses for groups and stops a test running on it." : null;
-                return { error, warning, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
+                // The name is a label: groups, positions and a running test follow the uuid.
+                return { error, action: { action: "set-attribute", doc: "scene", key, name: "name", value } };
             }
             case "FixtureID":
             case "FixtureIDNumeric": {
                 // MVR's FixtureID is a string; only FixtureIDNumeric is a number.
                 const twin = others.find((entry) => textOf(entry, field) === value);
-                return { error: field === "FixtureID" || /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same ID.` : null, action: child(field, value) };
+                return { error: field === "FixtureID" || /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same patch number.` : null, action: child(field, value) };
             }
             case "GDTFSpec": {
                 const tree = gdtfTree(draft, settings, value);
@@ -687,9 +687,17 @@
         return command;
     }
 
-    // A renamed or new fixture is not in the rig the show runs until a restart, and Starfire answers
-    // an unknown target with an error that stops the show.
-    const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.name === target.fixture || fixture.cells.includes(target.cell));
+    // A new fixture (or a new uuid) is not in the rig the show runs until a restart, and Starfire
+    // answers an unknown target with an error that stops the show.
+    const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
+    // Targets carry uuids; people read the label the form shows, which a rename or swap changes
+    // before a restart, and the running rig's label only for a fixture the draft no longer has.
+    const labelOf = (id) => {
+        const fixture = (show?.rig?.fixtures || []).find((entry) => entry.fixture_uuid === id || entry.cells.includes(id));
+        if (!fixture) return id;
+        const row = rig && fixtureRows(rig.draft, rig.settings).find((entry) => entry.fixture_uuid === fixture.fixture_uuid);
+        return id.replace(fixture.fixture_uuid, row?.name || fixture.name);
+    };
 
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
     function testControl(spec) {
@@ -699,17 +707,17 @@
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
         if (spec in rig.settings.testColours) {
-            const target = selectedCell ? { cell: selectedCell } : { fixture: row.name };
+            const target = selectedCell ? { cell: selectedCell } : { fixture: row.fixture_uuid };
             return running(target) ? highlight(target, spec) : null;
         }
         const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
         sendAction({ action: "select", key: next.key });
-        if (!running({ fixture: next.name })) {
+        if (!running({ fixture: next.fixture_uuid })) {
             clearTest();
             return null;
         }
-        return highlight({ fixture: next.name }, (lit && testCommand.colour) || show.highlight?.colour || "white");
+        return highlight({ fixture: next.fixture_uuid }, (lit && testCommand.colour) || show.highlight?.colour || "white");
     }
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });
@@ -789,8 +797,8 @@
                 testRefusal = "";
                 const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
                 // The lit test follows the selection, so the old fixture is never kept alive.
-                if (!next || !running({ fixture: next.name })) clearTest();
-                else if (testCommand.target.fixture !== next.name) highlight({ fixture: next.name }, testCommand.colour);
+                if (!next || !running({ fixture: next.fixture_uuid })) clearTest();
+                else if (testCommand.target.fixture !== next.fixture_uuid) highlight({ fixture: next.fixture_uuid }, testCommand.colour);
             }
             rig = { draft, settings, selection };
             if (typeof document.getElementById === "function") {
@@ -1209,27 +1217,27 @@
         const strip = typeof document.querySelector === "function" && document.querySelector("#fixture-info .cfg-test");
         if (!strip || !rig) return;
         const row = fixtureRows(rig.draft, rig.settings).find((entry) => entry.key === rig.selection);
-        const ids = show?.rig?.fixtures?.find((fixture) => fixture.name === row?.name)?.cells || [];
+        const ids = show?.rig?.fixtures?.find((fixture) => fixture.fixture_uuid === row?.fixture_uuid)?.cells || [];
         if (!ids.includes(selectedCell)) selectedCell = null;
         const cells = document.querySelector("#fixture-info .cfg-cells");
-        const listed = JSON.stringify([row?.name, ids]);
+        const listed = JSON.stringify([row?.fixture_uuid, row?.name, ids]);
         if (cells.dataset.listed !== listed) {
             cells.dataset.listed = listed;
             const offline = row?.cells.length ? `${row.cells.join(", ")} · not in the running show` : "No cells.";
-            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", className: "mvr-small", "data-cfg-cell": cell, title: `Pick ${cell} to test`, text: cell })) : [muted(offline)]));
+            cells.replaceChildren(...(ids.length ? ids.map((cell) => h("button", { type: "button", className: "mvr-small", "data-cfg-cell": cell, title: `Pick ${cell.replace(row.fixture_uuid, row.name)} to test`, text: cell.replace(row.fixture_uuid, row.name) })) : [muted(offline)]));
         }
         cells.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
-        const offline = row && !running({ fixture: row.name }) ? `${row.name} · not in the running show` : null;
+        const offline = row && !running({ fixture: row.fixture_uuid }) ? `${row.name} · not in the running show` : null;
         const active = show?.highlight;
-        const here = Boolean(active) && (active.target?.fixture === row?.name || ids.includes(active.target?.cell));
+        const here = Boolean(active) && (active.target?.fixture === row?.fixture_uuid || ids.includes(active.target?.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
             // ‹ › and Off still work: they move off or clear what the show does run.
             button.disabled = Boolean(blocked || (offline && !["off", "1", "-1"].includes(button.dataset.cfgTest)));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
         }
-        testNote(blocked || testRefusal || offline || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
+        testNote(blocked || testRefusal || offline || (active ? `Testing ${labelOf(active.target?.fixture ?? active.target?.cell)} in ${active.colour}.` : testEnded));
     }
 
     // Console-style patch form over the raw inspector; every field maps to one draft action.
@@ -1266,8 +1274,8 @@
                 { className: "cfg-form" },
                 testStrip(),
                 field("Name", input("name", row.name), true),
-                field("Fixture ID", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
-                field("Fixture ID (numeric)", input("FixtureIDNumeric", textOf(node, "FixtureIDNumeric"), { inputmode: "numeric" })),
+                field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
+                field("Patch number (numeric)", input("FixtureIDNumeric", textOf(node, "FixtureIDNumeric"), { inputmode: "numeric" })),
                 field("GDTF profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
                 field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} ch`])], row.mode), true),
                 field("Universe", h("input", { type: "text", value: (row.universe ?? 0) + 1, readonly: true, tabindex: -1 })),
