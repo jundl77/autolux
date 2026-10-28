@@ -594,13 +594,14 @@ fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
 }
 
 #[test]
-fn a_loop_reaching_an_accent_group_by_any_route_is_refused() {
+fn a_loop_naming_an_accent_group_or_fixture_by_any_route_is_refused() {
     let room = FixtureRig::from_wire(&support::room_definition()).unwrap();
     assert!(room.is_accent("fx"));
     for body in [
         r#"return {sf.dimmer({ group = "fx" }, 1)}"#,
         r#"local g = "fx"; return sf.each(sf.group(g), function(cell) return sf.dimmer(cell, 1) end)"#,
         r#"return {sf.dimmer(sf.mirror({ group = "fx" })[1][1], 1)}"#,
+        r#"return {sf.dimmer(sf.fixture("kinta"), 1)}"#,
     ] {
         let error = catalog(&format!("return {{render = function(ctx) {body} end}}"))
             .instantiate("test", "autoloop", &room, &support::palettes())
@@ -613,7 +614,7 @@ fn a_loop_reaching_an_accent_group_by_any_route_is_refused() {
             "{error}"
         );
         assert!(
-            error.contains("accent group fx plays specials only, never autoloops"),
+            error.contains("plays specials only, never autoloops"),
             "{error}"
         );
     }

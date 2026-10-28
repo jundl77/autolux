@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 
 use starfire::engine::{Engine, perceptual_to_linear_master};
+use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
@@ -1259,6 +1260,10 @@ fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
 }
 
 fn room_engine(scripts: &[(&str, &str)]) -> Engine {
+    engine_on(support::room(), scripts)
+}
+
+fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir(directory.path().join("test")).unwrap();
     for (name, source) in scripts {
@@ -1269,7 +1274,7 @@ fn room_engine(scripts: &[(&str, &str)]) -> Engine {
         .unwrap();
     }
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
-    let mut engine = Engine::new(support::room(), catalog, support::palettes()).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -1285,20 +1290,42 @@ fn room_engine(scripts: &[(&str, &str)]) -> Engine {
 }
 
 #[test]
+fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
+    let room = support::room();
+    let mut engine = room_engine(&[(
+        "lit",
+        "return {render=function(ctx) return {sf.dimmer(sf.all(), 1)} end}",
+    )]);
+    select(&mut engine, 0.0, "lit", Transition::Cut);
+    let states = engine
+        .render_at(0.0)
+        .unwrap()
+        .fixture_properties_before_strobe;
+    assert_eq!(states[&room.groups()["wash"][0]].intensity, 1.0);
+    for cell in &room.groups()["fx"] {
+        assert_eq!(states[cell].intensity, 0.0, "{cell}");
+    }
+}
+
+#[test]
 fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
-    let fx_fixture = support::room().groups()["fx"][0].clone();
-    let mut engine = room_engine(&[
-        ("empty", "return {render=function(ctx) return {} end}"),
-        (
-            "still",
-            "return {render=function(ctx) return {sf.physical_attribute(sf.fixture('kinta'), 'Effects1PosRotate', 0)} end}",
-        ),
-        (
-            "spin",
-            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.fixture('kinta'), 'Color1', 'Red'), sf.physical_attribute(sf.fixture('kinta'), 'Effects1PosRotate', 160)} end}",
-        ),
-    ]);
+    let rig = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
+    let fx_fixture = rig.groups()["fx"][0].clone();
+    let mut engine = engine_on(
+        rig,
+        &[
+            ("empty", "return {render=function(ctx) return {} end}"),
+            (
+                "still",
+                "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
+            ),
+            (
+                "spin",
+                "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
+            ),
+        ],
+    );
     let red = AttributeValue::Preset("Red".into());
     select(&mut engine, 0.0, "empty", Transition::Cut);
     select(

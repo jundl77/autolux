@@ -19,7 +19,7 @@ end
 
 return {
     render = function(ctx)
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
         local pan = PAN_SWING * sf.lerp(0.5, 1, energy)
             * spread(sf.phrase_phase(ctx.beat_position, LOOP_BARS))

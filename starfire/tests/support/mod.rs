@@ -175,6 +175,15 @@ pub fn room_definition() -> wire::RigDefinition {
     .unwrap()
 }
 
+/// The room with its accent groups played as loop groups, for loops that must light the Kinta.
+pub fn room_definition_as_loops() -> wire::RigDefinition {
+    let mut definition = room_definition();
+    for group in &mut definition.groups {
+        group.role = wire::GroupRole::Loop as i32;
+    }
+    definition
+}
+
 pub fn encoded(spec: &Value) -> Vec<u8> {
     definition(spec).encode_to_vec()
 }

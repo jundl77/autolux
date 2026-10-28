@@ -13,7 +13,7 @@ local PAN_SWING, TILT_SWING = 0.06, 0.04
 return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
         local reach = sf.lerp(0.5, 1, energy)
         local pan = PAN_SWING * reach * sf.osc.sine(beat, LOOP_BEATS, -1, 1, 0.25)
