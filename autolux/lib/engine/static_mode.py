@@ -6,6 +6,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from autolux.lib.clients.starfire_client import StarfireClient
+from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.engine.effect_controller import DROP_ACCENT_PRIORITY
 from autolux.lib.engine.special_policy import Special, SpecialCapabilities
 
@@ -60,8 +61,10 @@ class StaticLooks:
         rig: StaticRig,
         specials: Sequence[Special] = (),
         capabilities: Callable[[], SpecialCapabilities] = SpecialCapabilities,
+        clock: Clock = SYSTEM_CLOCK,
     ):
         self._lighting = lighting_client
+        self._clock = clock
         self.rig = rig
         self._capabilities = capabilities
         # Strobe rows stay the show's own drop accent; the operator never holds one.
@@ -70,7 +73,13 @@ class StaticLooks:
         self._special: Special | None = None
         self._floor = False
         self.blackout = False
-        self.highlighted: dict | None = None
+        self._highlighted: dict | None = None
+        self._highlight_ends = 0.0
+
+    @property
+    def highlighted(self) -> dict | None:
+        # Starfire drops the override after HIGHLIGHT_SECONDS; the state lapses on the same span.
+        return self._highlighted if self._clock.monotonic() < self._highlight_ends else None
 
     @property
     def active(self) -> bool:
@@ -199,11 +208,12 @@ class StaticLooks:
                 'lifetime': {'kind': 'seconds', 'duration_seconds': HIGHLIGHT_SECONDS},
             }
         )
-        self.highlighted = {'target': dict(target), 'colour': colour}
+        self._highlighted = {'target': dict(target), 'colour': colour}
+        self._highlight_ends = self._clock.monotonic() + HIGHLIGHT_SECONDS
 
     def clear_highlight(self) -> None:
         if self.highlighted is not None:
-            self.highlighted = None
+            self._highlighted = None
             self._lighting.clear_override(HIGHLIGHT_ID)
 
     def set_blackout(self, enabled: bool) -> None:

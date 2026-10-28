@@ -566,6 +566,18 @@ def test_testing_another_fixture_moves_the_one_highlight_and_clear_releases_it()
     assert looks.highlighted is None
 
 
+def test_the_highlight_state_lapses_with_starfires_60_s_expiry_on_the_engine_clock():
+    clock, lighting = VirtualClock(), RecordingStarfireClient()
+    looks = StaticLooks(lighting, HALL, clock=clock)
+    looks.highlight({'fixture': 'par'})
+    clock.advance(59.9)
+    assert looks.highlighted == {'target': {'fixture': 'par'}, 'colour': 'white'}
+    clock.advance(0.1)
+    assert looks.highlighted is None
+    looks.clear_highlight()
+    assert overrides(lighting)[-1]['kind'] == 'set_override', 'Starfire already dropped it'
+
+
 @pytest.mark.parametrize(
     ('colour', 'rgb'),
     [('warm', (1.0, 0.55, 0.2)), ('blue', (0.0, 0.0, 1.0)), ('green', (0.0, 1.0, 0.0))],

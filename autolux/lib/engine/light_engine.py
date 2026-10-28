@@ -159,6 +159,7 @@ class LightEngine(IMusicAnalyserHandler):
             static_rig,
             effect_controller.specials,
             effect_controller.special_capabilities,
+            clock,
         )
         self._log_chain_latency()
 
