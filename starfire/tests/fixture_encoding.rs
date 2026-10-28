@@ -55,7 +55,7 @@ fn rgb_and_rgbw_scale_intensity_without_a_master_channel() {
 
 #[test]
 fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
-    let rig = support::room();
+    let rig = support::stage();
     let mut states = rig.empty_states();
     for state in states.values_mut() {
         *state = FixtureState {
@@ -72,25 +72,20 @@ fn physical_profiles_keep_shutter_gobo_uv_and_program_controls_safe() {
         };
     }
     let frame = &rig.encode(&states).unwrap()[&0];
-    let wheel_fixture = 39..43;
+    // The stage patch, 0-based: washes from 0, movers from 32, the bar from 56, the accent at 80.
+    let wheel_fixture = 80..84;
     let magenta_slot = 81;
     assert_eq!(&frame[wheel_fixture.clone()], &[magenta_slot, 0, 0, 0]);
-    for start in [0, 12] {
+    for start in [32, 44] {
         assert_eq!(
             &frame[start..start + 12],
             &[149, 85, 191, 255, 0, 160, 7, 191, 0, 0, 0, 0]
         );
     }
-    for start in [64, 72, 80, 88] {
+    for start in [0, 8, 16, 24] {
         assert_eq!(&frame[start..start + 8], &[255, 0, 255, 0, 191, 0, 0, 0]);
     }
-    assert!(
-        frame[24..wheel_fixture.start]
-            .iter()
-            .chain(&frame[wheel_fixture.end..64])
-            .chain(frame[120..].iter())
-            .all(|byte| *byte == 0)
-    );
+    assert!(frame[wheel_fixture.end..].iter().all(|byte| *byte == 0));
 }
 
 #[test]
@@ -290,12 +285,12 @@ fn rotated_fixed_fixtures_are_accepted_and_non_rotations_rejected() {
 
 #[test]
 fn reference_patch_encodes_eight_independent_rgb_pixels_and_leaves_the_fx_derby_dark() {
-    const STRIP_START: usize = 96;
+    const STRIP_START: usize = 56;
     const RGB_CHANNELS: usize = 3;
     const PIXEL_COUNT: usize = 8;
-    const FX_DERBY_START: usize = 39;
+    const FX_DERBY_START: usize = 80;
     const FX_DERBY_CHANNELS: usize = 4;
-    let rig = support::room();
+    let rig = support::stage();
     let strip = rig.resolve(&Target::Group("strip".into())).unwrap();
     assert_eq!(strip.len(), PIXEL_COUNT);
     for (selected, id) in strip.iter().enumerate() {
@@ -390,21 +385,21 @@ fn labelled(names: [&str; 2], ids: [&str; 2]) -> serde_json::Value {
 
 #[test]
 fn a_fixture_is_its_uuid_and_swapping_labels_moves_nothing_else() {
-    let rig = support::rig(labelled(["spot_left", "spot_right"], [LEFT, RIGHT]));
-    let swapped = support::rig(labelled(["spot_right", "spot_left"], [LEFT, RIGHT]));
+    let rig = support::rig(labelled(["mover_left", "mover_right"], [LEFT, RIGHT]));
+    let swapped = support::rig(labelled(["mover_right", "mover_left"], [LEFT, RIGHT]));
     for rig in [&rig, &swapped] {
         assert_eq!(rig.cell_ids(), [LEFT, RIGHT]);
         assert_eq!(rig.groups()["wash"], [LEFT, RIGHT]);
         assert_eq!(rig.resolve(&Target::Fixture(LEFT.into())).unwrap(), [LEFT]);
         // Wire targets carry uuids; only autoloops resolve labels.
-        assert!(rig.resolve(&Target::Fixture("spot_left".into())).is_err());
+        assert!(rig.resolve(&Target::Fixture("mover_left".into())).is_err());
         let mut states = rig.empty_states();
         states.insert(LEFT.into(), full_light());
         assert_eq!(rig.encode(&states).unwrap()[&0][..2], [255, 0]);
     }
-    assert_eq!(rig.uuid_of_label("spot_left"), Some(LEFT));
-    assert_eq!(swapped.uuid_of_label("spot_left"), Some(RIGHT));
-    assert_eq!(swapped.label(LEFT), "spot_right");
+    assert_eq!(rig.uuid_of_label("mover_left"), Some(LEFT));
+    assert_eq!(swapped.uuid_of_label("mover_left"), Some(RIGHT));
+    assert_eq!(swapped.label(LEFT), "mover_right");
     assert_eq!(swapped.uuid_of_label(LEFT), None);
 }
 
@@ -674,7 +669,7 @@ fn a_login_whose_declared_cells_differ_from_the_profile_is_refused() {
 #[test]
 fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_cells() {
     for exported in [
-        include_bytes!("../../autolux/tests/data/room.rig.pb").as_slice(),
+        include_bytes!("../../autolux/tests/data/generic_rig/stage.rig.pb").as_slice(),
         include_bytes!("../../autolux/tests/data/generic_rig/generic.rig.pb"),
     ] {
         let definition = wire::RigDefinition::decode(exported).unwrap();
@@ -686,13 +681,16 @@ fn exported_rigs_declare_the_cells_starfire_derives_and_the_bar_is_eight_strip_c
         );
         FixtureRig::from_wire(&definition).unwrap();
     }
-    let room = support::room();
-    assert_eq!(room.fixture_uuids().len(), 8);
-    assert_eq!(room.cell_ids().len(), 15);
+    let stage = support::stage();
+    assert_eq!(stage.fixture_uuids().len(), 8);
+    assert_eq!(stage.cell_ids().len(), 15);
     assert_eq!(
-        room.resolve(&Target::Group("strip".into())).unwrap(),
+        stage.resolve(&Target::Group("strip".into())).unwrap(),
         (1..=8)
-            .map(|segment| format!("{}/Beam Segment {segment}", support::room_uuid("zq06017")))
+            .map(|segment| format!(
+                "{}/Beam Segment {segment}",
+                support::stage_uuid("bar_upstage")
+            ))
             .collect::<Vec<_>>()
     );
 }

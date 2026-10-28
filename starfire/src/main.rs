@@ -354,13 +354,16 @@ mod tests {
             _ => unreachable!(),
         };
         let mut sender = ArtNetOutput::bind("127.0.0.1:0".parse().unwrap(), destination).unwrap();
-        let rig =
-            FixtureRig::decode(include_bytes!("../../autolux/tests/data/room.rig.pb")).unwrap();
+        let rig = FixtureRig::decode(include_bytes!(
+            "../../autolux/tests/data/generic_rig/stage.rig.pb"
+        ))
+        .unwrap();
         play_frames(&[], &rig, &mut sender, &AtomicBool::new(true), None).unwrap();
         let mut packet = [0; 1024];
         let count = listener.recv(&mut packet).unwrap();
         assert_eq!(count, 530);
-        for dimmer in [7, 19, 68, 76, 84, 92] {
+        // The stage's wash and mover dimmer channels.
+        for dimmer in [4, 12, 20, 28, 39, 51] {
             assert_eq!(packet[18 + dimmer], 0);
         }
     }
