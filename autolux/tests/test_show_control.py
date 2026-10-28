@@ -840,26 +840,6 @@ def test_the_status_line_shows_the_active_fx():
     assert items(static)['FX'] == 'Static · Cold drift · wash'
 
 
-def test_the_config_rig_area_lists_each_groups_fx_capabilities():
-    from autolux.simulate.visualizer_app import special_groups_view
-
-    line = special_groups_view(
-        {'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']}, {'fx': 'accent'}
-    )
-    assert [getattr(part, 'children', part) for part in line] == [
-        'FX',
-        '  ',
-        'fx',
-        ' ',
-        'accent · colour · pulse · speed',
-        '  ',
-        'wash',
-        ' ',
-        'loop · colour',
-    ]
-    assert special_groups_view({}) == ['FX: Starfire reported no groups']
-
-
 @pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
 def test_a_picked_fx_row_is_sent_once_and_clear_fx_empties_the_picker_in_the_browser():
     from autolux.simulate.visualizer_app import FX_PICK_JS

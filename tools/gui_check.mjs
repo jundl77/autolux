@@ -304,12 +304,20 @@ async function type(selector, text) {
     await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.focus(); e.select(); })()`);
     await cdp('Input.insertText', {text});
 }
-async function shot(tab) {
+// The whole page, or one element unclipped by its own scrolling.
+async function shot(name, selector = null) {
     if (!SHOTS) {
         return;
     }
-    const {data} = await cdp('Page.captureScreenshot', {format: 'png', captureBeyondViewport: true});
-    writeFileSync(join(SHOTS, `gui_${tab}.png`), Buffer.from(data, 'base64'));
+    const element = `document.querySelector(${JSON.stringify(selector)})`;
+    const clip = selector && await ev(`(() => { const e = ${element}; window.__shotStyle = e.style.cssText;
+        e.style.cssText += ';contain:none;overflow:visible;height:auto;align-self:start'; const r = e.getBoundingClientRect();
+        return {x: r.x + scrollX, y: r.y + scrollY, width: r.width, height: r.height, scale: 1}; })()`);
+    const {data} = await cdp('Page.captureScreenshot', {format: 'png', captureBeyondViewport: true, ...(clip && {clip})});
+    if (selector) {
+        await ev(`${element}.style.cssText = window.__shotStyle`);
+    }
+    writeFileSync(join(SHOTS, selector ? `${name}.png` : `gui_${name}.png`), Buffer.from(data, 'base64'));
 }
 
 // ---- suites -------------------------------------------------------------------------------
@@ -383,8 +391,7 @@ async function cfgFresh({width = 1280} = {}) {
     await harness('rig', {restore: true});
     await fresh({width});
     await tab('Config');
-    await waitFor(`!!document.querySelector('#mvr-plan svg.plan')
-        && document.getElementById('special-groups').textContent.trim() !== ''`, 8000);
+    await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
     await planSettled();
     // Records every draft action the page sends (fixture_patch.js sendAction).
     await ev(`(() => {
@@ -399,8 +406,8 @@ async function cfgFresh({width = 1280} = {}) {
     await arm();
 }
 
-// The Config tab fills in after it opens (the server's FX groups line above the plan), which
-// moves the plan down; a click aimed before that lands beside the mark.
+// The Config tab can still move the plan after it opens (fonts, the DMX map filling in); a
+// click aimed before that lands beside the mark.
 async function planSettled() {
     let last = null;
     for (let stable = 0, i = 0; stable < 3 && i < 100; i++) {
@@ -468,7 +475,7 @@ async function choose(selector, value) {
     await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.focus();
         e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('change', {bubbles: true})); e.blur(); })()`);
 }
-const splitInput = (name, index) => `${cfg(name)} label:nth-child(${index + 1}) input`;
+const splitInput = (name, input) => `${cfg(name)} input[name="${input}"]`;
 
 // One form edit: exactly one draft action matching `expected` (partial), the draft taking it.
 async function formEdit(what, act, expected) {
@@ -849,12 +856,10 @@ const SUITES = {
         const keys = await ev(`[...document.querySelectorAll('#mvr-plan .plan-legend .plan-key')].map((k) => k.textContent)`);
         await check('rig map', 'has a legend', keys.length > 0, {keys});
         await check('rig map', 'has a scale bar', /\d+(\.\d+)? m$/.test(await text('#mvr-plan .plan-scale')), {scale: await text('#mvr-plan .plan-scale')});
-        const groups = await text('#special-groups');
-        await check('capabilities', 'lists each FX group with its axes', /pars.*colour.*dimmer/.test(groups) && /spots.*pan.*tilt/.test(groups), {groups});
         await shot('config');
         await planSettled();
         await action('rig map', 'select a fixture', () => click('#mvr-plan .mvr-object circle'), {watch: 1500});
-        await check('rig map', 'a plan click opens the patch form', await waitFor(`${shown('fixture-info')} && !!document.querySelector('#fixture-info .cfg-form')`, 5000));
+        await check('rig map', 'a plan click opens the patch form', await waitFor(`${shown('fixture-info')} && !!document.querySelector('#fixture-info .cfg-section')`, 5000));
         await shot('config_fixture');
         await action('Telemetry tab', 'open', () => tab('Telemetry'), {watch: 2500});
         await check('Telemetry tab', 'shows its panel', await ev(shown('telemetry-panel')));
@@ -868,7 +873,7 @@ const SUITES = {
         await check('plan drag', 'spot_left starts at X -300, Y 0 in the store',
             original.matrix[9] === -300 && original.matrix[10] === 0, {matrix: original.matrix});
         await check('plan drag', 'selecting spot_left opens its form', await selectFixture('spot_left'));
-        const xField = () => ev(`document.querySelector('${splitInput('matrix', 0)}').value`);
+        const xField = () => ev(`document.querySelector('${splitInput('matrix', 'x')}').value`);
         await check('plan drag', 'Position X reads -300 before the drag', (await xField()) === '-300', {x: await xField()});
 
         // Escape mid-drag: the preview moved, then everything is as it was and nothing is sent.
@@ -917,7 +922,7 @@ const SUITES = {
         await check('plan drag', 'a drag commits one set-position at X 0, Y 0',
             sent.length === 1 && moves.length === 1 && moves[0].x_mm === 0 && moves[0].y_mm === 0
             && moves[0].original_matrix.includes('-300'), {sent});
-        await check('plan drag', 'Position X shows the new value', await waitFor(`document.querySelector('${splitInput('matrix', 0)}').value === '0'`, 3000),
+        await check('plan drag', 'Position X shows the new value', await waitFor(`document.querySelector('${splitInput('matrix', 'x')}').value === '0'`, 3000),
             {x: await xField()});
         await check('plan drag', 'the plan redraws the mark at X 0', (await planMark('spot_left'))?.cx === 0);
         await check('plan drag', 'the draft reads dirty', (await statusText()).startsWith(UNSAVED), {status: await statusText()});
@@ -976,10 +981,8 @@ const SUITES = {
         const before = await rigFiles();
         await selectFixture('spot_left');
         await arm();
-        await formEdit('Patch number', () => typeInto(cfg('FixtureID'), '7'),
-            {action: 'set-child-text', tag: 'FixtureID', value: '7'});
-        await formEdit('Patch number (numeric)', () => typeInto(cfg('FixtureIDNumeric'), '8'),
-            {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '8'});
+        await formEdit('Patch number', () => typeInto(cfg('FixtureID'), '7'), {action: 'set-patch-number', value: '7'});
+        await formRefusal('Patch number A-1', () => typeInto(cfg('FixtureID'), 'A-1'), 'FixtureID', 'Use a whole number.');
         await formEdit('Address 25', () => typeInto(cfg('address'), '25'),
             {action: 'set-address', universe: 1, address: 25});
         await formRefusal('Address 13 (spot_right holds 13-24)', () => typeInto(cfg('address'), '13'),
@@ -996,16 +999,19 @@ const SUITES = {
             (await ev(`document.querySelector('${cfg('address')}').value`)) === '25'
             && (await ev(`document.querySelector('${cfg('name')}').value`)) === 'spot_left');
         for (const pitch of ['61', '-61', '60.5']) {
-            await formRefusal(`pitch ${pitch}°`, () => typeInto(splitInput('matrix', 4), pitch), 'matrix', 'Pitch must be within ±60°.');
+            await formRefusal(`pitch ${pitch}°`, () => typeInto(splitInput('matrix', 'pitch'), pitch), 'matrix', 'Pitch must be within ±60°.');
         }
-        await formEdit('pitch 60° (the limit)', () => typeInto(splitInput('matrix', 4), '60'),
-            {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 60, 0]});
-        await formEdit('Pan limits min 0.1', () => typeInto(splitInput('Pan', 0), '0.1'),
+        await formEdit('pitch 60° (the limit)', () => typeInto(splitInput('matrix', 'pitch'), '60'),
+            {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 60, 0], standing: false});
+        await formEdit('Pan limits min 54° (of 0–540°)', () => typeInto(splitInput('Pan', 'min'), '54'),
             {action: 'set-movement', axis: 'Pan', minimum: 0.1, maximum: 1});
-        await formRefusal('Tilt limits min 2', () => typeInto(splitInput('Tilt', 0), '2'), 'Tilt', 'Limits need 0 ≤ min ≤ max ≤ 1.');
+        await formRefusal('Tilt limits min 200° above max 100°', async () => {
+            await ev(`document.querySelector('${splitInput('Tilt', 'max')}').value = '100'`);
+            await typeInto(splitInput('Tilt', 'min'), '200');
+        }, 'Tilt', 'Min is above max.');
         await selectFixture('spot_right');
         await selectFixture('spot_left');
-        await formEdit('Tilt limits max 0.9', () => typeInto(splitInput('Tilt', 1), '0.9'),
+        await formEdit('Tilt limits max 243° (of 0–270°)', () => typeInto(splitInput('Tilt', 'max'), '243'),
             {action: 'set-movement', axis: 'Tilt', minimum: 0, maximum: 0.9});
         await formEdit('Invert pan', () => click(cfg('DMXInvertPan')),
             {action: 'set-child-text', tag: 'DMXInvertPan', value: 'true'});
@@ -1060,7 +1066,7 @@ const SUITES = {
         const spotXml = fixtureXml(after.store[SCENE_XML], 'spot_left');
         await check('patch form', 'the store holds spot_left as edited', spot.address === 25 && spot.class === 'fx'
             && spot.layer === 'accent' && spot.pan.min === 0.1 && spot.tilt.max === 0.9 && spot.pan.inverted && spot.tilt.inverted
-            && spotXml.includes('<FixtureID>7</FixtureID>') && spotXml.includes('<FixtureIDNumeric>8</FixtureIDNumeric>'),
+            && spotXml.includes('<FixtureID>7</FixtureID>') && spotXml.includes('<FixtureIDNumeric>7</FixtureIDNumeric>'),
             {spot, spotXml: spotXml.slice(0, 600)});
         const pitch = Math.asin(Math.max(-1, Math.min(1, spot.matrix[5]))) * 180 / Math.PI;
         await check('patch form', 'the stored spot_left is pitched 60° (|Matrix z of local Y|)', Math.abs(Math.abs(pitch) - 60) < 1e-3,
@@ -1077,7 +1083,7 @@ const SUITES = {
         // Stale revision: the store changes behind the page; the page's Save must not land.
         await selectFixture('spot_left');
         await formEdit('Patch number 9 (to save over a moved store)', () => typeInto(cfg('FixtureID'), '9'),
-            {action: 'set-child-text', tag: 'FixtureID', value: '9'});
+            {action: 'set-patch-number', value: '9'});
         await harness('rig', {bump: true});
         const bumped = await rigFiles();
         await check('stale save', 'Save over a changed store is refused', await save(false), {status: await statusText()});
@@ -1111,8 +1117,6 @@ const SUITES = {
         await sleep(1500);
         await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {seen: await since()});
-        const swapNote = await text('#fixture-info .cfg-test-note');
-        await check('name swap', 'the test note names the label the form shows', swapNote === 'Testing spot_right in white.', {note: swapNote});
         await click(testButton('off'));
         await sleep(800);
     },
@@ -1132,8 +1136,8 @@ const SUITES = {
         };
         const note = () => text('#fixture-info .cfg-test-note');
         await exactly('locate Test', 'click', () => click(testButton('white')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
-        await check('locate Test', 'lights its button and names the test', await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000)
-            && (await note()) === 'Testing spot_left in white.', {note: await note()});
+        await check('locate Test', 'lights its button; the note stays empty', await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000)
+            && (await note()) === '', {note: await note()});
         await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
         await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         for (const colour of ['warm', 'red', 'blue', 'green']) {
@@ -1229,8 +1233,7 @@ const SUITES = {
         await check('apply', 'enabled without a banner while the show runs the saved rig', !(await applyDisabled()) && (await banner()) === '',
             {banner: await banner()});
         await selectFixture('wash_left');
-        await formEdit('Patch number (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
-            {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
+        await formEdit('Patch number 42', () => typeInto(cfg('FixtureID'), '42'), {action: 'set-patch-number', value: '42'});
         await check('apply', 'an unsaved edit raises no banner', (await banner()) === '', {banner: await banner()});
         await check('apply', 'Save', await save(), {status: await statusText()});
         await check('apply', 'after a Save the banner names the older rig', await waitFor(`!document.getElementById('fixture-apply').disabled
@@ -1307,7 +1310,7 @@ const SUITES = {
         await sleep(800);
         const o = await overflow();
         await check('phone width Config form', 'no horizontal scroll', o.scroll <= o.width, o);
-        const columns = await ev(`getComputedStyle(document.querySelector('#fixture-info .cfg-form')).gridTemplateColumns`);
+        const columns = await ev(`getComputedStyle(document.querySelector('#fixture-info .cfg-section')).gridTemplateColumns`);
         await check('phone width Config form', 'the form is a single column', columns.trim().split(/\s+/).length === 1, {columns});
         await cdp('Emulation.setDeviceMetricsOverride', {width: 1280, height: 900, deviceScaleFactor: 1, mobile: false});
 
@@ -1344,8 +1347,7 @@ const SUITES = {
         // A browser reload after a Save must show the saved patch, and say the show runs an older rig.
         await cfgFresh();
         await selectFixture('wash_left');
-        await formEdit('Patch number (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
-            {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
+        await formEdit('Patch number 42', () => typeInto(cfg('FixtureID'), '42'), {action: 'set-patch-number', value: '42'});
         await check('reload after save', 'Save', await save());
         await navigate('Page.reload');
         await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
@@ -1355,11 +1357,83 @@ const SUITES = {
         await selectFixture('wash_left');
         await sleep(1000);
         await check('reload after save', 'the reloaded page shows the saved patch',
-            (await ev(`document.querySelector('${cfg('FixtureIDNumeric')}').value`)) === '42',
-            {shown: await ev(`document.querySelector('${cfg('FixtureIDNumeric')}').value`)});
+            (await ev(`document.querySelector('${cfg('FixtureID')}').value`)) === '42',
+            {shown: await ev(`document.querySelector('${cfg('FixtureID')}').value`)});
         await check('reload after save', 'and offers Restart show for it', !(await ev(`document.getElementById('fixture-apply').disabled`))
             && (await text('#fixture-show-rig')) === STALE_RIG, {banner: await text('#fixture-show-rig')});
         await checkHighlightIds('robust');
+    },
+
+    cfg_pane: async () => {
+        await cfgFresh();
+        const hidden = (selector) => ev(`getComputedStyle(document.querySelector('${selector}')).display === 'none'`);
+        await check('pane', 'with nothing selected it reads one line and offers no actions', (await text('#fixture-info .cfg-empty')) === 'Select a fixture on the plan'
+            && (await hidden('#fixture-close')) && (await hidden('#fixture-info .cfg-footer')));
+        await check('pane', 'select spot_left', await selectFixture('spot_left'));
+        const headings = () => ev(`[...document.querySelectorAll('#fixture-info .cfg-section > h4')].map((h) => h.firstChild.textContent)`);
+        await check('pane', 'a single-cell mover shows every section but Cells', same(await headings(), ['Patch', 'Placement', 'Group and role', 'Movement']),
+            {headings: await headings()});
+        await check('pane', 'the name is the heading', !!(await ev(`document.querySelector('#fixture-title [data-cfg="name"]')`)));
+        await check('pane', 'the uuid is no field outside Advanced', await ev(`![...document.querySelectorAll('#fixture-info input')]
+            .some((i) => !i.closest('.cfg-advanced') && i.value.toUpperCase() === '${ROOM_UUID.spot_left}')`));
+        const advancedOpen = () => ev(`document.querySelector('#fixture-info .cfg-advanced').open`);
+        await check('pane', 'Advanced is closed by default', (await advancedOpen()) === false);
+        await click('#fixture-info .cfg-advanced > summary');
+        await check('pane', 'Advanced opens on a click, showing the raw fields', await waitFor(`document.querySelector('#fixture-info .cfg-advanced').open
+            && !!document.querySelector('#fixture-info .cfg-advanced .mvr-row')`, 2000));
+        await check('pane', 'Advanced stays open for the next fixture', (await selectFixture('spot_right')) && (await advancedOpen()) === true);
+        await click('#fixture-info .cfg-advanced > summary');
+        await waitFor(`!document.querySelector('#fixture-info .cfg-advanced').open`, 2000);
+
+        // The pan arc: drawn bright for the selected mover, faint for the other, none for a par.
+        const arc = (name) => ev(`(() => { const p = ${markOf(name)}?.querySelector('.plan-pan'); return p && Number(getComputedStyle(p).opacity); })()`);
+        await check('pan arc', 'the selected mover has a bright arc, the other a faint one, a par none',
+            (await arc('spot_right')) > 0.5 && (await arc('spot_left')) < 0.5 && (await arc('spot_left')) > 0 && (await arc('wash_left')) === null,
+            {spot_right: await arc('spot_right'), spot_left: await arc('spot_left'), wash_left: await arc('wash_left')});
+        await shot('pane_impl_mover', '#fixture-info');
+
+        await selectFixture('wash_left');
+        await check('pane', 'a static fixture shows no Movement', same(await headings(), ['Patch', 'Placement', 'Group and role']),
+            {headings: await headings()});
+        await shot('pane_impl_static', '#fixture-info');
+
+        // Soft limits in degrees, clamped to the GDTF's 0–540° pan.
+        await selectFixture('spot_left');
+        const arcPath = () => ev(`${markOf('spot_left')}?.querySelector('.plan-pan')?.getAttribute('d')`);
+        const fullArc = await arcPath();
+        await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '0–540'
+            && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '540');
+        await formEdit('Pan max 600° clamps to 540°', () => typeInto(splitInput('Pan', 'max'), '600'), {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 1});
+        await formEdit('Pan min -20° clamps to 0°, max 270°', async () => {
+            await ev(`document.querySelector('${splitInput('Pan', 'min')}').value = '-20'`);
+            await typeInto(splitInput('Pan', 'max'), '270');
+        }, {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 0.5});
+        await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '0'
+            && document.querySelector('${splitInput('Pan', 'max')}').value === '270'`, 2000));
+        await check('pan arc', 'the arc follows the limits', !!fullArc && (await arcPath()) !== fullArc, {before: fullArc, after: await arcPath()});
+
+        // Hanging -> standing turns the head 180° about its facing; it survives Save and Reload.
+        await check('mount', 'spot_left reads hanging', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'hanging');
+        await formEdit('mount standing', () => choose(cfg('mount'), 'standing'),
+            {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 0, 0], standing: true});
+        await check('mount', 'the rotation fields keep their values', (await ev(`document.querySelector('${splitInput('matrix', 'yaw')}').value`)) === '180');
+
+        // The heading renames the label; the uuid, and with it everything else, stays.
+        const before = await rigFiles();
+        await formEdit('heading rename', () => typeInto(cfg('name'), 'spot_hero'), {action: 'set-attribute', doc: 'scene', name: 'name', value: 'spot_hero'});
+        await check('pane', 'Save', await save(), {status: await statusText()});
+        const after = await rigFiles();
+        const hero = after.fixtures.find((f) => f.fixture_uuid.toUpperCase() === ROOM_UUID.spot_left);
+        const was = before.fixtures.find((f) => f.fixture_uuid.toUpperCase() === ROOM_UUID.spot_left);
+        await check('heading rename', 'the uuid keeps its patch under the new name', hero?.name === 'spot_hero'
+            && same({...hero, name: 0, matrix: 0, pan: 0}, {...was, name: 0, matrix: 0, pan: 0}), {hero, was});
+        await check('mount', 'the saved Matrix is standing: local X and Z negated', same(hero?.matrix, [1, 0, 0, 0, -1, 0, 0, 0, -1, -300, 0, 0]),
+            {matrix: hero?.matrix});
+        await check('soft limits', 'the saved pan limits are the clamped share', hero?.pan?.min === 0 && hero?.pan?.max === 0.5, {pan: hero?.pan});
+        await check('pane', 'Reload loads the saved patch', await reloadSaved());
+        await selectFixture('spot_hero');
+        await check('mount', 'after Reload spot_hero reads standing', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'standing');
+        await check('pane', 'no bridge command from the pane edits', (await since()).length === 0, {seen: await since()});
     },
 
     narrow: async () => {

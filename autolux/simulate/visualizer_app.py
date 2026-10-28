@@ -38,7 +38,6 @@ from autolux.lib.ui_bridge import (
     snapshot_port,
 )
 from autolux.lighting.fixture_setup import FixtureStore
-from autolux.lighting.mvr_schema import LOOP_ROLE
 from autolux.lighting.palettes import PALETTES, base_palette_name
 from autolux.simulate import system_metrics
 from autolux.simulate.fixture_panel import FIXTURE_CSS, build_fixture_panel
@@ -1104,25 +1103,6 @@ STATIC_SELECTED_TAB_STYLE = {
 }
 
 
-def special_groups_view(groups: dict, roles: dict | None = None) -> list:
-    if not groups:
-        return ['FX: Starfire reported no groups']
-    roles = roles or {}
-    return [
-        html.Span('FX', className='control-label'),
-        *[
-            part
-            for name, axes in sorted(groups.items())
-            for part in (
-                '  ',
-                name,
-                ' ',
-                html.Span(' · '.join([roles.get(name, LOOP_ROLE), *axes]), className='status-tag'),
-            )
-        ],
-    ]
-
-
 def _build_static_fx():
     # Catalogue rows that fit the chosen target; picking one holds it until Clear FX.
     return html.Div(
@@ -2047,7 +2027,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
             [
                 html.Div(html.H2('Fixture setup'), className='section-heading'),
                 html.P('Fixture setup is unavailable in this session.', className='subtitle'),
-                html.P(id='special-groups', className='subtitle'),
             ],
             id='config-panel',
             style={'display': 'none'},
@@ -2469,15 +2448,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
     )
 
     _register_static_callbacks(app)
-
-    @app.callback(Output('special-groups', 'children'), Input('dashboard-tab', 'value'))
-    def show_special_groups(selected):
-        if selected != 'config':
-            raise dash.exceptions.PreventUpdate
-        snapshot = snapshot_source.snapshot()
-        return special_groups_view(
-            snapshot.get('special_groups') or {}, snapshot.get('group_roles') or {}
-        )
 
     app.clientside_callback(
         ANIMATION_JS,
