@@ -1042,10 +1042,15 @@
         // Marks shrink as the plan fills; names show while they fit, else on hover or tap.
         const r = span * 0.018 * Math.min(1, Math.sqrt(PLAN_LABEL_LIMIT / Math.max(1, fixtures.length)));
         const labelled = fixtures.length <= PLAN_LABEL_LIMIT;
-        const pad = span * 0.12;
-        const [left, top, width, height] = [minX - pad, minY - pad, maxX - minX + 2 * pad, maxY - minY + 3 * pad];
         const n = Math.round;
         const font = n(Math.max(r * 1.3, span * 0.014));
+        // The longest label sets how much edge room the plan needs, so none is ever clipped.
+        const charWidth = font * 0.58;
+        const maxLabel = labelled ? Math.max(0, ...fixtures.map((mark) => mark.name.length * charWidth)) : 0;
+        const pad = span * 0.12;
+        const padX = Math.max(pad, r * 1.4 + maxLabel + pad * 0.3);
+        const padTop = Math.max(pad, font * 1.4);
+        const [left, top, width, height] = [minX - padX, minY - padTop, maxX - minX + 2 * padX, maxY - minY + padTop + 2 * pad];
         const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
         const colour = Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
         const counts = fixtures.reduce((total, mark) => ({ ...total, [mark.group]: (total[mark.group] || 0) + 1 }), {});
@@ -1068,16 +1073,26 @@
         for (const mark of fixtures) {
             const [x, y, fill] = [n(mark.x), n(-mark.y), colour[mark.group]];
             const arrow = mark.facing ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
-            // Role by shape: a loop fixture is filled, an accent one a ring in its group's tone.
-            const shape = mark.accent ? ` fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.5)}"` : ` fill="${fill}"`;
-            const label = labelled ? `<text class="plan-name" x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}" stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>` : "";
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}"${shape}/>${panArc(mark, n, r * 3.2, fill)}${label}</g>`);
+            // Role by glyph: every fixture is filled; an accent one also wears a dotted ring.
+            const ring = mark.accent
+                ? `<circle cx="${x}" cy="${y}" r="${n(r * 1.4)}" fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.3)}" stroke-dasharray="${n(r * 0.5)} ${n(r * 0.4)}"/>`
+                : "";
+            // Near the right edge, a label would overflow it; anchor the text to the left of the mark instead.
+            const flip = labelled && x + r * 1.4 + mark.name.length * charWidth > left + width;
+            const label = labelled
+                ? `<text class="plan-name" x="${n(flip ? x - r * 1.4 : x + r * 1.4)}" y="${n(y + r * 0.4)}"${flip ? ' text-anchor="end"' : ""} stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>`
+                : "";
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"/>${ring}${panArc(mark, n, r * 3.2, fill)}${label}</g>`);
         }
         parts.push("</g></svg>");
-        const key = (circle, text) => `<span class="plan-key"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5"${circle}/></svg>${text}</span>`;
+        const key = (glyph, text) => `<span class="plan-key"><svg viewBox="0 0 14 14" width="14" height="14">${glyph}</svg>${text}</span>`;
+        const dot = (cls) => `<circle cx="7" cy="7" r="4.5" class="${cls}"/>`;
         const legend = [
-            ...groups.map((group) => key(` fill="${colour[group]}"`, `${escapeXml(group || "no group")} <b>${counts[group]}</b>`)),
-            ...settings.roles.map((role) => key(` class="plan-role${role === settings.accentRole ? " ring" : ""}"`, escapeXml(role)))
+            ...groups.map((group) => key(`<circle cx="7" cy="7" r="4.5" fill="${colour[group]}"/>`, `${escapeXml(group || "no group")} <b>${counts[group]}</b>`)),
+            // Accent wears the same dotted ring as its plan mark; loop is the plain dot.
+            ...settings.roles.map((role) =>
+                key(role === settings.accentRole ? `${dot("plan-role")}<circle cx="7" cy="7" r="6" class="plan-role ring"/>` : dot("plan-role"), escapeXml(role))
+            )
         ];
         return `<div class="plan-legend">${legend.join("")}</div>` + parts.join("");
     }
@@ -1331,9 +1346,14 @@
             section(
                 "Patch",
                 span,
-                field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
                 field("Profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
-                field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} channels`])], row.mode), true),
+                // Mode needs room for long GDTF mode names; the patch number is short.
+                h(
+                    "div",
+                    { className: "cfg-field-pair" },
+                    field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} channels`])], row.mode)),
+                    field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" }))
+                ),
                 field("Universe", h("input", { type: "text", value: (row.universe ?? 0) + 1, readonly: true, tabindex: -1 })),
                 field("Address", input("address", row.address, { type: "number", min: 1, max: settings.channelCount + 1 - (row.channels ?? 1), step: 1 }))
             ),

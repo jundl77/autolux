@@ -78,7 +78,7 @@ FIXTURE_CSS = '''
 #mvr-plan .plan circle {stroke:#e6edf3;}
 #mvr-plan .plan circle.ring {stroke:var(--ring);}
 .plan-key .plan-role {fill:var(--muted);stroke:var(--muted);}
-.plan-key .plan-role.ring {fill:none;stroke-width:2;}
+.plan-key .plan-role.ring {fill:none;stroke-width:2;stroke-dasharray:2,2;}
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
@@ -116,6 +116,8 @@ FIXTURE_CSS = '''
 .cfg-section>h4 small {color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0;}
 .cfg-field {display:grid;gap:6px;align-content:start;min-width:0;}
 .cfg-field.wide {grid-column:1 / -1;}
+/* A full-width row of two fields at 2:1, not the section's equal halves. */
+.cfg-field-pair {grid-column:1 / -1;display:grid;grid-template-columns:2fr 1fr;gap:14px 12px;}
 .cfg-field>span,.cfg-split span {color:var(--muted);font-size:12px;}
 .cfg-field>span small {float:right;}
 .cfg-split+span {margin-top:8px;}
