@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 from flask import jsonify, request
 from werkzeug.serving import make_server
 
-from autolux.lib.engine.effect_definitions import ShowSettings
+from autolux.lib.engine.effect_definitions import ShowSettings, intensity_level
 from autolux.lib.engine.event_buffer import EventBuffer
 from autolux.lib.engine.static_mode import ALL_FIXTURES
 from autolux.lib.ui_bridge import SnapshotServer
@@ -57,6 +57,14 @@ def running_rig(path: Path) -> tuple[str, dict]:
     return rig_revision(path.read_bytes()), {
         'fixtures': [{'name': name, 'cells': list(cells)} for name, cells in fixtures]
     }
+
+
+def _autoloop(intensity: float) -> dict:
+    # Calm under a DROP plays a breakdown loop, as the engine's intensity remap does.
+    level = intensity_level(intensity)
+    bank, loop = ('breakdown', 'afterglow') if level == 'calm' else ('drop', 'chase')
+    selection = {'intent': 'drop', 'look': bank, 'level': level}
+    return {'name': f'{bank}/{loop}', 'type': 'AUTOLOOP', 't': 0.0, 'selection': selection}
 
 
 class StubShow:
@@ -95,6 +103,7 @@ class StubShow:
                 'bpm': 124.0,
                 'decoder': {'classes': ['intro', 'build', 'drop'], 'posterior': [0.1, 0.3, 0.6]},
                 'highlight': None,
+                'current_effect': _autoloop(ShowSettings().intensity),
                 'rig': rig,
                 'rig_revision': revision,
                 'static': {
@@ -165,6 +174,8 @@ class StubShow:
                 s['master_brightness'] = c['level']
             elif a == 'intensity':
                 settings.update(intensity=c['level'], intensity_auto=False)
+                # A level change reselects the loop, as the engine's intensity remap does.
+                s['current_effect'] = _autoloop(c['level'])
             elif a in ('intensity_auto', 'fx_auto'):
                 settings[a] = c['enabled']
             elif a == 'settings':
