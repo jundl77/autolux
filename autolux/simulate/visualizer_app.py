@@ -1884,7 +1884,7 @@ GATE_JS = (
     gate.tab = selected;
     gate.hidden = document.hidden;
     if (changed) gate.viewAt = gate.metricsAt = 0;
-    if (selected === 'config' || document.hidden) return ds.no_update;
+    if (document.hidden) return ds.no_update;
     const now = Date.now();
     const free = (stream) => {
         const since = gate.inflight[stream];
@@ -1898,7 +1898,7 @@ GATE_JS = (
         delete gate.inflight[stream];
         return true;
     };
-    const metrics = now - (gate.metricsAt || 0) >= '''
+    const metrics = selected !== 'config' && now - (gate.metricsAt || 0) >= '''
     + str(TELEMETRY_REFRESH_SECONDS * 1000)
     + ''';
     if (!free('anchor') || (selected === 'telemetry' && !metrics)) return ds.no_update;
@@ -2258,7 +2258,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         prevent_initial_call=True,
     )
     def refresh(requested):
-        if not requested or requested.get('tab') not in ('control', 'telemetry'):
+        if not requested or requested.get('tab') not in ('control', 'telemetry', 'config'):
             raise dash.exceptions.PreventUpdate
         snap = _with_base_palette(snapshot_source.snapshot())
         now = time.time()
@@ -2267,12 +2267,8 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         notices = performance = renderer = control = charts = dash.no_update
         on_control = requested['tab'] == 'control'
         due = requested.get('metrics')
-        if on_control or due:
-            sync = _anchor(snap)
-            status = _build_show_status(snap, now)
-            show_timing = _build_show_timing(snap)
-            decoder = _build_decoder(snap)
-            cooldowns = _build_cooldowns(snap)
+        # The Config tab's fixture test reads only the control state (highlight, paused, blackout).
+        if on_control or due or requested['tab'] == 'config':
             control = {
                 key: snap.get(key)
                 for key in (
@@ -2284,6 +2280,7 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                     'mode',
                     'static',
                     'special_groups',
+                    'highlight',
                 )
             }
             control['settings_text'] = settings_text(control['settings'] or {})
@@ -2292,6 +2289,15 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
                 target: [{'label': fx_row_label(row), 'value': row} for row in rows]
                 for target, rows in fx_rows.items()
             }
+            # Only the test's Cells list needs the running rig's names.
+            if requested['tab'] == 'config':
+                control['rig'] = snap.get('rig')
+        if on_control or due:
+            sync = _anchor(snap)
+            status = _build_show_status(snap, now)
+            show_timing = _build_show_timing(snap)
+            decoder = _build_decoder(snap)
+            cooldowns = _build_cooldowns(snap)
             if requested.get('timeline') or not on_control:
                 timeline = _build_timeline(snap)
         if due:
