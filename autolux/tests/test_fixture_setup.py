@@ -346,9 +346,9 @@ def test_a_fixture_is_its_uuid_so_renaming_or_swapping_names_moves_only_labels(r
     store.save(draft, revision)
     after, regrouped = exported()
     relabelled = {
-        left['attributes']['uuid'].upper(): 'spot_right',
-        right['attributes']['uuid'].upper(): 'spot_left',
-        wash['attributes']['uuid'].upper(): 'wash_house_left',
+        left['attributes']['uuid']: 'spot_right',
+        right['attributes']['uuid']: 'spot_left',
+        wash['attributes']['uuid']: 'wash_house_left',
     }
     assert {identity: fixture.name for identity, fixture in after.items()} == {
         identity: relabelled.get(identity, fixture.name) for identity, fixture in before.items()

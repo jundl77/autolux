@@ -326,7 +326,7 @@
             const channels = modeChannels(tree, mode);
             const cells = modeCells(tree, mode);
             const className = classes[textOf(node, "Classing").toUpperCase()] || "";
-            return [{ key: node.key, fixture_uuid: (node.attributes.uuid || "").toUpperCase(), name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
+            return [{ key: node.key, fixture_uuid: node.attributes.uuid || "", name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
         });
     }
 
@@ -399,7 +399,7 @@
         const count = entry.modes[entry.default_mode].channels;
         const children = firstLayerChildren(draft, settings);
         const names = new Set(fixtureRows(draft, settings).map((row) => row.name));
-        let fixtureId = Math.max(0, ...[...walk(draft.scene)].filter(([node]) => node.tag === "FixtureIDNumeric").map(([node]) => Number(node.text) || 0));
+        let patchNumber = Math.max(0, ...[...walk(draft.scene)].filter(([node]) => node.tag === "FixtureIDNumeric").map(([node]) => Number(node.text) || 0));
         const added = [];
         for (let index = 0; index < quantity; index++) {
             const start = address == null ? firstFreeAddress(draft, settings, universe - 1, count) : address;
@@ -408,11 +408,11 @@
             const fixture = template(settings, "Fixture", "Fixture");
             fixture.attributes.name = `${entry.name}_${suffix}`;
             names.add(fixture.attributes.name);
-            fixtureId += 1;
+            patchNumber += 1;
             for (const [tag, text] of [["Matrix", formatMatrix(IDENTITY)], ["GDTFSpec", spec], ["GDTFMode", entry.default_mode]]) {
                 insertChild(fixture, "Fixture", element(tag, {}, text), settings);
             }
-            childOf(fixture, "FixtureID").text = childOf(fixture, "FixtureIDNumeric").text = String(fixtureId);
+            childOf(fixture, "FixtureID").text = childOf(fixture, "FixtureIDNumeric").text = String(patchNumber);
             const addresses = insertChild(fixture, "Fixture", element("Addresses"), settings);
             addresses.children.push(element("Address", { break: "0" }, absoluteAddress(universe - 1, start)));
             children.children.push(fixture);
@@ -611,7 +611,7 @@
             }
             case "FixtureID": {
                 const twin = others.find((entry) => textOf(entry, field) === value);
-                return { error: /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same number.` : null, action: { action: "set-patch-number", key, value } };
+                return { error: /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same patch number.` : null, action: { action: "set-patch-number", key, value } };
             }
             case "GDTFSpec": {
                 const tree = gdtfTree(draft, settings, value);

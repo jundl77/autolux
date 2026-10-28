@@ -55,6 +55,11 @@ test("patched fixtures match the server's reading of the room rig", () => {
     assert.deepEqual(plain(rows.map((row) => [row.fixture_uuid, row.name, row.universe, row.address, row.cells])), data.patched);
     assert.deepEqual(plain(model.occupancy(rows, settings, 0).errors), []);
     assert.equal(rows.find((row) => row.name === "spot_left").channels, 12);
+    // The uuid is carried as the MVR writes it, as the server's export does.
+    const lower = draft();
+    const spot = fixtureNode(lower, "spot_left");
+    spot.attributes.uuid = spot.attributes.uuid.toLowerCase();
+    assert.equal(model.fixtureRows(lower, settings).find((row) => row.key === spot.key).fixture_uuid, spot.attributes.uuid);
 });
 
 test("matrix composition and decomposition agree with the server byte for byte", () => {
@@ -367,7 +372,7 @@ test("the patch form validates each field and maps it to one draft action", () =
     const row = (tree) => plain(model.fixtureRows(tree, settings).find((entry) => entry.key === key));
     assert.deepEqual({ ...row(relabelled), name: "wash_right" }, row(current));
     // Patch number: a whole number, a duplicate only warned; FixtureIDNumeric follows FixtureID.
-    assert.match(check("FixtureID", child(spot, "FixtureID").text).warning, /spot_left has the same number/);
+    assert.match(check("FixtureID", child(spot, "FixtureID").text).warning, /spot_left has the same patch number/);
     assert.match(check("FixtureID", "A-1").error, /whole number/);
     const [numbered] = edit(current, check("FixtureID", "17").action);
     assert.deepEqual(["FixtureID", "FixtureIDNumeric"].map((tag) => child(fixtureNode(numbered, "wash_right"), tag).text), ["17", "17"]);

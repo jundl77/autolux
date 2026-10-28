@@ -210,8 +210,8 @@ def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
 
 RIG = {
     'fixtures': [
-        {'fixture_uuid': 'par', 'name': 'par', 'cells': ['par']},
-        {'fixture_uuid': 'bar', 'name': 'bar', 'cells': ['bar/a']},
+        {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par']},
+        {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a']},
     ]
 }
 
@@ -246,6 +246,8 @@ def test_a_highlight_names_one_fixture_or_cell_defaults_to_white_and_null_clears
         ({'fixture': 'par'}, False, False, None),
         ({'cell': 'bar/a'}, False, False, None),
         ({'fixture': 'bar/a'}, False, False, "no fixture 'bar/a' in the running rig"),
+        # Targets carry uuids; a label is not one.
+        ({'fixture': 'front'}, False, False, "no fixture 'front' in the running rig"),
         ({'cell': 'bar'}, False, False, "no cell 'bar' in the running rig"),
         ({'fixture': 'par'}, True, False, 'the show is paused'),
         ({'fixture': 'par'}, False, True, 'blackout is on'),
