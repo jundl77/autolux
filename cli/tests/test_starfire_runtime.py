@@ -878,8 +878,8 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     for bank, names in {
-        'atmospheric': ('cold_breathe', 'amber_drift', 'pixel_rain'),
-        'breakdown': ('wide_space',),
+        'atmospheric': ('dawn', 'amber_drift', 'pixel_rain'),
+        'breakdown': ('drift_apart',),
         'buildup': ('ramp',),
         'drop': ('kick', 'slam'),
     }.items():
@@ -889,8 +889,8 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     checked = [
         {'bank': bank, 'autoloop': name}
         for bank, name in [
-            ('atmospheric', 'cold_breathe'),
-            ('breakdown', 'wide_space'),
+            ('atmospheric', 'dawn'),
+            ('breakdown', 'drift_apart'),
             ('buildup', 'ramp'),
             ('drop', 'kick'),
         ]
@@ -916,8 +916,8 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
 
     header = '-- 8-beat loop.\n-- energy: 2\n-- movement: snap\n-- texture: wash\nreturn {}\n'
     loops = [
-        ('atmospheric', 'cold_breathe'),
-        ('breakdown', 'wide_space'),
+        ('atmospheric', 'dawn'),
+        ('breakdown', 'drift_apart'),
         ('buildup', 'ramp'),
         ('drop', 'kick'),
         ('standby', 'warm_white'),
@@ -944,8 +944,8 @@ def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplo
 
     header = '-- 8-beat loop.\n-- energy: 2\n-- movement: snap\n-- texture: wash\nreturn {}\n'
     loops = [
-        ('atmospheric', 'cold_breathe'),
-        ('breakdown', 'wide_space'),
+        ('atmospheric', 'dawn'),
+        ('breakdown', 'drift_apart'),
         ('buildup', 'ramp'),
         ('drop', 'kick'),
         ('standby', 'warm_white'),

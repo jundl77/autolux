@@ -100,8 +100,8 @@ def test_all_four_intents_map_to_authored_autoloops_in_stable_order():
     assert [
         (event['command']['bank'], event['command']['autoloop']) for event in selections(result)
     ] == [
-        ('atmospheric', 'cold_breathe'),
-        ('breakdown', 'wide_space'),
+        ('atmospheric', 'dawn'),
+        ('breakdown', 'drift_apart'),
         ('buildup', 'ramp'),
         ('drop', 'kick'),
     ]
