@@ -1,47 +1,52 @@
 -- 8-beat loop
 -- energy: 3
--- movement: sweep
--- texture: mixed
+-- movement: snap
+-- texture: wash
 local palette = sf.palette()
-local LOOP_BEATS = 8
-local RAMP_BEATS = 128
-local RAMP_SHARE = 0.85
-local WASH_FLOOR, WASH_PEAK = 0.06, 0.9
-local CENTRE_PAN, TILT = 0.5, 0.6
-local START_SWING, END_SWING = 0.2, 0.03
+local PLATEAU_BEATS, FINALE_BEATS, EASE_BEATS = 64, 16, 8
+local PULSE_SHARE = 0.45
+local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
+local WIDE_DEGREES, NARROW_DEGREES = 20, 6
 
-local function pulse_period_and_width(ramp)
-    if ramp < 0.33 then return 4, 0.4 end
-    if ramp < 0.66 then return 1, 0.4 end
-    return 0.5, 0.25
+-- Regime U builds on elapsed beats; a cued drop hands over continuously through the finale.
+local function drive_and_finale(ctx)
+    local drive = 0.15 + 0.55 * sf.tension(ctx, PLATEAU_BEATS)
+    if ctx.next_intent == "drop" then
+        local finale = sf.finale(ctx, FINALE_BEATS)
+        return drive + (1 - drive) * finale, finale
+    end
+    local ease = ctx.next_intent and sf.finale(ctx, EASE_BEATS) or 0
+    return drive * (1 - 0.5 * ease), 0
+end
+
+-- The roll halves on downbeats: a bar, two beats, a beat over the build, then half and a
+-- quarter beat over the drop's last two bars.
+local function pulse_period(ctx, finale)
+    local downbeat = math.max(0, (ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats) - ctx.bar_phase)
+    local period = downbeat < PLATEAU_BEATS / 2 and 4 or downbeat < 3 * PLATEAU_BEATS / 4 and 2 or 1
+    if finale == 0 then return period end
+    local left = ctx.beats_until_next
+    return math.min(period, left > 8 and 1 or left > 4 and 0.5 or 0.25)
 end
 
 return {
     render = function(ctx)
-        local beat = ctx.beat_position % LOOP_BEATS
-        local ramp = math.min(ctx.autoloop_elapsed_beats / RAMP_BEATS, 1)
-        local energy = sf.energy(ctx)
-        local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
+        local drive, finale = drive_and_finale(ctx)
+        local period = pulse_period(ctx, finale)
+        local pulse = sf.on_beat(ctx, PULSE_SHARE * period, period)
+        local count = math.floor(ctx.beat_position / period)
+        local floor = sf.lerp(0.08, 0.45, finale)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local period, width = pulse_period_and_width(ramp)
-        local pulse = sf.on_beat(beat, width, period)
-        local pulse_index = math.floor(beat / period)
-        local peak = sf.lerp(0.4, WASH_PEAK, drive)
-        local swing = sf.lerp(START_SWING, END_SWING, ramp) * sf.lerp(0.5, 1, energy)
-        local pan = swing * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
-        return sf.scene({
-            sf.colour(sf.group("wash"), palette.secondary),
-            sf.dimmer(sf.group("wash"), sf.lerp(WASH_FLOOR, peak, pulse) * gain),
-            sf.colour(sf.group("strip"), palette.primary),
+        local spread = period >= 1 and count % 2 == 0 and WIDE_DEGREES or NARROW_DEGREES
+        return sf.scene {
+            sf.colour(sf.all(), palette.primary),
+            sf.dimmer(sf.group("wash"), WASH_PEAK * drive * sf.lerp(floor, 1, pulse) * gain),
             sf.each(sf.group("strip"), function(pixel, index)
-                local lit = (index + pulse_index) % 2 == 0 and pulse or 0
-                return sf.dimmer(pixel, sf.lerp(0.3, 0.9, drive) * gain * lit)
+                local lit = (index + count) % 2 == 0 and pulse or floor * pulse
+                return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.4, 1, drive) * lit * gain)
             end),
-            sf.colour(sf.group("movers"), palette.cold),
-            sf.dimmer(sf.group("movers"), sf.lerp(0.3, 0.8, drive) * gain),
-            sf.each(sf.group("movers"), function(mover, index)
-                return sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * pan, TILT)
-            end)
-        })
+            sf.dimmer(sf.group("movers"), MOVER_PEAK * sf.lerp(0.4, 1, drive) * sf.lerp(floor, 1, pulse) * gain),
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = spread })
+        }
     end
 }

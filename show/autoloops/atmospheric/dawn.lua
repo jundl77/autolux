@@ -7,8 +7,7 @@ local LOOP_BEATS = 16
 local WASH_LOW, WASH_HIGH = 0.06, 0.2
 local GLOW_LEVEL = 0.25
 local MOVER_LEVEL = 0.25
-local CENTRE_PAN, PARK_PAN = 0.5, 0.2
-local TILT_LOW, TILT_HIGH = 0.55, 0.62
+local PARK_DEGREES, SUNRISE_DEGREES = 20, 12
 
 return {
     render = function(ctx)
@@ -25,13 +24,8 @@ return {
                 return sf.dimmer(pixel, GLOW_LEVEL * glow * level)
             end),
             sf.colour(sf.group("movers"), palette.cold),
-            sf.each(sf.group("movers"), function(mover, index)
-                local tilt = sf.lerp(TILT_LOW, TILT_HIGH, sun)
-                return {
-                    sf.pan_tilt(mover, CENTRE_PAN + sf.side(index) * PARK_PAN, tilt),
-                    sf.dimmer(mover, MOVER_LEVEL * level)
-                }
-            end)
+            sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = PARK_DEGREES, centre_tilt = SUNRISE_DEGREES * sun })
         }
     end
 }

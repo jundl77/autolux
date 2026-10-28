@@ -7,8 +7,7 @@ local LOOP_BEATS = 8
 local KICK_WIDTH_BEATS, STRIP_WIDTH_BEATS = 0.4, 0.7
 local FLOOR_QUIET, FLOOR_LOUD = 0.04, 0.2
 local WASH_PEAK, STRIP_PEAK, STRIP_BASE, MOVER_LEVEL = 0.9, 0.9, 0.1, 0.85
-local CENTRE_PAN = 0.5
-local POSITIONS = { { pan_offset = 0.14, tilt = 0.55 }, { pan_offset = 0.06, tilt = 0.7 } }
+local LOOKS = { { shape = "fan", size = 18, centre_tilt = 0 }, { shape = "fan", size = 7, centre_tilt = 9 } }
 
 local function is_outer(index, count) return index == 1 or index == count end
 
@@ -22,7 +21,7 @@ return {
         local outer_turn = math.floor(beat) % 2 == 0
         local in_bar = math.floor(sf.beat_in_bar(beat))
         local strip_hit = (in_bar == 0 or in_bar == 2) and sf.on_beat(beat, STRIP_WIDTH_BEATS) or 0
-        local position = POSITIONS[sf.bar(beat) % 2 + 1]
+        local look = LOOKS[sf.bar(beat) % 2 + 1]
         local reach = sf.lerp(0.5, 1, energy)
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),
@@ -34,10 +33,9 @@ return {
             sf.dimmer(sf.group("strip"), sf.lerp(STRIP_BASE, STRIP_PEAK, strip_hit) * gain),
             sf.colour(sf.group("movers"), palette.primary),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * gain),
-            sf.each(sf.group("movers"), function(mover, index)
-                local pan = CENTRE_PAN + sf.side(index) * position.pan_offset * reach
-                return sf.pan_tilt(mover, pan, position.tilt)
-            end)
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = look.shape, size = look.size * reach, centre_tilt = look.centre_tilt * reach
+            })
         }
     end
 }
