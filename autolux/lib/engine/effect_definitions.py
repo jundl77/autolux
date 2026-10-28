@@ -65,6 +65,27 @@ class AutoloopMeta:
 
 AutoloopMetaTable = Mapping[tuple[str, str], AutoloopMeta]
 
+# Banks of Lua layers a section cue schedules above its base look.
+OVERLAY_BANKS = ('hit', 'fill', 'riser', 'dip', 'accent')
+
+OVERLAY_META_VALUES: dict[str, tuple[str, ...]] = {
+    'strobe': ('yes', 'no'),
+    'intensity': ('htp', 'ltp'),
+}
+
+
+@dataclass(frozen=True)
+class OverlayMeta:
+    """strobe: the overlay strobes, so the venue gate counts it as an intense event.
+    intensity_htp: its intensity takes the higher of the look below and its own; else it
+    replaces the look below (LTP)."""
+
+    strobe: bool
+    intensity_htp: bool
+
+
+OverlayMetaTable = Mapping[tuple[str, str], OverlayMeta]
+
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
     ('atmospheric', 'cold_breathe'): AutoloopMeta(1, 'sweep', 'mixed'),
     ('breakdown', 'wide_space'): AutoloopMeta(1, 'sweep', 'mixed'),
