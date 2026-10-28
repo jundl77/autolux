@@ -13,7 +13,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -251,6 +251,14 @@ class _Handler(BaseHTTPRequestHandler):
     # Headers and body go out as two writes; Nagle would hold the body for the client's delayed ACK.
     disable_nagle_algorithm = True
 
+    def setup(self) -> None:
+        super().setup()
+        self.server.connections.add(self.connection)
+
+    def finish(self) -> None:
+        self.server.connections.discard(self.connection)
+        super().finish()
+
     def handle(self) -> None:
         try:
             super().handle()
@@ -329,6 +337,9 @@ class _Handler(BaseHTTPRequestHandler):
         if timeout is not None and not _await_handoff(commands, timeout):
             self._reply(504, {'error': 'the show has not taken the command yet'})
             return
+        if 'refused' in command:
+            self._reply(409, {'error': command['refused']})
+            return
         self._reply(202, {'accepted': command['action']})
 
     def _refuse(self, status: int, length: int) -> None:
@@ -387,6 +398,7 @@ class SnapshotServer:
         self._http = _Http((host, port), _Handler)
         self._http.event_buffer = event_buffer
         self._http.commands = commands
+        self._http.connections = set()
         self._http.dashboard_port = dashboard_port
         self._http.handoff_timeout = handoff_timeout
         self._thread = threading.Thread(
@@ -403,6 +415,11 @@ class SnapshotServer:
     def stop(self) -> None:
         self._http.shutdown()
         self._http.server_close()
+        # A browser reuses its keep-alive socket, which would reach this stopped show's queue
+        # and never the next session's: the second Config-tab restart did nothing.
+        for connection in list(self._http.connections):
+            with suppress(OSError):
+                connection.shutdown(socket.SHUT_RDWR)
 
 
 def viewer_command(ui_port: int, fixture_setup: dict | None = None) -> list:

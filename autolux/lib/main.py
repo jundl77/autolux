@@ -208,7 +208,9 @@ class ShowControl:
         elif action == 'restart_show':
             # Starfire reads the rig once per login, so only a new session loads the saved patch.
             if self._restart_show is None:
-                LOGGER.warning('[main] restart refused: this show has no restart hook')
+                # The bridge answers the waiting request with this, so the panel never holds on a no-op.
+                command['refused'] = 'this show has no restart hook'
+                LOGGER.warning('[main] restart refused: %s', command['refused'])
             else:
                 LOGGER.info('[main] restart requested from the Config tab')
                 self._restart_show()
