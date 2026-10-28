@@ -656,6 +656,11 @@ test("an edit to the lit mover's yaw or focus re-sends its test with the new pos
     settling()[0].run();
     assert.deepEqual(plain(commands.at(-1).pose.focus), [0, 3000, 0]);
     assert.equal(commands.at(-1).aim, true);
+    // The first edit wrote the FocusPoint; a later one moves it, Z included.
+    const [raised] = edit(focused, model.patchEdit(focused, settings, spot.key, "focus", ["0", "3000", "1200"]).action);
+    ds.fixture_patch.renderRig(spot.key, raised, settings);
+    settling()[0].run();
+    assert.deepEqual(plain(commands.at(-1).pose.focus), [0, 3000, 1200]);
     model.testControl("off");
     assert.equal(settling().length, 0);
 });

@@ -486,6 +486,24 @@ fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
     assert_ne!(posed, moved(&loaded, focus, false, Motion::Aim));
 }
 
+#[test]
+fn a_pose_aims_through_the_edited_focus_before_the_rig_reloads() {
+    let position = [865.0, -1291.0, 0.0];
+    let matrix = mounted(false, 180.0, position);
+    let focus = [-100.0, 60.0, 0.0];
+    let pose = FixturePose {
+        matrix: matrix.clone(),
+        pan: MovementRange::default(),
+        tilt: MovementRange::default(),
+        focus: focus.to_vec(),
+        universe: 0,
+        address: 1,
+        profile_id: "chauvet_intimidator_spot_110_12ch".into(),
+    };
+    let posed = moved(&matrix, [0.0; 3], false, Motion::Posed(pose));
+    assert_through(beam(&posed, &matrix), towards(position, focus), "posed");
+}
+
 /// A red test of the room fixture `name`, without a pose and then with its loaded patch as
 /// `edit` changes it: the universe 0 frames, the second or its refusal.
 fn room_test(
