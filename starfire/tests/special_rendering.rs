@@ -162,8 +162,8 @@ fn capabilities_follow_each_profiles_attribute_families() {
 }
 
 #[test]
-fn the_real_rig_reports_what_its_profiles_declare() {
-    let rig = support::room();
+fn the_stage_reports_what_its_profiles_declare() {
+    let rig = support::stage();
     let report: Vec<_> = capabilities(&rig)
         .into_iter()
         .map(|group| {
@@ -183,7 +183,7 @@ fn the_real_rig_reports_what_its_profiles_declare() {
             ("wash".to_owned(), 4, [true, false, false, false]),
         ]
     );
-    // The washes span three areas (CENTRE_LEFT, CENTRE, CENTRE_RIGHT), so they report none.
+    // The movers and the washes stand in a left and a right area, so they report none.
     let places: Vec<_> = capabilities(&rig)
         .into_iter()
         .map(|group| (group.area.map(|_| group.area()), group.centre_x_metres))
@@ -192,9 +192,9 @@ fn the_real_rig_reports_what_its_profiles_declare() {
     assert_eq!(
         places,
         [
+            (Some(A::Centre), 0.0),
+            (None, 0.0),
             (Some(A::UpCentre), 0.0),
-            (Some(A::UpCentre), 0.0),
-            (Some(A::DownCentre), 0.0),
             (None, 0.0),
         ]
     );
@@ -478,8 +478,8 @@ fn invalid_specials_are_rejected() {
 
 #[test]
 fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
-    let definition = support::room_definition();
-    let rig = support::room();
+    let definition = support::stage_definition();
+    let rig = support::stage();
     let member = &rig.groups()["fx"][0];
     let address = definition
         .fixtures
@@ -555,8 +555,8 @@ fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
 
 #[test]
 fn pause_homes_the_dimmerless_fx_fixture_to_its_gdtf_defaults_and_play_resumes_its_render() {
-    let definition = support::room_definition();
-    let rig = support::room();
+    let definition = support::stage_definition();
+    let rig = support::stage();
     let member = &rig.groups()["fx"][0];
     let address = definition
         .fixtures

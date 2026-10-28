@@ -156,7 +156,12 @@ def test_invalid_autoloop_name_is_rejected(login_assets):
 @pytest.mark.parametrize(
     # The repo rig stays here: Save and export-rig must keep its committed rig.pb in step.
     'rig',
-    [DEFAULT_RIG, ROOM, ROOT / 'autolux/tests/data/generic_rig/generic.mvr'],
+    [
+        DEFAULT_RIG,
+        ROOM,
+        ROOT / 'autolux/tests/data/generic_rig/generic.mvr',
+        ROOT / 'autolux/tests/data/generic_rig/stage.mvr',
+    ],
 )
 def test_committed_native_rig_is_the_exported_login_rig(rig):
     login = assets.load_login(rig, DEFAULT_AUTOLOOPS, '127.0.0.1:6454', run_id=1)
@@ -345,6 +350,7 @@ SAMPLE_RIG = ROOT / 'autolux/tests/data/generic_rig'
     [
         (ROOM.parent, 'room', [ROOT / 'rig/library']),
         (SAMPLE_RIG, 'generic', [ROOT / 'rig/library', SAMPLE_RIG]),
+        (SAMPLE_RIG, 'stage', [ROOT / 'rig/library']),
     ],
 )
 def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
