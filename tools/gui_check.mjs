@@ -1228,7 +1228,7 @@ const SUITES = {
             await ev('document.activeElement.blur()');
         }, {action: 'set-attribute', doc: 'scene', name: 'name', value: NAME});
         await check('odd name', 'typing the rename warns about groups and tests',
-            typingNote === 'Renaming changes which groups the show puts this fixture in and stops a test running on it.', {note: typingNote});
+            typingNote === 'Renaming changes the Class membership the show uses for groups and stops a test running on it.', {note: typingNote});
         await check('odd name', 'survives the form', (await ev(`document.querySelector('${cfg('name')}').value`)) === NAME);
         const svg = await ev(`(() => { const g = ${markOf(NAME)}; return g && {label: g.querySelector('text')?.textContent, title: g.querySelector('title').textContent}; })()`);
         await check('odd name', 'survives the plan SVG (label and tooltip)', svg?.label === NAME && svg?.title === NAME + ' · movers', {svg});
