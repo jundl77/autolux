@@ -19,7 +19,9 @@ return {
         local effects = {}
         for _, name in ipairs({ "wash", "strip", "movers" }) do
             local group = sf.group(name)
-            effects[#effects + 1] = { sf.colour(group, sf.white()), sf.dimmer(group, 1), sf.strobe(group, hz) }
+            effects[#effects + 1] = {
+                sf.colour(group, sf.white()), sf.dimmer(group, 1), sf.strobe(group, hz)
+            }
         end
         return sf.scene(effects)
     end

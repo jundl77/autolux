@@ -8,8 +8,8 @@ local FAN_DEGREES, FAN_MEASURE = 30, 8
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 local DOT_WIDTH = 1.5
 
--- One amount, converge, closes the fan, walks the strip's two dots to the centre and pulls
--- the washes inwards; regime U reaches half of it, a cued drop's finale the rest.
+-- One amount, converge, closes the fan and walks the strip's two dots to the centre; regime U
+-- reaches half of it, a cued drop's finale the rest, which also gathers the washes' light inwards.
 local function drive_and_converge(ctx)
     local tension = sf.tension(ctx, PLATEAU_BEATS)
     local drive, converge = 0.15 + 0.55 * tension, 0.5 * tension
@@ -41,12 +41,13 @@ return {
         local drive, converge = drive_and_converge(ctx)
         local elapsed = ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
         local opening = (1 - converge) * sf.osc.sine(elapsed, FAN_MEASURE, 1, 0)
+        local gather = math.max(0, 2 * converge - 1)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local movers = sf.group("movers")
         return sf.scene {
             sf.colour(sf.all(), palette.primary),
             sf.each(sf.group("wash"), function(wash, index, count)
-                local inward = 1 - converge * from_centre(index, count)
+                local inward = math.min(1, 1 + gather * (0.5 - from_centre(index, count)))
                 return sf.dimmer(wash, WASH_PEAK * drive * inward * gain)
             end),
             sf.each(sf.group("strip"), function(pixel, index, count)

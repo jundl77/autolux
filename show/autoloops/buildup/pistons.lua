@@ -41,11 +41,11 @@ return {
             sf.dimmer(sf.group("wash"), WASH_PEAK * drive * pump * gain),
             sf.each(sf.group("strip"), function(pixel, index)
                 local stroke_on = depth == 0 or (index + count) % 2 == 0
-                return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.4, 1, drive) * (stroke_on and pump or 0) * gain)
+                return sf.dimmer(pixel, stroke_on and STRIP_PEAK * sf.lerp(0.4, 1, drive) * pump * gain or 0)
             end),
             sf.dimmer(sf.group("movers"), MOVER_PEAK * sf.lerp(0.4, 1, drive) * pump * gain),
             sf.phaser(sf.group("movers"), ctx, {
-                shape = "tilt_wave", size = 0, tilt_size = STROKE_DEGREES * depth, measure = 2 * period, phase = 1
+                shape = "tilt_wave", tilt_size = STROKE_DEGREES * depth, measure = 2 * period, phase = 1
             })
         }
     end

@@ -21,7 +21,9 @@ return {
             sf.colour(sf.group("movers"), palette.primary),
             sf.gobo(sf.group("movers"), BREAKUP_SLOT),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_LOW, MOVER_HIGH, swell) * level),
-            sf.phaser(sf.group("movers"), ctx, { shape = "circle", size = CIRCLE_DEGREES, measure = CIRCLE_MEASURE })
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = "circle", size = CIRCLE_DEGREES, measure = CIRCLE_MEASURE
+            })
         }
     end
 }

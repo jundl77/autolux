@@ -36,16 +36,17 @@ return {
         local pulse = sf.on_beat(ctx, PULSE_SHARE * period, period)
         local count = math.floor(ctx.beat_position / period)
         local floor = sf.lerp(0.08, 0.45, finale)
+        local level = sf.lerp(floor, 1, pulse)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local spread = period >= 1 and count % 2 == 0 and WIDE_DEGREES or NARROW_DEGREES
         return sf.scene {
             sf.colour(sf.all(), palette.primary),
-            sf.dimmer(sf.group("wash"), WASH_PEAK * drive * sf.lerp(floor, 1, pulse) * gain),
+            sf.dimmer(sf.group("wash"), WASH_PEAK * drive * level * gain),
             sf.each(sf.group("strip"), function(pixel, index)
                 local lit = (index + count) % 2 == 0 and pulse or floor * pulse
                 return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.4, 1, drive) * lit * gain)
             end),
-            sf.dimmer(sf.group("movers"), MOVER_PEAK * sf.lerp(0.4, 1, drive) * sf.lerp(floor, 1, pulse) * gain),
+            sf.dimmer(sf.group("movers"), MOVER_PEAK * sf.lerp(0.4, 1, drive) * level * gain),
             sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = spread })
         }
     end

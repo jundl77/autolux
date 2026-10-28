@@ -25,7 +25,9 @@ return {
             end),
             sf.colour(sf.group("movers"), palette.cold),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
-            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = PARK_DEGREES, centre_tilt = SUNRISE_DEGREES * sun })
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = "fan", size = PARK_DEGREES, centre_tilt = SUNRISE_DEGREES * sun
+            })
         }
     end
 }

@@ -30,7 +30,7 @@ return {
             sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
             sf.phaser(sf.group("movers"), ctx, {
-                shape = "tilt_wave", size = 0, tilt_size = TIDE_DEGREES, measure = TIDE_BEATS, phase = 0.5
+                shape = "tilt_wave", tilt_size = TIDE_DEGREES, measure = TIDE_BEATS, phase = 0.5
             })
         }
     end

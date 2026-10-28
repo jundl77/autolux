@@ -28,7 +28,8 @@ return {
         local wipe = 1 - sf.phrase_phase(ctx, 1)
         return sf.scene {
             sf.each(sf.group("wash"), function(wash, index, count)
-                return { sf.colour(wash, split(index, count)), sf.dimmer(wash, sf.lerp(floor, WASH_PEAK, kick) * gain) }
+                local level = sf.lerp(floor, WASH_PEAK, kick) * gain
+                return { sf.colour(wash, split(index, count)), sf.dimmer(wash, level) }
             end),
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local distance = math.abs(from_centre(index, count) - wipe) * (count - 1) / 2

@@ -5,7 +5,7 @@
 local palette = sf.palette()
 local BALLYHOO_DEGREES, BALLYHOO_TILT_DEGREES, BALLYHOO_MEASURE = 30, 20, 8
 local KICK_WIDTH_BEATS, SPARK_WIDTH_BEATS = 0.4, 0.3
-local SPARK_SHARE = 0.3
+local SPARK_SHARE, LOOP_EIGHTHS = 0.3, 16
 local FLOOR_QUIET, FLOOR_LOUD = 0.08, 0.3
 local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.6, 0.85
 
@@ -15,7 +15,7 @@ return {
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
-        local eighth = math.floor(ctx.beat_position * 2)
+        local eighth = math.floor(ctx.beat_position * 2) % LOOP_EIGHTHS
         local spark = sf.on_beat(ctx, SPARK_WIDTH_BEATS, 0.5)
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),

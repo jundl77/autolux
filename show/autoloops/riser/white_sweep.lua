@@ -13,7 +13,9 @@ return {
             sf.dimmer(sf.group("wash"), WASH_PEAK * progress * progress),
             sf.colour(movers, sf.white()),
             sf.dimmer(movers, MOVER_PEAK * progress),
-            sf.phaser(movers, ctx, { shape = "fan", size = 0, centre_tilt = LIFT_DEGREES * progress * progress })
+            sf.phaser(movers, ctx, {
+                shape = "fan", size = 0, centre_tilt = LIFT_DEGREES * progress * progress
+            })
         }
     end
 }

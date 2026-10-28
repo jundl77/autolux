@@ -34,7 +34,8 @@ return {
         local drive, finale = drive_and_finale(ctx)
         local lap = lap_beats(ctx, finale)
         local head = ctx.beat_position / lap % 1
-        local closing = finale > 0 and math.min(1, (FINALE_BEATS - ctx.beats_until_next) / (FINALE_BEATS - ctx.beats_per_bar)) or 0
+        local closing = finale > 0
+            and math.min(1, (FINALE_BEATS - ctx.beats_until_next) / (FINALE_BEATS - ctx.beats_per_bar)) or 0
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local wash = sf.lerp(0.35, 1, sf.on_beat(ctx, LAP_PULSE_SHARE * lap, lap))
         return sf.scene {
@@ -43,7 +44,8 @@ return {
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local behind = (head * count - (index - 1)) % count
                 local lit = math.max(0, 1 - behind / TAIL_PIXELS)
-                return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.35, 1, drive) * sf.lerp(lit, 1, closing) * gain)
+                local level = STRIP_PEAK * sf.lerp(0.35, 1, drive) * gain
+                return sf.dimmer(pixel, level * sf.lerp(lit, 1, closing))
             end),
             sf.dimmer(sf.group("movers"), MOVER_PEAK * sf.lerp(0.4, 1, drive) * gain),
             sf.phaser(sf.group("movers"), ctx, {

@@ -43,7 +43,9 @@ return {
                 return sf.dimmer(pixel, STRIP_PEAK * sf.lerp(0.3, 1, drive) * filled * gain)
             end),
             sf.dimmer(sf.group("movers"), MOVER_PEAK * level * gain),
-            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = FAN_DEGREES, centre_tilt = RISE_DEGREES * breath })
+            sf.phaser(sf.group("movers"), ctx, {
+                shape = "fan", size = FAN_DEGREES, centre_tilt = RISE_DEGREES * breath
+            })
         }
     end
 }

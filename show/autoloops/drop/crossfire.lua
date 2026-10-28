@@ -8,7 +8,10 @@ local KICK_WIDTH_BEATS = 0.4
 local OFFBEAT_DUTY, OFFBEAT_PHASE = 0.3, 0.5
 local FLOOR_QUIET, FLOOR_LOUD = 0.04, 0.2
 local WASH_PEAK, STRIP_LEVEL, MOVER_LEVEL = 0.9, 0.35, 0.85
-local LOOKS = { { shape = "fan", size = 22, centre_tilt = 0 }, { shape = "cross", size = 10, centre_tilt = 12 } }
+local LOOKS = {
+    { shape = "fan", size = 22, centre_tilt = 0 },
+    { shape = "cross", size = 10, centre_tilt = 12 }
+}
 
 return {
     render = function(ctx)

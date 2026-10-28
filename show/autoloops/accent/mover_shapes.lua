@@ -14,7 +14,8 @@ return {
             sf.gobo(movers, BREAKUP_SLOT),
             sf.dimmer(movers, sf.lerp(FLOOR, PEAK, sf.on_beat(ctx, PULSE_WIDTH_BEATS))),
             sf.phaser(movers, ctx, {
-                shape = "figure8", size = FIGURE_DEGREES, tilt_size = FIGURE_TILT_DEGREES, measure = FIGURE_MEASURE
+                shape = "figure8", size = FIGURE_DEGREES, tilt_size = FIGURE_TILT_DEGREES,
+                measure = FIGURE_MEASURE
             })
         }
     end
