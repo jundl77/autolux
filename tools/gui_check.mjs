@@ -1096,6 +1096,8 @@ const SUITES = {
         await sleep(1500);
         await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {seen: await since()});
+        const swapNote = await text('#fixture-info .cfg-test-note');
+        await check('name swap', 'the test note names the label the form shows', swapNote === 'Testing spot_right in white.', {note: swapNote});
         await click(testButton('off'));
         await sleep(800);
     },

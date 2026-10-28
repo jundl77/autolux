@@ -689,10 +689,13 @@
     // A new fixture (or a new uuid) is not in the rig the show runs until Apply, and Starfire
     // answers an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
-    // Targets carry ids; people read the running rig's labels.
+    // Targets carry uuids; people read the label the form shows, which a rename or swap changes
+    // before Apply, and the running rig's label only for a fixture the draft no longer has.
     const labelOf = (id) => {
         const fixture = (show?.rig?.fixtures || []).find((entry) => entry.fixture_uuid === id || entry.cells.includes(id));
-        return fixture ? id.replace(fixture.fixture_uuid, fixture.name) : id;
+        if (!fixture) return id;
+        const row = rig && fixtureRows(rig.draft, rig.settings).find((entry) => entry.fixture_uuid === fixture.fixture_uuid);
+        return id.replace(fixture.fixture_uuid, row?.name || fixture.name);
     };
 
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
