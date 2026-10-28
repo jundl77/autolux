@@ -497,9 +497,11 @@ class AutoluxController:
         LOGGER.info("[main] Autolux stopped, clean shutdown")
 
     def restart(self):
-        self.restart_requested = True
         self.stop()
+        self.restart_requested = True
 
     def stop(self):
         self._stop_requested = True
+        # Ctrl-C during a restart's teardown ends the show rather than relaunching it.
+        self.restart_requested = False
         self.is_running = False
