@@ -835,10 +835,8 @@
             }
             rig = { draft, settings, selection };
             if (typeof document.getElementById === "function") {
-                for (const [id, draw] of [["mvr-plan", drawPlan], ["mvr-tree", drawTree]]) {
-                    const container = document.getElementById(id);
-                    if (container && !(planDrag && id === "mvr-plan")) redraw(container, draw);
-                }
+                const plan = document.getElementById("mvr-plan");
+                if (plan && !planDrag) redraw(plan, drawPlan);
                 const editor = document.getElementById("mvr-node-editor");
                 const title = document.getElementById("fixture-title");
                 if (editor && title) {
@@ -852,7 +850,7 @@
                     paintTest();
                 }
             }
-            return [{ display: "block" }, "patch-workspace has-selection", !path || path.length === 1, `${rows.length} fixtures`];
+            return [{ display: "block" }, "patch-workspace has-selection", !path || path.length === 1, `Universe ${universes(rows).map((number) => number + 1).join(", ")} · ${rows.length} fixtures`];
         },
 
         editPatch(_add, _remove, _close, action, response, settings, busy, draft, revision, selection, profile, quantity, universe, address) {
@@ -949,8 +947,14 @@
 
     // Plan view in standard plot orientation: MVR/GDTF -Y (downstage, toward the audience) at
     // the bottom, so the SVG y is -Y.
+    const universes = (rows) => [...new Set(rows.map((row) => row.universe).filter((value) => value !== null))].sort((a, b) => a - b);
+
     function planMarks(draft, settings) {
         const classes = classNames(draft);
+        const patched = fixtureRows(draft, settings);
+        const rows = Object.fromEntries(patched.map((row) => [row.key, row]));
+        // The header names a lone universe, so a caption only carries its own when there are several.
+        const several = universes(patched).length > 1;
         const fixtures = [];
         const others = [];
         for (const { node, matrix, layer } of placedObjects(draft, settings)) {
@@ -962,11 +966,15 @@
             const length = Math.hypot(matrix[3], matrix[4]);
             const range = physicalRange(gdtfTree(draft, settings, textOf(node, "GDTFSpec")), textOf(node, "GDTFMode"), "Pan");
             const home = homeOrientation(matrix);
+            const row = rows[node.key];
+            const group = classes[textOf(node, "Classing").toUpperCase()] || "";
             fixtures.push({
                 key: node.key,
                 name,
-                group: classes[textOf(node, "Classing").toUpperCase()] || "",
+                group,
                 accent: layer === settings.accentRole,
+                badge: `${textOf(node, "FixtureID")}${row?.cells.length > 1 ? ` ×${row.cells.length}` : ""}`,
+                caption: [row && `DMX ${several ? `${row.universe + 1}.` : ""}${row.address}–${row.address + row.channels - 1}`, group, layer].filter(Boolean).join(" · "),
                 x: matrix[9],
                 y: matrix[10],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
@@ -1045,7 +1053,7 @@
         const font = n(Math.max(r * 1.3, span * 0.014));
         const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
         const colour = Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
-        const accents = new Set(fixtures.filter((mark) => mark.accent).map((mark) => mark.group));
+        const counts = fixtures.reduce((total, mark) => ({ ...total, [mark.group]: (total[mark.group] || 0) + 1 }), {});
         const edge = n(maxY + r * 2);
         const metres = scaleMetres(span);
         const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
@@ -1065,17 +1073,20 @@
         for (const mark of fixtures) {
             const [x, y, fill] = [n(mark.x), n(-mark.y), colour[mark.group]];
             const arrow = mark.facing ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
-            const dash = mark.accent ? ` stroke-dasharray="${n(r * 0.5)} ${n(r * 0.35)}"` : "";
+            // Role by shape: a loop fixture is filled, an accent one a ring in its group's tone.
+            const shape = mark.accent ? ` fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.5)}"` : ` fill="${fill}"`;
             const label = labelled ? `<text x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}">${escapeXml(mark.name)}</text>` : "";
-            const title = mark.group ? `${mark.name} · ${mark.group}` : mark.name;
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(title)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"${dash}/>${panArc(mark, n, r * 3.2, fill)}${label}</g>`);
+            const badge = mark.badge ? `<text class="plan-badge" x="${n(x - r * 1.2)}" y="${n(y - r * 0.9)}" text-anchor="end" font-size="${n(font * 0.75)}">${escapeXml(mark.badge)}</text>` : "";
+            const caption = mark.caption ? `<text class="plan-caption" x="${x}" y="${n(y + r * 2.6 + font)}" text-anchor="middle" stroke-width="${n(font * 0.4)}">${escapeXml(mark.caption)}</text>` : "";
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}"${shape}/>${panArc(mark, n, r * 3.2, fill)}${label}${badge}${caption}</g>`);
         }
         parts.push("</g></svg>");
-        const legend = groups.map((group) => {
-            const dash = accents.has(group) ? ' stroke-dasharray="2 1.5"' : "";
-            return `<span class="plan-key"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="${colour[group]}"${dash}/></svg>${escapeXml(group || "no group")}${accents.has(group) ? " · accent" : ""}</span>`;
-        });
-        return parts.join("") + `<div class="plan-legend">${legend.join("")}</div>`;
+        const key = (circle, text) => `<span class="plan-key"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5"${circle}/></svg>${text}</span>`;
+        const legend = [
+            ...groups.map((group) => key(` fill="${colour[group]}"`, `${escapeXml(group || "no group")} <b>${counts[group]}</b>`)),
+            ...settings.roles.map((role) => key(` class="plan-role${role === settings.accentRole ? " ring" : ""}"`, escapeXml(role)))
+        ];
+        return `<div class="plan-legend">${legend.join("")}</div>` + parts.join("");
     }
 
     // The pan limits as an arc around the mark, a full turn or more as a circle. Two segments
@@ -1146,16 +1157,6 @@
     function nodeLabel(node) {
         const name = node.attributes.name || node.attributes.provider || node.attributes.fileName || "";
         return [h("span", { className: "mvr-tag", text: node.tag }), name ? ` ${name}` : ""];
-    }
-
-    function drawTree(container, draft, settings) {
-        const rows = (node, key, depth) => [
-            h("div", { className: "mvr-tree-row", "data-node-key": node.key, style: `padding-left:${depth * 12 + 4}px` }, nodeLabel(node)),
-            ...(nodeSchema(settings, key)?.any_content ? [] : node.children)
-                .filter((child) => !(key && fieldOf(settings, key, child.tag)?.kind))
-                .flatMap((child) => rows(child, key && childKey(settings, key, child), depth + 1))
-        ];
-        container.replaceChildren(...rows(draft.scene, "GeneralSceneDescription", 0));
     }
 
     const button = (text, action, title) => h("button", { type: "button", className: "mvr-small", "data-mvr-action": JSON.stringify(action), title, text });
@@ -1627,7 +1628,12 @@
                 event.stopImmediatePropagation();
                 return;
             }
-            const key = block?.dataset.fixtureKey ?? event.target.closest("#config-panel [data-node-key]")?.dataset.nodeKey;
+            let key = block?.dataset.fixtureKey ?? event.target.closest("#config-panel [data-node-key]")?.dataset.nodeKey;
+            // Stacked marks take turns under repeated clicks, so a covered fixture stays reachable.
+            if (key && event.target.closest("#mvr-plan")) {
+                const stack = [...new Set(document.elementsFromPoint(event.clientX, event.clientY).map((node) => node.closest("#mvr-plan [data-node-key]")?.dataset.nodeKey).filter(Boolean))];
+                key = stack[(stack.indexOf(rig?.selection) + 1) % stack.length];
+            }
             if (key) sendAction({ action: "select", key });
         },
         true

@@ -71,15 +71,20 @@ FIXTURE_CSS = '''
 #config-panel .patch-block.selected {outline:2px solid #e2efff;outline-offset:-2px;z-index:2;}
 #config-panel .patch-block.conflict {background:repeating-linear-gradient(135deg,#9b662e,#9b662e 6px,#5d4128 6px,#5d4128 12px)!important;}
 .patch-conflicts {color:#e8b56d;font-size:12px;margin-top:10px;}
-.mvr-layout {display:grid;grid-template-columns:minmax(0,1fr);gap:14px;}
 #mvr-plan svg.plan {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .mvr-object {cursor:pointer;}
 #mvr-plan .mvr-object:has(circle) {cursor:grab;}
 #mvr-plan svg.plan {touch-action:none;user-select:none;}
 #mvr-plan .plan circle {stroke:#e6edf3;}
+#mvr-plan .plan circle.ring {stroke:var(--ring);}
+.plan-key .plan-role {fill:var(--muted);stroke:var(--muted);}
+.plan-key .plan-role.ring {fill:none;stroke-width:2;}
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
+#mvr-plan .plan .plan-badge {fill:var(--muted);}
+#mvr-plan .plan .plan-caption {display:none;fill:var(--text);stroke:#0b121c;paint-order:stroke;}
+#mvr-plan .mvr-object:is(:hover,.selected) .plan-caption {display:inline;}
 #mvr-plan .plan-pan {fill:none;opacity:.2;pointer-events:none;}
 #mvr-plan .mvr-object.selected .plan-pan {opacity:.9;}
 #mvr-plan .plan-areas {stroke:#3b4d62;}
@@ -87,17 +92,16 @@ FIXTURE_CSS = '''
 #mvr-plan .plan-stage-edge {stroke:#6d7f95;}
 #mvr-plan .plan-scale line {stroke:#a9bbcf;}
 #mvr-plan text {fill:#a9bbcf;pointer-events:none;}
-.plan-legend {display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:11px;color:#94a6b9;}
+.plan-legend {display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:6px;font-size:11px;color:#94a6b9;}
+.plan-legend b {font-weight:400;color:var(--text);}
 .plan-key {display:inline-flex;align-items:center;gap:4px;}
 .plan-key circle {stroke:#e6edf3;stroke-width:1.2;}
 @media (max-width:700px) {#mvr-plan svg.plan {height:260px;}
 .patch-workspace,.patch-workspace.has-selection {grid-template-columns:minmax(0,1fr);}
 .patch-library,.patch-map-card,.mvr-card,#fixture-info {grid-column:1;grid-row:auto;contain:none;}}
-#mvr-tree {max-height:340px;overflow:auto;font-size:12px;border:1px solid #273345;border-radius:4px;padding:6px;background:#0b121c;}
-#mvr-tree .mvr-tree-row,.mvr-editor .mvr-link {cursor:pointer;color:#c9d7e6;padding:2px 4px;border-radius:3px;white-space:nowrap;}
-#mvr-tree .mvr-tree-row:hover,.mvr-editor .mvr-link:hover {background:#1b2938;}
-#mvr-tree .mvr-tree-row.selected {background:#273b51;color:#fff;}
-#mvr-tree .mvr-tag,.mvr-editor .mvr-tag {color:#7fa7cf;}
+.mvr-editor .mvr-link {cursor:pointer;color:#c9d7e6;padding:2px 4px;border-radius:3px;white-space:nowrap;}
+.mvr-editor .mvr-link:hover {background:#1b2938;}
+.mvr-editor .mvr-tag {color:#7fa7cf;}
 .mvr-editor {font-size:12px;}
 .mvr-editor h4 {margin:16px 0 8px;font-size:12px;color:#c9d7e6;font-weight:600;}
 .mvr-editor .mvr-row {display:grid;grid-template-columns:124px minmax(0,1fr) auto;gap:6px;align-items:center;margin-bottom:6px;}
@@ -286,13 +290,7 @@ def build_fixture_panel(app, store):
                                 ],
                                 className='patch-heading',
                             ),
-                            html.Div(
-                                [
-                                    html.Div(id='mvr-plan'),
-                                    html.Div(id='mvr-tree'),
-                                ],
-                                className='mvr-layout',
-                            ),
+                            html.Div(id='mvr-plan'),
                         ],
                         className='patch-card mvr-card',
                     ),

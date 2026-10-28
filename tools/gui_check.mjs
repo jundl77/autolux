@@ -446,7 +446,7 @@ async function planMark(name) {
         const m = circle.ownerSVGElement.getScreenCTM();
         const [cx, cy] = [Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))];
         return {cx, cy, a: m.a, d: m.d, x: m.a * cx + m.c * cy + m.e, y: m.b * cx + m.d * cy + m.f,
-            dashed: circle.hasAttribute('stroke-dasharray')};
+            ring: circle.classList.contains('ring')};
     })()`);
 }
 const areaBox = () => ev(`(() => { const r = document.querySelector('#mvr-plan .plan-areas rect');
@@ -868,6 +868,19 @@ const SUITES = {
         await action('rig map', 'select a fixture', () => click('#mvr-plan .mvr-object circle'), {watch: 1500});
         await check('rig map', 'a plan click opens the patch form', await waitFor(`${shown('fixture-info')} && !!document.querySelector('#fixture-info .cfg-section')`, 5000));
         await shot('config_fixture');
+        await check('rig map', 'no raw MVR outside the closed Advanced', await ev(`!document.querySelector('#mvr-tree')
+            && !/GeneralSceneDescription|ChildList/.test(document.getElementById('config-panel').innerText)`));
+        const plan = await ev(`(() => {
+            const marks = [...document.querySelectorAll('#mvr-plan .mvr-object:has(circle)')];
+            return {head: document.getElementById('mvr-summary').textContent, marks: marks.length,
+                badges: marks.filter((m) => /^\\d+( ×\\d+)?$/.test(m.querySelector('.plan-badge')?.textContent)).length,
+                counts: [...document.querySelectorAll('#mvr-plan .plan-legend b')].reduce((sum, b) => sum + Number(b.textContent), 0),
+                caption: [...document.querySelectorAll('#mvr-plan .plan-caption')].filter((c) => getComputedStyle(c).display !== 'none').map((c) => c.textContent)};
+        })()`);
+        await check('rig map', 'header, legend counts and a badge per mark agree', plan.head === `Universe 1 · ${plan.marks} fixtures`
+            && plan.badges === plan.marks && plan.counts === plan.marks, plan);
+        await check('rig map', 'only the selected mark shows its DMX caption', plan.caption.length === 1 && /^DMX \d+–\d+ · \w+ · (loop|accent)$/.test(plan.caption[0]), plan);
+        await shot('plan_rich', '.mvr-card');
         await action('Telemetry tab', 'open', () => tab('Telemetry'), {watch: 2500});
         await check('Telemetry tab', 'shows its panel', await ev(shown('telemetry-panel')));
         await shot('telemetry');
@@ -1024,10 +1037,10 @@ const SUITES = {
             {action: 'set-child-text', tag: 'DMXInvertPan', value: 'true'});
         await formEdit('Invert tilt', () => click(cfg('DMXInvertTilt')),
             {action: 'set-child-text', tag: 'DMXInvertTilt', value: 'true'});
-        await check('patch form', 'spot_left is not dashed (loop) before its group changes', !(await planMark('spot_left')).dashed);
+        await check('patch form', 'spot_left is filled (loop) before its group changes', !(await planMark('spot_left')).ring);
         await formEdit('Group movers -> fx', () => choose(cfg('group'), 'fx'), {action: 'set-class', name: 'fx'});
         await check('patch form', 'joining fx moves spot_left to the accent Layer', await waitFor(`(() => {
-            const c = ${markOf('spot_left')}?.querySelector('circle'); return !!c && c.hasAttribute('stroke-dasharray'); })()`, 3000)
+            const c = ${markOf('spot_left')}?.querySelector('circle'); return !!c && c.classList.contains('ring'); })()`, 3000)
             && (await ev(`document.querySelector('${cfg('role')}').value`)) === 'accent');
 
         await selectFixture('zq06017');
@@ -1056,7 +1069,7 @@ const SUITES = {
         await formEdit('Role of wash -> accent', () => choose(cfg('role'), 'accent'), {action: 'set-role', role: 'accent'});
         await check('patch form', 'the whole wash group moves to the accent Layer', await waitFor(`['wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right']
             .every((name) => [...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) => (g.querySelector('title')?.textContent || '').split(' · ')[0] === name)
-                ?.querySelector('circle').hasAttribute('stroke-dasharray'))`, 3000));
+                ?.querySelector('circle').classList.contains('ring'))`, 3000));
         await selectFixture('wash_right');
         await takeActions();
         await choose(cfg('group'), NEW_GROUP);

@@ -200,10 +200,10 @@ test("selecting a node changes only the inspector, never the rig layout", () => 
     assert.equal(picked.at(-1), idle.at(-1));
     assert.equal(idle[2], true);
     assert.equal(picked[2], false);
-    assert.equal(picked[3], "8 fixtures");
+    assert.equal(picked[3], "Universe 1 · 8 fixtures");
 });
 
-test("the rig plan marks each fixture at its MVR position, coloured by group, accents dashed", () => {
+test("the rig plan marks each fixture at its MVR position, coloured by group, accents ringed", () => {
     const plan = model.planMarks(draft(), settings);
     const byName = Object.fromEntries(plan.fixtures.map((mark) => [mark.name, mark]));
     assert.deepEqual(plain([byName.wash_left.x, byName.wash_left.y, byName.wash_left.group]), [-900, -1000, "wash"]);
@@ -231,8 +231,9 @@ test("the rig plan marks each fixture at its MVR position, coloured by group, ac
     // The audience is at the bottom: the most downstage fixture (the strip, Y -2000) is lowest.
     assert.match(markup, /<circle cx="0" cy="2000"/);
     const kinta = markup.slice(markup.indexOf("<title>kinta"));
-    assert.match(kinta.slice(0, kinta.indexOf("</g>")), /stroke-dasharray/);
-    assert.match(markup, /fx · accent<\/span>/);
+    assert.match(kinta.slice(0, kinta.indexOf("</g>")), /fill="none" class="ring"/);
+    assert.match(markup, /fx <b>1<\/b><\/span>/);
+    assert.match(kinta.slice(0, kinta.indexOf("</g>")), /class="plan-badge"[^>]*>\d+<\/text><text class="plan-caption"[^>]*>DMX \d+–\d+ · fx · accent</);
     const offCentre = { ...byName.kinta, x: 4000 };
     // One row: no depth extent, so only the X cuts (4000..9000 at 5667 and 7333).
     const row = model.planSvg({ fixtures: [offCentre, { ...offCentre, x: 9000 }], others: [] }, settings);
@@ -261,9 +262,9 @@ test("a 500-fixture, 30-group plan stays compact and keeps its groups apart", ()
     // Too dense to label: names move to hover titles.
     assert.equal((markup.match(/<title>/g) || []).length, 500);
     assert.ok(!markup.includes(">fixture_0</text>"));
-    const legend = markup.slice(markup.indexOf("plan-legend"));
+    const legend = markup.slice(markup.indexOf("plan-legend"), markup.indexOf("<svg class=\"plan\""));
     assert.equal(new Set([...legend.matchAll(/fill="([^"]+)"/g)].map((match) => match[1])).size, 30);
-    assert.equal((legend.match(/· accent/g) || []).length, 6);
+    assert.equal((markup.match(/class="ring"/g) || []).length, 6 * 17);
 });
 
 const matrixOf = (tree, name) => model.parseMatrix(child(fixtureNode(tree, name), "Matrix")?.text ?? "");
