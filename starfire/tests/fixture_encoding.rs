@@ -205,9 +205,9 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
 #[test]
 fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_yaw() {
     // Independent of the encoder: decode the DMX to body angles and carry the beam through the
-    // Matrix. Physical pan 0 faces local +Y, the display, and turns clockwise about local +Z; mid
-    // tilt is on the pan axis (the mirror the tilt inversion assumes) and tilts towards the pan
-    // heading. Standing, the room's spots still throw on the display side: the tilt reversal
+    // Matrix. The pan range centre (270 of 540) faces local +Y, the display, and pan turns
+    // clockwise about local +Z; mid tilt is on the pan axis (the mirror the tilt inversion
+    // assumes) and tilts towards the pan heading. Standing, the room's spots still throw on the display side: the tilt reversal
     // keeps the lean rather than turning it a half turn.
     let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
         let (sin, cos) = f64::to_radians(yaw).sin_cos();
@@ -231,7 +231,7 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
             f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0 * travel
         };
         let (pan, tilt) = (
-            angle(0, 540.0).to_radians(),
+            (angle(0, 540.0) - 270.0).to_radians(),
             (flip * (angle(2, 270.0) - 135.0)).to_radians(),
         );
         let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
@@ -242,8 +242,9 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
             for state in [(0.0, 0.2), (0.3, 0.9), (0.5, 0.35), (0.85, 0.6), (1.0, 0.0)] {
                 let expected = beam(true, 0.0, inverted, state);
                 if !inverted {
-                    // The logical pan is the scene heading clockwise from +Y within the limits.
-                    let heading = f64::to_radians(540.0 * (0.1 + 0.7 * state.0));
+                    // The logical pan is the scene heading clockwise from +Y within the limits,
+                    // 0 at the range centre.
+                    let heading = f64::to_radians(540.0 * (0.1 + 0.7 * state.0) - 270.0);
                     let lean = f64::to_radians(270.0 * state.1 - 135.0).sin();
                     let scene = [lean * heading.sin(), lean * heading.cos()];
                     assert!(

@@ -1188,7 +1188,7 @@
         const labels = ["x mm", "y mm", "z mm", "yaw °", "pitch °", "roll °"];
         const inputs = [...matrix.slice(9), ...rotation].map((value, index) => h("input", { type: "number", step: "any", value: formatNumber(value), title: labels[index], placeholder: labels[index] }));
         const home = homeOrientation(matrix);
-        const summary = typeof home === "string" ? home : `Starfire home: display faces ${formatNumber(home.pan)}°, tilt ${formatNumber(home.tilt)}°` + (home.reversed ? " · standing: pan/tilt reversed" : " · hanging");
+        const summary = typeof home === "string" ? home : `Starfire home: pan centre faces ${formatNumber(home.pan)}°, tilt ${formatNumber(home.tilt)}°` + (home.reversed ? " · standing: pan/tilt reversed" : " · hanging");
         return [h("div", { className: "mvr-helper", "data-mvr-matrix": owner.key }, inputs), muted(summary)];
     }
 
