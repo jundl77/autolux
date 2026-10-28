@@ -512,7 +512,8 @@ async def test_operator_static_looks_reach_starfire_in_the_same_pass_bypassing_t
 HALL = StaticRig(
     groups=('wash',),
     uv_groups=('wash',),
-    fixtures=(('par', 'par', ('par',)), ('bar', 'bar', ('bar/a', 'bar/b'))),
+    # Labels differ from uuids, so a target can only match by uuid.
+    fixtures=(('par', 'front', ('par',)), ('bar', 'strip', ('bar/a', 'bar/b'))),
     uv_targets=('par',),
 )
 
@@ -593,6 +594,7 @@ def test_each_highlight_swatch_sends_its_colour(colour, rgb):
     ('target', 'colour', 'paused', 'blackout', 'reason'),
     [
         ({'fixture': 'ghost'}, 'white', False, False, 'unknown fixture or cell'),
+        ({'fixture': 'front'}, 'white', False, False, 'unknown fixture or cell'),
         ({'cell': 'bar'}, 'white', False, False, 'unknown fixture or cell'),
         ({'fixture': 'par'}, 'uv', False, False, 'unknown highlight colour'),
         ({'fixture': 'par'}, 'white', True, False, 'the show is paused'),
@@ -661,8 +663,8 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
     assert snapshot['highlight'] == {'target': {'cell': 'bar/a'}, 'colour': 'blue'}
     assert snapshot['rig'] == {
         'fixtures': [
-            {'fixture_uuid': 'par', 'name': 'par', 'cells': ['par']},
-            {'fixture_uuid': 'bar', 'name': 'bar', 'cells': ['bar/a', 'bar/b']},
+            {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par']},
+            {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a', 'bar/b']},
         ]
     }
     assert snapshot['mode'] == 'auto'

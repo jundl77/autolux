@@ -297,7 +297,7 @@
             const channels = modeChannels(tree, mode);
             const cells = modeCells(tree, mode);
             const className = classes[textOf(node, "Classing").toUpperCase()] || "";
-            return [{ key: node.key, fixture_uuid: (node.attributes.uuid || "").toUpperCase(), name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
+            return [{ key: node.key, fixture_uuid: node.attributes.uuid || "", name: node.attributes.name || "", spec, mode, breaks, addressKey: addresses[0].key, universe, address, channels, cells, className, matrix }];
         });
     }
 
@@ -370,7 +370,7 @@
         const count = entry.modes[entry.default_mode].channels;
         const children = firstLayerChildren(draft, settings);
         const names = new Set(fixtureRows(draft, settings).map((row) => row.name));
-        let fixtureId = Math.max(0, ...[...walk(draft.scene)].filter(([node]) => node.tag === "FixtureIDNumeric").map(([node]) => Number(node.text) || 0));
+        let patchNumber = Math.max(0, ...[...walk(draft.scene)].filter(([node]) => node.tag === "FixtureIDNumeric").map(([node]) => Number(node.text) || 0));
         const added = [];
         for (let index = 0; index < quantity; index++) {
             const start = address == null ? firstFreeAddress(draft, settings, universe - 1, count) : address;
@@ -379,11 +379,11 @@
             const fixture = template(settings, "Fixture", "Fixture");
             fixture.attributes.name = `${entry.name}_${suffix}`;
             names.add(fixture.attributes.name);
-            fixtureId += 1;
+            patchNumber += 1;
             for (const [tag, text] of [["Matrix", formatMatrix(IDENTITY)], ["GDTFSpec", spec], ["GDTFMode", entry.default_mode]]) {
                 insertChild(fixture, "Fixture", element(tag, {}, text), settings);
             }
-            childOf(fixture, "FixtureID").text = childOf(fixture, "FixtureIDNumeric").text = String(fixtureId);
+            childOf(fixture, "FixtureID").text = childOf(fixture, "FixtureIDNumeric").text = String(patchNumber);
             const addresses = insertChild(fixture, "Fixture", element("Addresses"), settings);
             addresses.children.push(element("Address", { break: "0" }, absoluteAddress(universe - 1, start)));
             children.children.push(fixture);
@@ -579,7 +579,7 @@
             case "FixtureIDNumeric": {
                 // MVR's FixtureID is a string; only FixtureIDNumeric is a number.
                 const twin = others.find((entry) => textOf(entry, field) === value);
-                return { error: field === "FixtureID" || /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same ID.` : null, action: child(field, value) };
+                return { error: field === "FixtureID" || /^\d+$/.test(value) ? null : "Use a whole number.", warning: twin ? `${twin.attributes.name} has the same patch number.` : null, action: child(field, value) };
             }
             case "GDTFSpec": {
                 const tree = gdtfTree(draft, settings, value);
@@ -689,10 +689,13 @@
     // A new fixture (or a new uuid) is not in the rig the show runs until Apply, and Starfire
     // answers an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
-    // Targets carry ids; people read the running rig's labels.
+    // Targets carry uuids; people read the label the form shows, which a rename or swap changes
+    // before Apply, and the running rig's label only for a fixture the draft no longer has.
     const labelOf = (id) => {
         const fixture = (show?.rig?.fixtures || []).find((entry) => entry.fixture_uuid === id || entry.cells.includes(id));
-        return fixture ? id.replace(fixture.fixture_uuid, fixture.name) : id;
+        if (!fixture) return id;
+        const row = rig && fixtureRows(rig.draft, rig.settings).find((entry) => entry.fixture_uuid === fixture.fixture_uuid);
+        return id.replace(fixture.fixture_uuid, row?.name || fixture.name);
     };
 
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
@@ -1269,8 +1272,8 @@
                 { className: "cfg-form" },
                 testStrip(),
                 field("Name", input("name", row.name), true),
-                field("Fixture ID", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
-                field("Fixture ID (numeric)", input("FixtureIDNumeric", textOf(node, "FixtureIDNumeric"), { inputmode: "numeric" })),
+                field("Patch number", input("FixtureID", textOf(node, "FixtureID"), { inputmode: "numeric" })),
+                field("Patch number (numeric)", input("FixtureIDNumeric", textOf(node, "FixtureIDNumeric"), { inputmode: "numeric" })),
                 field("GDTF profile", select("GDTFSpec", specs.map((spec) => [spec, profile(spec)]), row.spec), true),
                 field("Mode", select("GDTFMode", [["", "—"], ...modesOf(tree).map((mode) => [mode, `${mode} · ${modeChannels(tree, mode)} ch`])], row.mode), true),
                 field("Universe", h("input", { type: "text", value: (row.universe ?? 0) + 1, readonly: true, tabindex: -1 })),

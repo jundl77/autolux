@@ -49,7 +49,7 @@ def placed_group(xs: list[float]) -> list[dict]:
             gdtf_mode='1ch',
             universe=0,
             address=index + 1,
-            fixture_id=index + 1,
+            patch_number=index + 1,
             fixture_class='wash',
             matrix=[*mvr.IDENTITY_MATRIX[:9], x, -1000.0, 3000.0],
         )
@@ -203,6 +203,19 @@ def test_room_rig_round_trips_to_identical_bytes_and_is_renderable():
     assert mvr._without_keys(mvr.draft(mvr.read(saved))) == mvr._without_keys(first)
 
 
+def test_a_fixture_uuid_reaches_starfire_as_the_mvr_writes_it(tmp_path):
+    scene = mvr.read(ROOM.read_bytes())
+    spot = next(node for node in scene.root.iter('Fixture') if node.get('name') == 'spot_left')
+    written = spot.get('uuid').lower()
+    spot.set('uuid', written)
+    rig = tmp_path / 'room.mvr'
+    rig.write_bytes(mvr.write(scene))
+    exported = rig_definition(rig)
+    assert [f.fixture_uuid for f in exported.fixtures if f.name == 'spot_left'] == [written]
+    movers = next(group for group in exported.groups if group.group_id == 'movers')
+    assert written in movers.fixture_uuids
+
+
 def room_layers(move: dict[str, str] | None = None, rename: dict[str, str] | None = None):
     """The room scene with fixtures moved between layers and layers renamed."""
     scene = mvr.read(ROOM.read_bytes())
@@ -257,7 +270,7 @@ def test_each_added_fixture_gets_a_fresh_random_uuid():
             gdtf_mode='4ch',
             universe=0,
             address=200 + 4 * index,
-            fixture_id=9 + index,
+            patch_number=9 + index,
         ).get('uuid')
         for index in range(2)
     ]
@@ -274,7 +287,7 @@ def test_a_new_fixture_joins_the_layer_of_its_class():
         gdtf_mode='4ch',
         universe=0,
         address=200,
-        fixture_id=9,
+        patch_number=9,
         fixture_class='fx',
     )
     fixtures = mvr.patched_fixtures(scene)
