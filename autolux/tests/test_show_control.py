@@ -634,6 +634,24 @@ def test_the_telemetry_charts_are_in_the_page_and_filled_by_the_first_control_po
     assert all('data' in figure and 'layout' in figure for figure in figures)
 
 
+def test_the_config_tab_polls_only_the_control_state_its_fixture_test_reads():
+    highlight = {'target': {'fixture': 'spot_left'}, 'colour': 'red'}
+    rig = {'fixtures': [{'name': 'spot_left', 'cells': ['spot_left']}]}
+    snapshot = {'paused': True, 'static': {'blackout': False}, 'highlight': highlight, 'rig': rig}
+    app = build_app(_Recorder(snapshot))
+    refresh = next(key for key in app.callback_map if key.startswith('..sync.data'))
+    gate = {'tab': 'config', 'metrics': False, 'timeline': False}
+    response = _run_callback(app, refresh, {'gate': gate}, 'gate.data').get_json()['response']
+    assert list(response) == ['control-state']
+    state = response['control-state']['data']
+    assert (state['paused'], state['static'], state['highlight'], state['rig']) == (
+        True,
+        {'blackout': False},
+        highlight,
+        rig,
+    )
+
+
 def test_the_colors_status_shows_the_active_palette_whether_pinned_or_chosen_by_the_show():
     from autolux.lighting.palettes import PALETTES
     from autolux.simulate.visualizer_app import PALETTE_SWATCH_SLOTS, _build_show_status, _rgb_css

@@ -19,7 +19,7 @@ FIXTURE_CSS = '''
 .patch-workspace {display:grid;grid-template-columns:230px minmax(480px,1fr);gap:16px;align-items:start;}
 .patch-card {background:#121a24;border:1px solid #273345;border-radius:6px;padding:16px;min-width:0;}
 .patch-card h3 {margin:0 0 14px;font-size:13px;font-weight:600;}
-.patch-workspace.has-selection {grid-template-columns:230px minmax(480px,1fr) 300px;}
+.patch-workspace.has-selection {grid-template-columns:230px minmax(480px,1fr) 380px;}
 .patch-library {grid-column:1;grid-row:1;}
 .patch-map-card {grid-column:2;grid-row:1;}
 .mvr-card {grid-column:2;grid-row:2;}
@@ -58,6 +58,8 @@ FIXTURE_CSS = '''
 .mvr-layout {display:grid;grid-template-columns:minmax(0,3fr) minmax(220px,2fr);gap:14px;}
 #mvr-plan svg.plan {display:block;width:100%;height:340px;background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .mvr-object {cursor:pointer;}
+#mvr-plan .mvr-object:has(circle) {cursor:grab;}
+#mvr-plan svg.plan {touch-action:none;user-select:none;}
 #mvr-plan .plan circle {stroke:#e6edf3;}
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
@@ -89,6 +91,32 @@ FIXTURE_CSS = '''
 .mvr-editor summary {cursor:pointer;color:#c9d7e6;}
 .mvr-editor .mvr-gdtf-attribute {color:#93a5b9;margin-left:14px;}
 .mvr-editor .mvr-readonly {color:#93a5b9;}
+.cfg-form {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 12px;padding-bottom:16px;margin-bottom:4px;border-bottom:1px solid #273345;}
+.cfg-field {display:grid;gap:5px;align-content:start;min-width:0;}
+.cfg-field.wide,.cfg-test {grid-column:1 / -1;}
+.cfg-field>span {color:#94a6b9;font-size:11px;}
+#config-panel .cfg-form input,#config-panel .cfg-form select {box-sizing:border-box;width:100%;min-width:0;background:#0b121c;color:#e6edf3;border:1px solid #344256;border-radius:4px;padding:6px 8px;font:inherit;font-size:12px;}
+#config-panel .cfg-form input[readonly] {color:#93a5b9;border-style:dashed;}
+#config-panel .cfg-form [aria-invalid="true"],#config-panel .cfg-form [aria-invalid="true"] input {border-color:#e69478;}
+.cfg-note {color:#93a5b9;font-size:11px;line-height:1.4;}
+.cfg-note.invalid {color:#ffbd9f;}
+.cfg-note:empty {display:none;}
+.cfg-split {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;}
+.cfg-split.cfg-2 {grid-template-columns:repeat(2,minmax(0,1fr));}
+.cfg-split label {display:grid;gap:3px;min-width:0;}
+.cfg-split span {color:#65798f;font-size:10px;}
+.cfg-group {display:grid;gap:6px;}
+.cfg-check {display:flex;align-items:center;gap:8px;color:#c9d7e6;font-size:12px;}
+#config-panel .cfg-check input {width:auto;margin:0;accent-color:#73b6ff;}
+.cfg-test {display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+#config-panel .cfg-test button {padding:6px 10px;}
+#config-panel .cfg-test .cfg-swatch {width:28px;height:28px;padding:0;background:var(--swatch);border-color:#3b4d62;}
+#config-panel .cfg-test button.active {border-color:#73b6ff;box-shadow:0 0 0 1px #73b6ff;}
+#config-panel .cfg-test .cfg-test-main.active {background:#284d71;color:#fff;}
+.cfg-test-note {flex-basis:100%;}
+.cfg-cells {display:flex;flex-wrap:wrap;gap:4px;}
+#config-panel .cfg-cells button.selected {border-color:#73b6ff;background:#273b51;color:#fff;}
+@media (max-width:700px) {.cfg-form {grid-template-columns:minmax(0,1fr);}}
 '''
 
 
@@ -326,6 +354,7 @@ def build_fixture_panel(app, store):
                     'columns': MAP_COLUMNS,
                     'colors': FIXTURE_COLORS,
                     'accentRole': mvr_schema.ACCENT_ROLE,
+                    'roles': mvr_schema.ROLES,
                 },
             ),
             dcc.Store(id='fixture-revision', data=revision),
@@ -365,6 +394,12 @@ def build_fixture_panel(app, store):
         Input('fixture-selection', 'data'),
         Input('fixture-draft', 'data'),
         State('fixture-settings', 'data'),
+    )
+    # The Control tab's poll also serves the Config tab, so the test controls show the show's state.
+    app.clientside_callback(
+        ClientsideFunction(namespace='fixture_patch', function_name='syncTest'),
+        Input('control-state', 'data'),
+        Input('dashboard-tab', 'value'),
     )
     app.clientside_callback(
         ClientsideFunction(namespace='fixture_patch', function_name='editPatch'),
