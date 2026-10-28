@@ -686,6 +686,10 @@
         return command;
     }
 
+    // A renamed or new fixture is not in the rig the show runs until Apply, and Starfire answers
+    // an unknown target with an error that stops the show.
+    const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.name === target.fixture || fixture.cells.includes(target.cell));
+
     // A swatch lights the selection (or its picked cell), ‹ › carry the test along the patch, Off clears it.
     function testControl(spec) {
         if (!rig?.selection || testBlocked(show)) return null;
@@ -693,10 +697,17 @@
         const rows = fixtureRows(rig.draft, rig.settings);
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
-        if (spec in rig.settings.testColours) return highlight(selectedCell ? { cell: selectedCell } : { fixture: row.name }, spec);
+        if (spec in rig.settings.testColours) {
+            const target = selectedCell ? { cell: selectedCell } : { fixture: row.name };
+            return running(target) ? highlight(target, spec) : null;
+        }
         const order = [...rows].sort((a, b) => (a.universe ?? -1) - (b.universe ?? -1) || (a.address ?? 0) - (b.address ?? 0));
         const next = order[(order.indexOf(row) + Number(spec) + order.length) % order.length];
         sendAction({ action: "select", key: next.key });
+        if (!running({ fixture: next.name })) {
+            clearTest();
+            return null;
+        }
         return highlight({ fixture: next.name }, (lit && testCommand.colour) || show.highlight?.colour || "white");
     }
 
@@ -774,7 +785,7 @@
                 selectedCell = null;
                 const next = lit && fixtureRows(draft, settings).find((row) => row.key === selection);
                 // The lit test follows the selection, so the old fixture is never kept alive.
-                if (!next) clearTest();
+                if (!next || !running({ fixture: next.name })) clearTest();
                 else if (testCommand.target.fixture !== next.name) highlight({ fixture: next.name }, testCommand.colour);
             }
             rig = { draft, settings, selection };
@@ -1205,14 +1216,16 @@
         }
         cells.querySelectorAll("[data-cfg-cell]").forEach((cell) => cell.classList.toggle("selected", cell.dataset.cfgCell === selectedCell));
         const blocked = testBlocked(show);
+        const offline = row && !running({ fixture: row.name }) ? `${row.name} · not in the running show` : null;
         const active = show?.highlight;
         const here = Boolean(active) && (active.target?.fixture === row?.name || ids.includes(active.target?.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
-            button.disabled = Boolean(blocked);
+            // ‹ › and Off still work: they move off or clear what the show does run.
+            button.disabled = Boolean(blocked || (offline && !["off", "1", "-1"].includes(button.dataset.cfgTest)));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch));
         }
-        testNote(blocked || testRefusal || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
+        testNote(blocked || testRefusal || offline || (active ? `Testing ${active.target?.fixture ?? active.target?.cell} in ${active.colour}.` : testEnded));
     }
 
     // Console-style patch form over the raw inspector; every field maps to one draft action.

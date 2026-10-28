@@ -32,6 +32,8 @@ const { settings } = data;
 const UUID = /^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
 
 const draft = () => structuredClone(data.draft);
+// The running show's rig as the control state reports it: the room as committed.
+const RUNNING = { fixtures: data.patched.map(([name, , , cells]) => ({ name, cells })) };
 const nodes = function* (tree) {
     yield tree;
     for (const child of tree.children) yield* nodes(child);
@@ -412,7 +414,7 @@ test("a role moves its whole group, and a joining fixture lands in its group's l
 test("the test controls send highlight commands, hold them alive and clear once on leave", async () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_right");
-    const live = { paused: false, static: { blackout: false }, highlight: null };
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
     commands.length = actions.length = 0;
     ds.fixture_patch.renderRig(spot.key, current, settings);
     ds.fixture_patch.syncTest({ ...live, paused: true }, "config");
@@ -477,7 +479,7 @@ test("Apply restarts the show only on a second click within 5 s", async () => {
 test("a lit test follows the selection; late or unanswered replies never turn it off", async () => {
     const current = draft();
     const [spot, kinta] = ["spot_right", "kinta"].map((name) => fixtureNode(current, name));
-    const live = { paused: false, static: { blackout: false }, highlight: null };
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
     timers.clear();
     ds.fixture_patch.renderRig(spot.key, current, settings);
     ds.fixture_patch.syncTest(live, "config");
@@ -499,7 +501,7 @@ test("a lit test follows the selection; late or unanswered replies never turn it
 });
 
 test("the Apply banner follows the show's rig revision and holds through a restart", async () => {
-    const live = { paused: false, static: { blackout: false }, highlight: null };
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
     const banner = (loaded, saved = "saved") => plain(ds.fixture_patch.syncTest({ ...live, rig_revision: loaded }, "config", saved));
     const stale = "The show runs an older rig. Apply to show restarts it on the saved patch.";
     const restarting = "Restarting the show on the saved patch.";
@@ -533,7 +535,7 @@ test("the Apply banner follows the show's rig revision and holds through a resta
 test("a held test ends after 10 minutes, and stops when the show drops it without an Off", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_right");
-    const live = { paused: false, static: { blackout: false }, highlight: null };
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
     const lit = { ...live, highlight: { target: { fixture: "spot_right" }, colour: "white" } };
     timers.clear();
     ds.fixture_patch.renderRig(spot.key, current, settings);
@@ -566,11 +568,28 @@ test("a plan drag writes the Matrix the server's area and group-order test reads
 
 test("› carries the operator's latest swatch, not the colour the last poll reported", () => {
     const current = draft();
-    const green = { paused: false, static: { blackout: false }, highlight: { target: { fixture: "spot_right" }, colour: "green" } };
+    const green = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: { target: { fixture: "spot_right" }, colour: "green" } };
     timers.clear();
     ds.fixture_patch.renderRig(fixtureNode(current, "spot_right").key, current, settings);
     ds.fixture_patch.syncTest(green, "config");
     model.testControl("red");
     assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: "kinta" }, colour: "red" });
     model.testControl("off");
+});
+
+test("a renamed, unapplied fixture is never sent as a test target", () => {
+    const current = draft();
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    const [renamed] = edit(current, { action: "set-attribute", doc: "scene", key: fixtureNode(current, "kinta").key, name: "name", value: "kinta_new" });
+    timers.clear();
+    ds.fixture_patch.renderRig(fixtureNode(renamed, "spot_right").key, renamed, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("red");
+    const sent = commands.length;
+    // › selects kinta_new (patch order) but cannot light it: the lit spot is cleared instead.
+    assert.equal(model.testControl("1"), null);
+    assert.deepEqual(plain(commands.slice(sent)), [{ action: "highlight", target: null }]);
+    ds.fixture_patch.renderRig(fixtureNode(renamed, "kinta_new").key, renamed, settings);
+    assert.equal(model.testControl("red"), null);
+    assert.equal(commands.length, sent + 1);
 });
