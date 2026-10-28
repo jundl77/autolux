@@ -385,21 +385,21 @@ fn labelled(names: [&str; 2], ids: [&str; 2]) -> serde_json::Value {
 
 #[test]
 fn a_fixture_is_its_uuid_and_swapping_labels_moves_nothing_else() {
-    let rig = support::rig(labelled(["spot_left", "spot_right"], [LEFT, RIGHT]));
-    let swapped = support::rig(labelled(["spot_right", "spot_left"], [LEFT, RIGHT]));
+    let rig = support::rig(labelled(["mover_left", "mover_right"], [LEFT, RIGHT]));
+    let swapped = support::rig(labelled(["mover_right", "mover_left"], [LEFT, RIGHT]));
     for rig in [&rig, &swapped] {
         assert_eq!(rig.cell_ids(), [LEFT, RIGHT]);
         assert_eq!(rig.groups()["wash"], [LEFT, RIGHT]);
         assert_eq!(rig.resolve(&Target::Fixture(LEFT.into())).unwrap(), [LEFT]);
         // Wire targets carry uuids; only autoloops resolve labels.
-        assert!(rig.resolve(&Target::Fixture("spot_left".into())).is_err());
+        assert!(rig.resolve(&Target::Fixture("mover_left".into())).is_err());
         let mut states = rig.empty_states();
         states.insert(LEFT.into(), full_light());
         assert_eq!(rig.encode(&states).unwrap()[&0][..2], [255, 0]);
     }
-    assert_eq!(rig.uuid_of_label("spot_left"), Some(LEFT));
-    assert_eq!(swapped.uuid_of_label("spot_left"), Some(RIGHT));
-    assert_eq!(swapped.label(LEFT), "spot_right");
+    assert_eq!(rig.uuid_of_label("mover_left"), Some(LEFT));
+    assert_eq!(swapped.uuid_of_label("mover_left"), Some(RIGHT));
+    assert_eq!(swapped.label(LEFT), "mover_right");
     assert_eq!(swapped.uuid_of_label(LEFT), None);
 }
 

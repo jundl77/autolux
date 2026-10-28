@@ -365,9 +365,11 @@ def test_a_rig_rebuilt_from_the_library_exports_the_committed_rig_definition(
     library = {spec: entry for path in libraries for spec, entry in fixture_library(path).items()}
     rebuilt = tmp_path / f'{name}.mvr'
     rebuilt.write_bytes(mvr.write(mvr.apply_draft(bare, mvr.draft(scene), library)))
-    assert rebuilt.read_bytes() == shipped.read_bytes()
+    committed = folder / f'{name}.rig.pb'
+    hint = f'Regenerate with: uv run autolux starfire export-rig {shipped} {committed}'
+    assert rebuilt.read_bytes() == shipped.read_bytes(), hint
     exported = assets.rig_definition(rebuilt).SerializeToString()
-    assert exported == (folder / f'{name}.rig.pb').read_bytes()
+    assert exported == committed.read_bytes(), hint
 
 
 def test_the_room_bar_is_one_fixture_whose_eight_cells_are_the_strip():

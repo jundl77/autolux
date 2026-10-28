@@ -77,7 +77,7 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
         )
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
-    // The loop's sf.all() passes over the accent Kinta, which plays specials only.
+    // The loop's sf.all() passes over the accent, which plays specials only.
     let stage = support::stage();
     for (id, state) in &frame.fixture_properties_before_strobe {
         if stage.is_accent_cell(id) {

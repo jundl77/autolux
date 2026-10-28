@@ -477,7 +477,7 @@ fn invalid_specials_are_rejected() {
 }
 
 #[test]
-fn the_real_rig_fx_group_spins_colours_and_gates_to_its_dark_slot() {
+fn the_stage_fx_group_spins_colours_and_gates_to_its_dark_slot() {
     let definition = support::stage_definition();
     let rig = support::stage();
     let member = &rig.groups()["fx"][0];
