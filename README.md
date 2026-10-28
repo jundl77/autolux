@@ -65,7 +65,10 @@ RDP is not needed during operation. Config templates are `radius/transmitter.jso
 
 Open **http://autolux.local:8765** for analysis, lighting and system health.
 The dashboard binds to `0.0.0.0`; mDNS publishes the local hostname while it runs.
-Allow TCP 8765 and UDP 5353 from your local network in Windows Firewall.
+Allow TCP 8765, TCP 8766 and UDP 5353 from your local network in Windows Firewall: the
+panel's controls post straight from the browser to the show's bridge on 8766, with no
+fallback through the dashboard, and over plain http only (an https proxy would break the
+bridge's CORS check).
 If a device cannot resolve mDNS, use the controller PC’s LAN IP with port 8765.
 Prometheus metrics are at `/metrics` on the same address. `--no-ui` keeps metrics
 available on port 8766. Logs and generated configs are under `.live/`.

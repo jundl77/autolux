@@ -292,9 +292,6 @@ class EventBuffer:
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
                 'group_roles': dict(self._group_roles),
-                'strobe_cooldown_seconds': next(
-                    (row['remaining_seconds'] for row in cooldowns if row.get('strobe')), None
-                ),
                 'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),

@@ -176,6 +176,8 @@ message SpecialFX {
 message UnsetActiveEffect {
   uint64 command_id = 1;
   string effect_id = 2;  // Removing an absent ID does nothing.
+  // Drops a special this frame, its fade too; otherwise it runs its own release.
+  bool instantaneous_release = 3;
 }
 
 // [CLIENT -> SERVER]

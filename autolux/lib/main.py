@@ -80,23 +80,18 @@ def apply_static(light_engine, command: dict) -> None:
     looks = light_engine.static_looks
     kind = command['kind']
     if kind == 'look':
-        looks.look(command['target'], colour=command['colour'], dimmer=command['dimmer'])
+        looks.look(
+            command['target'],
+            colour=command['colour'],
+            dimmer=command['dimmer'],
+            uv=command.get('uv'),
+        )
     elif kind == 'preset':
         looks.preset(command['preset'])
-    elif kind == 'blacklight':
-        looks.blacklight()
     elif kind == 'blackout':
         looks.set_blackout(command['enabled'])
-    elif kind == 'strobe':
-        looks.strobe(command.get('enabled'))
     elif kind == 'special_fx':
-        looks.special(
-            command['group'],
-            command['colour_slot'],
-            command['energy'],
-            command['speed'],
-            command['pulse_beats'],
-        )
+        looks.special(command['row'], command['target'])
     elif kind == 'special_fx_clear':
         looks.clear_special()
     elif kind == 'clear':
@@ -190,10 +185,17 @@ class ShowControl:
             )
         elif action == 'intensity_auto':
             self._follow_music(light_engine, command['enabled'])
-        elif action == 'settings' and command['settings'] != self.settings:
-            self.settings = command['settings']
-            light_engine.settings_changed()
+        elif action == 'fx_auto' and command['enabled'] != self.settings.fx_auto:
+            self.settings = dataclasses.replace(self.settings, fx_auto=command['enabled'])
             self._unsaved_change_at = self._clock.monotonic()
+            if not command['enabled']:
+                light_engine.effect_controller.forget_special(instantaneous=True)
+        elif action == 'settings':
+            settings = dataclasses.replace(self.settings, **command['settings'])
+            if settings != self.settings:
+                self.settings = settings
+                light_engine.settings_changed()
+                self._unsaved_change_at = self._clock.monotonic()
 
     def _follow_music(self, light_engine, enabled: bool) -> None:
         if enabled == self.settings.intensity_auto:

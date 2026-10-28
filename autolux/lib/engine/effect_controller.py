@@ -15,6 +15,7 @@ from autolux.lib.engine.autoloop_policy import (
     SelectionContext,
     look_intent,
     max_energy_for_intensity,
+    soft_drop,
 )
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOP_META,
@@ -76,7 +77,7 @@ def operator_transition(bpm: float | None) -> dict:
     return {'kind': 'cut'}
 
 
-def strobe_override(
+def _strobe_override(
     override_id: str,
     priority: int,
     duration_seconds: float,
@@ -117,7 +118,8 @@ class EffectController:
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
         self._pinned_palette: str | None = None
-        self._special_policy = SpecialPolicy(specials, random.Random(f'{seed}/special'), venue)
+        self.specials = tuple(specials)
+        self._special_policy = SpecialPolicy(self.specials, random.Random(f'{seed}/special'), venue)
         self._special: Special | None = None
         self._special_on = False
         self._capabilities: SpecialCapabilities | None = None
@@ -192,13 +194,11 @@ class EffectController:
         intent: LightIntent,
         bpm: float | None = None,
         context: SelectionContext | None = None,
-        *,
-        cut: bool = False,
     ) -> bool:
         context = context or SelectionContext(intent)
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
-        transition = {'kind': 'cut'} if cut else transition_for(choice.look)
+        transition = transition_for(choice.look)
         palette = self._palette_for(choice.look)
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
@@ -302,13 +302,13 @@ class EffectController:
             choice.reason,
         )
 
-    def enter_standby(self, bpm: float | None, *, renderer_paused: bool = False) -> None:
+    def enter_standby(self, bpm: float | None) -> None:
         self.lighting_client.clear_override(DROP_ACCENT_ID)
-        self._forget_special()
+        self.forget_special(instantaneous=True)
         bank, autoloop = STANDBY_AUTOLOOP
         transition = (
             {'kind': 'crossfade', 'duration_beats': bpm / 60.0 * STANDBY_CROSSFADE_SECONDS}
-            if bpm and bpm > 0 and not renderer_paused
+            if bpm and bpm > 0
             else {'kind': 'cut'}
         )
         if not self.lighting_client.select_autoloop(bank, autoloop, transition=transition):
@@ -338,8 +338,6 @@ class EffectController:
     ) -> None:
         settings = self._settings()
         now = self.clock.monotonic()
-        # An unknown arrival is not soft, matching how intensity follow grades a drop.
-        soft = arrival_of_peak is not None and arrival_of_peak < MAXIMAL_ARRIVAL_OF_PEAK
         choice = self._special_policy.choose(
             intent,
             self.special_capabilities(),
@@ -347,17 +345,20 @@ class EffectController:
             soft_drop=(
                 f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
                 'of the track peak'
-                if soft
+                if soft_drop(arrival_of_peak)
                 else None
             ),
             now=now,
         )
+        if not settings.fx_auto:
+            # FX off drops the special but keeps the drop strobe, the show's own accent.
+            choice = dataclasses.replace(choice, special=None)
         if choice.suppressed:
             LOGGER.info('[lighting] intense special suppressed | %s', choice.suppressed)
         if choice.intense:
             self._last_intense_at = now
         if choice.special is None:
-            self._forget_special()
+            self.forget_special()
         else:
             self._special_policy.record(choice.special, now, self._capabilities)
             self._fire_special(choice.special)
@@ -382,31 +383,39 @@ class EffectController:
             special.pulse_beats,
         )
 
-    def release_special(self) -> None:
+    def release_special(self, *, instantaneous: bool = False) -> None:
+        # Sent straight to the renderer, never through the delayed queue: a cut is the operator's,
+        # not the music's, so it belongs to the room's now.
         if not self._special_on:
             return
-        self.lighting_client.clear_override(SPECIAL_ID)
+        self.lighting_client.clear_override(SPECIAL_ID, instantaneous_release=instantaneous)
         LOGGER.info(
-            '[lighting] special %s released over %g beats',
+            '[lighting] special %s %s',
             self._special.name,
-            self._special.release_beats,
+            'instantaneous release'
+            if instantaneous
+            else f'released over {self._special.release_beats:g} beats',
         )
         self._special_on = False
         if self.event_buffer:
             self.event_buffer.set_special(None)
 
-    def _forget_special(self) -> None:
-        self.release_special()
+    def forget_special(self, *, instantaneous: bool = False) -> None:
+        """Release the running special (at once if instantaneous); nothing returns before the
+        next entry fires one."""
+        self.release_special(instantaneous=instantaneous)
         self._special = None
 
     def _restore_special(self) -> None:
+        if not self._settings().fx_auto:
+            self._special = None
         if self._special is not None and not self._special_on:
             self._fire_special(self._special)
 
     def _strobe(self, special: Special, bpm: float | None, settings: ShowSettings) -> None:
         duration = strobe_burst_seconds(bpm, settings)
         self.lighting_client.set_override(
-            strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings, special)
+            _strobe_override(DROP_ACCENT_ID, DROP_ACCENT_PRIORITY, duration, settings, special)
         )
         if self.event_buffer:
             self.event_buffer.add_effect(DROP_ACCENT_ID, 'ACCENT', duration_seconds=duration)

@@ -6,7 +6,7 @@ needs evidence from the track's sections since its start:
 - calm: the first CALM_OPENING_BARS are heard without a DROP, and the committed intents average
   CALM_MAX_MEAN_ENERGY or less on INTENT_ENERGY;
 - wild: the drive is above WILD_ABOVE_DRIVE and at least one DROP arrived loud, at
-  LOUD_DROP_ARRIVAL of the track peak or more (the autoloop policy's maximal-arrival grade);
+  MAXIMAL_ARRIVAL_OF_PEAK of the track peak or more, i.e. not autoloop_policy.soft_drop;
 - balanced: the drive is above BALANCED_ABOVE_DRIVE;
 - calm otherwise.
 
@@ -24,7 +24,7 @@ depends on the level, and evidence that follows the level would hold any level i
 
 from statistics import fmean
 
-from autolux.lib.engine.autoloop_policy import MAXIMAL_ARRIVAL_OF_PEAK
+from autolux.lib.engine.autoloop_policy import soft_drop
 from autolux.lib.engine.effect_definitions import (
     BALANCED,
     CALM,
@@ -39,7 +39,6 @@ from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 # Level drive spans about -0.6..+0.8 on the calibration set (track_mood.py).
 BALANCED_ABOVE_DRIVE = -0.3
 WILD_ABOVE_DRIVE = 0.4
-LOUD_DROP_ARRIVAL = MAXIMAL_ARRIVAL_OF_PEAK
 CALM_OPENING_BARS = 32
 CALM_OPENING_BEATS = CALM_OPENING_BARS * BEATS_PER_BAR
 CALM_MAX_MEAN_ENERGY = 1.5
@@ -122,7 +121,7 @@ class FollowMusic:
 
         drive is the track's drive over every beat so far, None while the opening window is open.
         """
-        soft = arrival_of_peak is not None and arrival_of_peak < LOUD_DROP_ARRIVAL
+        soft = soft_drop(arrival_of_peak)
         if arrival_of_peak is not None and not soft:
             self.loud_drop = True
         if self.track_level is None or self.capped:
