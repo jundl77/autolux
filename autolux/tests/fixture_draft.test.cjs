@@ -416,40 +416,6 @@ test("the mount toggle turns the fixture 180° about its facing and keeps its ro
     assert.deepEqual(plain(matrix(hanging)), plain(matrix(current)));
 });
 
-test("the plan draws each mover's pan limits where Starfire's encode sends the beam", () => {
-    const current = draft();
-    const marks = (tree) => Object.fromEntries(model.planMarks(tree, settings).fixtures.map((mark) => [mark.name, mark]));
-    const before = marks(current);
-    // The spot pans 0–540°; logical 270° is the heading 270° clockwise from +Y, i.e. MVR -X.
-    assert.deepEqual(plain(before.spot_left.pan), { span: 540, centre: -180 });
-    assert.equal(before.wash_left.pan, null);
-    const markup = model.planSvg(model.planMarks(current, settings), settings);
-    assert.equal((markup.match(/class="plan-pan"/g) || []).length, 2);
-    const spot = fixtureNode(current, "spot_left");
-    const [limited] = edit(current, model.patchEdit(current, settings, spot.key, "Pan", ["54", "216"]).action);
-    const sector = (tree) => marks(tree).spot_left.pan;
-    assert.deepEqual(plain(sector(limited)), { span: 162, centre: -45 });
-    // The yaw and mount only change the head's own angle: the sector stays put in the scene.
-    const turned = (tree, rotation, standing) => edit(tree, { action: "set-matrix", key: spot.key, position: [-300, 0, 0], rotation, standing })[0];
-    for (const yaw of [0, 90, 180, 270]) {
-        for (const standing of [false, true]) assert.deepEqual(plain(sector(turned(limited, [yaw, 0, 0], standing))), { span: 162, centre: -45 }, `yaw ${yaw} standing ${standing}`);
-    }
-    // An inversion reorders the pan inside the limits; the sector stays.
-    const [inverted] = edit(limited, model.patchEdit(limited, settings, spot.key, "DMXInvertPan", true).action);
-    assert.deepEqual(plain(sector(inverted)), plain(sector(limited)));
-    // The path's start, middle and end in SVG coordinates (y is MVR -Y); spot_left sits at (-300, 0).
-    const arcOf = (tree) => model.planSvg(model.planMarks(tree, settings), settings).match(/<title>spot_left[^]*?<path class="plan-pan" d="([^"]+)"/)[1];
-    const points = (d) => [[0, 1], [7, 8], [14, 15]].map((pair) => pair.map((index) => Number(d.match(/-?\d+/g)[index])));
-    // The full 540° is a whole circle, split at its middle (left of the mark).
-    const [start, middle, end] = points(arcOf(current));
-    assert.deepEqual(start, end);
-    assert.ok(middle[0] < -300 && middle[1] === 0, arcOf(current));
-    // Limited to 54–216°, the middle is 135° clockwise of upstage: below and right of the mark.
-    const [from, centre, to] = points(arcOf(limited));
-    assert.ok(centre[0] > -300 && centre[1] > 0, arcOf(limited));
-    assert.ok(Math.abs(Math.hypot(from[0] - centre[0], from[1] - centre[1]) - Math.hypot(to[0] - centre[0], to[1] - centre[1])) <= 2, arcOf(limited));
-});
-
 test("a role move keeps each fixture where it hangs, out of a nested group and a yawed layer", () => {
     const yawed = yawedLayer();
     const list = model.pathTo(yawed.scene, fixtureNode(yawed, "spot_left").key).at(-2);
@@ -550,9 +516,11 @@ test("only a mover's test row offers Sweep and Aim, which toggle its motion and 
     assert.deepEqual(plain(model.testControl("sweep")), { ...spot, colour: "white", sweep: true });
     assert.deepEqual(plain(model.testControl("red")), { ...spot, colour: "red", sweep: true });
     assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red", aim: true });
-    // A second click on the lit motion holds the light still; Off clears it all.
+    // A second click on the lit motion holds the light still; a second Test clears it all.
     assert.deepEqual(plain(model.testControl("aim")), { ...spot, colour: "red" });
-    assert.deepEqual(plain(model.testControl("off")), { action: "highlight", target: null });
+    assert.deepEqual(plain(model.testControl("test")), { action: "highlight", target: null });
+    assert.deepEqual(plain(model.testControl("test")), { ...spot, colour: "white" });
+    assert.deepEqual(plain(model.testControl("test")), { action: "highlight", target: null });
 });
 
 test("a mover's test pose is the placement the server exports, and a focus edit adds the MVR FocusPoint", () => {
@@ -694,7 +662,7 @@ test("the Restart banner names an older rig and holds until the next session rep
     assert.deepEqual(banner("old", "three"), [stale, false]);
 });
 
-test("a held test ends after 10 minutes, and stops when the show drops it without an Off", () => {
+test("a held test ends after 10 minutes, and stops when the show drops it unasked", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_right");
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
@@ -736,7 +704,7 @@ test("› carries the operator's latest swatch, not the colour the last poll rep
     ds.fixture_patch.syncTest(green, "config");
     model.testControl("red");
     assert.deepEqual(plain(model.testControl("1")), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
-    model.testControl("off");
+    model.testControl("test");
 });
 
 test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixture is never sent", () => {

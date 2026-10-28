@@ -586,7 +586,7 @@ impl FixtureRig {
         // A range past a full turn reaches the heading more than once; take the copy nearest
         // the middle of the soft limits.
         let turn = FULL_TURN_DEGREES / (to - from);
-        let position = (heading_degrees - from) / (to - from);
+        let position = 0.5 + heading_degrees / (to - from);
         let centre = (placement.pan.min + placement.pan.max) / 2.0;
         let position = position + ((centre - position) / turn).round() * turn;
         // The encode mirrors a standing head itself, so the lean is the hanging one.
@@ -685,13 +685,12 @@ impl FixtureRig {
                 let position = placement.pan.map(position);
                 pan_range.map_or(position, |(from, to)| {
                     if placement.reversed {
-                        // Standing turns pan the other way round, and the room shows the beam
-                        // still leaving on the display side, so heading L needs head angle
-                        // -L - yaw: the mirror of the whole range, then this offset, canonical
-                        // like the yaw.
+                        // Standing turns pan the other way round about the range centre and
+                        // the reversed tilt throws the beam a half turn, so heading L needs
+                        // centre + 180 - L - yaw: the mirror of the whole range, then this
+                        // offset, canonical like the yaw.
                         let offset = HALF_TURN_DEGREES
-                            - (from + to + placement.pan_offset_degrees + HALF_TURN_DEGREES)
-                                .rem_euclid(FULL_TURN_DEGREES);
+                            - placement.pan_offset_degrees.rem_euclid(FULL_TURN_DEGREES);
                         offset_pan(1.0 - position, offset, from, to)
                     } else {
                         offset_pan(position, placement.pan_offset_degrees, from, to)

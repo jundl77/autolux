@@ -44,8 +44,10 @@ render as separate patches.
 (Z up, right-handed). The rotation is read as `R = Rz(yaw) · Rx(pitch) · Ry(roll)`:
 
 - **yaw** is the direction the fixture's display faces on the plan (the local +Y axis,
-  anticlockwise from scene +Y); at pan centre the beam leaves that way. A hanging head reaches
-  stage heading L (clockwise from +Y) at pan angle L + yaw; the pan home offset is canonical in
+  anticlockwise from scene +Y); at pan centre, the middle of the GDTF Pan PhysicalFrom..To
+  (270° on a 0–540° head), the beam leaves that way. A logical pan is the stage heading L
+  (clockwise from +Y) measured from that centre, and a hanging head reaches it at centre + L +
+  yaw; the pan home offset is canonical in
   (-180°, 180°] (+180, never -180, so one orientation always gives the same DMX on 540°
   heads);
 - tilt home offset = **pitch**. This is an approximation: it is exact only at pan home,
@@ -55,7 +57,8 @@ render as separate patches.
   so a logical pan lands on the same stage heading as on a hanging head at any yaw; roll
   otherwise does not render;
 - a standing head pans the other way round, which Starfire accounts for: it reaches heading L
-  at pan angle -L - yaw, its beam still on the display side;
+  at centre + 180 - L - yaw (kept in range by whole turns), because its reversed tilt throws the
+  beam a half turn;
 - identity = the GDTF default (hanging) orientation, display to upstage: offset 0, not
   reversed.
 
