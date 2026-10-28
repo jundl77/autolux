@@ -1992,11 +1992,14 @@ PREVIEW_BAR_LABELS = 12
 PREVIEW_CSS = '''
 .preview-card {margin-top:16px;}
 .preview-card .patch-heading {margin-bottom:10px;}
-.preview-transport {display:flex;align-items:center;gap:12px;margin-bottom:6px;font-size:12px;color:var(--muted);}
+.preview-label {min-height:16px;margin-bottom:6px;font-size:12px;color:var(--muted);}
+.preview-scrub,.preview-overview {display:grid;grid-template-columns:110px minmax(0,1fr);gap:2px 8px;}
+.preview-scrub {align-items:center;}
+.preview-transport {display:flex;align-items:center;gap:12px;}
 .preview-beat {width:12px;height:12px;border-radius:50%;background:#1d2733;flex:none;}
 .preview-beat.on {background:#73b6ff;}
 .preview-beat.bar {background:#e6edf3;box-shadow:0 0 6px #e6edf3;}
-.preview-overview {position:relative;display:grid;grid-template-columns:110px 1fr;gap:2px 8px;font-size:11px;color:var(--muted);margin:6px 25px 0;}
+.preview-overview {position:relative;font-size:11px;color:var(--muted);margin-top:6px;}
 .preview-overview svg {display:block;width:100%;height:12px;background:#0b121c;}
 .preview-overview .preview-cursor {position:absolute;top:0;bottom:0;width:1px;background:#e6edf3;pointer-events:none;}
 #mvr-plan:has(svg.elevation) {display:grid;grid-template-columns:3fr 2fr;gap:8px;}
@@ -2076,23 +2079,30 @@ def _build_preview_card():
                 ],
                 className='patch-heading',
             ),
+            html.Div(id='preview-label', className='preview-label'),
+            # The slider shares the strip's track column, so a frame sits above its slice.
             html.Div(
                 [
-                    html.Button('Play', id='preview-play', type='button', disabled=True),
-                    html.Span(id='preview-beat', className='preview-beat'),
-                    html.Span(id='preview-label'),
+                    html.Div(
+                        [
+                            html.Button('Play', id='preview-play', type='button', disabled=True),
+                            html.Span(id='preview-beat', className='preview-beat'),
+                        ],
+                        className='preview-transport',
+                    ),
+                    dcc.Slider(
+                        id='preview-frame',
+                        min=0,
+                        max=0,
+                        step=1,
+                        value=0,
+                        marks=None,
+                        updatemode='drag',
+                        allow_direct_input=False,
+                        disabled=True,
+                    ),
                 ],
-                className='preview-transport',
-            ),
-            dcc.Slider(
-                id='preview-frame',
-                min=0,
-                max=0,
-                step=1,
-                value=0,
-                marks=None,
-                updatemode='drag',
-                disabled=True,
+                className='preview-scrub',
             ),
             # fixture_patch.js draws the whole-track strip here once the frames arrive.
             html.Div(id='preview-overview', className='preview-overview'),
