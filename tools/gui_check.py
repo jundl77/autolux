@@ -233,6 +233,8 @@ class StubShow:
             if 'lengthen' in payload:
                 group, total = payload['lengthen']
                 self.cooldowns[group]['total'] = float(total)
+            if 'shed' in payload:
+                self.state['shed'] = payload['shed']
             if 'special' in payload:
                 self.state['special'] = payload['special']
             if 'paused' in payload:

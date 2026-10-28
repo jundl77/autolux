@@ -87,6 +87,17 @@ def test_a_page_load_renders_what_the_first_poll_would_above_the_controls():
     ]
 
 
+def test_telemetry_notices_share_one_line_with_the_full_text_in_its_title():
+    from autolux.simulate.system_metrics import build_telemetry_notices
+
+    (notice,) = build_telemetry_notices({'shed': {'level': 'LIGHT', 'sheds_per_min': 3}})
+    text = (
+        'No system telemetry yet. Graphs will populate when measurements arrive.'
+        ' · Analysis is holding the last intent. · Analysis skips: 3/min.'
+    )
+    assert notice.children == notice.title == text
+
+
 class _Browser:
     """POSTs to the show's control bridge as control.js does."""
 

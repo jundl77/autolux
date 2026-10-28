@@ -277,4 +277,6 @@ def build_telemetry_notices(snapshot, *, now=None):
         messages.append(f'Analysis is holding the last intent{f": {fault}" if fault else "."}')
     if shed.get('sheds_per_min', 0):
         messages.append(f'Analysis skips: {shed["sheds_per_min"]}/min.')
-    return [html.Div(message, className='telemetry-notice', role='status') for message in messages]
+    # One line, however many: the line sits above the show controls and must never grow.
+    text = ' · '.join(messages)
+    return [html.Div(text, title=text, className='telemetry-notice', role='status')] if text else []

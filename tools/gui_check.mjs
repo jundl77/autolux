@@ -836,6 +836,13 @@ const SUITES = {
             {expect: [{action: 'fx_auto', enabled: false}], look: has('control-fx-off', 'active')});
 
         await fresh();
+        const fxOffTop = () => ev(`document.getElementById('control-fx-off').getBoundingClientRect().top`);
+        const top = await fxOffTop();
+        await harness('control', {shed: {level: 'LIGHT'}});
+        const noticed = await waitFor(`document.getElementById('telemetry-alerts').textContent.includes('Analysis is holding')`);
+        await check('first load', 'a poll adding a notice leaves FX Off where it was',
+            noticed && (await fxOffTop()) === top, {noticed, before: top, after: await fxOffTop()});
+        await fresh();
         await flashes();
         await action('tabs', 'Telemetry, Config and back to Control', async () => {
             await tab('Telemetry');
