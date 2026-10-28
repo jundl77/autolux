@@ -19,6 +19,7 @@
     const RESTARTING = "Restarting the show on the saved patch.";
     const NEW_GROUP = "\u0000new";
     const RESTART_HOLD_MS = 60000;
+    const SHOW_GONE = Symbol("show gone");
     // A forgotten Locate in a party room: the held test ends by itself after 10 minutes.
     const TEST_MAX_MS = 600000;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
@@ -774,6 +775,8 @@
             paintTest();
             // No show reporting a rig means nothing to restart; a restart holds until a new rig reports.
             const loaded = state?.rig_revision ?? null;
+            // A show that went away and came back is the new session, even on the same revision.
+            if (loaded === null && restartingFrom !== null) restartingFrom = SHOW_GONE;
             if (loaded !== null && loaded !== restartingFrom) restartingFrom = null;
             const stale = loaded !== null && loaded !== saved;
             return restartingFrom !== null ? [RESTARTING, true] : [stale ? STALE_RIG : "", loaded === null];

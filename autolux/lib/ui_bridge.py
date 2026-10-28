@@ -39,6 +39,7 @@ VIEWER_MODULE = 'autolux.simulate.visualizer_app'
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KILL_GRACE_SEC = 5.0
 _VIEWER_POLL_SEC = 0.2
+_RETRY_POLL_SEC = 0.25
 
 
 @contextmanager
@@ -476,6 +477,31 @@ class UiBridge:
         self._stopping = True
         kill_tree(self._viewer)
         self._server.stop()
+        # The venv launcher can exit before the interpreter it started lets go of the port.
+        try:
+            _within(_KILL_GRACE_SEC, lambda: _probe(self._ui_port))
+        except OSError as error:
+            LOGGER.warning(f'[ui] the dashboard port {self._ui_port} is still taken ({error!r})')
+
+
+def _probe(port: int) -> None:
+    with socket.socket() as probe:
+        if os.name != 'nt':
+            # Else a closed listener's TIME_WAIT reads as taken; Windows binds through it anyway.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind((DASHBOARD_BIND_ADDRESS, port))
+
+
+def _within(seconds: float, attempt, *, clock=time.monotonic, sleep=time.sleep):
+    """attempt() until it stops raising OSError; a relaunch races the last session's sockets."""
+    deadline = clock() + seconds
+    while True:
+        try:
+            return attempt()
+        except OSError:
+            if clock() >= deadline:
+                raise
+            sleep(_RETRY_POLL_SEC)
 
 
 def start(
@@ -487,13 +513,16 @@ def start(
 ) -> UiBridge | None:
     try:
         # Bound like the dashboard so its page can POST controls here directly.
-        server = SnapshotServer(
-            event_buffer,
-            snapshot_port(ui_port),
-            commands,
-            host=DASHBOARD_BIND_ADDRESS,
-            dashboard_port=ui_port,
-            handoff_timeout=HANDOFF_TIMEOUT_SEC,
+        server = _within(
+            _KILL_GRACE_SEC,
+            lambda: SnapshotServer(
+                event_buffer,
+                snapshot_port(ui_port),
+                commands,
+                host=DASHBOARD_BIND_ADDRESS,
+                dashboard_port=ui_port,
+                handoff_timeout=HANDOFF_TIMEOUT_SEC,
+            ),
         )
         server.start()
     except OSError as error:

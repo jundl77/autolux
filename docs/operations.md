@@ -12,10 +12,17 @@ starts on the current store with a fresh viewer:
 - **Restart show** in the Config tab starts the next session at once.
 - A fault that ends a running show (Starfire, Radius link, capture) restarts it after 5 s,
   then 15 s, then 60 s for each further fault; a session that ran 10 minutes resets the wait.
-  A relaunch that fails to start counts as a fault. A first start that fails exits, since it
-  needs the operator.
-- Ctrl-C, `autolux stop` or `--duration` ends the session and exits. The stop flag is checked
-  during the wait and before each relaunch, so `autolux stop` also ends a show waiting to restart.
+  A failed teardown, a relaunch that fails to start, or a relaunch whose dashboard does not come
+  back counts as a fault. A first show that fails before it plays (devices, configuration)
+  exits, since it needs the operator.
+- Ctrl-C, `autolux stop` or `--duration` (one deadline for the whole run) ends the session and
+  exits. The stop flag is checked during the wait and before each relaunch, so `autolux stop`
+  also ends a show waiting to restart. The process holds the controller lock throughout, so a
+  second show cannot start in between.
+
+Each session logs `[prod] session N starting: <run dir>` and keeps its logs and its `--report`
+(written as `<run dir>/<report file name>`) in its own run directory. Before a relaunch the
+controller confirms over SSH that the old receiver released the output PC's hardware.
 
 ## Health
 

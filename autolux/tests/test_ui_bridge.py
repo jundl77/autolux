@@ -335,15 +335,46 @@ def test_a_restarted_session_kills_its_viewer_and_brings_up_a_fresh_one(monkeypa
 
     monkeypatch.setattr(ui_bridge, '_spawn', spawn)
     monkeypatch.setattr(ui_bridge, 'kill_tree', kill)
+    monkeypatch.setattr(ui_bridge, '_probe', lambda port: events.append(('port free', port)))
     monkeypatch.setattr(ui_bridge, 'DASHBOARD_BIND_ADDRESS', '127.0.0.1')
     with socket.socket() as probe:
         probe.bind(('127.0.0.1', 0))
         bridge_port = probe.getsockname()[1]
+    ui_port = bridge_port - 1
     with caplog.at_level('WARNING'):
         for _ in range(2):
-            session = ui_bridge.start(EventBuffer(), bridge_port - 1, commands=queue.Queue())
+            session = ui_bridge.start(EventBuffer(), ui_port, commands=queue.Queue())
             assert session is not None, 'the bridge port was not free again for the next session'
             session.stop()
             session._watcher.join(2)
-    assert events == ['spawn', 'kill', 'spawn', 'kill']
+    # Each stop waits for the old viewer's port before the next session spawns its viewer.
+    assert events == ['spawn', 'kill', ('port free', ui_port)] * 2
     assert 'viewer process exited' not in caplog.text
+
+
+def test_a_relaunch_retries_a_taken_port_until_its_deadline():
+    from autolux.lib.ui_bridge import _within
+
+    now = [0.0]
+    attempts = []
+
+    def attempt(fails):
+        attempts.append(now[0])
+        if len(attempts) <= fails:
+            raise OSError('address in use')
+        return 'bound'
+
+    def run(fails):
+        attempts.clear()
+        now[0] = 0.0
+        return _within(
+            1.0,
+            lambda: attempt(fails),
+            clock=lambda: now[0],
+            sleep=lambda s: now.__setitem__(0, now[0] + s),
+        )
+
+    assert run(2) == 'bound' and attempts == [0.0, 0.25, 0.5]
+    with pytest.raises(OSError, match='address in use'):
+        run(100)
+    assert attempts == [0.0, 0.25, 0.5, 0.75, 1.0]
