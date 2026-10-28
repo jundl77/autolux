@@ -24,8 +24,9 @@ FIXTURE_CSS = '''
 .patch-card h3 {margin:0 0 14px;font-size:13px;font-weight:600;}
 .patch-workspace.has-selection {grid-template-columns:230px minmax(480px,1fr) 380px;}
 .patch-library {grid-column:1;grid-row:1;}
-.patch-map-card {grid-column:2;grid-row:1;}
-.mvr-card {grid-column:2;grid-row:2;}
+/* Positioning leads: the plan comes first and big, the DMX map below it. */
+.mvr-card {grid-column:2;grid-row:1;}
+.patch-map-card {grid-column:2;grid-row:2;}
 #fixture-info {grid-column:3;grid-row:1 / span 2;align-self:stretch;contain:size;overflow:auto;}
 .patch-universe-heading {display:flex;align-items:center;gap:14px;}
 .patch-universe-heading h3,.patch-info-heading h3 {margin:0;}
@@ -58,8 +59,8 @@ FIXTURE_CSS = '''
 #config-panel .patch-block.conflict {background:repeating-linear-gradient(135deg,#9b662e,#9b662e 6px,#5d4128 6px,#5d4128 12px)!important;}
 .patch-conflicts {color:#e8b56d;font-size:12px;margin-top:10px;}
 .patch-map-legend {display:flex;gap:20px;font-size:11px;color:#94a6b9;}
-.mvr-layout {display:grid;grid-template-columns:minmax(0,3fr) minmax(220px,2fr);gap:14px;}
-#mvr-plan svg.plan {display:block;width:100%;height:340px;background:#0b121c;border:1px solid #273345;border-radius:4px;}
+.mvr-layout {display:grid;grid-template-columns:minmax(0,1fr);gap:14px;}
+#mvr-plan svg.plan {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .mvr-object {cursor:pointer;}
 #mvr-plan .mvr-object:has(circle) {cursor:grab;}
 #mvr-plan svg.plan {touch-action:none;user-select:none;}
@@ -75,7 +76,7 @@ FIXTURE_CSS = '''
 .plan-legend {display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:11px;color:#94a6b9;}
 .plan-key {display:inline-flex;align-items:center;gap:4px;}
 .plan-key circle {stroke:#e6edf3;stroke-width:1.2;}
-@media (max-width:700px) {.mvr-layout {grid-template-columns:1fr;} #mvr-plan svg.plan {height:260px;}
+@media (max-width:700px) {#mvr-plan svg.plan {height:260px;}
 .patch-workspace,.patch-workspace.has-selection {grid-template-columns:minmax(0,1fr);}
 .patch-library,.patch-map-card,.mvr-card,#fixture-info {grid-column:1;grid-row:auto;contain:none;}}
 #mvr-tree {max-height:340px;overflow:auto;font-size:12px;border:1px solid #273345;border-radius:4px;padding:6px;background:#0b121c;}
@@ -269,6 +270,33 @@ def build_fixture_panel(app, store, snapshot_source):
                         [
                             html.Div(
                                 [
+                                    html.H3('MVR rig'),
+                                    html.Span(id='mvr-summary', className='patch-muted'),
+                                ],
+                                className='patch-heading',
+                            ),
+                            html.P(id='special-groups', className='patch-muted'),
+                            html.Div(
+                                [
+                                    html.Div(id='mvr-plan'),
+                                    html.Div(id='mvr-tree'),
+                                ],
+                                className='mvr-layout',
+                            ),
+                            html.P(
+                                'Plan view, audience at the bottom (MVR -Y downstage), dashed '
+                                'nine-area stage grid over the fixtures; colour is the group, a dashed ring an accent '
+                                'group, arrows the local Y axis (yaw). Click any object or tree '
+                                'node to edit every MVR field.',
+                                className='patch-muted',
+                            ),
+                        ],
+                        className='patch-card mvr-card',
+                    ),
+                    html.Div(
+                        [
+                            html.Div(
+                                [
                                     html.Div(
                                         [
                                             html.H3('DMX universe'),
@@ -322,33 +350,6 @@ def build_fixture_panel(app, store, snapshot_source):
                             ),
                         ],
                         className='patch-card patch-map-card',
-                    ),
-                    html.Div(
-                        [
-                            html.Div(
-                                [
-                                    html.H3('MVR rig'),
-                                    html.Span(id='mvr-summary', className='patch-muted'),
-                                ],
-                                className='patch-heading',
-                            ),
-                            html.P(id='special-groups', className='patch-muted'),
-                            html.Div(
-                                [
-                                    html.Div(id='mvr-plan'),
-                                    html.Div(id='mvr-tree'),
-                                ],
-                                className='mvr-layout',
-                            ),
-                            html.P(
-                                'Plan view, audience at the bottom (MVR -Y downstage), dashed '
-                                'nine-area stage grid over the fixtures; colour is the group, a dashed ring an accent '
-                                'group, arrows the local Y axis (yaw). Click any object or tree '
-                                'node to edit every MVR field.',
-                                className='patch-muted',
-                            ),
-                        ],
-                        className='patch-card mvr-card',
                     ),
                 ],
                 id='fixture-workspace',
