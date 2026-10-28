@@ -200,7 +200,8 @@ pub struct LightingOverride {
     pub pose: Option<Box<FixturePose>>,
 }
 
-/// A rig fixture's placement fields: MVR Matrix, soft limits and focus point position (mm).
+/// A rig fixture's placement and patch fields: MVR Matrix, soft limits, focus point position
+/// (mm), Art-Net universe, DMX start address and profile (its GDTF mode).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixturePose {
@@ -208,6 +209,9 @@ pub struct FixturePose {
     pub pan: MovementRange,
     pub tilt: MovementRange,
     pub focus: Vec<f64>,
+    pub universe: u32,
+    pub address: u32,
+    pub profile_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

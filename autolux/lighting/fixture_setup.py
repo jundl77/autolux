@@ -83,6 +83,31 @@ def channel_occupancy(
     return occupied, errors
 
 
+def pose_refusal(rig: dict, fixture_uuid: str, pose: dict) -> str | None:
+    """Why Starfire's rig copy with this test pose's patch would refuse it, in the rig load's
+    words; a refused command stops the show. `rig` is the running rig as it is published."""
+    fixture = next(f for f in rig['fixtures'] if f['fixture_uuid'] == fixture_uuid)
+    modes = rig['modes'][fixture['gdtf_spec']]
+    if pose['universe'] not in {f['universe'] for f in rig['fixtures']}:
+        return f'universe {pose["universe"] + 1} is not one the show outputs'
+    # The running rig loaded, so every fixture has its one Address on break 0.
+    patched = [
+        {**f, **(pose if f is fixture else {}), 'addresses': [(0,)]} for f in rig['fixtures']
+    ]
+    _, errors = channel_occupancy(patched, rig['modes'], pose['universe'])
+    if errors:
+        return errors[0]
+    running, posed = modes[fixture['gdtf_mode']], modes[pose['gdtf_mode']]
+    if posed['cells'] != running['cells'] or not set(running['attributes']) <= set(
+        posed['attributes']
+    ):
+        return (
+            f'{fixture["name"]}: mode {pose["gdtf_mode"]!r} lacks the cells or attributes of '
+            f'{fixture["gdtf_mode"]!r}; Save and Restart show to test it.'
+        )
+    return None
+
+
 def require_renderable(scene: mvr.Scene) -> list[dict]:
     require_valid(scene)
     fixtures = mvr.patched_fixtures(scene)

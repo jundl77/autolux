@@ -374,13 +374,13 @@ const ROOM_UUID = {
     spot_right: '0BD68C96-850C-57EA-86E0-1780E40FF826',
     zq06017: 'B3F12D06-678A-51FE-AD71-BC2BC260EB9F',
 };
-// A mover's test carries its draft placement: the room hangs both turned to the audience, no
-// soft limits and no MVR Focus.
-const roomPose = (x) => {
+// A mover's test carries its draft placement and patch: the room hangs both turned to the
+// audience, no soft limits and no MVR Focus, in 12ch on universe 1.
+const roomPose = (x, address) => {
     const full = {min: 0, max: 1, inverted: false};
-    return {matrix: [-1, 0, 0, 0, -1, 0, 0, 0, 1, x, 0, 0], pan: full, tilt: full, focus: []};
+    return {matrix: [-1, 0, 0, 0, -1, 0, 0, 0, 1, x, 0, 0], pan: full, tilt: full, focus: [], universe: 0, address, gdtf_mode: '12ch'};
 };
-const ROOM_POSE = {[ROOM_UUID.spot_left]: roomPose(-300), [ROOM_UUID.spot_right]: roomPose(300)};
+const ROOM_POSE = {[ROOM_UUID.spot_left]: roomPose(-300, 1), [ROOM_UUID.spot_right]: roomPose(300, 13)};
 const lightOn = (target, colour, motion) => ({action: 'highlight', target, colour, sweep: motion === 'sweep', aim: motion === 'aim', pose: ROOM_POSE[target.fixture] ?? null});
 const CLEAR = {action: 'highlight', target: null};
 const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
@@ -1263,6 +1263,23 @@ const SUITES = {
         await harness('control', {paused: false});
         await check('locate paused', 'play enables them again', await waitFor(`[...document.querySelectorAll('#fixture-info [data-cfg-test]')].every((b) => !b.disabled)`, 3000)
             && (await note()) === '', {note: await note()});
+
+        // The draft frees 13-24, which the running show still patches to spot_right.
+        await selectFixture('spot_right');
+        await typeInto(cfg('address'), '400');
+        await selectFixture('spot_left');
+        await exactly('locate address', 'Test lights spot_left', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        const at300 = {...lightOn({fixture: ROOM_UUID.spot_left}, 'white'), pose: {...ROOM_POSE[ROOM_UUID.spot_left], address: 300}};
+        await exactly('locate address', 'an Address edit moves the lit test to 300', () => typeInto(cfg('address'), '300'), [at300]);
+        await arm();
+        await watchNote();
+        await typeInto(cfg('address'), '13');
+        await sleep(1500);
+        const refusal = 'Test refused: spot_right overlaps spot_left in universe 1.';
+        await check('locate address', 'the show refuses 13, which spot_right still runs at, and says why',
+            (await since()).length === 0 && (await note()) === refusal, {note: await note(), posted: posted()});
+        await exactly('locate address', 'the keep-alive keeps the test at 300', () => ev('window.__tickKeepAlive()'), [at300]);
+        await exactly('locate address', 'Test clears it', () => click(testButton('test')), [CLEAR]);
         await checkHighlightIds('locate');
     },
 

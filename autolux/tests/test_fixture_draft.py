@@ -67,7 +67,8 @@ def test_fixture_draft_integrity(tmp_path):
         ],
         'poses': {
             fixture['fixture_uuid']: {
-                key: fixture[key] for key in ('matrix', 'pan', 'tilt', 'focus')
+                key: fixture[key]
+                for key in ('matrix', 'pan', 'tilt', 'focus', 'universe', 'address', 'gdtf_mode')
             }
             for fixture in mvr.patched_fixtures(room)
         },

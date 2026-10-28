@@ -224,11 +224,18 @@ def _check_pose(pose) -> None:
 
     if (
         not isinstance(pose, dict)
-        or pose.keys() != {'matrix', 'pan', 'tilt', 'focus'}
+        or pose.keys() != {'matrix', 'pan', 'tilt', 'focus', 'universe', 'address', 'gdtf_mode'}
         or not numbers(pose['matrix'], (12,))
         or not numbers(pose['focus'], (0, 3))
+        or type(pose['universe']) is not int
+        or type(pose['address']) is not int
+        or not 1 <= pose['address'] <= mvr.DMX_UNIVERSE_SIZE
+        or not isinstance(pose['gdtf_mode'], str)
     ):
-        raise ValueError('a pose is {matrix: 12 numbers, pan, tilt, focus: [] or [x, y, z]}')
+        raise ValueError(
+            'a pose is {matrix: 12 numbers, pan, tilt, focus: [] or [x, y, z], universe, '
+            'address, gdtf_mode}'
+        )
     mvr.home_orientation(pose['matrix'])
     for axis in mvr.MOVEMENT_AXES:
         limits = pose[axis]
@@ -264,6 +271,11 @@ def command_refusal(
             fixture = next(f for f in fixtures if f['fixture_uuid'] == command['target']['fixture'])
             if not fixture['pan']:
                 return f'{fixture["name"]} has no pan'
+        if command['pose'] is not None:
+            from autolux.lighting.fixture_setup import pose_refusal
+
+            if refusal := pose_refusal(rig, command['target']['fixture'], command['pose']):
+                return refusal
         if paused:
             return 'the show is paused'
         if (static or {}).get('blackout'):

@@ -42,7 +42,7 @@ const RUNNING = {
 };
 // Each room fixture's MVR uuid by its committed name.
 const FIXTURE_UUID = Object.fromEntries(data.patched.map(([fixture_uuid, name]) => [name, fixture_uuid]));
-// A mover's test carries its placement as the server exports it.
+// A test carries its fixture's placement and patch as the server exports them.
 const POSES = plain(data.poses);
 const posed = (name) => ({ pose: POSES[FIXTURE_UUID[name]] });
 const nodes = function* (tree) {
@@ -558,7 +558,7 @@ test("the first Test click lights Test at once, and a refusal says why", async (
         ds.fixture_patch.renderRig(kinta.key, current, settings);
         model.testControl("test");
         assert.ok(lit());
-        assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "white" });
+        assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "white", ...posed("kinta") });
         model.testControl("test");
         replies.push({ error: "the show is paused", status: 409 });
         model.testControl("test");
@@ -595,11 +595,10 @@ test("only a mover's test row offers Sweep and Aim, which toggle its motion and 
     assert.deepEqual(plain(model.testControl("test")), { action: "highlight", target: null });
 });
 
-test("a mover's test pose is the placement the server exports, and a focus edit adds the MVR FocusPoint", () => {
+test("a test pose is the placement and patch the server exports, and a focus edit adds the MVR FocusPoint", () => {
     const current = draft();
     for (const row of model.fixtureRows(current, settings)) {
-        const pose = model.draftPose(current, settings, row);
-        assert.deepEqual(pose && plain(pose), row.name.startsWith("spot_") ? POSES[row.fixture_uuid] : undefined, row.name);
+        assert.deepEqual(plain(model.draftPose(current, settings, row)), POSES[row.fixture_uuid], row.name);
     }
     const spot = fixtureNode(current, "spot_left");
     // Without a FocusPoint the pane shows the stage centre: the fixtures' plan box centre on the floor.
@@ -661,6 +660,38 @@ test("an edit to the lit mover's yaw or focus re-sends its test with the new pos
     assert.equal(settling().length, 0);
 });
 
+test("an address edit re-sends the lit test at the new address; a refused one keeps the previous pose lit", async () => {
+    const current = draft();
+    const kinta = fixtureNode(current, "kinta");
+    const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
+    // Starts from no test, whatever an earlier test left lit or queued.
+    ds.fixture_patch.renderRig(null, current, settings);
+    timers.clear();
+    replies.length = 0;
+    ds.fixture_patch.renderRig(kinta.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("red");
+    const settling = () => [...timers.values()].filter((timer) => timer.ms === 150);
+    const readdress = (tree, address) => edit(tree, model.patchEdit(tree, settings, kinta.key, "address", String(address)).action)[0];
+    const moved = readdress(current, 300);
+    ds.fixture_patch.renderRig(kinta.key, moved, settings);
+    settling()[0].run();
+    const at300 = { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red", pose: { ...POSES[FIXTURE_UUID.kinta], address: 300 } };
+    assert.deepEqual(plain(commands.at(-1)), at300);
+    await new Promise(setImmediate);
+    // The running rig still patches a fixture where the draft has moved it away.
+    replies.push({ error: "kinta overlaps spot_left in universe 1.", status: 409 });
+    ds.fixture_patch.renderRig(kinta.key, readdress(moved, 400), settings);
+    settling()[0].run();
+    assert.equal(commands.at(-1).pose.address, 400);
+    await new Promise(setImmediate);
+    const [refresh] = [...timers.values()].filter((timer) => timer.ms !== 150);
+    assert.ok(refresh, "the test stays lit");
+    refresh.run();
+    assert.deepEqual(plain(commands.at(-1)), at300);
+    model.testControl("off");
+});
+
 test("Restart show restarts the show only on a second click within 5 s", async () => {
     const sent = commands.length;
     timers.clear();
@@ -698,7 +729,7 @@ test("a lit test follows the selection; late or unanswered replies never turn it
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("red");
     ds.fixture_patch.renderRig(kinta.key, current, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red", ...posed("kinta") });
     await new Promise(setImmediate);
     assert.equal(timers.size, 1, "kinta's keep-alive survives spot_right's late refusal");
     // No answer at all may mean lit: the keep-alive stays and a deselect still clears.
@@ -807,7 +838,7 @@ test("a rename or a name swap keeps each test on its uuid; a new, unapplied fixt
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
     const renamed = rename(current, "kinta", "kinta_new");
     ds.fixture_patch.renderRig(fixtureNode(renamed, "kinta_new").key, renamed, settings);
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red", ...posed("kinta") });
     // A fixture added since the show started has a uuid the show does not know.
     const spec = Object.keys(settings.library).find((name) => name.startsWith("Generic@Dimmer@"));
     const [added, , , fresh] = edit(renamed, null, { trigger: "fixture-add", profile: spec });

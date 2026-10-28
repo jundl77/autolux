@@ -109,10 +109,13 @@ a focus point converges), and the MVR has no FocusPoint; the first edit adds
 one beside the fixture and points the fixture's Focus at it.
 
 Edits reach the lit fixture instantly while testing; Save writes the patch; Restart show makes the
-loops use it. Every test of a mover carries the unsaved placement (Matrix, soft limits, inversion
+loops use it. Every test of a fixture carries the unsaved placement (Matrix, soft limits, inversion
 and focus point), and an edit to it re-sends the lit test within 150 ms, so Aim and Sweep follow a
-yaw, mount or focus change at once. Only the test sees the unsaved pose; the loops keep the rig
-the show loaded.
+yaw, mount or focus change at once. The test carries the unsaved Address, Universe and Mode too, so
+it lights the new slots in the new mode's layout and the old ones go dark; an address that leaves
+the universe or overlaps a fixture where the show runs it, a universe the show does not output, or a
+mode with other cells or fewer attributes is refused in the status line and the previous test
+stays lit. Only the test sees the unsaved pose; the loops keep the rig the show loaded.
 
 Tests pin no geometry from `rig/room.mvr`: they use the frozen copies
 `autolux/tests/data/room.mvr` and `room.rig.pb` (Starfire's tests embed the same `room.rig.pb`),

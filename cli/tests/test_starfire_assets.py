@@ -58,7 +58,7 @@ def test_login_carries_embedded_gdtf_inversion_class_and_scene_matrix(login_asse
     assert list(fixture.matrix[:3]) == [-1, 0, 0]
     assert login.rig.groups[0].group_id == 'movers'
     assert login.rig.groups[0].fixture_uuids == [fixture.fixture_uuid]
-    [profile] = login.rig.profiles
+    [profile] = [profile for profile in login.rig.profiles if profile.dmx_mode == '16 bit']
     assert profile.mode == compile_mode(GDTF_XML, '16 bit')
     assert profile.dmx_mode == '16 bit'
     script = login.autoloops[0]
@@ -297,6 +297,9 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
         'pan': {'min': 0.1, 'max': 0.8, 'inverted': True},
         'tilt': {'min': 0.0, 'max': 1.0, 'inverted': False},
         'focus': [0.0, 2000.0, 0.0],
+        'universe': 0,
+        'address': 300,
+        'gdtf_mode': '12ch',
     }
     looks.highlight({'fixture': ids['spot_left']}, aim=True, pose=pose)
     wash, segment, sweep, aim = (
@@ -314,6 +317,12 @@ def test_the_room_rig_names_every_fixture_and_cell_and_a_highlight_encodes_for_s
         0.1,
         True,
         False,
+    )
+    # The mode reaches Starfire as the profile the login compiled for it.
+    assert (aim.pose.universe, aim.pose.address, aim.pose.profile_id) == (
+        0,
+        300,
+        'Chauvet DJ@Intimidator Spot 110@1.0.gdtf#12ch',
     )
     assert not sweep.HasField('pose')
     assert (wash.fixture, wash.attributes['ColorAdd_UV'].number, wash.duration_seconds) == (

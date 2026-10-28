@@ -735,7 +735,8 @@ async def test_the_show_publishes_the_highlight_and_rig_and_clears_it_with_the_o
             {'fixture_uuid': 'par', 'name': 'front', 'cells': ['par'], 'pan': False},
             {'fixture_uuid': 'bar', 'name': 'strip', 'cells': ['bar/a', 'bar/b'], 'pan': False},
             {'fixture_uuid': 'spot', 'name': 'mover', 'cells': ['spot'], 'pan': True},
-        ]
+        ],
+        'modes': {},
     }
     assert snapshot['mode'] == 'auto'
     assert (await apply({'action': 'highlight', 'target': None}))['highlight'] is None
