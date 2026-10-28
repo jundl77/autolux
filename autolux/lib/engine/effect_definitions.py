@@ -1,6 +1,6 @@
 import math
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 
 
@@ -140,10 +140,24 @@ class ShowSettings:
     strobe_max_burst_seconds: float = STROBE_MAX_BURST_SECONDS
     intensity: float = DEFAULT_INTENSITY
     intensity_auto: bool = False
+    # Inhibitive submasters by rig group, 0..1: Starfire scales the group after the master.
+    # An absent group is at full.
+    group_masters: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self):
         if type(self.intensity_auto) is not bool:
             raise ValueError('intensity_auto must be true or false')
+        if not isinstance(self.group_masters, dict):
+            raise TypeError('group_masters must map group names to levels')
+        # Before sorting, which mixed key types would fail with a bare TypeError.
+        if any(type(group) is not str or not group for group in self.group_masters):
+            raise ValueError('group_masters keys must be group names')
+        masters = {}
+        for group, level in sorted(self.group_masters.items()):
+            if type(level) not in (int, float) or not 0.0 <= level <= 1.0:
+                raise ValueError(f'group master {group} must be within 0..1')
+            masters[group] = float(level)
+        object.__setattr__(self, 'group_masters', masters)
         for name, (low, high) in SHOW_SETTING_RANGES.items():
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value):

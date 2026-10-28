@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -18,6 +19,7 @@ use crate::intensity;
 use crate::model::{Effect, MAX_STROBE_HZ, PropertyValues, RenderContext, Target};
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
+use crate::spatial::MM_PER_METRE;
 
 const MAX_SOURCE_BYTES: usize = 64 * 1024;
 const MAX_CATALOGUE_BYTES: usize = 4 * 1024 * 1024;
@@ -241,7 +243,7 @@ pub struct LuaAutoloop {
     render: Function,
     use_render_intensity: Function,
     instruction_budget: Arc<AtomicU32>,
-    rig: FixtureRig,
+    rig: Rc<FixtureRig>,
     identity: String,
     active_palette_slots: Vec<Table>,
 }
@@ -349,7 +351,9 @@ impl LuaAutoloop {
             Value::Table(active_palette),
             "palettes are read-only",
         )?)?;
-        let targets = rig.clone();
+        // The closures outlive this call and the rig is large: they and the autoloop share one copy.
+        let shared = Rc::new(rig.clone());
+        let targets = Rc::clone(&shared);
         api.set(
             "members",
             lua.create_function(move |lua, value: Value| {
@@ -358,13 +362,95 @@ impl LuaAutoloop {
                 {
                     return lua.create_table();
                 }
-                let members = targets.resolve(&target).map_err(mlua::Error::external)?;
+                let members = targets
+                    .resolve_for_loop(&target)
+                    .map_err(mlua::Error::external)?;
                 if members.len() > MAX_CELLS {
                     return Err(mlua::Error::RuntimeError(
                         "cell target limit exceeded".to_owned(),
                     ));
                 }
                 lua.create_sequence_from(members)
+            })?,
+        )?;
+        let spatial = Rc::clone(&shared);
+        api.set(
+            "mirror",
+            lua.create_function(move |lua, value: Value| {
+                let target: Target = lua.from_value(value)?;
+                let named: Vec<(String, String)> = match &target {
+                    Target::Group(group) => {
+                        spatial
+                            .refuse_accent_group(group)
+                            .map_err(mlua::Error::external)?;
+                        spatial
+                            .spatial()
+                            .mirror(group)
+                            .map(<[_]>::to_vec)
+                            .unwrap_or_default()
+                    }
+                    // A fixture's cells share its position, so only their order can pair them.
+                    _ => {
+                        let members = spatial
+                            .resolve_for_loop(&target)
+                            .map_err(mlua::Error::external)?;
+                        crate::spatial::rank_pairs(members.len())
+                            .into_iter()
+                            .map(|(left, right)| (members[left].clone(), members[right].clone()))
+                            .collect()
+                    }
+                };
+                let fixture = |id: &str| -> mlua::Result<Table> {
+                    let table = lua.create_table()?;
+                    table.set("fixture", id)?;
+                    Ok(table)
+                };
+                lua.create_sequence_from(
+                    named
+                        .iter()
+                        .map(|(left, right)| {
+                            lua.create_sequence_from([fixture(left)?, fixture(right)?])
+                        })
+                        .collect::<mlua::Result<Vec<_>>>()?,
+                )
+            })?,
+        )?;
+        // MVR millimetres become metres here, at the Lua boundary only.
+        let located = |rig: Rc<FixtureRig>| {
+            move |value: &Value| -> mlua::Result<[f64; 3]> {
+                let position = cell_fact(value, |id| rig.spatial().position(id))?;
+                Ok(position.map(|mm| mm / MM_PER_METRE))
+            }
+        };
+        let position = located(Rc::clone(&shared));
+        api.set(
+            "position",
+            lua.create_function(move |_, cell: Value| {
+                let [x, y, z] = position(&cell)?;
+                Ok((x, y, z))
+            })?,
+        )?;
+        let position = located(Rc::clone(&shared));
+        api.set(
+            "distance",
+            lua.create_function(move |_, (cell, x, y): (Value, f64, f64)| {
+                let [cell_x, cell_y, _] = position(&cell)?;
+                Ok((cell_x - x).hypot(cell_y - y))
+            })?,
+        )?;
+        let areas = Rc::clone(&shared);
+        api.set(
+            "zone",
+            lua.create_function(move |_, cell: Value| {
+                // Rig load refuses an unspecified area, so every known cell has a placement.
+                cell_fact(&cell, |id| areas.spatial().area(id)?.placement())
+            })?,
+        )?;
+        let fixtures = Rc::clone(&shared);
+        api.set(
+            "fixture_of",
+            lua.create_function(move |_, cell: Value| {
+                cell_fact(&cell, |id| fixtures.fixture_of(id).map(str::to_owned))
             })?,
         )?;
         globals.set("sf", api)?;
@@ -384,7 +470,7 @@ impl LuaAutoloop {
             render,
             use_render_intensity,
             instruction_budget,
-            rig: rig.clone(),
+            rig: shared,
             identity,
             active_palette_slots,
         })
@@ -465,7 +551,11 @@ impl LuaAutoloop {
             _ => true,
         });
         for effect in &effects {
-            for id in self.rig.resolve(&effect.target)? {
+            let cells = self
+                .rig
+                .resolve_for_loop(&effect.target)
+                .with_context(|| format!("autoloop {} failed", self.identity))?;
+            for id in cells {
                 self.rig
                     .validate_attributes(&id, &effect.values.attributes)?;
             }
@@ -473,6 +563,23 @@ impl LuaAutoloop {
         }
         Ok(effects)
     }
+}
+
+/// A cell (or fixture) name, given bare or as the `sf.fixture` target `sf.each` hands out.
+fn cell_name(value: &Value) -> mlua::Result<String> {
+    match value {
+        Value::String(id) => Ok(id.to_str()?.to_owned()),
+        Value::Table(target) => target.get::<String>("fixture"),
+        _ => Err(mlua::Error::RuntimeError(
+            "expected a cell name or sf.fixture target".to_owned(),
+        )),
+    }
+}
+
+/// What the rig knows about the cell Lua names, which must exist.
+fn cell_fact<T>(value: &Value, fact: impl FnOnce(&str) -> Option<T>) -> mlua::Result<T> {
+    let id = cell_name(value)?;
+    fact(&id).ok_or_else(|| mlua::Error::RuntimeError(format!("unknown cell {id}")))
 }
 
 fn read_only(lua: &Lua, value: Value, error: &'static str) -> mlua::Result<Table> {

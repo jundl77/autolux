@@ -86,6 +86,7 @@ def require_renderable(scene: mvr.Scene) -> list[dict]:
     require_valid(scene)
     fixtures = mvr.patched_fixtures(scene)
     _, errors = channel_occupancy(fixtures, rig_modes(scene), 0)
+    errors += mvr.group_roles(fixtures)[1]
     if errors:
         raise ValueError(errors[0])
     return fixtures

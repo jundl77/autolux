@@ -411,6 +411,7 @@ FX_GROUP = {
     'speed': True,
     'pulse': True,
     'pattern': False,
+    'role': 'accent',
 }
 SPIN = Special(
     'spin',
@@ -482,27 +483,43 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
     ]
 
 
-async def test_each_intent_gets_its_catalogue_row_and_breakdown_releases_it():
-    controller, lighting, _ = with_specials(discover_specials())
-    sent = []
-    for intent in (LightIntent.ATMOSPHERIC, LightIntent.BUILDUP, LightIntent.BREAKDOWN):
+async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accent():
+    controller, lighting, clock = with_specials(discover_specials())
+    textures = []
+    for _ in range(3):
         start = len(lighting.events)
-        await controller.change_effect(intent)
-        sent.append(accents(lighting, start))
-    [atmospheric], [buildup], [breakdown] = sent
-    assert atmospheric['value']['target'] == {'group': 'fx'}
-    assert atmospheric['value']['special_fx']['attack_beats'] == 32.0
-    assert buildup['value']['id'] == SPECIAL_ID
-    assert buildup['value']['special_fx']['attack_beats'] == 128.0
-    assert breakdown == {'kind': 'clear_override', 'id': SPECIAL_ID}
+        await controller.change_effect(LightIntent.ATMOSPHERIC)
+        textures += [c['value']['special_fx']['colour_slot'] for c in accents(lighting, start)]
+        await controller.change_effect(LightIntent.BUILDUP)
+    # The first texture rests fx for 240 s, so neither texture plays again inside it.
+    assert len(textures) == 1
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.DROP)
+    assert [c['value']['id'] for c in accents(lighting, start)] == [DROP_ACCENT_ID]
+    clock.advance(240)
+    start = len(lighting.events)
+    await controller.change_effect(LightIntent.BREAKDOWN)
+    assert accents(lighting, start)[0]['kind'] == 'set_override'
 
+    clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
     spin, strobe = accents(lighting, start)
     assert spin['value']['id'] == SPECIAL_ID
+    assert spin['value']['target'] == {'group': 'fx'}
     assert spin['value']['special_fx']['pulse_beats'] == 1
     assert strobe['value']['id'] == DROP_ACCENT_ID
     assert strobe['value']['values'] == {'strobe_hz': STROBE_RATE_HZ}
+
+
+async def test_a_soft_drop_keeps_the_strobe_but_plays_no_intense_special(caplog):
+    controller, lighting, _ = with_specials([SPIN, DROP_STROBE])
+    soft = SelectionContext(LightIntent.DROP, arrival_of_peak=0.6)
+    with caplog.at_level(logging.INFO):
+        await controller.change_effect(LightIntent.DROP, context=soft)
+    [strobe] = accents(lighting)
+    assert strobe['value']['id'] == DROP_ACCENT_ID
+    assert 'intense special suppressed | drop arrival 0.60 below 0.90' in caplog.text
 
 
 async def test_a_strobe_row_releases_the_running_special_before_it_bursts():
@@ -574,12 +591,12 @@ async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups(
 
 
 async def test_an_intense_special_starts_the_strobe_cooldown_the_dashboard_counts_down():
-    clock = VirtualClock()
-    buffer = EventBuffer(clock=clock)
+    buffer = EventBuffer(clock=VirtualClock())
     buffer.start()
     settings = ShowSettings(intensity=0.7, drop_strobe_cooldown_seconds=60)
-    buffer.set_control_state(paused=False, master_brightness=1.0, settings=settings.to_dict())
-    controller, _, _ = with_specials([SPIN], settings=settings, event_buffer=buffer)
+    controller, _, clock = with_specials(
+        discover_specials(), settings=settings, event_buffer=buffer
+    )
     assert buffer.snapshot()['strobe_cooldown_seconds'] == 0.0
     await controller.change_effect(LightIntent.DROP)
     clock.advance(19.0)
@@ -806,3 +823,53 @@ async def test_a_calm_swap_during_a_drop_reaches_the_snapshot_with_the_real_inte
         'calm',
     )
     assert after['intent'] == 'drop'
+
+
+async def test_the_snapshot_carries_each_special_cooldown_on_the_engine_clock():
+    texture = Special(
+        'drift',
+        (LightIntent.ATMOSPHERIC,),
+        'fx',
+        colour_slot='cold',
+        energy=0.3,
+        speed=0.1,
+        cooldown_seconds=240,
+    )
+    clock = VirtualClock()
+    buffer = EventBuffer(clock=clock)
+    buffer.start()
+    controller = EffectController(
+        RecordingStarfireClient(clock=clock, groups=(FX_GROUP,)),
+        event_buffer=buffer,
+        clock=clock,
+        settings=lambda: BALANCED,
+        specials=[texture, SPIN, DROP_STROBE],
+    )
+
+    def cooldowns():
+        return {row['group']: row for row in buffer.snapshot()['special_cooldowns']}
+
+    before = cooldowns()
+    assert set(before) == {'fx', 'all', 'venue'}
+    assert before['fx']['last'] is None
+    assert all(row['ready'] and row['remaining_seconds'] == 0.0 for row in before.values())
+    await controller.change_effect(LightIntent.DROP)
+    clock.advance(10.0)
+    first = cooldowns()
+    clock.advance(30.0)
+    later = cooldowns()
+    # Spin sets no cooldown of its own, so fx is free at once; the strobe waits out the shared one.
+    assert (first['fx']['last'], first['fx']['ready']) == ('spin', True)
+    assert first['all']['last'] == 'strobe_burst'
+    assert first['venue']['label'] == 'venue · accents 1/2'
+    assert first['all']['cooldown_seconds'] == pytest.approx(60.0)
+    assert first['all']['remaining_seconds'] == pytest.approx(50.0)
+    assert later['all']['remaining_seconds'] == pytest.approx(20.0)
+    assert not later['all']['ready']
+    await controller.change_effect(LightIntent.ATMOSPHERIC)
+    clock.advance(100.0)
+    rested = cooldowns()['fx']
+    assert (rested['last'], rested['cooldown_seconds']) == ('drift', 240)
+    assert rested['remaining_seconds'] == pytest.approx(140.0)
+    clock.advance(140.0)
+    assert all(row['ready'] for row in cooldowns().values())

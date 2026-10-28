@@ -260,7 +260,7 @@ class AutoluxController:
         from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
         from autolux.lib.engine.effect_controller import EffectController
         from autolux.lib.engine.light_engine import LightEngine
-        from autolux.lighting.special_catalogue import discover_specials
+        from autolux.lighting.special_catalogue import discover_specials, read_venue
 
         self.lighting_client = lighting_client
         self.enable_ui: bool = enable_ui
@@ -316,6 +316,7 @@ class AutoluxController:
             autoloop_meta=autoloop_meta,
             seed=selection_seed,
             specials=discover_specials(),
+            venue=read_venue(),
         )
         self.light_engine: LightEngine = LightEngine(
             self.lighting_client,

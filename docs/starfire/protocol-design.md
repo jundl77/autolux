@@ -27,6 +27,7 @@ It is shared by Login's initial settings and runtime updates.
 | `ANIMATION_SPEED` | Number, 0..8; animation rate independent of musical phase. |
 | `OUTPUT_BLACKOUT` | Boolean; final darkness gate. |
 | `AUDIO_RMS_NORMALIZED` | Number, 0..1; measured RMS, unknown until supplied. |
+| `GROUP_MASTER` | Number, 0..1, with `group` naming a rig group; inhibitive submaster (protocol 3.2). Same perceptual curve as the global master; scales intensity, and colour on fixtures without a Dimmer; pan, tilt and gobo untouched; inhibitive like grandMA3's Group Master. |
 
 Unknown parameter types, wrong value types and invalid ranges are rejected.
 There are no arbitrary parameter names or autoloop-owned parameters.

@@ -56,10 +56,21 @@ FIXTURE_CSS = '''
 .patch-conflicts {color:#e8b56d;font-size:12px;margin-top:10px;}
 .patch-map-legend {display:flex;gap:20px;font-size:11px;color:#94a6b9;}
 .mvr-layout {display:grid;grid-template-columns:minmax(0,3fr) minmax(220px,2fr);gap:14px;}
-#mvr-plan svg {width:100%;height:340px;background:#0b121c;border:1px solid #273345;border-radius:4px;}
+#mvr-plan svg.plan {display:block;width:100%;height:340px;background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .mvr-object {cursor:pointer;}
+#mvr-plan .plan circle {stroke:#e6edf3;}
+#mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
+#mvr-plan .plan-object.hollow {fill:none;}
 #mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
-#mvr-plan text {fill:#a9bbcf;font-size:10px;pointer-events:none;}
+#mvr-plan .plan-areas {stroke:#3b4d62;}
+#mvr-plan .plan-area-name {fill:var(--muted);}
+#mvr-plan .plan-stage-edge {stroke:#6d7f95;}
+#mvr-plan .plan-scale line {stroke:#a9bbcf;}
+#mvr-plan text {fill:#a9bbcf;pointer-events:none;}
+.plan-legend {display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:11px;color:#94a6b9;}
+.plan-key {display:inline-flex;align-items:center;gap:4px;}
+.plan-key circle {stroke:#e6edf3;stroke-width:1.2;}
+@media (max-width:700px) {.mvr-layout {grid-template-columns:1fr;} #mvr-plan svg.plan {height:260px;}}
 #mvr-tree {max-height:340px;overflow:auto;font-size:12px;border:1px solid #273345;border-radius:4px;padding:6px;background:#0b121c;}
 #mvr-tree .mvr-tree-row,.mvr-editor .mvr-link {cursor:pointer;color:#c9d7e6;padding:2px 4px;border-radius:3px;white-space:nowrap;}
 #mvr-tree .mvr-tree-row:hover,.mvr-editor .mvr-link:hover {background:#1b2938;}
@@ -284,8 +295,10 @@ def build_fixture_panel(app, store):
                                 className='mvr-layout',
                             ),
                             html.P(
-                                'Top view, +Y up; arrows show each object\'s local Y axis. Click '
-                                'any object or tree node to edit every MVR field.',
+                                'Plan view, audience at the bottom (MVR -Y downstage), dashed '
+                                'nine-area stage grid over the fixtures; colour is the group, a dashed ring an accent '
+                                'group, arrows the local Y axis (yaw). Click any object or tree '
+                                'node to edit every MVR field.',
                                 className='patch-muted',
                             ),
                         ],
@@ -310,6 +323,7 @@ def build_fixture_panel(app, store):
                     'maxQuantity': MAX_ADD_QUANTITY,
                     'columns': MAP_COLUMNS,
                     'colors': FIXTURE_COLORS,
+                    'accentRole': mvr_schema.ACCENT_ROLE,
                 },
             ),
             dcc.Store(id='fixture-revision', data=revision),

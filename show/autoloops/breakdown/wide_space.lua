@@ -19,7 +19,7 @@ end
 return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
         local reach = sf.lerp(0.5, 1, energy)
         local pan = PAN_SWING * reach * sf.osc.sine(beat, LOOP_BEATS, -1, 1)
@@ -36,7 +36,7 @@ return {
             end),
             sf.colour(sf.group("movers"), palette.cold),
             sf.each(sf.group("movers"), function(mover, index)
-                local side = index % 2 == 1 and -1 or 1
+                local side = sf.side(index)
                 return {
                     sf.pan_tilt(mover, CENTRE_PAN + side * pan, tilt),
                     sf.dimmer(mover, MOVER_LEVEL * level)

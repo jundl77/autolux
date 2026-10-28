@@ -47,8 +47,25 @@ reversed. This is how the room spots are entered. Standing on the floor: `Rx(180
 `{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` (Config: pitch 0, roll 180, yaw 180 as decomposed) →
 yaw 180 and reversed. The inspector shows the derived home under each Matrix.
 
-Sheared, mirrored or degenerate matrices are rejected. The Config plan is a top view
-(+Y up); each arrow is the object's local Y axis.
+Sheared, mirrored or degenerate matrices are rejected.
+
+## Plan and stage directions
+
+MVR fixes the frame but names no audience side and gives its origin no meaning; Autolux reads
+the plan as GDTF draws a device, with the audience as the viewer (-X house left, -Y downstage;
+the standard texts are quoted at `stage_areas` in `cli/starfire_assets.py`). Each fixture's
+`StageArea` is its cell of the nine-area stage grid over the rig's bounding box: X and Y cut
+into equal thirds, a fixture on a cut in the centre third, an axis without extent all centre.
+Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.
+The Config rig map is a standard plot from the same draft: plan view, audience at the bottom,
+the dashed nine-area grid over the fixtures' bounding box, the stage edge at the most downstage
+object, a 1-2-5 metre scale
+bar, one ring per fixture coloured by group (golden-angle hues past the configured six) and
+dashed for an accent-layer group, an arrow along the local Y axis (yaw), and a legend. Names
+label the marks up to 48 fixtures; past that marks shrink with density and names move to the
+hover/tap title, which keeps a 500-fixture map under 200 KB. It redraws whenever the draft
+changes, and reads positions only; the MVR changes only through the Config editor's writer.
 
 ## Validation on save
 

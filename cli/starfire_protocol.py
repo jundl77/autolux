@@ -5,8 +5,26 @@ import struct
 
 from google.protobuf.message import Message
 
+from autolux.lighting.mvr_schema import ACCENT_ROLE, DEPTHS, LOOP_ROLE, ZONES
+from proto.starfire import rig_pb2 as rig_wire
 from proto.starfire import starfire_pb2 as wire
 
+ROLE_NAMES = {rig_wire.GROUP_ROLE_LOOP: LOOP_ROLE, rig_wire.GROUP_ROLE_ACCENT: ACCENT_ROLE}
+# Rows run downstage to upstage (DEPTHS), columns house left to right (ZONES).
+STAGE_AREAS = (
+    (
+        rig_wire.STAGE_AREA_DOWN_LEFT,
+        rig_wire.STAGE_AREA_DOWN_CENTRE,
+        rig_wire.STAGE_AREA_DOWN_RIGHT,
+    ),
+    (rig_wire.STAGE_AREA_CENTRE_LEFT, rig_wire.STAGE_AREA_CENTRE, rig_wire.STAGE_AREA_CENTRE_RIGHT),
+    (rig_wire.STAGE_AREA_UP_LEFT, rig_wire.STAGE_AREA_UP_CENTRE, rig_wire.STAGE_AREA_UP_RIGHT),
+)
+AREA_PLACES = {
+    area: (zone, depth)
+    for depth, row in zip(DEPTHS, STAGE_AREAS, strict=True)
+    for zone, area in zip(ZONES, row, strict=True)
+}
 MAX_LOGIN_BYTES = 4 * 1024 * 1024
 MAX_MESSAGE_BYTES = 4 * 1024
 MAX_COMMAND_ID = (1 << 64) - 1
@@ -57,6 +75,7 @@ PARAMETERS = {
     'set_strobe_max_burst_seconds': (wire.STROBE_MAX_BURST_SECONDS, 'seconds', 'number'),
     'set_palette': (wire.PALETTE, 'name', 'text'),
     'set_intensity': (wire.INTENSITY, 'level', 'number'),
+    'set_group_master': (wire.GROUP_MASTER, 'level', 'number'),
 }
 
 
@@ -96,6 +115,8 @@ def build_command(command: dict | Message) -> Message:
                 setting = wire.Parameter(type=parameter, **{value_type: value.pop(field)})
                 if kind == 'set_master':
                     setting.fade_seconds = value.pop('fade_seconds', 0.0)
+                if kind == 'set_group_master':
+                    setting.group = value.pop('group')
                 message = wire.SetParameter(parameter=setting)
                 if value:
                     raise ValueError('Parameter command contains unexpected fields')
@@ -197,17 +218,25 @@ def _special_fx(value):
 
 
 def login_groups(reply) -> list[dict]:
-    return [
-        {
-            'name': group.name,
-            'cell_count': group.cell_count,
-            'colour': group.colour,
-            'speed': group.speed,
-            'pulse': group.pulse,
-            'pattern': group.pattern,
-        }
-        for group in reply.groups
-    ]
+    groups = []
+    for group in reply.groups:
+        # An absent area (the members' areas differ) reads as UNSPECIFIED, which has no place.
+        zone, depth = AREA_PLACES.get(group.area, (None, None))
+        groups.append(
+            {
+                'name': group.name,
+                'cell_count': group.cell_count,
+                'colour': group.colour,
+                'speed': group.speed,
+                'pulse': group.pulse,
+                'pattern': group.pattern,
+                'role': ROLE_NAMES[group.role],
+                'zone': zone,
+                'depth': depth,
+                'x': group.centre_x_metres,
+            }
+        )
+    return groups
 
 
 def encode_command(message: Message) -> bytes:

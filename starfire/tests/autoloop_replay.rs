@@ -648,7 +648,7 @@ fn palettes_swap_by_name_and_grid_helpers_follow_the_bar() {
         assert(sf.phrase_phase(8, 4) == 0.5 and sf.phrase_phase(16, 4) == 0)
         assert(sf.on_beat(3, 0.5) == 1 and sf.on_beat(3.5, 0.5) == 0)
         assert(sf.on_beat(3.5, 0.25, 0.5) == 1 and sf.on_beat(3.25, 0.25, 0.5) == 0)
-        assert(sf.side(1) == -1 and sf.side(2) == 1)
+        assert(sf.side(1, 2) == -1 and sf.side(2, 2) == 1)
         local mid = sf.mix(sf.rgb(0, 0, 1), sf.rgb(1, 0, 0), 0.25)
         assert(mid.red == 0.25 and mid.green == 0 and mid.blue == 0.75)
         return { render = function(ctx)

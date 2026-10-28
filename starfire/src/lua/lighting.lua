@@ -66,12 +66,15 @@ end
 local render_intensity = 1
 -- The depth curve lives in Rust (starfire::intensity) so pulse and movement share one table.
 local render_pulse_depth = 1
+local each_count
 
 local function use_render_intensity(intensity, pulse_depth)
     assert(finite(intensity) and intensity >= 0 and intensity <= 1, "intensity must be within 0..1")
     assert(finite(pulse_depth) and pulse_depth >= 0 and pulse_depth <= 1, "pulse depth must be within 0..1")
     render_intensity = intensity
     render_pulse_depth = pulse_depth
+    -- Loops cannot pcall, so an error inside sf.each ends the frame; a new frame starts outside one.
+    each_count = nil
 end
 
 function sf.on_beat(ctx_or_beats, width, period)
@@ -84,10 +87,22 @@ function sf.on_beat(ctx_or_beats, width, period)
     return remaining * remaining * render_pulse_depth
 end
 
-local LEFT, RIGHT = -1, 1
-function sf.side(index) return index % 2 == 1 and LEFT or RIGHT end
+local LEFT, CENTRE, RIGHT = -1, 0, 1
+-- Group members run left to right (Autolux orders them by MVR position), so the side is the
+-- member's half of the group, an odd middle at the centre. Inside sf.each the count defaults
+-- to that group's size.
+function sf.side(index, count)
+    count = count or each_count
+    assert(math.type(index) == "integer" and math.type(count) == "integer"
+        and index >= 1 and index <= count, "side needs a member index within 1..count")
+    if 2 * index == count + 1 then return CENTRE end
+    return 2 * index <= count and LEFT or RIGHT
+end
 
 local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
+
+-- The measured RMS, or a typical level before any is measured.
+function sf.energy(ctx) return ctx.normalized_rms_level or UNMEASURED_RMS end
 
 function sf.loudness_gain(rms)
     rms = rms or UNMEASURED_RMS
@@ -147,12 +162,18 @@ function sf.scene(effects)
     return result
 end
 
+-- sf.mirror(target) is native: partners by reflection about the stage centreline, derived
+-- once at rig load (starfire::spatial).
+
 function sf.each(target, make_effect)
-    local result = {}
+    -- A nested sf.each sides by its own group, then hands the outer group's size back.
+    local result, outer_count = {}, each_count
     local members = sf.members(target)
+    each_count = #members
     for index, name in ipairs(members) do
         result[#result + 1] = make_effect(sf.fixture(name), index, #members)
     end
+    each_count = outer_count
     return sf.scene(result)
 end
 

@@ -17,7 +17,7 @@ return {
         local beat = ctx.beat_position % LOOP_BEATS
         local elapsed = ctx.autoloop_elapsed_beats
         local ramp = math.min(elapsed / RAMP_BEATS, 1)
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local on_the_one = sf.beat_in_bar(beat) < 1

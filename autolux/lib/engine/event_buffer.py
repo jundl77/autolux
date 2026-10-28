@@ -4,6 +4,7 @@ import copy
 import math
 import threading
 from collections import deque
+from collections.abc import Callable
 
 from autolux.lib.clock import SYSTEM_CLOCK, Clock
 from autolux.lib.telemetry_history import TelemetryHistory
@@ -48,7 +49,8 @@ class EventBuffer:
         self._palette: dict | None = None
         self._special: dict | None = None
         self._special_groups: dict[str, list[str]] = {}
-        self._intense_at: float | None = None
+        self._group_roles: dict[str, str] = {}
+        self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
         self._system_health: dict = {}
         self._system_history = TelemetryHistory()
@@ -193,26 +195,16 @@ class EventBuffer:
             if duration_seconds is not None:
                 self._special['end'] = self.elapsed() + duration_seconds
 
-    def set_special_groups(self, groups: dict[str, list[str]]) -> None:
+    def set_special_groups(
+        self, groups: dict[str, list[str]], roles: dict[str, str] | None = None
+    ) -> None:
         with self._lock:
             self._special_groups = copy.deepcopy(groups)
+            self._group_roles = dict(roles or {})
 
-    def mark_intense(self) -> None:
+    def set_cooldown_source(self, source: Callable[[], list[dict]]) -> None:
         with self._lock:
-            self._intense_at = self.elapsed()
-
-    def _strobe_cooldown_seconds(self, now: float) -> float | None:
-        from autolux.lib.engine.effect_controller import drop_strobe_cooldown_seconds
-        from autolux.lib.engine.effect_definitions import ShowSettings
-
-        # From the live settings, so a new intensity level shows at once.
-        try:
-            settings = ShowSettings.from_dict(self._control_state['settings'])
-        except (TypeError, ValueError):
-            return None
-        if self._intense_at is None:
-            return 0.0
-        return max(0.0, drop_strobe_cooldown_seconds(settings) - (now - self._intense_at))
+            self._cooldown_source = source
 
     def set_track(self, track: dict) -> None:
         with self._lock:
@@ -262,6 +254,9 @@ class EventBuffer:
         return recent
 
     def snapshot(self) -> dict:
+        # Outside the lock: the source reads the controller's settings and clock.
+        source = self._cooldown_source
+        cooldowns = source() if source is not None else []
         with self._lock:
             now = self.elapsed()
             cutoff = now - min(self._window_sec, self.SNAPSHOT_WINDOW_SEC + self._look_ahead_sec)
@@ -296,7 +291,11 @@ class EventBuffer:
                     else dict(self._special)
                 ),
                 'special_groups': copy.deepcopy(self._special_groups),
-                'strobe_cooldown_seconds': self._strobe_cooldown_seconds(now),
+                'group_roles': dict(self._group_roles),
+                'strobe_cooldown_seconds': next(
+                    (row['remaining_seconds'] for row in cooldowns if row.get('strobe')), None
+                ),
+                'special_cooldowns': cooldowns,
                 'track': copy.deepcopy(self._track),
                 'system': copy.deepcopy(self._system_health),
                 'system_history': self._system_history.snapshot(),

@@ -15,6 +15,7 @@ const SCANNER: std::ops::Range<usize> = 10..16;
 
 fn synthetic_rig() -> wire::RigDefinition {
     let fixture = |id: &str, profile: &str, address| wire::Fixture {
+        area: wire::StageArea::Centre as i32,
         fixture_id: id.into(),
         profile_id: profile.into(),
         universe: 0,
@@ -24,6 +25,7 @@ fn synthetic_rig() -> wire::RigDefinition {
     let group = |id: &str, members: &[&str]| wire::FixtureGroup {
         group_id: id.into(),
         fixture_ids: members.iter().map(|member| (*member).into()).collect(),
+        ..Default::default()
     };
     let profile = |id: &str, source: &str| support::compiled_profile(source, id);
     wire::RigDefinition {
@@ -135,6 +137,9 @@ fn capabilities_follow_each_profiles_attribute_families() {
         speed,
         pulse,
         pattern,
+        // Every synthetic fixture lies in the centre area.
+        area: Some(wire::StageArea::Centre as i32),
+        ..Default::default()
     };
     assert_eq!(
         capabilities(&rig),
@@ -166,6 +171,21 @@ fn the_real_rig_reports_what_its_profiles_declare() {
             ("movers".to_owned(), 2, [true, true, true, false]),
             ("strip".to_owned(), 8, [true, false, false, false]),
             ("wash".to_owned(), 4, [true, false, false, false]),
+        ]
+    );
+    // The washes span three areas (CENTRE_LEFT, CENTRE, CENTRE_RIGHT), so they report none.
+    let places: Vec<_> = capabilities(&rig)
+        .into_iter()
+        .map(|group| (group.area.map(|_| group.area()), group.centre_x_metres))
+        .collect();
+    use wire::StageArea as A;
+    assert_eq!(
+        places,
+        [
+            (Some(A::UpCentre), 0.0),
+            (Some(A::UpCentre), 0.0),
+            (Some(A::DownCentre), 0.0),
+            (None, 0.0),
         ]
     );
 }
@@ -322,6 +342,7 @@ fn an_absent_group_renders_nothing_and_low_intensity_gates_pulse_but_only_slows_
                 r#type: wire::ParameterType::Intensity as i32,
                 value: Some(wire::parameter::Value::Number(0.2)),
                 fade_seconds: 0.0,
+                ..Default::default()
             }),
         }),
     );
@@ -479,6 +500,7 @@ fn parameter(kind: wire::ParameterType, value: f64) -> ClientMessage {
             r#type: kind as i32,
             value: Some(wire::parameter::Value::Number(value)),
             fade_seconds: 0.0,
+            ..Default::default()
         }),
     })
 }

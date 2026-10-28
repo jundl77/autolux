@@ -186,7 +186,6 @@ pub struct LightingOverride {
     pub lifetime: OverrideLifetime,
     #[serde(default)]
     pub priority: i32,
-    #[serde(default)]
     pub special_fx: Option<Box<SpecialFx>>,
 }
 
@@ -195,7 +194,6 @@ pub struct LightingOverride {
 pub enum Command {
     Beat {
         beat_index: u64,
-        #[serde(default)]
         bar_phase: Option<u32>,
         beats_per_bar: u32,
         bpm: f64,
@@ -243,6 +241,11 @@ pub enum Command {
         name: String,
     },
     SetIntensity {
+        level: f64,
+    },
+    /// An inhibitive submaster: scales the group's rendered output, never raises it.
+    SetGroupMaster {
+        group: String,
         level: f64,
     },
     Stop,

@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 
 use starfire::engine::{Engine, perceptual_to_linear_master};
+use starfire::fixtures::FixtureRig;
 use starfire::model::{
     Command, LightingOverride, OverrideLifetime, PropertyValues, Rgb, Target, Transition,
 };
@@ -1259,6 +1260,10 @@ fn the_burst_cap_releases_a_timed_strobe_override_before_its_own_lifetime() {
 }
 
 fn room_engine(scripts: &[(&str, &str)]) -> Engine {
+    engine_on(support::room(), scripts)
+}
+
+fn engine_on(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
     let directory = tempfile::tempdir().unwrap();
     fs::create_dir(directory.path().join("test")).unwrap();
     for (name, source) in scripts {
@@ -1269,7 +1274,7 @@ fn room_engine(scripts: &[(&str, &str)]) -> Engine {
         .unwrap();
     }
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
-    let mut engine = Engine::new(support::room(), catalog, support::palettes()).unwrap();
+    let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     engine
         .apply(
             0.0,
@@ -1285,20 +1290,42 @@ fn room_engine(scripts: &[(&str, &str)]) -> Engine {
 }
 
 #[test]
+fn a_loop_on_all_leaves_the_accent_fixtures_dark() {
+    let room = support::room();
+    let mut engine = room_engine(&[(
+        "lit",
+        "return {render=function(ctx) return {sf.dimmer(sf.all(), 1)} end}",
+    )]);
+    select(&mut engine, 0.0, "lit", Transition::Cut);
+    let states = engine
+        .render_at(0.0)
+        .unwrap()
+        .fixture_properties_before_strobe;
+    assert_eq!(states[&room.groups()["wash"][0]].intensity, 1.0);
+    for cell in &room.groups()["fx"] {
+        assert_eq!(states[cell].intensity, 0.0, "{cell}");
+    }
+}
+
+#[test]
 fn a_crossfade_takes_the_target_preset_from_its_start_and_ramps_numeric_attributes() {
     use starfire::model::AttributeValue;
-    let fx_fixture = support::room().groups()["fx"][0].clone();
-    let mut engine = room_engine(&[
-        ("empty", "return {render=function(ctx) return {} end}"),
-        (
-            "still",
-            "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
-        ),
-        (
-            "spin",
-            "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
-        ),
-    ]);
+    let rig = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
+    let fx_fixture = rig.groups()["fx"][0].clone();
+    let mut engine = engine_on(
+        rig,
+        &[
+            ("empty", "return {render=function(ctx) return {} end}"),
+            (
+                "still",
+                "return {render=function(ctx) return {sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 0)} end}",
+            ),
+            (
+                "spin",
+                "return {render=function(ctx) return sf.scene {sf.channel_preset(sf.group('fx'), 'Color1', 'Red'), sf.physical_attribute(sf.group('fx'), 'Effects1PosRotate', 160)} end}",
+            ),
+        ],
+    );
     let red = AttributeValue::Preset("Red".into());
     select(&mut engine, 0.0, "empty", Transition::Cut);
     select(
@@ -1709,4 +1736,76 @@ fn intensity_outside_zero_to_one_is_rejected() {
     for level in [-0.1, 1.1, f64::NAN] {
         assert!(engine.apply(0.0, &Command::SetIntensity { level }).is_err());
     }
+}
+
+fn group_master(group: &str, level: f64) -> starfire::protocol::wire::Parameter {
+    use starfire::protocol::wire;
+    wire::Parameter {
+        r#type: wire::ParameterType::GroupMaster as i32,
+        value: Some(wire::parameter::Value::Number(level)),
+        group: group.into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_half_group_master_dims_only_that_groups_output_on_the_master_curve() {
+    let mut engine = room_engine(&[(
+        "lit",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8), sf.colour(sf.all(), sf.rgb(1, 0.5, 0))} end}",
+    )]);
+    select(&mut engine, 0.0, "lit", Transition::Cut);
+    set_master_instantly(&mut engine, 0.5);
+    let before = engine.render_at(0.0).unwrap();
+    engine
+        .set_parameter(0.0, &group_master("wash", 0.5))
+        .unwrap();
+    let capped = engine.render_at(0.0).unwrap();
+    let wash = support::room().groups()["wash"].clone();
+    for (cell, state) in &before.fixture_properties_before_strobe {
+        let expected = if wash.contains(cell) {
+            state.intensity * perceptual_to_linear_master(0.5)
+        } else {
+            state.intensity
+        };
+        near(
+            capped.fixture_properties_before_strobe[cell].intensity,
+            expected,
+        );
+    }
+    assert!(
+        wash.iter()
+            .all(|cell| before.fixture_properties_before_strobe[cell].intensity > 0.0)
+    );
+    assert_ne!(capped.dmx_frames_by_universe, before.dmx_frames_by_universe);
+    engine
+        .set_parameter(0.0, &group_master("wash", 1.0))
+        .unwrap();
+    let restored = engine.render_at(0.0).unwrap();
+    assert_eq!(
+        restored.dmx_frames_by_universe,
+        before.dmx_frames_by_universe
+    );
+}
+
+#[test]
+fn group_masters_reject_unknown_groups_values_outside_unit_and_stray_groups() {
+    use starfire::protocol::wire;
+    let mut engine = room_engine(&[("empty", "return {render=function(ctx) return {} end}")]);
+    assert!(
+        engine
+            .set_parameter(0.0, &group_master("ceiling", 0.5))
+            .is_err()
+    );
+    assert!(
+        engine
+            .set_parameter(0.0, &group_master("wash", 1.5))
+            .is_err()
+    );
+    assert!(engine.set_parameter(0.0, &group_master("", 0.5)).is_err());
+    let stray = wire::Parameter {
+        group: "wash".into(),
+        ..palette_parameter("techno")
+    };
+    assert!(engine.set_parameter(0.0, &stray).is_err());
 }

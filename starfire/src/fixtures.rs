@@ -9,6 +9,7 @@ use crate::artnet::MAX_ARTNET_UNIVERSE;
 use crate::gdtf::{GdtfCell, GdtfProfile};
 use crate::model::{AttributeValue, DMX_CHANNELS, FixtureState, FixtureStates, Rgb, Target};
 use crate::protocol::{MAX_LOGIN_BYTES, wire};
+use crate::spatial::{Position, Spatial};
 use prost::Message;
 
 pub const MAX_FIXTURES: usize = 512;
@@ -34,6 +35,8 @@ struct FixturePatch {
     tilt_offset_degrees: f64,
     declared_cells: Vec<wire::fixture::Cell>,
     cells: Vec<String>,
+    position: Position,
+    area: wire::StageArea,
 }
 
 #[derive(Clone, Debug)]
@@ -147,8 +150,11 @@ pub fn home_orientation(matrix: &[f64]) -> Result<HomeOrientation> {
 pub struct FixtureRig {
     fixtures: Vec<FixturePatch>,
     groups: BTreeMap<String, Vec<String>>,
+    accent_groups: BTreeSet<String>,
+    accent_cells: BTreeSet<String>,
     profiles: BTreeMap<String, Vec<GdtfCell>>,
     cells: BTreeMap<String, (usize, usize)>,
+    spatial: Spatial,
 }
 
 /// A single-cell fixture's cell is the fixture itself; other cells are named after their geometry.
@@ -184,11 +190,33 @@ impl FixtureRig {
                     tilt_offset_degrees: home.tilt_offset_degrees,
                     declared_cells: fixture.cells.clone(),
                     cells: Vec::new(),
+                    // The Matrix's o row; an empty Matrix is identity, at the origin.
+                    position: fixture
+                        .matrix
+                        .get(9..12)
+                        .map_or([0.0; 3], |o| [o[0], o[1], o[2]]),
+                    area: Some(fixture.area())
+                        .filter(|&area| area != wire::StageArea::Unspecified)
+                        .with_context(|| {
+                            format!("fixture {} has no stage area", fixture.fixture_id)
+                        })?,
                 })
             })
             .collect::<Result<_>>()?;
         let mut groups = BTreeMap::new();
+        let accent_groups = rig
+            .groups
+            .iter()
+            .filter(|group| group.role() == wire::GroupRole::Accent)
+            .map(|group| group.group_id.clone())
+            .collect();
         for group in &rig.groups {
+            ensure!(
+                wire::GroupRole::try_from(group.role).is_ok(),
+                "fixture group {} has unknown role {}",
+                group.group_id,
+                group.role
+            );
             ensure!(
                 groups
                     .insert(group.group_id.clone(), group.fixture_ids.clone())
@@ -212,7 +240,7 @@ impl FixtureRig {
                 profile.profile_id
             );
         }
-        Self::from_parts(fixtures, groups, profiles)
+        Self::from_parts(fixtures, groups, accent_groups, profiles)
     }
 
     pub fn load(path: &Path) -> Result<Self> {
@@ -226,6 +254,7 @@ impl FixtureRig {
     fn from_parts(
         mut fixtures: Vec<FixturePatch>,
         groups: BTreeMap<String, Vec<String>>,
+        accent_groups: BTreeSet<String>,
         profiles: BTreeMap<String, Vec<GdtfCell>>,
     ) -> Result<Self> {
         ensure!(
@@ -345,11 +374,43 @@ impl FixtureRig {
                 .collect();
             cell_groups.insert(group.clone(), members);
         }
+        let placed = || {
+            fixtures.iter().flat_map(|fixture| {
+                std::iter::once(&fixture.id)
+                    .chain(&fixture.cells)
+                    .map(move |id| (id.clone(), fixture))
+            })
+        };
+        let positions = placed()
+            .map(|(id, fixture)| (id, fixture.position))
+            .collect();
+        let areas = placed().map(|(id, fixture)| (id, fixture.area)).collect();
+        let spatial = Spatial::new(positions, areas, &cell_groups, |cell| {
+            cells.get(cell).map_or(usize::MAX, |&(fixture, _)| fixture)
+        });
+        for (group, members) in &cell_groups {
+            for accent in accent_groups.iter().filter(|accent| *accent != group) {
+                ensure!(
+                    !cell_groups[accent]
+                        .iter()
+                        .any(|cell| members.contains(cell)),
+                    "loop group {group} shares a fixture with accent group {accent}, which plays specials only"
+                );
+            }
+        }
+        let accent_cells = accent_groups
+            .iter()
+            .flat_map(|group| &cell_groups[group])
+            .cloned()
+            .collect();
         Ok(Self {
             fixtures,
             groups: cell_groups,
+            accent_groups,
+            accent_cells,
             profiles,
             cells,
+            spatial,
         })
     }
 
@@ -379,6 +440,43 @@ impl FixtureRig {
         &self.groups
     }
 
+    /// Cell positions, stage areas and mirror partners, derived once at rig load.
+    pub fn spatial(&self) -> &Spatial {
+        &self.spatial
+    }
+
+    /// Groups whose MVR Layer is `accent`: they play specials only, never autoloops.
+    pub fn is_accent(&self, group: &str) -> bool {
+        self.accent_groups.contains(group)
+    }
+
+    pub fn is_accent_cell(&self, cell_id: &str) -> bool {
+        self.accent_cells.contains(cell_id)
+    }
+
+    pub fn refuse_accent_group(&self, group: &str) -> Result<()> {
+        ensure!(
+            !self.is_accent(group),
+            "accent group {group} plays specials only, never autoloops"
+        );
+        Ok(())
+    }
+
+    /// The cells an autoloop's target lights. Naming an accent group or fixture is refused;
+    /// `all` passes over accent cells, which rig load keeps out of loop groups.
+    pub fn resolve_for_loop(&self, target: &Target) -> Result<Vec<String>> {
+        let mut cells = self.resolve(target)?;
+        match target {
+            Target::Group(group) => self.refuse_accent_group(group)?,
+            Target::Fixture(id) => ensure!(
+                !cells.iter().any(|cell| self.is_accent_cell(cell)),
+                "accent fixture {id} plays specials only, never autoloops"
+            ),
+            Target::All => cells.retain(|cell| !self.is_accent_cell(cell)),
+        }
+        Ok(cells)
+    }
+
     pub fn validate_attributes(
         &self,
         cell_id: &str,
@@ -392,6 +490,11 @@ impl FixtureRig {
     pub fn profile(&self, cell_id: &str) -> Option<&GdtfProfile> {
         let &(fixture, cell) = self.cells.get(cell_id)?;
         Some(&self.profiles[&self.fixtures[fixture].profile][cell].profile)
+    }
+
+    pub fn fixture_of(&self, cell_id: &str) -> Option<&str> {
+        let &(fixture, _) = self.cells.get(cell_id)?;
+        Some(&self.fixtures[fixture].id)
     }
 
     pub fn fixture_ids(&self) -> Vec<String> {

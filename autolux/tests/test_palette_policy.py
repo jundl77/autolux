@@ -400,9 +400,25 @@ async def test_a_drop_too_early_in_the_window_leaves_it_open_until_the_next_sect
     assert light.effect_controller._palette_policy.track_palette == DEFAULT_PALETTE
     assert light._track_mood.measuring
     measure_beats(light, 4)
+    await enter(light, LightIntent.BREAKDOWN)
+    assert light._track_mood.measuring, 'still short of the minimum window'
+    measure_beats(light, 6)
     await enter(light, LightIntent.ATMOSPHERIC)
     (kind, palette) = palette_kinds(lighting)[-1]
     assert kind == 'select' and palette in SUNSET_LIKE
+    assert not light._track_mood.measuring
+
+
+async def test_sixteen_beats_of_a_doubled_tempo_reading_are_too_short_to_close_the_window():
+    light, _ = await engine_showing_an_intro()
+    doubled = beat(164.0, 0.98, CENTROID_RANGE_HZ[1], 40.0)
+    for index in range(MIN_MOOD_BEATS):
+        light._measure_track_mood(doubled, index % 4)
+    await enter(light, LightIntent.BUILDUP)
+    assert light._track_mood.measuring, f'{MIN_MOOD_BEATS} beats at 164 bpm are under 8 s'
+    for index in range(MIN_MOOD_BEATS, 22):
+        light._measure_track_mood(doubled, index % 4)
+    await enter(light, LightIntent.BREAKDOWN)
     assert not light._track_mood.measuring
 
 

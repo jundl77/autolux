@@ -9,6 +9,7 @@
     const UNIVERSE_SIZE = 512;
     const MAX_UNIVERSES = 32768;
     const PLAN_MIN_SPAN_MM = 2000;
+    const PLAN_LABEL_LIMIT = 48;
     const IDENTITY = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     const GEOMETRY_TAGS = new Set(["Geometry", "Axis", "FilterBeam", "FilterColor", "FilterGobo", "FilterShaper", "Beam", "MediaServerLayer", "MediaServerCamera", "MediaServerMaster", "Display", "GeometryReference", "Laser", "WiringObject", "Inventory", "Structure", "Support", "Magnet"]);
     let drag = null;
@@ -235,16 +236,16 @@
 
     function placedObjects(draft, settings) {
         const objects = [];
-        const visit = (node, matrix) => {
+        const visit = (node, matrix, layer) => {
             for (const child of childOf(node, "ChildList")?.children || []) {
                 if (!settings.schema.object_tags.includes(child.tag)) continue;
                 const placed = multiply(matrix, parseMatrix(textOf(child, "Matrix")) || [...IDENTITY]);
-                objects.push({ node: child, matrix: placed });
-                visit(child, placed);
+                objects.push({ node: child, matrix: placed, layer });
+                visit(child, placed, layer);
             }
         };
         for (const layer of childOf(childOf(draft.scene, "Scene"), "Layers")?.children || []) {
-            if (layer.tag === "Layer") visit(layer, parseMatrix(textOf(layer, "Matrix")) || [...IDENTITY]);
+            if (layer.tag === "Layer") visit(layer, parseMatrix(textOf(layer, "Matrix")) || [...IDENTITY], layer.attributes.name || "");
         }
         return objects;
     }
@@ -585,6 +586,8 @@
         fixtureRows,
         occupancy,
         placedObjects,
+        planMarks,
+        planSvg,
         schemaKeys,
         pathTo,
         template
@@ -606,12 +609,6 @@
         return node;
     }
 
-    function svg(tag, attributes = {}, text = "") {
-        const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-        for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
-        node.textContent = text;
-        return node;
-    }
 
     function keepingState(container, sameNode, draw) {
         if (!sameNode) return draw();
@@ -622,37 +619,128 @@
         if (focused >= 0) container.querySelectorAll("input, select")[focused]?.focus({ preventScroll: true });
     }
 
-    function drawPlan(container, draft, settings) {
-        const objects = placedObjects(draft, settings);
+    // Plan view in standard plot orientation: MVR/GDTF -Y (downstage, toward the audience) at
+    // the bottom, so the SVG y is -Y.
+    function planMarks(draft, settings) {
         const classes = classNames(draft);
-        const palette = [...new Set(Object.values(classes))];
-        const xs = [0, ...objects.map(({ matrix }) => matrix[9])];
-        const ys = [0, ...objects.map(({ matrix }) => -matrix[10])];
-        const [minX, minY] = [Math.min(...xs), Math.min(...ys)];
-        const span = Math.max(PLAN_MIN_SPAN_MM, Math.max(...xs) - minX, Math.max(...ys) - minY);
-        const [pad, r] = [span * 0.12, span * 0.018];
-        const width = Math.max(...xs) - minX + 2 * pad;
-        const height = Math.max(...ys) - minY + 2 * pad;
-        const plan = svg("svg", { viewBox: `${minX - pad} ${minY - pad} ${width} ${height}`, preserveAspectRatio: "xMidYMid meet" });
-        plan.append(svg("circle", { cx: 0, cy: 0, r: r * 0.3, fill: "#3b4d62" }));
-        for (const { node, matrix } of objects) {
-            const [x, y] = [matrix[9], -matrix[10]];
-            const group = svg("g", { class: "mvr-object", "data-node-key": node.key });
-            if (node.tag === "Fixture") {
-                const name = classes[textOf(node, "Classing").toUpperCase()];
-                const colour = name ? settings.colors[palette.indexOf(name) % settings.colors.length] : "#7f8ea3";
-                const length = Math.hypot(matrix[3], matrix[4]) || 1;
-                const [x2, y2] = [x + (matrix[3] / length) * r * 2.4, y - (matrix[4] / length) * r * 2.4];
-                group.append(svg("line", { x1: x, y1: y, x2, y2, stroke: colour, "stroke-width": r * 0.35 }));
-                group.append(svg("circle", { cx: x, cy: y, r, fill: colour, stroke: "#0b121c", "stroke-width": r * 0.25 }));
-            } else {
-                const fill = node.tag === "GroupObject" ? "none" : "#455468";
-                group.append(svg("rect", { x: x - r * 0.8, y: y - r * 0.8, width: r * 1.6, height: r * 1.6, fill, stroke: "#6d7f95", "stroke-width": r * 0.2 }));
+        const fixtures = [];
+        const others = [];
+        for (const { node, matrix, layer } of placedObjects(draft, settings)) {
+            const name = node.attributes.name || node.tag;
+            if (node.tag !== "Fixture") {
+                others.push({ key: node.key, name, x: matrix[9], y: matrix[10], hollow: node.tag === "GroupObject" });
+                continue;
             }
-            group.append(svg("text", { x: x + r * 1.4, y: y + r * 0.4, "font-size": r * 1.3 }, node.attributes.name || node.tag));
-            plan.append(group);
+            const length = Math.hypot(matrix[3], matrix[4]);
+            fixtures.push({
+                key: node.key,
+                name,
+                group: classes[textOf(node, "Classing").toUpperCase()] || "",
+                accent: layer === settings.accentRole,
+                x: matrix[9],
+                y: matrix[10],
+                // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
+                facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null
+            });
         }
-        container.replaceChildren(plan);
+        return { fixtures, others };
+    }
+
+    // Past the configured colours, golden-angle hues keep dozens of groups apart.
+    function groupColour(index, colors) {
+        return index < colors.length ? colors[index] : `hsl(${Math.round((index * 137.508) % 360)},55%,58%)`;
+    }
+
+    const escapeXml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+    // The largest 1, 2 or 5 × 10^k metres within a fifth of the plan.
+    function scaleMetres(spanMm) {
+        const target = spanMm / 5000;
+        const power = 10 ** Math.floor(Math.log10(target));
+        return [5, 2, 1].map((unit) => unit * power).find((value) => value <= target);
+    }
+
+    // Draws the nine-area stage grid (equal thirds of the fixtures' bounding box) and its area
+    // names; it only draws lines and labels and never assigns areas, which come from
+    // stage_areas in cli/starfire_assets.py. An axis without extent has no cuts and only its
+    // centre names.
+    const AREA_ROWS = ["up", "centre", "down"];
+    const AREA_COLUMNS = ["left", "centre", "right"];
+    const areaName = (row, column) => (row === "centre" && column === "centre" ? "centre" : `${row} ${column}`);
+    function areaGrid(fixtures, n, r, font) {
+        if (!fixtures.length) return "";
+        const xs = fixtures.map((mark) => mark.x);
+        const ys = fixtures.map((mark) => -mark.y);
+        const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+        const cuts = (low, high) => (high > low ? [1, 2].map((k) => low + ((high - low) * k) / 3) : []);
+        // Each third's centre and index.
+        const thirds = (low, high) => (high > low ? [0, 1, 2].map((k) => [low + ((high - low) * (2 * k + 1)) / 6, k]) : [[low, 1]]);
+        const line = (ax, ay, bx, by) => `<line x1="${n(ax)}" y1="${n(ay)}" x2="${n(bx)}" y2="${n(by)}"/>`;
+        // SVG y grows downstage, so the top row is upstage.
+        const names = thirds(y0, y1).flatMap(([y, row]) =>
+            thirds(x0, x1).map(([x, column]) => `<text class="plan-area-name" x="${n(x)}" y="${n(y)}">${areaName(AREA_ROWS[row], AREA_COLUMNS[column])}</text>`)
+        );
+        const box = x1 > x0 && y1 > y0 ? `<rect x="${n(x0)}" y="${n(y0)}" width="${n(x1 - x0)}" height="${n(y1 - y0)}"/>` : "";
+        return [
+            `<g class="plan-areas" stroke-width="${n(r * 0.2)}" stroke-dasharray="${n(r)} ${n(r * 0.6)}" fill="none">`,
+            box,
+            ...cuts(x0, x1).map((x) => line(x, y0, x, y1)),
+            ...cuts(y0, y1).map((y) => line(x0, y, x1, y)),
+            "</g>",
+            `<g font-size="${n(font * 0.7)}" text-anchor="middle" dominant-baseline="middle">${names.join("")}</g>`
+        ].join("");
+    }
+
+    function planSvg({ fixtures, others }, settings) {
+        const all = [...fixtures, ...others];
+        const xs = all.length ? all.map((mark) => mark.x) : [0];
+        const ys = all.length ? all.map((mark) => -mark.y) : [0];
+        const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+        const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, maxY - minY);
+        // Marks shrink as the plan fills; names show while they fit, else on hover or tap.
+        const r = span * 0.018 * Math.min(1, Math.sqrt(PLAN_LABEL_LIMIT / Math.max(1, fixtures.length)));
+        const labelled = fixtures.length <= PLAN_LABEL_LIMIT;
+        const pad = span * 0.12;
+        const [left, top, width, height] = [minX - pad, minY - pad, maxX - minX + 2 * pad, maxY - minY + 3 * pad];
+        const n = Math.round;
+        const font = n(Math.max(r * 1.3, span * 0.014));
+        const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
+        const colour = Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
+        const accents = new Set(fixtures.filter((mark) => mark.accent).map((mark) => mark.group));
+        const edge = n(maxY + r * 2);
+        const metres = scaleMetres(span);
+        const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
+        const parts = [
+            `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${n(left)} ${n(top)} ${n(width)} ${n(height)}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}">`,
+            areaGrid(fixtures, n, r, font),
+            // MVR has no stage edge; the plan draws it at the most downstage object.
+            `<line class="plan-stage-edge" x1="${n(left)}" y1="${edge}" x2="${n(left + width)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
+            `<text x="${n(left + pad * 0.2)}" y="${n(edge + font * 1.4)}">audience</text>`,
+            `<g class="plan-scale"><line x1="${barX}" y1="${barY}" x2="${n(barX + metres * 1000)}" y2="${barY}" stroke-width="${n(r * 0.3)}"/><text x="${barX}" y="${n(barY - font * 0.5)}">${metres} m</text></g>`,
+            `<g stroke-width="${n(r * 0.25)}">`
+        ];
+        for (const mark of others) {
+            const [x, y, side] = [n(mark.x - r * 0.8), n(-mark.y - r * 0.8), n(r * 1.6)];
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title><rect class="plan-object${mark.hollow ? " hollow" : ""}" x="${x}" y="${y}" width="${side}" height="${side}"/></g>`);
+        }
+        for (const mark of fixtures) {
+            const [x, y, fill] = [n(mark.x), n(-mark.y), colour[mark.group]];
+            const arrow = mark.facing ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
+            const dash = mark.accent ? ` stroke-dasharray="${n(r * 0.5)} ${n(r * 0.35)}"` : "";
+            const label = labelled ? `<text x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}">${escapeXml(mark.name)}</text>` : "";
+            const title = mark.group ? `${mark.name} · ${mark.group}` : mark.name;
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(title)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"${dash}/>${label}</g>`);
+        }
+        parts.push("</g></svg>");
+        const legend = groups.map((group) => {
+            const dash = accents.has(group) ? ' stroke-dasharray="2 1.5"' : "";
+            return `<span class="plan-key"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5" fill="${colour[group]}"${dash}/></svg>${escapeXml(group || "no group")}${accents.has(group) ? " · accent" : ""}</span>`;
+        });
+        return parts.join("") + `<div class="plan-legend">${legend.join("")}</div>`;
+    }
+
+    function drawPlan(container, draft, settings) {
+        container.innerHTML = planSvg(planMarks(draft, settings), settings);
     }
 
     function nodeLabel(node) {

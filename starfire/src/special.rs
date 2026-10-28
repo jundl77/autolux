@@ -9,6 +9,7 @@ use crate::gdtf::{FunctionInfo, GdtfProfile, numbered_attribute as numbered};
 use crate::model::{AttributeValue, FixtureState, SpecialFx, lerp};
 use crate::palette::PaletteSlots;
 use crate::protocol::wire;
+use crate::spatial::MM_PER_METRE;
 
 pub const MAX_ENVELOPE_BEATS: f64 = 1_024.0;
 pub const MAX_PULSE_BEATS: u32 = 64;
@@ -205,13 +206,21 @@ pub fn capabilities(rig: &FixtureRig) -> Vec<wire::GroupCapability> {
                     .iter()
                     .any(|member| maps.get(member).is_some_and(axis))
             };
+            let place = rig.spatial().group_place(name);
             wire::GroupCapability {
+                area: place.and_then(|place| place.area).map(|area| area as i32),
+                centre_x_metres: place.map_or(0.0, |place| place.centre_x_mm / MM_PER_METRE),
                 name: name.clone(),
                 cell_count: members.len() as u32,
                 colour: any(CellMap::colour),
                 speed: any(CellMap::speed),
                 pulse: any(CellMap::pulse),
                 pattern: any(CellMap::pattern),
+                role: if rig.is_accent(name) {
+                    wire::GroupRole::Accent
+                } else {
+                    wire::GroupRole::Loop
+                } as i32,
             }
         })
         .collect()

@@ -176,3 +176,14 @@ def test_a_refusal_arrives_whole_even_when_the_body_is_still_on_its_way(bridge):
         assert reply.getheader('Access-Control-Allow-Origin') == DASHBOARD
         reply.read()
     assert commands.empty()
+
+
+def test_a_settings_post_carries_group_masters_and_refuses_one_outside_unit():
+    from autolux.lib.ui_bridge import parse_control_command
+
+    command = parse_control_command(
+        {'action': 'settings', 'settings': {'group_masters': {'wash': 0.5}}}
+    )
+    assert command['settings'].group_masters == {'wash': 0.5}
+    with pytest.raises(ValueError, match='group master wash'):
+        parse_control_command({'action': 'settings', 'settings': {'group_masters': {'wash': 2}}})
