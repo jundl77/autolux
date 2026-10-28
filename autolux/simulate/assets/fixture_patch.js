@@ -182,10 +182,11 @@
         return { pan: rotation[0], tilt: rotation[1], reversed: isStanding(matrix) };
     }
 
-    // GDTF models a fixture hanging (beam down, local Z up); standing is that turned 180° about
-    // its X axis, which negates the local Y and Z axes. The flip is its own inverse.
+    // GDTF models a fixture hanging (beam down, local Z up). Standing turns it 180° about its
+    // local Y, negating X and Z: the facing (local Y) stays, so the yaw and pitch the pane shows
+    // are the pan and tilt home Starfire derives in either mount. The flip is its own inverse.
     const isStanding = (matrix) => matrix[8] < 0;
-    const flipped = (matrix) => matrix.map((value, index) => (index >= 3 && index < 9 ? -value : value));
+    const flipped = (matrix) => matrix.map((value, index) => (index < 3 || (index >= 6 && index < 9) ? -value : value));
 
     // The pane's placement: the mount, and the rotation relative to it.
     function placement(matrix) {

@@ -1399,7 +1399,7 @@ const SUITES = {
             && document.querySelector('${splitInput('Pan', 'max')}').value === '270'`, 2000));
         await check('pan arc', 'the arc follows the limits', !!fullArc && (await arcPath()) !== fullArc, {before: fullArc, after: await arcPath()});
 
-        // Hanging -> standing turns the head 180° about X; it survives Save and Reload.
+        // Hanging -> standing turns the head 180° about its facing; it survives Save and Reload.
         await check('mount', 'spot_left reads hanging', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'hanging');
         await formEdit('mount standing', () => choose(cfg('mount'), 'standing'),
             {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 0, 0], standing: true});
@@ -1414,7 +1414,7 @@ const SUITES = {
         const was = before.fixtures.find((f) => f.fixture_uuid.toUpperCase() === ROOM_UUID.spot_left);
         await check('heading rename', 'the uuid keeps its patch under the new name', hero?.name === 'spot_hero'
             && same({...hero, name: 0, matrix: 0, pan: 0}, {...was, name: 0, matrix: 0, pan: 0}), {hero, was});
-        await check('mount', 'the saved Matrix is standing: local Y and Z negated', same(hero?.matrix, [-1, 0, 0, 0, 1, 0, 0, 0, -1, -300, 0, 0]),
+        await check('mount', 'the saved Matrix is standing: local X and Z negated', same(hero?.matrix, [1, 0, 0, 0, -1, 0, 0, 0, -1, -300, 0, 0]),
             {matrix: hero?.matrix});
         await check('soft limits', 'the saved pan limits are the clamped share', hero?.pan?.min === 0 && hero?.pan?.max === 0.5, {pan: hero?.pan});
         await check('pane', 'Reload loads the saved patch', await reloadSaved());

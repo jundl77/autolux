@@ -387,16 +387,17 @@ test("the patch form validates each field and maps it to one draft action", () =
     assert.deepEqual(plain(check("Tilt", ["-20", "300"], current, spot.key)), { error: null, action: { action: "set-movement", key: spot.key, axis: "Tilt", minimum: 0, maximum: 1 } });
 });
 
-test("the mount toggle turns the fixture 180° about X and keeps its rotation relative to the mount", () => {
+test("the mount toggle turns the fixture 180° about its facing and keeps its rotation relative to the mount", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_left");
     const matrix = (tree) => model.parseMatrix(child(fixtureNode(tree, "spot_left"), "Matrix").text);
     const toggle = model.patchEdit(current, settings, spot.key, "mount", "standing");
     assert.deepEqual(plain(toggle.action), { action: "set-matrix", key: spot.key, position: [-300, 0, 0], rotation: [180, 0, 0], standing: true });
     const [standing] = edit(current, toggle.action);
-    // Hung turned around {-1,0,0}{0,-1,0}{0,0,1}: standing negates its local Y and Z.
-    assert.deepEqual(plain(matrix(standing)), [-1, 0, 0, 0, 1, 0, 0, 0, -1, -300, 0, 0]);
-    assert.equal(model.homeOrientation(matrix(standing)).reversed, true);
+    // Hung turned around {-1,0,0}{0,-1,0}{0,0,1}: standing negates its local X and Z, so it
+    // still faces downstage and Starfire reads the same yaw, reversed.
+    assert.deepEqual(plain(matrix(standing)), [1, 0, 0, 0, -1, 0, 0, 0, -1, -300, 0, 0]);
+    assert.deepEqual(plain(model.homeOrientation(matrix(standing))), { pan: 180, tilt: 0, reversed: true });
     // A rotation edit on a standing fixture stays standing.
     const [yawed] = edit(standing, model.patchEdit(standing, settings, spot.key, "matrix", ["-300", "0", "0", "90", "0", "0"]).action);
     assert.ok(matrix(yawed)[8] < 0);

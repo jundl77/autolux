@@ -53,8 +53,8 @@ render as separate patches.
 
 Hanging, turned around: `Rz(180)` = `{-1,0,0}{0,-1,0}{0,0,1}{x,y,z}` → yaw 180, not
 reversed. This is how the room spots are entered. Standing on the floor: `Rx(180)` =
-`{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` (Config: pitch 0, roll 180, yaw 180 as decomposed) →
-yaw 180 and reversed. The inspector shows the derived home under each Matrix.
+`{1,0,0}{0,-1,0}{0,0,-1}{x,y,z}` → yaw 180 and reversed; Config shows it as Standing,
+yaw 180, since its Mount toggle negates the local X and Z and so keeps the facing. The inspector shows the derived home under each Matrix.
 
 Sheared, mirrored or degenerate matrices are rejected.
 
