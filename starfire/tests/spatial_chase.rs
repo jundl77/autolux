@@ -9,7 +9,12 @@ use starfire::model::RenderContext;
 use starfire::protocol::wire;
 
 const LOOP: (&str, &str) = ("atmospheric", "traverse");
-const WASH: [&str; 4] = ["wash_left", "wash_mid_left", "wash_mid_right", "wash_right"];
+const WASH: [&str; 4] = [
+    "wash_left_outer",
+    "wash_left_inner",
+    "wash_right_inner",
+    "wash_right_outer",
+];
 /// starfire::script's MAX_EFFECTS_PER_FRAME, a detector the loop must stay well inside.
 const EFFECT_CAP: usize = 512;
 const SEAM_TOLERANCE: f64 = 1e-3;
@@ -70,34 +75,34 @@ fn assert_seamless(rig: &FixtureRig) {
 }
 
 #[test]
-fn the_sweep_crosses_the_room_washes_house_left_to_house_right() {
-    let room = support::room();
+fn the_sweep_crosses_the_washes_house_left_to_house_right() {
+    let stage = support::stage();
     let order: Vec<_> = [0.8, 3.0, 5.0, 7.2]
         .iter()
-        .map(|&beat| brightest(&levels(&room, beat), &WASH))
+        .map(|&beat| brightest(&levels(&stage, beat), &WASH))
         .collect();
     assert_eq!(order, WASH);
     // The movers follow: house left lit first, house right last.
-    let early = levels(&room, 1.0);
-    assert!(early["spot_left"] > early["spot_right"]);
+    let early = levels(&stage, 1.0);
+    assert!(early["mover_left"] > early["mover_right"]);
     // The strip's cells have no X spread between them, so they travel in geometry order.
-    let strip = levels(&room, 1.5);
+    let strip = levels(&stage, 1.5);
     assert!(
-        strip["zq06017/Beam Segment 1"] > strip["zq06017/Beam Segment 8"],
+        strip["bar_upstage/Beam Segment 1"] > strip["bar_upstage/Beam Segment 8"],
         "{strip:?}"
     );
-    assert_seamless(&room);
+    assert_seamless(&stage);
 }
 
 #[test]
 fn the_mirrored_half_lights_both_sides_at_once_then_closes_in() {
-    let room = support::room();
-    let outer = levels(&room, 9.0);
-    assert!((outer["wash_left"] - outer["wash_right"]).abs() < 1e-12);
-    assert!(outer["wash_left"] > outer["wash_mid_left"]);
-    let inner = levels(&room, 14.0);
-    assert!((inner["wash_mid_left"] - inner["wash_mid_right"]).abs() < 1e-12);
-    assert!(inner["wash_mid_left"] > inner["wash_left"]);
+    let stage = support::stage();
+    let outer = levels(&stage, 9.0);
+    assert!((outer["wash_left_outer"] - outer["wash_right_outer"]).abs() < 1e-12);
+    assert!(outer["wash_left_outer"] > outer["wash_left_inner"]);
+    let inner = levels(&stage, 14.0);
+    assert!((inner["wash_left_inner"] - inner["wash_right_inner"]).abs() < 1e-12);
+    assert!(inner["wash_left_inner"] > inner["wash_left_outer"]);
 }
 
 #[test]
@@ -190,13 +195,13 @@ fn on_a_400_fixture_truss_the_peak_travels_monotonically_along_x() {
 /// 60 eight-cell bars as the only movers: one pan per cell would overrun the effect cap.
 #[test]
 fn a_rig_of_many_multi_cell_movers_pans_each_fixture_once() {
-    let room = support::room_definition();
-    let bar = room
+    let stage = support::stage_definition();
+    let bar = stage
         .fixtures
         .iter()
-        .find(|fixture| fixture.name == "zq06017")
+        .find(|fixture| fixture.name == "bar_upstage")
         .unwrap();
-    let profile = room
+    let profile = stage
         .profiles
         .iter()
         .find(|profile| profile.profile_id == bar.profile_id)

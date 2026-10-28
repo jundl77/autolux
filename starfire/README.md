@@ -34,7 +34,7 @@ the repository root.
 Replay reports `render_elapsed_seconds` and `render_realtime_factor`: a factor
 of 20 means 20 seconds of show rendered per wall-clock second. This includes
 Lua and fixture encoding, excluding file output and network pacing. Performance
-tests require 10x for the room rig and 2x for 64 fixtures over a 90-second show.
+tests require 10x for the generic stage rig and 2x for 64 fixtures over a 90-second show.
 
 Live mode starts without output resources. Autolux supplies the complete typed
 fixture patch, profiles, banked Lua sources, Radius transport settings and
