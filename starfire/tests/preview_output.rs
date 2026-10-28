@@ -283,3 +283,32 @@ fn a_script_fault_is_flagged_on_every_dark_frame_and_named_once() {
     assert!(frames[0]["error"].as_str().unwrap().contains("boom"));
     assert!(frames[1..].iter().all(|frame| frame.get("error").is_none()));
 }
+
+#[test]
+fn a_colour_wheel_shows_the_slot_its_encode_selects() {
+    let rig = || {
+        let mut definition = support::definition(&json!({"fixtures": [
+            {"fixture_uuid": "wheel", "profile": "wheel_spinner", "universe": 0, "address": 1}]}));
+        definition.profiles.push(support::compiled_profile(
+            "wheel_spinner#3ch",
+            "wheel_spinner",
+        ));
+        starfire::fixtures::FixtureRig::from_wire(&definition).unwrap()
+    };
+    let colour_of = |rgb: &str| {
+        let source = format!(
+            "return {{render=function(ctx) return sf.scene {{
+                sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb({rgb}))}} end}}"
+        );
+        let (catalog, replay) = one_loop(&source, 0.0);
+        let mut output = Vec::new();
+        write_preview(&replay, rig(), catalog, 10, &mut output).unwrap();
+        frames_of(output)[0]["c"][0].as_array().unwrap()[1..4].to_vec()
+    };
+    let pinkish = colour_of("1, 0.3, 0.3");
+    // Both requests land on the red slot, and the preview shows that slot, not the request.
+    assert_eq!(pinkish, colour_of("1, 0, 0"));
+    assert_ne!(pinkish, [json!(1.0), json!(0.3), json!(0.3)]);
+    let [red, green, blue] = [0, 1, 2].map(|channel| pinkish[channel].as_f64().unwrap());
+    assert!(red > 0.5 && green < red && blue < red, "{pinkish:?}");
+}

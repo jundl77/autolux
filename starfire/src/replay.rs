@@ -182,7 +182,8 @@ pub struct PreviewSummary {
 
 /// The offline preview as JSON lines: a header naming the rig's cells, groups and bar length,
 /// then one frame per line at `rate_hz`, each cell `[i, r, g, b, strobe_hz, direction, gobo]`
-/// in header order. Intensity and strobe are the output after masters and limits. Direction
+/// in header order. Intensity and strobe are the output after masters and limits, the colour
+/// what the encode emits (a colour wheel's slot). Direction
 /// (a unit vector in the MVR scene frame) and gobo leave the tail when absent; a missing
 /// direction before a gobo is null. The replay renders at its own rate, as the show does, and
 /// every (replay rate / `rate_hz`)-th frame is written as it renders, so a long recording holds
@@ -278,7 +279,13 @@ pub fn write_preview(
             .iter()
             .map(|id| {
                 let state = &states[id];
-                preview_cell(state, rig.beam_direction(id, state.pan, state.tilt))
+                // A wheel head shows the slot it lands on, not the colour asked of it.
+                let colour = rig
+                    .profile(id)
+                    .and_then(|profile| profile.emitted_colour(state).ok())
+                    .unwrap_or(state.colour);
+                let direction = rig.beam_direction(id, state.pan, state.tilt);
+                preview_cell(state, colour, direction)
             })
             .collect();
         let mut line = json!({
@@ -307,6 +314,7 @@ pub fn write_preview(
 
 fn preview_cell(
     state: &crate::model::FixtureState,
+    colour: crate::model::Rgb,
     direction: Option<[f64; 3]>,
 ) -> serde_json::Value {
     use crate::model::AttributeValue;
@@ -314,9 +322,9 @@ fn preview_cell(
 
     let mut cell = [
         state.intensity,
-        state.colour.red,
-        state.colour.green,
-        state.colour.blue,
+        colour.red,
+        colour.green,
+        colour.blue,
         state.strobe_hz,
     ]
     .map(|value| json!(preview_round(value)))
