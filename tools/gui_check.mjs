@@ -63,7 +63,23 @@ const cdp = (method, params = {}) => new Promise((resolve, reject) => {
 
 const network = [];
 const consoleLines = [];
+// From a navigation's start to its commit the old page is torn down, and Dash reports each
+// callback it had in flight as failed: that is the harness navigating, not a page error.
+let leaving = false;
+let abortedOnLeave = 0;
+const ABORTED_CALLBACK = 'Callback failed: the server did not respond';
+async function navigate(method, params = {}) {
+    leaving = true;
+    await cdp(method, params);
+}
 listeners.push((msg) => {
+    if (msg.method === 'Page.frameNavigated' && !msg.params.frame.parentId) {
+        leaving = false;
+    } else if (leaving && msg.method === 'Runtime.consoleAPICalled'
+            && msg.params.args.some((a) => String(a.value ?? a.description).includes(ABORTED_CALLBACK))) {
+        abortedOnLeave += 1;
+        return;
+    }
     if (msg.method === 'Network.requestWillBeSent') {
         const r = msg.params.request;
         if (r.method === 'POST' && r.url.endsWith('/control')) {
@@ -93,6 +109,29 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', {source: `
         }
         el.__flashing = flashing;
     })).observe(document, {subtree: true, attributes: true, attributeFilter: ['class']});
+    // The fixture test's keep-alive is held, not scheduled: the harness fires it by hand
+    // (window.__tickKeepAlive) instead of waiting 15 s. Every other timer runs as usual.
+    window.__pointer = [];
+    for (const type of ['pointerdown', 'pointerup', 'click']) {
+        document.addEventListener(type, (e) => window.__pointer.push({type, x: e.clientX, y: e.clientY,
+            target: (e.target.tagName || '') + '.' + (e.target.getAttribute?.('class') || '') + (e.target.closest?.('[data-node-key]') ? ' in-mark' : ''),
+            at: Math.round(performance.now())}), true);
+    }
+    window.__keepAlive = new Map();
+    window.__keepAliveDelays = [];
+    const realSetInterval = window.setInterval.bind(window);
+    const realClearInterval = window.clearInterval.bind(window);
+    let keepAliveId = 1e9;
+    window.setInterval = (fn, ms, ...rest) => {
+        if (typeof fn === 'function' && String(fn).includes('dispatchTest')) {
+            window.__keepAliveDelays.push(ms);
+            window.__keepAlive.set(++keepAliveId, fn);
+            return keepAliveId;
+        }
+        return realSetInterval(fn, ms, ...rest);
+    };
+    window.clearInterval = (id) => (window.__keepAlive.delete(id) ? undefined : realClearInterval(id));
+    window.__tickKeepAlive = () => { window.__keepAlive.forEach((fn) => fn()); return window.__keepAlive.size; };
 `});
 
 async function ev(expression) {
@@ -158,6 +197,7 @@ async function check(control, action, ok, detail = {}) {
         console.log(`     ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
     }
     console.log(`     dom: ${JSON.stringify(await dom().catch((e) => String(e)))}`);
+    console.log(`     last pointer events: ${JSON.stringify(await ev('(window.__pointer || []).slice(-4)').catch((e) => String(e)))}`);
 }
 
 const sub = (whole, part) => part === undefined || (part !== null && typeof part === 'object'
@@ -218,7 +258,7 @@ async function fresh({blank = false, wait = true, width = 1280} = {}) {
     }
     await cdp('Emulation.setDeviceMetricsOverride', {width, height: 900, deviceScaleFactor: 1,
         mobile: width < 600});
-    await cdp('Page.navigate', {url: URL_});
+    await navigate('Page.navigate', {url: URL_});
     await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
     if (wait && !blank) {
         await waitFor(`document.getElementById('control-fx-auto').className.includes('active')
@@ -250,6 +290,7 @@ const KEYS = {
     Space: {key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' '},
     ArrowRight: {key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39},
     ArrowLeft: {key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37},
+    Escape: {key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27},
 };
 async function key(selector, name) {
     if (selector) {
@@ -292,8 +333,196 @@ const tokenColour = (name) => ev(`(() => { const probe = document.createElement(
     probe.style.background = 'var(${name})'; document.getElementById('show-control').appendChild(probe);
     const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour; })()`);
 
+const overflow = () => ev(`(() => {
+    const w = document.documentElement.clientWidth;
+    const wide = [...document.querySelectorAll('body *')].filter((e) => e.getClientRects().length
+        && e.getBoundingClientRect().right > w + 1 && !e.closest('[style*="overflow: hidden"], .marquee'))
+        .slice(0, 4).map((e) => (e.id ? '#' + e.id : e.tagName.toLowerCase() + '.' + e.className) + ' right=' + Math.round(e.getBoundingClientRect().right));
+    return {scroll: document.documentElement.scrollWidth, width: w, wide};
+})()`);
+
 // Clicks a slider's track at a fraction of its width.
 const slider = (selector, fraction) => click(selector, {fx: fraction});
+
+// ---- fixture configuration helpers --------------------------------------------------------
+
+const STATUS = '#fixture-status';
+const UNSAVED = 'Unsaved changes';
+const SCENE_XML = 'GeneralSceneDescription.xml';
+const APPLY_LABEL = 'Apply to show (restarts it; lights go dark until it is back)';
+const STALE_RIG = 'The show runs an older rig. Apply to show restarts it on the saved patch.';
+const NEW_GROUP = '\u0000new';
+const rigFiles = () => harness('rig');
+const cfg = (name) => `#fixture-info [data-cfg="${name}"]`;
+const testButton = (spec) => `#fixture-info [data-cfg-test="${spec}"]`;
+// Sorted keys on both sides: Flask sorts the stub's, the expectations are written by hand.
+const canon = (value) => JSON.stringify(value, (key, v) => (v && typeof v === 'object' && !Array.isArray(v)
+    ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : 1))) : v));
+const same = (a, b) => canon(a) === canon(b);
+const lightOn = (target, colour) => ({action: 'highlight', target, colour});
+const CLEAR = {action: 'highlight', target: null};
+const posted = () => network.slice(netMark).map((n) => JSON.parse(n.body));
+const markOf = (name) => `[...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) =>
+    (g.querySelector('title')?.textContent || '').split(' · ')[0] === ${JSON.stringify(name)})`;
+const takeActions = () => ev('window.__actions.splice(0)');
+const keepAlive = () => ev('({held: window.__keepAlive.size, delays: window.__keepAliveDelays.slice()})');
+const statusText = () => text(STATUS);
+const noteOf = (name) => ev(`(document.querySelector('${cfg(name)}')?.closest('.cfg-field')
+    ?.querySelector('.cfg-note')?.textContent || '').trim()`);
+
+// The Config tab on a page booted against the original rig: the store is restored first, as
+// the panel's layout carries the draft the server loaded at start.
+async function cfgFresh({width = 1280} = {}) {
+    await harness('rig', {restore: true});
+    await fresh({width});
+    await tab('Config');
+    await waitFor(`!!document.querySelector('#mvr-plan svg.plan')
+        && document.getElementById('special-groups').textContent.trim() !== ''`, 8000);
+    await planSettled();
+    // Records every draft action the page sends (fixture_patch.js sendAction).
+    await ev(`(() => {
+        window.__actions = [];
+        const ds = window.dash_clientside;
+        const real = ds.set_props;
+        ds.set_props = function (id, props) {
+            if (id === 'fixture-grid-action') window.__actions.push(props.data);
+            return real.apply(this, arguments);
+        };
+    })()`);
+    await arm();
+}
+
+// The Config tab fills in after it opens (the server's FX groups line above the plan), which
+// moves the plan down; a click aimed before that lands beside the mark.
+async function planSettled() {
+    let last = null;
+    for (let stable = 0, i = 0; stable < 3 && i < 100; i++) {
+        const now = await ev(`(() => { const r = document.querySelector('#mvr-plan svg.plan')?.getBoundingClientRect();
+            return r ? [r.x, r.y + scrollY, r.width, r.height].map(Math.round).join() : null; })()`);
+        stable = now && now === last ? stable + 1 : 0;
+        last = now;
+        await sleep(100);
+    }
+}
+
+async function selectFixture(name) {
+    await planSettled();
+    await ev(`(() => {
+        document.querySelectorAll('[data-harness-mark]').forEach((e) => e.removeAttribute('data-harness-mark'));
+        ${markOf(name)}.querySelector('circle').setAttribute('data-harness-mark', '');
+    })()`);
+    await click('[data-harness-mark]');
+    const ok = await waitFor(`document.querySelector('${cfg('name')}')?.value === ${JSON.stringify(name)}`, 5000);
+    await sleep(300);
+    const sent = await takeActions();
+    if (!ok) {
+        console.log('     selectFixture', name, 'sent', JSON.stringify(sent), JSON.stringify(await ev('window.__pointer.slice(-6)')),
+            JSON.stringify(await ev(`(() => { const r = document.querySelector('[data-harness-mark]')?.getBoundingClientRect(); return r && [r.x, r.y, r.width, scrollY, performance.now()]; })()`)));
+    }
+    return ok;
+}
+
+// The fixture's plan mark in screen and plan coordinates; the plan's SVG x is MVR X.
+async function planMark(name) {
+    return ev(`(() => {
+        const mark = ${markOf(name)};
+        if (!mark) return null;
+        mark.scrollIntoView({block: 'center'});
+        const circle = mark.querySelector('circle');
+        const m = circle.ownerSVGElement.getScreenCTM();
+        const [cx, cy] = [Number(circle.getAttribute('cx')), Number(circle.getAttribute('cy'))];
+        return {cx, cy, a: m.a, d: m.d, x: m.a * cx + m.c * cy + m.e, y: m.b * cx + m.d * cy + m.f,
+            dashed: circle.hasAttribute('stroke-dasharray')};
+    })()`);
+}
+const areaBox = () => ev(`(() => { const r = document.querySelector('#mvr-plan .plan-areas rect');
+    return r && ['x', 'y', 'width', 'height'].map((k) => Number(r.getAttribute(k))); })()`);
+
+const mouse = (type, x, y, extra = {}) => cdp('Input.dispatchMouseEvent', {type, x, y, button: 'left', ...extra});
+async function pressAndMove(x0, y0, x1, y1, steps = 8) {
+    await mouse('mouseMoved', x0, y0, {button: 'none'});
+    await mouse('mousePressed', x0, y0, {clickCount: 1, buttons: 1});
+    for (let i = 1; i <= steps; i++) {
+        await mouse('mouseMoved', x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps, {buttons: 1});
+        await sleep(30);
+    }
+    // One animation frame draws the preview.
+    await sleep(150);
+}
+const release = (x, y) => mouse('mouseReleased', x, y, {clickCount: 1});
+
+async function typeInto(selector, value) {
+    await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.focus(); e.select(); })()`);
+    await cdp('Input.insertText', {text: value});
+    // The page edits on change, which a text field fires when it loses focus.
+    await ev('document.activeElement.blur()');
+}
+async function choose(selector, value) {
+    await ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.focus();
+        e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('change', {bubbles: true})); e.blur(); })()`);
+}
+const splitInput = (name, index) => `${cfg(name)} label:nth-child(${index + 1}) input`;
+
+// One form edit: exactly one draft action matching `expected` (partial), the draft taking it.
+async function formEdit(what, act, expected) {
+    await takeActions();
+    await act();
+    await waitFor('window.__actions.length > 0', 3000);
+    await sleep(500);
+    const sent = await takeActions();
+    const applied = await waitFor(`document.querySelector('${STATUS}').textContent.startsWith('${UNSAVED}')`, 3000);
+    await check('patch form', `${what} -> one draft action`, sent.length === 1 && sub(sent[0], expected),
+        {expected, sent});
+    await check('patch form', `${what} -> the draft takes it`, applied, {status: await statusText()});
+    return sent[0];
+}
+// One refused form edit: no draft action and the reason beside the field.
+async function formRefusal(what, act, field, reason) {
+    await takeActions();
+    await act();
+    await sleep(800);
+    const sent = await takeActions();
+    const note = await noteOf(field);
+    const invalid = await ev(`document.querySelector('${cfg(field)}').getAttribute('aria-invalid') === 'true'`);
+    await check('patch form', `${what} -> refused, says "${reason}"`, sent.length === 0 && note === reason && invalid,
+        {sent, note, invalid});
+}
+
+async function save(expectSaved = true) {
+    await click('#fixture-save');
+    const want = expectSaved ? 'Patch saved' : 'Patch not saved';
+    const ok = await waitFor(`document.querySelector('${STATUS}').textContent.startsWith('${want}')
+        && document.getElementById('config-panel').getAttribute('aria-busy') === 'false'`, 15000);
+    return ok;
+}
+async function reloadSaved() {
+    await click('#fixture-reload');
+    return waitFor(`document.querySelector('${STATUS}').textContent === 'Saved patch loaded.'`, 15000);
+}
+const fixtureIn = (files, name) => files.fixtures.find((f) => f.name === name);
+// A fixture's element in the scene XML, from its name to its closing tag.
+function fixtureXml(xml, name) {
+    const start = xml.lastIndexOf('<Fixture ', xml.indexOf(`name="${name}"`));
+    return xml.slice(start, xml.indexOf('</Fixture>', start) + '</Fixture>'.length);
+}
+// Every highlight target any page posted must be in the running rig (Starfire stops the show
+// on an unknown fixture; the bridge refusing it is the last line, not the first).
+async function checkHighlightIds(scenario) {
+    const rig = (await harness('state')).rig;
+    const ids = new Set(rig.fixtures.flatMap((f) => [`fixture:${f.name}`, ...f.cells.map((c) => `cell:${c}`)]));
+    const bad = network.slice(scenarioNet).map((n) => JSON.parse(n.body))
+        .filter((c) => c.action === 'highlight' && c.target)
+        .filter((c) => !ids.has(Object.entries(c.target).map(([k, v]) => `${k}:${v}`)[0]));
+    await check(scenario, 'no highlight posted with an id outside rig.fixtures', bad.length === 0, {bad});
+}
+let scenarioNet = 0;
+// Every text the test note shows from now on, however briefly.
+const watchNote = () => ev(`(() => {
+    window.__notes = [];
+    const note = document.querySelector('#fixture-info .cfg-test-note');
+    new MutationObserver(() => window.__notes.push(note.textContent))
+        .observe(note, {childList: true, characterData: true, subtree: true});
+})()`);
 
 const SUITES = {
     control: async () => {
@@ -610,15 +839,492 @@ const SUITES = {
         await shot('telemetry');
     },
 
+    cfg_drag: async () => {
+        await cfgFresh();
+        const before = await rigFiles();
+        const original = fixtureIn(before, 'spot_left');
+        await check('plan drag', 'spot_left starts at X -300, Y 0 in the store',
+            original.matrix[9] === -300 && original.matrix[10] === 0, {matrix: original.matrix});
+        await check('plan drag', 'selecting spot_left opens its form', await selectFixture('spot_left'));
+        const xField = () => ev(`document.querySelector('${splitInput('matrix', 0)}').value`);
+        await check('plan drag', 'Position X reads -300 before the drag', (await xField()) === '-300', {x: await xField()});
+
+        // Escape mid-drag: the preview moved, then everything is as it was and nothing is sent.
+        let m = await planMark('spot_left');
+        const grid0 = await areaBox();
+        await arm();
+        await pressAndMove(m.x, m.y, m.x + 300 * m.a, m.y);
+        const mid = await planMark('spot_left');
+        await check('plan drag', 'the mark previews 300 mm house-right (+X)', mid?.cx === m.cx + 300, {before: m.cx, mid: mid?.cx});
+        await check('plan drag', 'the grid preview keeps its box when the extent holds', same(await areaBox(), grid0),
+            {before: grid0, mid: await areaBox()});
+        await key(null, 'Escape');
+        await sleep(200);
+        const back = await planMark('spot_left');
+        await check('plan drag', 'Escape puts the mark back', back?.cx === m.cx && back?.cy === m.cy, {before: m, after: back});
+        await release(m.x + 300 * m.a, m.y);
+        await sleep(800);
+        let sent = (await takeActions()).filter((a) => a.action !== 'select');
+        await check('plan drag', 'Escape then release sends no draft action', sent.length === 0, {sent});
+        await check('plan drag', 'Escape leaves the draft clean', !(await statusText()).startsWith(UNSAVED), {status: await statusText()});
+
+        // The nine-area grid follows the preview: wash_left is the leftmost fixture.
+        const w = await planMark('wash_left');
+        await pressAndMove(w.x, w.y, w.x + 300 * w.a, w.y);
+        const gridMid = await areaBox();
+        await check('plan drag', 'the nine-area grid preview moves with the extent',
+            gridMid && grid0 && gridMid[0] === grid0[0] + 300 && gridMid[2] === grid0[2] - 300, {before: grid0, mid: gridMid});
+        const names = await ev(`[...document.querySelectorAll('#mvr-plan .plan-area-name')].map((t) => Number(t.getAttribute('x')))`);
+        await key(null, 'Escape');
+        await release(w.x + 300 * w.a, w.y);
+        await sleep(600);
+        await check('plan drag', 'the area names move with the grid', names.length === 9 && Math.min(...names) > grid0[0],
+            {names});
+        await check('plan drag', 'Escape restores the grid', same(await areaBox(), grid0), {grid: await areaBox()});
+        await takeActions();
+
+        // The committing drag.
+        m = await planMark('spot_left');
+        await arm();
+        await pressAndMove(m.x, m.y, m.x + 300 * m.a, m.y);
+        await release(m.x + 300 * m.a, m.y);
+        await waitFor('window.__actions.length > 0', 3000);
+        await sleep(600);
+        sent = await takeActions();
+        const moves = sent.filter((a) => a.action === 'set-position');
+        await check('plan drag', 'a drag commits one set-position at X 0, Y 0',
+            sent.length === 1 && moves.length === 1 && moves[0].x_mm === 0 && moves[0].y_mm === 0
+            && moves[0].original_matrix.includes('-300'), {sent});
+        await check('plan drag', 'Position X shows the new value', await waitFor(`document.querySelector('${splitInput('matrix', 0)}').value === '0'`, 3000),
+            {x: await xField()});
+        await check('plan drag', 'the plan redraws the mark at X 0', (await planMark('spot_left'))?.cx === 0);
+        await check('plan drag', 'the draft reads dirty', (await statusText()).startsWith(UNSAVED), {status: await statusText()});
+        await check('plan drag', 'a drag sends no bridge command', (await since()).length === 0, {seen: await since()});
+
+        // Zero movement: a press and release in place, and a drag that comes home.
+        m = await planMark('spot_left');
+        await mouse('mouseMoved', m.x, m.y, {button: 'none'});
+        await mouse('mousePressed', m.x, m.y, {clickCount: 1, buttons: 1});
+        await release(m.x, m.y);
+        await sleep(300);
+        await pressAndMove(m.x, m.y, m.x + 40, m.y + 25, 4);
+        for (let i = 3; i >= 0; i--) {
+            await mouse('mouseMoved', m.x + 10 * i, m.y + 6.25 * i, {buttons: 1});
+            await sleep(30);
+        }
+        await sleep(150);
+        await release(m.x, m.y);
+        await sleep(800);
+        sent = (await takeActions()).filter((a) => a.action !== 'select');
+        await check('plan drag', 'a drag with zero movement sends nothing', sent.length === 0, {sent});
+
+        await check('plan drag', 'Save writes the patch', await save(), {status: await statusText()});
+        const after = await rigFiles();
+        const moved = fixtureIn(after, 'spot_left');
+        await check('plan drag', 'the store holds spot_left at X 0', moved.matrix[9] === 0 && moved.matrix[10] === 0
+            && same(moved.matrix.slice(0, 9), original.matrix.slice(0, 9)) && moved.matrix[11] === original.matrix[11],
+            {matrix: moved.matrix});
+        await check('plan drag', 'every other fixture is unchanged in the store',
+            same(after.fixtures.filter((f) => f.name !== 'spot_left'), before.fixtures.filter((f) => f.name !== 'spot_left')));
+        await check('plan drag', 'the repo mirror is the store, byte for byte', after.repo_same_as_store);
+        await check('plan drag', "the repo pb is Starfire's for the saved store", after.repo_pb === after.pb_of_store
+            && after.repo_pb !== before.repo_pb, {before: before.repo_pb, after: after.repo_pb, expected: after.pb_of_store});
+        const [xml0, xml1] = [before.store[SCENE_XML], after.store[SCENE_XML]];
+        const matrix = (xml) => {
+            const from = xml.indexOf('<Matrix>', xml.indexOf('name="spot_left"'));
+            return [from, xml.indexOf('</Matrix>', from) + '</Matrix>'.length];
+        };
+        const [a0, a1] = matrix(xml0);
+        const [b0, b1] = matrix(xml1);
+        await check('plan drag', 'the scene XML differs only in spot_left\'s Matrix',
+            xml0.slice(0, a0) === xml1.slice(0, b0) && xml0.slice(a1) === xml1.slice(b1) && xml0.slice(a0, a1) !== xml1.slice(b0, b1),
+            {was: xml0.slice(a0, a1), now: xml1.slice(b0, b1), sameLength: xml0.length - xml1.length});
+        const others = (entries) => Object.entries(entries).filter(([k]) => k !== SCENE_XML);
+        await check('plan drag', 'every other MVR entry is byte-identical', same(others(before.store), others(after.store)));
+
+        await check('plan drag', 'Reload loads the saved patch', await reloadSaved(), {status: await statusText()});
+        await selectFixture('spot_left');
+        await check('plan drag', 'after Reload spot_left is at X 0', (await xField()) === '0' && (await planMark('spot_left'))?.cx === 0,
+            {x: await xField()});
+        await check('plan drag', 'no bridge command from the whole drag, save and reload', (await since()).length === 0, {seen: await since()});
+    },
+
+    cfg_form: async () => {
+        await cfgFresh();
+        const before = await rigFiles();
+        await selectFixture('spot_left');
+        await arm();
+        await formEdit('Fixture ID', () => typeInto(cfg('FixtureID'), '7'),
+            {action: 'set-child-text', tag: 'FixtureID', value: '7'});
+        await formEdit('Fixture ID (numeric)', () => typeInto(cfg('FixtureIDNumeric'), '8'),
+            {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '8'});
+        await formEdit('Address 25', () => typeInto(cfg('address'), '25'),
+            {action: 'set-address', universe: 1, address: 25});
+        await formRefusal('Address 13 (spot_right holds 13-24)', () => typeInto(cfg('address'), '13'),
+            'address', 'Overlaps spot_right.');
+        await formRefusal('Address 505 (12 channels)', () => typeInto(cfg('address'), '505'),
+            'address', 'Address must be 1–501 for 12 channels.');
+        await formRefusal('rename to spot_right', () => typeInto(cfg('name'), 'spot_right'),
+            'name', 'Another fixture is named spot_right.');
+        await formRefusal('empty name', () => typeInto(cfg('name'), ' '), 'name', 'A name is required.');
+        // The refusals left typed text in the fields; a redraw from the draft puts it back.
+        await selectFixture('spot_right');
+        await selectFixture('spot_left');
+        await check('patch form', 'refused edits leave the draft as it was',
+            (await ev(`document.querySelector('${cfg('address')}').value`)) === '25'
+            && (await ev(`document.querySelector('${cfg('name')}').value`)) === 'spot_left');
+        for (const pitch of ['61', '-61', '60.5']) {
+            await formRefusal(`pitch ${pitch}°`, () => typeInto(splitInput('matrix', 4), pitch), 'matrix', 'Pitch must be within ±60°.');
+        }
+        await formEdit('pitch 60° (the limit)', () => typeInto(splitInput('matrix', 4), '60'),
+            {action: 'set-matrix', position: [-300, 0, 0], rotation: [180, 60, 0]});
+        await formEdit('Pan limits min 0.1', () => typeInto(splitInput('Pan', 0), '0.1'),
+            {action: 'set-movement', axis: 'Pan', minimum: 0.1, maximum: 1});
+        await formRefusal('Tilt limits min 2', () => typeInto(splitInput('Tilt', 0), '2'), 'Tilt', 'Limits need 0 ≤ min ≤ max ≤ 1.');
+        await selectFixture('spot_right');
+        await selectFixture('spot_left');
+        await formEdit('Tilt limits max 0.9', () => typeInto(splitInput('Tilt', 1), '0.9'),
+            {action: 'set-movement', axis: 'Tilt', minimum: 0, maximum: 0.9});
+        await formEdit('Invert pan', () => click(cfg('DMXInvertPan')),
+            {action: 'set-child-text', tag: 'DMXInvertPan', value: 'true'});
+        await formEdit('Invert tilt', () => click(cfg('DMXInvertTilt')),
+            {action: 'set-child-text', tag: 'DMXInvertTilt', value: 'true'});
+        await check('patch form', 'spot_left is not dashed (loop) before its group changes', !(await planMark('spot_left')).dashed);
+        await formEdit('Group movers -> fx', () => choose(cfg('group'), 'fx'), {action: 'set-class', name: 'fx'});
+        await check('patch form', 'joining fx moves spot_left to the accent Layer', await waitFor(`(() => {
+            const c = ${markOf('spot_left')}?.querySelector('circle'); return !!c && c.hasAttribute('stroke-dasharray'); })()`, 3000)
+            && (await ev(`document.querySelector('${cfg('role')}').value`)) === 'accent');
+
+        await selectFixture('zq06017');
+        await formEdit('Mode 24Channel -> 2Channel', () => choose(cfg('GDTFMode'), '2Channel'),
+            {action: 'set-child-text', tag: 'GDTFMode', value: '2Channel'});
+        await formEdit('zq06017 Address 505 (2 channels)', () => typeInto(cfg('address'), '505'),
+            {action: 'set-address', universe: 1, address: 505});
+        await formRefusal('Mode 24Channel at 505', () => choose(cfg('GDTFMode'), '24Channel'),
+            'GDTFMode', 'Address must be 1–489 for 24 channels.');
+        await selectFixture('spot_right');
+        await selectFixture('zq06017');
+        await formEdit('zq06017 Address 97', () => typeInto(cfg('address'), '97'),
+            {action: 'set-address', universe: 1, address: 97});
+        await formEdit('Mode 12Channel', () => choose(cfg('GDTFMode'), '12Channel'),
+            {action: 'set-child-text', tag: 'GDTFMode', value: '12Channel'});
+
+        await selectFixture('wash_left');
+        const washSpec = await ev(`document.querySelector('${cfg('GDTFSpec')}').value`);
+        const spotSpec = 'Chauvet DJ@Intimidator Spot 110@1.0.gdtf';
+        await formEdit('Profile -> the spot', () => choose(cfg('GDTFSpec'), spotSpec),
+            {action: 'set-child-text', tag: 'GDTFSpec', value: spotSpec});
+        await check('patch form', 'a profile without the mode blocks Save', await waitFor(`document.getElementById('fixture-save').disabled`, 2000));
+        await formEdit('Profile back', () => choose(cfg('GDTFSpec'), washSpec),
+            {action: 'set-child-text', tag: 'GDTFSpec', value: washSpec});
+        await check('patch form', 'Save is enabled again', await waitFor(`!document.getElementById('fixture-save').disabled`, 2000));
+        await formEdit('Role of wash -> accent', () => choose(cfg('role'), 'accent'), {action: 'set-role', role: 'accent'});
+        await check('patch form', 'the whole wash group moves to the accent Layer', await waitFor(`['wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right']
+            .every((name) => [...document.querySelectorAll('#mvr-plan .mvr-object')].find((g) => (g.querySelector('title')?.textContent || '').split(' · ')[0] === name)
+                ?.querySelector('circle').hasAttribute('stroke-dasharray'))`, 3000));
+        await selectFixture('wash_right');
+        await takeActions();
+        await choose(cfg('group'), NEW_GROUP);
+        await sleep(500);
+        await check('patch form', '"new…" opens the name field and sends nothing',
+            (await takeActions()).length === 0 && (await ev(`!document.querySelector('${cfg('newGroup')}').hidden`)));
+        await formEdit('New group solo', () => typeInto(cfg('newGroup'), 'solo'), {action: 'set-class', name: 'solo'});
+        await check('patch form', 'no bridge command from any form edit', (await since()).length === 0, {seen: await since()});
+
+        await check('patch form', 'Save after the form edits', await save(), {status: await statusText()});
+        const after = await rigFiles();
+        const spot = fixtureIn(after, 'spot_left');
+        const zq = fixtureIn(after, 'zq06017');
+        const spotXml = fixtureXml(after.store[SCENE_XML], 'spot_left');
+        await check('patch form', 'the store holds spot_left as edited', spot.address === 25 && spot.class === 'fx'
+            && spot.layer === 'accent' && spot.pan.min === 0.1 && spot.tilt.max === 0.9 && spot.pan.inverted && spot.tilt.inverted
+            && spotXml.includes('<FixtureID>7</FixtureID>') && spotXml.includes('<FixtureIDNumeric>8</FixtureIDNumeric>'),
+            {spot, spotXml: spotXml.slice(0, 600)});
+        const pitch = Math.asin(Math.max(-1, Math.min(1, spot.matrix[5]))) * 180 / Math.PI;
+        await check('patch form', 'the stored spot_left is pitched 60° (|Matrix z of local Y|)', Math.abs(Math.abs(pitch) - 60) < 1e-3,
+            {matrix: spot.matrix, pitch});
+        await check('patch form', 'the store holds zq06017 at 97 in 12Channel', zq.address === 97 && zq.gdtf_mode === '12Channel', {zq});
+        await check('patch form', 'the wash group sits in accent; wash_right is in solo',
+            ['wash_left', 'wash_mid_left', 'wash_mid_right', 'wash_right'].every((n) => fixtureIn(after, n).layer === 'accent')
+            && fixtureIn(after, 'wash_right').class === 'solo' && fixtureIn(after, 'wash_left').gdtf_spec === washSpec,
+            {washes: after.fixtures.filter((f) => f.name.startsWith('wash')).map((f) => [f.name, f.class, f.layer])});
+        await check('patch form', 'untouched fixtures are unchanged', same(fixtureIn(after, 'spot_right'), fixtureIn(before, 'spot_right'))
+            && same(fixtureIn(after, 'kinta'), fixtureIn(before, 'kinta')));
+        await check('patch form', 'repo mirror and pb follow the save', after.repo_same_as_store && after.repo_pb === after.pb_of_store);
+
+        // Stale revision: the store changes behind the page; the page's Save must not land.
+        await selectFixture('spot_left');
+        await formEdit('Fixture ID 9 (to save over a moved store)', () => typeInto(cfg('FixtureID'), '9'),
+            {action: 'set-child-text', tag: 'FixtureID', value: '9'});
+        await harness('rig', {bump: true});
+        const bumped = await rigFiles();
+        await check('stale save', 'Save over a changed store is refused', await save(false), {status: await statusText()});
+        await check('stale save', 'the refusal says to reload',
+            (await statusText()) === 'Patch not saved: Fixture patch changed. Reload it before saving your edits.', {status: await statusText()});
+        const refused = await rigFiles();
+        await check('stale save', 'the refused save writes nothing', refused.revision === bumped.revision
+            && refused.repo_pb === bumped.repo_pb && same(refused.repo, bumped.repo) && refused.revision !== after.revision,
+            {revision: [after.revision, bumped.revision, refused.revision]});
+        await check('stale save', 'the draft keeps the unsaved edit', (await ev(`document.querySelector('${cfg('FixtureID')}').value`)) === '9');
+    },
+
+    cfg_locate: async () => {
+        await cfgFresh();
+        await check('locate', 'select spot_left', await selectFixture('spot_left'),
+            {form: await ev(`document.getElementById('fixture-info').innerHTML.slice(0, 1500)`)});
+        const exactly = async (control, name, act, expected, watch = 2500) => {
+            await arm();
+            await act();
+            await sleep(watch);
+            const seen = await since();
+            await check(control, `${name} -> ${expected.length} command(s), exactly`,
+                seen.length === expected.length && expected.every((e, i) => same(seen[i], e)), {expected, seen});
+            return seen;
+        };
+        const note = () => text('#fixture-info .cfg-test-note');
+        await exactly('locate Test', 'click', () => click(testButton('white')), [lightOn({fixture: 'spot_left'}, 'white')]);
+        await check('locate Test', 'lights its button and names the test', await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000)
+            && (await note()) === 'Testing spot_left in white.', {note: await note()});
+        await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
+        await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: 'spot_left'}, 'white')]);
+        for (const colour of ['warm', 'red', 'blue', 'green']) {
+            await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: 'spot_left'}, colour)]);
+        }
+        await check('locate swatch', 'the lit swatch wears the active ring', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
+            && !document.querySelector('${testButton('blue')}').classList.contains('active')`, 3000));
+        await check('locate swatch', 'one keep-alive, whatever the clicks', (await keepAlive()).held === 1, await keepAlive());
+        await exactly('locate ›', 'next in patch order (spot_right), no clear first', () => click(testButton('1')), [lightOn({fixture: 'spot_right'}, 'green')]);
+        await check('locate ›', 'the selection follows the test', await waitFor(`document.querySelector('${cfg('name')}').value === 'spot_right'`, 2000));
+        await exactly('locate ‹', 'back to spot_left', () => click(testButton('-1')), [lightOn({fixture: 'spot_left'}, 'green')]);
+        await exactly('locate ‹', 'wraps from the first to the last (zq06017 at 97)', () => click(testButton('-1')), [lightOn({fixture: 'zq06017'}, 'green')]);
+        await exactly('locate ›', 'wraps back to spot_left', () => click(testButton('1')), [lightOn({fixture: 'spot_left'}, 'green')]);
+        // The operator's latest colour must travel with ›, even before the show echoes it.
+        await exactly('locate ›', 'right after a swatch carries that swatch', async () => {
+            await click(testButton('red'));
+            await click(testButton('1'));
+        }, [lightOn({fixture: 'spot_left'}, 'red'), lightOn({fixture: 'spot_right'}, 'red')]);
+        await exactly('locate Off', 'click', () => click(testButton('off')), [CLEAR]);
+        await check('locate Off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
+        await exactly('locate Off', 'a tick after Off sends nothing', () => ev('window.__tickKeepAlive()'), []);
+
+        await selectFixture('zq06017');
+        const rig = (await harness('state')).rig;
+        const cells = rig.fixtures.find((f) => f.name === 'zq06017').cells;
+        const listing = `[...document.querySelectorAll('#fixture-info [data-cfg-cell]')].map((b) => b.dataset.cfgCell)`;
+        // The list fills from the show's rig on the poll after the form draws.
+        await waitFor(`JSON.stringify(${listing}) === ${JSON.stringify(JSON.stringify(cells))}`, 3000);
+        const listed = await ev(listing);
+        await check('locate cells', "lists the running rig's cells for zq06017", same(listed, cells),
+            {listed, cells, shown: await ev(`document.querySelector('#fixture-info .cfg-cells')?.outerHTML.slice(0, 400)`)});
+        const cell = cells[2];
+        await exactly('locate cells', `picking ${cell} alone sends nothing`, () => click(`#fixture-info [data-cfg-cell="${cell}"]`), [], 800);
+        await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('white')), [lightOn({cell}, 'white')]);
+        await exactly('locate cells', 'a swatch keeps the cell', () => click(testButton('blue')), [lightOn({cell}, 'blue')]);
+        await check('locate cells', 'the picked cell is marked', await ev(`document.querySelector('#fixture-info [data-cfg-cell="${cell}"]').classList.contains('selected')`));
+
+        await exactly('locate deselect', 'Close sends one clear', () => click('#fixture-close'), [CLEAR]);
+        await check('locate deselect', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
+
+        await selectFixture('spot_left');
+        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('white')), [lightOn({fixture: 'spot_left'}, 'white')]);
+        await exactly('locate tab switch', 'Control sends one clear and nothing after', async () => {
+            await tab('Control');
+            await sleep(2000);
+            await ev('window.__tickKeepAlive()');
+        }, [CLEAR], 4000);
+
+        await tab('Config');
+        await waitFor(`!!document.querySelector('${testButton('white')}') && !document.querySelector('${testButton('white')}').disabled`, 3000);
+        await planSettled();
+        await harness('control', {refuse_paused: true});
+        await arm();
+        await watchNote();
+        await click(testButton('white'));
+        await sleep(1500);
+        const history = await ev('window.__notes.slice()');
+        await check('locate 409', 'shows the reason', history.includes('Test refused: the show is paused'), {history});
+        await check('locate 409', 'still shows the reason 1.5 s later (polls do not wipe it)',
+            (await note()) === 'Test refused: the show is paused', {note: await note(), history});
+        await check('locate 409', 'the page posted one highlight; the show took none',
+            posted().length === 1 && posted()[0].action === 'highlight' && (await since()).length === 0, {posted: posted(), seen: await since(),
+                pointer: await ev('window.__pointer.slice(-3)'), button: await ev(`(() => { const b = document.querySelector('${testButton('white')}'); const r = b.getBoundingClientRect(); return [b.disabled, r.x, r.y, scrollY]; })()`)});
+        await check('locate 409', 'turns the test off (no keep-alive)', (await keepAlive()).held === 0, await keepAlive());
+        await exactly('locate 409', 'a deselect after the refusal has nothing to clear', () => click('#fixture-close'), []);
+        await harness('control', {refuse_paused: false});
+
+        await selectFixture('spot_left');
+        await harness('control', {paused: true});
+        const disabled = await waitFor(`[...document.querySelectorAll('#fixture-info [data-cfg-test]')].every((b) => b.disabled)`, 3000);
+        await check('locate paused', 'every test control is disabled', disabled);
+        await check('locate paused', 'says why', (await note()) === 'Test is off while the show is paused.', {note: await note()});
+        await arm();
+        await click(testButton('white'));
+        await click(testButton('red'));
+        await sleep(800);
+        await check('locate paused', 'clicks on the disabled controls post nothing', posted().length === 0, {posted: posted()});
+        await harness('control', {paused: false});
+        await check('locate paused', 'play enables them again', await waitFor(`[...document.querySelectorAll('#fixture-info [data-cfg-test]')].every((b) => !b.disabled)`, 3000)
+            && (await note()) === '', {note: await note()});
+        await checkHighlightIds('locate');
+    },
+
+    cfg_apply: async () => {
+        await cfgFresh();
+        const applyDisabled = () => ev(`document.getElementById('fixture-apply').disabled`);
+        const banner = () => text('#fixture-show-rig');
+        const label = () => text('#fixture-apply');
+        await sleep(1000);
+        await check('apply', 'disabled while the show runs the saved rig', (await applyDisabled()) && (await banner()) === '',
+            {banner: await banner()});
+        await selectFixture('wash_left');
+        await formEdit('Fixture ID (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
+            {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
+        await check('apply', 'an unsaved edit does not enable Apply', await applyDisabled());
+        await check('apply', 'Save', await save(), {status: await statusText()});
+        await check('apply', 'after a Save it enables with the banner', await waitFor(`!document.getElementById('fixture-apply').disabled
+            && document.getElementById('fixture-show-rig').textContent === ${JSON.stringify(STALE_RIG)}`, 3000), {banner: await banner()});
+        await arm();
+        await click('#fixture-apply');
+        await check('apply', 'the first click arms', await waitFor(`document.getElementById('fixture-apply').textContent === 'Click again to restart'`, 1000),
+            {label: await label()});
+        await sleep(5500);
+        await check('apply', '5 s later it disarms', (await label()) === APPLY_LABEL, {label: await label()});
+        await check('apply', 'arming and disarming send no command', (await since()).length === 0 && posted().length === 0,
+            {seen: await since(), posted: posted()});
+        const running = (await harness('state')).rig_revision;
+        await arm();
+        await click('#fixture-apply');
+        await sleep(400);
+        await click('#fixture-apply');
+        await sleep(300);
+        await check('apply', 'the second click within 5 s says it restarts', (await banner()) === 'Restarting the show on the saved patch.'
+            && (await applyDisabled()), {banner: await banner()});
+        await sleep(2500);
+        const seen = await since();
+        await check('apply', 'two clicks send exactly one restart_show', seen.length === 1 && same(seen[0], {action: 'restart_show'}), {seen});
+        const files = await rigFiles();
+        const state = await harness('state');
+        await check('apply', 'the stub rebooted on the saved store', state.rig_revision === files.revision && running !== files.revision,
+            {running, now: state.rig_revision, saved: files.revision});
+        await check('apply', 'the new revision clears the banner and disables Apply', await waitFor(`document.getElementById('fixture-apply').disabled
+            && document.getElementById('fixture-show-rig').textContent === ''`, 3000), {banner: await banner()});
+        await check('apply', 'the label is back', (await label()) === APPLY_LABEL, {label: await label()});
+        await arm();
+        await click('#fixture-apply');
+        await click('#fixture-apply');
+        await sleep(1500);
+        await check('apply', 'clicks on the disabled button post nothing', posted().length === 0, {posted: posted()});
+    },
+
+    cfg_robust: async () => {
+        const NAME = `spot <"left"> & 'co'`;
+        await cfgFresh();
+        await selectFixture('spot_left');
+        let typingNote = null;
+        await formEdit('rename with < & and quotes', async () => {
+            await ev(`(() => { const e = document.querySelector('${cfg('name')}'); e.focus(); e.select(); })()`);
+            await cdp('Input.insertText', {text: NAME});
+            typingNote = await noteOf('name');
+            await ev('document.activeElement.blur()');
+        }, {action: 'set-attribute', doc: 'scene', name: 'name', value: NAME});
+        await check('odd name', 'typing the rename warns about groups and tests',
+            typingNote === 'Renaming changes which groups the show puts this fixture in and stops a test running on it.', {note: typingNote});
+        await check('odd name', 'survives the form', (await ev(`document.querySelector('${cfg('name')}').value`)) === NAME);
+        const svg = await ev(`(() => { const g = ${markOf(NAME)}; return g && {label: g.querySelector('text')?.textContent, title: g.querySelector('title').textContent}; })()`);
+        await check('odd name', 'survives the plan SVG (label and tooltip)', svg?.label === NAME && svg?.title === NAME + ' · movers', {svg});
+        await check('odd name', 'survives the DMX map', (await ev(`[...document.querySelectorAll('#fixture-channel-map .patch-block')].some((b) => b.dataset.fixtureName === ${JSON.stringify(NAME)} && b.textContent.startsWith(${JSON.stringify(NAME + ' · ')}))`)));
+        await check('odd name', 'leaves no stray markup in the plan', (await ev(`document.querySelectorAll('#mvr-plan svg.plan').length === 1 && !document.querySelector('#mvr-plan svg.plan left, #mvr-plan svg.plan co')`)));
+        // A renamed fixture is not in the running rig until Apply: its test must not post that id.
+        await arm();
+        await watchNote();
+        await click(testButton('white'));
+        await sleep(1500);
+        const renamedTest = posted();
+        await check('odd name', 'the refused test of the renamed fixture says why',
+            (await ev('window.__notes.slice()')).some((n) => n.startsWith('Test refused: no fixture')) || renamedTest.length === 0,
+            {notes: await ev('window.__notes.slice()')});
+        await check('odd name', 'Test on the renamed, unapplied fixture posts no id outside the running rig',
+            renamedTest.every((c) => c.action !== 'highlight' || !c.target || c.target.fixture === 'spot_left'), {posted: renamedTest,
+                note: await text('#fixture-info .cfg-test-note')});
+        if (renamedTest.length) {
+            await click(testButton('off'));
+            await sleep(800);
+        }
+        await check('odd name', 'Save', await save(), {status: await statusText()});
+        const files = await rigFiles();
+        const xml = files.store[SCENE_XML];
+        const attr = `name="spot &lt;&quot;left&quot;&gt; &amp; 'co'"`;
+        await check('odd name', 'the saved XML escapes it exactly once', xml.includes(attr) && !/&amp;(lt|gt|quot|amp|apos|#)/.test(xml),
+            {around: xml.slice(Math.max(0, xml.indexOf('spot ') - 40), xml.indexOf('spot ') + 80)});
+        const parsed = await ev(`(() => { const doc = new DOMParser().parseFromString(${JSON.stringify(xml)}, 'application/xml');
+            return {error: !!doc.querySelector('parsererror'), names: [...doc.querySelectorAll('Fixture')].map((f) => f.getAttribute('name'))}; })()`);
+        await check('odd name', 'the saved XML parses back to the name', !parsed.error && parsed.names.filter((n) => n === NAME).length === 1, parsed);
+        await check('odd name', 'the store reads it back', !!fixtureIn(files, NAME) && files.repo_same_as_store && files.repo_pb === files.pb_of_store);
+        await check('odd name', 'Reload brings it back', await reloadSaved());
+        await check('odd name', 'and the form shows it again', await selectFixture(NAME));
+
+        await cfgFresh({width: 390});
+        await check('phone width', 'select a fixture on the Config tab', await selectFixture('spot_left'));
+        await sleep(800);
+        const o = await overflow();
+        await check('phone width Config form', 'no horizontal scroll', o.scroll <= o.width, o);
+        const columns = await ev(`getComputedStyle(document.querySelector('#fixture-info .cfg-form')).gridTemplateColumns`);
+        await check('phone width Config form', 'the form is a single column', columns.trim().split(/\s+/).length === 1, {columns});
+        await cdp('Emulation.setDeviceMetricsOverride', {width: 1280, height: 900, deviceScaleFactor: 1, mobile: false});
+
+        // Reload mid-test. Behaviour: the unloading page turns hidden, and its visibilitychange
+        // handler clears the lit test (one clear reaches the show); nothing else is sent, and
+        // the reloaded page shows no test and holds no keep-alive.
+        await cfgFresh();
+        await selectFixture('spot_left');
+        await click(testButton('white'));
+        await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000);
+        await arm();
+        await navigate('Page.reload');
+        await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
+        await sleep(3000);
+        await check('reload mid-test', 'the unload sends exactly one clear and nothing else', same(await since(), [CLEAR]),
+            {seen: await since()});
+        await check('reload mid-test', 'the show holds no test', (await harness('state')).highlight === null);
+        await tab('Config');
+        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+        await ev(`window.__actions = []; (() => { const ds = window.dash_clientside; const real = ds.set_props;
+            ds.set_props = function (id, props) { if (id === 'fixture-grid-action') window.__actions.push(props.data); return real.apply(this, arguments); }; })()`);
+        await check('reload mid-test', 'the reloaded page selects the fixture', await selectFixture('spot_left'));
+        await sleep(800);
+        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(`document.querySelector('${testButton('white')}').classList.contains('active')`))
+            && (await text('#fixture-info .cfg-test-note')) === '' && (await keepAlive()).held === 0, {note: await text('#fixture-info .cfg-test-note')});
+        await arm();
+        await click(testButton('white'));
+        await sleep(1500);
+        await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: 'spot_left'}, 'white')]),
+            {seen: await since()});
+        await click(testButton('off'));
+        await sleep(1000);
+
+        // A browser reload after a Save must show the saved patch, and offer Apply.
+        await cfgFresh();
+        await selectFixture('wash_left');
+        await formEdit('Fixture ID (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
+            {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
+        await check('reload after save', 'Save', await save());
+        await navigate('Page.reload');
+        await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
+        await tab('Config');
+        await waitFor(`!!document.querySelector('#mvr-plan svg.plan')`, 8000);
+        await ev(`window.__actions = []`);
+        await selectFixture('wash_left');
+        await sleep(1000);
+        await check('reload after save', 'the reloaded page shows the saved patch',
+            (await ev(`document.querySelector('${cfg('FixtureIDNumeric')}').value`)) === '42',
+            {shown: await ev(`document.querySelector('${cfg('FixtureIDNumeric')}').value`)});
+        await check('reload after save', 'and offers Apply for it', !(await ev(`document.getElementById('fixture-apply').disabled`)),
+            {banner: await text('#fixture-show-rig')});
+        await checkHighlightIds('robust');
+    },
+
     narrow: async () => {
         await fresh({width: 390});
-        const overflow = () => ev(`(() => {
-            const w = document.documentElement.clientWidth;
-            const wide = [...document.querySelectorAll('body *')].filter((e) => e.getClientRects().length
-                && e.getBoundingClientRect().right > w + 1 && !e.closest('[style*="overflow: hidden"], .marquee'))
-                .slice(0, 4).map((e) => (e.id ? '#' + e.id : e.tagName.toLowerCase() + '.' + e.className) + ' right=' + Math.round(e.getBoundingClientRect().right));
-            return {scroll: document.documentElement.scrollWidth, width: w, wide};
-        })()`);
         const views = [
             ['Control AUTO', async () => {}],
             ['Settings open', () => click('#settings-toggle')],
@@ -644,6 +1350,7 @@ for (const [name, suite] of Object.entries(SUITES)) {
     }
     console.log(`== ${name}`);
     const lines = consoleLines.length;
+    scenarioNet = network.length;
     try {
         await suite();
     } catch (error) {
@@ -652,6 +1359,7 @@ for (const [name, suite] of Object.entries(SUITES)) {
     const noisy = consoleLines.slice(lines);
     await check(name, 'no page errors or warnings', noisy.length === 0, {console: noisy});
 }
+console.log(`aborted Dash callbacks dropped during navigations: ${abortedOnLeave}`);
 console.log(`\n${results.length - failed} passed, ${failed} failed`);
 chrome.kill();
 process.exit(failed ? 1 : 0);
