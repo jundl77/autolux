@@ -83,19 +83,20 @@ def test_a_page_load_renders_what_the_first_poll_would_above_the_controls():
     texts = [item.children[0].children for item in page['show-status'].children]
     assert texts[0] == 'Health' and 'Render FPS' in texts
     assert [notice.children for notice in page['telemetry-alerts'].children] == [
-        'No system telemetry yet. Graphs will populate when measurements arrive.'
+        ['No system telemetry yet. Graphs will populate when measurements arrive.']
     ]
 
 
-def test_telemetry_notices_share_one_line_with_the_full_text_in_its_title():
+def test_telemetry_notices_share_one_line_most_severe_first_with_a_count_and_the_full_text_in_its_title():
     from autolux.simulate.system_metrics import build_telemetry_notices
 
     (notice,) = build_telemetry_notices({'shed': {'level': 'LIGHT', 'sheds_per_min': 3}})
     text = (
-        'No system telemetry yet. Graphs will populate when measurements arrive.'
-        ' · Analysis is holding the last intent. · Analysis skips: 3/min.'
+        'Analysis is holding the last intent. · Analysis skips: 3/min.'
+        ' · No system telemetry yet. Graphs will populate when measurements arrive.'
     )
-    assert notice.children == notice.title == text
+    count, line = notice.children
+    assert (count.children, line, notice.title) == ('3 ·', text, text)
 
 
 class _Browser:
