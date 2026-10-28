@@ -54,7 +54,7 @@ fn a_robe_mover_drives_16_bit_pan_tilt_cmy_mixing_wheels_and_dimmer() {
             ..Default::default()
         },
     );
-    assert_eq!(&output[..4], [64, 0, 191, 255], "16-bit pan and tilt");
+    assert_eq!(&output[..4], [149, 85, 191, 255], "16-bit pan and tilt");
     assert_eq!(&output[8..11], [0, 255, 255], "CMY subtracts to red");
     assert_eq!(output[32], 255, "dimmer");
     assert_eq!(output[31], 32, "shutter keeps its open default");

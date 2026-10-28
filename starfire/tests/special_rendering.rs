@@ -32,7 +32,11 @@ fn synthetic_rig() -> wire::RigDefinition {
     wire::RigDefinition {
         fixtures: vec![
             fixture("spinner", "wheel_spinner", SPINNER.start as u32 + 1),
-            fixture("scanner", "beam_scanner", SCANNER.start as u32 + 1),
+            // Turned so its limited throw covers the headings its logical range names.
+            wire::Fixture {
+                matrix: vec![-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                ..fixture("scanner", "beam_scanner", SCANNER.start as u32 + 1)
+            },
         ],
         groups: vec![
             group("spinners", &["spinner"]),
