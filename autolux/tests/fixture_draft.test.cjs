@@ -408,17 +408,17 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [numbered] = edit(current, check("FixtureID", "17").action);
     assert.deepEqual(["FixtureID", "FixtureIDNumeric"].map((tag) => child(fixtureNode(numbered, "wash_right"), tag).text), ["17", "17"]);
     assert.match(check("matrix", ["0", "0", "0", "0", "61", "0"]).error, /±60°/);
-    // Soft limits in degrees within the GDTF's physical range (the spot pans 0–540°, tilts 0–270°),
+    // Soft limits in degrees within the GDTF's physical range (the spot pans -220–320°, tilts 0–270°),
     // stored as the share of it Starfire maps; edits past the range clamp to it.
     assert.match(check("Pan", ["400", "100"], current, spot.key).error, /Min is above max/);
     assert.match(check("Pan", ["", "100"], current, spot.key).error, /both limits/);
-    const [limited] = edit(current, check("Pan", ["54", "486"], current, spot.key).action);
+    const [limited] = edit(current, check("Pan", ["-166", "266"], current, spot.key).action);
     const movement = [...nodes(limited.scene)].find((node) => node.tag === "Movement");
     assert.deepEqual(plain(movement.attributes), { fixture: spot.attributes.uuid, axis: "Pan", minimum: "0.1", maximum: "0.9" });
     assert.deepEqual(plain(check("Tilt", ["-20", "300"], current, spot.key)), { error: null, action: { action: "set-movement", key: spot.key, axis: "Tilt", minimum: 0, maximum: 1 } });
     // The range's ends are the share's ends exactly, on both axes.
-    for (const [axis, top] of [["Pan", "540"], ["Tilt", "270"]]) {
-        assert.deepEqual(plain(check(axis, ["0", top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 0, maximum: 1 });
+    for (const [axis, bottom, top] of [["Pan", "-220", "320"], ["Tilt", "0", "270"]]) {
+        assert.deepEqual(plain(check(axis, [bottom, top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 0, maximum: 1 });
         assert.deepEqual(plain(check(axis, [top, top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 1, maximum: 1 });
     }
 });
