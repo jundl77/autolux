@@ -227,7 +227,14 @@ def build_system_health_panels():
 def build_telemetry_notices(snapshot, *, now=None):
     now = time.time() if now is None else now
     system = snapshot.get('system') or {}
+    # Most severe first: the line ellipsises, and a routine link notice must not hide a fault.
     messages = []
+    shed = snapshot.get('shed') or {}
+    fault = shed.get('fault')
+    if fault or shed.get('level', 'NONE') != 'NONE':
+        messages.append(f'Analysis is holding the last intent{f": {fault}" if fault else "."}')
+    if shed.get('sheds_per_min', 0):
+        messages.append(f'Analysis skips: {shed["sheds_per_min"]}/min.')
     age = max(0, now - system.get('updated_at', now))
     if not system:
         messages.append('No system telemetry yet. Graphs will populate when measurements arrive.')
@@ -271,12 +278,10 @@ def build_telemetry_notices(snapshot, *, now=None):
             and (not finite(dmx_age) or dmx_age + age >= DMX_INPUT_STALE_SECONDS)
         ):
             messages.append('No recent lighting input from Starfire.')
-    shed = snapshot.get('shed') or {}
-    fault = shed.get('fault')
-    if fault or shed.get('level', 'NONE') != 'NONE':
-        messages.append(f'Analysis is holding the last intent{f": {fault}" if fault else "."}')
-    if shed.get('sheds_per_min', 0):
-        messages.append(f'Analysis skips: {shed["sheds_per_min"]}/min.')
     # One line, however many: the line sits above the show controls and must never grow.
+    if not messages:
+        return []
     text = ' · '.join(messages)
-    return [html.Div(text, title=text, className='telemetry-notice', role='status')] if text else []
+    # The count tells the operator the ellipsis may hide more than the first notice.
+    count = [html.Span(f'{len(messages)} ·', className='notice-count')] if len(messages) > 1 else []
+    return [html.Div([*count, text], title=text, className='telemetry-notice', role='status')]

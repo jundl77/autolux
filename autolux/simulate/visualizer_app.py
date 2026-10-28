@@ -1609,9 +1609,10 @@ h2 { font-size: 14px; font-weight: 600; margin: 0; }
 .chart-panel { min-width: 0; background: #111923; border: 1px solid #273344; border-radius: 8px; overflow: hidden; }
 .chart-panel h3 { margin: 16px 16px 7px; font-size: 13px; font-weight: 600; }
 .panel-description { margin: 0 16px 4px; color: #9baabb; font-size: 11px; line-height: 1.5; min-height: 50px; }
-/* Fixed even when empty: a notice coming or going must not move the controls below. */
-#telemetry-alerts { height: 36px; margin-bottom: 12px; }
-.telemetry-notice { height: 100%; padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
+/* Held open when empty: a one-line notice coming or going must not move the controls below. */
+#telemetry-alerts { min-height: 36px; margin-bottom: 12px; }
+.notice-count { margin-right: 6px; font-weight: 600; }
+.telemetry-notice { padding: 10px 14px; border-left: 2px solid #f6c177; background: #29251f;
                     color: #f6c177; font-size: 12px; white-space: nowrap; overflow: hidden;
                     text-overflow: ellipsis; }
 .diagnostics-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(340px, 1fr);
