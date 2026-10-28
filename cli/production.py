@@ -35,6 +35,13 @@ ROOT = Path(__file__).resolve().parents[1]
 READINESS_TIMEOUT_SECONDS = 45
 READINESS_WORKER_EXIT_TIMEOUT_SECONDS = 2
 DEFAULT_RECEIVER_BUFFER_MS = 500
+# A fault storm waits longer each time rather than flashing the room dark and back every few seconds.
+RESTART_BACKOFF_SECONDS = (5, 15, 60)
+HEALTHY_RUN_SECONDS = 600
+
+
+class ShowFault(RuntimeError):
+    """A show that started and then failed; the session loop restarts it."""
 
 
 def add_arguments(parser):
@@ -207,7 +214,44 @@ async def run(args):
     if args.check or args.check_full:
         run_readiness_check(args)
         return
-    await _run_session(args)
+    await run_shows(lambda: _run_session(args), stop_requested)
+
+
+def stop_requested():
+    current = ROOT / '.live/current.json'
+    return current.exists() and (Path(read_config(current)['run_dir']) / 'stop').exists()
+
+
+async def run_shows(session, stop_requested, *, clock=time.monotonic, sleep=asyncio.sleep):
+    faults = 0
+    ran = False
+    while True:
+        started = clock()
+        try:
+            outcome = await session()
+        except (RuntimeError, OSError, ValueError) as error:
+            # A first show that never started is a setup problem for the operator, not a fault.
+            if not ran and not isinstance(error, ShowFault):
+                raise
+            outcome = error
+        ran = True
+        if clock() - started >= HEALTHY_RUN_SECONDS:
+            faults = 0
+        if outcome == 'stop':
+            return
+        delay = 0
+        if outcome == 'restart':
+            LOGGER.info('[prod] restarting on request from the Config tab')
+        else:
+            delay = RESTART_BACKOFF_SECONDS[min(faults, len(RESTART_BACKOFF_SECONDS) - 1)]
+            faults += 1
+            LOGGER.error('[prod] show fault: %s; restarting in %d s', outcome, delay)
+        resume = clock() + delay
+        while clock() < resume and not stop_requested():
+            await sleep(min(1, resume - clock()))
+        if stop_requested():
+            LOGGER.info('[prod] stop requested; not restarting')
+            return
 
 
 def _readiness_worker(args, owned):
@@ -259,7 +303,16 @@ async def _run_session(args, *, checking=False):
     lock = RoleLock('controller')
     app = None
     app_ran = False
+    run_dir = (
+        ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+    )
     try:
+        if not checking:
+            # First, so an `autolux stop` during startup reaches this session and not the last one.
+            run_dir.mkdir(parents=True)
+            (ROOT / '.live/current.json').write_text(
+                json.dumps({'run_dir': str(run_dir), 'pid': os.getpid()})
+            )
         processes = running_processes()
         check_conflicts([args.starfire_binary], processes)
         from autolux.lib.section_chain import artifacts_present
@@ -275,9 +328,6 @@ async def _run_session(args, *, checking=False):
             rig,
             args.autoloops,
             expected_universe=tx['dmx_universe'],
-        )
-        run_dir = (
-            ROOT / '.live' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
         )
         remote = RemoteRuntime(
             rx,
@@ -337,9 +387,6 @@ async def _run_session(args, *, checking=False):
                 server = SnapshotServer(app.event_buffer, args.ui_port + 1, app.control.commands)
                 server.start()
                 stack.callback(server.stop)
-            (ROOT / '.live/current.json').write_text(
-                json.dumps({'run_dir': str(run_dir), 'pid': os.getpid()})
-            )
             started = time.monotonic()
 
             def check_health():
@@ -362,8 +409,12 @@ async def _run_session(args, *, checking=False):
             main.global_app = app
             app.health_check = check_health
             app_ran = True
-            await app.run()
+            try:
+                await app.run()
+            except (RuntimeError, OSError, ValueError) as error:
+                raise ShowFault(error) from error
             main.write_report(app, args.report)
+        return 'restart' if app.restart_requested else 'stop'
     finally:
         if app is not None and not app_ran:
             app._shut_down()

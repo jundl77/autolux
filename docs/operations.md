@@ -5,6 +5,18 @@ and SSH readiness within 60 seconds, or `--check-full` for builds, all tests,
 backtest and simulation. Both leave outputs stopped. Stop a show with Ctrl-C or
 `uv run autolux stop`.
 
+The show restarts itself; nothing outside Autolux relaunches it. Each session ends with the
+same clean shutdown (dashboard viewer, Starfire, then the Radius receiver), and the next one
+starts on the current store with a fresh viewer:
+
+- **Restart show** in the Config tab starts the next session at once.
+- A fault that ends a running show (Starfire, Radius link, capture) restarts it after 5 s,
+  then 15 s, then 60 s for each further fault; a session that ran 10 minutes resets the wait.
+  A relaunch that fails to start counts as a fault. A first start that fails exits, since it
+  needs the operator.
+- Ctrl-C, `autolux stop` or `--duration` ends the session and exits. The stop flag is checked
+  during the wait and before each relaunch, so `autolux stop` also ends a show waiting to restart.
+
 ## Health
 
 The dashboard at `http://autolux.local:8765` groups playback, tempo, intent and effect
@@ -56,11 +68,10 @@ checkout or merge aborts. If `rig/room.mvr` already differs from the store when 
 or checkout brought another rig), the Save status warns that it replaced it.
 
 A running show reads its rig once at login, so a saved patch reaches the lights only on the
-next session. While the show runs an older rig, the Config tab says so and **Apply to show**
-(a second click within 5 s confirms it) asks it to exit cleanly, as `autolux stop` does. The
-lights go dark until the next session is up: the show supervisor restarts the show after any
-exit until its stop flag `.live/supervisor.stop` exists, on the saved store. Without a
-supervisor, start the show again by hand.
+next session. While the show runs an older rig, the Config tab says so beside **Restart show**,
+which is enabled whenever a show runs (a second click within 5 s confirms it). The show shuts
+down cleanly and starts again on the saved store; the lights go dark until it is back. Under
+`autolux run` (not `--prod`) the button only ends the show.
 
 The show runs one fixture test at a time, so two open dashboards share it: a test from one moves
 or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it

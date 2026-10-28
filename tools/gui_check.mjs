@@ -349,8 +349,9 @@ const slider = (selector, fraction) => click(selector, {fx: fraction});
 const STATUS = '#fixture-status';
 const UNSAVED = 'Unsaved changes';
 const SCENE_XML = 'GeneralSceneDescription.xml';
-const APPLY_LABEL = 'Apply to show (restarts it; lights go dark until it is back)';
-const STALE_RIG = 'The show runs an older rig. Apply to show restarts it on the saved patch.';
+const APPLY_LABEL = 'Restart show';
+const APPLY_ARMED = 'Click again to restart; lights go dark until it is back';
+const STALE_RIG = 'The show runs an older rig. Restart show loads the saved patch.';
 const NEW_GROUP = '\u0000new';
 const rigFiles = () => harness('rig');
 const cfg = (name) => `#fixture-info [data-cfg="${name}"]`;
@@ -1175,18 +1176,18 @@ const SUITES = {
         const banner = () => text('#fixture-show-rig');
         const label = () => text('#fixture-apply');
         await sleep(1000);
-        await check('apply', 'disabled while the show runs the saved rig', (await applyDisabled()) && (await banner()) === '',
+        await check('apply', 'enabled without a banner while the show runs the saved rig', !(await applyDisabled()) && (await banner()) === '',
             {banner: await banner()});
         await selectFixture('wash_left');
         await formEdit('Fixture ID (numeric) 42', () => typeInto(cfg('FixtureIDNumeric'), '42'),
             {action: 'set-child-text', tag: 'FixtureIDNumeric', value: '42'});
-        await check('apply', 'an unsaved edit does not enable Apply', await applyDisabled());
+        await check('apply', 'an unsaved edit raises no banner', (await banner()) === '', {banner: await banner()});
         await check('apply', 'Save', await save(), {status: await statusText()});
-        await check('apply', 'after a Save it enables with the banner', await waitFor(`!document.getElementById('fixture-apply').disabled
+        await check('apply', 'after a Save the banner names the older rig', await waitFor(`!document.getElementById('fixture-apply').disabled
             && document.getElementById('fixture-show-rig').textContent === ${JSON.stringify(STALE_RIG)}`, 3000), {banner: await banner()});
         await arm();
         await click('#fixture-apply');
-        await check('apply', 'the first click arms', await waitFor(`document.getElementById('fixture-apply').textContent === 'Click again to restart'`, 1000),
+        await check('apply', 'the first click arms', await waitFor(`document.getElementById('fixture-apply').textContent === ${JSON.stringify(APPLY_ARMED)}`, 1000),
             {label: await label()});
         await sleep(5500);
         await check('apply', '5 s later it disarms', (await label()) === APPLY_LABEL, {label: await label()});
@@ -1207,14 +1208,9 @@ const SUITES = {
         const state = await harness('state');
         await check('apply', 'the stub rebooted on the saved store', state.rig_revision === files.revision && running !== files.revision,
             {running, now: state.rig_revision, saved: files.revision});
-        await check('apply', 'the new revision clears the banner and disables Apply', await waitFor(`document.getElementById('fixture-apply').disabled
+        await check('apply', 'the new revision clears the banner and Restart stays enabled', await waitFor(`!document.getElementById('fixture-apply').disabled
             && document.getElementById('fixture-show-rig').textContent === ''`, 3000), {banner: await banner()});
         await check('apply', 'the label is back', (await label()) === APPLY_LABEL, {label: await label()});
-        await arm();
-        await click('#fixture-apply');
-        await click('#fixture-apply');
-        await sleep(1500);
-        await check('apply', 'clicks on the disabled button post nothing', posted().length === 0, {posted: posted()});
     },
 
     cfg_robust: async () => {

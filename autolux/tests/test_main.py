@@ -189,8 +189,8 @@ async def test_restart_show_from_the_config_tab_exits_the_show_cleanly(
     app.control.commands.put_nowait(command)
     with caplog.at_level('INFO'):
         await app.control.apply_pending(app.light_engine)
-    # The same exit `autolux stop` takes: the loop ends and run() shuts down without a fault.
-    assert (app._stop_requested, app.is_running) == (True, False)
+    # The same exit `autolux stop` takes, marked so the production loop starts the next show.
+    assert (app._stop_requested, app.is_running, app.restart_requested) == (True, False, True)
     assert 'restart requested from the Config tab (rig changed)' in caplog.text
 
 

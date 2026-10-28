@@ -485,6 +485,45 @@ def test_static_targets_and_uv_chips_follow_the_published_rig():
     assert _static_targets({'mode': 'static', 'static': uv_rig})[1:] == [False]
 
 
+@pytest.mark.skipif(NODE is None, reason='needs node to run fixture_patch.js')
+def test_restart_show_is_enabled_while_a_show_runs_and_confirms_on_a_second_click():
+    source = (Path(__file__).parents[1] / 'simulate/assets/fixture_patch.js').read_text('utf8')
+    script = (
+        'const labels = [];\n'
+        'const listen = () => {};\n'
+        'globalThis.document = {addEventListener: listen};\n'
+        'globalThis.window = {addEventListener: listen,\n'
+        '    dash_clientside: {set_props: (id, props) => labels.push(props.children)}};\n'
+        f'{source}\n'
+        'const patch = window.dash_clientside.fixture_patch;\n'
+        "const sync = (state, saved) => patch.syncTest(state, 'control', saved);\n"
+        'console.log(JSON.stringify({\n'
+        "    none: sync(null, 'a'),\n"
+        "    saved: sync({rig_revision: 'a'}, 'a'),\n"
+        "    older: sync({rig_revision: 'a'}, 'b'),\n"
+        '    clicks: [0, 1].map(() => window.dash_clientside.fixture_patch_model.applyClick()),\n'
+        '    labels,\n'
+        '}));'
+    )
+    # Through stdin: the whole module is longer than a Windows command line.
+    result = subprocess.run(
+        [NODE, '-'], input=script, capture_output=True, text=True, encoding='utf8', check=True
+    )
+    seen = json.loads(result.stdout)
+    # [banner, disabled]: no show means nothing to restart; the banner only names an older rig.
+    assert seen['none'] == ['', True]
+    assert seen['saved'] == ['', False]
+    assert seen['older'] == [
+        'The show runs an older rig. Restart show loads the saved patch.',
+        False,
+    ]
+    assert seen['clicks'] == [None, {'action': 'restart_show'}]
+    assert seen['labels'] == [
+        'Click again to restart; lights go dark until it is back',
+        'Restart show',
+    ]
+
+
 CONTROL_JS = Path(__file__).parents[1] / 'simulate' / 'assets' / 'control.js'
 
 

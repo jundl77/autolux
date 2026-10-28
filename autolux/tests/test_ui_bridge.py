@@ -295,3 +295,55 @@ def test_the_config_viewer_gets_the_show_start_check_inputs_for_save():
     assert command[command.index('--autoloops') + 1] == 'loops'
     assert command[command.index('--expected-universe') + 1] == '0'
     assert '--expected-universe' not in viewer_command(8765, {**setup, 'expected_universe': None})
+
+
+def test_restart_show_reaches_the_engine_as_the_bare_action(bridge):
+    connection, commands = bridge
+    taken = []
+    _engine(commands, taken)
+    headers = {**JSON, 'Origin': DASHBOARD}
+    reply, body = _request(connection, 'POST', {'action': 'restart_show', 'extra': 1}, headers)
+    commands.put(None)
+    assert (reply.status, json.loads(body)) == (202, {'accepted': 'restart_show'})
+    assert taken == [{'action': 'restart_show'}]
+
+
+def test_a_restarted_session_kills_its_viewer_and_brings_up_a_fresh_one(monkeypatch, caplog):
+    import socket
+
+    from autolux.lib import ui_bridge
+
+    events = []
+
+    class Viewer:
+        pid = 1
+
+        def __init__(self):
+            self.killed = threading.Event()
+
+        def wait(self):
+            self.killed.wait()
+            return 1
+
+    def spawn(command):
+        events.append('spawn')
+        return Viewer()
+
+    def kill(viewer):
+        events.append('kill')
+        viewer.killed.set()
+
+    monkeypatch.setattr(ui_bridge, '_spawn', spawn)
+    monkeypatch.setattr(ui_bridge, 'kill_tree', kill)
+    monkeypatch.setattr(ui_bridge, 'DASHBOARD_BIND_ADDRESS', '127.0.0.1')
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        bridge_port = probe.getsockname()[1]
+    with caplog.at_level('WARNING'):
+        for _ in range(2):
+            session = ui_bridge.start(EventBuffer(), bridge_port - 1, commands=queue.Queue())
+            assert session is not None, 'the bridge port was not free again for the next session'
+            session.stop()
+            session._watcher.join(2)
+    assert events == ['spawn', 'kill', 'spawn', 'kill']
+    assert 'viewer process exited' not in caplog.text

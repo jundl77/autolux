@@ -154,6 +154,7 @@ def test_controller_preparation_needs_no_audio_stream_or_ready_renderer(monkeypa
         ('renderer_start', False),
         ('monitor_setup', False),
         ('controller_run', False),
+        ('restart_request', False),
         (None, False),
         (None, True),
     ],
@@ -300,6 +301,7 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
                 self.health_check()
                 if failure == 'controller_run':
                     raise RuntimeError('show failed')
+                self.restart_requested = failure == 'restart_request'
             finally:
                 self._shut_down()
 
@@ -313,7 +315,13 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
         monkeypatch.setattr(
             health_monitor, 'HealthMonitor', Mock(side_effect=RuntimeError('monitor setup failed'))
         )
-    if failure:
+    if failure == 'controller_run':
+        # A show that ran and then failed is a fault the session loop restarts, not a setup error.
+        with pytest.raises(production.ShowFault, match='show failed'):
+            await production._run_session(args)
+    elif failure == 'restart_request':
+        assert await production._run_session(args) == 'restart'
+    elif failure:
         with pytest.raises(
             RuntimeError, match='fixture universes' if failure == 'universe_mismatch' else None
         ):
@@ -341,3 +349,99 @@ async def test_partial_start_and_show_failure_clean_up_owned_endpoints(
     else:
         assert 'stop' not in events
     assert main.global_app is None
+
+
+class _Shows:
+    """Scripted session outcomes on a simulated clock: each entry is (run seconds, outcome)."""
+
+    def __init__(self, *script, stop_at=None):
+        self.now = 0
+        self.script = list(script)
+        self.starts = []
+        self.stop_at = stop_at
+
+    def clock(self):
+        return self.now
+
+    async def sleep(self, seconds):
+        self.now += seconds
+
+    def stop_requested(self):
+        return self.stop_at is not None and self.now >= self.stop_at
+
+    async def session(self):
+        self.starts.append(self.now)
+        seconds, outcome = self.script.pop(0)
+        self.now += seconds
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    async def run(self):
+        await production.run_shows(
+            self.session, self.stop_requested, clock=self.clock, sleep=self.sleep
+        )
+
+
+async def test_a_config_tab_restart_starts_the_next_show_at_once(caplog):
+    shows = _Shows((30, 'restart'), (30, 'restart'), (30, 'stop'))
+    with caplog.at_level('INFO'):
+        await shows.run()
+    assert shows.starts == [0, 30, 60]
+    assert caplog.text.count('restarting on request from the Config tab') == 2
+
+
+async def test_a_stop_ends_the_loop_without_a_relaunch():
+    shows = _Shows((30, 'stop'))
+    await shows.run()
+    assert shows.starts == [0]
+
+
+async def test_faults_back_off_and_a_healthy_run_resets_the_wait(caplog):
+    fault = production.ShowFault('Starfire heartbeat response timed out')
+    shows = _Shows((1, fault), (1, fault), (1, fault), (600, fault), (1, 'stop'))
+    with caplog.at_level('ERROR'):
+        await shows.run()
+    # 5, 15, 60 s after each short run; the 10-minute run starts over at 5 s.
+    assert shows.starts == [0, 6, 22, 83, 688]
+    assert 'show fault: Starfire heartbeat response timed out; restarting in 5 s' in caplog.text
+
+
+async def test_a_fault_storm_including_failed_relaunches_waits_60_s_each():
+    fault = production.ShowFault('capture resyncs')
+    setup = RuntimeError('receiver unreachable')
+    shows = _Shows((0, fault), (0, setup), (0, setup), (0, fault), (0, setup), (0, 'stop'))
+    await shows.run()
+    gaps = [later - earlier for earlier, later in zip(shows.starts, shows.starts[1:])]
+    assert gaps == [5, 15, 60, 60, 60]
+
+
+async def test_a_stop_during_the_backoff_exits_before_the_relaunch():
+    shows = _Shows((0, production.ShowFault('renderer exited')), (0, 'stop'), stop_at=3)
+    await shows.run()
+    assert (shows.starts, shows.now) == ([0], 3)
+
+
+async def test_a_stop_with_a_pending_restart_request_exits():
+    shows = _Shows((0, 'restart'), (0, 'stop'), stop_at=0)
+    await shows.run()
+    assert shows.starts == [0]
+
+
+async def test_a_first_show_that_cannot_start_exits_for_the_operator():
+    shows = _Shows((0, RuntimeError('An Autolux controller is already running.')))
+    with pytest.raises(RuntimeError, match='already running'):
+        await shows.run()
+    assert shows.starts == [0]
+
+
+def test_the_loop_reads_the_stop_flag_of_the_current_session(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(production, 'ROOT', tmp_path)
+    run_dir = tmp_path / '.live' / 'run'
+    run_dir.mkdir(parents=True)
+    (tmp_path / '.live/current.json').write_text(json.dumps({'run_dir': str(run_dir)}))
+    assert not production.stop_requested()
+    (run_dir / 'stop').touch()
+    assert production.stop_requested()

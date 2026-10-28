@@ -206,7 +206,7 @@ class ShowControl:
             if not command['enabled']:
                 light_engine.effect_controller.forget_special(instantaneous=True)
         elif action == 'restart_show':
-            # Starfire reads the rig once per login; the supervisor restarts a show that exits.
+            # Starfire reads the rig once per login, so only a new session loads the saved patch.
             if self._stop_show is None:
                 LOGGER.warning('[main] restart refused: this show has no stop hook')
             else:
@@ -300,6 +300,7 @@ class AutoluxController:
         self._fixture_setup = fixture_setup
         self.is_running: bool = False
         self._stop_requested = False
+        self.restart_requested = False
         self.health_check = None
         self.command_queue: DelayedCommandQueue = DelayedCommandQueue(PLAYBACK_DELAY_SEC)
 
@@ -338,7 +339,7 @@ class AutoluxController:
 
         self.track_source = TrackSource()
         self.media_session = MediaSessionListener(self._on_media_event)
-        self.control = ShowControl(show_config_path, self.event_buffer, stop_show=self.stop)
+        self.control = ShowControl(show_config_path, self.event_buffer, stop_show=self.restart)
         if self.event_buffer is not None and fixture_setup is not None:
             self.event_buffer.set_rig_revision(fixture_setup['rig_revision'])
         self.effect_controller: EffectController = EffectController(
@@ -494,6 +495,10 @@ class AutoluxController:
             except Exception:
                 LOGGER.exception('[main] %s did not close cleanly', what)
         LOGGER.info("[main] Autolux stopped, clean shutdown")
+
+    def restart(self):
+        self.restart_requested = True
+        self.stop()
 
     def stop(self):
         self._stop_requested = True
