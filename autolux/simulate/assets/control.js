@@ -262,7 +262,7 @@
         };
     }
 
-    // Covers the double pulse in control.css (600 ms).
+    // Outlasts the cooldown-fire animation in control.css.
     const FLASH_MS = 650;
 
     // Whether a group fired between two polls of it ({last, remaining, ready, total}): a new
