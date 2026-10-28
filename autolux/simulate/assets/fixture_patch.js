@@ -14,6 +14,8 @@
     const PREVIEW_BEAM_MM = 3000;
     // A beat lights the scrubber's flash for its first quarter; a bar's first beat is brighter.
     const BEAT_FLASH_SHARE = 0.25;
+    // Where the overview's tracks start: its label column plus gap in PREVIEW_CSS.
+    const OVERVIEW_TRACK_LEFT = "118px";
     const NAME_BYTES = 128;
     const TEST_REFRESH_MS = 15000;
     const APPLY_CONFIRM_MS = 5000;
@@ -879,7 +881,7 @@
             // A redraw mid-gesture would drop the pointer's capture; the next frame catches up.
             if (rig && !planDrag && !planNav) showPlan(planView);
             const cursor = document.querySelector?.("#preview-overview .preview-cursor");
-            if (cursor) cursor.style.left = `calc(118px + ${shown / Math.max(1, recording.frames.length - 1)} * (100% - 118px))`;
+            if (cursor) cursor.style.left = `calc(${OVERVIEW_TRACK_LEFT} + ${shown / Math.max(1, recording.frames.length - 1)} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
             const perBar = recording.header.beats_per_bar;
             const whole = Math.floor(frame.beat);
             const inBar = perBar ? ((whole % perBar) + perBar) % perBar : 0;
@@ -1048,8 +1050,6 @@
         placedObjects,
         planMarks,
         planSvg,
-        previewLooks,
-        elevationSvg,
         zoomPlan,
         startPlanDrag,
         planMove,

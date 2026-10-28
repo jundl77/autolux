@@ -2007,6 +2007,7 @@ PREVIEW_CSS = '''
 #mvr-plan svg.elevation {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .plan-strobe {fill:none;stroke:#f5f7fa;}
 #mvr-plan svg.elevation circle:not(.plan-strobe) {stroke:#e6edf3;}
+#mvr-plan svg.elevation .selected circle:not(.plan-strobe) {stroke:var(--accent);}
 #mvr-plan svg.elevation text {fill:var(--muted);}
 @media (max-width:700px) {#mvr-plan:has(svg.elevation) {grid-template-columns:1fr;}}
 '''
@@ -2018,6 +2019,8 @@ def render_recording(report: dict, rig_path: Path) -> str:
     from cli.starfire import DEFAULT_AUTOLOOPS, DEFAULT_BINARY
     from cli.starfire_assets import native_rig
 
+    if not DEFAULT_BINARY.is_file():
+        raise ValueError(f'the Starfire binary is missing: {DEFAULT_BINARY}; build it first')
     replay = report_to_replay(report)
     with (
         tempfile.TemporaryDirectory(prefix='autolux-preview-') as directory,
