@@ -90,8 +90,11 @@ label. A fixture added in Config gets a fresh uuid, which the show learns only a
 show**; until then the Config tab does not test it.
 
 The show runs one fixture test at a time, so two open dashboards share it: a test from one moves
-or clears the other's. A held test ends by itself after 10 minutes, and when the show drops it
-(standby, sound stop, restart) the page stops holding it rather than relighting it.
+or clears the other's. A test stays lit, through edits and with the window in the background,
+until you turn it off, close or change the selection, leave the Config tab, pause or close the
+page. The page re-sends it every 15 s; Starfire's 60 s dead-man only ends a test whose page
+vanished. When the show drops it (standby, sound stop, restart) the page stops holding it rather
+than relighting it.
 
 A mover's test row also has **Sweep** and **Aim**, which move the head through the same logical
 pan as the show, so yaw, mount and soft limits apply exactly as in a loop. Sweep: the beam should
