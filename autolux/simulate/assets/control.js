@@ -145,6 +145,10 @@
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(command),
+            // A command sent as the page unloads (the Config test's clear on a reload) must outlive
+            // the page; without it Chrome may cancel the request and a test stays lit until
+            // Starfire's 60 s dead-man.
+            keepalive: true,
             signal: AbortSignal.timeout(POST_TIMEOUT_MS),
         });
     }
