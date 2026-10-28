@@ -2043,11 +2043,15 @@ def render_recording(report: dict, rig_path: Path) -> str:
             ],
             check=True,
             capture_output=True,
-            text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=PREVIEW_RENDER_TIMEOUT_SEC,
             stdin=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
         )
+        # The bound an uploaded preview meets, so a render cannot hold more than a load would.
+        if target.stat().st_size > PREVIEW_UPLOAD_MAX_BYTES:
+            raise ValueError(f'the preview exceeds {PREVIEW_UPLOAD_MAX_BYTES} bytes')
         return target.read_text(encoding='utf-8')
 
 
@@ -2164,10 +2168,14 @@ def _register_preview(app, fixture_store: FixtureStore) -> None:
             revision = loaded['revision']
         rate = preview.rate_hz
         faults = sum(1 for frame in preview.frames if frame.get('fault'))
+        first_error = next(
+            (str(frame['error']) for frame in preview.frames if 'error' in frame), ''
+        )
         status = (
             f'{filename}: {preview.header["duration_seconds"]:.0f} s, '
             f'{len(bar_starts(preview))} bars, {len(preview.frames)} frames at {rate} Hz'
             + (f'; {faults} frames dark from a script fault' if faults else '')
+            + (f': {first_error.strip().splitlines()[0]}' if first_error.strip() else '')
         )
         source = {
             'url': f'{PREVIEW_FRAMES_PATH}?v={revision}',

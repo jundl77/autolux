@@ -12,8 +12,6 @@
     const PLAN_LABEL_LIMIT = 48;
     const PLAN_ZOOM = [0.5, 8];
     const PREVIEW_BEAM_MM = 3000;
-    // A beat lights the scrubber's flash for its first quarter; a bar's first beat is brighter.
-    const BEAT_FLASH_SHARE = 0.25;
     // Where the overview's tracks start: its label column plus gap in PREVIEW_CSS.
     const OVERVIEW_TRACK_LEFT = "118px";
     const NAME_BYTES = 128;
@@ -860,11 +858,18 @@
 
         // The frames the server holds for this load; frame 0 shows once they are parsed.
         async loadPreview(source) {
-            const text = await (await fetch(source.url, { cache: "no-store" })).text();
-            const [header, ...frames] = text
-                .split("\n")
-                .filter((line) => line.trim())
-                .map((line) => JSON.parse(line));
+            let header, frames;
+            try {
+                const response = await fetch(source.url, { cache: "no-store" });
+                if (!response.ok) throw new Error(`the server answered ${response.status}`);
+                [header, ...frames] = (await response.text())
+                    .split("\n")
+                    .filter((line) => line.trim())
+                    .map((line) => JSON.parse(line));
+            } catch (error) {
+                ds.set_props("preview-status", { children: `Recording not shown: ${error.message}` });
+                return ds.no_update;
+            }
             recording = { header, frames, looks: null };
             drawOverview(source.overview, frames.length);
             ds.set_props("preview-frame", { value: 0 });
@@ -885,7 +890,10 @@
             const perBar = recording.header.beats_per_bar;
             const whole = Math.floor(frame.beat);
             const inBar = perBar ? ((whole % perBar) + perBar) % perBar : 0;
-            const flash = frame.beat - whole >= BEAT_FLASH_SHARE ? "preview-beat" : perBar && inBar === 0 ? "preview-beat on bar" : "preview-beat on";
+            // The frame a beat starts in flashes: above 150 bpm a quarter beat is shorter than a
+            // preview frame, so a phase window would skip beats. A bar's first beat is brighter.
+            const struck = shown === 0 || Math.floor(recording.frames[shown - 1].beat) !== whole;
+            const flash = !struck ? "preview-beat" : perBar && inBar === 0 ? "preview-beat on bar" : "preview-beat on";
             const where = perBar ? `bar ${Math.floor(whole / perBar) + 1}.${inBar + 1}` : `beat ${whole + 1}`;
             const base = [frame.bank, frame.autoloop].filter(Boolean).join("/") || "idle";
             return [`${previewClock(frame.t)} · ${where} · ${base}${frame.fault ? " · dark from a script fault" : ""}`, flash];
