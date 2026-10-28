@@ -13,12 +13,14 @@ const replies = [];
 const timers = new Map();
 let timerId = 0;
 const labels = [];
+// The window listeners the page registers once, by type: only pagehide ends a held test now.
+const windowListeners = new Map();
 ds.set_props = (id, props) => (id === "fixture-grid-action" ? actions.push(props.data) : labels.push([id, props.children]));
 const autoluxControl = { dispatch: (command) => (commands.push(command), Promise.resolve(replies.shift() || {})) };
 // No DOM: a test that builds the pane lends this page a createElement.
 const page = { addEventListener() {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../simulate/assets/fixture_patch.js"), "utf8"), {
-    window: { dash_clientside: ds, addEventListener() {}, autoluxControl },
+    window: { dash_clientside: ds, addEventListener: (type, fn) => windowListeners.set(type, fn), autoluxControl },
     document: page,
     structuredClone,
     crypto: globalThis.crypto,
@@ -408,17 +410,17 @@ test("the patch form validates each field and maps it to one draft action", () =
     const [numbered] = edit(current, check("FixtureID", "17").action);
     assert.deepEqual(["FixtureID", "FixtureIDNumeric"].map((tag) => child(fixtureNode(numbered, "wash_right"), tag).text), ["17", "17"]);
     assert.match(check("matrix", ["0", "0", "0", "0", "61", "0"]).error, /±60°/);
-    // Soft limits in degrees within the GDTF's physical range (the spot pans 0–540°, tilts 0–270°),
+    // Soft limits in degrees within the GDTF's physical range (the spot pans -220–320°, tilts 0–270°),
     // stored as the share of it Starfire maps; edits past the range clamp to it.
     assert.match(check("Pan", ["400", "100"], current, spot.key).error, /Min is above max/);
     assert.match(check("Pan", ["", "100"], current, spot.key).error, /both limits/);
-    const [limited] = edit(current, check("Pan", ["54", "486"], current, spot.key).action);
+    const [limited] = edit(current, check("Pan", ["-166", "266"], current, spot.key).action);
     const movement = [...nodes(limited.scene)].find((node) => node.tag === "Movement");
     assert.deepEqual(plain(movement.attributes), { fixture: spot.attributes.uuid, axis: "Pan", minimum: "0.1", maximum: "0.9" });
     assert.deepEqual(plain(check("Tilt", ["-20", "300"], current, spot.key)), { error: null, action: { action: "set-movement", key: spot.key, axis: "Tilt", minimum: 0, maximum: 1 } });
     // The range's ends are the share's ends exactly, on both axes.
-    for (const [axis, top] of [["Pan", "540"], ["Tilt", "270"]]) {
-        assert.deepEqual(plain(check(axis, ["0", top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 0, maximum: 1 });
+    for (const [axis, bottom, top] of [["Pan", "-220", "320"], ["Tilt", "0", "270"]]) {
+        assert.deepEqual(plain(check(axis, [bottom, top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 0, maximum: 1 });
         assert.deepEqual(plain(check(axis, [top, top], current, spot.key).action), { action: "set-movement", key: spot.key, axis, minimum: 1, maximum: 1 });
     }
 });
@@ -494,11 +496,16 @@ test("the test controls send highlight commands, hold them alive and clear once 
     assert.equal(model.testControl("red"), null);
     ds.fixture_patch.syncTest(live, "config");
     assert.deepEqual(plain(model.testControl("red")), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "red", ...posed("spot_right") });
-    // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command, and the 10-minute end.
-    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000, 600000]);
-    [...timers.values()][0].run();
+    // One keep-alive inside Starfire's 60 s dead-man, re-sending the same command; it never ends on its own.
+    assert.deepEqual([...timers.values()].map((timer) => timer.ms), [15000]);
+    const [keepAlive] = [...timers.values()];
+    keepAlive.run();
     assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
-    assert.equal(timers.size, 2);
+    assert.equal(timers.size, 1);
+    // The old 10-minute cap is gone: 20 minutes of keep-alives still hold the same test lit.
+    for (let i = 0; i < 80; i++) keepAlive.run();
+    assert.deepEqual(plain(commands.at(-1)), plain(commands.at(-2)));
+    assert.equal(timers.size, 1);
     const sent = commands.length;
     ds.fixture_patch.syncTest(live, "control");
     ds.fixture_patch.syncTest(live, "telemetry");
@@ -682,20 +689,23 @@ test("a lit test follows the selection; late or unanswered replies never turn it
     const [spot, kinta] = ["spot_right", "kinta"].map((name) => fixtureNode(current, name));
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
     timers.clear();
-    ds.fixture_patch.renderRig(spot.key, current, settings);
+    // A held test outlives the test that lit it; force any earlier one off before this scenario.
     ds.fixture_patch.syncTest(live, "config");
+    ds.fixture_patch.renderRig(null, current, settings);
+    commands.length = 0;
+    ds.fixture_patch.renderRig(spot.key, current, settings);
     // An older test's late 409 must not stop the test that replaced it.
     replies.push({ error: "no fixture 'spot_right' in the running rig", status: 409 });
     model.testControl("red");
     ds.fixture_patch.renderRig(kinta.key, current, settings);
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.kinta }, colour: "red" });
     await new Promise(setImmediate);
-    assert.equal(timers.size, 2, "kinta's keep-alive survives spot_right's late refusal");
+    assert.equal(timers.size, 1, "kinta's keep-alive survives spot_right's late refusal");
     // No answer at all may mean lit: the keep-alive stays and a deselect still clears.
     replies.push({ error: "the show is not answering" });
     [...timers.values()][0].run();
     await new Promise(setImmediate);
-    assert.equal(timers.size, 2);
+    assert.equal(timers.size, 1);
     ds.fixture_patch.renderRig(null, current, settings);
     assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
     assert.equal(timers.size, 0);
@@ -740,7 +750,7 @@ test("the Restart banner names an older rig and holds until the next session rep
     assert.deepEqual(banner("old", "three"), [stale, false]);
 });
 
-test("a held test ends after 10 minutes, and stops when the show drops it unasked", () => {
+test("a held test never ends on its own", () => {
     const current = draft();
     const spot = fixtureNode(current, "spot_right");
     const live = { rig: RUNNING, paused: false, static: { blackout: false }, highlight: null };
@@ -749,18 +759,27 @@ test("a held test ends after 10 minutes, and stops when the show drops it unaske
     ds.fixture_patch.renderRig(spot.key, current, settings);
     ds.fixture_patch.syncTest(live, "config");
     model.testControl("white");
-    const [end] = [...timers.values()].filter((timer) => timer.ms === 600000);
-    end.run();
-    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
-    assert.equal(timers.size, 0);
+    const [keepAlive] = [...timers.values()];
+    assert.equal(keepAlive.ms, 15000);
+    // The old 10-minute cap is gone: 20 minutes of keep-alives still hold the same test lit.
+    for (let i = 0; i < 80; i++) keepAlive.run();
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: { fixture: FIXTURE_UUID.spot_right }, colour: "white", ...posed("spot_right") });
+    assert.equal(timers.size, 1);
     // Standby, a sound stop or a restart clears the show's highlight: no relight, no clear.
-    model.testControl("white");
     ds.fixture_patch.syncTest(lit, "config");
     const sent = commands.length;
     ds.fixture_patch.syncTest(live, "config");
     assert.equal(timers.size, 0);
     ds.fixture_patch.renderRig(null, current, settings);
     assert.equal(commands.length, sent);
+    // Only a page that goes away ends a held test now; pagehide clears it.
+    ds.fixture_patch.renderRig(spot.key, current, settings);
+    ds.fixture_patch.syncTest(live, "config");
+    model.testControl("white");
+    assert.equal(timers.size, 1);
+    windowListeners.get("pagehide")();
+    assert.deepEqual(plain(commands.at(-1)), { action: "highlight", target: null });
+    assert.equal(timers.size, 0);
 });
 
 test("a plan drag writes the Matrix the server's area and group-order test reads", () => {
