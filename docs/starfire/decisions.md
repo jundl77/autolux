@@ -522,3 +522,66 @@ Still refused, each with its reason (pinned per corpus mode in test_gdtf_compile
 Relations, sub-channel sets, wheel Filter slots, DMX breaks other than 1, GDTF versions
 outside 1.0..1.2, duplicate function names, and brightness functions that share their
 channel, carry presets, depend on a ModeMaster or run inverted.
+
+2026-10-27 Spatial group order: a rig group (MVR Class) lists its members left to right by
+the X of each fixture's placed MVR Matrix (scene space, layers and parents composed); equal X
+keeps file order, and a group whose members all share one X keeps file order with a warning
+naming the group. The exported RigDefinition carries that order, so `sf.group`/`sf.members`
+in Lua see it unchanged. Mirror pairs are by symmetry about the group's centre in that order:
+`sf.mirror(target)` returns `{left, right}` partners outermost first (an odd middle pairs
+with itself), and `sf.side(index, count)` gives each member's half (-1, 0 for an odd middle,
+1); inside `sf.each`, `sf.side(index)` takes the group's size as the count, so it is -1 for
+the house-left half and 1 for the right. sf.each counts cells, so a multi-cell mover's cells
+skew the halves toward its side.
+The room's positions (washes at X -900/-300/300/900, spots at -300/300, mm) already match
+their names, so room.rig.pb and the goldens are unchanged.
+
+2026-10-27 Group masters: each rig group has an inhibitive submaster, 0..1 and full by default,
+kept in show.json as `settings.group_masters` (`{"wash": 0.5}`; an absent group is at full) and
+sent as the `GROUP_MASTER` parameter with its `group` (protocol minor 2). Starfire multiplies the
+group's cell intensity and attribute brightness by it right after the global master, so it
+caps the rendered look, specials included, and never raises it; a cell in several capped
+groups takes the product. Starfire
+refuses an unknown group; Autolux sends only the levels of groups in the logged-in rig, and
+only when one changes. It follows the same perceptual curve as the global master; it scales
+intensity, and colour on fixtures without a Dimmer (a colour wheel holds its slot until 0, then
+takes its dark slot); pan, tilt and gobo are untouched; inhibitive like grandMA3's Group Master.
+
+2026-10-27 Mirror by symmetry: `sf.mirror(group)` pairs each member with the member nearest
+its reflection about the stage centreline, the scene's X = 0 (MVR, DIN SPEC 15801: Matrix
+"u1,u2,u3 / v1,v2,v3 / w1,w2,w3 / o1,o2,o3", "Right-handed, Z-Up, 1 Distance Unit equals 1
+mm"; position is the o row). The reflection keeps Y and Z, so two rows that interleave in X
+still pair within their row. A partner must be unique, mutual and within 300 mm of the
+reflection; otherwise the group pairs by rank as before, with a warning. The 300 mm covers
+plotting error (centimetres) and stays below fixture spacing (half a metre and more); missing
+it only ever causes that fallback. A member is its own partner only within 50 mm of the axis;
+otherwise any member within 150 mm of it would claim itself and an asymmetric group hugging
+the centreline would never close. Fixtures pair first; a mirrored pair's cells then pair in
+reversed rank and a fixture on the axis mirrors its own cells by rank, without a warning. A
+group wholly on one side of X = 0 (or a rig that never crosses it) mirrors about its own X
+centre, also without a warning. Starfire derives the pairs once at rig load
+(`starfire::spatial`) by searching each member's reflection within the tolerance window in X:
+O(n log n) for spread members, O(n²) where many members share one X. It reads
+`Fixture.matrix`, which the rig already carries; a cell takes its fixture's position since the
+rig carries no GDTF geometry offsets, so the RigDefinition is unchanged. The room is symmetric
+about X = 0, so its pairs equal the rank pairs and the goldens are unchanged. Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.
+
+2026-10-27 Stage areas: every fixture carries one `StageArea` of the standard nine-area stage
+grid (down/centre/up × left/centre/right, named from the audience), derived once by Autolux
+when it builds the rig from the MVR (`stage_areas` in `cli/starfire_assets.py`, which quotes
+the MVR 1.6 and GDTF 1.2 axes: -X house left, -Y downstage). MVR gives its scene origin no
+meaning, so the stage frame is the rig's own bounding box over all fixture positions: X and Y
+each cut into equal thirds, a fixture on a cut in the centre third, an axis without extent all
+centre. The nine-area grid is the lighting convention for blocking and focus, so a special
+row's `zone` (column) and `depth` (row) speak the language of a plot. Cells inherit their
+fixture's area (the rig carries no GDTF geometry offsets). Starfire applies no geometry rule:
+`sf.zone(cell)` returns the area's column (house_left/centre/house_right), row
+(downstage/centre/upstage) and name (e.g. `up_centre`), and rig load refuses an unspecified area;
+`sf.position(cell)` returns x, y, z and `sf.distance(cell, x, y)` the plan distance, in metres;
+`sf.fixture_of(cell)` names the fixture a cell belongs to.
+Login reports a group's `area` only when every member shares it, plus its mean X
+(`centre_x_metres`, which accent alternation uses), so a role row with `zone` or `depth` plays
+only on groups lying in one area of that column or row; no MIXED value is needed.
+Stage areas use the rig's bounding box, while `sf.mirror` keeps the scene's X = 0 as
+its axis, with the per-group fallback: two separate concepts.

@@ -16,7 +16,7 @@ return {
         local beat = ctx.beat_position % LOOP_BEATS
         local elapsed = ctx.autoloop_elapsed_beats
         local ramp = math.min(elapsed / RAMP_BEATS, 1)
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local drive = ramp * RAMP_SHARE + energy * (1 - RAMP_SHARE)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local depth = sf.lerp(0.2, 0.9, ramp)
@@ -37,7 +37,7 @@ return {
             sf.colour(sf.group("movers"), palette.cold),
             sf.dimmer(sf.group("movers"), sf.lerp(0.3, 0.8, drive) * gain),
             sf.each(sf.group("movers"), function(mover, index)
-                local side = index % 2 == 1 and -1 or 1
+                local side = sf.side(index)
                 return sf.pan_tilt(mover, CENTRE_PAN + side * pan, TILT)
             end)
         })

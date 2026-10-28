@@ -3,7 +3,7 @@ repos:
     hooks:
       - id: python-format
         name: Python formatting (Ruff)
-        entry: uv run --locked --extra dev ruff format
+        entry: uv run --no-sync --locked --extra dev ruff format
         language: system
         types: [python]
         files: ^(autolux|cli|proto|tools)/
@@ -11,13 +11,13 @@ repos:
         require_serial: true
       - id: python-lint
         name: Python lint (Ruff)
-        entry: uv run --locked --extra dev ruff check --force-exclude
+        entry: uv run --no-sync --locked --extra dev ruff check --force-exclude
         language: system
         types: [python]
         require_serial: true
       - id: proto-format
         name: Protobuf formatting (clang-format)
-        entry: uv run --locked --extra dev clang-format -i --style=file
+        entry: uv run --no-sync --locked --extra dev clang-format -i --style=file
         language: system
         types: [proto]
         files: ^proto/

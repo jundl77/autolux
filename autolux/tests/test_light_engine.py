@@ -583,14 +583,27 @@ async def test_a_chain_slower_than_the_budget_fires_at_once_and_says_so(caplog):
     light, queue, clock, _ = engine(decoder=decoder)
     await elapse(light, clock, 30.0)
     with caplog.at_level(logging.WARNING):
-        await commit(light, decoder, clock, 'drop', age_sec=16.4)
-        await commit(light, decoder, clock, 'breakdown', age_sec=16.4)
+        await commit(light, decoder, clock, 'drop', age_sec=15.0)
+        await commit(light, decoder, clock, 'breakdown', age_sec=15.0)
     intent = next(e for e in queue._queue if e[4] == 'intent')
     assert intent[3] == 0.0
     assert 'late' in caplog.text.lower()
     assert len([r for r in caplog.records if 'late' in r.message.lower()]) == 1, (
         'one line per transition, not one per bar'
     )
+    assert '1.00s late (slow tempo, accepted)' in caplog.text
+
+
+async def test_more_than_a_bar_late_is_named_a_stale_backlog_not_slow_tempo(caplog):
+    decoder = FakeDecoder()
+    light, queue, clock, _ = engine(decoder=decoder)
+    await elapse(light, clock, 30.0)
+    with caplog.at_level(logging.WARNING):
+        await commit(light, decoder, clock, 'drop', age_sec=14.0 + decoder.bar_sec + 0.5)
+    intent = next(e for e in queue._queue if e[4] == 'intent')
+    assert intent[3] == 0.0, 'no behaviour change: it still fires at once'
+    assert 'stale decoder backlog after a track change, accepted' in caplog.text
+    assert 'slow tempo' not in caplog.text
 
 
 def test_the_startup_line_names_both_halves_of_the_measured_chain(caplog):
@@ -1837,6 +1850,28 @@ async def test_renderer_settings_are_sent_at_start_and_at_once_on_a_change(tmp_p
         (changed_at, {'kind': 'set_strobe_max_rate_hz', 'hz': 5.0}),
         (changed_at, {'kind': 'set_strobe_max_burst_seconds', 'seconds': 2.0}),
         (changed_at, {'kind': 'set_intensity', 'level': 0.4}),
+    ]
+
+
+def test_group_masters_go_to_starfire_for_rig_groups_only_on_every_settings_send():
+    from autolux.lib.engine.effect_definitions import ShowSettings
+
+    light, _, _, lighting = engine()
+    lighting.groups = lambda: [{'name': 'movers'}, {'name': 'wash'}]
+    settings = ShowSettings(group_masters={'wash': 0.5, 'ghost': 0.2, 'movers': 1.0})
+    light._settings = lambda: settings
+    light.send_renderer_settings()
+    light.send_renderer_settings()
+    settings = ShowSettings(group_masters={})
+    light.send_renderer_settings()
+    assert [command for _, command in sent(lighting, 'set_group_master')] == [
+        {'kind': 'set_group_master', 'group': 'movers', 'level': 1.0},
+        {'kind': 'set_group_master', 'group': 'wash', 'level': 0.5},
+        # A restarted Starfire starts every group at full, so a resend must repeat the cap.
+        {'kind': 'set_group_master', 'group': 'movers', 'level': 1.0},
+        {'kind': 'set_group_master', 'group': 'wash', 'level': 0.5},
+        {'kind': 'set_group_master', 'group': 'movers', 'level': 1.0},
+        {'kind': 'set_group_master', 'group': 'wash', 'level': 1.0},
     ]
 
 

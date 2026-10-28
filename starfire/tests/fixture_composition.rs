@@ -70,7 +70,12 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
         )
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
-    for state in frame.fixture_properties_before_strobe.values() {
+    // The loop's sf.all() passes over the accent Kinta, which plays specials only.
+    let room = support::room();
+    for (id, state) in &frame.fixture_properties_before_strobe {
+        if room.is_accent_cell(id) {
+            continue;
+        }
         assert_eq!(state.intensity, 0.2);
         assert_eq!(
             state.colour,
@@ -111,13 +116,15 @@ fn timed_strobe_gates_dimmers_without_selecting_hardware_strobe_or_macros() {
             ),
         )
         .unwrap();
+    let room = support::room();
     for (seconds, expected_intensity) in [(0.0, 204), (0.25, 0), (0.5, 204)] {
         let frame = engine.render_at(seconds).unwrap();
         assert!(
             frame
                 .fixture_properties_before_strobe
-                .values()
-                .all(|state| state.strobe_hz == 2.0 && state.intensity == 0.8)
+                .iter()
+                .filter(|(id, _)| !room.is_accent_cell(id))
+                .all(|(_, state)| state.strobe_hz == 2.0 && state.intensity == 0.8)
         );
         for start in [0, 12] {
             assert_eq!(
@@ -279,4 +286,34 @@ fn a_wash_blacklight_accent_drives_uv_full_with_rgb_off_above_the_automatic_look
             &[0, 0, 0, 0, 0, 0, 0, 0]
         );
     }
+}
+
+#[test]
+fn a_loop_group_sharing_a_fixture_with_an_accent_group_is_refused_at_rig_load() {
+    let mut definition = support::room_definition();
+    let kinta = support::room().groups()["fx"][0].clone();
+    definition
+        .groups
+        .push(starfire::protocol::wire::FixtureGroup {
+            group_id: "house".into(),
+            fixture_ids: vec![kinta],
+            ..Default::default()
+        });
+    let error = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "loop group house shares a fixture with accent group fx, which plays specials only"
+    );
+}
+
+#[test]
+fn a_group_with_an_unknown_role_is_refused_rather_than_read_as_a_loop_group() {
+    let mut definition = support::room_definition();
+    definition.groups[0].role = 99;
+    let name = definition.groups[0].group_id.clone();
+    let error = starfire::fixtures::FixtureRig::from_wire(&definition).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!("fixture group {name} has unknown role 99")
+    );
 }

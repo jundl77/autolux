@@ -14,7 +14,7 @@ local POSITIONS = { { pan_offset = 0.12, tilt = 0.6 }, { pan_offset = 0.2, tilt 
 return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local fill = sf.lerp(FILL_QUIET, FILL_LOUD, energy)
         local flash = sf.on_beat(beat, FLASH_WIDTH_BEATS, HALF_BAR_BEATS)

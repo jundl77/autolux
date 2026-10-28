@@ -32,10 +32,64 @@ from autolux.simulate.visualizer_app import (
     control_page_config,
     decimal_text,
     expected_control_values,
+    group_master_edit,
+    group_master_rows,
     setting_text,
     static_control_command,
 )
 from autolux.tests.test_static_mode import overrides, static_engine
+
+
+def test_group_masters_round_trip_through_show_json_and_reject_levels_outside_unit(tmp_path):
+    from autolux.lib.main import load_show_settings, save_show_settings
+
+    path = tmp_path / 'show.json'
+    saved = ShowSettings(quiet_brightness=0.3, group_masters={'wash': 0.5, 'movers': 0})
+    save_show_settings(path, saved)
+    assert json.loads(path.read_text(encoding='utf-8'))['settings']['group_masters'] == {
+        'movers': 0.0,
+        'wash': 0.5,
+    }
+    assert load_show_settings(path) == saved
+    assert ShowSettings.from_dict({}).group_masters == {}
+    for masters in ({'wash': 1.5}, {'wash': -0.1}, {'wash': True}, {'': 0.5}, ['wash']):
+        with pytest.raises((TypeError, ValueError)):
+            ShowSettings(group_masters=masters)
+    with pytest.raises(ValueError, match='keys must be group names'):
+        ShowSettings(group_masters={'wash': 0.5, 1: 0.5})
+
+
+def test_a_group_master_edit_changes_only_that_group_and_keeps_every_other_setting():
+    current = ShowSettings(crossfade_beats=4, group_masters={'movers': 0.25}).to_dict()
+    state = {'settings': current}
+    command = group_master_edit('wash', 0.5, state)
+    assert command == {
+        'action': 'settings',
+        'settings': {**current, 'group_masters': {'movers': 0.25, 'wash': 0.5}},
+    }
+    assert ShowSettings.from_dict(command['settings']).group_masters['wash'] == 0.5
+    assert group_master_edit('movers', 0.25, state) is None
+    assert group_master_edit('wash', 1.0, state) is None
+    assert group_master_edit('wash', 0.5, {}) is None
+
+
+def test_the_settings_area_has_one_master_brightness_style_fader_per_rig_group():
+    rows = group_master_rows(
+        {'wash': ['colour'], 'movers': []}, {'group_masters': {'wash': 0.4}}, disabled=False
+    )
+    sliders = [row.children[1].children[0].children for row in rows]
+    assert [slider.id for slider in sliders] == [
+        {'type': 'group-master', 'group': 'movers'},
+        {'type': 'group-master', 'group': 'wash'},
+    ]
+    assert [slider.value for slider in sliders] == [1.0, 0.4]
+    assert [row.children[0].children for row in rows] == [
+        'movers group master',
+        'wash group master',
+    ]
+    assert all(row.children[1].className == 'fader' for row in rows)
+    assert all(slider.min == 0 and slider.max == 1 for slider in sliders)
+    assert build_app(_Recorder()).layout['group-masters'].children is None
 
 
 @pytest.fixture
@@ -877,19 +931,14 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
             for item in _build_show_status(snapshot, now=0.0)
         }
 
-    clock = VirtualClock()
-    buffer = EventBuffer(clock=clock)
+    strobe = {'group': 'all', 'strobe': True, 'remaining_seconds': 0.0}
+    buffer = EventBuffer(clock=VirtualClock())
     buffer.start()
-    buffer.set_control_state(
-        paused=False,
-        master_brightness=1.0,
-        settings={'drop_strobe_cooldown_seconds': 60.0, 'intensity': 0.7},
-    )
+    buffer.set_cooldown_source(lambda: [strobe])
     assert 'FX' not in items(buffer.snapshot())
     assert items(buffer.snapshot())['Strobe'] == 'ready'
     buffer.set_special('cold_spin', 'fx')
-    buffer.mark_intense()
-    clock.advance(19.0)
+    strobe['remaining_seconds'] = 41.0
     shown = items(buffer.snapshot())
     assert shown['FX'] == 'Cold spin · fx'
     assert shown['Strobe'] == 'in 41 s'
@@ -902,17 +951,19 @@ def test_the_status_line_shows_the_active_fx_and_the_strobe_cooldown():
 def test_the_config_rig_area_lists_each_groups_fx_capabilities():
     from autolux.simulate.visualizer_app import special_groups_view
 
-    line = special_groups_view({'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']})
+    line = special_groups_view(
+        {'wash': ['colour'], 'fx': ['colour', 'pulse', 'speed']}, {'fx': 'accent'}
+    )
     assert [getattr(part, 'children', part) for part in line] == [
         'FX',
         '  ',
         'fx',
         ' ',
-        'colour · pulse · speed',
+        'accent · colour · pulse · speed',
         '  ',
         'wash',
         ' ',
-        'colour',
+        'loop · colour',
     ]
     assert special_groups_view({}) == ['FX: Starfire reported no groups']
 
@@ -1152,14 +1203,14 @@ def test_a_settings_edit_keeps_follow_the_music_on():
 
 def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command():
     from autolux.lib.engine.effect_definitions import ShowSettings
-    from autolux.simulate.visualizer_app import FORM_SETTINGS, setting_text
+    from autolux.simulate.visualizer_app import FORM_SETTINGS, settings_text
 
     source = _Recorder()
     app = build_app(source)
     output = next(key for key in app.callback_map if key.startswith('..control-status.children'))
     # More digits than the form shows: a resend of the rounded text would change the show.
     settings = ShowSettings(quiet_brightness=0.1234567, crossfade_beats=1.0).to_dict()
-    text = {name: setting_text(name, value) for name, value in settings.items()}
+    text = settings_text(settings)
     state = {'settings': settings, 'settings_text': text, 'master_brightness': 1.0}
     shown = {f'control-{name}': text[name] for name in FORM_SETTINGS}
     for name in FORM_SETTINGS:
@@ -1171,3 +1222,79 @@ def test_restored_or_polled_settings_send_nothing_and_one_edit_sends_one_command
     assert source.commands == [
         {'action': 'settings', 'settings': {**settings, 'crossfade_beats': 2.0}}
     ]
+
+
+def test_the_fx_effects_block_shows_one_bar_per_group_readiest_first():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    app = build_app(_Recorder())
+    with pytest.raises(KeyError):
+        app.layout['command-diagnostics']
+    assert app.layout['special-cooldowns'] is not None
+
+    def cooldown(group, last, total, remaining):
+        return {
+            'group': group,
+            'last': last,
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining == 0,
+        }
+
+    rows = _build_cooldowns(
+        {
+            'special_cooldowns': [
+                cooldown('fx', 'cold_drift', 240, 179.5),
+                cooldown('all', 'strobe_burst', 60, 0.0),
+                cooldown('movers', 'spin', 90, 45.0),
+                cooldown('wash', None, 0, 0.0),
+            ]
+        }
+    )
+
+    def shown(row):
+        head, track = row.children
+        return (
+            head.children[0].children,
+            head.children[1].children,
+            track.children.style['width'],
+            'ready' in row.className,
+        )
+
+    assert [shown(row) for row in rows] == [
+        ('all · Strobe burst', 'ready', '100.0%', True),
+        ('wash', 'ready', '100.0%', True),
+        ('movers · Spin', '45 s', '50.0%', False),
+        ('fx · Cold drift', '180 s', '25.2%', False),
+    ]
+    # The ticker in control.js reads these to count down between polls.
+    props = rows[3].to_plotly_json()['props']
+    assert (props['data-total'], props['data-remaining']) == (240, 179.5)
+
+
+@pytest.mark.skipif(NODE is None, reason='needs node to run control.js')
+def test_the_fx_effects_ticker_counts_a_bar_down_from_the_last_poll():
+    from autolux.simulate.visualizer_app import _build_cooldowns
+
+    def rendered(total, remaining):
+        entry = {
+            'group': 'fx',
+            'last': 'drift',
+            'cooldown_seconds': total,
+            'remaining_seconds': remaining,
+            'ready': remaining <= 0,
+        }
+        [row] = _build_cooldowns({'special_cooldowns': [entry]})
+        head, track = row.children
+        return {
+            'fill': track.children.style['width'],
+            'caption': head.children[1].children,
+            'ready': 'ready' in row.className,
+        }
+
+    # (total, remaining at the poll, seconds since the poll)
+    cases = [(240, 180.0, 0.0), (240, 180.0, 59.5), (90, 10.0, 10.0), (90, 10.0, 30.0), (0, 0, 0)]
+    calls = ', '.join(f'control.cooldownView({t}, {r}, {e})' for t, r, e in cases)
+    ticked = _run_control_js('console.log(JSON.stringify([' + calls + ']));')
+    # Ticking e seconds after a poll shows what a poll e seconds later would have rendered.
+    assert ticked == [rendered(t, max(0.0, r - e)) for t, r, e in cases]

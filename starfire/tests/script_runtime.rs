@@ -136,6 +136,229 @@ fn composed_effects_resolve_named_groups_in_the_authored_order() {
 }
 
 #[test]
+fn mirror_pairs_and_sides_follow_the_groups_left_to_right_order() {
+    let rig = support::rig(
+        serde_json::from_str(
+            r#"{"schema_version":1,"fixtures":[
+          {"id":"a","profile":"generic_rgb","universe":0,"address":1},
+          {"id":"b","profile":"generic_rgb","universe":0,"address":4},
+          {"id":"c","profile":"generic_rgb","universe":0,"address":7}],
+          "groups":{"row":["c","a","b"]}}"#,
+        )
+        .unwrap(),
+    );
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          local effects = {}
+          for rank, pair in ipairs(sf.mirror(sf.group("row"))) do
+            effects[#effects + 1] = sf.dimmer(pair[1], rank / 10)
+            effects[#effects + 1] = sf.dimmer(pair[2], rank / 10)
+          end
+          return sf.scene {
+            effects,
+            sf.each(sf.group("row"), function(fixture, index, count)
+              return sf.pan_tilt(fixture, 0.5 + sf.side(index, count) / 4, 0.5)
+            end)
+          }
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let effects = autoloop.render(&snapshot(0.0), &techno()).unwrap();
+    let mirrored: Vec<_> = effects[..4]
+        .iter()
+        .map(|effect| (effect.target.clone(), effect.values.intensity.unwrap()))
+        .collect();
+    assert_eq!(
+        mirrored,
+        [
+            (Target::Fixture("c".into()), 0.1),
+            (Target::Fixture("b".into()), 0.1),
+            (Target::Fixture("a".into()), 0.2),
+            (Target::Fixture("a".into()), 0.2),
+        ]
+    );
+    let pans: Vec<_> = effects[4..]
+        .iter()
+        .map(|effect| effect.values.pan.unwrap())
+        .collect();
+    assert_eq!(pans, [0.25, 0.5, 0.75]);
+}
+
+fn at(x: f64, y: f64) -> String {
+    format!("[1,0,0,0,1,0,0,0,1,{x},{y},0]")
+}
+
+fn placed(id: &str, address: u32, x: f64, y: f64) -> String {
+    format!(
+        r#"{{"id":"{id}","profile":"generic_rgb","universe":0,"address":{address},"matrix":{}}}"#,
+        at(x, y)
+    )
+}
+
+#[test]
+fn side_without_a_count_parks_each_half_of_a_mover_row_on_its_own_side() {
+    let rig = support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{},{},{}],
+              "groups":{{"movers":["a","b","c","d"]}}}}"#,
+            placed("a", 1, -900.0, 0.0),
+            placed("b", 4, -300.0, 0.0),
+            placed("c", 7, 300.0, 0.0),
+            placed("d", 10, 900.0, 0.0),
+        ))
+        .unwrap(),
+    );
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          return sf.each(sf.group("movers"), function(mover, index)
+            return sf.pan_tilt(mover, 0.5 + sf.side(index) / 4, 0.5)
+          end)
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let pans: Vec<_> = autoloop
+        .render(&snapshot(0.0), &techno())
+        .unwrap()
+        .iter()
+        .map(|effect| effect.values.pan.unwrap())
+        .collect();
+    assert_eq!(pans, [0.25, 0.25, 0.75, 0.75]);
+}
+
+/// `area` is a StageArea name without its prefix, as Autolux would derive it.
+fn placed_in(id: &str, address: u32, x: f64, y: f64, area: &str) -> String {
+    let fixture = placed(id, address, x, y);
+    format!(r#"{},"area":"{area}"}}"#, &fixture[..fixture.len() - 1])
+}
+
+/// Uneven spacing: the house-left members sit 100 mm off the house-right ones, the middle
+/// 40 mm off the centreline, and two rows of different depth interleave in X, so rank would
+/// pair across rows.
+/// Areas are the thirds of the box X -1000..1000, Y -2000..0.
+fn uneven_rig() -> FixtureRig {
+    support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{},{},{},{}],
+              "groups":{{"row":["a","b","m","c","d"]}}}}"#,
+            placed_in("a", 1, -1000.0, 0.0, "UP_LEFT"),
+            placed_in("b", 4, -900.0, -2000.0, "DOWN_LEFT"),
+            placed_in("m", 7, 40.0, -1000.0, "CENTRE"),
+            placed_in("c", 10, 900.0, 0.0, "UP_RIGHT"),
+            placed_in("d", 13, 1000.0, -2000.0, "DOWN_RIGHT"),
+        ))
+        .unwrap(),
+    )
+}
+
+#[test]
+fn mirror_pairs_by_reflection_about_the_centreline_not_by_rank() {
+    let rig = uneven_rig();
+    assert!(rig.spatial().warnings().is_empty());
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          local effects = {}
+          for rank, pair in ipairs(sf.mirror(sf.group("row"))) do
+            effects[#effects + 1] = sf.dimmer(pair[1], rank / 10)
+            effects[#effects + 1] = sf.dimmer(pair[2], rank / 10)
+          end
+          return effects
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let pairs: Vec<_> = autoloop
+        .render(&snapshot(0.0), &techno())
+        .unwrap()
+        .iter()
+        .map(|effect| (effect.target.clone(), effect.values.intensity.unwrap()))
+        .collect();
+    let fixture = |id: &str| Target::Fixture(id.into());
+    // Outermost first: a↔c and b↔d both reach 1000 mm, broken by the left member's rank.
+    assert_eq!(
+        pairs,
+        [
+            (fixture("a"), 0.1),
+            (fixture("c"), 0.1),
+            (fixture("b"), 0.2),
+            (fixture("d"), 0.2),
+            (fixture("m"), 0.3),
+            (fixture("m"), 0.3),
+        ]
+    );
+}
+
+#[test]
+fn lua_reads_zone_position_and_distance_in_metres() {
+    let rig = uneven_rig();
+    let mut autoloop = catalog(
+        r#"return {render = function(ctx)
+          return sf.each(sf.group("row"), function(fixture)
+            local zone, depth, area = sf.zone(fixture)
+            local x, y, z = sf.position(fixture)
+            local level = (zone == "house_left" and 0.1 or zone == "centre" and 0.2 or 0.3)
+              + (depth == "upstage" and 0.01 or depth == "centre" and 0.02 or 0)
+              + (area == "centre" and 0.4 or 0) + z
+            return {sf.dimmer(fixture, level),
+                    sf.pan_tilt(fixture, x / 10 + 0.5, sf.distance(fixture, 0, -1) / 10)}
+          end)
+        end}"#,
+    )
+    .instantiate("test", "autoloop", &rig, &support::palettes())
+    .unwrap();
+    let effects = autoloop.render(&snapshot(0.0), &techno()).unwrap();
+    let levels: Vec<_> = effects
+        .iter()
+        .filter_map(|effect| effect.values.intensity)
+        .map(|level| (level * 100.0).round() / 100.0)
+        .collect();
+    assert_eq!(levels, [0.11, 0.1, 0.62, 0.31, 0.3]);
+    let a = effects.iter().find_map(|effect| effect.values.pan).unwrap();
+    assert!((a - 0.4).abs() < 1e-12, "{a}");
+    let tilt_of_b = effects
+        .iter()
+        .filter_map(|effect| effect.values.tilt)
+        .nth(1)
+        .unwrap();
+    assert!((tilt_of_b - 0.9f64.hypot(1.0) / 10.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_rig_with_a_fixture_outside_every_stage_area_is_refused_at_load() {
+    let error = support::try_rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{}],"groups":{{"row":["a"]}}}}"#,
+            placed_in("a", 1, 0.0, 0.0, "UNSPECIFIED"),
+        ))
+        .unwrap(),
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("fixture a has no stage area"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn an_asymmetric_group_falls_back_to_rank_and_says_so() {
+    let rig = support::rig(
+        serde_json::from_str(&format!(
+            r#"{{"schema_version":1,"fixtures":[{},{}],"groups":{{"row":["a","b"]}}}}"#,
+            placed("a", 1, -2000.0, 0.0),
+            placed("b", 4, 500.0, 0.0),
+        ))
+        .unwrap(),
+    );
+    assert_eq!(
+        rig.spatial().mirror("row").unwrap(),
+        [("a".to_owned(), "b".to_owned())]
+    );
+    let warnings = rig.spatial().warnings();
+    assert!(warnings[0].contains("group row"), "{warnings:?}");
+}
+
+#[test]
 fn oscillators_are_periodic_and_use_supplied_musical_time() {
     let mut autoloop = autoloop(
         r#"return {render = function(ctx)
@@ -368,4 +591,31 @@ fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
         starfire::script::missing_groups_warning(&Default::default()),
         None
     );
+}
+
+#[test]
+fn a_loop_naming_an_accent_group_or_fixture_by_any_route_is_refused() {
+    let room = FixtureRig::from_wire(&support::room_definition()).unwrap();
+    assert!(room.is_accent("fx"));
+    for body in [
+        r#"return {sf.dimmer({ group = "fx" }, 1)}"#,
+        r#"local g = "fx"; return sf.each(sf.group(g), function(cell) return sf.dimmer(cell, 1) end)"#,
+        r#"return {sf.dimmer(sf.mirror({ group = "fx" })[1][1], 1)}"#,
+        r#"return {sf.dimmer(sf.fixture("kinta"), 1)}"#,
+    ] {
+        let error = catalog(&format!("return {{render = function(ctx) {body} end}}"))
+            .instantiate("test", "autoloop", &room, &support::palettes())
+            .unwrap()
+            .render(&snapshot(0.0), &techno())
+            .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.starts_with("autoloop test/autoloop failed"),
+            "{error}"
+        );
+        assert!(
+            error.contains("plays specials only, never autoloops"),
+            "{error}"
+        );
+    }
 }

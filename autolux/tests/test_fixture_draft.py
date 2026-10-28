@@ -33,6 +33,7 @@ def test_fixture_draft_integrity(tmp_path):
             'maxQuantity': 64,
             'columns': MAP_COLUMNS,
             'colors': FIXTURE_COLORS,
+            'accentRole': mvr_schema.ACCENT_ROLE,
         },
         'parity': [
             {

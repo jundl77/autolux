@@ -14,7 +14,7 @@ local POSITIONS = { { pan_offset = 0.16, tilt = 0.52 }, { pan_offset = 0.04, til
 return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local gain = sf.loudness_gain(ctx.normalized_rms_level)
         local kick = sf.on_beat(beat, KICK_WIDTH_BEATS)
         local spark = sf.on_beat(beat + OFFBEAT_SHIFT_BEATS, SPARK_WIDTH_BEATS)

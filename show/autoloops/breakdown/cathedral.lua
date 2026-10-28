@@ -13,7 +13,7 @@ local TILT_LOW, TILT_HIGH = 0.6, 0.82
 return {
     render = function(ctx)
         local beat = ctx.beat_position % LOOP_BEATS
-        local energy = ctx.normalized_rms_level or 0.6
+        local energy = sf.energy(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)
         local breath = sf.osc.sine(beat, LOOP_BEATS / 2, PIXEL_LOW, PIXEL_HIGH)
         local cross = PAN_SWING * sf.lerp(0.5, 1, energy) * sf.osc.sine(beat, LOOP_BEATS, 1, -1)
