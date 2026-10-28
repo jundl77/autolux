@@ -951,10 +951,6 @@
 
     function planMarks(draft, settings) {
         const classes = classNames(draft);
-        const patched = fixtureRows(draft, settings);
-        const rows = Object.fromEntries(patched.map((row) => [row.key, row]));
-        // The header names a lone universe, so a caption only carries its own when there are several.
-        const several = universes(patched).length > 1;
         const fixtures = [];
         const others = [];
         for (const { node, matrix, layer } of placedObjects(draft, settings)) {
@@ -966,15 +962,12 @@
             const length = Math.hypot(matrix[3], matrix[4]);
             const range = physicalRange(gdtfTree(draft, settings, textOf(node, "GDTFSpec")), textOf(node, "GDTFMode"), "Pan");
             const home = homeOrientation(matrix);
-            const row = rows[node.key];
             const group = classes[textOf(node, "Classing").toUpperCase()] || "";
             fixtures.push({
                 key: node.key,
                 name,
                 group,
                 accent: layer === settings.accentRole,
-                badge: `${textOf(node, "FixtureID")}${row?.cells.length > 1 ? ` ×${row.cells.length}` : ""}`,
-                caption: [row && `DMX ${several ? `${row.universe + 1}.` : ""}${row.address}–${row.address + row.channels - 1}`, group, layer].filter(Boolean).join(" · "),
                 x: matrix[9],
                 y: matrix[10],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
@@ -1078,9 +1071,7 @@
             // Role by shape: a loop fixture is filled, an accent one a ring in its group's tone.
             const shape = mark.accent ? ` fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.5)}"` : ` fill="${fill}"`;
             const label = labelled ? `<text class="plan-name" x="${n(x + r * 1.4)}" y="${n(y + r * 0.4)}" stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>` : "";
-            const badge = mark.badge ? planBadge(mark.badge, x, y, r, font * 1.15, fill, n) : "";
-            const caption = mark.caption ? `<text class="plan-caption" x="${x}" y="${n(y + r * 2.6 + font)}" text-anchor="middle" stroke-width="${n(font * 0.4)}">${escapeXml(mark.caption)}</text>` : "";
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}"${shape}/>${panArc(mark, n, r * 3.2, fill)}${label}${badge}${caption}</g>`);
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}"${shape}/>${panArc(mark, n, r * 3.2, fill)}${label}</g>`);
         }
         parts.push("</g></svg>");
         const key = (circle, text) => `<span class="plan-key"><svg viewBox="0 0 12 12" width="12" height="12"><circle cx="6" cy="6" r="4.5"${circle}/></svg>${text}</span>`;
@@ -1089,19 +1080,6 @@
             ...settings.roles.map((role) => key(` class="plan-role${role === settings.accentRole ? " ring" : ""}"`, escapeXml(role)))
         ];
         return `<div class="plan-legend">${legend.join("")}</div>` + parts.join("");
-    }
-
-    // The patch number as a pill up and left of the mark, clear of it and of the name on its
-    // right. SVG has no text metrics before layout, so the width assumes ~0.62 em digits and is
-    // centred on the text to split any error between both sides.
-    function planBadge(text, x, y, r, size, stroke, n) {
-        const [width, height] = [text.length * size * 0.62 + size * 0.8, size * 1.35];
-        const [right, bottom] = [x - r * 1.3, y - r * 0.7];
-        const middle = right - width / 2;
-        return (
-            `<g class="plan-badge" font-size="${n(size)}"><rect x="${n(right - width)}" y="${n(bottom - height)}" width="${n(width)}" height="${n(height)}" rx="${n(height / 2)}" stroke="${stroke}" stroke-width="1" vector-effect="non-scaling-stroke"/>` +
-            `<text x="${n(middle)}" y="${n(bottom - height / 2)}" text-anchor="middle" dominant-baseline="central">${escapeXml(text)}</text></g>`
-        );
     }
 
     // The pan limits as an arc around the mark, a full turn or more as a circle. Two segments
