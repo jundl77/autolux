@@ -1140,11 +1140,11 @@ const SUITES = {
             {was: was[ROOM_UUID.spot_left]?.rest, now: now[ROOM_UUID.spot_left]?.rest});
         await selectFixture('spot_right');
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         await check('name swap', 'Test on "spot_right" lights the old spot_left uuid', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {seen: await since()});
-        await click(testButton('off'));
+        await click(testButton('test'));
         await sleep(800);
     },
 
@@ -1162,15 +1162,18 @@ const SUITES = {
             return seen;
         };
         const note = () => text('#fixture-info .cfg-test-note');
-        await exactly('locate Test', 'click', () => click(testButton('white')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
-        await check('locate Test', 'lights its button; the note stays empty', await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000)
+        await exactly('locate Test', 'click', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await check('locate Test', 'lights its button; the note stays empty', await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000)
             && (await note()) === '', {note: await note()});
         await check('locate Test', 'the keep-alive is held every 15 s', same(await keepAlive(), {held: 1, delays: [15000]}), await keepAlive());
         await exactly('locate keep-alive', 'the 15 s tick re-sends the test', () => ev('window.__tickKeepAlive()'), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'a second click clears it', () => click(testButton('test')), [CLEAR]);
+        await check('locate Test', 'its button goes dark', await waitFor(`!document.querySelector('${testButton('test')}').classList.contains('active')`, 3000));
+        await exactly('locate Test', 'a third click lights it again', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         for (const colour of ['warm', 'red', 'blue', 'green']) {
             await exactly(`locate swatch ${colour}`, 'click', () => click(testButton(colour)), [lightOn({fixture: ROOM_UUID.spot_left}, colour)]);
         }
-        await check('locate swatch', 'the lit swatch wears the active ring', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
+        await check('locate swatch', 'the lit swatch is filled, the last one not', await waitFor(`document.querySelector('${testButton('green')}').classList.contains('active')
             && !document.querySelector('${testButton('blue')}').classList.contains('active')`, 3000));
         await check('locate swatch', 'one keep-alive, whatever the clicks', (await keepAlive()).held === 1, await keepAlive());
         await exactly('locate ›', 'next in patch order (spot_right), no clear first', () => click(testButton('1')), [lightOn({fixture: ROOM_UUID.spot_right}, 'green')]);
@@ -1187,12 +1190,16 @@ const SUITES = {
             await exactly(`locate ${motion}`, 'click', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'red', motion)]);
             await check(`locate ${motion}`, 'lights its button', await waitFor(`document.querySelector('${testButton(motion)}').classList.contains('active')`, 3000));
         }
-        await exactly('locate Off', 'clears the aim', () => click(testButton('off')), [CLEAR]);
-        await check('locate Off', 'the motion buttons go dark', await waitFor(`!document.querySelector('${testButton('aim')}').classList.contains('active')`, 3000));
-        await exactly('locate sweep', 'from dark lights white', () => click(testButton('sweep')), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', 'sweep')]);
-        await exactly('locate Off', 'clears the sweep', () => click(testButton('off')), [CLEAR]);
-        await check('locate Off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
-        await exactly('locate Off', 'a tick after Off sends nothing', () => ev('window.__tickKeepAlive()'), []);
+        await shot('test_row_mover', '#fixture-info');
+        await exactly('locate Test off', 'a second Test clears the aim', () => click(testButton('test')), [CLEAR]);
+        await check('locate Test off', 'Test and the motion buttons go dark', await waitFor(['test', 'aim'].map((spec) => `!document.querySelector('${testButton(spec)}').classList.contains('active')`).join(' && '), 3000));
+        for (const motion of ['sweep', 'aim']) {
+            await exactly(`locate ${motion}`, 'from dark starts the test in white', () => click(testButton(motion)), [lightOn({fixture: ROOM_UUID.spot_right}, 'white', motion)]);
+            await check(`locate ${motion}`, 'lights Test with it', await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000));
+            await exactly('locate Test off', `clears the ${motion}`, () => click(testButton('test')), [CLEAR]);
+        }
+        await check('locate Test off', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
+        await exactly('locate Test off', 'a tick after it sends nothing', () => ev('window.__tickKeepAlive()'), []);
 
         await selectFixture('zq06017');
         await check('locate cells', 'a fixture without pan offers no Sweep or Aim', await ev(`!document.querySelector('${testButton('sweep')}') && !document.querySelector('${testButton('aim')}')`));
@@ -1209,15 +1216,16 @@ const SUITES = {
             same(shown, cells.map((id) => id.replace(ROOM_UUID.zq06017, 'zq06017'))), {shown});
         const cell = cells[2];
         await exactly('locate cells', `picking ${cell} alone sends nothing`, () => click(`#fixture-info [data-cfg-cell="${cell}"]`), [], 800);
-        await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('white')), [lightOn({cell}, 'white')]);
+        await exactly('locate cells', 'Test lights the picked cell', () => click(testButton('test')), [lightOn({cell}, 'white')]);
         await exactly('locate cells', 'a swatch keeps the cell', () => click(testButton('blue')), [lightOn({cell}, 'blue')]);
+        await shot('test_row_static', '#fixture-info');
         await check('locate cells', 'the picked cell is marked', await ev(`document.querySelector('#fixture-info [data-cfg-cell="${cell}"]').classList.contains('selected')`));
 
         await exactly('locate deselect', 'Close sends one clear', () => click('#fixture-close'), [CLEAR]);
         await check('locate deselect', 'drops the keep-alive', (await keepAlive()).held === 0, await keepAlive());
 
         await selectFixture('spot_left');
-        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('white')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
+        await exactly('locate Test', 'again before leaving the tab', () => click(testButton('test')), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]);
         await exactly('locate tab switch', 'Control sends one clear and nothing after', async () => {
             await tab('Control');
             await sleep(2000);
@@ -1225,12 +1233,12 @@ const SUITES = {
         }, [CLEAR], 4000);
 
         await tab('Config');
-        await waitFor(`!!document.querySelector('${testButton('white')}') && !document.querySelector('${testButton('white')}').disabled`, 3000);
+        await waitFor(`!!document.querySelector('${testButton('test')}') && !document.querySelector('${testButton('test')}').disabled`, 3000);
         await planSettled();
         await harness('control', {refuse_paused: true});
         await arm();
         await watchNote();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         const history = await ev('window.__notes.slice()');
         await check('locate 409', 'shows the reason', history.includes('Test refused: the show is paused'), {history});
@@ -1238,7 +1246,7 @@ const SUITES = {
             (await note()) === 'Test refused: the show is paused', {note: await note(), history});
         await check('locate 409', 'the page posted one highlight; the show took none',
             posted().length === 1 && posted()[0].action === 'highlight' && (await since()).length === 0, {posted: posted(), seen: await since(),
-                pointer: await ev('window.__pointer.slice(-3)'), button: await ev(`(() => { const b = document.querySelector('${testButton('white')}'); const r = b.getBoundingClientRect(); return [b.disabled, r.x, r.y, scrollY]; })()`)});
+                pointer: await ev('window.__pointer.slice(-3)'), button: await ev(`(() => { const b = document.querySelector('${testButton('test')}'); const r = b.getBoundingClientRect(); return [b.disabled, r.x, r.y, scrollY]; })()`)});
         await check('locate 409', 'turns the test off (no keep-alive)', (await keepAlive()).held === 0, await keepAlive());
         await exactly('locate 409', 'a deselect after the refusal has nothing to clear', () => click('#fixture-close'), []);
         await harness('control', {refuse_paused: false});
@@ -1249,7 +1257,7 @@ const SUITES = {
         await check('locate paused', 'every test control is disabled', disabled);
         await check('locate paused', 'says why', (await note()) === 'Test is off while the show is paused.', {note: await note()});
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await click(testButton('red'));
         await sleep(800);
         await check('locate paused', 'clicks on the disabled controls post nothing', posted().length === 0, {posted: posted()});
@@ -1320,12 +1328,12 @@ const SUITES = {
         await check('odd name', 'leaves no stray markup in the plan', (await ev(`document.querySelectorAll('#mvr-plan svg.plan').length === 1 && !document.querySelector('#mvr-plan svg.plan left, #mvr-plan svg.plan co')`)));
         // A rename keeps the uuid the running rig knows, so its test lights the same fixture.
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         const renamedTest = posted();
         await check('odd name', 'Test on the renamed, unapplied fixture lights its uuid', same(renamedTest, [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {posted: renamedTest, note: await text('#fixture-info .cfg-test-note')});
-        await click(testButton('off'));
+        await click(testButton('test'));
         await sleep(800);
         await check('odd name', 'Save', await save(), {status: await statusText()});
         const files = await rigFiles();
@@ -1354,8 +1362,8 @@ const SUITES = {
         // the reloaded page shows no test and holds no keep-alive.
         await cfgFresh();
         await selectFixture('spot_left');
-        await click(testButton('white'));
-        await waitFor(`document.querySelector('${testButton('white')}').classList.contains('active')`, 3000);
+        await click(testButton('test'));
+        await waitFor(`document.querySelector('${testButton('test')}').classList.contains('active')`, 3000);
         await arm();
         await navigate('Page.reload');
         await waitFor(`!!document.getElementById('control-fx-off')`, 15000);
@@ -1369,14 +1377,14 @@ const SUITES = {
             ds.set_props = function (id, props) { if (id === 'fixture-grid-action') window.__actions.push(props.data); return real.apply(this, arguments); }; })()`);
         await check('reload mid-test', 'the reloaded page selects the fixture', await selectFixture('spot_left'));
         await sleep(800);
-        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(`document.querySelector('${testButton('white')}').classList.contains('active')`))
+        await check('reload mid-test', 'and shows no test lit, no keep-alive', !(await ev(`document.querySelector('${testButton('test')}').classList.contains('active')`))
             && (await text('#fixture-info .cfg-test-note')) === '' && (await keepAlive()).held === 0, {note: await text('#fixture-info .cfg-test-note')});
         await arm();
-        await click(testButton('white'));
+        await click(testButton('test'));
         await sleep(1500);
         await check('reload mid-test', 'Test works again with one command', same(await since(), [lightOn({fixture: ROOM_UUID.spot_left}, 'white')]),
             {seen: await since()});
-        await click(testButton('off'));
+        await click(testButton('test'));
         await sleep(1000);
 
         // A browser reload after a Save must show the saved patch, and say the show runs an older rig.
@@ -1420,11 +1428,9 @@ const SUITES = {
         await click('#fixture-info .cfg-advanced > summary');
         await waitFor(`!document.querySelector('#fixture-info .cfg-advanced').open`, 2000);
 
-        // The pan arc: drawn bright for the selected mover, faint for the other, none for a par.
-        const arc = (name) => ev(`(() => { const p = ${markOf(name)}?.querySelector('.plan-pan'); return p && Number(getComputedStyle(p).opacity); })()`);
-        await check('pan arc', 'the selected mover has a bright arc, the other a faint one, a par none',
-            (await arc('spot_right')) > 0.5 && (await arc('spot_left')) < 0.5 && (await arc('spot_left')) > 0 && (await arc('wash_left')) === null,
-            {spot_right: await arc('spot_right'), spot_left: await arc('spot_left'), wash_left: await arc('wash_left')});
+        await check('selected mark', 'wears the selected class, the others dimmed', await ev(`${markOf('spot_right')}.classList.contains('selected')
+            && !${markOf('spot_left')}.classList.contains('selected') && Number(getComputedStyle(${markOf('spot_left')}).opacity) < 1`));
+        await shot('plan_selected', '#mvr-plan');
         await shot('pane_impl_mover', '#fixture-info');
 
         await selectFixture('wash_left');
@@ -1434,8 +1440,6 @@ const SUITES = {
 
         // Soft limits in degrees, clamped to the GDTF's 0–540° pan.
         await selectFixture('spot_left');
-        const arcPath = () => ev(`${markOf('spot_left')}?.querySelector('.plan-pan')?.getAttribute('d')`);
-        const fullArc = await arcPath();
         await check('soft limits', 'the pan field shows the physical range and degrees', (await text('#fixture-info .cfg-field:has([data-cfg="Pan"]) > span small')) === '0–540'
             && (await ev(`document.querySelector('${splitInput('Pan', 'max')}').value`)) === '540');
         await formEdit('Pan max 600° clamps to 540°', () => typeInto(splitInput('Pan', 'max'), '600'), {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 1});
@@ -1445,7 +1449,6 @@ const SUITES = {
         }, {action: 'set-movement', axis: 'Pan', minimum: 0, maximum: 0.5});
         await check('soft limits', 'the fields redraw at the clamped degrees', await waitFor(`document.querySelector('${splitInput('Pan', 'min')}').value === '0'
             && document.querySelector('${splitInput('Pan', 'max')}').value === '270'`, 2000));
-        await check('pan arc', 'the arc follows the limits', !!fullArc && (await arcPath()) !== fullArc, {before: fullArc, after: await arcPath()});
 
         // Hanging -> standing turns the head 180° about its facing; it survives Save and Reload.
         await check('mount', 'spot_left reads hanging', (await ev(`document.querySelector('${cfg('mount')}').value`)) === 'hanging');

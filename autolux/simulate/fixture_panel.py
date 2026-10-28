@@ -81,10 +81,12 @@ FIXTURE_CSS = '''
 .plan-key .plan-role.ring {fill:none;stroke-width:2;stroke-dasharray:2,2;}
 #mvr-plan .plan-object {fill:#455468;stroke:#6d7f95;}
 #mvr-plan .plan-object.hollow {fill:none;}
-#mvr-plan .mvr-object.selected circle,#mvr-plan .mvr-object.selected rect {stroke:#ffffff;}
+/* --r is the plan's mark radius in user units, so the selection reads the same at any rig size. */
+#mvr-plan .plan:has(.mvr-object.selected) .mvr-object:not(.selected) {opacity:.5;}
+#mvr-plan .mvr-object.selected circle {transform-box:fill-box;transform-origin:center;transform:scale(1.3);}
+#mvr-plan .mvr-object.selected circle:not(.ring),#mvr-plan .mvr-object.selected rect {stroke:var(--accent);stroke-width:calc(var(--r) * .35px);filter:drop-shadow(0 0 calc(var(--r) * .6px) var(--accent));}
+#mvr-plan .mvr-object.selected .plan-name {font-weight:700;fill:var(--text);}
 #mvr-plan .plan .plan-name {stroke:#0b121c;stroke-linejoin:round;paint-order:stroke;}
-#mvr-plan .plan-pan {fill:none;opacity:.2;pointer-events:none;}
-#mvr-plan .mvr-object.selected .plan-pan {opacity:.9;}
 #mvr-plan .plan-areas {stroke:#3b4d62;}
 #mvr-plan .plan-area-name {fill:var(--muted);}
 #mvr-plan .plan-stage-edge {stroke:#6d7f95;}
@@ -139,9 +141,13 @@ FIXTURE_CSS = '''
 .cfg-test {display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
 .cfg-test .cfg-step {margin-left:auto;}
 #config-panel .cfg-test button,#config-panel .cfg-cells button {padding:6px 10px;}
-#config-panel .cfg-test .cfg-swatch {width:26px;height:26px;padding:0;background:var(--swatch);border-color:#3b4d62;}
-#config-panel .cfg-test button.active {border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
-#config-panel .cfg-test .cfg-test-main.active,#config-panel .cfg-test .cfg-test-motion.active {background:#284d71;color:#fff;}
+/* The Control tab's segmented style. Each segment draws its own 1px ring into the 1px gaps, so a
+   row wrapped on a phone keeps its dividers and outline. */
+.cfg-seg {display:inline-flex;flex-wrap:wrap;gap:1px;padding:1px;border-radius:6px;overflow:hidden;--tone:var(--accent);}
+#config-panel .cfg-seg button {flex:1 0 auto;height:32px;min-width:40px;padding:0 12px;border:0;border-radius:0;background:transparent;color:var(--muted);font-size:14px;box-shadow:0 0 0 1px var(--line);}
+#config-panel .cfg-seg button:hover:not(:disabled):not(.active) {background-color:color-mix(in srgb,var(--tone) 16%,transparent);color:var(--tone);}
+#config-panel .cfg-seg button.active {background-color:var(--tone);color:var(--ink);box-shadow:var(--lift),0 0 0 1px var(--line);}
+#config-panel .cfg-seg .cfg-swatch {min-width:32px;padding:0;background-image:radial-gradient(circle,var(--tone) 5px,transparent 6px);}
 .cfg-test-note {margin:8px 0 0;}
 .cfg-cells {grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:4px;}
 #config-panel .cfg-cells button.selected {border-color:var(--accent);background:#273b51;color:#fff;}

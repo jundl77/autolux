@@ -736,11 +736,12 @@
     // answers an unknown target with an error that stops the show.
     const running = (target) => (show?.rig?.fixtures || []).some((fixture) => fixture.fixture_uuid === target.fixture || fixture.cells.includes(target.cell));
 
-    // A swatch lights the selection (or its picked cell), Sweep and Aim toggle a mover's motion
-    // (a swatch keeps it), ‹ › carry the test along the patch, Off clears it.
+    // Test toggles the selection (or its picked cell) in white, a swatch lights or recolours it,
+    // Sweep and Aim toggle a mover's motion (a swatch keeps it), ‹ › carry the test along the patch.
     function testControl(spec) {
         if (!rig?.selection || testBlocked(show)) return null;
-        if (spec === "off") return highlight(null);
+        if (spec === "test" && lit) return highlight(null);
+        if (spec === "test") spec = "white";
         const rows = fixtureRows(rig.draft, rig.settings);
         const row = rows.find((entry) => entry.key === rig.selection);
         if (!row) return null;
@@ -817,7 +818,7 @@
 
         syncTest(state, tab, saved) {
             if (tab !== "config") clearTest();
-            // The show dropped the test without an Off (standby, sound stop, restart): stop holding it.
+            // The show dropped the test unasked (standby, sound stop, restart): stop holding it.
             else if (lit && show?.highlight && state && !state.highlight) stopRefresh();
             // The control state carries the rig only when its revision changed; keep the last one.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
@@ -970,8 +971,6 @@
                 continue;
             }
             const length = Math.hypot(matrix[3], matrix[4]);
-            const range = physicalRange(gdtfTree(draft, settings, textOf(node, "GDTFSpec")), textOf(node, "GDTFMode"), "Pan");
-            const home = homeOrientation(matrix);
             const group = classes[textOf(node, "Classing").toUpperCase()] || "";
             fixtures.push({
                 key: node.key,
@@ -981,20 +980,12 @@
                 x: matrix[9],
                 y: matrix[10],
                 // The local Y axis in plan, i.e. the yaw; a fixture aimed straight up or down has none.
-                facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null,
-                pan: range && typeof home === "object" ? panSector(range, movementFor(draft, (node.attributes.uuid || "").toUpperCase(), "Pan")?.attributes) : null
+                facing: length > 1e-6 ? [matrix[3] / length, matrix[4] / length] : null
             });
         }
         return { fixtures, others };
     }
 
-    // Where Starfire's encode can send the beam: the soft limits bound the logical pan, a scene
-    // heading clockwise from +Y whatever the yaw or mount (an inversion only reorders it inside
-    // them). Returns the sector's span and its middle, anticlockwise from MVR +X.
-    function panSector([from, to], limits) {
-        const [low, high] = [Number(limits?.minimum ?? 0), Number(limits?.maximum ?? 1)].map((share) => from + share * (to - from));
-        return { span: Math.abs(high - low), centre: 90 - (low + high) / 2 };
-    }
 
     // Past the configured colours, golden-angle hues keep dozens of groups apart.
     function groupColour(index, colors) {
@@ -1068,7 +1059,7 @@
         const metres = scaleMetres(span);
         const [barX, barY] = [n(left + width - pad * 0.3 - metres * 1000), n(top + height - pad * 0.4)];
         const parts = [
-            `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox || `${n(left)} ${n(top)} ${n(width)} ${n(height)}`}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}">`,
+            `<svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox || `${n(left)} ${n(top)} ${n(width)} ${n(height)}`}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Rig plan, audience at the bottom" font-size="${font}" style="--r:${n(r)}">`,
             areaGrid(fixtures, n, r, font),
             // MVR has no stage edge; the plan draws it at the most downstage object.
             `<line class="plan-stage-edge" x1="${n(left)}" y1="${edge}" x2="${n(left + width)}" y2="${edge}" stroke-width="${n(r * 0.3)}"/>`,
@@ -1092,7 +1083,7 @@
             const label = labelled
                 ? `<text class="plan-name" x="${n(flip ? x - r * 1.4 : x + r * 1.4)}" y="${n(y + r * 0.4)}"${flip ? ' text-anchor="end"' : ""} stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>`
                 : "";
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"/>${ring}${panArc(mark, n, r * 3.2, fill)}${label}</g>`);
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"/>${ring}${label}</g>`);
         }
         parts.push("</g></svg>");
         const key = (glyph, text) => `<span class="plan-key"><svg viewBox="0 0 14 14" width="14" height="14">${glyph}</svg>${text}</span>`;
@@ -1107,17 +1098,6 @@
         return `<div class="plan-legend">${legend.join("")}</div>` + parts.join("");
     }
 
-    // The pan limits as an arc around the mark, a full turn or more as a circle. Two segments
-    // through the middle, as an SVG arc whose ends meet draws nothing.
-    function panArc(mark, n, radius, stroke) {
-        if (!mark.pan) return "";
-        const half = (Math.min(mark.pan.span, 360) * Math.PI) / 360;
-        const centre = (mark.pan.centre * Math.PI) / 180;
-        // Plan SVG y is MVR -Y, so an anticlockwise MVR arc is sweep flag 0.
-        const point = (angle) => `${n(mark.x + radius * Math.cos(angle))} ${n(-mark.y - radius * Math.sin(angle))}`;
-        const segment = (angle) => `A ${n(radius)} ${n(radius)} 0 0 0 ${point(angle)}`;
-        return `<path class="plan-pan" d="M ${point(centre - half)} ${segment(centre)} ${segment(centre + half)}" stroke="${stroke}"/>`;
-    }
 
     function redraw(container, draw) {
         const scene = JSON.stringify(rig.draft.scene);
@@ -1277,13 +1257,16 @@
             h(
                 "div",
                 { className: "cfg-test" },
-                button("white", "Test", "Light the selected fixture or cell in white", "cfg-test-main"),
-                Object.entries(rig.settings.testColours).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--swatch:${hex}` })),
-                mover && [
-                    button("sweep", "Sweep", "Pan between the soft limits; the beam should trace the arc on the plan", "cfg-test-motion"),
-                    button("aim", "Aim", "Point straight upstage, away from the audience at the plan's bottom edge", "cfg-test-motion")
-                ],
-                button("off", "Off", "Clear the test"),
+                h(
+                    "div",
+                    { className: "cfg-seg" },
+                    button("test", "Test", "Light the selected fixture or cell in white; click again to clear it", "cfg-test-main"),
+                    Object.entries(rig.settings.testColours).map(([colour, hex]) => h("button", { type: "button", className: "cfg-swatch", "data-cfg-test": colour, title: `Test in ${colour}`, "aria-label": `Test in ${colour}`, style: `--tone:${hex}` })),
+                    mover && [
+                        button("sweep", "Sweep", "Pan between the soft limits"),
+                        button("aim", "Aim", "Point straight upstage, away from the audience at the plan's bottom edge")
+                    ]
+                ),
                 button("-1", "‹", "Previous fixture in patch order", "cfg-step"),
                 button("1", "›", "Next fixture in patch order")
             ),
@@ -1310,8 +1293,8 @@
         const active = show?.highlight;
         const here = Boolean(active) && (active.target?.fixture === row?.fixture_uuid || ids.includes(active.target?.cell));
         for (const button of strip.querySelectorAll("[data-cfg-test]")) {
-            // ‹ › and Off still work: they move off or clear what the show does run.
-            button.disabled = Boolean(blocked || (offline && !["off", "1", "-1"].includes(button.dataset.cfgTest)));
+            // ‹ › and a lit Test still work: they move off or clear what the show does run.
+            button.disabled = Boolean(blocked || (offline && !["1", "-1", ...(lit ? ["test"] : [])].includes(button.dataset.cfgTest)));
             const swatch = button.classList.contains("cfg-swatch") && active?.colour === button.dataset.cfgTest;
             button.classList.toggle("active", here && (button.classList.contains("cfg-test-main") || swatch || active[button.dataset.cfgTest] === true));
         }
