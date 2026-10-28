@@ -13,7 +13,7 @@ use starfire::replay::Replay;
 
 const SHOW_DURATION_SECONDS: f64 = 90.0;
 const FRAME_RATE_HZ: u32 = 40;
-const MIN_ROOM_REALTIME_FACTOR: f64 = 10.0;
+const MIN_STAGE_REALTIME_FACTOR: f64 = 10.0;
 const MIN_SCALED_REALTIME_FACTOR: f64 = 2.0;
 const SCALED_FIXTURE_COUNT: usize = 64;
 const SCALED_MOVER_COUNT: usize = 16;
@@ -206,9 +206,9 @@ fn assert_render_budget(name: &str, rig: &[u8], minimum_factor: f64) {
 }
 
 #[test]
-fn room_show_keeps_ten_times_realtime_headroom() {
-    let rig = include_bytes!("../../autolux/tests/data/room.rig.pb");
-    assert_render_budget("room / 14 fixtures", rig, MIN_ROOM_REALTIME_FACTOR);
+fn stage_show_keeps_ten_times_realtime_headroom() {
+    let rig = include_bytes!("../../autolux/tests/data/generic_rig/stage.rig.pb");
+    assert_render_budget("stage / 8 fixtures", rig, MIN_STAGE_REALTIME_FACTOR);
 }
 
 #[test]

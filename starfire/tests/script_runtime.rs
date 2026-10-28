@@ -572,26 +572,29 @@ fn an_unknown_fixture_is_still_an_error() {
 
 #[test]
 fn loops_name_a_fixture_by_label_and_render_it_by_uuid() {
-    let room = FixtureRig::from_wire(&support::room_definition_as_loops()).unwrap();
-    let spot = room.uuid_of_label("spot_left").unwrap();
+    let stage = FixtureRig::from_wire(&support::stage_definition_as_loops()).unwrap();
+    let mover = stage.uuid_of_label("mover_left").unwrap();
     let source = format!(
         r#"return {{render = function(ctx)
-          assert(sf.fixture_of("spot_left") == "{spot}")
-          assert(sf.position("spot_left") == sf.position("{spot}"))
-          assert(sf.members(sf.fixture("spot_left"))[1] == "{spot}")
-          return {{sf.dimmer(sf.fixture("spot_left"), 1), sf.dimmer({{ fixture = "kinta" }}, 1)}}
+          assert(sf.fixture_of("mover_left") == "{mover}")
+          assert(sf.position("mover_left") == sf.position("{mover}"))
+          assert(sf.members(sf.fixture("mover_left"))[1] == "{mover}")
+          return {{sf.dimmer(sf.fixture("mover_left"), 1), sf.dimmer({{ fixture = "accent_centre" }}, 1)}}
         end}}"#
     );
     let effects = catalog(&source)
-        .instantiate("test", "autoloop", &room, &support::palettes())
+        .instantiate("test", "autoloop", &stage, &support::palettes())
         .unwrap()
         .render(&snapshot(0.0), &techno())
         .unwrap();
     let targets: Vec<_> = effects.into_iter().map(|effect| effect.target).collect();
-    let kinta = room.uuid_of_label("kinta").unwrap();
+    let accent = stage.uuid_of_label("accent_centre").unwrap();
     assert_eq!(
         targets,
-        [Target::Fixture(spot.into()), Target::Fixture(kinta.into())]
+        [
+            Target::Fixture(mover.into()),
+            Target::Fixture(accent.into())
+        ]
     );
 }
 
@@ -620,16 +623,16 @@ fn missing_groups_lists_exactly_the_referenced_groups_the_rig_lacks() {
 
 #[test]
 fn a_loop_naming_an_accent_group_or_fixture_by_any_route_is_refused() {
-    let room = FixtureRig::from_wire(&support::room_definition()).unwrap();
-    assert!(room.is_accent("fx"));
+    let stage = FixtureRig::from_wire(&support::stage_definition()).unwrap();
+    assert!(stage.is_accent("fx"));
     for body in [
         r#"return {sf.dimmer({ group = "fx" }, 1)}"#,
         r#"local g = "fx"; return sf.each(sf.group(g), function(cell) return sf.dimmer(cell, 1) end)"#,
         r#"return {sf.dimmer(sf.mirror({ group = "fx" })[1][1], 1)}"#,
-        r#"return {sf.dimmer(sf.fixture("kinta"), 1)}"#,
+        r#"return {sf.dimmer(sf.fixture("accent_centre"), 1)}"#,
     ] {
         let error = catalog(&format!("return {{render = function(ctx) {body} end}}"))
-            .instantiate("test", "autoloop", &room, &support::palettes())
+            .instantiate("test", "autoloop", &stage, &support::palettes())
             .unwrap()
             .render(&snapshot(0.0), &techno())
             .unwrap_err();
