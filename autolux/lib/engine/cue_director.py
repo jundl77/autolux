@@ -64,7 +64,7 @@ SILENT_GAP_SHARE = 0.1
 GAP_REFERENCE_BEATS = 16
 BREAKDOWN_DIP_BEATS = 2.0
 # Half a beat, the no-gap default, reads as a flicker between the riser's white and the hit's.
-DROP_DIP_BEATS = 2.0
+DROP_DIP_BEATS = 1.0
 
 HIT_BEATS = 2.0
 RISER_BARS = 8
