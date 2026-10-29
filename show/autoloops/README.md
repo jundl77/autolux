@@ -126,7 +126,13 @@ An overlay's first line is free text saying what it does, then exactly these fou
 
 ## Rules
 
-- **Pure functions of ctx.** Same ctx, same frame: no state between frames, no clocks.
+- **Pure functions of ctx.** Same ctx, same frame, no clocks. A render keeps no state between
+  calls, neither in globals nor in chunk-level locals (upvalues): one compiled VM serves the
+  base and every overlay layer naming the loop and survives reselection, so a counter, cache
+  or accumulator leaks between layers and sections. Compute everything from ctx and vary with
+  `sf.random(ctx, ...)`. Globals are frozen after load, and Login renders each loop twice on
+  one frame and refuses it if the two differ, but that only catches state that changes what a
+  frame shows; this rule is the whole contract. Constants computed at load are fine.
   `ctx.beat_position` is bar-locked (`floor(beat_position) % ctx.beats_per_bar` is the beat in
   bar, 0 the one); prefer the ctx form of `sf.beat_in_bar(ctx)`, `sf.bar(ctx)` and
   `sf.phrase_phase(ctx, bars)`.
