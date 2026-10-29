@@ -38,6 +38,10 @@ def cues(replay):
     return [event for event in replay['events'] if event['command']['kind'] == 'cue_section']
 
 
+def cue_values(replay):
+    return [event['command']['value'] for event in cues(replay)]
+
+
 async def test_actual_event_buffer_queue_delivery_is_aligned_to_source_time_once():
     from autolux.lib.engine.delayed_command_queue import DelayedCommandQueue
 
@@ -107,7 +111,9 @@ def test_silence_stops_immediately_and_same_autoloop_can_resume_after_transport_
     assert result['events'][-1] == {'at_seconds': 20.0, 'command': {'kind': 'stop'}}
 
 
-def overlay_catalogue(directory):
+@pytest.fixture
+def catalogue(tmp_path):
+    directory = tmp_path / 'autoloops'
     skipped = shutil.ignore_patterns('*.md', 'hit', 'fill', 'riser', 'dip', 'accent')
     shutil.copytree(AUTOLOOP_DIRECTORY, directory, ignore=skipped)
     header = '-- overlay\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: mixed\n'
@@ -148,11 +154,10 @@ def planned(seed=7, settings=({'t': 0.0, 'settings': {}},)):
     return {**a_set(), 'planning': {'seed': seed, 'venue': {}, 'settings': list(settings)}}
 
 
-def test_the_director_cues_every_section_with_its_overlays_deterministically(tmp_path):
-    catalogue = overlay_catalogue(tmp_path / 'autoloops')
+def test_the_director_cues_every_section_with_its_overlays_deterministically(catalogue):
     first = report_to_replay(planned(), autoloops=catalogue)
     assert json.dumps(first) == json.dumps(report_to_replay(planned(), autoloops=catalogue))
-    cued = [event['command']['value'] for event in cues(first)]
+    cued = cue_values(first)
     assert [cue['intent'] for cue in cued] == ['atmospheric', 'buildup', 'drop', 'breakdown']
     assert [event['at_seconds'] for event in cues(first)] == [0.0, 21.5, 53.5, 85.5]
     assert sections(first) == [0.5, 30.5, 62.5, 94.5]
@@ -160,20 +165,17 @@ def test_the_director_cues_every_section_with_its_overlays_deterministically(tmp
     assert ('dip', 'last_beat') in drop_rows
     assert {bank for bank, _ in drop_rows} >= {'dip', 'hit'}
     other = report_to_replay(planned(seed=8), autoloops=catalogue)
-    assert [cue['seed'] for cue in cued] != [
-        event['command']['value']['seed'] for event in cues(other)
-    ]
+    assert [cue['seed'] for cue in cued] != [cue['seed'] for cue in cue_values(other)]
 
 
-def test_each_section_is_planned_at_the_level_in_force_when_the_room_hears_it(tmp_path):
-    catalogue = overlay_catalogue(tmp_path / 'autoloops')
+def test_each_section_is_planned_at_the_level_in_force_when_the_room_hears_it(catalogue):
     wild = {'t': 0.0, 'settings': {'intensity': 1.0}}
     calm_by_the_drop = [wild, {'t': 70.0, 'settings': {'intensity': 0.3}}]
     calm_after_it = [wild, {'t': 72.0, 'settings': {'intensity': 0.3}}]
 
     def drop(settings):
         replay = report_to_replay(planned(settings=settings), autoloops=catalogue)
-        return [event['command']['value'] for event in cues(replay)][2]
+        return cue_values(replay)[2]
 
     assert drop(calm_by_the_drop) != drop([wild])
     assert drop(calm_after_it) == drop([wild])
@@ -248,4 +250,4 @@ def test_a_replay_embeds_the_login_palette_table_and_names_only_its_palettes():
     ]
     assert replay['palettes'][0]['secondary'] == {'red': 1.0, 'green': 140 / 255, 'blue': 26 / 255}
     names = {palette['name'] for palette in replay['palettes']}
-    assert {event['command']['value']['palette'] for event in cues(replay)} <= names
+    assert {cue['palette'] for cue in cue_values(replay)} <= names
