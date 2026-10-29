@@ -146,7 +146,10 @@ class AutoloopPolicy:
         context: SelectionContext,
         exclude: tuple[str, str] | None = None,
         intensity: float = INTENSITY_BALANCED,
+        contrast: AutoloopMeta | None = None,
     ) -> AutoloopChoice:
+        """contrast: the look this one follows in a rotation; the choice differs from it in
+        movement or texture."""
         look = look_intent(context.intent, intensity)
         wild = intensity_level(intensity) == WILD
         loops = [loop for loop in self._autoloops[look] if loop != exclude]
@@ -170,6 +173,8 @@ class AutoloopPolicy:
                 f'{reason}; no energy {"/".join(map(str, tiers))} loop, '
                 f'nearest {"/".join(map(str, energies))}'
             )
+        if contrast is not None:
+            candidates, reason = self._contrasting(loops, candidates, tiers, contrast, reason)
         candidates = self._narrowed(candidates, look)
         bank, name = self._weighted_pick(candidates, look, wild)
         return AutoloopChoice(bank, name, self._meta[(bank, name)], reason, look)
@@ -215,6 +220,26 @@ class AutoloopPolicy:
 
         nearest = min(distance(loop) for loop in loops)
         return [loop for loop in loops if distance(loop) == nearest], nearest == 0
+
+    def _contrasting(
+        self, loops, candidates, tiers, contrast: AutoloopMeta, reason: str
+    ) -> tuple[list[tuple[str, str]], str]:
+        def differs(loop) -> bool:
+            meta = self._meta[loop]
+            return meta.movement != contrast.movement or meta.texture != contrast.texture
+
+        against = f'{contrast.movement}/{contrast.texture}'
+        within = [loop for loop in candidates if differs(loop)]
+        if within:
+            return within, f'{reason}; contrasts {against}'
+        others = [loop for loop in loops if differs(loop)]
+        if not others:
+            return candidates, f'{reason}; nothing contrasts {against}'
+        neighbours, _ = self._nearest_tier(others, tiers)
+        energies = '/'.join(
+            str(e) for e in sorted({self._meta[loop].energy for loop in neighbours})
+        )
+        return neighbours, f'{reason}; contrasts {against} from energy {energies}'
 
     def _narrowed(self, candidates, intent: LightIntent) -> list[tuple[str, str]]:
         last = self._last_by_intent.get(intent)
