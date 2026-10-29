@@ -10,6 +10,8 @@ use starfire::model::{
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
+const IDLE: &str = "return {render=function(ctx) return sf.scene {} end}";
+
 const ROOT_GEOMETRY: &str = "Base";
 
 fn function(attribute: &str, name: &str) -> wire::ChannelFunction {
@@ -241,13 +243,7 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
             ..Default::default()
         },
     );
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "idle".into(),
-        bank: "test".into(),
-        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("idle", IDLE)]);
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let sweep = LightingOverride {
         id: "highlight".into(),
@@ -285,18 +281,6 @@ fn a_pan_sweep_covers_exactly_the_soft_limits_on_an_eight_second_triangle() {
     );
 }
 
-fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
-    let (sin, cos) = f64::to_radians(yaw).sin_cos();
-    let flip = if hanging { 1.0 } else { -1.0 };
-    [
-        [flip * cos, flip * sin, 0.0],
-        [-sin, cos, 0.0],
-        [0.0, 0.0, flip],
-        position,
-    ]
-    .concat()
-}
-
 fn moved(matrix: &[f64], focus: [f64; 3], inverted: bool, motion: Motion) -> Vec<u8> {
     let rig = support::rig(serde_json::json!({"fixtures": [{
         "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
@@ -304,13 +288,7 @@ fn moved(matrix: &[f64], focus: [f64; 3], inverted: bool, motion: Motion) -> Vec
         "pan": {"min": 0.1, "max": 0.8, "inverted": inverted},
         "tilt": {"inverted": inverted},
     }]}));
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "idle".into(),
-        bank: "test".into(),
-        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("idle", IDLE)]);
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let highlight = LightingOverride {
         id: "highlight".into(),
@@ -342,10 +320,6 @@ enum Motion {
     Posed(FixturePose),
 }
 
-/// The scene direction the frame throws the beam, decoded independently of the encoder and
-/// carried through the Matrix, as fixture_encoding's mount test does. Physical pan 0 faces
-/// local +Y, the display, and pan turns clockwise about local +Z; mid tilt runs along local -Z,
-/// the pan axis, and tilts towards the pan heading; standing is the rigid flip.
 fn beam(frame: &[u8], matrix: &[f64]) -> [f64; 3] {
     let probe = support::rig(serde_json::json!({ "fixtures": [{
         "fixture_uuid": "test", "profile": "chauvet_intimidator_spot_110_12ch",
@@ -357,12 +331,11 @@ fn beam(frame: &[u8], matrix: &[f64]) -> [f64; 3] {
         .movement_range("Pan")
         .unwrap();
     let share = |at: usize| f64::from(u16::from_be_bytes([frame[at], frame[at + 1]])) / 65535.0;
-    let (pan, tilt) = (
+    support::beam_through(
+        matrix,
         (from + share(0) * (to - from)).to_radians(),
         ((share(2) - 0.5) * 270.0).to_radians(),
-    );
-    let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos(), -tilt.cos()];
-    [0, 1, 2].map(|axis| (0..3).map(|row| matrix[3 * row + axis] * body[row]).sum())
+    )
 }
 
 fn towards(from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
@@ -390,7 +363,7 @@ fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
         ] {
             let focus = [0, 1, 2].map(|axis| position[axis] + offset[axis]);
             for yaw in [0.0, 37.0, 90.0, 180.0, 233.0, -90.0] {
-                let matrix = mounted(hanging, yaw, position);
+                let matrix = support::mounted(hanging, yaw, position);
                 for inverted in [false, true] {
                     let aimed = moved(&matrix, focus, inverted, Motion::Aim);
                     let context =
@@ -408,8 +381,8 @@ fn a_focus_aim_throws_the_beam_through_the_focus_point_at_any_yaw_and_mount() {
 fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
     let positions = [[-2000.0, 1000.0, 3000.0], [3000.0, -1000.0, 2500.0]];
     let matrices = [
-        mounted(true, 37.0, positions[0]),
-        mounted(true, -90.0, positions[1]),
+        support::mounted(true, 37.0, positions[0]),
+        support::mounted(true, -90.0, positions[1]),
     ];
     let fixtures = [0, 1].map(|index| {
         serde_json::json!({
@@ -418,13 +391,7 @@ fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
         })
     });
     let rig = support::rig(serde_json::json!({ "fixtures": fixtures }));
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "idle".into(),
-        bank: "test".into(),
-        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("idle", IDLE)]);
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     for index in 0..2 {
         let highlight = LightingOverride {
@@ -460,7 +427,10 @@ fn without_a_focus_point_every_head_aims_at_the_stage_centre_on_the_floor() {
 fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
     let position = [0.0, 0.0, 3000.0];
     let focus = [0.0, 2000.0, 1000.0];
-    let (loaded, edited) = (mounted(true, 0.0, position), mounted(true, 90.0, position));
+    let (loaded, edited) = (
+        support::mounted(true, 0.0, position),
+        support::mounted(true, 90.0, position),
+    );
     let pose = FixturePose {
         matrix: edited.clone(),
         pan: MovementRange {
@@ -482,7 +452,7 @@ fn a_pose_aims_with_the_edited_yaw_before_the_rig_reloads() {
 #[test]
 fn a_pose_aims_through_the_edited_focus_before_the_rig_reloads() {
     let position = [865.0, -1291.0, 0.0];
-    let matrix = mounted(false, 180.0, position);
+    let matrix = support::mounted(false, 180.0, position);
     let focus = [-100.0, 60.0, 0.0];
     let pose = FixturePose {
         matrix: matrix.clone(),
@@ -513,13 +483,7 @@ fn stage_test(
         profile_id: fixture.profile_id.clone(),
     };
     edit(&mut pose);
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "idle".into(),
-        bank: "test".into(),
-        lua_source: "return {render=function(ctx) return sf.scene {} end}".into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("idle", IDLE)]);
     let rig = FixtureRig::from_wire(definition).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     let mut test = |pose: Option<FixturePose>| {
@@ -1004,13 +968,7 @@ fn rig(channels: Vec<wire::DmxChannel>) -> FixtureRig {
 }
 
 fn engine(channels: Vec<wire::DmxChannel>, source: &str) -> Engine {
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "test".into(),
-        bank: "test".into(),
-        lua_source: source.into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("test", source)]);
     let mut engine = Engine::new(rig(channels), catalog, support::palettes()).unwrap();
     engine
         .apply(

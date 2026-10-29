@@ -12,7 +12,6 @@ use starfire::model::{
     SectionIntent, Transition,
 };
 use starfire::protocol::{ClientMessage, MAX_MESSAGE_BYTES, apply_command, wire};
-use starfire::script::AutoloopCatalog;
 
 const SECONDS_PER_BEAT: f64 = 0.5;
 const RIG: &str = r#"{"schema_version":1,"fixtures":[
@@ -52,20 +51,8 @@ fn engine() -> Engine {
 }
 
 fn engine_with(scripts: &[(&str, &str)]) -> Engine {
-    let catalog = AutoloopCatalog::from_definitions(
-        &scripts
-            .iter()
-            .map(|(name, source)| wire::AutoloopDefinition {
-                autoloop_id: (*name).into(),
-                bank: "test".into(),
-                lua_source: (*source).into(),
-                intensity_htp: false,
-            })
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
     let rig = support::rig(serde_json::from_str(RIG).unwrap());
-    Engine::new(rig, catalog, support::palettes()).unwrap()
+    Engine::new(rig, support::test_catalog(scripts), support::palettes()).unwrap()
 }
 
 fn at(beat: f64) -> f64 {
@@ -74,16 +61,7 @@ fn at(beat: f64) -> f64 {
 
 fn beat_at(engine: &mut Engine, seconds: f64, index: u64, bar_phase: u32) {
     engine
-        .apply(
-            seconds,
-            &Command::Beat {
-                beat_index: index,
-                bar_phase: Some(bar_phase),
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
+        .apply(seconds, &support::beat(index, Some(bar_phase), 120.0))
         .unwrap();
 }
 
@@ -93,15 +71,7 @@ fn beat(engine: &mut Engine, index: u64) {
 
 fn select(engine: &mut Engine, seconds: f64, name: &str) {
     engine
-        .apply(
-            seconds,
-            &Command::Select {
-                bank: "test".into(),
-                autoloop: name.into(),
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
-        )
+        .apply(seconds, &support::select("test", name, Transition::Cut))
         .unwrap();
 }
 
@@ -139,12 +109,7 @@ fn overlay(begin_beats: f64, length_beats: f64, every_bars: u32, release_beats: 
 }
 
 fn send(engine: &mut Engine, seconds: f64, cue: SectionCue) -> anyhow::Result<()> {
-    engine.apply(
-        seconds,
-        &Command::CueSection {
-            value: Box::new(cue),
-        },
-    )
+    engine.apply(seconds, &support::cue(cue))
 }
 
 struct Probe {
@@ -853,13 +818,7 @@ fn lua(expression: &str, context: RenderContext) -> anyhow::Result<[f64; 3]> {
         "return {{render=function(ctx) local r, g, b = {expression}
          return {{sf.colour(sf.fixture('left'), sf.rgb(r, g, b))}} end}}"
     );
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "helpers".into(),
-        bank: "test".into(),
-        lua_source: source,
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("helpers", &source)]);
     let rig = support::rig(serde_json::from_str(RIG).unwrap());
     let palettes = support::palettes();
     let mut script = catalog
@@ -1267,18 +1226,11 @@ fn metrics_at_their_largest_fit_the_realtime_cap() {
     );
 }
 
-fn directory_catalog(bank: &str, source: &str) -> anyhow::Result<AutoloopCatalog> {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::create_dir(directory.path().join(bank)).unwrap();
-    std::fs::write(directory.path().join(bank).join("look.lua"), source).unwrap();
-    AutoloopCatalog::load(directory.path())
-}
-
 #[test]
 fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
     const BODY: &str = "return {render=function(ctx) return {} end}\n";
     let htp = |bank: &str, header: &str| {
-        directory_catalog(bank, &format!("-- 1-beat hit\n{header}{BODY}"))
+        support::directory_catalog(bank, &[("look", &format!("-- 1-beat hit\n{header}{BODY}"))])
             .map(|catalog| catalog.intensity_htp(bank, "look"))
     };
     const FULL: &str = "-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n";

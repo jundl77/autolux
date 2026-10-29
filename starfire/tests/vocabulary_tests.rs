@@ -10,7 +10,6 @@ use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Rgb, Transition};
 use starfire::protocol::wire;
-use starfire::script::AutoloopCatalog;
 
 const FRAMES_PER_SECOND: usize = 40;
 
@@ -24,30 +23,12 @@ fn engine(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
 
 fn beat(engine: &mut Engine, at: f64, beat_index: u64, bar_phase: Option<u32>, bpm: f64) {
     engine
-        .apply(
-            at,
-            &Command::Beat {
-                beat_index,
-                bar_phase,
-                beats_per_bar: 4,
-                bpm,
-                features: None,
-            },
-        )
+        .apply(at, &support::beat(beat_index, bar_phase, bpm))
         .unwrap();
 }
 
 fn engine_at(rig: FixtureRig, scripts: &[(&str, &str)], bpm: f64) -> Engine {
-    let directory = tempfile::tempdir().unwrap();
-    fs::create_dir(directory.path().join("test")).unwrap();
-    for (name, source) in scripts {
-        fs::write(
-            directory.path().join("test").join(format!("{name}.lua")),
-            source,
-        )
-        .unwrap();
-    }
-    let catalog = AutoloopCatalog::load(directory.path()).unwrap();
+    let catalog = support::directory_catalog("test", scripts).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     beat(&mut engine, 0.0, 0, None, bpm);
     engine
@@ -55,20 +36,8 @@ fn engine_at(rig: FixtureRig, scripts: &[(&str, &str)], bpm: f64) -> Engine {
 
 fn select(engine: &mut Engine, at: f64, name: &str, transition: Transition) {
     engine
-        .apply(
-            at,
-            &Command::Select {
-                bank: "test".into(),
-                autoloop: name.into(),
-                transition,
-                palette: "techno".into(),
-            },
-        )
+        .apply(at, &support::select("test", name, transition))
         .unwrap();
-}
-
-fn rig(spec: Value) -> FixtureRig {
-    support::rig(spec)
 }
 
 const STROBE_SWEEP: &str = r#"return {render=function(ctx)
@@ -83,7 +52,7 @@ fn dimmers(count: usize) -> FixtureRig {
                    "universe": 0, "address": index + 1})
         })
         .collect();
-    rig(json!({ "fixtures": fixtures }))
+    support::rig(json!({ "fixtures": fixtures }))
 }
 
 fn lit(engine: &mut Engine, frames: std::ops::Range<usize>, cells: usize) -> Vec<Vec<bool>> {
@@ -732,7 +701,7 @@ const SPOT_PICKS: [([f64; 3], u8); 9] = [
 ];
 
 fn spot() -> FixtureRig {
-    rig(
+    support::rig(
         json!({"fixtures": [{"fixture_uuid": "spot", "universe": 0, "address": 1,
         "profile": "chauvet_intimidator_spot_110_12ch"}]}),
     )

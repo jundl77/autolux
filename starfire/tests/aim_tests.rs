@@ -3,8 +3,7 @@ mod support;
 use serde_json::{Value, json};
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Effect, PropertyValues, RenderContext, Target};
-use starfire::protocol::wire;
-use starfire::script::{AutoloopCatalog, LuaAutoloop};
+use starfire::script::LuaAutoloop;
 
 const HEAD: &str = "scanner";
 const BAR: &str = "bar";
@@ -23,18 +22,6 @@ fn rig(fixtures: Value, groups: Value) -> FixtureRig {
     FixtureRig::from_wire(&definition).unwrap()
 }
 
-fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
-    let (sin, cos) = yaw.to_radians().sin_cos();
-    let flip = if hanging { 1.0 } else { -1.0 };
-    [
-        [flip * cos, flip * sin, 0.0],
-        [-sin, cos, 0.0],
-        [0.0, 0.0, flip],
-        position,
-    ]
-    .concat()
-}
-
 fn head(id: &str, slot: usize, matrix: Vec<f64>, focus: [f64; 3]) -> Value {
     json!({
         "fixture_uuid": id, "profile": HEAD, "universe": 0, "address": 1 + 6 * slot,
@@ -45,7 +32,7 @@ fn head(id: &str, slot: usize, matrix: Vec<f64>, focus: [f64; 3]) -> Value {
 fn wash(id: &str, slot: usize, position: [f64; 3]) -> Value {
     json!({
         "fixture_uuid": id, "profile": "generic_rgb", "universe": 0, "address": 1 + 6 * slot,
-        "matrix": mounted(true, 0.0, position),
+        "matrix": support::mounted(true, 0.0, position),
     })
 }
 
@@ -121,7 +108,7 @@ fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limit
                 let mut fixture = head(
                     "head",
                     0,
-                    mounted(hanging, yaw, position),
+                    support::mounted(hanging, yaw, position),
                     add(position, offsets[0]),
                 );
                 fixture["pan"] = pan_limits.clone();
@@ -162,7 +149,7 @@ fn aim_at_and_beam_direction_are_inverses_over_mounts_yaws_points_and_soft_limit
 #[test]
 fn a_point_outside_the_soft_limits_clamps_to_the_nearest_edge() {
     let position = [0.0, 0.0, 3000.0];
-    let mut fixture = head("head", 0, mounted(true, 0.0, position), [0.0; 3]);
+    let mut fixture = head("head", 0, support::mounted(true, 0.0, position), [0.0; 3]);
     fixture["pan"] = json!({"min": 0.1, "max": 0.3});
     fixture["tilt"] = json!({"min": 0.5, "max": 0.7});
     let rig = rig(json!([fixture]), Value::Null);
@@ -191,7 +178,12 @@ fn a_point_at_the_head_itself_rests_along_the_pan_axis() {
     for (hanging, axis) in [(true, -1.0), (false, 1.0)] {
         let position = [700.0, -300.0, if hanging { 3000.0 } else { 0.0 }];
         let rig = rig(
-            json!([head("head", 0, mounted(hanging, 37.0, position), position)]),
+            json!([head(
+                "head",
+                0,
+                support::mounted(hanging, 37.0, position),
+                position
+            )]),
             Value::Null,
         );
         let (pan, tilt) = rig.aim("head").unwrap();
@@ -205,15 +197,13 @@ fn a_point_at_the_head_itself_rests_along_the_pan_axis() {
     }
 }
 
-/// The scene direction an 8-bit Pan and Tilt pair throws the beam, decoded independently of
-/// the encoder: physical pan 0 faces local +Y and turns clockwise about local +Z, mid tilt runs
-/// along local -Z and leans towards the pan heading, and standing is the rigid flip.
 fn thrown(dmx: &[u8], matrix: &[f64]) -> [f64; 3] {
     let share = |byte: u8| f64::from(byte) / 255.0;
-    let pan = (share(dmx[0]) * PAN_TRAVEL).to_radians();
-    let tilt = ((share(dmx[1]) - 0.5) * TILT_TRAVEL).to_radians();
-    let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos(), -tilt.cos()];
-    [0, 1, 2].map(|axis| (0..3).map(|row| matrix[3 * row + axis] * body[row]).sum())
+    support::beam_through(
+        matrix,
+        (share(dmx[0]) * PAN_TRAVEL).to_radians(),
+        ((share(dmx[1]) - 0.5) * TILT_TRAVEL).to_radians(),
+    )
 }
 
 #[test]
@@ -221,7 +211,7 @@ fn beam_direction_is_where_the_encoded_dmx_throws_the_beam() {
     for hanging in [true, false] {
         for yaw in [0.0, 37.0, 180.0, -90.0] {
             let position = [500.0, 1000.0, if hanging { 3000.0 } else { 0.0 }];
-            let matrix = mounted(hanging, yaw, position);
+            let matrix = support::mounted(hanging, yaw, position);
             let mut fixture = head("head", 0, matrix.clone(), [0.0; 3]);
             fixture["pan"] = json!({"min": 0.1, "max": 0.8, "inverted": true});
             fixture["tilt"] = json!({"min": 0.05, "max": 0.95});
@@ -251,7 +241,7 @@ fn a_cell_without_a_pan_range_has_a_focus_but_no_aim_or_beam() {
             head(
                 "head",
                 0,
-                mounted(true, 0.0, [-2000.0, 0.0, 3000.0]),
+                support::mounted(true, 0.0, [-2000.0, 0.0, 3000.0]),
                 [0.0; 3]
             ),
             wash("wash", 1, [2000.0, 1000.0, 3000.0]),
@@ -266,13 +256,10 @@ fn a_cell_without_a_pan_range_has_a_focus_but_no_aim_or_beam() {
 }
 
 fn autoloop(rig: &FixtureRig, body: &str) -> LuaAutoloop {
-    AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "autoloop".into(),
-        bank: "test".into(),
-        lua_source: format!("return {{render = function(ctx)\n{body}\nend}}"),
-        intensity_htp: false,
-    }])
-    .unwrap()
+    support::test_catalog(&[(
+        "autoloop",
+        &format!("return {{render = function(ctx)\n{body}\nend}}"),
+    )])
     .instantiate("test", "autoloop", rig, &support::palettes())
     .unwrap()
 }
@@ -347,10 +334,10 @@ fn assert_same_aims(actual: &[(String, f64, f64)], expected: &[(String, f64, f64
 fn sf_aim_and_sf_focus_read_the_rig_in_metres_and_only_cells_with_pan_aim() {
     let rig = rig(
         json!([
-            head("head", 0, mounted(true, 37.0, [-1000.0, 500.0, 4000.0]), [-2000.0, 3000.0, 0.0]),
+            head("head", 0, support::mounted(true, 37.0, [-1000.0, 500.0, 4000.0]), [-2000.0, 3000.0, 0.0]),
             wash("wash", 1, [3000.0, -500.0, 3000.0]),
             {"fixture_uuid": "bar", "profile": BAR, "universe": 0, "address": 13,
-             "matrix": mounted(true, 0.0, [1000.0, 0.0, 3000.0])},
+             "matrix": support::mounted(true, 0.0, [1000.0, 0.0, 3000.0])},
         ]),
         Value::Null,
     );
@@ -395,43 +382,43 @@ fn rest_beams() -> FixtureRig {
             head(
                 "down",
                 0,
-                mounted(true, 0.0, [0.0, 0.0, 4000.0]),
+                support::mounted(true, 0.0, [0.0, 0.0, 4000.0]),
                 [0.0, 0.0, 0.0]
             ),
             head(
                 "up",
                 1,
-                mounted(false, 0.0, [0.0, 1000.0, 0.0]),
+                support::mounted(false, 0.0, [0.0, 1000.0, 0.0]),
                 [0.0, 1000.0, 3000.0]
             ),
             head(
                 "upstage",
                 2,
-                mounted(true, 30.0, [-2000.0, 0.0, 3000.0]),
+                support::mounted(true, 30.0, [-2000.0, 0.0, 3000.0]),
                 [-2000.0, 4000.0, 3000.0]
             ),
             head(
                 "across",
                 3,
-                mounted(true, -90.0, [2000.0, 0.0, 3000.0]),
+                support::mounted(true, -90.0, [2000.0, 0.0, 3000.0]),
                 [6000.0, 0.0, 3000.0]
             ),
             head(
                 "slant",
                 4,
-                mounted(true, 0.0, [1000.0, -500.0, 3000.0]),
+                support::mounted(true, 0.0, [1000.0, -500.0, 3000.0]),
                 [-500.0, 2500.0, 0.0]
             ),
             head(
                 "side",
                 5,
-                mounted(true, 90.0, [-3000.0, 0.0, 3000.0]),
+                support::mounted(true, 90.0, [-3000.0, 0.0, 3000.0]),
                 [-1000.0, 0.0, 1500.0]
             ),
             head(
                 "diagonal",
                 6,
-                mounted(true, 0.0, [-3000.0, -2000.0, 3000.0]),
+                support::mounted(true, 0.0, [-3000.0, -2000.0, 3000.0]),
                 [-1000.0, -1000.0, 1500.0]
             ),
         ]),
@@ -602,7 +589,14 @@ fn row(focus: impl Fn(f64) -> [f64; 3]) -> FixtureRig {
         .into_iter()
         .zip([-3000.0, -1000.0, 1000.0, 3000.0, 0.0])
         .enumerate()
-        .map(|(slot, (id, x))| head(id, slot, mounted(true, 0.0, [x, 0.0, 4000.0]), focus(x)))
+        .map(|(slot, (id, x))| {
+            head(
+                id,
+                slot,
+                support::mounted(true, 0.0, [x, 0.0, 4000.0]),
+                focus(x),
+            )
+        })
         .collect();
     fixtures.extend([
         wash("wash", 5, [0.0, 0.0, 4000.0]),

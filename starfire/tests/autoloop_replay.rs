@@ -11,7 +11,7 @@ use starfire::model::{
 };
 use starfire::protocol::wire;
 use starfire::replay::{Replay, dmx_digest, render_replay};
-use starfire::script::AutoloopCatalog;
+use starfire::script::{MAX_EFFECTS_PER_FRAME, OVERLAY_BANKS};
 
 const FLOAT_TOLERANCE: f64 = 1e-9;
 const GOLDEN_INTENSITY: f64 = 1.0;
@@ -27,13 +27,11 @@ const WHITE: Rgb = Rgb {
     green: 1.0,
     blue: 1.0,
 };
-const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
 const LOOP_GROUPS: [&str; 3] = ["wash", "strip", "movers"];
 const BASE_PEAK: f64 = 0.9;
 const PULSE_DEPTH: f64 = 0.05;
 const SAMPLE_BEATS: f64 = 0.07;
 const MIN_PULSE_GAP_BEATS: f64 = 0.5 - SAMPLE_BEATS;
-const EFFECT_CAP: usize = 512;
 const DROP_BEAT: f64 = 128.0;
 const DIP_BEAT: f64 = 127.0;
 const COUNT_STEPS: usize = 8;
@@ -333,27 +331,17 @@ fn engine_at_intensity(bank: &str, autoloop: &str, select_beat: f64, intensity: 
         .apply(0.0, &Command::SetIntensity { level: intensity })
         .unwrap();
     let anchor_beat = select_beat.floor();
+    let bar_phase = Some((anchor_beat as u32) % 4);
     engine
         .apply(
             0.0,
-            &Command::Beat {
-                beat_index: anchor_beat as u64,
-                bar_phase: Some((anchor_beat as u32) % 4),
-                beats_per_bar: 4,
-                bpm: REPLAY_BPM,
-                features: None,
-            },
+            &support::beat(anchor_beat as u64, bar_phase, REPLAY_BPM),
         )
         .unwrap();
     engine
         .apply(
             (select_beat - anchor_beat) * SECONDS_PER_BEAT,
-            &Command::Select {
-                bank: bank.into(),
-                autoloop: autoloop.into(),
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
+            &support::select(bank, autoloop, Transition::Cut),
         )
         .unwrap();
     engine
@@ -743,36 +731,13 @@ fn drop_kick_washes_hit_on_every_beat() {
 }
 
 fn inline_engine(autoloop_id: &str, source: &str) -> Engine {
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: autoloop_id.into(),
-        bank: "test".into(),
-        lua_source: source.into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[(autoloop_id, source)]);
     let mut engine = Engine::new(support::stage(), catalog, support::palettes()).unwrap();
     engine
-        .apply(
-            0.0,
-            &Command::Beat {
-                beat_index: 0,
-                bar_phase: Some(0),
-                beats_per_bar: 4,
-                bpm: REPLAY_BPM,
-                features: None,
-            },
-        )
+        .apply(0.0, &support::beat(0, Some(0), REPLAY_BPM))
         .unwrap();
     engine
-        .apply(
-            0.0,
-            &Command::Select {
-                bank: "test".into(),
-                autoloop: autoloop_id.into(),
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
-        )
+        .apply(0.0, &support::select("test", autoloop_id, Transition::Cut))
         .unwrap();
     engine
 }
@@ -1541,7 +1506,7 @@ fn every_loop_stays_inside_the_effect_cap_on_large_rigs() {
                     .render(context, &slots)
                     .unwrap_or_else(|error| panic!("{look} on {name}: {error:#}"));
                 assert!(
-                    effects.len() <= EFFECT_CAP,
+                    effects.len() <= MAX_EFFECTS_PER_FRAME,
                     "{look} on {name}: {} effects",
                     effects.len()
                 );
@@ -1565,16 +1530,12 @@ fn a_fan_spreads_in_stage_order_on_a_shuffled_patch() {
     };
     shuffled_row(&mut definition, &mover, "movers", 24, 1);
     let rig = FixtureRig::from_wire(&definition).unwrap();
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "fan".into(),
-        bank: "test".into(),
-        lua_source: r#"return { render = function(ctx)
+    let catalog = support::test_catalog(&[(
+        "fan",
+        r#"return { render = function(ctx)
             return sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = 20 })
-        end }"#
-            .into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+        end }"#,
+    )]);
     let palettes = support::palettes();
     let mut script = catalog.instantiate("test", "fan", &rig, &palettes).unwrap();
     let effects = script

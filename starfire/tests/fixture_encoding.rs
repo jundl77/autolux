@@ -198,11 +198,6 @@ fn matrix_yaw_shifts_pan_home_and_identity_matches_unrotated_dmx() {
 
 #[test]
 fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_yaw() {
-    // Independent of the encoder: decode the DMX to body angles and carry the beam through the
-    // Matrix. Physical pan 0 (PhysicalFrom 0 of the profile) faces local +Y, the display, and pan turns
-    // clockwise about local +Z; mid tilt is on the pan axis (the mirror the tilt inversion
-    // assumes) and tilts towards the pan heading. Standing is the rigid flip, so the reversed
-    // tilt leans the beam a half turn round.
     let probe = rig(json!([fixture("chauvet_intimidator_spot_110_12ch", 1)]));
     let ranges =
         ["Pan", "Tilt"].map(|axis| probe.profile("test").unwrap().movement_range(axis).unwrap());
@@ -211,15 +206,9 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
         (from + share * (to - from) - zero).to_radians()
     };
     let beam = |hanging: bool, yaw: f64, inverted: bool, (pan, tilt): (f64, f64)| {
-        let (sin, cos) = f64::to_radians(yaw).sin_cos();
-        let flip = if hanging { 1.0 } else { -1.0 };
-        let [u, v, w] = [
-            [flip * cos, flip * sin, 0.0],
-            [-sin, cos, 0.0],
-            [0.0, 0.0, flip],
-        ];
+        let matrix = support::mounted(hanging, yaw, [0.0; 3]);
         let mut patch = fixture("chauvet_intimidator_spot_110_12ch", 1);
-        patch["matrix"] = json!([u, v, w, [0.0; 3]].concat());
+        patch["matrix"] = json!(matrix);
         patch["pan"] = json!({"min": 0.1, "max": 0.8, "inverted": inverted});
         patch["tilt"] = json!({"inverted": inverted});
         let rig = rig(json!([patch]));
@@ -232,8 +221,8 @@ fn a_standing_head_throws_its_beam_where_an_unturned_hanging_head_does_at_any_ya
             decode(frame, 0, ranges[0], 0.0),
             decode(frame, 2, ranges[1], tilt_centre),
         );
-        let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos()];
-        [0, 1].map(|axis| u[axis] * body[0] + v[axis] * body[1])
+        let [x, y, _] = support::beam_through(&matrix, pan, tilt);
+        [x, y]
     };
     let [(pan_from, pan_to), (tilt_from, tilt_to)] = ranges;
     for yaw in [0.0, 37.0, 90.0, 130.0, 180.0, 233.0, 270.0, -90.0, -130.0] {

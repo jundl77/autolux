@@ -140,16 +140,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(String, String)]) -> Engine {
     .unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     engine
-        .apply(
-            0.0,
-            &Command::Beat {
-                beat_index: 0,
-                bar_phase: Some(0),
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
+        .apply(0.0, &support::beat(0, Some(0), 120.0))
         .unwrap();
     engine
 }
@@ -157,15 +148,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(String, String)]) -> Engine {
 fn select(engine: &mut Engine, id: &str) {
     let (bank, autoloop) = identity(id);
     engine
-        .apply(
-            0.0,
-            &Command::Select {
-                bank,
-                autoloop,
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
-        )
+        .apply(0.0, &support::select(&bank, &autoloop, Transition::Cut))
         .unwrap();
 }
 
@@ -238,14 +221,7 @@ fn cue(start: u64, base: &str, transition: Transition, overlays: Vec<OverlayCue>
 }
 
 fn send_cue(engine: &mut Engine, beat: f64, cue: SectionCue) {
-    engine
-        .apply(
-            at(beat),
-            &Command::CueSection {
-                value: Box::new(cue),
-            },
-        )
-        .unwrap();
+    engine.apply(at(beat), &support::cue(cue)).unwrap();
 }
 
 fn send(engine: &mut Engine, beat: f64, start: u64, base: &str, overlays: Vec<OverlayCue>) {
@@ -254,16 +230,7 @@ fn send(engine: &mut Engine, beat: f64, start: u64, base: &str, overlays: Vec<Ov
 
 fn beat_message(engine: &mut Engine, seconds: f64, index: u64, bar_phase: Option<u32>) {
     engine
-        .apply(
-            seconds,
-            &Command::Beat {
-                beat_index: index,
-                bar_phase,
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
+        .apply(seconds, &support::beat(index, bar_phase, 120.0))
         .unwrap();
 }
 

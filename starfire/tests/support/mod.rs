@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use prost::Message;
 use serde_json::Value;
 use starfire::fixtures::FixtureRig;
+use starfire::model::{Command, SectionCue, Transition};
 use starfire::palette::{PaletteDefinition, PaletteTable};
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
@@ -27,6 +28,76 @@ pub fn stage() -> FixtureRig {
 
 pub fn show_catalog() -> AutoloopCatalog {
     AutoloopCatalog::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../show/autoloops")).unwrap()
+}
+
+pub fn test_catalog(scripts: &[(&str, &str)]) -> AutoloopCatalog {
+    AutoloopCatalog::from_definitions(
+        &scripts
+            .iter()
+            .map(|(autoloop_id, source)| wire::AutoloopDefinition {
+                autoloop_id: (*autoloop_id).into(),
+                bank: "test".into(),
+                lua_source: (*source).into(),
+                intensity_htp: false,
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap()
+}
+
+pub fn directory_catalog(bank: &str, scripts: &[(&str, &str)]) -> anyhow::Result<AutoloopCatalog> {
+    let directory = tempfile::tempdir().unwrap();
+    let bank_directory = directory.path().join(bank);
+    std::fs::create_dir(&bank_directory).unwrap();
+    for (name, source) in scripts {
+        std::fs::write(bank_directory.join(format!("{name}.lua")), source).unwrap();
+    }
+    AutoloopCatalog::load(directory.path())
+}
+
+pub fn beat(beat_index: u64, bar_phase: Option<u32>, bpm: f64) -> Command {
+    Command::Beat {
+        beat_index,
+        bar_phase,
+        beats_per_bar: 4,
+        bpm,
+        features: None,
+    }
+}
+
+pub fn select(bank: &str, autoloop: &str, transition: Transition) -> Command {
+    Command::Select {
+        bank: bank.into(),
+        autoloop: autoloop.into(),
+        transition,
+        palette: "techno".into(),
+    }
+}
+
+pub fn cue(cue: SectionCue) -> Command {
+    Command::CueSection {
+        value: Box::new(cue),
+    }
+}
+
+pub fn mounted(hanging: bool, yaw: f64, position: [f64; 3]) -> Vec<f64> {
+    let (sin, cos) = yaw.to_radians().sin_cos();
+    let flip = if hanging { 1.0 } else { -1.0 };
+    [
+        [flip * cos, flip * sin, 0.0],
+        [-sin, cos, 0.0],
+        [0.0, 0.0, flip],
+        position,
+    ]
+    .concat()
+}
+
+/// Decoded independently of the encoder: physical pan 0 faces local +Y and turns clockwise about
+/// local +Z, mid tilt runs along local -Z and leans towards the pan heading.
+pub fn beam_through(matrix: &[f64], pan_radians: f64, tilt_radians: f64) -> [f64; 3] {
+    let (pan, tilt) = (pan_radians, tilt_radians);
+    let body = [tilt.sin() * pan.sin(), tilt.sin() * pan.cos(), -tilt.cos()];
+    [0, 1, 2].map(|axis| (0..3).map(|row| matrix[3 * row + axis] * body[row]).sum())
 }
 
 /// `source` is `<file stem>#<mode>`; regenerate with `python tools/compile_test_profiles.py`.

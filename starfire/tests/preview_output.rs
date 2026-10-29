@@ -19,13 +19,7 @@ fn placed(uuid: &str, address: u32, x_mm: f64) -> Value {
 fn beat(at_seconds: f64, beat_index: u64) -> TimedCommand {
     TimedCommand {
         at_seconds,
-        command: Command::Beat {
-            beat_index,
-            bar_phase: None,
-            beats_per_bar: 4,
-            bpm: 120.0,
-            features: None,
-        },
+        command: support::beat(beat_index, None, 120.0),
     }
 }
 
@@ -34,13 +28,7 @@ fn preview_lines(rate_hz: u32) -> Vec<Value> {
         "fixtures": [placed("left", 1, -2000.0), placed("right", 4, 2000.0)],
         "groups": {"wash": ["left", "right"]},
     }));
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "red_half".into(),
-        bank: "test".into(),
-        lua_source: RED_HALF.into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("red_half", RED_HALF)]);
     let mut events: Vec<_> = (0..4)
         .map(|index| beat(index as f64 * 0.5, index))
         .collect();
@@ -48,12 +36,7 @@ fn preview_lines(rate_hz: u32) -> Vec<Value> {
         2,
         TimedCommand {
             at_seconds: 0.5,
-            command: Command::Select {
-                bank: "test".into(),
-                autoloop: "red_half".into(),
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
+            command: support::select("test", "red_half", Transition::Cut),
         },
     );
     let replay = Replay {
@@ -143,21 +126,10 @@ fn scanner_and_wash() -> starfire::fixtures::FixtureRig {
 }
 
 fn one_loop(source: &str, duration_seconds: f64) -> (AutoloopCatalog, Replay) {
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "under_test".into(),
-        bank: "test".into(),
-        lua_source: source.into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("under_test", source)]);
     let select = TimedCommand {
         at_seconds: 0.0,
-        command: Command::Select {
-            bank: "test".into(),
-            autoloop: "under_test".into(),
-            transition: Transition::Cut,
-            palette: "techno".into(),
-        },
+        command: support::select("test", "under_test", Transition::Cut),
     };
     let replay = Replay {
         duration_seconds,
