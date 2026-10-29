@@ -95,8 +95,8 @@ Each buildup is one idea that drives every layer:
 | `dip` | `last_beat` (every group dark), `fade` (a low glow for breakdown entry) | LTP |
 | `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (one wash per off-beat eighth), `mover_shapes` (figure-eights through a gobo) | HTP, but `mover_shapes` LTP |
 
-An overlay's first line is free text saying what it does, then exactly these four lines,
-`strobe` and `intensity` first:
+An overlay's first line is free text saying what it does, then exactly these four lines in
+any order:
 
 ```
 -- strobe: yes|no

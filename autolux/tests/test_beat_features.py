@@ -59,10 +59,10 @@ def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
         start_beat_index=2**63,
         intent=LightIntent.DROP,
         rotation=tuple(
-            BaseLook(name, name + 'y' * 7, 2**31, {'kind': 'crossfade', 'duration_beats': 1e300})
+            BaseLook(name, name + 'y' * 7, 2**31, {'kind': 'crossfade', 'duration_beats': 1024.0})
             for _ in range(8)
         ),
-        palette='p' * 128,
+        palette='techno',
         overlays=tuple(
             Overlay(name, name + 'y' * 7, -(2**31), -64.0, 1024.0, 0, 1024.0, 1024.0)
             for _ in range(8)
@@ -70,7 +70,10 @@ def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
         drop_strength=0.5,
         seed=2**32 - 1,
     )
-    message = build_command(cue.command())
+    command = cue.command()
+    # The proto allows a 128-byte palette name; size the cue at that.
+    command['value']['palette'] = 'p' * 128
+    message = build_command(command)
     assert message.ByteSize() <= MAX_MESSAGE_BYTES
     assert message.rotation[0].autoloop_id == f'{name}/{name}yyyyyyy'
     assert message.overlays[0].begin_beats == -64.0
@@ -90,6 +93,10 @@ def test_the_largest_cue_fits_the_realtime_cap_and_round_trips():
         {'intent': LightIntent.BUILDUP, 'drop_strength': 0.5},
         {'drop_strength': 1.5},
         {'seed': 2**32},
+        {'palette': 'no such palette'},
+        {'rotation': (BaseLook('drop', 'kick', 16, {'kind': 'crossfade', 'duration_beats': 0}),)},
+        {'rotation': (BaseLook('drop', 'kick', 16, {'kind': 'crossfade', 'duration_beats': 2e3}),)},
+        {'rotation': (BaseLook('drop', 'kick', 16, {'kind': 'fade'}),)},
     ],
 )
 def test_an_unsendable_cue_cannot_be_built(change):

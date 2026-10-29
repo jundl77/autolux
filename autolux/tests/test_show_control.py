@@ -1548,3 +1548,28 @@ const step = async (name, act) => {{
         ['click Intensity Auto', [{'action': 'intensity_auto', 'enabled': True}]],
         ['Off whose run comes late', [{'action': 'fx_auto', 'enabled': False}]],
     ]
+
+
+def test_an_overlay_fault_is_a_notice_and_never_a_lighting_fault():
+    from autolux.lib.system_health import health_summary
+    from autolux.simulate.system_metrics import build_telemetry_notices
+
+    now = 1000.0
+    system = {
+        'updated_at': now,
+        'starfire': {
+            'age_seconds': 0.0,
+            'script_error': '',
+            'overlay_error': 'overlay hit/blinder not started: 8 overlays already play',
+        },
+    }
+    snapshot = {
+        'system': system,
+        'system_history': [{'starfire_measured_render_frames_per_second': 40}],
+    }
+    (notice,) = build_telemetry_notices(snapshot, now=now)
+    assert 'Starfire skipped an overlay: overlay hit/blinder not started' in notice.title
+    lighting = next(
+        card for card in health_summary(snapshot, now=now)['cards'] if card[0] == 'Lighting'
+    )
+    assert 'overlay' not in lighting[2]

@@ -252,6 +252,8 @@ def build_telemetry_notices(snapshot, *, now=None):
             history = snapshot.get('system_history') or []
             if not history or history[-1].get('starfire_measured_render_frames_per_second') is None:
                 messages.append('Waiting for two renderer reports to measure Starfire FPS.')
+            if renderer.get('overlay_error'):
+                messages.append(f'Starfire skipped an overlay: {renderer["overlay_error"]}')
         for node, name in [('tx', 'Transmitter'), ('rx', 'Receiver')]:
             measured_age = system.get(f'{node}_age_seconds')
             info = system.get(node) or {}

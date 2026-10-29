@@ -17,11 +17,9 @@ pub const MAX_PENDING_CUES: usize = 4;
 pub const MAX_ACTIVE_OVERLAYS: usize = 8;
 pub const MAX_PREROLL_BEATS: f64 = 64.0;
 pub const MAX_OVERLAY_ERROR_BYTES: usize = 256;
-/// A cue resolving this soon after its start (a frame or two of command latency) is on time,
-/// not a bar late.
-const ON_TIME_GRACE_BEATS: f64 = 0.125;
-/// The overlay bank whose pre-roll row is the blackout before the section; a finale aims at it.
-const DIP_BANK: &str = "dip";
+/// The overlay bank whose pre-roll row is the blackout before the section: beats_until_dip and
+/// move in black key on this name (the proto Overlay comment states the contract).
+pub const DIP_BANK: &str = "dip";
 
 /// What the cue timeline reads from the musical clock at one instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -426,7 +424,9 @@ impl CueTimeline {
             .active
             .as_ref()
             .is_some_and(|active| active.cue.start_beat_index == pending.cue.start_beat_index);
-        let activates_at = if start_grid >= now.beat_position - ON_TIME_GRACE_BEATS {
+        // Strictly as Autolux's switch clock: a start the room already passed waits for the bar
+        // line, so the entry hit, the room-side state and the specials land together.
+        let activates_at = if start_grid >= now.beat_position {
             start
         } else {
             let bar = now.bar_beats();

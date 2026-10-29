@@ -50,11 +50,16 @@ pub struct AutoloopCatalog {
 
 /// Banks whose loops play as cue overlays; their header must say how they compose.
 const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
-const OVERLAY_HEADER: [(&str, [&str; 2]); 2] =
-    [("strobe", ["yes", "no"]), ("intensity", ["htp", "ltp"])];
+/// Autolux's OVERLAY_META_VALUES: the keys every overlay header declares, with their values.
+const OVERLAY_HEADER: [(&str, &[&str]); 4] = [
+    ("strobe", &["yes", "no"]),
+    ("intensity", &["htp", "ltp"]),
+    ("movement", &["still", "sweep", "snap"]),
+    ("texture", &["wash", "beam", "pixel", "mixed"]),
+];
 
-/// An overlay's `-- strobe:` and `-- intensity:` lines, read as Autolux reads them for Login:
-/// the `-- key: value` block right after the first line, each key once, both required.
+/// An overlay's header, read as Autolux's read_overlay_meta reads it for Login: the
+/// `-- key: value` block right after the first line, keys in any order, each once, all required.
 fn overlay_htp(source: &str) -> Result<bool> {
     let mut values: BTreeMap<&str, &str> = BTreeMap::new();
     for line in source.split('\n').skip(1) {
@@ -84,14 +89,6 @@ fn overlay_htp(source: &str) -> Result<bool> {
     Ok(values["intensity"] == "htp")
 }
 
-/// A base loop's `-- intensity: htp` header line; base loops never play as overlays.
-fn declares_htp(source: &str) -> bool {
-    source
-        .lines()
-        .map_while(|line| line.strip_prefix("--"))
-        .any(|line| line.trim().replace(' ', "") == "intensity:htp")
-}
-
 /// Every catalogue script compiled once at Login; cues and selections only look identities up,
 /// so nothing compiles on the render thread. One VM serves every layer naming the loop, which
 /// Lua purity allows: a render is a function of its ctx alone.
@@ -109,6 +106,31 @@ impl CompiledScripts {
             Some(Err(error)) => bail!("{error}"),
             None => bail!("unknown autoloop {bank}/{autoloop}"),
         }
+    }
+
+    /// Renders every script twice on one frame: one VM serves the base and overlay layers, so
+    /// state kept in chunk-level upvalues (which the frozen globals cannot stop) would leak
+    /// between them. A loop whose second render differs is refused. A render that fails is
+    /// left to the frame probe, which reports it in context.
+    pub fn check_pure(&self, context: &RenderContext, palette: &PaletteSlots) -> Result<()> {
+        for ((bank, autoloop), script) in &self.scripts {
+            let Ok(script) = script else {
+                continue;
+            };
+            let mut script = script.borrow_mut();
+            let (Ok(first), Ok(second)) = (
+                script.render(context, palette),
+                script.render(context, palette),
+            ) else {
+                continue;
+            };
+            ensure!(
+                first == second,
+                "autoloop {bank}/{autoloop} renders one frame two ways: it keeps state between \
+                 renders, which a shared VM forbids"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -187,12 +209,10 @@ impl AutoloopCatalog {
             .collect();
         let mut intensity_htp = BTreeSet::new();
         for ((bank, autoloop), source) in &sources {
-            let htp = if OVERLAY_BANKS.contains(&bank.as_str()) {
-                overlay_htp(source)
-                    .with_context(|| format!("invalid overlay header in {bank}/{autoloop}.lua"))?
-            } else {
-                declares_htp(source)
-            };
+            // Base loops never compose as overlays, so only overlay banks declare it.
+            let htp = OVERLAY_BANKS.contains(&bank.as_str())
+                && overlay_htp(source)
+                    .with_context(|| format!("invalid overlay header in {bank}/{autoloop}.lua"))?;
             if htp {
                 intensity_htp.insert((bank.clone(), autoloop.clone()));
             }
