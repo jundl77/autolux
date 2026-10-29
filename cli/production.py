@@ -1,5 +1,3 @@
-"""Production topology: controller here; audio/DMX receivers on the output PC."""
-
 import asyncio
 import itertools
 import json
@@ -36,13 +34,12 @@ ROOT = Path(__file__).resolve().parents[1]
 READINESS_TIMEOUT_SECONDS = 45
 READINESS_WORKER_EXIT_TIMEOUT_SECONDS = 2
 DEFAULT_RECEIVER_BUFFER_MS = 500
-# A fault storm waits longer each time rather than flashing the room dark and back every few seconds.
 RESTART_BACKOFF_SECONDS = (5, 15, 60)
 HEALTHY_RUN_SECONDS = 600
 
 
 class ShowFault(RuntimeError):
-    """A show that played and then failed; the session loop restarts it."""
+    pass
 
 
 def add_arguments(parser):
@@ -219,7 +216,6 @@ async def run(args, *, clock=time.monotonic):
 
     deadline = None if args.duration is None else clock() + args.duration
     sessions = itertools.count(1)
-    # Held across sessions and waits, so a second show cannot start while this one restarts.
     lock = RoleLock('controller')
     try:
         await run_shows(
@@ -250,7 +246,6 @@ async def run_shows(session, stop_requested, *, clock=time.monotonic, sleep=asyn
         try:
             outcome = await session()
         except Exception as error:
-            # A first show that never played is a setup problem for the operator, not a fault.
             if not ran and not isinstance(error, ShowFault):
                 raise
             outcome = error
@@ -346,12 +341,10 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
         if not checking:
             previous = _stop_file()
             stale = previous is not None and previous.exists()
-            # First, so an `autolux stop` during startup reaches this session and not the last one.
             run_dir.mkdir(parents=True)
             (ROOT / '.live/current.json').write_text(
                 json.dumps({'run_dir': str(run_dir), 'pid': os.getpid()})
             )
-            # A stop that read the old current.json just before this write landed there.
             if previous is not None and not stale and previous.exists():
                 return 'stop'
             LOGGER.info('[prod] session %d starting: %s', number, run_dir)
@@ -441,8 +434,6 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
 
                 def check_health():
                     nonlocal played
-                    # A first session runs without a dashboard (the bridge warns); a relaunch's
-                    # missing one is the last viewer still dying, which the backoff waits out.
                     if (
                         number > 1
                         and not args.no_ui
@@ -460,8 +451,6 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
                     health_log.update(
                         state, fault=getattr(getattr(app, 'drift_watchdog', None), 'fault', None)
                     )
-                    # Only a passed health check counts: a first show that fails its first one
-                    # is a setup problem for the operator, like any other first-start fault.
                     played = True
                     if (run_dir / 'stop').exists() or (
                         deadline is not None and time.monotonic() >= deadline
@@ -473,11 +462,9 @@ async def _run_session(args, *, checking=False, number=1, deadline=None):
                 app_ran = True
                 await app.run()
                 main.write_report(app, report)
-        # Any error once the show played, a bug included: nobody is at the terminal mid-party.
         except Exception as error:
             if not played:
                 raise
-            # A failed teardown must not bring back a show the operator stopped.
             if app._stop_requested and not app.restart_requested:
                 LOGGER.exception('[prod] the show stopped with an error')
                 return 'stop'

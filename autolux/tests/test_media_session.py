@@ -20,8 +20,6 @@ GAP_SECONDS = 16 * 256 / 44100
 
 
 class _FedShow(_Show):
-    """A show whose media session is a fake feed delivered the way the listener delivers it."""
-
     def __init__(self):
         super().__init__()
         self.track_source = TrackSource(clock=self.clock)

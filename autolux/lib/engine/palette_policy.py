@@ -20,8 +20,6 @@ def palette_variant(base: str, intent: LightIntent) -> str:
 def section_palette(
     base: str, look: LightIntent, intent: LightIntent, *, after_first_drop: bool
 ) -> str:
-    """The look's variant, mono before the track's first drop and in every breakdown and
-    buildup, so the second colour arrives with the drop; drops are never mono."""
     if look is LightIntent.DROP or intent is LightIntent.DROP:
         return palette_variant(base, look)
     mono = intent in (LightIntent.BREAKDOWN, LightIntent.BUILDUP) or not after_first_drop

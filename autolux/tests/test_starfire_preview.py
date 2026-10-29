@@ -20,7 +20,6 @@ RATE_HZ = 10
 
 
 def preview_text(frames=None) -> str:
-    """Two cells in one group at 120 bpm, 4/4: dark, then red, then the second cell strobing."""
     header = {
         'kind': PREVIEW_KIND,
         'frame_rate_hz': RATE_HZ,
@@ -87,14 +86,11 @@ def test_the_loader_refuses_group_members_outside_the_header_cells():
 
 
 def test_bars_start_where_the_renderers_grid_enters_them():
-    # Five frames a beat, four beats a bar: a bar every 20 frames.
     assert bar_starts(load_preview(preview_text())) == [(1, 0), (2, 20)]
 
 
 def test_the_overview_bounds_each_groups_level_and_marks_strobe_over_the_track():
     overview = preview_overview(load_preview(preview_text()), columns=3)
-    # 21 frames in slices of 7: five dark then the pair at 1 and 0.5; the pair at 1 and 0.5;
-    # one at 1 and 0.5 then both at 1, the second strobing at 8 Hz.
     assert overview['columns'] == 3
     assert overview['groups'] == {'wash': {'low': [0.0, 0.5, 0.5], 'high': [1.0, 1.0, 1.0]}}
     assert overview['headroom'] == 0.9
@@ -103,7 +99,6 @@ def test_the_overview_bounds_each_groups_level_and_marks_strobe_over_the_track()
     assert overview['strobe_seconds'] == 0.6
     assert overview['group_strobe_seconds'] == {'wash': 0.6}
     assert overview['phrases'] == [0]
-    # Without cues a section is named by the bank a selection chose; nothing overlays it.
     assert overview['intents'] == [{'name': 'drop', 'start': 5, 'end': 21}]
     assert overview['overlays'] == []
     assert overview['sections'] == [
@@ -123,8 +118,6 @@ def test_a_section_of_two_looks_keeps_both_colours_and_white_counts_as_hits():
         for index, cells in enumerate([[red, blue]] * 20 + [[white, blue]])
     ]
     overview = preview_overview(load_preview(preview_text(frames)), columns=3)
-    # Blue carries a frame more light than red: both stripes, strongest first, never the
-    # magenta of their mean.
     assert overview['sections'][0]['colours'] == [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
     assert overview['white'] == [0.0, 0.0, 0.143]
 

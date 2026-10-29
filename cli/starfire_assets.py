@@ -28,7 +28,6 @@ MAX_SCRIPTS = 256
 IDENTIFIER = re.compile(r'[a-z0-9_-]{1,64}')
 WIRE_ROLES = {name: role for role, name in ROLE_NAMES.items()}
 LOGGER = logging.getLogger(__name__)
-# What the running rig publishes of each fixture's patch, for a test pose's checks.
 PATCH_KEYS = ('gdtf_spec', 'gdtf_mode', 'universe', 'address', 'matrix')
 
 
@@ -41,19 +40,7 @@ def _read(path: Path, limit: int) -> bytes:
 
 
 def stage_areas(positions: list[tuple[float, float]]) -> list[int]:
-    """Each plan position's (X, Y in mm) cell of the nine-area stage grid.
-
-    MVR 1.6 (DIN SPEC 15801) places a Fixture by its Matrix, "u1,u2,u3 / v1,v2,v3 / w1,w2,w3 /
-    o1,o2,o3" in a "Right-handed, Z-Up, 1 Distance Unit equals 1 mm" system, the position being
-    the o row. MVR names no audience side and gives its origin no meaning, so the axes follow
-    GDTF 1.2 (DIN SPEC 15800), which draws a device from the viewer: "X – from left (-X) to
-    right (+X), Y – from the outside of the monitor (-Y) to the inside of the monitor (+Y)".
-    With the audience as the viewer, -X is house left and -Y downstage.
-
-    The stage frame is therefore the rig's own bounding box: each axis is cut into equal thirds
-    of its extent, a position on a cut belongs to the centre third, and an axis without extent
-    puts every fixture in its centre third.
-    """
+    # MVR positions are in mm; GDTF's viewer axes, seen from the audience: -X house left, -Y downstage.
 
     def thirds(values: list[float]) -> list[int]:
         low, high = min(values), max(values)
@@ -80,7 +67,6 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
             if len(description.encode('utf-8')) > MAX_DESCRIPTION_BYTES:
                 raise ValueError('GDTF description exceeds its size limit')
             modes[spec] = mvr.gdtf_modes(description, spec)
-            # Every mode, so a test pose can repatch a fixture in another before a restart.
             for name in modes[spec]:
                 try:
                     compiled = compile_mode(description, name)
@@ -113,7 +99,6 @@ def rig_definition(path: Path) -> rig_wire.RigDefinition:
 
 
 def rig_bytes(path: Path) -> bytes:
-    """The rig.pb export-rig commits and Save regenerates beside the repo rig."""
     return rig_definition(Path(path)).SerializeToString()
 
 
@@ -129,8 +114,6 @@ def static_rig(path: Path) -> StaticRig:
     scene, fixtures = load_rig(path)
     definition = rig_definition(path)
     compiled = {profile.profile_id for profile in definition.profiles}
-    # What a test pose's mode is checked by: Starfire's copy must keep the cells the show's
-    # states are keyed by, and every attribute the loops may set must still encode.
     modes = {}
     for spec, spec_modes in rig_modes(scene).items():
         root = mvr.gdtf_root(mvr.gdtf_description(scene, spec), spec)
@@ -158,7 +141,6 @@ def static_rig(path: Path) -> StaticRig:
         fixture['pan'] = 'Pan' in attributes
     by_uuid = {fixture['fixture_uuid']: fixture for fixture in fixtures}
     groups = mvr.groups(fixtures)[0]
-    # The ids come from the very RigDefinition Starfire loads, named by Starfire's cell rule.
     patched = [
         (
             entry.fixture_uuid,
@@ -180,8 +162,7 @@ def static_rig(path: Path) -> StaticRig:
             )
         ),
         fixtures=tuple(patched),
-        # Starfire checks attributes per cell, and which cell of a multi-cell fixture owns the
-        # UV channel is not known here, so only single-cell fixtures get UV zeroed.
+        # Starfire checks UV per cell, and a multi-cell fixture's UV cell is not known here.
         uv_targets=tuple(
             fixture_uuid
             for fixture_uuid, _, cells in patched
@@ -220,7 +201,6 @@ def _autoloop_definitions(directory):
             scripts.append((bank.name, path.stem, content.decode('utf-8')))
     if not scripts:
         raise ValueError('Autoloop directory contains no Lua scripts')
-    # The catalogue's header parse, so a bad overlay header fails Login as it fails readiness.
     overlays = read_overlay_meta(Path(directory))
     return [
         wire.AutoloopDefinition(

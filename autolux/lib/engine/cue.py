@@ -1,5 +1,3 @@
-"""One section's lighting plan, decided at commit time and sent to Starfire ahead of the room."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,8 +6,7 @@ from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lighting.palettes import VARIANT_BASES
 
-# Starfire's row checks, mirrored so a bad plan is refused before it reaches the stage; at these
-# bounds a CueSection stays under the 4 KiB cap.
+# Mirrors Starfire's row checks; at these bounds a CueSection stays under the 4 KiB cap.
 MAX_ROTATION = 8
 MAX_OVERLAYS = 8
 MAX_PREROLL_BEATS = 64.0
@@ -20,13 +17,9 @@ MAX_IDENTIFIER_BYTES = 128
 
 @dataclass(frozen=True)
 class BaseLook:
-    """A rotation entry; entries change on bar lines counted from the section start."""
-
     bank: str
     autoloop: str
     bars: int
-    # Into this entry: {'kind': 'cut'} or {'kind': 'crossfade', 'duration_beats': b}; None is
-    # the renderer default. The first entry's transition enters the section.
     transition: dict | None = None
 
     def command(self) -> dict:
@@ -38,8 +31,6 @@ class BaseLook:
 
 @dataclass(frozen=True)
 class Overlay:
-    """A scheduled Lua layer; beats count from the section start, negative begins are pre-roll."""
-
     bank: str
     autoloop: str
     priority: int
@@ -77,13 +68,13 @@ def _check_transition(transition: dict | None) -> None:
 
 @dataclass(frozen=True)
 class Cue:
-    start_beat_index: int  # An analysis-time beat index whose bar phase is 0.
+    start_beat_index: int
     intent: LightIntent
     rotation: tuple[BaseLook, ...]
     palette: str
     overlays: tuple[Overlay, ...] = ()
-    drop_strength: float | None = None  # 0..1, drops only.
-    seed: int = 0  # uint32, for sf.random.
+    drop_strength: float | None = None
+    seed: int = 0
 
     def __post_init__(self):
         if self.start_beat_index < 0:
@@ -109,7 +100,7 @@ class Cue:
                     raise ValueError('overlay attack and release are within 0..1024 beats')
             if overlay.every_bars < 0:
                 raise ValueError('an overlay repeats every nonnegative number of bars')
-            # The session's bars are 4/4 (BEATS_PER_BAR), as Starfire's repeat period is.
+            # Starfire's repeat period assumes 4/4 bars, as the session does.
             period = overlay.every_bars * BEATS_PER_BAR
             if overlay.every_bars == 0:
                 if not -MAX_PREROLL_BEATS <= overlay.begin_beats <= MAX_OVERLAY_BEATS:
@@ -126,7 +117,6 @@ class Cue:
             raise ValueError('a cue seed is a uint32')
 
     def command(self) -> dict:
-        """The replay and adapter shape (Starfire's `cue_section` command)."""
         value = {
             'start_beat_index': self.start_beat_index,
             'intent': self.intent.value,

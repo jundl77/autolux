@@ -147,10 +147,8 @@ def test_a_texture_rests_its_group_so_no_accent_or_other_texture_plays_there():
     policy = SpecialPolicy([drift, cold, spin], random.Random(0))
     assert fire(policy, ATMOSPHERIC, 1000.0) is not None
     assert fire(policy, ATMOSPHERIC, 1100.0) is None
-    # A drop inside the texture's 240 s plays nothing on fx.
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1239.0)
     assert choice.special is None
-    # The texture itself returns exactly when its 240 s are up.
     capabilities = SpecialCapabilities.from_groups([FX])
     assert policy.choose(ATMOSPHERIC, capabilities, now=1240.0).special is not None
     assert fire(policy, DROP, 1240.0).name == 'spin'
@@ -160,7 +158,6 @@ def test_an_accent_rests_its_group_for_its_own_cooldown_after_the_shared_one_exp
     drift = row('drift', ATMOSPHERIC, speed=0.1, cooldown=240)
     policy = SpecialPolicy([drift, row('spin', pulse=1, cooldown=90)], random.Random(0))
     assert fire(policy, DROP, 1000.0).name == 'spin'
-    # 70 s on, the shared 60 s intense cooldown has run out (no block) but the group's has not.
     choice = policy.choose(DROP, SpecialCapabilities.from_groups([FX]), now=1070.0)
     assert choice.special is None
     assert fire(policy, ATMOSPHERIC, 1089.0) is None
@@ -175,7 +172,6 @@ def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alon
     spins = [s for s in discover_specials() if s.name in ('spin', 'cold_spin')]
     capabilities = SpecialCapabilities.from_groups([FX, LASER, WASH])
     assert {row.group for s in spins for row in capabilities.targets(s)} == {'fx', 'laser'}
-    # A laser that cannot rotate does not inherit the spin rows.
     assert [
         row.group
         for row in SpecialCapabilities.from_groups([FX, LASER | {'speed': False}]).targets(spins[0])
@@ -198,7 +194,6 @@ def test_a_role_row_plays_on_every_capable_group_of_its_role_and_each_rests_alon
 def test_a_zoned_role_row_plays_only_on_groups_lying_in_one_area_of_that_zone():
     left = FX | {'name': 'left', 'zone': 'house_left', 'depth': 'upstage', 'x': -3.0}
     middle = FX | {'name': 'middle', 'zone': 'centre', 'depth': 'centre', 'x': 0.0}
-    # Members in several areas: the login reports no area, so neither zone nor depth.
     spread = FX | {'name': 'spread', 'zone': None, 'depth': None, 'x': 0.0}
     right = FX | {'name': 'right', 'zone': 'house_right', 'depth': 'downstage', 'x': 3.0}
     capabilities = SpecialCapabilities.from_groups([left, middle, spread, right])
@@ -231,7 +226,6 @@ def test_ready_accent_groups_alternate_across_the_room_by_x(seed):
         chosen = policy.choose(DROP, capabilities, now=float(now)).special
         policy.record(chosen, float(now), capabilities)
         fired.append(chosen.group)
-    # House left first, then always the ready group furthest away, whatever the seed.
     assert fired == ['left', 'right', 'left', 'right']
 
 
@@ -244,7 +238,6 @@ def test_a_resting_accent_group_lets_the_next_furthest_take_its_turn():
         chosen = policy.choose(DROP, capabilities, now=now).special
         policy.record(chosen, now, capabilities)
         fired.append(chosen.group)
-    # At 20 s house left still rests, so the centre, furthest of the ready, plays.
     assert fired == ['left', 'right', 'centre', 'left']
 
 
@@ -268,11 +261,9 @@ def test_the_venue_caps_accent_specials_per_minute_across_accent_groups():
 
     assert venue(0.0) == ('venue · accents 0/2', True, 0.0)
     assert sorted([fire(0.0), fire(10.0)]) == ['fx', 'laser']
-    # Two accents fill the minute whichever groups played them; a loop group is not capped.
     assert fire(20.0) is None
     assert fire(20.0, ATMOSPHERIC) == 'wash'
     assert venue(20.0) == ('venue · accents 2/2', False, 40.0)
-    # The window slides: once the first accent is a minute old, one more may fire.
     assert venue(60.0)[:2] == ('venue · accents 1/2', True)
     assert fire(60.0) in ('fx', 'laser')
     assert venue(60.0) == ('venue · accents 2/2', False, 10.0)
