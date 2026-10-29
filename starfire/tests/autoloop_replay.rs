@@ -33,14 +33,20 @@ const LOOP_GROUPS: [&str; 3] = ["wash", "strip", "movers"];
 const BASE_PEAK: f64 = 0.9;
 /// A level swing smaller than this is shimmer, not a pulse.
 const PULSE_DEPTH: f64 = 0.05;
-/// Half-beat steps are the fastest a base loop pulses; faster reads as a strobe.
-const MAX_PULSES_PER_BEAT: f64 = 2.0;
+/// Half-beat steps are the fastest a base loop pulses; faster reads as a strobe. Sampling every
+/// 0.07 beats never divides the beat, so a pulse can land anywhere in it.
+const SAMPLE_BEATS: f64 = 0.07;
+const MIN_PULSE_GAP_BEATS: f64 = 0.5 - SAMPLE_BEATS;
+/// starfire::script's MAX_EFFECTS_PER_FRAME, a detector a loop must stay inside on any rig.
+const EFFECT_CAP: usize = 512;
 /// The finale replay: the drop is cued at beat 92 for beat 128, its riser runs from 111 and its
 /// dip blacks out beat 127.
 const DROP_BEAT: f64 = 128.0;
 const DIP_BEAT: f64 = 127.0;
-const RISER_BEAT: f64 = 111.0;
 const COUNT_STEPS: usize = 8;
+/// A 4-beat window of a looping figure gains or loses one edge frame against the next; a sag
+/// smaller than this share is sampling, not the build falling back.
+const WINDOW_EDGE_SHARE: f64 = 0.02;
 /// Heads slew back to the base after a moving overlay ends; compare once they are home.
 const OVERLAY_SETTLE_BEATS: f64 = 4.0;
 /// Worst frames on the stage rig, well inside the 100k per-script budget (B1): a heavier loop
@@ -213,32 +219,45 @@ fn finale_for(look: &Look) -> Replay {
 }
 
 /// The look under test takes the place of its bank's loop: in selections, in the first rotation
-/// entry and in the first overlay row.
+/// entry and in the first overlay row. It panics unless exactly one command (sent once or
+/// repeated) took the look, so a fixture cannot silently test something else.
 fn substitute(mut replay: Replay, look: &Look) -> Replay {
+    let mut took: Vec<Command> = Vec::new();
     for event in &mut replay.events {
-        match &mut event.command {
+        let named = match &mut event.command {
             Command::Select { bank, autoloop, .. } if *bank == look.bank => {
                 *autoloop = look.autoloop.clone();
+                true
             }
             Command::CueSection { value } => {
-                let first_entry = value
+                let entry = value
                     .rotation
                     .first_mut()
                     .filter(|entry| entry.bank == look.bank);
-                let first_row = value
+                let row = value
                     .overlays
                     .first_mut()
                     .filter(|row| row.bank == look.bank);
-                if let Some(entry) = first_entry {
+                let named = entry.is_some() || row.is_some();
+                if let Some(entry) = entry {
                     entry.autoloop = look.autoloop.clone();
                 }
-                if let Some(row) = first_row {
+                if let Some(row) = row {
                     row.autoloop = look.autoloop.clone();
                 }
+                named
             }
-            _ => {}
+            _ => false,
+        };
+        if named && !took.contains(&event.command) {
+            took.push(event.command.clone());
         }
     }
+    assert_eq!(
+        took.len(),
+        1,
+        "{look}: the replay must name its bank in exactly one command: {took:?}"
+    );
     replay
 }
 
@@ -622,7 +641,7 @@ fn silence_drops_wash_to_a_tenth_of_loud_level() {
 }
 
 #[test]
-fn standby_is_a_still_dim_warm_look_that_ignores_beat_and_loudness() {
+fn standby_is_a_still_dim_white_look_that_ignores_beat_and_loudness() {
     for look in looks_in(&[STANDBY_BANK]) {
         let mut engine = look.engine(0.0);
         let reference = render(&mut engine, 0.0);
@@ -959,17 +978,33 @@ fn the_bar_emits_the_bytes_the_eight_pixel_fixtures_did() {
     }
 }
 
-/// Pulses in a level sequence: a rise of at least PULSE_DEPTH, then a fall of as much.
-fn pulses(levels: &[f64]) -> usize {
-    let Some(&first) = levels.first() else {
-        return 0;
+/// What a viewer sees of a cell: its dimmer times its brightest channel, so a colour flicker
+/// at a constant dimmer is a pulse too.
+fn seen(state: &FixtureState) -> f64 {
+    state.intensity
+        * state
+            .colour
+            .red
+            .max(state.colour.green)
+            .max(state.colour.blue)
+}
+
+/// The peak beat of every completed pulse: a rise of at least PULSE_DEPTH, then a fall of as
+/// much. Peaks, not the falls, so a sharp and a soft pulse half a beat apart stay half a beat
+/// apart.
+fn pulse_beats(samples: &[(f64, f64)]) -> Vec<f64> {
+    let Some(&(first_beat, first)) = samples.first() else {
+        return Vec::new();
     };
-    let (mut low, mut high, mut rising, mut count) = (first, first, false, 0);
-    for &level in levels {
+    let (mut low, mut high, mut peak_beat) = (first, first, first_beat);
+    let (mut rising, mut pulses) = (false, Vec::new());
+    for &(beat, level) in samples {
         if rising {
-            high = high.max(level);
+            if level > high {
+                (high, peak_beat) = (level, beat);
+            }
             if high - level >= PULSE_DEPTH {
-                count += 1;
+                pulses.push(peak_beat);
                 rising = false;
                 low = level;
             }
@@ -977,36 +1012,46 @@ fn pulses(levels: &[f64]) -> usize {
             low = low.min(level);
             if level - low >= PULSE_DEPTH {
                 rising = true;
-                high = level;
+                (high, peak_beat) = (level, beat);
             }
         }
     }
-    count
+    pulses
 }
 
 fn assert_pulses_at_most_half_beats(
     look: &Look,
     frames: &[&RenderedFrame],
-    beats: f64,
+    rig: &FixtureRig,
     when: &str,
 ) {
-    for id in loop_cells() {
-        let levels: Vec<_> = frames
-            .iter()
-            .map(|frame| frame.fixture_properties_before_strobe[&id].intensity)
-            .collect();
-        let count = pulses(&levels);
-        assert!(
-            count as f64 <= MAX_PULSES_PER_BEAT * beats + 1.0,
-            "{look}: {id} pulses {count} times in {beats} beats {when}"
-        );
+    for group in LOOP_GROUPS {
+        for id in rig.groups().get(group).into_iter().flatten() {
+            let samples: Vec<_> = frames
+                .iter()
+                .map(|frame| {
+                    (
+                        frame.beat_position,
+                        seen(&frame.fixture_properties_before_strobe[id]),
+                    )
+                })
+                .collect();
+            for pair in pulse_beats(&samples).windows(2) {
+                assert!(
+                    pair[1] - pair[0] >= MIN_PULSE_GAP_BEATS,
+                    "{look}: {id} pulses at beats {} and {} {when}",
+                    pair[0],
+                    pair[1]
+                );
+            }
+        }
     }
 }
 
 #[test]
 fn base_loops_pulse_no_faster_than_half_beat_steps() {
     const BEATS: f64 = 32.0;
-    const STEPS_PER_BEAT: f64 = 16.0;
+    let stage = support::stage();
     for look in looks().into_iter().filter(Look::follows_music) {
         let start = if look.ramps() {
             RAMP_PLATEAU_BEATS - BEATS
@@ -1015,15 +1060,15 @@ fn base_loops_pulse_no_faster_than_half_beat_steps() {
         };
         let mut engine = look.engine(0.0);
         set_rms(&mut engine, 0.9);
-        let frames: Vec<_> = (0..(BEATS * STEPS_PER_BEAT) as usize)
-            .map(|step| render(&mut engine, start + step as f64 / STEPS_PER_BEAT))
+        let frames: Vec<_> = (0..(BEATS / SAMPLE_BEATS) as usize)
+            .map(|step| render(&mut engine, start + step as f64 * SAMPLE_BEATS))
             .collect();
-        assert_pulses_at_most_half_beats(&look, &frames.iter().collect::<Vec<_>>(), BEATS, "");
+        assert_pulses_at_most_half_beats(&look, &frames.iter().collect::<Vec<_>>(), &stage, "");
         if look.ramps() {
             let finale = without_overlays(finale_for(&look), &["riser", "hit"]);
-            let frames = render_replay(&finale, support::stage(), support::show_catalog()).unwrap();
+            let frames = render_replay(&finale, stage.clone(), support::show_catalog()).unwrap();
             let last = frames_between(&frames, DIP_BEAT - BEATS, DIP_BEAT);
-            assert_pulses_at_most_half_beats(&look, &last, BEATS, "into a cued drop");
+            assert_pulses_at_most_half_beats(&look, &last, &stage, "into a cued drop");
         }
     }
 }
@@ -1057,10 +1102,17 @@ fn base_loops_peak_at_most_0_9() {
     }
 }
 
+fn peak_light(frames: &[RenderedFrame], from: f64, to: f64, cells: &[String]) -> f64 {
+    frames_between(frames, from, to)
+        .iter()
+        .map(|frame| total_light(frame, cells))
+        .fold(0.0, f64::max)
+}
+
 #[test]
 fn buildup_regime_u_never_restarts() {
     // With no drop known the build only climbs: each 16-beat stride peaks at least as high as the
-    // last, up to the plateau.
+    // last up to the plateau, and bar 16 is at least twice as bright as bar 1.
     let cells = loop_cells();
     for look in looks_in(&["buildup"]) {
         let frames = render_replay(
@@ -1072,23 +1124,20 @@ fn buildup_regime_u_never_restarts() {
         let mut previous = 0.0;
         for stride in 0..(RAMP_PLATEAU_BEATS / 16.0) as usize {
             let from = stride as f64 * 16.0;
-            let peak = frames_between(&frames, from, from + 16.0)
-                .iter()
-                .map(|frame| total_light(frame, &cells))
-                .fold(0.0, f64::max);
+            let peak = peak_light(&frames, from, from + 16.0, &cells);
             assert!(
                 peak >= previous - FLOAT_TOLERANCE,
                 "{look}: beats {from}.. peak {peak} below the stride before, {previous}"
             );
             previous = peak;
         }
-        let first = frames_between(&frames, 0.0, 16.0)
-            .iter()
-            .map(|frame| total_light(frame, &cells))
-            .fold(0.0, f64::max);
+        let (bar_1, bar_16) = (
+            peak_light(&frames, 0.0, 4.0, &cells),
+            peak_light(&frames, 60.0, 64.0, &cells),
+        );
         assert!(
-            previous > first,
-            "{look}: the build never climbed ({first} to {previous})"
+            bar_16 >= 2.0 * bar_1,
+            "{look}: bar 16 peaks {bar_16}, under twice bar 1's {bar_1}"
         );
     }
 }
@@ -1097,6 +1146,26 @@ fn buildup_regime_u_never_restarts() {
 fn buildup_finale_rises_into_the_drop_and_the_last_beat_is_dark() {
     let cells = loop_cells();
     for look in looks_in(&["buildup"]) {
+        // The base alone must rise: the riser and the hit would hide a build that sags.
+        let base = without_overlays(finale_for(&look), &["riser", "hit"]);
+        let frames = render_replay(&base, support::stage(), support::show_catalog()).unwrap();
+        let mut previous = 0.0;
+        let mut from = DIP_BEAT - 31.0;
+        while from < DIP_BEAT {
+            let window = frames_between(&frames, from, (from + 4.0).min(DIP_BEAT));
+            let mean = window
+                .iter()
+                .map(|frame| total_light(frame, &cells))
+                .sum::<f64>()
+                / window.len() as f64;
+            assert!(
+                mean >= previous * (1.0 - WINDOW_EDGE_SHARE),
+                "{look}: beats {from}.. mean {mean} after {previous}"
+            );
+            previous = mean;
+            from += 4.0;
+        }
+
         let frames = render_replay(
             &finale_for(&look),
             support::stage(),
@@ -1110,22 +1179,6 @@ fn buildup_finale_rises_into_the_drop_and_the_last_beat_is_dark() {
                 frame.script_error
             );
         }
-        let mean = |from: f64, to: f64| {
-            let window = frames_between(&frames, from, to);
-            window
-                .iter()
-                .map(|frame| total_light(frame, &cells))
-                .sum::<f64>()
-                / window.len() as f64
-        };
-        let (approach, finale) = (
-            mean(RISER_BEAT - 16.0, RISER_BEAT),
-            mean(RISER_BEAT + 1.0, DIP_BEAT),
-        );
-        assert!(
-            finale > approach,
-            "{look}: finale mean {finale} <= {approach} before it"
-        );
         for frame in frames_between(&frames, DIP_BEAT + 0.05, DROP_BEAT - 0.05) {
             assert_eq!(
                 total_light(frame, &cells),
@@ -1149,19 +1202,14 @@ fn buildup_finale_rises_into_the_drop_and_the_last_beat_is_dark() {
 }
 
 #[test]
-fn countdown_shows_8_distinct_steps_over_the_last_8_beats() {
+fn countdown_fills_the_strip_one_step_per_beat_over_the_last_8_beats() {
     let look = looks_in(&["buildup"])
         .into_iter()
         .find(|look| look.autoloop == "countdown")
         .unwrap();
-    let frames = render_replay(
-        &finale_for(&look),
-        support::stage(),
-        support::show_catalog(),
-    )
-    .unwrap();
+    let base = without_overlays(finale_for(&look), &["riser", "hit"]);
+    let frames = render_replay(&base, support::stage(), support::show_catalog()).unwrap();
     let strip = support::stage().groups()["strip"].clone();
-    // Each step is the strip's light in units of one full cell; a half-lit edge pair is a step.
     let light: Vec<_> = (0..COUNT_STEPS)
         .map(|beat| {
             let at = DIP_BEAT - COUNT_STEPS as f64 + beat as f64 + 0.5;
@@ -1175,14 +1223,17 @@ fn countdown_shows_8_distinct_steps_over_the_last_8_beats() {
                 .collect::<Vec<_>>()
         })
         .collect();
-    let full_cell = light[0].iter().copied().fold(0.0, f64::max);
-    let steps: Vec<_> = light
-        .iter()
-        .map(|levels| (levels.iter().sum::<f64>() / full_cell * 100.0).round() / 100.0)
-        .collect();
+    let sums: Vec<f64> = light.iter().map(|levels| levels.iter().sum()).collect();
     assert!(
-        steps.windows(2).all(|pair| pair[1] < pair[0]) && steps[COUNT_STEPS - 1] > 0.0,
-        "countdown must step down once a beat to its last cell: {steps:?}"
+        sums.windows(2)
+            .all(|pair| pair[1] > pair[0] + FLOAT_TOLERANCE),
+        "countdown steps {sums:?}"
+    );
+    let last = &light[COUNT_STEPS - 1];
+    let full = last.iter().copied().fold(0.0, f64::max);
+    assert!(
+        last.iter().all(|level| *level >= full - FLOAT_TOLERANCE),
+        "the count ends short of full: {last:?}"
     );
 }
 
@@ -1194,7 +1245,13 @@ fn beat_features_change_levels_not_colour_or_structure() {
         mid: level,
         high: level,
     };
+    let mut responsive = Vec::new();
     for look in looks().into_iter().filter(Look::follows_music) {
+        let start = if look.ramps() {
+            RAMP_PLATEAU_BEATS
+        } else {
+            0.0
+        };
         let (mut strong, mut weak) = (look.engine(0.0), look.engine(0.0));
         for (engine, level) in [(&mut strong, 1.0), (&mut weak, 0.1)] {
             engine
@@ -1210,8 +1267,9 @@ fn beat_features_change_levels_not_colour_or_structure() {
                 )
                 .unwrap();
         }
-        for step in 0..16 {
-            let beat = 1.0 + step as f64 * 0.0625;
+        let mut levels_moved = false;
+        for step in 0..(look.loop_beats / SAMPLE_BEATS) as usize {
+            let beat = start + 1.0 + step as f64 * SAMPLE_BEATS;
             let (a, b) = (render(&mut strong, beat), render(&mut weak, beat));
             for (id, state) in &a.fixture_properties_before_strobe {
                 let other = &b.fixture_properties_before_strobe[id];
@@ -1232,7 +1290,33 @@ fn beat_features_change_levels_not_colour_or_structure() {
                     ),
                     "{look}: {id} follows the beat's features beyond its level at beat {beat}"
                 );
+                levels_moved |= (state.intensity - other.intensity).abs() > FLOAT_TOLERANCE;
             }
+        }
+        if levels_moved {
+            responsive.push(look.to_string());
+        }
+    }
+    assert!(
+        !responsive.is_empty(),
+        "no base loop reads the beat's features"
+    );
+}
+
+#[test]
+fn buildups_render_the_same_at_any_loudness() {
+    // RMS falls as a build high-passes, so a build that followed it would dim as it climbs (C5).
+    for look in looks_in(&["buildup"]) {
+        let (mut silent, mut loud) = (look.engine(0.0), look.engine(0.0));
+        set_rms(&mut silent, 0.0);
+        set_rms(&mut loud, 1.0);
+        for step in 0..(RAMP_PLATEAU_BEATS / 1.7) as usize {
+            let beat = step as f64 * 1.7;
+            assert_eq!(
+                render(&mut silent, beat).dmx_frames_by_universe,
+                render(&mut loud, beat).dmx_frames_by_universe,
+                "{look} follows loudness at beat {beat}"
+            );
         }
     }
 }
@@ -1288,13 +1372,27 @@ fn overlays_end_within_length_plus_release() {
             .zip(&without)
             .any(|(a, b)| a.dmx_frames_by_universe != b.dmx_frames_by_universe);
         assert!(touched, "{look} never shows");
-        for (a, b) in with.iter().zip(&without) {
-            if a.beat_position >= end + OVERLAY_SETTLE_BEATS {
+        // Light and colour are the base's from the end; heads may still be slewing home.
+        for (a, b) in with
+            .iter()
+            .zip(&without)
+            .filter(|(a, _)| a.beat_position >= end)
+        {
+            for (id, state) in &a.fixture_properties_before_strobe {
+                let base = &b.fixture_properties_before_strobe[id];
+                let at = a.beat_position;
                 assert_eq!(
-                    a.dmx_frames_by_universe, b.dmx_frames_by_universe,
-                    "{look} still shows at beat {}, after its end at {end}",
-                    a.beat_position
+                    (state.intensity, state.colour),
+                    (base.intensity, base.colour),
+                    "{look}: {id} at {at}"
                 );
+                if at >= end + OVERLAY_SETTLE_BEATS {
+                    assert_eq!(
+                        (state.pan, state.tilt),
+                        (base.pan, base.tilt),
+                        "{look}: {id} at {at}"
+                    );
+                }
             }
         }
     }
@@ -1377,4 +1475,282 @@ fn every_loop_stays_lean_inside_the_instruction_budget() {
         "worst-frame Lua instructions per loop:\n{}",
         report.join("\n")
     );
+}
+
+/// A fixture copied from the stage at a new place and patch.
+fn placed(
+    template: &wire::Fixture,
+    id: String,
+    x_mm: f64,
+    universe: u32,
+    address: u32,
+) -> wire::Fixture {
+    let mut matrix = template.matrix.clone();
+    matrix[9] = x_mm;
+    wire::Fixture {
+        fixture_uuid: id.clone(),
+        name: id,
+        matrix,
+        universe,
+        address,
+        ..template.clone()
+    }
+}
+
+fn stage_fixture_of(definition: &wire::RigDefinition, group: &str) -> wire::Fixture {
+    let member = &definition
+        .groups
+        .iter()
+        .find(|candidate| candidate.group_id == group)
+        .unwrap()
+        .fixture_uuids[0];
+    definition
+        .fixtures
+        .iter()
+        .find(|fixture| &fixture.fixture_uuid == member)
+        .unwrap()
+        .clone()
+}
+
+/// `count` copies of the stage's `group` fixture along x, patched in shuffled order.
+fn shuffled_row(
+    definition: &mut wire::RigDefinition,
+    template: &wire::Fixture,
+    group: &str,
+    count: u32,
+    first_universe: u32,
+) {
+    let mut members = Vec::new();
+    for rank in 0..count {
+        let index = (rank * 7) % count;
+        let x = (f64::from(index) - f64::from(count - 1) / 2.0) * 500.0;
+        let id = format!("{group}_{index:03}");
+        definition.fixtures.push(placed(
+            template,
+            id.clone(),
+            x,
+            first_universe + rank / 8,
+            (rank % 8) * 64 + 1,
+        ));
+        members.push(id);
+    }
+    definition
+        .groups
+        .retain(|candidate| candidate.group_id != group);
+    definition.groups.push(wire::FixtureGroup {
+        group_id: group.into(),
+        fixture_uuids: members,
+        ..Default::default()
+    });
+}
+
+/// Large rigs a loop must stay inside the effect cap on: 400 washes, and 60 eight-cell bars as
+/// the only movers. Both are patched in shuffled order.
+fn large_rigs() -> Vec<(&'static str, FixtureRig)> {
+    let stage = support::stage_definition();
+    let empty = |template: &wire::Fixture| wire::RigDefinition {
+        profiles: stage
+            .profiles
+            .iter()
+            .filter(|profile| profile.profile_id == template.profile_id)
+            .cloned()
+            .collect(),
+        ..Default::default()
+    };
+    let wash = stage_fixture_of(&stage, "wash");
+    let mut washes = empty(&wash);
+    shuffled_row(&mut washes, &wash, "wash", 400, 1);
+    let bar = stage_fixture_of(&stage, "strip");
+    let mut bars = empty(&bar);
+    shuffled_row(&mut bars, &bar, "movers", 60, 1);
+    vec![
+        ("400 washes", FixtureRig::from_wire(&washes).unwrap()),
+        ("60 bars as movers", FixtureRig::from_wire(&bars).unwrap()),
+    ]
+}
+
+#[test]
+fn every_loop_stays_inside_the_effect_cap_on_large_rigs() {
+    let (catalog, palettes) = (support::show_catalog(), support::palettes());
+    let slots = palettes.slots("techno").unwrap();
+    for (name, rig) in large_rigs() {
+        for look in every_look() {
+            let mut script = catalog
+                .instantiate(&look.bank, &look.autoloop, &rig, &palettes)
+                .unwrap();
+            for context in contexts(&look).iter().step_by(37) {
+                let effects = script
+                    .render(context, &slots)
+                    .unwrap_or_else(|error| panic!("{look} on {name}: {error:#}"));
+                assert!(
+                    effects.len() <= EFFECT_CAP,
+                    "{look} on {name}: {} effects",
+                    effects.len()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_fan_spreads_in_stage_order_on_a_shuffled_patch() {
+    let stage = support::stage_definition();
+    let mover = stage_fixture_of(&stage, "movers");
+    let mut definition = wire::RigDefinition {
+        profiles: stage
+            .profiles
+            .iter()
+            .filter(|profile| profile.profile_id == mover.profile_id)
+            .cloned()
+            .collect(),
+        ..Default::default()
+    };
+    shuffled_row(&mut definition, &mover, "movers", 24, 1);
+    let rig = FixtureRig::from_wire(&definition).unwrap();
+    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
+        autoloop_id: "fan".into(),
+        bank: "test".into(),
+        lua_source: r#"return { render = function(ctx)
+            return sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = 20 })
+        end }"#
+            .into(),
+        intensity_htp: false,
+    }])
+    .unwrap();
+    let palettes = support::palettes();
+    let mut script = catalog.instantiate("test", "fan", &rig, &palettes).unwrap();
+    let effects = script
+        .render(
+            &RenderContext::default(),
+            &palettes.slots("techno").unwrap(),
+        )
+        .unwrap();
+    // How far each beam swings towards +X from its rest beam on its focus.
+    let mut swings: Vec<(f64, f64)> = effects
+        .iter()
+        .flat_map(|effect| {
+            let (pan, tilt) = (effect.values.pan.unwrap(), effect.values.tilt.unwrap());
+            rig.resolve(&effect.target)
+                .unwrap()
+                .into_iter()
+                .map(move |cell| (cell, pan, tilt))
+        })
+        .map(|(cell, pan, tilt)| {
+            let (rest_pan, rest_tilt) = rig
+                .focus(&cell)
+                .and_then(|focus| rig.aim_at(&cell, focus))
+                .unwrap();
+            let fanned = rig.beam_direction(&cell, pan, tilt).unwrap();
+            let rest = rig.beam_direction(&cell, rest_pan, rest_tilt).unwrap();
+            (
+                rig.spatial().position(&cell).unwrap()[0],
+                fanned[0] - rest[0],
+            )
+        })
+        .collect();
+    assert_eq!(swings.len(), rig.groups()["movers"].len());
+    swings.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(
+        swings
+            .windows(2)
+            .all(|pair| pair[1].1 >= pair[0].1 - FLOAT_TOLERANCE),
+        "the fan's swing is not in stage order: {swings:?}"
+    );
+    assert!(
+        swings[0].1 < 0.0 && swings[swings.len() - 1].1 > 0.0,
+        "{swings:?}"
+    );
+}
+
+/// A bigger generic rig: eight movers and a 40-cell strip of five bars beside the stage's washes.
+fn big_generic_rig() -> FixtureRig {
+    let mut definition = support::stage_definition();
+    let mover = stage_fixture_of(&definition, "movers");
+    let bar = stage_fixture_of(&definition, "strip");
+    let movers = definition
+        .groups
+        .iter()
+        .find(|group| group.group_id == "movers")
+        .unwrap()
+        .fixture_uuids
+        .clone();
+    let strip = definition
+        .groups
+        .iter()
+        .find(|group| group.group_id == "strip")
+        .unwrap()
+        .fixture_uuids
+        .clone();
+    definition.fixtures.retain(|fixture| {
+        !movers.contains(&fixture.fixture_uuid) && !strip.contains(&fixture.fixture_uuid)
+    });
+    for (group, template, count) in [("movers", &mover, 8), ("strip", &bar, 5)] {
+        let mut members = Vec::new();
+        for index in 0..count {
+            let id = format!("{group}_{index}");
+            let x = (f64::from(index) - f64::from(count - 1) / 2.0) * 1500.0;
+            let universe = if group == "movers" { 10 } else { 20 } + index;
+            definition
+                .fixtures
+                .push(placed(template, id.clone(), x, universe, 1));
+            members.push(id);
+        }
+        definition
+            .groups
+            .iter_mut()
+            .find(|candidate| candidate.group_id == group)
+            .unwrap()
+            .fixture_uuids = members;
+    }
+    FixtureRig::from_wire(&definition).unwrap()
+}
+
+#[test]
+fn the_semantic_rules_hold_on_a_bigger_generic_rig() {
+    const BEATS: f64 = 64.0;
+    let rig = big_generic_rig();
+    assert_eq!(
+        (rig.groups()["movers"].len(), rig.groups()["strip"].len()),
+        (8, 40)
+    );
+    for look in every_look().into_iter().filter(Look::follows_music) {
+        // A base loop alone: a fill releasing over a pulse is the fill's shape, not the loop's.
+        let mut replay = if look.is_overlay() {
+            replay_for(&look)
+        } else {
+            without_overlays(replay_for(&look), &OVERLAY_BANKS)
+        };
+        replay.duration_seconds = BEATS * SECONDS_PER_BEAT;
+        replay
+            .events
+            .retain(|event| event.at_seconds <= replay.duration_seconds);
+        let frames = render_replay(&replay, rig.clone(), support::show_catalog()).unwrap();
+        for frame in &frames {
+            assert!(
+                frame.script_error.is_none(),
+                "{look}: {:?}",
+                frame.script_error
+            );
+            for (id, state) in &frame.fixture_properties_before_strobe {
+                assert!(
+                    state.strobe_hz == 0.0 || look.strobes(),
+                    "{look} strobes {id}"
+                );
+                assert!(
+                    look.is_overlay() || state.intensity <= BASE_PEAK + FLOAT_TOLERANCE,
+                    "{look}: {id}"
+                );
+            }
+        }
+        if !look.is_overlay() {
+            // Only while the look plays: a rotation's cut may set two loops' pulses close.
+            for playing in frames
+                .chunk_by(|a, b| a.active_autoloop == b.active_autoloop)
+                .filter(|run| run[0].active_autoloop.as_deref() == Some(look.autoloop.as_str()))
+            {
+                let run: Vec<_> = playing.iter().collect();
+                assert_pulses_at_most_half_beats(&look, &run, &rig, "on the bigger rig");
+            }
+        }
+    }
 }
