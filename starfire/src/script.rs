@@ -48,7 +48,43 @@ pub struct AutoloopCatalog {
     intensity_htp: BTreeSet<(String, String)>,
 }
 
-/// A source file's `-- intensity: htp` header line, as Autolux reads it for Login.
+/// Banks whose loops play as cue overlays; their header must say how they compose.
+const OVERLAY_BANKS: [&str; 5] = ["hit", "fill", "riser", "dip", "accent"];
+const OVERLAY_HEADER: [(&str, [&str; 2]); 2] =
+    [("strobe", ["yes", "no"]), ("intensity", ["htp", "ltp"])];
+
+/// An overlay's `-- strobe:` and `-- intensity:` lines, read as Autolux reads them for Login:
+/// the `-- key: value` block right after the first line, each key once, both required.
+fn overlay_htp(source: &str) -> Result<bool> {
+    let mut values: BTreeMap<&str, &str> = BTreeMap::new();
+    for line in source.split('\n').skip(1) {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let Some((key, value)) = line
+            .strip_prefix("-- ")
+            .and_then(|entry| entry.split_once(": "))
+        else {
+            break;
+        };
+        let Some((_, allowed)) = OVERLAY_HEADER.iter().find(|(name, _)| *name == key) else {
+            break;
+        };
+        ensure!(
+            allowed.contains(&value),
+            "{key} {value:?} is not one of {}",
+            allowed.join(", ")
+        );
+        ensure!(values.insert(key, value).is_none(), "{key} declared twice");
+    }
+    for (key, _) in OVERLAY_HEADER {
+        ensure!(
+            values.contains_key(key),
+            "missing {key} in the header block after the first line"
+        );
+    }
+    Ok(values["intensity"] == "htp")
+}
+
+/// A base loop's `-- intensity: htp` header line; base loops never play as overlays.
 fn declares_htp(source: &str) -> bool {
     source
         .lines()
@@ -149,11 +185,18 @@ impl AutoloopCatalog {
                 )
             })
             .collect();
-        let intensity_htp = sources
-            .iter()
-            .filter(|(_, source)| declares_htp(source))
-            .map(|(identity, _)| identity.clone())
-            .collect();
+        let mut intensity_htp = BTreeSet::new();
+        for ((bank, autoloop), source) in &sources {
+            let htp = if OVERLAY_BANKS.contains(&bank.as_str()) {
+                overlay_htp(source)
+                    .with_context(|| format!("invalid overlay header in {bank}/{autoloop}.lua"))?
+            } else {
+                declares_htp(source)
+            };
+            if htp {
+                intensity_htp.insert((bank.clone(), autoloop.clone()));
+            }
+        }
         Ok(Self {
             sources,
             identities,
