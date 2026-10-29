@@ -930,14 +930,48 @@ fn measured_energy_is_distinct_from_master_and_rejects_invalid_values() {
     engine
         .apply(0.75, &Command::SetNormalizedRmsLevel { level: 0.0 })
         .unwrap();
+    // A new reading takes one beat (0.5 s at 120 BPM) to arrive.
     near(
         engine
-            .render_at(0.75)
+            .render_at(1.25)
             .unwrap()
             .fixture_properties_before_strobe["left"]
             .intensity,
         0.0,
     );
+}
+
+/// The level arrives once a beat; a loop scaling by it must ramp, not jump, between readings.
+#[test]
+fn measured_energy_glides_to_each_reading_over_one_beat() {
+    let mut engine = engine(&[(
+        "energy",
+        "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), ctx.normalized_rms_level)} end}",
+    )]);
+    engine
+        .apply(0.0, &Command::SetNormalizedRmsLevel { level: 0.2 })
+        .unwrap();
+    select(&mut engine, 0.0, "energy", Transition::Cut);
+    let level = |engine: &mut Engine, at: f64| {
+        engine
+            .render_at(at)
+            .unwrap()
+            .fixture_properties_before_strobe["left"]
+            .intensity
+    };
+    near(level(&mut engine, 0.5), 0.2);
+    engine
+        .apply(0.5, &Command::SetNormalizedRmsLevel { level: 0.6 })
+        .unwrap();
+    near(level(&mut engine, 0.5), 0.2);
+    near(level(&mut engine, 0.75), 0.4);
+    // A reading mid-glide starts from where the glide is, so the level never jumps.
+    engine
+        .apply(0.75, &Command::SetNormalizedRmsLevel { level: 0.0 })
+        .unwrap();
+    near(level(&mut engine, 0.75), 0.4);
+    near(level(&mut engine, 1.0), 0.2);
+    near(level(&mut engine, 1.25), 0.0);
 }
 
 #[test]

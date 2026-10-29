@@ -551,13 +551,13 @@ fn measured_energy_scales_levels_and_reach_but_not_colour_or_structure() {
         .into_iter()
         .filter(|look| look.follows_music() && !look.ramps())
     {
-        let mut engine = look.engine(4.0);
-        set_rms(&mut engine, 1.0);
-        let strong = engine.render_at(0.25).unwrap();
-        engine
-            .apply(0.25, &Command::SetNormalizedRmsLevel { level: 0.0 })
-            .unwrap();
-        let quiet = engine.render_at(0.25).unwrap();
+        // Separate engines: a later reading glides over a beat, which would move the look too.
+        let at_rms = |level: f64| {
+            let mut engine = look.engine(4.0);
+            set_rms(&mut engine, level);
+            engine.render_at(0.25).unwrap()
+        };
+        let (strong, quiet) = (at_rms(1.0), at_rms(0.0));
         for (id, strong) in &strong.fixture_properties_before_strobe {
             let quiet = &quiet.fixture_properties_before_strobe[id];
             assert!(

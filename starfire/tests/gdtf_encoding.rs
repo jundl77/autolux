@@ -1249,9 +1249,10 @@ fn unrelated_cells_keep_independent_brightness_and_blackout() {
         intensity: 0.5,
         ..Default::default()
     };
+    // Head1's dimmer rounds 127.5 up and its colour takes the remainder: 128 x 254 is 0.5.
     assert_eq!(
         encode(&profile, &state),
-        [128, 255, 255, 255, 128, 128, 128]
+        [128, 254, 254, 254, 128, 128, 128]
     );
     assert_eq!(
         encode(&profile, &FixtureState::default()),

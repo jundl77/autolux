@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 
-const SECONDS_PER_MINUTE: f64 = 60.0;
+pub const SECONDS_PER_MINUTE: f64 = 60.0;
 pub const MAX_TEMPO_BPM: f64 = 1_000.0;
 pub const MAX_SPEED_MULTIPLIER: f64 = 8.0;
 pub const MAX_BEATS_PER_BAR: u32 = 16;
