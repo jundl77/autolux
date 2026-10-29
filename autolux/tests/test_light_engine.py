@@ -2131,22 +2131,32 @@ async def test_a_late_section_switches_on_the_next_room_downbeat_as_starfire_doe
     assert light.current_intent is LightIntent.DROP
 
 
-async def test_a_level_change_re_sends_the_planned_cue_with_its_start_and_seed():
+async def test_a_level_change_re_plans_a_pending_cue_and_leaves_the_running_one():
     decoder = FakeDecoder()
-    control = SimpleNamespace(settings=ShowSettings(intensity=0.7))
-    light, _, clock, lighting = engine(decoder=decoder)
+    control = SimpleNamespace(settings=ShowSettings(intensity=0.3))
+    light, queue, clock, lighting = engine(decoder=decoder)
     light._settings = light.effect_controller._settings = lambda: control.settings
     planned = await planned_drop(light, decoder, clock)
-    [first] = cue_events(lighting)
-    control.settings = ShowSettings(intensity=1.0)
+    [calm] = (e['command']['value'] for e in cue_events(lighting))
+    assert [step['bank'] for step in calm['rotation']] == ['breakdown']
+
+    control.settings = ShowSettings(intensity=0.7)
     light.intensity_changed()
-    first, again = (e['command']['value'] for e in cue_events(lighting))
-    assert (again['start_beat_index'], again['seed'], again['rotation']) == (
-        first['start_beat_index'],
-        first['seed'],
-        first['rotation'],
+    balanced = cue_events(lighting)[-1]['command']['value']
+    assert (balanced['start_beat_index'], balanced['seed']) == (
+        calm['start_beat_index'],
+        calm['seed'],
     )
-    assert light.effect_controller.cue_for(planned).command()['value'] == again
+    assert [step['bank'] for step in balanced['rotation']] == ['drop']
+    assert light.effect_controller.cue_for(planned).command()['value'] == balanced
+
+    clock.advance(14.5)
+    await queue.drain()
+    assert light._current_plan is planned
+    control.settings = ShowSettings(intensity=0.3)
+    light.intensity_changed()
+    running = cue_events(lighting)[-1]['command']['value']
+    assert running['rotation'] == balanced['rotation'], 'a running cue keeps its loops'
 
 
 async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_again():

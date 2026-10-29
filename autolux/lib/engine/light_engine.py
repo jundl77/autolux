@@ -372,7 +372,7 @@ class LightEngine(IMusicAnalyserHandler):
             self.effect_controller.apply_intensity(
                 dataclasses.replace(context, new_track=False), self._last_bpm
             )
-        self._revise_cues(palette=False)
+        self._revise_cues(palette=False, replan=True)
 
     def _send_brightness(self, fade_seconds: float = BRIGHTNESS_FADE_SECONDS) -> None:
         quiet = self._room_quiet and not self._static_mode
@@ -874,9 +874,12 @@ class LightEngine(IMusicAnalyserHandler):
             if cue is not None:
                 self._cue_out(planned, cue)
 
-    def _revise_cues(self, *, palette: bool) -> None:
+    def _revise_cues(self, *, palette: bool, replan: bool = False) -> None:
         for planned in self._planned_sections(current=True):
             started = planned is self._current_plan
+            if replan and not started:
+                self._send_cue(planned)
+                continue
             cue = self.effect_controller.revise_cue(planned, started=started, palette=palette)
             if cue is not None:
                 planned.cue = cue
