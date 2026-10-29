@@ -88,6 +88,7 @@ class SectionRequest:
     room_sec: float
     bpm: float | None = None
     levels_before: tuple[float, ...] = ()
+    # No row may begin before Starfire has the cue.
     lead_beats: float = 0.0
 
 
@@ -281,6 +282,7 @@ class CueDirector:
             plan = dataclasses.replace(plan, cue=dataclasses.replace(plan.cue, palette=name))
         revised = self._with_overlays(plan, settings, gate, moment)
         if started:
+            # Its one-shot rows and their bookings stand; only recurring rows go out again.
             once = tuple(row for row in plan.cue.overlays if row.every_bars == 0)
             again = recurring_rows(revised.cue.overlays)
             revised = dataclasses.replace(

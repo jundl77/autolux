@@ -23,10 +23,12 @@ _RHYTHM_LOG_INTERVAL = datetime.timedelta(seconds=10)
 
 _ENERGY_WINDOW_BUFFERS = 26
 
+# Swept to reproduce the sound-start/stop instants on the golden fixtures.
 _SILENCE_RMS = 1.5e-4
 
 # MME delivers a stopped player as a few 16-bit LSB (3e-5 each) of noise, not exact zeros.
 _DIGITAL_SILENCE_PEAK = 1e-4
+# A DJ's track change can leave this long a run of exact zeros; shorter runs are dropouts.
 TRACK_GAP_MIN_SECONDS = 0.05
 TRACK_GAP_IGNORED_AFTER_START_SECONDS = 2.0
 
@@ -45,6 +47,7 @@ _BEAT_BAND_BINS = {
     for name, (low, high) in BEAT_BANDS_HZ.items()
 }
 _KICK_BINS = _SPECTRUM_HZ <= 150.0
+# A beat is reported up to about 50 ms after its transient.
 ONSET_WINDOW_SECONDS = 0.1
 REFERENCE_HALF_LIFE_BEATS = 256
 _REFERENCE_DECAY = 0.5 ** (1.0 / REFERENCE_HALF_LIFE_BEATS)

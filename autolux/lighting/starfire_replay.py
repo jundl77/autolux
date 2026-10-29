@@ -16,7 +16,12 @@ from autolux.lib.engine.effect_definitions import (
     LightIntent,
     ShowSettings,
 )
-from autolux.lib.engine.light_engine import BUILD_INTENTS, levels_before, planned_context
+from autolux.lib.engine.light_engine import (
+    BUILD_INTENTS,
+    levels_before,
+    planned_context,
+    start_reach,
+)
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lighting.autoloop_catalogue import (
     AUTOLOOP_DIRECTORY,
@@ -73,7 +78,7 @@ class _Section:
 
 
 def _start_beat(placed: list[tuple[float, int, float]], at: float) -> tuple[float, int, float]:
-    near = [beat for beat in placed if abs(beat[0] - at) <= 30.0 / beat[2]]
+    near = [beat for beat in placed if abs(beat[0] - at) <= start_reach(beat[2], False)]
     return min(near, key=lambda beat: abs(beat[0] - at), default=None)
 
 
@@ -148,7 +153,7 @@ def _cue_events(
             events.append({'at_seconds': at, 'command': command})
         else:
             beat_at, index, bpm = start
-            before = levels_before(levels, beat_at - 30.0 / bpm)
+            before = levels_before(levels, beat_at - start_reach(bpm, False))
             context = planned_context(
                 intent,
                 at,

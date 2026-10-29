@@ -128,6 +128,7 @@ class Venue:
 def moments_near(
     times: Mapping[Hashable, float], at: float, window: float, *, excluding: Hashable
 ) -> dict[Hashable, float]:
+    # Either side of `at`: cues are booked ahead of specials firing in the room's now.
     return {
         key: when for key, when in times.items() if key != excluding and abs(at - when) < window
     }
@@ -219,6 +220,7 @@ class SpecialPolicy:
         intense_remaining: float,
         capabilities: SpecialCapabilities | None = None,
     ) -> list[dict]:
+        # Copied: the snapshot thread reads it while the engine writes it in place.
         fired = dict(self._group_fired)
         capabilities = capabilities or SpecialCapabilities()
         groups = dict.fromkeys(

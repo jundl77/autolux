@@ -34,7 +34,7 @@ class Overlay:
     bank: str
     autoloop: str
     priority: int
-    begin_beats: float
+    begin_beats: float  # negative is pre-roll
     length_beats: float
     every_bars: int = 0
     attack_beats: float = 0.0
@@ -78,7 +78,7 @@ class Cue:
     palette: str
     overlays: tuple[Overlay, ...] = ()
     drop_strength: float | None = None
-    seed: int = 0
+    seed: int = 0  # uint32 for sf.random
 
     def __post_init__(self):
         if self.start_beat_index < 0:
