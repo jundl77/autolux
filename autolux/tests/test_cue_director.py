@@ -115,6 +115,13 @@ def play(sections=SET, *, level='balanced', gate=None, cues=None, seed=0):
     return plans
 
 
+def drop_after_build(build_beats=64, *, level='balanced', **drop):
+    cues = director()
+    settings = ShowSettings(intensity=LEVELS[level])
+    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
+    return cues.plan(1, request(D, build_beats, **drop), settings, 'ice', Gate())
+
+
 def entry_of(cue):
     hits = {o.autoloop for o in cue.overlays if o.bank == 'hit'}
     if 'strobe' in hits:
@@ -397,10 +404,7 @@ def test_a_riser_only_after_a_buildup():
 def test_the_riser_starts_after_starfire_has_the_cue_and_inside_the_build(
     build_beats, levels, lead, riser_beats
 ):
-    cues = director()
-    settings = ShowSettings(intensity=INTENSITY_BALANCED)
-    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
-    drop = cues.plan(1, request(D, build_beats, levels=levels, lead=lead), settings, 'ice', Gate())
+    drop = drop_after_build(build_beats, levels=levels, lead=lead)
     risers = [o for o in drop.cue.overlays if o.bank == 'riser']
     if riser_beats is None:
         assert risers == []
@@ -466,10 +470,7 @@ def test_dip_shapes_land_in_the_drop_cue():
         ((0.7,) * 12 + (0.05,) * 4, 4.0),
         ((0.9,) * 8 + (0.05,) * 8, 8.0),
     ):
-        cues = director()
-        settings = ShowSettings(intensity=INTENSITY_BALANCED)
-        cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
-        drop = cues.plan(1, request(D, 64, levels=levels), settings, 'ice', Gate())
+        drop = drop_after_build(levels=levels)
         assert (row(drop, 'dip').begin_beats, row(drop, 'dip').length_beats) == (-dip, dip)
         riser = row(drop, 'riser')
         assert riser.begin_beats + riser.length_beats == -dip
@@ -519,10 +520,7 @@ def test_a_drop_split_in_two_goes_on_with_its_next_look_and_no_second_entry():
 
 
 def test_a_soft_drop_keeps_its_white_but_never_strobes():
-    cues = director()
-    settings = ShowSettings(intensity=INTENSITY_WILD)
-    cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
-    soft = cues.plan(1, request(D, 64, arrival=0.6), settings, 'ice', Gate())
+    soft = drop_after_build(level='wild', arrival=0.6)
     assert entry_of(soft.cue) == 'white' and row(soft, 'riser').autoloop == 'white_rise'
     assert not soft.events.intense and soft.events.accent
 

@@ -1986,6 +1986,15 @@ def cue_events(lighting, kind='cue_section'):
     return [e for e in lighting.events if e['command']['kind'] == kind]
 
 
+async def planned_drop(light, decoder, clock):
+    await elapse(light, clock, 20.0)
+    await beat_at_phase(light, decoder, 3, decision='drop')
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, 0)
+    [planned] = light._pending_intents
+    return planned
+
+
 def planned_cue(planned):
     from autolux.lib.engine.cue import BaseLook, Cue
 
@@ -2047,11 +2056,7 @@ def test_the_start_beat_is_the_first_downbeat_at_the_section_start_and_never_a_g
 async def test_clearing_the_command_queue_clears_every_cue_at_once():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)
-    await elapse(light, clock, 20.0)
-    await beat_at_phase(light, decoder, 3, decision='drop')
-    await elapse(light, clock, 0.5)
-    await beat_at_phase(light, decoder, 0)
-    [planned] = light._pending_intents
+    planned = await planned_drop(light, decoder, clock)
     assert light.effect_controller.cue_for(planned) is not None
     light.on_digital_silence()
     [cleared] = cue_events(lighting, 'clear_cues')
@@ -2087,11 +2092,7 @@ async def test_the_room_switches_in_the_beat_publish_of_the_planned_start_beat()
         return await change_effect(intent, *args, **kwargs)
 
     light.effect_controller.change_effect = spy
-    await elapse(light, clock, 20.0)
-    await beat_at_phase(light, decoder, 3, decision='drop')
-    await elapse(light, clock, 0.5)
-    await beat_at_phase(light, decoder, 0)
-    [planned] = light._pending_intents
+    planned = await planned_drop(light, decoder, clock)
     assert planned.switch_beat_index == planned.start_beat_index == 2
     clock.advance(14.0 - 0.5 - 0.01)
     await queue.drain()
@@ -2125,15 +2126,6 @@ async def test_a_late_section_switches_on_the_next_room_downbeat_as_starfire_doe
     clock.advance(1.1)
     await queue.drain()
     assert light.current_intent is LightIntent.DROP
-
-
-async def planned_drop(light, decoder, clock):
-    await elapse(light, clock, 20.0)
-    await beat_at_phase(light, decoder, 3, decision='drop')
-    await elapse(light, clock, 0.5)
-    await beat_at_phase(light, decoder, 0)
-    [planned] = light._pending_intents
-    return planned
 
 
 async def test_a_level_change_re_sends_the_planned_cue_with_its_start_and_seed():
