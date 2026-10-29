@@ -17,7 +17,7 @@
       "DnhxAxnCbrY"
     ]
   },
-  "pipeline_sha": "d4961bd2ced5a973bb704255dbaef02550c5d02027592f49f4072dd8e4bc9679",
+  "pipeline_sha": "4ec377a4f7b0261bb4ca325a1f6f6dad50f6d1f8f9870b2353892fea6f32c92d",
   "space": "raw9",
   "reported_spaces": [
     "raw9",
@@ -132,7 +132,7 @@
   "tracks": {
     "0064.hzIFjGcOKbg": {
       "youtube_id": "hzIFjGcOKbg",
-      "checksum": "add27f20f80291ea181e4d50b2c85d4d2311611ac5c80c3582adb01e2cfa3e18",
+      "checksum": "017fc13e8d5209de9eba961ca25c68f71cc32f60405cc025f63adb6e5cf4617c",
       "beats": 1312,
       "rows": 1312,
       "song_sec": 473.049,
@@ -249,7 +249,7 @@
     },
     "0096.PNpXKsge4xM": {
       "youtube_id": "PNpXKsge4xM",
-      "checksum": "05d532a21a2c093a3e509503920a1561d636e3f1f54467e9f87f403b14c600c8",
+      "checksum": "2a1d24bed0d38ee6e3c05a90265ebf77616bb2a54e3ed1d2830fb712148f18ff",
       "beats": 729,
       "rows": 726,
       "song_sec": 257.643,
@@ -366,7 +366,7 @@
     },
     "0136.FO566BKY2Jc": {
       "youtube_id": "FO566BKY2Jc",
-      "checksum": "2a52f6afaff7de222857ef70050176dc0761034f06ae65b696b073d255ba0ed1",
+      "checksum": "62c634dd6aa623dde17ce695a5b38024491c9addd4852637d6d42147b6f610ed",
       "beats": 924,
       "rows": 924,
       "song_sec": 431.171,
@@ -483,7 +483,7 @@
     },
     "0434.SBnxzXkc_qw": {
       "youtube_id": "SBnxzXkc_qw",
-      "checksum": "34d38232a92216951ae2571ad2519c7aa1a7d4cd3292282b716285520c538a09",
+      "checksum": "553bad7441d4733ff9a0445cd9199f13a0b37db9c36b0a4a2f912e6e94b705bd",
       "beats": 1050,
       "rows": 1047,
       "song_sec": 409.89,
@@ -600,7 +600,7 @@
     },
     "0485.MRRgXXq-0rc": {
       "youtube_id": "MRRgXXq-0rc",
-      "checksum": "0f43260b65a30b7fde531148adddfceeef7e873a8b2a185e8eee55cf1d589de4",
+      "checksum": "cd2d2fddc0726201ce10edf16c2e6f6889c96a9ed6266c9578a6b07d6ecaeace",
       "beats": 866,
       "rows": 862,
       "song_sec": 412.665,
@@ -717,7 +717,7 @@
     },
     "0501.hwdjIgtMFq8": {
       "youtube_id": "hwdjIgtMFq8",
-      "checksum": "fd48ac6dfa4d7a11d027aaffef66aafd8ad3e8a2f1f656c1abace3a40b27bc48",
+      "checksum": "5d012a61c6d40c79d899e98bdd1a2399a7e37264decb3ce43f8c9fa2ea5783a0",
       "beats": 931,
       "rows": 919,
       "song_sec": 420.003,
@@ -834,7 +834,7 @@
     },
     "0640.4o4joooH5tg": {
       "youtube_id": "4o4joooH5tg",
-      "checksum": "77d3f30eeebbbef897a66ca44c657a1f7e30c1491772b255b5f7b2ad24e0686c",
+      "checksum": "b6a3ee532e56b03e33a28e66a644a09bdd8bbe231db62f2817c376bb6c2d9999",
       "beats": 958,
       "rows": 954,
       "song_sec": 434.085,
@@ -951,7 +951,7 @@
     },
     "0834.NyEKXA7_6z0": {
       "youtube_id": "NyEKXA7_6z0",
-      "checksum": "0bd2e17feb318d30e088a3eddad9c1d962f5c719e589594d3b844a851f08e6f6",
+      "checksum": "a3204b659e9974265a96c939f3e7e49f8ed1bb440a762e52e01554bd12b044fd",
       "beats": 701,
       "rows": 699,
       "song_sec": 365.087,
@@ -1068,7 +1068,7 @@
     },
     "0911.hSCcLy_OBLM": {
       "youtube_id": "hSCcLy_OBLM",
-      "checksum": "2f9aa02f4d328bf4de529676290d25a3161c8f61f7d7b0e4ab237cbfaa982e24",
+      "checksum": "422986654f5f7ef55a07087e6a34b5bd36086975a497473971089c51988cae54",
       "beats": 833,
       "rows": 828,
       "song_sec": 411.797,
@@ -1185,7 +1185,7 @@
     },
     "1110.DnhxAxnCbrY": {
       "youtube_id": "DnhxAxnCbrY",
-      "checksum": "e0d9fbfb7c71c52931ef2368af8e81f16423568e6d3020187b3d04e2333c6ccd",
+      "checksum": "545f84d087793cfefaabc68533d808affdc3c07d8315c47a4206732419bbb724",
       "beats": 993,
       "rows": 988,
       "song_sec": 447.019,
