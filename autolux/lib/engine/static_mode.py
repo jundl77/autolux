@@ -198,7 +198,7 @@ class StaticLooks:
             for group in self.rig.uv_groups:
                 self.look(group, colour=BLACK, dimmer=1.0, uv=True)
         elif name == 'off':
-            # Clearing alone would reveal the held automatic look (warm-white standby when idle).
+            # Clearing alone would reveal the held automatic look.
             self._set_floor()
 
     def highlight(
