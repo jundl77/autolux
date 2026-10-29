@@ -54,11 +54,13 @@ BREAKDOWN_DIP = ('dip', 'fade')
 COLOUR_HIT = ('hit', 'colour_bump')
 # The bar-16 fill, bigger than the bar-8 one.
 TURNAROUND_FILL = ('fill', 'turnaround')
-# Overlays that fight these base loops' own primary layer.
+# Pairs the shared texture does not catch: the overlay fights these loops' lead layer.
 CLASHES: dict[tuple[str, str], frozenset[tuple[str, str]]] = {
     ('accent', 'mover_shapes'): frozenset({('drop', 'ballyhoo'), ('drop', 'wide_fan')}),
-    ('riser', 'strip_fill'): frozenset({('buildup', 'countdown'), ('buildup', 'ramp')}),
+    ('riser', 'strip_fill'): frozenset({('buildup', 'countdown')}),
 }
+# A texture that leads no single layer, so it fights none.
+MIXED_TEXTURE = 'mixed'
 
 # The dip before a drop, by the quiet beats before the one: half a beat, a beat, a bar, two bars.
 DIP_BEATS = (0.5, 1.0, float(BEATS_PER_BAR), 2.0 * BEATS_PER_BAR)
@@ -366,14 +368,20 @@ class CueDirector:
         under: Sequence[AutoloopChoice] = (),
     ) -> list[tuple[str, str]]:
         """The bank's overlays that play over every base loop `under` without fighting it."""
-        bases = {(choice.bank, choice.autoloop) for choice in under}
         return sorted(
             loop
             for loop, meta in self._overlays.items()
             if loop[0] == bank
             and (strobe is None or meta.strobe == strobe)
-            and not bases & CLASHES.get(loop, frozenset())
+            and not any(self._fights(loop, choice) for choice in under)
         )
+
+    def _fights(self, overlay: tuple[str, str], base: AutoloopChoice) -> bool:
+        """An accent or riser on the layer the base loop leads with would cover its idea."""
+        if (base.bank, base.autoloop) in CLASHES.get(overlay, frozenset()):
+            return True
+        texture = self._overlays[overlay].texture
+        return texture != MIXED_TEXTURE and texture == base.meta.texture
 
     def _shipped(self, overlay: tuple[str, str]) -> tuple[str, str] | None:
         return overlay if overlay in self._overlays else None
@@ -395,7 +403,7 @@ class CueDirector:
         choices: tuple[AutoloopChoice, ...],
         previous: SectionPlan | None,
     ) -> OverlayPicks:
-        fills = [loop for loop in self._bank('fill', under=choices) if loop != TURNAROUND_FILL]
+        fills = [loop for loop in self._bank('fill') if loop != TURNAROUND_FILL]
         if intent is not LightIntent.DROP:
             fill = self._pick(fills) if intent is not LightIntent.BUILDUP else None
             return OverlayPicks(fill=fill)

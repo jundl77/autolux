@@ -37,28 +37,32 @@ META = {
     ('atmospheric', 'glow'): AutoloopMeta(1, 'still', 'wash'),
     ('atmospheric', 'drift'): AutoloopMeta(1, 'sweep', 'beam'),
     ('breakdown', 'pulse'): AutoloopMeta(1, 'still', 'wash'),
-    ('breakdown', 'float'): AutoloopMeta(1, 'sweep', 'beam'),
-    ('buildup', 'climb'): AutoloopMeta(2, 'sweep', 'pixel'),
+    ('breakdown', 'float'): AutoloopMeta(1, 'sweep', 'mixed'),
+    ('buildup', 'climb'): AutoloopMeta(2, 'sweep', 'mixed'),
     ('buildup', 'rise'): AutoloopMeta(2, 'still', 'wash'),
     ('drop', 'stomp'): AutoloopMeta(2, 'snap', 'wash'),
     ('drop', 'stomp_twin'): AutoloopMeta(2, 'snap', 'wash'),
-    ('drop', 'fan'): AutoloopMeta(2, 'sweep', 'beam'),
-    ('drop', 'lift'): AutoloopMeta(3, 'sweep', 'beam'),
+    ('drop', 'fan'): AutoloopMeta(2, 'sweep', 'mixed'),
+    ('drop', 'lift'): AutoloopMeta(3, 'sweep', 'mixed'),
 }
-LTP, HTP = OverlayMeta(strobe=False, intensity_htp=False), OverlayMeta(False, True)
-STROBE = OverlayMeta(strobe=True, intensity_htp=True)
+
+
+def overlay(strobe=False, htp=True, movement='still', texture='mixed'):
+    return OverlayMeta(strobe, htp, movement, texture)
+
+
 OVERLAYS = {
-    ('dip', 'last_beat'): LTP,
-    ('dip', 'fade'): LTP,
-    ('hit', 'colour_bump'): HTP,
-    ('hit', 'blinder'): HTP,
-    ('hit', 'strobe'): STROBE,
-    ('riser', 'strip_fill'): HTP,
-    ('riser', 'strobe_ramp'): STROBE,
-    ('fill', 'wipe'): LTP,
-    ('fill', 'turnaround'): LTP,
-    ('accent', 'sparkle'): LTP,
-    ('accent', 'mover_shapes'): LTP,
+    ('dip', 'last_beat'): overlay(htp=False),
+    ('dip', 'fade'): overlay(htp=False),
+    ('hit', 'colour_bump'): overlay(texture='wash'),
+    ('hit', 'blinder'): overlay(texture='wash'),
+    ('hit', 'strobe'): overlay(strobe=True),
+    ('riser', 'strip_fill'): overlay(texture='pixel'),
+    ('riser', 'strobe_ramp'): overlay(strobe=True),
+    ('fill', 'wipe'): overlay(htp=False, movement='sweep', texture='pixel'),
+    ('fill', 'turnaround'): overlay(htp=False, movement='sweep'),
+    ('accent', 'sparkle'): overlay(texture='pixel'),
+    ('accent', 'mover_shapes'): overlay(htp=False, movement='sweep', texture='beam'),
 }
 LEVELS = {'calm': INTENSITY_CALM, 'balanced': INTENSITY_BALANCED, 'wild': INTENSITY_WILD}
 # Atmospheric, buildup, drop, breakdown, buildup, drop: start beats, 16 or 32 bars apart.
@@ -182,7 +186,7 @@ def test_consecutive_looks_contrast_in_movement_or_texture():
         for plan in play(seed=seed):
             metas = [choice.meta for choice in plan.choices]
             # The rotation cycles, so the last look leads back into the first.
-            for first, second in itertools.pairwise([*metas, metas[0]]):
+            for first, second in itertools.pairwise([*metas, metas[0]] if metas[1:] else []):
                 assert (first.movement, first.texture) != (second.movement, second.texture)
 
 
@@ -284,7 +288,7 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
 def test_the_drop_entry_per_venue_setting(level, gate, expected):
     drop = play(SET[:3], level=level, gate=gate)[2]
     assert sorted(rows(drop)) == sorted(expected)
-    strobing = any(OVERLAYS[row.bank, row.autoloop].strobe for row in drop.cue.overlays)
+    strobing = any(OVERLAYS[o.bank, o.autoloop].strobe for o in drop.cue.overlays)
     assert strobing == (level == 'wild' and gate.blocked is None and not gate.crowded)
     assert drop.events.intense == strobing
     assert drop.events.accent == (level != 'calm' and not gate.crowded)
@@ -364,6 +368,19 @@ def test_an_overlay_never_fights_its_base_loop():
         assert bases & {('drop', 'ballyhoo'), ('drop', 'wide_fan')}
         assert 'accent/mover_shapes' not in rows(drop)
         assert 'accent/sparkle' in rows(drop)
+
+
+def test_an_accent_or_riser_never_leads_with_the_base_loops_own_layer():
+    meta = {
+        **{loop: value for loop, value in META.items() if loop[0] not in ('buildup', 'drop')},
+        ('buildup', 'pixels'): AutoloopMeta(2, 'sweep', 'pixel'),
+        ('drop', 'chase'): AutoloopMeta(2, 'snap', 'pixel'),
+        ('drop', 'scan'): AutoloopMeta(2, 'sweep', 'pixel'),
+    }
+    _, drop = play(SET[1:3], cues=director(meta=meta))
+    assert [name for name in rows(drop) if name.split('/')[0] in ('accent', 'riser')] == [
+        'accent/mover_shapes'
+    ], 'the pixel lead keeps the strip sparkle and the strip riser off'
 
 
 @pytest.mark.parametrize(
