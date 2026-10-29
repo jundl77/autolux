@@ -1,14 +1,10 @@
-//! Section cues on the render clock: pending queue, Autolux beat index to grid beat, sticky
-//! activation, the rotation clock and the overlay instance schedule.
-//!
-//! Cues are kept in Autolux beat-index space and mapped through the newest received beat on
-//! every frame, so a bar-phase correction moves a pending cue with the grid. `beat_position` is
-//! not monotonic (a late beat re-anchors it), so every state here only moves forward: cues go
-//! pending → active → gone, instances pending → running → releasing → done, rotation steps up.
-//! Envelope times are elapsed musical beats, which never jump; the grid only schedules.
+//! `beat_position` is not monotonic (a late beat re-anchors the grid), so every state here only
+//! moves forward. `started`, `ends`, `released_at` and `received_at` are elapsed musical beats,
+//! which never jump; `begin*` and grid values are grid beats.
 
 use anyhow::{Result, ensure};
 
+use crate::clock::ReceivedBeat;
 use crate::model::{OverlayCue, SectionCue, SectionIntent, Transition};
 
 pub const MAX_ROTATION: usize = 8;
@@ -17,31 +13,28 @@ pub const MAX_PENDING_CUES: usize = 4;
 pub const MAX_ACTIVE_OVERLAYS: usize = 8;
 pub const MAX_PREROLL_BEATS: f64 = 64.0;
 pub const MAX_OVERLAY_ERROR_BYTES: usize = 256;
-/// The overlay bank whose pre-roll row is the blackout before the section: beats_until_dip and
-/// move in black key on this name (the proto Overlay comment states the contract).
+const ROW_STOPPED: u64 = u64::MAX;
+/// The proto Overlay dip contract: beats_until_dip and move in black key on this bank name.
 pub const DIP_BANK: &str = "dip";
 
-/// What the cue timeline reads from the musical clock at one instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CueSample {
     pub beat_position: f64,
     pub elapsed_musical_beats: f64,
     pub beats_per_bar: u32,
-    /// The newest received beat as (beat index, grid beat); `None` before the first beat.
-    pub anchor: Option<(u64, u64)>,
+    pub anchor: Option<ReceivedBeat>,
 }
 
 impl CueSample {
-    /// i128 because a cue may address a beat before the session's first (grid below zero) and
-    /// must still resolve.
+    /// i128: a cue may address a beat before the session's first, below grid zero.
     fn grid_of(&self, beat_index: i128) -> Option<f64> {
-        let (index, grid) = self.anchor?;
-        Some((i128::from(grid) + beat_index - i128::from(index)) as f64)
+        let anchor = self.anchor?;
+        Some((i128::from(anchor.grid_beat) + beat_index - i128::from(anchor.beat_index)) as f64)
     }
 
     fn index_of_grid(&self, grid: i128) -> Option<i128> {
-        let (index, anchor_grid) = self.anchor?;
-        Some(grid - i128::from(anchor_grid) + i128::from(index))
+        let anchor = self.anchor?;
+        Some(grid - i128::from(anchor.grid_beat) + i128::from(anchor.beat_index))
     }
 
     fn bar_beats(&self) -> f64 {
@@ -49,7 +42,6 @@ impl CueSample {
     }
 }
 
-/// The section fields of the render context.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SectionContext {
     pub section_intent: Option<SectionIntent>,
@@ -57,16 +49,12 @@ pub struct SectionContext {
     pub next_intent: Option<SectionIntent>,
     pub beats_until_next: Option<f64>,
     pub beats_until_dip: Option<f64>,
-    /// Elapsed musical beats when the next cue was received.
     pub next_received_at: Option<f64>,
     pub drop_strength: Option<f64>,
     pub next_drop_strength: Option<f64>,
     pub seed: u32,
 }
 
-/// A base loop the active cue's rotation wants playing from `begin_beat` (a grid beat, the
-/// entry's begin counted from the true section start). The engine starts it unless it is
-/// already the running loop.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BaseStep {
     pub bank: String,
@@ -74,17 +62,13 @@ pub struct BaseStep {
     pub transition: Transition,
     pub begin_beat: f64,
     pub seed: u32,
-    /// Set on the frame a cue activates: its palette, crossfaded over `transition`.
     pub palette: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Span {
-    /// Elapsed musical beats at the first rendered frame (t0).
     pub started: f64,
-    /// Beats past the nominal begin at t0; nonzero for a late start.
     pub late_beats: f64,
-    /// Elapsed musical beats at the nominal end.
     pub ends: f64,
 }
 
@@ -92,30 +76,21 @@ pub struct Span {
 pub enum InstanceState {
     Pending,
     Running(Span),
-    /// From `released_at` (elapsed musical beats) over the row's release beats.
-    Releasing {
-        span: Span,
-        released_at: f64,
-    },
+    Releasing { span: Span, released_at: f64 },
 }
 
-/// One scheduled play of an overlay row. Done instances are removed and never return.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OverlayInstance {
     pub overlay: OverlayCue,
-    /// Start order across all cues; ties of priority compose in this order.
     pub order: u64,
     pub state: InstanceState,
-    /// The owning cue's, for sf.random.
     pub seed: u32,
     owner: u64,
     row: usize,
-    /// The beat index `overlay.begin_beats` counts from.
     anchor_index: i128,
 }
 
 impl OverlayInstance {
-    /// `autoloop_elapsed_beats` for the overlay script: beats since its nominal begin.
     pub fn elapsed_beats(&self, elapsed_musical_beats: f64) -> Option<f64> {
         match self.state {
             InstanceState::Pending => None,
@@ -125,7 +100,6 @@ impl OverlayInstance {
         }
     }
 
-    /// The nominal end as a grid beat; `None` before any beat.
     pub fn nominal_end(&self, now: &CueSample) -> Option<f64> {
         Some(self.nominal_begin(now)? + self.overlay.length_beats)
     }
@@ -134,8 +108,7 @@ impl OverlayInstance {
         Some(now.grid_of(self.anchor_index)? + self.overlay.begin_beats)
     }
 
-    /// The same row of a re-sent cue: it carries on instead of restarting.
-    fn continues(&self, row: &OverlayCue, anchor_index: i128) -> bool {
+    fn is_same_row(&self, row: &OverlayCue, anchor_index: i128) -> bool {
         let own = &self.overlay;
         self.anchor_index == anchor_index
             && (own.bank.as_str(), own.autoloop.as_str(), own.every_bars)
@@ -153,7 +126,6 @@ impl OverlayInstance {
         }
     }
 
-    /// Starts a due instance (false once it can never play); `live` counts the cap.
     fn start(&mut self, now: &CueSample, live: &mut usize, refused: &mut Option<String>) -> bool {
         let Some(begin) = self.nominal_begin(now) else {
             return true;
@@ -182,7 +154,6 @@ impl OverlayInstance {
         true
     }
 
-    /// Ends and releases a started instance; false once done.
     fn finish(&mut self, at: f64) -> bool {
         if let InstanceState::Running(span) = self.state
             && at >= span.ends
@@ -202,10 +173,7 @@ impl OverlayInstance {
 struct PendingCue {
     cue: SectionCue,
     id: u64,
-    /// Elapsed musical beats at receipt: when the room's next change became known.
     received_at: f64,
-    /// Fixed when first resolved: the start, or for a cue resolved after its start the next
-    /// bar line (a late cue never enters mid-bar).
     activates_at: Option<i128>,
 }
 
@@ -213,9 +181,7 @@ struct PendingCue {
 struct ActiveCue {
     cue: SectionCue,
     id: u64,
-    /// The rotation step playing, counted over cycles; only increases.
     step: Option<u64>,
-    /// Per overlay row: the next repetition a recurring row may start (`u64::MAX` once stopped).
     next_repetition: Vec<u64>,
 }
 
@@ -230,8 +196,6 @@ pub struct CueTimeline {
 }
 
 impl CueTimeline {
-    /// Supersedes, then queues. Content (identifiers, ranges, scripts, palette) is validated by
-    /// the caller first, so a refused cue changes nothing.
     pub fn receive(&mut self, cue: SectionCue, now: CueSample) -> Result<()> {
         let start = cue.start_beat_index;
         let kept = self
@@ -267,7 +231,6 @@ impl CueTimeline {
         Ok(())
     }
 
-    /// Ends every cue: their overlays release, or vanish when `release` is false.
     pub fn clear(&mut self, now: f64, release: bool) {
         self.pending.clear();
         self.active = None;
@@ -283,14 +246,11 @@ impl CueTimeline {
         }
     }
 
-    /// A frozen clock would hold a release at its level and replay it on play.
     pub fn drop_releasing(&mut self) {
         self.instances
             .retain(|instance| !matches!(instance.state, InstanceState::Releasing { .. }));
     }
 
-    /// Resolves, activates and schedules for this frame; returns the base loop the rotation
-    /// wants when it changes.
     pub fn advance(&mut self, now: CueSample) -> Option<BaseStep> {
         now.anchor?;
         let mut pending = std::mem::take(&mut self.pending);
@@ -345,8 +305,6 @@ impl CueTimeline {
         context
     }
 
-    /// The earliest resolved pending cue and the grid beat it activates at. A re-sent cue for
-    /// the active section is no next section.
     pub fn next_cue(&self, now: &CueSample) -> Option<(&SectionCue, f64)> {
         self.next_pending(now)
             .map(|(pending, grid)| (&pending.cue, grid))
@@ -366,7 +324,6 @@ impl CueTimeline {
         Some((pending, now.grid_of(at)?))
     }
 
-    /// Running and releasing overlays, in start order; W2 composes them by priority.
     pub fn instances(&self) -> &[OverlayInstance] {
         &self.instances
     }
@@ -386,7 +343,6 @@ impl CueTimeline {
         self.overlay_error.as_deref()
     }
 
-    /// Bounded for Metrics; an overlay failure never becomes the show's script error.
     pub fn record_overlay_error(&mut self, mut message: String) {
         if message.len() > MAX_OVERLAY_ERROR_BYTES {
             message.truncate(message.floor_char_boundary(MAX_OVERLAY_ERROR_BYTES));
@@ -394,8 +350,6 @@ impl CueTimeline {
         self.overlay_error = Some(message);
     }
 
-    /// Stops a broken overlay at once, its release skipped, and its row for the rest of the
-    /// owning cue: a recurring row starts no further repetitions.
     pub fn stop_row(&mut self, order: u64) {
         let Some(index) = self
             .instances
@@ -408,7 +362,7 @@ impl CueTimeline {
         if let Some(active) = &mut self.active
             && active.id == stopped.owner
         {
-            active.next_repetition[stopped.row] = u64::MAX;
+            active.next_repetition[stopped.row] = ROW_STOPPED;
         }
     }
 
@@ -424,8 +378,7 @@ impl CueTimeline {
             .active
             .as_ref()
             .is_some_and(|active| active.cue.start_beat_index == pending.cue.start_beat_index);
-        // Strictly as Autolux's switch clock: a start the room already passed waits for the bar
-        // line, so the entry hit, the room-side state and the specials land together.
+        // Mirrors Autolux's switch clock so the hit, room state and specials land on one bar line.
         let activates_at = if start_grid >= now.beat_position {
             start
         } else {
@@ -438,10 +391,8 @@ impl CueTimeline {
             if overlay.every_bars != 0 {
                 continue;
             }
-            // A late cue enters on its bar line with its entry rows; its pre-roll, and every row
-            // of a re-sent cue (same start as the active one), keep the true start and so are
-            // skipped as past, never fired twice.
-            let entry = if replaces_active || overlay.begin_beats < 0.0 {
+            let keeps_true_start = replaces_active || overlay.begin_beats < 0.0;
+            let entry = if keeps_true_start {
                 start
             } else {
                 activates_at
@@ -460,7 +411,6 @@ impl CueTimeline {
     }
 
     fn activate_due(&mut self, now: &CueSample) {
-        // Several cues may pass in one frame (after a resume): the latest wins, the rest drop.
         let passed: Vec<usize> = (0..self.pending.len())
             .filter(|&index| {
                 self.pending[index]
@@ -504,8 +454,6 @@ impl CueTimeline {
         self.active = Some(active);
     }
 
-    /// Gives `to` the running instances of `from` that its own rows would play again, so a
-    /// re-sent cue's riser, accent or fill carries on instead of restarting.
     fn hand_over(
         &mut self,
         from: u64,
@@ -521,21 +469,18 @@ impl CueTimeline {
                 continue;
             }
             let index = index - 1;
-            // A one-shot row of `to` already waits as a pending instance; it yields.
             let waiting = self.instances.iter().position(|candidate| {
                 candidate.owner == to
                     && candidate.state == InstanceState::Pending
-                    && instance.continues(&candidate.overlay, candidate.anchor_index)
+                    && instance.is_same_row(&candidate.overlay, candidate.anchor_index)
             });
             if let Some(waiting) = waiting {
                 let (row, seed) = (self.instances[waiting].row, self.instances[waiting].seed);
                 let carried = &mut self.instances[index];
                 (carried.owner, carried.row, carried.seed) = (to, row, seed);
                 self.instances.remove(waiting);
-                // Carried instances now belong to `to`, so a rescan skips them.
                 return self.hand_over(from, to, active, now);
             }
-            // A recurring row of the newly active cue: that repetition carries on.
             let Some(active) = active.as_deref_mut() else {
                 continue;
             };
@@ -551,7 +496,7 @@ impl CueTimeline {
                     (period > 0
                         && offset >= 0
                         && offset % period == 0
-                        && instance.continues(overlay, instance.anchor_index))
+                        && instance.is_same_row(overlay, instance.anchor_index))
                     .then(|| (row, (offset / period) as u64))
                 });
             if let Some((row, repetition)) = matched {
@@ -566,7 +511,6 @@ impl CueTimeline {
         now.grid_of(i128::from(active.cue.start_beat_index))
     }
 
-    /// Recurring rows play on phrase lines counted from the true start, while the cue is active.
     fn schedule_recurring(&mut self, now: &CueSample) {
         let Some(active) = &mut self.active else {
             return;
@@ -585,7 +529,6 @@ impl CueTimeline {
             if since < 0.0 {
                 continue;
             }
-            // Only the current repetition: after a jump the skipped ones are long over.
             let due = (since / period).floor() as u64;
             if due < active.next_repetition[row] {
                 continue;
@@ -642,7 +585,6 @@ impl CueTimeline {
         })
     }
 
-    /// Ends one cue's overlays: running ones release from now, unstarted ones are discarded.
     fn release_owner(&mut self, owner: u64, now: f64) {
         self.instances
             .retain(|instance| instance.owner != owner || instance.state != InstanceState::Pending);

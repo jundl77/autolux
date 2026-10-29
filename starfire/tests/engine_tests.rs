@@ -1387,7 +1387,6 @@ fn a_crossfade_takes_the_target_preset_half_way_and_ramps_numeric_attributes() {
             duration_beats: 4.0,
         },
     );
-    // A preset changes at the one snap point every wheel shares, half-way.
     for (time, preset) in [
         (0.0, None),
         (0.9, None),
@@ -1727,7 +1726,6 @@ fn pan_after_snap(intensity: f64) -> Vec<f64> {
             },
         ),
     );
-    // Three seconds: calm's glide needs under one to cross half the range.
     (1..=120)
         .map(|frame| {
             let state = &engine
@@ -1767,7 +1765,6 @@ fn low_and_mid_intensity_move_at_clearly_different_speeds() {
             + 1
     };
     let (low, mid) = (frames_to_target(0.3), frames_to_target(0.7));
-    // Calm moves at 0.3 of full and balanced at 0.7: 7/3 as many frames.
     assert!(low > 2 * mid, "0.3 took {low} frames, 0.7 took {mid}");
 }
 

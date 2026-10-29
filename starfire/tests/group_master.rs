@@ -47,8 +47,6 @@ fn lit_engine(definition: &wire::RigDefinition) -> Engine {
     engine
 }
 
-/// The Mini Kinta has no Dimmer: Color1 is a wheel with a Black slot and Shutter1 only opens or
-/// strobes, so the group master must reach its light through the wheel.
 #[test]
 fn a_group_master_on_the_dimmerless_accent_keeps_its_colour_and_at_zero_selects_black() {
     let definition = support::stage_definition_as_loops();

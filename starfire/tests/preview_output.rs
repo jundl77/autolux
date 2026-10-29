@@ -19,29 +19,16 @@ fn placed(uuid: &str, address: u32, x_mm: f64) -> Value {
 fn beat(at_seconds: f64, beat_index: u64) -> TimedCommand {
     TimedCommand {
         at_seconds,
-        command: Command::Beat {
-            beat_index,
-            bar_phase: None,
-            beats_per_bar: 4,
-            bpm: 120.0,
-            features: None,
-        },
+        command: support::beat(beat_index, None, 120.0),
     }
 }
 
-/// Two seconds at 120 bpm, dark until a loop is selected at 0.5 s.
 fn preview_lines(rate_hz: u32) -> Vec<Value> {
     let rig = support::rig(json!({
         "fixtures": [placed("left", 1, -2000.0), placed("right", 4, 2000.0)],
         "groups": {"wash": ["left", "right"]},
     }));
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "red_half".into(),
-        bank: "test".into(),
-        lua_source: RED_HALF.into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("red_half", RED_HALF)]);
     let mut events: Vec<_> = (0..4)
         .map(|index| beat(index as f64 * 0.5, index))
         .collect();
@@ -49,12 +36,7 @@ fn preview_lines(rate_hz: u32) -> Vec<Value> {
         2,
         TimedCommand {
             at_seconds: 0.5,
-            command: Command::Select {
-                bank: "test".into(),
-                autoloop: "red_half".into(),
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
+            command: support::select("test", "red_half", Transition::Cut),
         },
     );
     let replay = Replay {
@@ -99,7 +81,6 @@ fn frames_come_at_the_preview_rate_with_one_entry_per_cell() {
     assert_eq!(frames.len(), 21);
     for (index, frame) in frames.iter().enumerate() {
         assert_eq!(frame["t"], json!(index as f64 / 10.0));
-        // 120 bpm: two beats a second on the grid the first beat anchors.
         assert_eq!(frame["beat"], json!(index as f64 / 5.0));
         assert_eq!(frame["c"].as_array().unwrap().len(), 2);
         assert!(frame.get("fault").is_none());
@@ -113,7 +94,6 @@ fn frames_come_at_the_preview_rate_with_one_entry_per_cell() {
         (&dark["c"][0][0], &dark["c"][1][0]),
         (&json!(0.0), &json!(0.0))
     );
-    // A cell without movement or gobo carries no direction or gobo entry.
     let lit = &frames[5];
     assert_eq!(
         (&lit["bank"], &lit["autoloop"]),
@@ -132,7 +112,6 @@ fn a_higher_rate_only_adds_frames() {
     assert_eq!(lines[1 + 20], preview_lines(10)[1 + 10]);
 }
 
-/// A hanging synthetic scanner (pan, tilt, RGB, a gobo wheel) above a generic wash.
 fn scanner_and_wash() -> starfire::fixtures::FixtureRig {
     let mut definition = support::definition(&json!({"fixtures": [
         {"fixture_uuid": "scanner", "profile": "beam_scanner", "universe": 0, "address": 1,
@@ -146,23 +125,11 @@ fn scanner_and_wash() -> starfire::fixtures::FixtureRig {
     starfire::fixtures::FixtureRig::from_wire(&definition).unwrap()
 }
 
-/// `source` selected at 0 s on a 120 bpm grid, recorded at the show's 40 Hz.
 fn one_loop(source: &str, duration_seconds: f64) -> (AutoloopCatalog, Replay) {
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "under_test".into(),
-        bank: "test".into(),
-        lua_source: source.into(),
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("under_test", source)]);
     let select = TimedCommand {
         at_seconds: 0.0,
-        command: Command::Select {
-            bank: "test".into(),
-            autoloop: "under_test".into(),
-            transition: Transition::Cut,
-            palette: "techno".into(),
-        },
+        command: support::select("test", "under_test", Transition::Cut),
     };
     let replay = Replay {
         duration_seconds,
@@ -193,8 +160,6 @@ fn a_moving_head_carries_its_beam_direction_and_gobo() {
     );
     let mut output = Vec::new();
     write_preview(&replay, scanner_and_wash(), catalog, 10, &mut output).unwrap();
-    // A hanging head at the middle of its pan and tilt throws straight down; the wash has no
-    // movement and no gobo, so its entry stops at strobe.
     assert_eq!(
         frames_of(output)[0]["c"],
         json!([
@@ -206,8 +171,6 @@ fn a_moving_head_carries_its_beam_direction_and_gobo() {
 
 #[test]
 fn preview_frames_are_the_shows_own_frames_under_the_slew_limit_and_strobe_caps() {
-    // The pan target jumps every beat, so the slew limit is mid-chase in most frames, and the
-    // wash strobes long enough to meet the burst cap.
     let (catalog, replay) = one_loop(
         r#"return {render=function(ctx) return sf.scene {
             sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(1, 1, 1)),
@@ -215,8 +178,6 @@ fn preview_frames_are_the_shows_own_frames_under_the_slew_limit_and_strobe_caps(
             sf.strobe(sf.fixture("wash"), 8)} end}"#,
         4.0,
     );
-    // Balanced: movement slews at a share of full speed and strobe is allowed, scaled; a
-    // one-second burst cap ends the strobe inside the recording.
     let mut replay = replay;
     replay.events.insert(
         0,
@@ -309,7 +270,6 @@ fn a_colour_wheel_shows_the_slot_its_encode_selects() {
         frames_of(output)[0]["c"][0].as_array().unwrap()[1..4].to_vec()
     };
     let pinkish = colour_of("1, 0.3, 0.3");
-    // Both requests land on the red slot, and the preview shows that slot, not the request.
     assert_eq!(pinkish, colour_of("1, 0, 0"));
     assert_ne!(pinkish, [json!(1.0), json!(0.3), json!(0.3)]);
     let [red, green, blue] = [0, 1, 2].map(|channel| pinkish[channel].as_f64().unwrap());
@@ -329,7 +289,6 @@ fn frames_name_the_cues_section_and_its_sounding_overlays() {
         definition("flash", RED_HALF),
     ])
     .unwrap();
-    // A drop from beat 4 (2 s) whose overlay sounds for its first two beats, cut off after.
     let drop = SectionCue {
         start_beat_index: 4,
         intent: SectionIntent::Drop,

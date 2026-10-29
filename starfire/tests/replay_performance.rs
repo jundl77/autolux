@@ -1,5 +1,3 @@
-//! Coarse regression budgets for the complete replay renderer, including Lua.
-
 mod support;
 
 use std::path::Path;

@@ -10,7 +10,6 @@ use starfire::model::{
 };
 use starfire::script::AutoloopCatalog;
 
-/// The stage's 0-based universe 0 slots: the 12-channel movers and the 8-channel washes.
 const MOVERS: [usize; 2] = [32, 44];
 const WASHES: [usize; 4] = [0, 8, 16, 24];
 
@@ -77,7 +76,6 @@ fn partial_lua_properties_compose_before_master_and_profile_encoding() {
         )
         .unwrap();
     let frame = engine.render_at(0.0).unwrap();
-    // The loop's sf.all() passes over the accent, which plays specials only.
     let stage = support::stage();
     for (id, state) in &frame.fixture_properties_before_strobe {
         if stage.is_accent_cell(id) {

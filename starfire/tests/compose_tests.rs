@@ -1,6 +1,3 @@
-//! Layered composition: cue overlays between the base loop and the overrides, on the generic
-//! stage and a simulated clock at 120 bpm (a beat every 0.5 s).
-
 mod support;
 
 use std::collections::BTreeMap;
@@ -9,6 +6,7 @@ use std::time::Instant;
 use serde_json::json;
 use starfire::engine::{Engine, RenderedFrame, perceptual_to_linear_master};
 use starfire::fixtures::FixtureRig;
+use starfire::intensity::STROBE_GATE_INTENSITY;
 use starfire::model::{
     AttributeValue, Command, FixtureState, LightingOverride, OverlayCue, OverrideLifetime,
     PropertyValues, Rgb, RotationEntry, SectionCue, SectionIntent, Target, Transition,
@@ -17,7 +15,6 @@ use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
 
 const SECONDS_PER_BEAT: f64 = 0.5;
-/// Render cadence of the live loop and the replay clock.
 const FRAME_RATE_HZ: f64 = 40.0;
 const RED: Rgb = Rgb {
     red: 1.0,
@@ -40,23 +37,18 @@ const BASE: &str = r#"return {render=function(ctx) return sf.scene {
     sf.pan_tilt(sf.group("movers"), 0.2, 0.4)} end}"#;
 const BRIGHT: &str = "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0.8)} end}";
 const DARK: &str = "return {render=function(ctx) return sf.scene {sf.dimmer(sf.all(), 0)} end}";
-/// The outer left wash low and every other cell high.
 const UNEVEN: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.all(), 0.8), sf.dimmer(sf.fixture("wash_left_outer"), 0.2)} end}"#;
-/// Movers stepping between 0.9 and 0.1 every beat, pan and gobo still.
 const CHASE: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.group("movers"), sf.osc.pulse(ctx.beat_position, 2, 0.1, 0.9)),
     sf.pan_tilt(sf.group("movers"), 0.2, 0.4),
     sf.physical_attribute(sf.group("movers"), "Gobo1", 0)} end}"#;
-/// Intensity on the washes only, pan alone, and colour and strobe everywhere.
 const TINT: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.group("wash"), 0.25), sf.colour(sf.all(), sf.rgb(0, 0, 1)),
     {target = sf.group("movers"), values = {pan = 1}}, sf.strobe(sf.all(), 4)} end}"#;
-/// A white hit decaying linearly over its length.
 const HIT: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.all(), 1 - ctx.autoloop_elapsed_beats / ctx.overlay_length_beats),
     sf.colour(sf.all(), sf.rgb(1, 1, 1)), sf.pan_tilt(sf.group("movers"), 1, 0.4)} end}"#;
-/// Movers at half, aimed and on a gobo.
 const BEAM: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.group("movers"), 0.5), sf.pan_tilt(sf.group("movers"), 0.8, 0.6),
     sf.physical_attribute(sf.group("movers"), "Gobo1", 200)} end}"#;
@@ -87,10 +79,8 @@ const AFTER: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(0, 0, 1)),
     sf.pan_tilt(sf.group("movers"), 0.9, 0.7),
     sf.physical_attribute(sf.group("movers"), "Gobo1", 128)} end}"#;
-/// Sets only the right mover's position.
 const AFTER_RIGHT: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.all(), 1), sf.pan_tilt(sf.fixture("mover_right"), 0.9, 0.7)} end}"#;
-/// Aims by the bar it plays in.
 const AFTER_BARS: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.all(), 1), sf.pan_tilt(sf.group("movers"), 0.1 + ctx.bar_index / 10,
         0.2 + ctx.bar_phase / 10)} end}"#;
@@ -98,10 +88,8 @@ const DIP: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.fixture("mover_left"), 0)} end}"#;
 const DARK_LEFT_MOVER: &str = DIP;
 
-/// Loops whose intensity is HTP; every other loop here is LTP.
 const HTP: [&str; 5] = ["hit", "right_full", "beam", "strobe", "heavy"];
 
-/// `bank/autoloop`, or an autoloop of the `test` bank.
 const SCRIPTS: [(&str, &str); 25] = [
     ("base", BASE),
     ("bright", BRIGHT),
@@ -153,16 +141,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(String, String)]) -> Engine {
     .unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     engine
-        .apply(
-            0.0,
-            &Command::Beat {
-                beat_index: 0,
-                bar_phase: Some(0),
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
+        .apply(0.0, &support::beat(0, Some(0), 120.0))
         .unwrap();
     engine
 }
@@ -170,15 +149,7 @@ fn engine_on(rig: FixtureRig, scripts: &[(String, String)]) -> Engine {
 fn select(engine: &mut Engine, id: &str) {
     let (bank, autoloop) = identity(id);
     engine
-        .apply(
-            0.0,
-            &Command::Select {
-                bank,
-                autoloop,
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
-        )
+        .apply(0.0, &support::select(&bank, &autoloop, Transition::Cut))
         .unwrap();
 }
 
@@ -189,7 +160,6 @@ fn file_scripts() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The stage with this file's scripts and `base` playing.
 fn playing(base: &str) -> Engine {
     playing_on(support::stage(), base)
 }
@@ -226,7 +196,6 @@ fn enveloped(id: &str, length_beats: f64, attack_beats: f64, release_beats: f64)
     }
 }
 
-/// The dip before a cue, `beats` long, ending on its start.
 fn dip(beats: f64, attack_beats: f64) -> OverlayCue {
     OverlayCue {
         attack_beats,
@@ -234,7 +203,6 @@ fn dip(beats: f64, attack_beats: f64) -> OverlayCue {
     }
 }
 
-/// A cue starting at beat `start` whose rotation enters `base` for 4 bars.
 fn cue(start: u64, base: &str, transition: Transition, overlays: Vec<OverlayCue>) -> SectionCue {
     let (bank, autoloop) = identity(base);
     SectionCue {
@@ -254,33 +222,16 @@ fn cue(start: u64, base: &str, transition: Transition, overlays: Vec<OverlayCue>
 }
 
 fn send_cue(engine: &mut Engine, beat: f64, cue: SectionCue) {
-    engine
-        .apply(
-            at(beat),
-            &Command::CueSection {
-                value: Box::new(cue),
-            },
-        )
-        .unwrap();
+    engine.apply(at(beat), &support::cue(cue)).unwrap();
 }
 
-/// A cue cutting to `base`.
 fn send(engine: &mut Engine, beat: f64, start: u64, base: &str, overlays: Vec<OverlayCue>) {
     send_cue(engine, beat, cue(start, base, Transition::Cut, overlays));
 }
 
 fn beat_message(engine: &mut Engine, seconds: f64, index: u64, bar_phase: Option<u32>) {
     engine
-        .apply(
-            seconds,
-            &Command::Beat {
-                beat_index: index,
-                bar_phase,
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
+        .apply(seconds, &support::beat(index, bar_phase, 120.0))
         .unwrap();
 }
 
@@ -307,7 +258,6 @@ fn near_colour(actual: Rgb, expected: Rgb, what: &str) {
     near(actual.blue, expected.blue, what);
 }
 
-/// Red mixed toward white by `white`.
 fn pink(white: f64) -> Rgb {
     Rgb {
         red: 1.0,
@@ -324,7 +274,6 @@ fn attribute(state: &FixtureState, key: &str) -> Option<AttributeValue> {
     state.attributes.get(key).cloned()
 }
 
-/// The DMX bytes of one cell that carry `property`'s change from `low` to `high`.
 struct Slots {
     universe: u16,
     slots: Vec<usize>,
@@ -357,7 +306,6 @@ impl Slots {
         }
     }
 
-    /// The colour wheel byte: red is low, blue is high.
     fn wheel(label: &str) -> Self {
         let slots = Self::of(label, |state, blue| {
             state.colour = if blue { BLUE } else { RED }
@@ -366,7 +314,6 @@ impl Slots {
         slots
     }
 
-    /// The bytes that dark (low) and lit (high) differ in.
     fn light(label: &str) -> Self {
         Self::of(label, |state, lit| {
             state.intensity = if lit { 1.0 } else { 0.0 }
@@ -407,7 +354,6 @@ fn an_ltp_overlay_blends_each_property_it_sets_by_its_level_and_leaves_the_rest(
         let mover = state(&frame, "mover_left");
         near(mover.pan, 0.2 + 0.8 * level, &what);
         near(mover.tilt, 0.4, &what);
-        // No intensity is set on the movers, and their colour wheel changes slot half-way.
         near(mover.intensity, 0.5, &what);
         near_colour(mover.colour, if level < 0.5 { RED } else { BLUE }, &what);
     }
@@ -417,8 +363,6 @@ fn an_ltp_overlay_blends_each_property_it_sets_by_its_level_and_leaves_the_rest(
 fn an_htp_overlay_mixes_colour_by_its_share_of_the_light_and_owns_the_rest_from_the_start() {
     let mut engine = playing("base");
     send(&mut engine, 0.0, 4, "base", vec![overlay("hit", 0.0, 8.0)]);
-    // Beats into the hit, its intensity 1 - e/8 against the base's 0.5, and its share of the
-    // brighter of the two, which carries its white on the mixing washes.
     for (elapsed, intensity, share) in [
         (0.0, 1.0, 1.0),
         (2.0, 0.75, 1.0),
@@ -431,12 +375,10 @@ fn an_htp_overlay_mixes_colour_by_its_share_of_the_light_and_owns_the_rest_from_
         let wash = state(&frame, "wash_left_outer");
         near(wash.intensity, intensity, &what);
         near_colour(wash.colour, pink(share), &what);
-        // Position and the wheel follow the envelope, which is full, whatever the light.
         let mover = state(&frame, "mover_left");
         near(mover.pan, 1.0, &what);
         near_colour(mover.colour, WHITE, &what);
     }
-    // Over a dark base the hit is the only light, so its colour holds as it fades.
     let mut engine = playing("dark");
     send(&mut engine, 0.0, 4, "dark", vec![overlay("hit", 0.0, 8.0)]);
     render(&mut engine, 4.0);
@@ -460,7 +402,6 @@ fn heads_and_gobos_under_an_htp_overlay_never_flip_with_a_dimmer_chase_below() {
         let rendered = engine.render_at(frame as f64 / FRAME_RATE_HZ).unwrap();
         let mover = state(&rendered, "mover_left");
         let what = format!("frame {frame}");
-        // The chase steps the base between 0.1 and 0.9 around the beam's 0.5.
         assert!(mover.intensity == 0.5 || mover.intensity == 0.9, "{what}");
         near(mover.pan, 0.8, &what);
         near(mover.tilt, 0.6, &what);
@@ -486,7 +427,6 @@ fn an_htp_strobe_starts_on_its_own_first_frame_and_flashes_in_step_over_uneven_b
         ..(at(6.0) * FRAME_RATE_HZ) as usize)
         .map(|frame| engine.render_at(frame as f64 / FRAME_RATE_HZ).unwrap())
         .collect();
-    // Its 0.3 is a small share over 0.8, and it still strobes from its first frame.
     near(
         state(&frames[0], "wash_right_outer").strobe_hz,
         5.0,
@@ -537,6 +477,31 @@ fn past_the_burst_cap_an_overlay_strobe_is_refused_and_the_base_plays_on() {
 }
 
 #[test]
+fn at_the_strobe_gate_an_uncapped_overlay_strobe_is_refused_and_the_base_plays_on() {
+    let mut engine = playing("base");
+    send(&mut engine, 0.0, 4, "base", vec![overlay("tint", 0.0, 8.0)]);
+    let frame = render(&mut engine, 4.0);
+    near(
+        state(&frame, "wash_left_outer").strobe_hz,
+        4.0,
+        "above the gate",
+    );
+    engine
+        .apply(
+            at(4.5),
+            &Command::SetIntensity {
+                level: STROBE_GATE_INTENSITY,
+            },
+        )
+        .unwrap();
+    let frame = render(&mut engine, 4.5);
+    let wash = state(&frame, "wash_left_outer");
+    near(wash.strobe_hz, 0.0, "at the gate");
+    near(wash.intensity, 0.5, "at the gate");
+    near_colour(wash.colour, RED, "at the gate");
+}
+
+#[test]
 fn blackout_darkens_an_overlay_with_everything_else() {
     let mut engine = playing("base");
     send(
@@ -570,7 +535,6 @@ fn higher_priority_composes_later_and_ties_keep_list_order() {
         (vec![row("three_quarters", 1), row("quarter", 0)], 0.75),
         (vec![row("quarter", 0), row("three_quarters", 0)], 0.75),
         (vec![row("three_quarters", 0), row("quarter", 0)], 0.25),
-        // Banks rank nothing: the director's priorities do.
         (
             vec![row("dip/three_quarters_dip", 0), row("hit/quarter_hit", 0)],
             0.25,
@@ -594,7 +558,6 @@ fn higher_priority_composes_later_and_ties_keep_list_order() {
 
 #[test]
 fn envelopes_attack_from_the_first_frame_release_from_the_level_reached_and_then_drop() {
-    // (attack, release, length) and (beats after the start, level).
     let cases: [(_, &[(f64, f64)]); 3] = [
         (
             (2.0, 2.0, 4.0),
@@ -608,12 +571,10 @@ fn envelopes_attack_from_the_first_frame_release_from_the_level_reached_and_then
                 (6.0, 0.0),
             ],
         ),
-        // Release 0 is a snap: full up to the end, gone on it.
         (
             (0.0, 0.0, 4.0),
             &[(0.0, 1.0), (3.75, 1.0), (4.0, 0.0), (5.0, 0.0)],
         ),
-        // An attack longer than the row releases from where it got to.
         (
             (8.0, 2.0, 4.0),
             &[(0.0, 0.0), (2.0, 0.25), (4.0, 0.5), (5.0, 0.25), (6.0, 0.0)],
@@ -637,7 +598,6 @@ fn envelopes_attack_from_the_first_frame_release_from_the_level_reached_and_then
             }
         }
     }
-    // A pre-roll row received late starts mid-way and attacks from its first frame.
     let mut engine = playing("dark");
     let late = OverlayCue {
         attack_beats: 2.0,
@@ -684,8 +644,6 @@ fn a_replaced_cue_releases_its_overlays_from_the_level_they_reached() {
 
 #[test]
 fn a_new_overlay_composes_above_one_still_releasing() {
-    // A repeating row cannot overlap itself (its length and release fit its period), so the
-    // overlap comes from a replaced cue releasing under the next cue's row.
     let mut engine = playing("dark");
     send(
         &mut engine,
@@ -709,7 +667,6 @@ fn a_new_overlay_composes_above_one_still_releasing() {
     near(state(&frame, "wash_left_outer").intensity, 0.25, "on top");
 }
 
-/// A one-channel zoom from 10 to 40 degrees whose DMX default sits mid-range.
 fn zoom_head() -> wire::FixtureProfile {
     wire::FixtureProfile {
         profile_id: String::new(),
@@ -732,7 +689,6 @@ fn zoom_head() -> wire::FixtureProfile {
     }
 }
 
-/// The stage with a scanning head whose Gobo1 has named ChannelSets, and two zoom heads.
 fn stage_with_beams() -> FixtureRig {
     let mut definition = support::stage_definition();
     let added = support::definition(&json!({"fixtures": [
@@ -792,8 +748,6 @@ fn an_overlay_fades_numbers_in_from_below_or_the_gdtf_default_and_steps_the_rest
         let states = &frame.fixture_properties_before_strobe;
         let what = format!("beat {beat}");
         let stepped = level >= 0.5;
-        // A continuous channel fades from below, or from its GDTF default where the base
-        // sets nothing.
         assert_eq!(
             attribute(&states["zoom_set"], "Zoom"),
             number(10.0 + 30.0 * level),
@@ -805,7 +759,6 @@ fn an_overlay_fades_numbers_in_from_below_or_the_gdtf_default_and_steps_the_rest
         } else {
             assert_eq!(free, None, "{what}");
         }
-        // A wheel channel and a preset step over half-way up the envelope.
         assert_eq!(
             attribute(&states[&mover], "Gobo1"),
             number(if stepped { 128.0 } else { 0.0 }),
@@ -884,7 +837,6 @@ fn overrides_and_masters_compose_above_every_overlay() {
     );
 }
 
-/// A Static-mode look: an override above the specials.
 fn static_look(target: Target, values: PropertyValues) -> LightingOverride {
     LightingOverride {
         id: "static".into(),
@@ -921,7 +873,6 @@ fn a_failing_overlay_stops_alone_and_never_darkens_the_show() {
     for beat in [6.5, 7.0, 9.0] {
         let frame = render(&mut engine, beat);
         let what = format!("beat {beat}");
-        // The base shows where the broken overlay was; the other overlay plays on.
         near(state(&frame, "wash_left_outer").intensity, 0.5, &what);
         near(state(&frame, "wash_right_outer").intensity, 1.0, &what);
         assert_eq!(engine.active_overlay_count(), 1, "{what}");
@@ -1000,7 +951,6 @@ fn a_dipped_head_moves_in_black_before_the_cue_and_a_lit_wheel_holds_its_slot() 
     let (dipped, lit) = (Slots::wheel("mover_left"), Slots::wheel("mover_right"));
     let mut engine = playing("before");
     send(&mut engine, 0.0, 8, "after", vec![dip(2.0, 1.0)]);
-    // Before the dip, on its first frame, and half-way down its attack: still lit.
     for beat in [5.0, 6.0, 6.5] {
         let frame = render(&mut engine, beat);
         let what = format!("beat {beat}");
@@ -1011,8 +961,6 @@ fn a_dipped_head_moves_in_black_before_the_cue_and_a_lit_wheel_holds_its_slot() 
         assert_eq!(attribute(head, "Gobo1"), number(0.0), "{what}");
         assert!(dipped.is_low(&frame), "{what}: red");
     }
-    // Dark: the next cue's first look at its start, at intensity 0. The undipped head stays
-    // lit and its wheel holds its slot.
     for beat in [7.0, 7.75] {
         let frame = render(&mut engine, beat);
         let what = format!("beat {beat}");
@@ -1026,7 +974,6 @@ fn a_dipped_head_moves_in_black_before_the_cue_and_a_lit_wheel_holds_its_slot() 
         near(state(&frame, "mover_right").pan, 0.2, &what);
         assert!(lit.is_low(&frame), "{what}: lit wheel still red");
     }
-    // On the one the dipped head has nothing left to move.
     let frame = render(&mut engine, 8.0);
     let head = state(&frame, "mover_left");
     near(head.intensity, 1.0, "the one");
@@ -1045,12 +992,10 @@ fn a_dark_head_moves_at_full_speed_under_the_slew_limit() {
     for frame in 0..(at(6.0) * FRAME_RATE_HZ) as usize {
         engine.render_at(frame as f64 / FRAME_RATE_HZ).unwrap();
     }
-    // Its first dark frame holds the whole move, where calm's slew limit allows a fraction.
     let frame = render(&mut engine, 6.0);
     let head = state(&frame, "mover_left");
     near(head.intensity, 0.0, "dark");
     near(head.pan, 0.9, "arrived");
-    // Lit heads keep the limit: the undipped one cannot jump to its new look on the one.
     for frame in (at(6.1) * FRAME_RATE_HZ) as usize..=(at(8.0) * FRAME_RATE_HZ) as usize {
         engine.render_at(frame as f64 / FRAME_RATE_HZ).unwrap();
     }
@@ -1075,8 +1020,6 @@ fn move_in_black_renders_the_entry_on_the_bar_it_starts() {
 
 #[test]
 fn move_in_black_follows_the_dip_through_a_late_beat_and_a_bar_phase_correction() {
-    // A late beat pulls the grid back mid-dip; a bar-phase correction pushes it forward. The
-    // cue's start moves with the grid, and the dark head stays on its new look throughout.
     for (index, bar_phase) in [(7, None), (7, Some(0))] {
         let mut engine = playing("before");
         send(&mut engine, 0.0, 8, "after", vec![dip(2.0, 0.0)]);
@@ -1120,7 +1063,6 @@ fn a_dip_that_ends_before_the_next_cue_moves_nothing() {
     let frame = render(&mut engine, 5.5);
     let head = state(&frame, "mover_left");
     near(head.intensity, 0.0, "dipped");
-    // The head comes back lit inside this section, so it keeps this section's look.
     near(head.pan, 0.2, "held in the section");
     assert_eq!(attribute(head, "Gobo1"), number(0.0));
 }
@@ -1131,15 +1073,12 @@ fn a_held_head_keeps_its_look_where_the_entry_or_an_override_has_its_own() {
         duration_beats: 4.0,
     };
     let cases = [
-        // The entry keeps the running loop, or crossfades from the look before.
         (cue(8, "before", Transition::Cut, vec![dip(2.0, 0.0)]), None),
         (cue(8, "after", crossfade, vec![dip(2.0, 0.0)]), None),
-        // The entry sets nothing on this head.
         (
             cue(8, "after_right", Transition::Cut, vec![dip(2.0, 0.0)]),
             None,
         ),
-        // An override lights the held head: it must not move in light.
         (
             cue(8, "after", Transition::Cut, vec![dip(2.0, 0.0)]),
             Some(0.4),
@@ -1172,7 +1111,6 @@ fn a_held_head_keeps_its_look_where_the_entry_or_an_override_has_its_own() {
     }
 }
 
-/// Every frame's DMX for a scene with HTP and LTP overlays, a release and a dip before a cue.
 fn scene_dmx() -> Vec<BTreeMap<u16, Vec<u8>>> {
     let mut engine = playing("before");
     send(
@@ -1208,8 +1146,7 @@ fn the_same_cues_render_the_same_dmx() {
 
 #[test]
 fn eight_heavy_overlays_render_every_frame_each_inside_its_own_instruction_budget() {
-    // About 30k Lua instructions each, so together far past one script's 100k budget, which
-    // stays per script (B1). Overlay k lights strip cell k.
+    // About 30k instructions each: together past one script's 100k budget, which is per script.
     let heavy = |index: usize| {
         format!(
             "return {{render=function(ctx) local x = 0 for i = 1, 10000 do x = x + i % 7 end \

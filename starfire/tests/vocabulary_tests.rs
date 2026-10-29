@@ -1,5 +1,3 @@
-//! Fixture vocabulary: the software strobe gate, wheel colour blends, gobo slots and darkness.
-
 mod support;
 
 use std::fs;
@@ -12,9 +10,7 @@ use starfire::engine::Engine;
 use starfire::fixtures::FixtureRig;
 use starfire::model::{Command, Rgb, Transition};
 use starfire::protocol::wire;
-use starfire::script::AutoloopCatalog;
 
-// The live render rate.
 const FRAMES_PER_SECOND: usize = 40;
 
 fn frame_time(frame: usize) -> f64 {
@@ -27,31 +23,12 @@ fn engine(rig: FixtureRig, scripts: &[(&str, &str)]) -> Engine {
 
 fn beat(engine: &mut Engine, at: f64, beat_index: u64, bar_phase: Option<u32>, bpm: f64) {
     engine
-        .apply(
-            at,
-            &Command::Beat {
-                beat_index,
-                bar_phase,
-                beats_per_bar: 4,
-                bpm,
-                features: None,
-            },
-        )
+        .apply(at, &support::beat(beat_index, bar_phase, bpm))
         .unwrap();
 }
 
-/// An engine with one beat at 0 s, so its grid starts at 0 at `bpm`.
 fn engine_at(rig: FixtureRig, scripts: &[(&str, &str)], bpm: f64) -> Engine {
-    let directory = tempfile::tempdir().unwrap();
-    fs::create_dir(directory.path().join("test")).unwrap();
-    for (name, source) in scripts {
-        fs::write(
-            directory.path().join("test").join(format!("{name}.lua")),
-            source,
-        )
-        .unwrap();
-    }
-    let catalog = AutoloopCatalog::load(directory.path()).unwrap();
+    let catalog = support::directory_catalog("test", scripts).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     beat(&mut engine, 0.0, 0, None, bpm);
     engine
@@ -59,23 +36,10 @@ fn engine_at(rig: FixtureRig, scripts: &[(&str, &str)], bpm: f64) -> Engine {
 
 fn select(engine: &mut Engine, at: f64, name: &str, transition: Transition) {
     engine
-        .apply(
-            at,
-            &Command::Select {
-                bank: "test".into(),
-                autoloop: name.into(),
-                transition,
-                palette: "techno".into(),
-            },
-        )
+        .apply(at, &support::select("test", name, transition))
         .unwrap();
 }
 
-fn rig(spec: Value) -> FixtureRig {
-    support::rig(spec)
-}
-
-// 1 -> 10 Hz over 16 beats (8 s at 120 bpm), then held at 10 Hz.
 const STROBE_SWEEP: &str = r#"return {render=function(ctx)
     local rate = 1 + 9 * math.min(1, ctx.autoloop_elapsed_beats / 16)
     return sf.scene {sf.dimmer(sf.all(), 1), sf.colour(sf.all(), sf.rgb(1, 1, 1)),
@@ -88,10 +52,9 @@ fn dimmers(count: usize) -> FixtureRig {
                    "universe": 0, "address": index + 1})
         })
         .collect();
-    rig(json!({ "fixtures": fixtures }))
+    support::rig(json!({ "fixtures": fixtures }))
 }
 
-/// Whether each dimmer is lit on each frame of `frames`.
 fn lit(engine: &mut Engine, frames: std::ops::Range<usize>, cells: usize) -> Vec<Vec<bool>> {
     frames
         .map(|frame| {
@@ -104,7 +67,6 @@ fn lit(engine: &mut Engine, frames: std::ops::Range<usize>, cells: usize) -> Vec
         .collect()
 }
 
-/// Gate openings (dark to lit) in each second-long window of frames.
 fn openings_per_second(engine: &mut Engine, seconds: usize) -> Vec<usize> {
     let lit: Vec<bool> = lit(engine, 0..seconds * FRAMES_PER_SECOND, 1)
         .into_iter()
@@ -127,7 +89,6 @@ fn a_strobe_rate_sweep_never_gates_faster_than_the_rate_cap() {
         select(&mut engine, 0.0, "sweep", Transition::Cut);
         let counts = openings_per_second(&mut engine, 12);
         let busiest = counts.iter().copied().max().unwrap();
-        // The held rate fills a whole second with exactly cap cycles.
         assert_eq!(busiest, cap as usize, "{counts:?}");
         assert_eq!(*counts.last().unwrap(), cap as usize, "{counts:?}");
     }
@@ -153,7 +114,6 @@ fn every_flash_at_a_rate_dividing_the_frame_rate_lasts_two_frames() {
             START_FRAME..START_FRAME + 4 * FRAMES_PER_SECOND,
             1,
         );
-        // 50 ms on, the rest of the cycle off, cycles on the beat grid from 0 s.
         for (frame, cells) in (START_FRAME..).zip(&frames) {
             assert_eq!(
                 cells[0],
@@ -166,8 +126,6 @@ fn every_flash_at_a_rate_dividing_the_frame_rate_lasts_two_frames() {
 
 #[test]
 fn flashes_at_beat_divisions_start_on_the_beat_grid_and_follow_a_bar_phase_correction() {
-    // 60 bpm, so a beat is 40 frames. Beats arrive on time until index 5 comes 0.3 s late as bar
-    // phase 2, moving the grid on by 1.3 beats; its next bar line is grid beat 8, at 7.3 s.
     let beats = [
         (40, 1, None),
         (80, 2, None),
@@ -209,7 +167,6 @@ fn flashes_at_beat_divisions_start_on_the_beat_grid_and_follow_a_bar_phase_corre
     }
 }
 
-// Each dimmer starts strobing one frame after the one before it, at 10 Hz.
 const STAGGERED_STROBE: &str = r#"return {render=function(ctx)
     return sf.each(sf.all(), function(cell, index)
         local started = ctx.autoloop_elapsed_beats >= (index - 1) * 0.05
@@ -221,8 +178,6 @@ fn cells_at_one_rate_flash_together_whenever_each_started() {
     let mut engine = engine(dimmers(4), &[("staggered", STAGGERED_STROBE)]);
     select(&mut engine, 0.0, "staggered", Transition::Cut);
     let frames = lit(&mut engine, 0..2 * FRAMES_PER_SECOND, 4);
-    // The first cell's burst opens at frame 0; the others join its gate as they start, by
-    // frame 4 at the latest.
     for (frame, cells) in frames.iter().enumerate().skip(4) {
         assert!(
             cells.iter().all(|&cell| cell == (frame % 4 < 2)),
@@ -231,7 +186,6 @@ fn cells_at_one_rate_flash_together_whenever_each_started() {
     }
 }
 
-// Strobes for 4 s (8 beats at 120 bpm), then holds steady.
 const STROBE_THEN_STEADY: &str = r#"return {render=function(ctx)
     local strobing = ctx.autoloop_elapsed_beats < 8
     return sf.scene {sf.dimmer(sf.all(), 1), strobing and sf.strobe(sf.all(), 10) or nil} end}"#;
@@ -253,7 +207,6 @@ fn a_strobe_past_its_burst_cap_stays_dark_until_it_is_no_longer_asked_for() {
     assert!(second(5).iter().all(|&lit| lit));
 }
 
-/// A spec's rig with synthetic compiled test profiles added under the names its fixtures use.
 fn rig_with(spec: Value, profiles: &[(&str, wire::FixtureProfile)]) -> FixtureRig {
     let mut definition = support::definition(&spec);
     for (name, profile) in profiles {
@@ -274,7 +227,6 @@ fn solid(colour: &str) -> String {
 
 #[test]
 fn a_wheel_only_cell_changes_slot_half_way_through_a_fade_while_mixing_cells_blend() {
-    // wheel_spinner's Color1 slots: Red from 64, Blue from 192.
     let (red, blue) = (("red", 64, 1.0), ("blue", 192, 0.0));
     for (from, to) in [(red, blue), (blue, red)] {
         let rig = rig_with(
@@ -290,7 +242,6 @@ fn a_wheel_only_cell_changes_slot_half_way_through_a_fade_while_mixing_cells_ble
         let mut engine = engine(rig, &[("red", &red_loop), ("blue", &blue_loop)]);
         select(&mut engine, 0.0, from.0, Transition::Cut);
         engine.render_at(0.0).unwrap();
-        // 120 bpm: a 4-beat crossfade from 1 s reaches half-way at 2 s.
         select(
             &mut engine,
             1.0,
@@ -320,8 +271,6 @@ fn a_wheel_only_cell_changes_slot_half_way_through_a_fade_while_mixing_cells_ble
     }
 }
 
-/// A one-channel Gobo1 whose ChannelSets are `sets` (name, selects a wheel slot), evenly spaced
-/// in DMX order. A set that selects no slot stands for a shake or spin range packed into Gobo1.
 fn gobo_wheel(sets: &[(&str, bool)]) -> wire::FixtureProfile {
     let step = 256 / sets.len() as u32;
     let sets = sets
@@ -337,7 +286,6 @@ fn gobo_wheel(sets: &[(&str, bool)]) -> wire::FixtureProfile {
             },
             physical_from: index as f64,
             physical_to: index as f64,
-            // GDTF's default slot colour, as Autolux compiles a gobo slot without one.
             wheel_slot_colour: slot.then_some(wire::CieColor {
                 x: 0.3127,
                 y: 0.329,
@@ -368,8 +316,6 @@ fn gobo_wheel(sets: &[(&str, bool)]) -> wire::FixtureProfile {
     }
 }
 
-/// Gobo wheels at DMX 1..3: Open first with a shake range packed in after the slots, an `oPEN`
-/// slot in second place, and no open slot behind a spin range; an RGB fixture at 4..6.
 fn gobo_rig() -> FixtureRig {
     rig_with(
         json!({"fixtures": [
@@ -441,13 +387,11 @@ fn sf_gobo_sends_a_validated_preset_to_every_member_with_a_gobo_wheel() {
         gobo_rig(),
         &[("two", &two), ("four", &four), ("negative", &negative)],
     );
-    // Lines, Lines, Tunnel and Dots, Lines, Tunnel.
     for (name, expected) in [("two", [102, 170, 192]), ("four", [51, 170, 192])] {
         select(&mut engine, 0.0, name, Transition::Cut);
         let frame = engine.render_at(0.0).unwrap();
         assert_eq!(frame.script_error, None);
         assert_eq!(frame.dmx_frames_by_universe[&0][..3], expected, "{name}");
-        // The RGB fixture without a gobo wheel takes the dimmer only.
         assert!(
             frame.fixture_properties_before_strobe["plain"]
                 .attributes
@@ -466,9 +410,6 @@ fn sf_gobo_sends_a_validated_preset_to_every_member_with_a_gobo_wheel() {
     );
 }
 
-/// Every compiled mode the generic test data carries (the stage's patched modes are the shipped
-/// fixture types), plus wheel_spinner without its black slot, whose gate shutter is then its
-/// only way to go dark.
 fn test_data_profiles() -> Vec<wire::FixtureProfile> {
     let read =
         |path: PathBuf| wire::RigDefinition::decode(fs::read(path).unwrap().as_slice()).unwrap();
@@ -521,7 +462,6 @@ fn is_black_slot(set: &wire::ChannelSet) -> bool {
         .is_some_and(|colour| colour.luminance == 0.0)
 }
 
-/// A shutter function with no ChannelSets from DMX 0: 0 closes it.
 fn is_gate(function: &wire::ChannelFunction) -> bool {
     function
         .attribute
@@ -531,7 +471,6 @@ fn is_gate(function: &wire::ChannelFunction) -> bool {
         && function.dmx_from == 0
 }
 
-/// How a mode can go dark, read from its functions.
 #[derive(Debug, PartialEq)]
 enum DarkPath {
     Dimmer,
@@ -558,9 +497,6 @@ fn dark_path(mode: &wire::DmxMode) -> Option<DarkPath> {
     }
 }
 
-/// Whether a frame can emit light: dimmers and emitters must not all be at zero, a wheel must
-/// not sit on a black slot and, where a gate shutter is the only dark path, it must not be
-/// closed. Elsewhere a shutter's DMX 0 can mean open, so it is not read.
 fn emits_light(mode: &wire::DmxMode, path: &DarkPath, frame: &[u8]) -> bool {
     let values = |test: fn(&wire::ChannelFunction) -> bool| -> Vec<u32> {
         mode.channels
@@ -646,7 +582,6 @@ fn intensity_zero_is_dark_on_every_test_data_profile() {
 
 #[test]
 fn colour_and_gobo_wheels_change_together_half_way_through_a_fade() {
-    // wheel_spinner's Color1 at DMX 1 (Red 64, Blue 192) and a gobo wheel at DMX 4.
     let mut wheels = support::compiled_profile("wheel_spinner#3ch", "wheels");
     let mut gobo = gobo_wheel(&[("Open", true), ("Dots", true), ("Lines", true)])
         .mode
@@ -669,7 +604,6 @@ fn colour_and_gobo_wheels_change_together_half_way_through_a_fade() {
     let red_dots = look("1, 0, 0", "sf.gobo(sf.all(), 1)");
     let blue_lines = look("0, 0, 1", "sf.gobo(sf.all(), 2)");
     let blue_open = look("0, 0, 1", "nil");
-    // (colour DMX, gobo DMX) before and from half-way; an unset gobo rests on Open at 0.
     for (from, to, before, after) in [
         (
             ("red_dots", &red_dots),
@@ -696,7 +630,6 @@ fn colour_and_gobo_wheels_change_together_half_way_through_a_fade() {
         );
         select(&mut engine, 0.0, from.0, Transition::Cut);
         engine.render_at(0.0).unwrap();
-        // 120 bpm: a 4-beat crossfade from 1 s reaches half-way at 2 s.
         select(
             &mut engine,
             1.0,
@@ -718,9 +651,7 @@ fn colour_and_gobo_wheels_change_together_half_way_through_a_fade() {
     }
 }
 
-/// Requested colour -> wheel_spinner#3ch Color1 DMX as the encode picks the slot, ties and
-/// near-ties included. autolux/tests/test_palette_variants.py holds Python's copy of the rule
-/// (palettes.nearest_slot) to this same table.
+/// autolux/tests/test_palette_variants.py holds palettes.nearest_slot to this same table.
 const WHEEL_SPINNER_PICKS: [([f64; 3], u8); 9] = [
     ([1.0, 0.0, 0.0], 64),
     ([1.0, 0.5, 0.0], 64),
@@ -756,9 +687,7 @@ fn a_wheel_only_cell_takes_the_nearest_slot_python_predicts() {
     }
 }
 
-/// Requested colour -> the stage Spot's Color1 DMX (Open 0, Red 32, Blue 111, Yellow 128,
-/// Magenta 160, Amber 192, Cyan 224). Only white lands on Open; a pale colour takes its nearest
-/// coloured slot. autolux/tests/test_palette_variants.py holds palettes.nearest_slot to it.
+/// autolux/tests/test_palette_variants.py holds palettes.nearest_slot to this same table.
 const SPOT_PICKS: [([f64; 3], u8); 9] = [
     ([1.0, 0.82, 0.6], 192),
     ([1.0, 1.0, 1.0], 0),
@@ -772,13 +701,12 @@ const SPOT_PICKS: [([f64; 3], u8); 9] = [
 ];
 
 fn spot() -> FixtureRig {
-    rig(
+    support::rig(
         json!({"fixtures": [{"fixture_uuid": "spot", "universe": 0, "address": 1,
         "profile": "chauvet_intimidator_spot_110_12ch"}]}),
     )
 }
 
-/// The Spot's Color1 is its sixth channel.
 const SPOT_COLOUR: usize = 5;
 
 #[test]
@@ -815,7 +743,6 @@ fn sf_white_is_a_fixed_palette_slot_that_opens_the_wheel_and_a_blend_snaps_to_it
             blue: 1.0
         }
     );
-    // The white slot ignores palette changes: mid palette crossfade it is still full white.
     engine
         .apply(
             0.0,
@@ -830,7 +757,6 @@ fn sf_white_is_a_fixed_palette_slot_that_opens_the_wheel_and_a_blend_snaps_to_it
         1.0
     );
     assert_eq!(frame.dmx_frames_by_universe[&0][SPOT_COLOUR], 0);
-    // 120 bpm: a 4-beat crossfade from 1 s reaches half-way at 2 s; Open, then Amber.
     select(
         &mut engine,
         1.0,

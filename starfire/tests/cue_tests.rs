@@ -1,8 +1,7 @@
-//! Section cues on a simulated clock: 120 bpm, four beats to the bar, a beat every 0.5 s.
-
 mod support;
 
 use prost::Message;
+use starfire::clock::ReceivedBeat;
 use starfire::cue::{
     CueSample, CueTimeline, InstanceState, MAX_ACTIVE_OVERLAYS, MAX_OVERLAYS, MAX_PENDING_CUES,
     MAX_ROTATION,
@@ -13,14 +12,12 @@ use starfire::model::{
     SectionIntent, Transition,
 };
 use starfire::protocol::{ClientMessage, MAX_MESSAGE_BYTES, apply_command, wire};
-use starfire::script::AutoloopCatalog;
 
 const SECONDS_PER_BEAT: f64 = 0.5;
 const RIG: &str = r#"{"schema_version":1,"fixtures":[
     {"fixture_uuid":"left","profile":"generic_rgb","universe":0,"address":1},
     {"fixture_uuid":"right","profile":"generic_rgb","universe":0,"address":4}],
     "groups":{"wash":["left","right"]}}"#;
-/// Encodes the section context into colours: beat counts over 1000, nil as 1.
 const PROBE: &str = r#"
 local INTENTS = {atmospheric = 0.2, breakdown = 0.4, buildup = 0.6, drop = 0.8}
 local function beats(value) return value and value / 1000 or 1 end
@@ -33,7 +30,6 @@ return {render = function(ctx)
         INTENTS[ctx.next_intent] or 0, ctx.seed / 4294967296)),
   }
 end}"#;
-/// Encodes the music fields: levels halved, nil as 1.
 const MUSIC: &str = r#"
 local function level(value) return value and value / 2 or 1 end
 return {render = function(ctx)
@@ -55,20 +51,8 @@ fn engine() -> Engine {
 }
 
 fn engine_with(scripts: &[(&str, &str)]) -> Engine {
-    let catalog = AutoloopCatalog::from_definitions(
-        &scripts
-            .iter()
-            .map(|(name, source)| wire::AutoloopDefinition {
-                autoloop_id: (*name).into(),
-                bank: "test".into(),
-                lua_source: (*source).into(),
-                intensity_htp: false,
-            })
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
     let rig = support::rig(serde_json::from_str(RIG).unwrap());
-    Engine::new(rig, catalog, support::palettes()).unwrap()
+    Engine::new(rig, support::test_catalog(scripts), support::palettes()).unwrap()
 }
 
 fn at(beat: f64) -> f64 {
@@ -77,35 +61,17 @@ fn at(beat: f64) -> f64 {
 
 fn beat_at(engine: &mut Engine, seconds: f64, index: u64, bar_phase: u32) {
     engine
-        .apply(
-            seconds,
-            &Command::Beat {
-                beat_index: index,
-                bar_phase: Some(bar_phase),
-                beats_per_bar: 4,
-                bpm: 120.0,
-                features: None,
-            },
-        )
+        .apply(seconds, &support::beat(index, Some(bar_phase), 120.0))
         .unwrap();
 }
 
-/// The beat arriving on time: index n at beat n.
 fn beat(engine: &mut Engine, index: u64) {
     beat_at(engine, at(index as f64), index, (index % 4) as u32);
 }
 
 fn select(engine: &mut Engine, seconds: f64, name: &str) {
     engine
-        .apply(
-            seconds,
-            &Command::Select {
-                bank: "test".into(),
-                autoloop: name.into(),
-                transition: Transition::Cut,
-                palette: "techno".into(),
-            },
-        )
+        .apply(seconds, &support::select("test", name, Transition::Cut))
         .unwrap();
 }
 
@@ -143,12 +109,7 @@ fn overlay(begin_beats: f64, length_beats: f64, every_bars: u32, release_beats: 
 }
 
 fn send(engine: &mut Engine, seconds: f64, cue: SectionCue) -> anyhow::Result<()> {
-    engine.apply(
-        seconds,
-        &Command::CueSection {
-            value: Box::new(cue),
-        },
-    )
+    engine.apply(seconds, &support::cue(cue))
 }
 
 struct Probe {
@@ -207,7 +168,6 @@ fn a_cue_activates_on_the_first_frame_at_its_start_beat() {
     near(before.section_elapsed, 7.95);
     assert_eq!(before.next_intent, 0.8);
     near(before.until_next, 0.05);
-    // No beat message: the extrapolated clock reaches the start.
     let started = probe(&mut engine, 8.0);
     assert_eq!(started.autoloop.as_deref(), Some("probe"));
     near(started.section_elapsed, 0.0);
@@ -245,10 +205,8 @@ fn a_bar_phase_correction_moves_a_pending_cue_with_the_grid() {
         section(8, SectionIntent::Drop, &[("probe", 16)]),
     )
     .unwrap();
-    // Index 5 is said to be phase 2: the grid jumps forward a beat, so index 8 is grid 9.
     beat_at(&mut engine, at(5.0), 5, 2);
     near(probe(&mut engine, 5.0).until_next, 3.0);
-    // A beat earlier in time the grid reads 8, which the cue no longer is.
     let frame = engine.render_at(at(7.0)).unwrap();
     assert_eq!(frame.beat_position, 8.0);
     assert_eq!(frame.active_autoloop.as_deref(), Some("other"));
@@ -264,7 +222,6 @@ fn a_late_cue_starts_on_the_next_bar_line_with_its_rotation_counted_from_the_tru
     select(&mut engine, 0.0, "other");
     let mut late = section(4, SectionIntent::Drop, &[("probe", 16)]);
     late.overlays = vec![overlay(0.0, 2.0, 0, 0.0)];
-    // Received at beat 5, a beat after its start: not mid-bar, on beat 8.
     send(&mut engine, at(5.0), late).unwrap();
     let waiting = probe(&mut engine, 7.9);
     assert_eq!(waiting.autoloop.as_deref(), Some("other"));
@@ -274,7 +231,6 @@ fn a_late_cue_starts_on_the_next_bar_line_with_its_rotation_counted_from_the_tru
     assert_eq!(started.autoloop.as_deref(), Some("probe"));
     near(started.section_elapsed, 4.0);
     near(started.autoloop_elapsed, 4.0);
-    // The entry hit fires on the bar line, for its whole length.
     assert_eq!(engine.active_overlay_count(), 1);
     probe(&mut engine, 9.9);
     assert_eq!(engine.active_overlay_count(), 1);
@@ -317,7 +273,6 @@ fn a_replacement_drops_pending_cues_at_or_after_its_start_and_releases_their_pre
     assert_eq!(engine.active_overlay_count(), 0);
     probe(&mut engine, 8.0);
     assert_eq!(engine.active_overlay_count(), 1);
-    // The decoder changes its mind: the section at 16 is a buildup after all.
     send(
         &mut engine,
         at(10.0),
@@ -358,7 +313,6 @@ fn the_latest_of_several_cues_passed_in_one_frame_after_a_resume_wins() {
     engine
         .apply(at(1.0), &Command::SetPaused { paused: true })
         .unwrap();
-    // Beats keep arriving while paused; the frozen clock only follows them on the next beat.
     for index in 2..14 {
         beat(&mut engine, index);
     }
@@ -385,7 +339,6 @@ fn section_elapsed_stays_at_zero_when_a_late_beat_re_anchors_before_the_start() 
         section(4, SectionIntent::Drop, &[("probe", 1), ("other", 1)]),
     )
     .unwrap();
-    // The clock runs on past beat 4 before beat 3 arrives late and pulls it back.
     let started = probe(&mut engine, 4.2);
     near(started.section_elapsed, 0.2);
     beat_at(&mut engine, at(4.3), 3, 3);
@@ -520,7 +473,6 @@ fn a_fifth_pending_cue_is_refused_and_changes_nothing() {
     let fifth = section(100, SectionIntent::Drop, &[("probe", 1)]);
     assert!(send(&mut engine, at(0.5), fifth).is_err());
     assert_eq!(engine.pending_cue_count(), MAX_PENDING_CUES);
-    // A cue before them all supersedes every one.
     send(
         &mut engine,
         at(0.5),
@@ -639,7 +591,6 @@ fn context_fields_are_nil_until_there_is_something_to_say() {
         },
         "pending: no drop strength"
     );
-    // A beat without features clears them: a new track never shows the old one's.
     beat(&mut engine, 1);
     let started = colours(&engine.render_at(at(4.0)).unwrap());
     assert_eq!(
@@ -862,19 +813,12 @@ fn a_wire_cue_resolves_autoloop_ids_and_needs_an_intent() {
     near(cleared.section_elapsed, 0.5);
 }
 
-/// The three numbers `expression` yields, through the left cell's colour.
 fn lua(expression: &str, context: RenderContext) -> anyhow::Result<[f64; 3]> {
     let source = format!(
         "return {{render=function(ctx) local r, g, b = {expression}
          return {{sf.colour(sf.fixture('left'), sf.rgb(r, g, b))}} end}}"
     );
-    let catalog = AutoloopCatalog::from_definitions(&[wire::AutoloopDefinition {
-        autoloop_id: "helpers".into(),
-        bank: "test".into(),
-        lua_source: source,
-        intensity_htp: false,
-    }])
-    .unwrap();
+    let catalog = support::test_catalog(&[("helpers", &source)]);
     let rig = support::rig(serde_json::from_str(RIG).unwrap());
     let palettes = support::palettes();
     let mut script = catalog
@@ -930,7 +874,6 @@ fn sf_beat_strobe_hz_takes_the_fastest_division_the_engine_lets_through() {
         .unwrap()[0]
             * 10.0
     };
-    // Wild's 8 Hz cap: at 128 bpm sixteenths (8.53 Hz) would be clamped off the grid.
     assert!((rate(128.0, 8.0, "4") - 128.0 / 60.0 * 2.0).abs() < 1e-12);
     assert!(
         (rate(120.0, 8.0, "4") - 8.0).abs() < 1e-12,
@@ -962,7 +905,6 @@ fn sf_tension_keeps_rising_then_bends_to_the_known_change_without_a_jump() {
         )
         .unwrap()
     };
-    // Unknown change: e / (e + 48), the entry's beats without a section, never flat.
     let ease = |e: f64| e / (e + 48.0);
     assert!((ease(32.0) - 0.4).abs() < 1e-12, "bar 8");
     assert!((ease(64.0) - 4.0 / 7.0).abs() < 1e-12, "bar 16, about 0.57");
@@ -980,7 +922,6 @@ fn sf_tension_keeps_rising_then_bends_to_the_known_change_without_a_jump() {
         level > bar_16 && stepped == bar_16,
         "the second value is the last downbeat's"
     );
-    // The change becomes known at 96 with 32 beats left: no jump there, full at the change.
     let eased = ease(96.0);
     assert_eq!(tension(Some(96.0), 0.0, Some(32.0), Some(96.0))[1], eased);
     let halfway = eased + (1.0 - eased) * 16.0 / 32.0;
@@ -1036,7 +977,6 @@ fn sf_finale_hands_over_continuously_and_its_last_bar_is_full() {
         )
         .unwrap()
     };
-    // No next cue, or one further than the finale: exactly the base level, so no jump.
     assert_eq!(finale(None), [0.0, 0.7, 0.7]);
     assert_eq!(finale(Some(20.0))[..2], [0.0, 0.7]);
     assert_eq!(finale(Some(16.0))[..2], [0.0, 0.7]);
@@ -1100,13 +1040,15 @@ fn music_helpers_read_the_beat_and_fall_back_to_a_mid_level() {
     assert!(lua("sf.band(ctx, 'treble'), 0, 0", RenderContext::default()).is_err());
 }
 
-/// Beat `beat` of a clock whose index n is grid beat n and that never re-anchored.
 fn sample(beat: f64) -> CueSample {
     CueSample {
         beat_position: beat,
         elapsed_musical_beats: beat,
         beats_per_bar: 4,
-        anchor: Some((0, 0)),
+        anchor: Some(ReceivedBeat {
+            beat_index: 0,
+            grid_beat: 0,
+        }),
     }
 }
 
@@ -1141,7 +1083,6 @@ fn a_resent_cue_carries_its_running_overlays_on() {
     timeline.advance(sample(10.0));
     let riser = timeline.instances()[0].clone();
     assert!(matches!(riser.state, InstanceState::Running(_)));
-    // A level change re-sends the cue: the riser neither restarts nor releases.
     drop.seed = 9;
     timeline.receive(drop.clone(), sample(10.0)).unwrap();
     timeline.advance(sample(10.5));
@@ -1159,7 +1100,6 @@ fn a_resent_cue_carries_its_running_overlays_on() {
         .unwrap()
         .clone();
     timeline.receive(drop, sample(17.0)).unwrap();
-    // The re-sent cue takes over on the next bar line; the fill playing then carries on.
     timeline.advance(sample(20.0));
     let fills: Vec<_> = timeline
         .instances()
@@ -1286,23 +1226,15 @@ fn metrics_at_their_largest_fit_the_realtime_cap() {
     );
 }
 
-fn directory_catalog(bank: &str, source: &str) -> anyhow::Result<AutoloopCatalog> {
-    let directory = tempfile::tempdir().unwrap();
-    std::fs::create_dir(directory.path().join(bank)).unwrap();
-    std::fs::write(directory.path().join(bank).join("look.lua"), source).unwrap();
-    AutoloopCatalog::load(directory.path())
-}
-
 #[test]
 fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
     const BODY: &str = "return {render=function(ctx) return {} end}\n";
     let htp = |bank: &str, header: &str| {
-        directory_catalog(bank, &format!("-- 1-beat hit\n{header}{BODY}"))
+        support::directory_catalog(bank, &[("look", &format!("-- 1-beat hit\n{header}{BODY}"))])
             .map(|catalog| catalog.intensity_htp(bank, "look"))
     };
     const FULL: &str = "-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n";
     assert!(htp("hit", FULL).unwrap());
-    // Any order, as Login's read_overlay_meta takes it.
     let reordered = "-- texture: beam\n-- intensity: ltp\n-- movement: snap\n-- strobe: yes\n";
     assert!(!htp("dip", reordered).unwrap());
     let error = htp(
@@ -1325,7 +1257,6 @@ fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
         let error = htp("fill", header).unwrap_err();
         assert!(format!("{error:#}").contains("fill/look.lua"), "{error:#}");
     }
-    // Base banks keep their own header rules.
     assert!(!htp("drop", "").unwrap());
 }
 

@@ -117,7 +117,7 @@ pub enum SectionIntent {
     Drop,
 }
 
-/// Measured by Autolux over one beat; each 0..1.
+/// Each 0..1.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BeatFeatures {
@@ -127,8 +127,6 @@ pub struct BeatFeatures {
     pub high: f64,
 }
 
-/// Lua sees `None` as nil. Section fields describe the active cue and `next_*` the earliest
-/// pending one; a pending cue never shows through `section_*`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderContext {
     pub time_seconds: f64,
@@ -136,35 +134,25 @@ pub struct RenderContext {
     pub bar_phase: f64,
     pub bar_index: u64,
     pub beats_per_bar: u32,
-    /// Beats since this layer began: the rotation entry for a base loop, the nominal begin for
-    /// an overlay.
     pub autoloop_elapsed_beats: f64,
     pub autoloop_speed_scaled_elapsed_beats: f64,
     pub normalized_rms_level: Option<f64>,
     pub intensity: f64,
-    /// The newest beat's tempo; 0 before the first beat.
     pub bpm: f64,
-    /// The strobe rate the engine lets through at this intensity (the strobe rate cap scaled by
-    /// the intensity, 0 where strobing is off), so a loop can keep its flashes on the beat.
     pub strobe_max_hz: f64,
     pub section_intent: Option<SectionIntent>,
     pub section_elapsed_beats: Option<f64>,
     pub next_intent: Option<SectionIntent>,
     pub beats_until_next: Option<f64>,
-    /// Beats until the next cue's dip pre-roll begins, the moment a finale aims at.
     pub beats_until_dip: Option<f64>,
-    /// `section_elapsed_beats` when the next cue arrived, so a build can bend its curve towards
-    /// the now known change without a jump.
     pub next_known_at: Option<f64>,
     pub drop_strength: Option<f64>,
     pub next_drop_strength: Option<f64>,
-    /// The active cue's seed, or 0.
     pub seed: u32,
     pub onset: Option<f64>,
     pub bass: Option<f64>,
     pub mid: Option<f64>,
     pub high: Option<f64>,
-    /// Set only for overlay scripts.
     pub overlay_length_beats: Option<f64>,
 }
 
@@ -200,7 +188,6 @@ impl Default for RenderContext {
     }
 }
 
-/// One section's plan, addressed by an Autolux beat index (a downbeat).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SectionCue {
@@ -226,7 +213,6 @@ pub struct RotationEntry {
     pub transition: Transition,
 }
 
-/// Times in beats from the section start; whether intensity is HTP is the loop's metadata.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OverlayCue {
@@ -255,6 +241,15 @@ pub enum Transition {
     },
 }
 
+impl Transition {
+    pub fn crossfade_beats(&self) -> f64 {
+        match self {
+            Self::Crossfade { duration_beats } => *duration_beats,
+            Self::Cut | Self::RendererDefault => 0.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum OverrideLifetime {
@@ -268,7 +263,6 @@ pub enum OverrideLifetime {
     },
 }
 
-/// Fixture-agnostic accent vocabulary; the renderer maps each axis onto GDTF attribute families.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SpecialFx {
@@ -294,21 +288,15 @@ pub struct LightingOverride {
     #[serde(default)]
     pub priority: i32,
     pub special_fx: Option<Box<SpecialFx>>,
-    /// Pan runs the whole logical range, low soft limit to high and back, and tilt reaches the
-    /// focus point's elevation, in place of `pan` and `tilt`.
     #[serde(default)]
     pub pan_sweep: bool,
-    /// Pan and tilt throw the beam through the fixture's focus point, in place of `pan` and
-    /// `tilt`.
     #[serde(default)]
     pub aim_focus: bool,
-    /// The target fixture encodes with this in place of its loaded placement.
     #[serde(default)]
     pub pose: Option<Box<FixturePose>>,
 }
 
-/// A rig fixture's placement and patch fields: MVR Matrix, soft limits, focus point position
-/// (mm), Art-Net universe, DMX start address and profile (its GDTF mode).
+/// `focus` in millimetres.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FixturePose {
@@ -350,10 +338,11 @@ pub enum Command {
         #[serde(default)]
         features: Option<BeatFeatures>,
     },
+    /// A re-sent cue's rows that are already playing carry on.
     CueSection {
         value: Box<SectionCue>,
     },
-    /// Drops every pending cue and ends the active one; the base look plays on.
+    /// Overlays release; the base look plays on.
     ClearCues,
     Select {
         bank: String,
@@ -402,7 +391,6 @@ pub enum Command {
     SetIntensity {
         level: f64,
     },
-    /// An inhibitive submaster: scales the group's rendered output, never raises it.
     SetGroupMaster {
         group: String,
         level: f64,

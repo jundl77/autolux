@@ -12,8 +12,7 @@ use crate::protocol::wire;
 const MAX_PALETTES: usize = 64;
 const MAX_PALETTE_NAME_BYTES: usize = 64;
 const MAX_PALETTE_FILE_BYTES: u64 = 64 * 1024;
-/// A reserved slot beside every palette's own: full white for hits, never crossfaded and never
-/// set by a palette file. Only it may put a colour wheel on a white slot.
+/// Never crossfaded nor set by a palette file; only it may put a colour wheel on a white slot.
 pub const WHITE_SLOT: &str = "white";
 pub const WHITE: Rgb = Rgb {
     red: 1.0,
