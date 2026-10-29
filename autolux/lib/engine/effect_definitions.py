@@ -87,7 +87,7 @@ OverlayMetaTable = Mapping[tuple[str, str], OverlayMeta]
 DEFAULT_AUTOLOOP_META: AutoloopMetaTable = {
     ('atmospheric', 'dawn'): AutoloopMeta(1, 'sweep', 'mixed'),
     ('breakdown', 'drift_apart'): AutoloopMeta(1, 'sweep', 'beam'),
-    ('buildup', 'stutter'): AutoloopMeta(3, 'snap', 'wash'),
+    ('buildup', 'stutter'): AutoloopMeta(3, 'sweep', 'wash'),
     ('drop', 'kick'): AutoloopMeta(3, 'snap', 'wash'),
 }
 

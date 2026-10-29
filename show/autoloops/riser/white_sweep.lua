@@ -1,9 +1,9 @@
--- The Balanced riser: the beams lift off their focus in full white while the washes swell.
+-- The Balanced riser: the beams lift off their focus in full white; the washes keep the build's dark floor.
 -- strobe: no
 -- intensity: htp
 -- movement: sweep
 -- texture: beam
-local LIFT_DEGREES, WASH_CAP = 40, 0.6
+local LIFT_DEGREES = 40
 
 return {
     render = function(ctx)
@@ -14,7 +14,6 @@ return {
         local landing = math.max(0, math.min(1, left / bar))
         local movers = sf.group("movers")
         return sf.scene {
-            sf.dimmer(sf.group("wash"), WASH_CAP * level),
             sf.colour(movers, sf.white()),
             sf.dimmer(movers, level),
             sf.phaser(movers, ctx, {

@@ -571,16 +571,109 @@ function sf.drop_within(build, beats)
     return build.left ~= nil and build.left <= beats
 end
 
+local ROLL_HALF_BEATS, ROLL_QUARTER_BEATS, LAST_BAR_BEATS = 32, 8, 4
+local WHITE_FROM_BEATS, WHITE_FULL_BEATS = 16, 4
+local WASH_TOP, CALM_WASH_TOP, WASH_START_SHARE = 0.9, 0.6, 0.35
+local MOVER_TOP, MOVER_HOLD, MOVER_STAB_FLOOR = 0.9, 0.5, 0.15
+local FLASH_DECAY_SHARE, SAW_CUT_FLASH_BEATS, SAW_HOLD_BEATS = 1 / 3, 1 / 3, 1 / 8
+-- Mirrors INTENSITY_CALM in intensity.rs: Calm takes the softer roll.
+local CALM_INTENSITY = 0.3
+
+local function flash_at(beats, interval, decay)
+    return math.max(0, 1 - beats % interval / decay) ^ 2
+end
+
+local function roll_interval(ctx, left, calm)
+    if left == nil or left > ROLL_HALF_BEATS then return 1 end
+    if left > ROLL_QUARTER_BEATS or calm or ctx.bpm / 60 * 4 > ctx.strobe_max_hz then return 0.5 end
+    return 0.25
+end
+
+-- The drop's phrase takes over on the bar line after the cue arrives, so a late cue never jumps mid-flash.
+local function phrase_left(ctx, build)
+    local known, bar = ctx.next_known_at, ctx.beats_per_bar
+    if build.left == nil or (known ~= nil and sf.section_beats(ctx) < (math.floor(known / bar) + 1) * bar) then
+        return nil
+    end
+    return build.left
+end
+
+local function saw_length(ctx, build, left)
+    local uncued, next = 2 * build.measure, ctx.beats_until_next
+    if left == nil then return uncued, sf.section_beats(ctx) % uncued end
+    local cued = next > 64 and 16 or next > 32 and 8 or next > 8 and 4 or next > LAST_BAR_BEATS and 2 or 1
+    local length = math.min(uncued, cued)
+    return length, (length - next % length) % length
+end
+
+local function outside_in_rank(index, count)
+    return index <= count - index + 1 and 2 * (index - 1) or 2 * (count - index) + 1
+end
+
+local function chase_rank(step, count)
+    local cycle = math.max(1, 2 * count - 2)
+    local at = step % cycle
+    return at < count and at or cycle - at
+end
+
+-- A buildup's washes: hard flashes on a dark floor rising to the cap, phrase-locked to a cued
+-- drop, white over its last four bars; the movers' counterpoint level comes back with them.
+function sf.wash_build(ctx, build, spec)
+    local pattern, palette = spec.pattern, sf.palette()
+    local calm = render_intensity <= CALM_INTENSITY
+    local left = phrase_left(ctx, build)
+    local climb = (build.drive - DRIVE_FLOOR) / DRIVE_GAIN
+    local peak = (calm and CALM_WASH_TOP or WASH_TOP) * sf.lerp(WASH_START_SHARE, 1, climb)
+    local last_bar = left ~= nil and left <= LAST_BAR_BEATS
+    local interval = roll_interval(ctx, left, calm)
+    local beats = ctx.beat_position
+    local step = math.floor(beats / interval)
+    local flash = flash_at(beats, interval, FLASH_DECAY_SHARE * interval)
+    local whiten = (left == nil or calm) and 0 or math.max(0, math.min(1,
+        (WHITE_FROM_BEATS - left) / (WHITE_FROM_BEATS - WHITE_FULL_BEATS)))
+    local colour = spec.stab and whiten == 0 and step % 2 == 1 and palette.secondary or palette.primary
+    local member_level, movers
+    if pattern == "roll" then
+        member_level = function(index, count)
+            local side = sf.side(index, count)
+            local own = side == 0 or (side < 0) == (step % 2 == 0)
+            return (own or interval < 1) and peak * flash or 0
+        end
+        local stab_interval = interval == 1 and 1 or 2 * interval
+        local stab = flash_at(beats - interval / 2, stab_interval, FLASH_DECAY_SHARE * interval)
+        movers = sf.lerp(MOVER_STAB_FLOOR, MOVER_TOP, last_bar and flash or stab)
+    elseif pattern == "chase" then
+        member_level = function(index, count)
+            local lit = (left ~= nil and left <= 1) or outside_in_rank(index, count) == chase_rank(step, count)
+            return lit and peak * flash or 0
+        end
+    else
+        assert(pattern == "saw", "wash build pattern is roll, chase or saw")
+        local length, into = saw_length(ctx, build, left)
+        member_level = function() return peak * math.min(1, into / (length - SAW_HOLD_BEATS)) end
+        flash = sf.section_beats(ctx) >= length and flash_at(into, length, SAW_CUT_FLASH_BEATS) or 0
+        movers = sf.lerp(MOVER_HOLD, MOVER_TOP, flash)
+    end
+    local wash, mover_white = sf.group("wash"), pattern == "saw" and not calm and flash or 0
+    colour = sf.mix(colour, sf.white(), whiten)
+    local effects = {
+        sf.colour(wash, colour),
+        sf.each(wash, function(member, index, count) return sf.dimmer(member, member_level(index, count)) end)
+    }
+    return effects, {
+        flash = flash, interval = interval, peak = peak, climb = climb, colour = colour, movers = movers,
+        mover_colour = sf.mix(palette.primary, sf.white(), mover_white), last_bar = last_bar,
+    }
+end
+
 function sf.overlay_progress(ctx)
     local length = ctx.overlay_duration_beats or 1
     return math.min(1, ctx.autoloop_elapsed_beats / length), length - ctx.autoloop_elapsed_beats
 end
 
-local LOOP_GROUPS = { "wash", "strip", "movers" }
-
-function sf.white_strobe(level, hz)
+function sf.white_strobe(level, hz, groups)
     local effects = {}
-    for _, name in ipairs(LOOP_GROUPS) do
+    for _, name in ipairs(groups) do
         local group = sf.group(name)
         effects[#effects + 1] = { sf.colour(group, sf.white()), sf.dimmer(group, level), sf.strobe(group, hz) }
     end
