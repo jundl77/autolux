@@ -6,7 +6,6 @@ local palette = sf.palette()
 local BREATH_BEATS = 8
 local PIXEL_LOW, PIXEL_HIGH = 0.04, 0.45
 
--- Negative space: one cell breathing in a dark room resets the eye before the next build.
 return {
     render = function(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)

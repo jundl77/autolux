@@ -50,8 +50,6 @@ function sf.beat_in_bar(ctx_or_beats)
     return ctx_or_beats % BEATS_PER_BAR
 end
 
--- Given ctx, bars since the section start (the bar line at or before a selection without a
--- cue); the absolute bar index before any.
 function sf.bar(ctx_or_beats)
     if type(ctx_or_beats) == "table" then
         local elapsed = ctx_or_beats.section_elapsed_beats
@@ -70,7 +68,6 @@ function sf.phrase_phase(ctx_or_beats, bars)
 end
 
 local render_intensity = 1
--- The depth curve lives in Rust (starfire::intensity) so pulse and movement share one table.
 local render_pulse_depth = 1
 local each_count
 
@@ -79,7 +76,7 @@ local function use_render_intensity(intensity, pulse_depth)
     assert(finite(pulse_depth) and pulse_depth >= 0 and pulse_depth <= 1, "pulse depth must be within 0..1")
     render_intensity = intensity
     render_pulse_depth = pulse_depth
-    -- Loops cannot pcall, so an error inside sf.each ends the frame; a new frame starts outside one.
+    -- Loops cannot pcall, so an error inside sf.each ends the frame with each_count still set.
     each_count = nil
 end
 
@@ -94,9 +91,7 @@ function sf.on_beat(ctx_or_beats, width, period)
 end
 
 local LEFT, CENTRE, RIGHT = -1, 0, 1
--- Group members run left to right (Autolux orders them by MVR position), so the side is the
--- member's half of the group, an odd middle at the centre. Inside sf.each the count defaults
--- to that group's size.
+-- Autolux orders group members left to right by MVR position.
 function sf.side(index, count)
     count = count or each_count
     assert(math.type(index) == "integer" and math.type(count) == "integer"
@@ -107,7 +102,6 @@ end
 
 local LOUDNESS_FLOOR, LOUDNESS_FULL_RMS, UNMEASURED_RMS = 0.08, 0.8, 0.6
 
--- The measured RMS, or a typical level before any is measured.
 function sf.energy(ctx) return ctx.normalized_rms_level or UNMEASURED_RMS end
 
 function sf.loudness_gain(rms)
@@ -168,11 +162,7 @@ function sf.scene(effects)
     return result
 end
 
--- sf.mirror(target) is native: partners by reflection about the stage centreline, derived
--- once at rig load (starfire::spatial).
-
 function sf.each(target, make_effect)
-    -- A nested sf.each sides by its own group, then hands the outer group's size back.
     local result, outer_count = {}, each_count
     local members = sf.members(target)
     each_count = #members
@@ -183,23 +173,14 @@ function sf.each(target, make_effect)
     return sf.scene(result)
 end
 
--- ==== W1 context ====
--- Section lookahead and per-beat music. Starfire derives these from the cue Autolux sent ahead
--- of the room; every ctx field here is nil until there is something to say.
+-- Section and music
 
--- Phrase time: beats since the section start (a bar line, also for a selection without a
--- cue), else since the layer began. Every phrase-counting helper reads it.
 function sf.section_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
 local TENSION_HALF_BEATS = 48
 
--- 0..1. Until the next change is known, e / (e + half_beats) of section time keeps rising for
--- as long as the build lasts (with 48: 0.4 at bar 8, 0.57 at bar 16, 0.73 at bar 32). From the
--- moment the change is known (ctx.next_known_at) it bends linearly to full at that change, so
--- the curve fills the real build without a jump. The second value is the tension at the last
--- downbeat, for loops that step against it.
 function sf.tension(ctx, half_beats)
     half_beats = half_beats or TENSION_HALF_BEATS
     assert(finite(half_beats) and half_beats > 0, "tension half point must be positive and finite")
@@ -216,10 +197,6 @@ function sf.tension(ctx, half_beats)
     return at(elapsed), at(math.floor(elapsed / bar) * bar)
 end
 
--- 0..1 over the last `beats` before the next cue starts, 0 while none is pending. Given `from`
--- (the level the loop builds to without a known next section), the result hands over from it
--- continuously: from + (1 - from) * fin. The second value holds each bar at the level its end
--- reaches, so the last bar is full.
 function sf.finale(ctx, beats, from)
     assert(finite(beats) and beats > 0, "finale length must be positive and finite")
     assert(from == nil or (finite(from) and from >= 0 and from <= 1), "finale base must be within 0..1")
@@ -233,9 +210,6 @@ function sf.finale(ctx, beats, from)
     return level(remaining), level(stepped)
 end
 
--- The strobe rate of the fastest beat division, at most `per_beat` flashes a beat and halving
--- down to one every two beats, that the engine will not clamp (ctx.strobe_max_hz, the cap at
--- this intensity), so flashes stay on the grid at any tempo; 0 when none fits.
 function sf.beat_strobe_hz(ctx, per_beat)
     assert(finite(per_beat) and per_beat > 0, "flashes per beat must be positive and finite")
     local division = per_beat
@@ -253,9 +227,6 @@ local function random_index(value)
     return value
 end
 
--- 0..1, a pure hash of the cue's seed and up to three integer indices (say phrase, cell, step):
--- the same arguments give the same value on every frame and every run. SplitMix64's
--- finaliser, two rounds.
 function sf.random(ctx, i, j, k)
     local x = ctx.seed ~ (random_index(i) * 0x9E3779B97F4A7C15) ~ (random_index(j) << 21)
         ~ (random_index(k) << 42)
@@ -267,28 +238,21 @@ function sf.random(ctx, i, j, k)
     return (x >> 11) / 2.0 ^ 53
 end
 
--- A neutral mid level before the analyser has measured a beat.
 local UNMEASURED_FEATURE = 0.5
 
--- The newest beat's onset strength, 0..1.
 function sf.onset(ctx)
     return ctx.onset or UNMEASURED_FEATURE
 end
 
--- The newest beat's level in "bass", "mid" or "high", 0..1.
 function sf.band(ctx, name)
     assert(name == "bass" or name == "mid" or name == "high", "band is bass, mid or high")
     return ctx[name] or UNMEASURED_FEATURE
 end
 
--- ==== W3 aim ====
--- sf.aim(cell, x, y, z) -> pan, tilt (nil, nil for a cell without a pan range) and
--- sf.focus(cell) -> x, y, z are native (starfire::fixtures). Points are metres in the MVR scene
--- frame: X cross-stage, Y upstage, Z up.
+-- Aim: points in metres in the MVR scene frame (X cross-stage, Y upstage, Z up), angles in degrees
 
 local X_AXIS, Z_AXIS = { 1, 0, 0 }, { 0, 0, 1 }
--- Parallel means float noise only; the fallback is for beams plotted exactly plumb.
-local PARALLEL = 1e-9
+local PARALLEL_TOLERANCE = 1e-9
 
 local function cross(a, b)
     return { a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1] }
@@ -296,15 +260,13 @@ end
 
 local function norm(v) return math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3]) end
 
--- The unit normal of the plane holding `beam` and `towards`, or `fallback` when they are parallel.
 local function rotation_axis(beam, towards, fallback)
     local axis = cross(beam, towards)
     local length = norm(axis)
-    if length <= PARALLEL * norm(beam) then return fallback end
+    if length <= PARALLEL_TOLERANCE * norm(beam) then return fallback end
     return { axis[1] / length, axis[2] / length, axis[3] / length }
 end
 
--- Rodrigues: `v` turned right-handed by `degrees` about the unit `axis`.
 local function rotate(v, axis, degrees)
     local angle = math.rad(degrees)
     local c, s = math.cos(angle), math.sin(angle)
@@ -314,20 +276,12 @@ local function rotate(v, axis, degrees)
         v[3] * c + k[3] * s + axis[3] * along }
 end
 
--- Elevation turns the rest beam in its vertical plane, positive up; a plumb beam turns about X.
--- Spread turns it about the perpendicular in that plane, so the two offsets are at right angles
--- for every beam and a circle of offsets is a cone. Positive spread moves any throw with a Y
--- component towards +X, and a pure cross-stage throw clockwise seen from above. Elevation applies
--- first, so a horizontal beam's offsets are exactly heading and elevation. `beam` = {dx, dy, dz}
--- in metres is the rest beam, by default focus - position. nil, nil for a cell without a pan
--- range.
 function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
     assert(finite(spread_degrees) and finite(elevation_degrees), "aim offsets must be finite degrees")
     local x, y, z = sf.position(cell)
     if beam == nil then
         local focus_x, focus_y, focus_z = sf.focus(cell)
         beam = { focus_x - x, focus_y - y, focus_z - z }
-        -- A focus at the head itself gives nothing to turn; rest along the pan axis as sf.aim does.
         if norm(beam) == 0 then return sf.aim(cell, x, y, z) end
     else
         assert(type(beam) == "table" and finite(beam[1]) and finite(beam[2]) and finite(beam[3])
@@ -341,7 +295,6 @@ function sf.aim_offset(cell, spread_degrees, elevation_degrees, beam)
     return sf.aim(cell, x + beam[1], y + beam[2], z + beam[3])
 end
 
--- The beam along (dx, dy, dz) from the head whatever its focus: parallel walls, every beam up.
 function sf.aim_direction(cell, dx, dy, dz)
     assert(finite(dx) and finite(dy) and finite(dz) and (dx ~= 0 or dy ~= 0 or dz ~= 0),
         "aim direction must be a finite nonzero vector")
@@ -349,42 +302,24 @@ function sf.aim_direction(cell, dx, dy, dz)
     return sf.aim(cell, x + dx, y + dy, z + dz)
 end
 
--- Each shape gives (spread, elevation) per unit size at cycle position t (nil when static), for
--- a member at signed stage position u (wings: outermost +-1, centreline 0; else 1) on side w.
 local PHASER_SHAPES = {
-    fan = function(t, u) return u * (t and 0.5 + 0.5 * math.cos(FULL_TURN * t) or 1), 0 end,
-    cross = function(t, u) return -u * (t and math.cos(FULL_TURN * t) or 1), 0 end,
-    circle = function(t, _, w) return w * math.cos(FULL_TURN * t), math.sin(FULL_TURN * t) end,
-    figure8 = function(t, _, w)
-        return w * math.sin(FULL_TURN * t), 0.5 * math.sin(2 * FULL_TURN * t)
+    fan = function(cycle, across) return across * (cycle and 0.5 + 0.5 * math.cos(FULL_TURN * cycle) or 1), 0 end,
+    cross = function(cycle, across) return -across * (cycle and math.cos(FULL_TURN * cycle) or 1), 0 end,
+    circle = function(cycle, _, side) return side * math.cos(FULL_TURN * cycle), math.sin(FULL_TURN * cycle) end,
+    figure8 = function(cycle, _, side)
+        return side * math.sin(FULL_TURN * cycle), 0.5 * math.sin(2 * FULL_TURN * cycle)
     end,
-    tilt_wave = function(t) return 0, math.sin(FULL_TURN * t) end,
-    -- Each member's own phase on the fundamental keeps partners from reading as one mirrored circle.
-    ballyhoo = function(t, _, w, ctx, index)
-        local fundamental = FULL_TURN * (t + sf.random(ctx, index, 2))
-        return w * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * t + FULL_TURN * sf.random(ctx, index))),
-            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * t + FULL_TURN * sf.random(ctx, index, 1))
+    tilt_wave = function(cycle) return 0, math.sin(FULL_TURN * cycle) end,
+    ballyhoo = function(cycle, _, side, ctx, index)
+        local fundamental = FULL_TURN * (cycle + sf.random(ctx, index, 2))
+        return side * (0.7 * math.sin(fundamental) + 0.3 * math.sin(3 * FULL_TURN * cycle + FULL_TURN * sf.random(ctx, index))),
+            0.7 * math.cos(fundamental) + 0.3 * math.sin(2 * FULL_TURN * cycle + FULL_TURN * sf.random(ctx, index, 1))
     end,
 }
 local STATIC_SHAPES = { fan = true, cross = true }
--- Cycles that divide a phrase, so counted from the section start every member is back at its
--- start on each phrase line.
+-- Powers of two divide a phrase, so every member is back at its start on each phrase line.
 local MEASURES = { [1] = true, [2] = true, [4] = true, [8] = true, [16] = true, [32] = true }
 
--- spec = { shape = "fan"|"cross"|"circle"|"figure8"|"tilt_wave"|"ballyhoo",
---   size = spread degrees (tilt_wave needs none), tilt_size = elevation degrees (default size),
---   measure = beats per cycle: 1, 2, 4, 8, 16 or 32 (nil holds a fan or cross still),
---   phase = -1..1 cycles spread across the selection (default 0); positive runs the wave in
---     selection order, left to right, negative the other way,
---   wings = mirror partners share a rank and move outward (default true; false for tilt_wave),
---   centre_pan = spread degrees, centre_tilt = elevation degrees added to every member,
---   at = {x, y, z} metres every beam rests on, or direction = {dx, dy, dz} every beam rests
---     along (default each member's focus) }
--- Member i cycles at t = frac(E / measure - phase * rank_i / ranks), E the beats since the
--- section start, else since the loop started. t restarts with every section, so it runs on
--- unbroken only when the section's length is a multiple of the measure; likewise change measure
--- only where E is a multiple of both measures. Returns sf.pan_tilt effects for the members with
--- a pan range.
 function sf.phaser(target, ctx, spec)
     local shape = PHASER_SHAPES[spec.shape]
     assert(shape ~= nil, "unknown phaser shape")
@@ -409,25 +344,22 @@ function sf.phaser(target, ctx, spec)
     local wings = spec.wings
     if wings == nil then wings = spec.shape ~= "tilt_wave" end
 
-    -- Only heads that can aim take part, so a wash in the group neither widens the row nor
-    -- takes a rank.
-    local members, aimable = {}, {}
+    local aimable_members, aimable = {}, {}
     for _, cell in ipairs(sf.members(target)) do
         if sf.aim(cell, sf.focus(cell)) ~= nil then
-            members[#members + 1] = cell
+            aimable_members[#aimable_members + 1] = cell
             aimable[cell] = true
         end
     end
     local rank, across, ranks = {}, {}, 0
     if wings then
         local xs, low, high = {}, math.huge, -math.huge
-        for _, cell in ipairs(members) do
+        for _, cell in ipairs(aimable_members) do
             local x = sf.position(cell)
             xs[cell], low, high = x, math.min(low, x), math.max(high, x)
         end
         local half_width = (high - low) / 2
-        -- Partners take opposite halves of the gap between them, so they mirror exactly even
-        -- where the plot is uneven; a member that is its own partner sits at 0.
+        -- Partners take opposite halves of their gap, so they mirror exactly on an uneven plot.
         for _, pair in ipairs(sf.mirror(target)) do
             local first, second = pair[1].fixture, pair[2].fixture
             if aimable[first] and aimable[second] then
@@ -438,7 +370,7 @@ function sf.phaser(target, ctx, spec)
             end
         end
     end
-    for _, cell in ipairs(members) do
+    for _, cell in ipairs(aimable_members) do
         if rank[cell] == nil then
             rank[cell], across[cell], ranks = ranks, wings and 0 or 1, ranks + 1
         end
@@ -446,12 +378,10 @@ function sf.phaser(target, ctx, spec)
 
     local elapsed = sf.section_beats(ctx)
     local effects = {}
-    for index, cell in ipairs(members) do
-        local t = measure and (elapsed / measure - phase_spread * rank[cell] / ranks) % 1
-        local u = across[cell]
-        -- A centre member circles the way the +X side does rather than nodding in a line.
-        local w = u < 0 and -1 or 1
-        local spread, elevation = shape(t, u, w, ctx, index)
+    for index, cell in ipairs(aimable_members) do
+        local cycle = measure and (elapsed / measure - phase_spread * rank[cell] / ranks) % 1
+        local side = across[cell] < 0 and -1 or 1
+        local spread, elevation = shape(cycle, across[cell], side, ctx, index)
         local beam = direction
         if at ~= nil then
             local x, y, z = sf.position(cell)
@@ -464,30 +394,20 @@ function sf.phaser(target, ctx, spec)
     return effects
 end
 
--- ==== W4 vocabulary ====
+-- Fixture vocabulary
 
--- sf.gobo(target, slot) is native: one Gobo1 preset per member that has a gobo wheel. Slot 0
--- is the open slot, 1.. the others in wheel order, wrapping, so any slot works on any rig.
-
--- Full white, every palette's reserved "white" slot, for hits only: it ignores palette changes
--- and alone may put a colour wheel on its open slot.
 function sf.white() return active_palette.white end
 
--- ==== W6 show helpers ====
+-- Show helpers
 
--- 0 at the centre of an sf.each row, 1 at either end; 0 for a row of one.
 function sf.from_centre(index, count)
     return count > 1 and math.abs(2 * (index - 1) / (count - 1) - 1) or 0
 end
 
--- A width along a row as a share of its cells, never under one cell, so a look keeps its
--- proportions on any strip.
 function sf.pixels(share, count)
     return math.max(1, share * count)
 end
 
--- The mean of the members' focus points as {x, y, z}, where beams sent meet in one spot; nil
--- without members.
 function sf.shared_focus(target)
     local members, x, y, z = sf.members(target), 0, 0, 0
     if #members == 0 then return nil end
@@ -500,9 +420,6 @@ end
 
 local SNAP_LEAD_BEATS, SNAP_DARK_BEATS = 0.5, 0.25
 
--- Alternating looks for a snap: the look (0 or 1) changes on the off-beat half a beat before
--- every `period` line of section time, and `dark` holds for the quarter beat after the change,
--- so heads jump only while their dimmers are at 0. A section opens on look 0.
 function sf.snap(ctx, period)
     local beats = sf.section_beats(ctx) + SNAP_LEAD_BEATS
     return math.floor(beats / period) % 2, beats % period < SNAP_DARK_BEATS
@@ -510,14 +427,12 @@ end
 
 local FINALE_BEATS, EASE_BEATS, LADDER_BEATS = 16, 8, 8
 local DRIVE_FLOOR, DRIVE_GAIN = 0.25, 0.65
--- Tension lines for a build's stages: about bar 6 and bar 12 of an uncued build.
-local STAGE_LINES = { 1 / 3, 1 / 2 }
+local STAGE_TENSIONS = { 1 / 3, 1 / 2 }
 
 local function stage_of(tension)
-    return tension < STAGE_LINES[1] and 0 or tension < STAGE_LINES[2] and 1 or 2
+    return tension < STAGE_TENSIONS[1] and 0 or tension < STAGE_TENSIONS[2] and 1 or 2
 end
 
--- The context as it was at the last `beats` line of section time, for the fields tension reads.
 local function back_at_line(ctx, beats)
     local elapsed = sf.section_beats(ctx)
     local back = elapsed % beats
@@ -528,21 +443,12 @@ local function back_at_line(ctx, beats)
     }
 end
 
--- Every buildup's shared state. drive 0..1: with no drop known 0.25 + 0.65 x tension (0.3 at
--- bar 1, 0.62 at bar 16, twice bar 1); a cued drop hands it over continuously to 1 over the last 16 beats
--- before the dip; a cued non-drop eases it down by half. finale 0..1 is that hand-over, tension
--- the build's progress, step the tension at the last downbeat, stage 0, 1, 2 from step (so
--- stages change on the one), measure the phaser rate ladder 8, 4, 2 beats by stage at the last
--- 8-beat line, so cycles never jump, left
--- the beats until a cued drop's dip begins (nil while no drop is cued), span the beats the
--- finale runs over (16, or what was left when a late cue arrived).
 function sf.build(ctx)
     local tension, step = sf.tension(ctx)
     local drive, finale = DRIVE_FLOOR + DRIVE_GAIN * tension, 0
     local left = ctx.next_intent == "drop" and (ctx.beats_until_dip or ctx.beats_until_next) or nil
     local span = FINALE_BEATS
     if left ~= nil then
-        -- A drop cued with fewer than 16 beats to go hands over across what is left, not in a jump.
         local known = ctx.next_known_at
         span = known and math.min(FINALE_BEATS, left + sf.section_beats(ctx) - known) or FINALE_BEATS
         finale = span > 0 and 1 - math.min(1, left / span) or 1
@@ -557,15 +463,12 @@ function sf.build(ctx)
     }
 end
 
--- 0..1 over a cued drop's last `beats` before the dip, over less when the cue came later than
--- that, so nothing a build times to the drop ever jumps; 0 while no drop is cued.
 function sf.approach(build, beats)
     if build.left == nil then return 0 end
     local over = math.min(beats, build.span)
     return over > 0 and math.max(0, math.min(1, 1 - build.left / over)) or 1
 end
 
--- An overlay's progress through its length, 0..1, and the beats it has left.
 function sf.overlay_progress(ctx)
     local length = ctx.overlay_length_beats or 1
     return math.min(1, ctx.autoloop_elapsed_beats / length), length - ctx.autoloop_elapsed_beats

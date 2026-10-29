@@ -9,8 +9,6 @@ local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.9, 0.9, 0.6, 0.85
 local CROSS_DEGREES, CROSS_MEASURE = 18, 4
 local OUTER_FROM = 0.5
 
--- Outer members carry the second colour over the group's first, so the wall reads as two
--- layers in one colour change per outer member; the strip wipes outside-in over each bar.
 local function outer_in_b(target)
     return sf.each(target, function(member, index, count)
         if sf.from_centre(index, count) > OUTER_FROM then return sf.colour(member, palette.secondary) end

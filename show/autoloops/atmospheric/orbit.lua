@@ -8,8 +8,6 @@ local CIRCLE_DEGREES, CIRCLE_TILT_DEGREES = 12, 8
 local WASH_LOW, WASH_HIGH = 0.06, 0.2
 local GLOW_LEVEL, GLOW_SHARE, MOVER_LEVEL = 0.22, 0.125, 0.35
 
--- One orbit drives the room: the beams circle their focus, the light swings round the washes
--- with it, and the strip's mirrored glow rides the beams' cross-stage swing.
 return {
     render = function(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)

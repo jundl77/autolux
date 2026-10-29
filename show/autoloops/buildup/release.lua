@@ -9,9 +9,6 @@ local WASH_HELD, MOVER_HELD = 0.4, 0.6
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 local LAP_BEATS, TAIL_SHARE = 2, 0.3
 
--- Held back, then let go: until half-way the room is a dim share of the build's drive and
--- motionless, one dot and beams parked on their focus; then, and over a cued drop's finale, the
--- beams open into a sweep and the dot into a chase. The last bar eases the sweep tight.
 local function letting_go(build)
     local open = math.max(0, (build.tension - HOLD_UNTIL) / (1 - HOLD_UNTIL))
     return open + (1 - open) * build.finale

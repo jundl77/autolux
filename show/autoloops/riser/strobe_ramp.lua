@@ -5,9 +5,6 @@
 -- texture: mixed
 local STROBE_BEATS = 8
 
--- Held back to the last eight beats so the build's own finale shows first; there the rate
--- steps on beat lines through half, one, two and four flashes a beat, as fast as the engine
--- lets through at this intensity.
 local function strobe_hz(ctx, remaining)
     if remaining > STROBE_BEATS then return 0 end
     return sf.beat_strobe_hz(ctx, 2 ^ (math.floor((STROBE_BEATS - remaining) / 2) - 1))

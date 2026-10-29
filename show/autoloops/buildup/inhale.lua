@@ -7,8 +7,6 @@ local BREATH_BEATS, HOLD_BEATS, HOLD_REACH = 8, 16, 4 / 3
 local RISE_DEGREES, FAN_DEGREES = 15, 10
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 
--- Two-bar breaths that deepen with the build; once a drop is cued the room holds its breath:
--- every layer freezes at the top of the inhale and is completely still for the last bar.
 local function held_breath(ctx, build)
     local breath = sf.osc.sine(sf.section_beats(ctx), BREATH_BEATS)
     local hold = math.min(1, HOLD_REACH * sf.approach(build, HOLD_BEATS))

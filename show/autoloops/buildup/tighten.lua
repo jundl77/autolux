@@ -8,9 +8,6 @@ local WASH_HOLD, WASH_RISE = 0.3, 0.4
 local STRIP_PEAK, STRIP_GLOW, MOVER_PEAK = 0.6, 0.25, 0.9
 local DOT_SHARE = 0.19
 
--- One amount closes the fan onto the movers' shared point and walks the strip's two dots in:
--- the build reaches half of it, a cued drop's finale the rest. The washes hold back so the
--- closed beam point is the brightest thing in the room.
 return {
     render = function(ctx)
         local build = sf.build(ctx)

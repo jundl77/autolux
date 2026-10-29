@@ -7,8 +7,6 @@ local BREAKUP_SLOT = 1
 local CIRCLE_DEGREES, CIRCLE_MEASURE = 6, 16
 local WASH_LEVEL, MOVER_LOW, MOVER_HIGH = 0.2, 0.45, 0.7
 
--- A gobo only reads as texture in haze while the room is dim, so the washes stay low and the
--- slow circle lets the pattern crawl over the floor instead of sweeping past it.
 return {
     render = function(ctx)
         local level = sf.loudness_gain(ctx.normalized_rms_level)

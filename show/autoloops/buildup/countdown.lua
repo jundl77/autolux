@@ -8,9 +8,6 @@ local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 local TICK_WIDTH_BEATS = 0.45
 local FAN_DEGREES, LIFT_DEGREES = 12, 35
 
--- The strip is a meter that fills from the centre to half its length as the build climbs; over
--- a cued drop's last eight beats the count closes the dark rest from both ends one step per
--- beat, so the bar is full on the last beat before the dip and never loses light on the way.
 local function meter_and_count(build)
     local meter = 0.5 * build.step
     if build.left == nil or build.left > COUNT_BEATS then return meter, 0 end

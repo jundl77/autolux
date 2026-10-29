@@ -233,7 +233,7 @@ sf.beat_strobe_hz(ctx, per_beat) -- the fastest beat-division strobe rate the en
 sf.white()                     -- full white, for overlays only.
 ```
 
-Show helpers, shared by the banks (the W6 block in `lighting.lua`):
+Show helpers, shared by the banks (the show-helpers section of `lighting.lua`):
 
 ```lua
 sf.build(ctx) -> { drive, finale, tension, step, stage, measure, left, span }
