@@ -933,27 +933,74 @@ fn sf_countdown_steps_once_per_beat_over_the_last_beats() {
 }
 
 #[test]
-fn sf_tension_eases_in_over_the_section_or_over_the_known_build() {
-    let tension = |section: Option<f64>, entry: f64, left: Option<f64>| {
+fn sf_tension_eases_in_then_bends_to_the_known_change_without_a_jump() {
+    let tension = |section: Option<f64>, entry: f64, left: Option<f64>, known: Option<f64>| {
         lua(
             "0, sf.tension(ctx)",
             with(|context| {
                 context.section_elapsed_beats = section;
                 context.autoloop_elapsed_beats = entry;
                 context.beats_until_next = left;
+                context.next_known_at = known;
             }),
         )
         .unwrap()
     };
-    // Without a next cue: (elapsed / 128)^3, the entry's beats without a section.
-    assert_eq!(tension(Some(64.0), 0.0, None)[1..], [0.125, 0.125]);
-    assert_eq!(tension(None, 64.0, None)[1..], [0.125, 0.125]);
-    assert_eq!(tension(Some(200.0), 0.0, None)[1..], [1.0, 1.0]);
-    let [_, level, stepped] = tension(Some(66.0), 0.0, None);
-    assert!(level > 0.125 && stepped == 0.125, "held at the bar line");
-    // A known next cue: the share of the real build played, eased in.
-    assert_eq!(tension(Some(16.0), 0.0, Some(16.0))[1], 0.125);
-    assert_eq!(tension(Some(32.0), 0.0, Some(0.0))[1], 1.0);
+    // Unknown change: (elapsed / 128)^3, the entry's beats without a section.
+    assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [0.125, 0.125]);
+    assert_eq!(tension(None, 64.0, None, None)[1..], [0.125, 0.125]);
+    assert_eq!(tension(Some(200.0), 0.0, None, None)[1..], [1.0, 1.0]);
+    let [_, level, stepped] = tension(Some(66.0), 0.0, None, None);
+    assert!(
+        level > 0.125 && stepped == 0.125,
+        "the second value is the last downbeat's"
+    );
+    // The change becomes known at 96 with 32 beats left: no jump there, full at the change.
+    let eased = 0.75_f64.powi(3);
+    assert_eq!(tension(Some(96.0), 0.0, Some(32.0), Some(96.0))[1], eased);
+    let halfway = eased + (1.0 - eased) * 0.5;
+    assert_eq!(
+        tension(Some(112.0), 0.0, Some(16.0), Some(96.0))[1..],
+        [halfway, halfway]
+    );
+    let [_, level, stepped] = tension(Some(114.0), 0.0, Some(14.0), Some(96.0));
+    assert!(level > halfway && stepped == halfway);
+    assert_eq!(tension(Some(128.0), 0.0, Some(0.0), Some(96.0))[1], 1.0);
+}
+
+#[test]
+fn next_known_at_is_the_section_time_the_next_cue_arrived() {
+    const KNOWN: &str = r#"return {render = function(ctx)
+      return {sf.colour(sf.fixture("left"), sf.rgb((ctx.next_known_at or 1000) / 1000, 0, 0))}
+    end}"#;
+    let mut engine = engine_with(&[("known", KNOWN)]);
+    beat(&mut engine, 0);
+    send(
+        &mut engine,
+        at(0.5),
+        section(4, SectionIntent::Buildup, &[("known", 16)]),
+    )
+    .unwrap();
+    let known = |engine: &mut Engine, beat: f64| {
+        colours(&engine.render_at(at(beat)).unwrap()).0.red * 1000.0
+    };
+    assert_eq!(
+        known(&mut engine, 20.0),
+        1000.0,
+        "nil while the change is unknown"
+    );
+    send(
+        &mut engine,
+        at(20.0),
+        section(36, SectionIntent::Drop, &[("known", 16)]),
+    )
+    .unwrap();
+    for beat in [20.0, 24.0, 30.5] {
+        assert!(
+            (known(&mut engine, beat) - 16.0).abs() < 1e-9,
+            "beat {beat}"
+        );
+    }
 }
 
 #[test]
@@ -1230,4 +1277,34 @@ fn metrics_at_their_largest_fit_the_realtime_cap() {
         "{}",
         metrics.encoded_len()
     );
+}
+
+fn directory_catalog(bank: &str, source: &str) -> anyhow::Result<AutoloopCatalog> {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join(bank)).unwrap();
+    std::fs::write(directory.path().join(bank).join("look.lua"), source).unwrap();
+    AutoloopCatalog::load(directory.path())
+}
+
+#[test]
+fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
+    const BODY: &str = "return {render=function(ctx) return {} end}\n";
+    let htp = |bank: &str, header: &str| {
+        directory_catalog(bank, &format!("-- 1-beat hit\n{header}{BODY}"))
+            .map(|catalog| catalog.intensity_htp(bank, "look"))
+    };
+    assert!(htp("hit", "-- strobe: no\n-- intensity: htp\n").unwrap());
+    assert!(!htp("dip", "-- intensity: ltp\n-- strobe: yes\n").unwrap());
+    for header in [
+        "",
+        "-- strobe: no\n",
+        "-- strobe: no\n-- intensity: max\n",
+        "-- strobe: no\n-- strobe: no\n-- intensity: htp\n",
+        "local x = 1\n-- strobe: no\n-- intensity: htp\n",
+    ] {
+        let error = htp("fill", header).unwrap_err();
+        assert!(format!("{error:#}").contains("fill/look.lua"), "{error:#}");
+    }
+    // Base banks keep their own header rules.
+    assert!(!htp("drop", "").unwrap());
 }
