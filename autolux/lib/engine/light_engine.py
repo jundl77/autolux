@@ -320,6 +320,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._send_brightness(OPERATOR_FADE_SECONDS)
 
     def settings_changed(self) -> None:
+        if self.event_buffer is not None:
+            self.event_buffer.record_settings(self._settings().to_dict())
         self.send_renderer_settings()
         self._send_brightness(OPERATOR_FADE_SECONDS)
 

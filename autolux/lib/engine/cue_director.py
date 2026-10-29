@@ -20,7 +20,7 @@ from autolux.lib.engine.autoloop_policy import (
     look_intent,
     soft_drop,
 )
-from autolux.lib.engine.cue import BaseLook, Cue, Overlay
+from autolux.lib.engine.cue import MAX_OVERLAYS, BaseLook, Cue, Overlay
 from autolux.lib.engine.effect_definitions import (
     CALM,
     CROSSFADE_SCALE,
@@ -53,6 +53,9 @@ DROP_DIP = ('dip', 'last_beat')
 BREAKDOWN_DIP = ('dip', 'fade')
 # Calm's entry: the palette's own punch, never white.
 COLOUR_HIT = ('hit', 'colour_bump')
+# Calm's riser: the strip filling in the palette's accent. The overlay header names no colour,
+# so the one riser that paints no white is named here.
+CALM_RISER = ('riser', 'strip_fill')
 # The bar-16 fill, bigger than the bar-8 one.
 TURNAROUND_FILL = ('fill', 'turnaround')
 # A texture that leads no single layer and a movement that moves nothing fight nothing.
@@ -118,10 +121,12 @@ class SectionRequest:
 class OverlayPicks:
     """Chosen once per plan, so a level change re-filters rows without a new draw."""
 
-    hit: tuple[str, str] | None = None
+    # Every white hit lands together on the one, each on its own layer.
+    hits: tuple[tuple[str, str], ...] = ()
     strobe_hit: tuple[str, str] | None = None
     riser: tuple[str, str] | None = None
     strobe_riser: tuple[str, str] | None = None
+    calm_riser: tuple[str, str] | None = None
     fill: tuple[str, str] | None = None
     accents: tuple[tuple[str, str], ...] = ()
 
@@ -458,15 +463,17 @@ class CueDirector:
         ]
         if intent is not LightIntent.DROP:
             return OverlayPicks(fill=self._pick(fills))
-        white_hits = [loop for loop in self._bank('hit', strobe=False) if loop != COLOUR_HIT]
+        white_hits = tuple(loop for loop in self._bank('hit', strobe=False) if loop != COLOUR_HIT)
         # The riser plays over the build before the drop, so it pairs with the build's look.
         build = previous.choices if previous is not None else ()
+        risers = self._bank('riser', strobe=False, under=build)
         return OverlayPicks(
-            # The entry hit is the track's: a second drop reuses the first drop's.
-            hit=first_drop.picks.hit if first_drop is not None else self._pick(white_hits),
+            # The entry hits are the track's: a second drop reuses the first drop's.
+            hits=first_drop.picks.hits if first_drop is not None else white_hits,
             strobe_hit=next(iter(self._bank('hit', strobe=True)), None),
-            riser=self._pick(self._bank('riser', strobe=False, under=build)),
+            riser=self._pick(risers),
             strobe_riser=next(iter(self._bank('riser', strobe=True, under=build)), None),
+            calm_riser=CALM_RISER if CALM_RISER in risers else None,
             fill=self._pick(fills),
             accents=tuple(accents),
         )
@@ -526,10 +533,24 @@ class CueDirector:
             )
         # A single accent arrives with the one already, so no bar-8 fill cuts across it.
         bar_8 = entry_accent is None or len(accents) > 1
-        rows += self._drop_fills(plan, level, bar_8=bar_8)
-        for index, accent in enumerate(accents):
-            begin = (ACCENT_OFFSET_BARS + index * ACCENT_BARS) * BEATS_PER_BAR
-            rows.append(_row(accent, begin, ACCENT_BARS * BEATS_PER_BAR, 2 * ACCENT_BARS, 4.0, 4.0))
+        fills = self._drop_fills(plan, level, bar_8=bar_8)
+        accent_rows = [
+            _row(
+                accent,
+                (ACCENT_OFFSET_BARS + index * ACCENT_BARS) * BEATS_PER_BAR,
+                ACCENT_BARS * BEATS_PER_BAR,
+                2 * ACCENT_BARS,
+                4.0,
+                4.0,
+            )
+            for index, accent in enumerate(accents)
+        ]
+        rows += fills + accent_rows
+        # Over Starfire's row cap the entry stays whole: the bar-8 fill goes first, then the
+        # second accent, then the rest of the phrase rows.
+        spare = [*fills[:-1], *accent_rows[1:], *fills[-1:], *accent_rows[:1]]
+        while len(rows) > MAX_OVERLAYS and spare:
+            rows.remove(spare.pop(0))
         return rows, events
 
     def _drop_entry(
@@ -559,8 +580,8 @@ class CueDirector:
         intense = False
 
         riser_beats = self._riser_beats(plan)
-        if plan.previous is LightIntent.BUILDUP and level != CALM and riser_beats is not None:
-            riser = plan.picks.riser
+        if plan.previous is LightIntent.BUILDUP and riser_beats is not None:
+            riser = plan.picks.calm_riser if level == CALM else plan.picks.riser
             fits = (
                 bool(bpm) and RISER_STROBE_BEATS * 60.0 / bpm <= settings.strobe_max_burst_seconds
             )
@@ -572,16 +593,16 @@ class CueDirector:
                     _row(riser, -(dip + riser_beats), riser_beats, 0, 4.0, RISER_RELEASE_BEATS)
                 )
 
-        hit = self._shipped(COLOUR_HIT)
-        hit_beats, hit_release = HIT_BEATS, HIT_BEATS
-        if white and plan.picks.hit is not None:
-            hit = plan.picks.hit
+        hits = [self._shipped(COLOUR_HIT)]
+        if white and plan.picks.hits:
+            hits = list(plan.picks.hits)
+        rows += [_row(hit, 0.0, HIT_BEATS, release=HIT_BEATS) for hit in hits if hit is not None]
         if strobing and plan.picks.strobe_hit is not None:
-            hit, hit_release, intense = plan.picks.strobe_hit, 0.0, True
-            hit_beats = strobe_hit_beats(bpm, settings)
-        if hit is not None:
-            rows.append(_row(hit, 0.0, hit_beats, release=hit_release))
-        events = EntryEvents(intense=intense, accent=hit is not None and hit != COLOUR_HIT)
+            intense = True
+            beats = strobe_hit_beats(bpm, settings)
+            rows.append(_row(plan.picks.strobe_hit, 0.0, beats))
+        lit = [row for row in rows if row.bank == 'hit' and (row.bank, row.autoloop) != COLOUR_HIT]
+        events = EntryEvents(intense=intense, accent=bool(lit))
 
         accent = accents[-1] if plan.drop_number > 1 and accents else None
         if accent is not None:

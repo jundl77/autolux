@@ -2305,8 +2305,8 @@ def sent_hits(lighting):
 @pytest.mark.parametrize('cause', ['supersession', 'static'])
 async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
     light, lighting, planned = await wild_drop_in_the_room()
-    [hit] = sent_hits(lighting)
-    assert hit['autoloop'] == 'strobe'
+    entry = sent_hits(lighting)
+    assert {row['autoloop'] for row in entry} == {'blinder', 'beam_punch', 'strobe'}
     booked = dict(light.effect_controller._intense_at)
     before = len(cue_events(lighting))
     if cause == 'static':
@@ -2317,7 +2317,7 @@ async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
     [again] = (e['command']['value'] for e in cue_events(lighting)[before:])
     assert again['start_beat_index'] == planned.start_beat_index
     assert again['overlays'] and all(row['every_bars'] > 0 for row in again['overlays'])
-    assert sent_hits(lighting) == [hit], 'Starfire would anchor the hit on its next bar line'
+    assert sent_hits(lighting) == entry, 'Starfire would anchor the hits on its next bar line'
     assert light.effect_controller._intense_at == booked
 
 
@@ -2350,3 +2350,28 @@ async def test_a_late_section_without_a_phase_switches_on_starfires_next_bar_lin
     await elapse(light, clock, 0.5)
     await beat_at_phase(light, decoder, None)
     assert planned.switch_beat_index == 5
+
+
+def test_the_report_records_what_the_director_planned_from():
+    from autolux.lib.engine.event_buffer import EventBuffer
+
+    clock = VirtualClock()
+    buffer = EventBuffer(window_sec=float('inf'), clock=clock)
+    buffer.start()
+    settings = ShowSettings()
+    lighting = RecordingStarfireClient(clock=clock)
+    controller = EffectController(lighting, event_buffer=buffer, settings=lambda: settings, seed=41)
+    light = LightEngine(
+        lighting, controller, event_buffer=buffer, clock=clock, settings=lambda: settings
+    )
+    clock.advance(30.0)
+    settings = ShowSettings(intensity=0.2)
+    light.settings_changed()
+    light.settings_changed()
+    planning = buffer.to_report()['planning']
+    assert planning['seed'] == 41
+    assert planning['venue'] == {'max_accent_events_per_minute': 2}
+    assert [(change['t'], change['settings']['intensity']) for change in planning['settings']] == [
+        (0.0, ShowSettings().intensity),
+        (30.0, 0.2),
+    ]

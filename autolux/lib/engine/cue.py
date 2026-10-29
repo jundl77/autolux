@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
+from autolux.lighting.palettes import VARIANT_BASES
 
 # Starfire's row checks, mirrored so a bad plan is refused before it reaches the stage; at these
 # bounds a CueSection stays under the 4 KiB cap.
@@ -60,6 +61,19 @@ class Overlay:
         }
 
 
+def _check_transition(transition: dict | None) -> None:
+    if transition is None or transition == {'kind': 'cut'}:
+        return
+    beats = transition.get('duration_beats')
+    if (
+        set(transition) != {'kind', 'duration_beats'}
+        or transition['kind'] != 'crossfade'
+        or not isinstance(beats, (int, float))
+        or not 0 < beats <= MAX_OVERLAY_BEATS
+    ):
+        raise ValueError('a transition is a cut or a crossfade of 0..1024 beats')
+
+
 @dataclass(frozen=True)
 class Cue:
     start_beat_index: int  # An analysis-time beat index whose bar phase is 0.
@@ -82,6 +96,10 @@ class Cue:
                 raise ValueError('autoloop ID is too long for a cue')
         if any(look.bars < 1 for look in self.rotation):
             raise ValueError('a rotation entry lasts at least one bar')
+        for look in self.rotation:
+            _check_transition(look.transition)
+        if self.palette not in VARIANT_BASES:
+            raise ValueError(f'palette {self.palette!r} is not in the Login palette table')
         for overlay in self.overlays:
             if not 0 < overlay.length_beats <= MAX_OVERLAY_BEATS:
                 raise ValueError('an overlay lasts a positive number of beats')
@@ -90,6 +108,7 @@ class Cue:
                     raise ValueError('overlay attack and release are within 0..1024 beats')
             if overlay.every_bars < 0:
                 raise ValueError('an overlay repeats every nonnegative number of bars')
+            # The session's bars are 4/4 (BEATS_PER_BAR), as Starfire's repeat period is.
             period = overlay.every_bars * BEATS_PER_BAR
             if overlay.every_bars == 0:
                 if not -MAX_PREROLL_BEATS <= overlay.begin_beats <= MAX_OVERLAY_BEATS:

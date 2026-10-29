@@ -10,8 +10,8 @@ use serde::Serialize;
 
 use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::cue::{
-    BaseStep, CueSample, CueTimeline, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
-    OverlayInstance, Span,
+    BaseStep, CueSample, CueTimeline, DIP_BANK, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS,
+    MAX_ROTATION, OverlayInstance, Span,
 };
 use crate::fixtures::FixtureRig;
 use crate::gdtf::GdtfProfile;
@@ -49,9 +49,6 @@ const ONE_TOLERANCE_BEATS: f64 = 1e-6;
 /// Banks in composition order when priorities tie: the dip lands on top, so nothing composed
 /// after it can light through the dark before the drop.
 const OVERLAY_BANK_LADDER: [&str; 5] = ["fill", "accent", "riser", "hit", "dip"];
-/// Only the dip's dark before a cue moves heads in black; a fill's dark last eighth inside a
-/// section comes back lit where it was.
-const DIP_BANK: &str = "dip";
 const TRUNCATED_ERROR_SUFFIX: &str = "… [truncated]";
 
 /// Semantic properties precede software strobe gating; DMX contains the final output.
@@ -286,9 +283,8 @@ impl Engine {
                         bpm: *bpm,
                     },
                 )?;
-                if features.is_some() {
-                    self.features = *features;
-                }
+                // An unmeasured beat clears them: a new track never shows the old one's onsets.
+                self.features = *features;
             }
             Command::CueSection { value } => {
                 self.validate_cue(value, time)?;
@@ -297,7 +293,9 @@ impl Engine {
             }
             Command::ClearCues => {
                 self.cues.clear(time.elapsed_musical_beats, true);
-                self.phrase_start = None;
+                self.features = None;
+                // The base look plays on, so its phrase time carries on from a bar line.
+                self.phrase_start = Some(bar_line_at_or_before(time));
             }
             Command::Select {
                 bank,
@@ -316,10 +314,10 @@ impl Engine {
                     .is_some_and(|active| active.bank == *bank && active.name == *autoloop)
                 {
                     self.select(at_seconds, time, bank, autoloop, transition)?;
-                    let bar = f64::from(time.beats_per_bar);
-                    self.phrase_start = Some((time.beat_position / bar).floor() * bar);
+                    self.phrase_start = Some(bar_line_at_or_before(time));
                 }
                 self.cues.clear(time.elapsed_musical_beats, true);
+                self.features = None;
                 let duration_beats = match transition {
                     Transition::Crossfade { duration_beats } => *duration_beats,
                     Transition::Cut | Transition::RendererDefault => 0.0,
@@ -413,6 +411,7 @@ impl Engine {
             Command::Stop => {
                 self.cues.clear(time.elapsed_musical_beats, false);
                 self.phrase_start = None;
+                self.features = None;
                 self.active = None;
                 self.fade = None;
                 self.overrides.clear();
@@ -446,6 +445,17 @@ impl Engine {
 
     pub fn active_palette(&self) -> &str {
         &self.palette.name
+    }
+
+    /// Login's purity probe over every compiled script, on this engine's frame at 0 s.
+    pub fn check_scripts_pure(&self) -> Result<()> {
+        let time = self.clock.sample_at(0.0)?;
+        let context = RenderContext {
+            overlay_length_beats: Some(1.0),
+            ..self.frame_context(0.0, time)
+        };
+        self.scripts
+            .check_pure(&context, &self.palette.slots_at(time.elapsed_musical_beats))
     }
 
     pub fn resolve_autoloop(&self, autoloop_id: &str) -> Result<(String, String)> {
@@ -568,13 +578,24 @@ impl Engine {
             )?;
         }
         if let Some(palette) = palette {
-            let slots = self.palettes.slots(&palette)?;
-            let duration_beats = match transition {
-                Transition::Crossfade { duration_beats } => duration_beats,
-                Transition::Cut | Transition::RendererDefault => 0.0,
-            };
-            self.palette
-                .retarget(time.elapsed_musical_beats, &palette, slots, duration_beats);
+            // Validated at receipt; should it fail now, the look keeps its colours and plays.
+            match self.palettes.slots(&palette) {
+                Ok(slots) => {
+                    let duration_beats = match transition {
+                        Transition::Crossfade { duration_beats } => duration_beats,
+                        Transition::Cut | Transition::RendererDefault => 0.0,
+                    };
+                    self.palette.retarget(
+                        time.elapsed_musical_beats,
+                        &palette,
+                        slots,
+                        duration_beats,
+                    );
+                }
+                Err(error) => self
+                    .cues
+                    .record_overlay_error(format!("cue palette not applied: {error:#}")),
+            }
         }
         Ok(())
     }
@@ -1059,6 +1080,8 @@ impl Engine {
                 elapsed_beats,
                 seed: instance.seed,
                 level: overlay_level(instance, beat),
+                // Only the dip's dark before a cue moves heads in black; a fill's dark last eighth
+                // inside a section comes back lit where it was.
                 holds_to_one: overlay.bank == DIP_BANK
                     && matches!(instance.state, InstanceState::Running(_))
                     && instance
@@ -1516,6 +1539,11 @@ fn validate_identifier(value: &str) -> Result<()> {
         "invalid identifier length"
     );
     Ok(())
+}
+
+fn bar_line_at_or_before(time: ClockSample) -> f64 {
+    let bar = f64::from(time.beats_per_bar);
+    (time.beat_position / bar).floor() * bar
 }
 
 pub fn perceptual_to_linear_master(perceptual: f64) -> f64 {

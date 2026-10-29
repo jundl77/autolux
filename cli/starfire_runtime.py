@@ -282,6 +282,10 @@ class StarfireRuntime:
                         'active_bank': metrics.active_bank,
                         'active_autoloop': metrics.active_autoloop,
                         'script_error': metrics.script_error,
+                        # Overlay faults never stop the show, so they are a notice, not a fault.
+                        'overlay_error': metrics.overlay_error,
+                        'active_overlay_count': metrics.active_overlay_count,
+                        'pending_cues': metrics.pending_cues,
                         'last_processed_command_id': metrics.last_processed_command_id,
                     }
                     self._health_at = time.monotonic()

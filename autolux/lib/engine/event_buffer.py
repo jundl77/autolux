@@ -56,6 +56,8 @@ class EventBuffer:
         self._cooldown_source: Callable[[], list[dict]] | None = None
         self._track: dict | None = None
         self._rig_revision: str | None = None
+        # What the director plans from, so a recording replays the show it came from.
+        self._planning: dict | None = None
         # Tells the page a restarted show from the one before it, even on the same rig.
         self._session = uuid.uuid4().hex
         self._system_health: dict = {}
@@ -225,6 +227,19 @@ class EventBuffer:
         with self._lock:
             self._track = dict(track)
 
+    def set_planning(self, seed: int, venue: dict) -> None:
+        with self._lock:
+            self._planning = {'seed': seed, 'venue': dict(venue), 'settings': []}
+
+    def record_settings(self, settings: dict) -> None:
+        """Each change of the settings the director plans with, at song time."""
+        with self._lock:
+            if self._planning is None:
+                return
+            changes = self._planning['settings']
+            if not changes or changes[-1]['settings'] != settings:
+                changes.append({'t': self.elapsed(), 'settings': copy.deepcopy(settings)})
+
     def set_rig_revision(self, revision: str) -> None:
         with self._lock:
             self._rig_revision = revision
@@ -377,6 +392,8 @@ class EventBuffer:
                     'dominant_intent': dominant_intent,
                 },
             }
+            if self._planning is not None:
+                report['planning'] = copy.deepcopy(self._planning)
             # Offline replays have no hardware telemetry; retain their deterministic schema.
             if self._system_health:
                 report['system'] = copy.deepcopy(self._system_health)

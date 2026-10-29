@@ -499,7 +499,8 @@ fn clear_cues_ends_the_section_but_the_base_look_plays_on() {
     engine.apply(at(6.0), &Command::ClearCues).unwrap();
     let cleared = probe(&mut engine, 6.0);
     assert_eq!(cleared.autoloop.as_deref(), Some("probe"));
-    assert_eq!((cleared.section_elapsed, cleared.intent), (None, 0.0));
+    assert_eq!(cleared.intent, 0.0);
+    near(cleared.section_elapsed, 2.0);
     assert_eq!(engine.pending_cue_count(), 0);
     assert_eq!(probe(&mut engine, 21.0).autoloop.as_deref(), Some("probe"));
 }
@@ -638,22 +639,22 @@ fn context_fields_are_nil_until_there_is_something_to_say() {
         },
         "pending: no drop strength"
     );
-    // A beat without features holds the last measurement.
+    // A beat without features clears them: a new track never shows the old one's.
     beat(&mut engine, 1);
     let started = colours(&engine.render_at(at(4.0)).unwrap());
     assert_eq!(
         started.0,
         Rgb {
-            red: 0.5,
-            green: 0.4,
+            red: 1.0,
+            green: 1.0,
             blue: 0.12
         }
     );
     assert_eq!(
         started.1,
         Rgb {
-            red: 0.25,
-            green: 0.1,
+            red: 1.0,
+            green: 1.0,
             blue: 0.3
         }
     );
@@ -856,7 +857,9 @@ fn a_wire_cue_resolves_autoloop_ids_and_needs_an_intent() {
         &ClientMessage::ClearCues(wire::ClearCues { command_id: 2 }),
     )
     .unwrap();
-    assert_eq!(probe(&mut engine, 4.5).section_elapsed, None);
+    let cleared = probe(&mut engine, 4.5);
+    assert_eq!(cleared.intent, 0.0);
+    near(cleared.section_elapsed, 0.5);
 }
 
 /// The three numbers `expression` yields, through the left cell's colour.
@@ -946,19 +949,23 @@ fn sf_tension_eases_in_then_bends_to_the_known_change_without_a_jump() {
         )
         .unwrap()
     };
-    // Unknown change: (elapsed / 128)^3, the entry's beats without a section.
-    assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [0.125, 0.125]);
-    assert_eq!(tension(None, 64.0, None, None)[1..], [0.125, 0.125]);
+    // Unknown change: 0.8·min(1, e/64)² + 0.2·min(1, e/128), the entry's beats without a section.
+    let ease = |e: f64| 0.8 * (e / 64.0).min(1.0).powi(2) + 0.2 * (e / 128.0).min(1.0);
+    assert!((ease(32.0) - 0.25).abs() < 1e-12, "bar 8 already climbs");
+    assert!((ease(64.0) - 0.9).abs() < 1e-12 && ease(128.0) == 1.0);
+    let bar_16 = ease(64.0);
+    assert_eq!(tension(Some(64.0), 0.0, None, None)[1..], [bar_16, bar_16]);
+    assert_eq!(tension(None, 64.0, None, None)[1..], [bar_16, bar_16]);
     assert_eq!(tension(Some(200.0), 0.0, None, None)[1..], [1.0, 1.0]);
     let [_, level, stepped] = tension(Some(66.0), 0.0, None, None);
     assert!(
-        level > 0.125 && stepped == 0.125,
+        level > bar_16 && stepped == bar_16,
         "the second value is the last downbeat's"
     );
     // The change becomes known at 96 with 32 beats left: no jump there, full at the change.
-    let eased = 0.75_f64.powi(3);
+    let eased = ease(96.0);
     assert_eq!(tension(Some(96.0), 0.0, Some(32.0), Some(96.0))[1], eased);
-    let halfway = eased + (1.0 - eased) * 0.5;
+    let halfway = eased + (1.0 - eased) * 16.0 / 32.0;
     assert_eq!(
         tension(Some(112.0), 0.0, Some(16.0), Some(96.0))[1..],
         [halfway, halfway]
@@ -1293,18 +1300,45 @@ fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
         directory_catalog(bank, &format!("-- 1-beat hit\n{header}{BODY}"))
             .map(|catalog| catalog.intensity_htp(bank, "look"))
     };
-    assert!(htp("hit", "-- strobe: no\n-- intensity: htp\n").unwrap());
-    assert!(!htp("dip", "-- intensity: ltp\n-- strobe: yes\n").unwrap());
+    const FULL: &str = "-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n";
+    assert!(htp("hit", FULL).unwrap());
+    // Any order, as Login's read_overlay_meta takes it.
+    let reordered = "-- texture: beam\n-- intensity: ltp\n-- movement: snap\n-- strobe: yes\n";
+    assert!(!htp("dip", reordered).unwrap());
+    let error = htp(
+        "fill",
+        "-- strobe: no\n-- intensity: htp\n-- movement: still\n",
+    )
+    .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("missing texture"),
+        "{error:#}"
+    );
     for header in [
         "",
         "-- strobe: no\n",
-        "-- strobe: no\n-- intensity: max\n",
-        "-- strobe: no\n-- strobe: no\n-- intensity: htp\n",
-        "local x = 1\n-- strobe: no\n-- intensity: htp\n",
+        "-- strobe: no\n-- intensity: max\n-- movement: still\n-- texture: wash\n",
+        "-- strobe: no\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n",
+        "-- strobe: no\n-- intensity: htp\n-- movement: drift\n-- texture: wash\n",
+        "local x = 1\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n",
     ] {
         let error = htp("fill", header).unwrap_err();
         assert!(format!("{error:#}").contains("fill/look.lua"), "{error:#}");
     }
     // Base banks keep their own header rules.
     assert!(!htp("drop", "").unwrap());
+}
+
+#[test]
+fn login_refuses_a_loop_that_keeps_state_between_renders() {
+    const COUNTER: &str = r#"local frames = 0
+return {render = function(ctx)
+  frames = frames + 1
+  return {sf.dimmer(sf.all(), frames % 2)}
+end}"#;
+    assert!(engine().check_scripts_pure().is_ok());
+    let error = engine_with(&[("still", STILL), ("counter", COUNTER)])
+        .check_scripts_pure()
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("test/counter"), "{error:#}");
 }
