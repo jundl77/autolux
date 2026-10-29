@@ -503,7 +503,7 @@ fn the_stage_fx_group_spins_colours_and_gates_to_its_dark_slot() {
         }),
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,
-            autoloop_id: "standby/warm_white".into(),
+            autoloop_id: "standby/white".into(),
             transition: Some(wire::play_autoloop::Transition::default()),
             palette: "techno".into(),
         }),

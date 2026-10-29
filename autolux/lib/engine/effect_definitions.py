@@ -33,7 +33,7 @@ PREFERRED_AUTOLOOPS: dict[LightIntent, str] = {
 
 AutoloopTable = dict[LightIntent, tuple[tuple[str, str], ...]]
 
-STANDBY_AUTOLOOP = ('standby', 'warm_white')
+STANDBY_AUTOLOOP = ('standby', 'white')
 STANDBY_CROSSFADE_SECONDS = 1.0
 
 DEFAULT_AUTOLOOPS: AutoloopTable = {

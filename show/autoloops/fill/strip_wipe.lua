@@ -4,7 +4,7 @@
 -- movement: sweep
 -- texture: pixel
 local palette = sf.palette()
-local PEAK, WIPE_PIXELS = 0.9, 1.5
+local PEAK, WIPE_SHARE = 0.9, 0.19
 
 return {
     render = function(ctx)
@@ -13,7 +13,7 @@ return {
             sf.colour(sf.group("strip"), palette.secondary),
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local distance = math.abs(sf.from_centre(index, count) - (1 - progress)) * (count - 1) / 2
-                return sf.dimmer(pixel, PEAK * math.max(0, 1 - distance / WIPE_PIXELS))
+                return sf.dimmer(pixel, PEAK * math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count)))
             end)
         }
     end

@@ -906,7 +906,7 @@ def test_preflight_requires_every_discovered_autoloop(tmp_path, monkeypatch):
     with pytest.raises(
         RuntimeError,
         match='missing Autolux autoloops: atmospheric/amber_drift, atmospheric/pixel_rain, '
-        'drop/slam, standby/warm_white$',
+        'drop/slam, standby/white$',
     ):
         starfire_runtime.validate_starfire(binary, ROOM, tmp_path)
 
@@ -920,7 +920,7 @@ def test_preflight_names_an_autoloop_whose_selection_header_is_broken(tmp_path, 
         ('breakdown', 'drift_apart'),
         ('buildup', 'stutter'),
         ('drop', 'kick'),
-        ('standby', 'warm_white'),
+        ('standby', 'white'),
     ]
     for bank, name in loops:
         (tmp_path / bank).mkdir()
@@ -948,7 +948,7 @@ def test_preflight_warns_about_groups_the_rig_lacks(tmp_path, monkeypatch, caplo
         ('breakdown', 'drift_apart'),
         ('buildup', 'stutter'),
         ('drop', 'kick'),
-        ('standby', 'warm_white'),
+        ('standby', 'white'),
     ]
     for bank, name in loops:
         (tmp_path / bank).mkdir()

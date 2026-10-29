@@ -29,10 +29,7 @@ return {
                 return sf.dimmer(pixel, HAZE_SCALE * breathe(slot) * level)
             end),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),
-            sf.each(sf.group("movers"), function(mover, index)
-                local pan, tilt = sf.aim_offset(mover, sf.side(index) * PARK_DEGREES, sf.side(index) * drift)
-                if pan ~= nil then return sf.pan_tilt(mover, pan, tilt) end
-            end)
+            sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = PARK_DEGREES, centre_tilt = drift })
         }
     end
 }

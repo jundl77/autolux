@@ -9,7 +9,7 @@ One Lua file per look, `show/autoloops/<bank>/<loop>.lua`. The API is
   its base, once or every few bars, each with a begin, a length and an attack and release
   envelope.
 
-`standby/warm_white` is the exception: Autolux shows it while the input is digitally
+`standby/white` is the exception: Autolux shows it while the input is digitally
 silent (the player stopped). It is outside the rotation, required by readiness, and
 deliberately static: no beat or loudness response, movers parked dark, `sf.white()` held low
 so it never depends on a palette's name.
@@ -45,8 +45,9 @@ its one.
 
 Every buildup reads one shared state, `sf.build(ctx)` (below), and implements both regimes:
 
-- **Regime U, the drop unknown.** `drive` rises with the build's tension (an ease-in: held back
-  early, climbing late) to a 0.7 plateau, so an uncued build never peaks early or restarts.
+- **Regime U, the drop unknown.** `drive = 0.3 + 0.5 * tension`: 0.3 on the one, about 0.43 at
+  bar 8, 0.75 at bar 16 and the 0.8 plateau at bar 32, so a 16-bar build has climbed by its
+  middle and an uncued build never peaks early or restarts.
 - **Regime K, a drop cued.** `drive` hands over continuously to 1 over the last 16 beats before
   the dip, however late the cue arrives (`drive + (1 - drive) * finale`). Counts move one step
   per beat (`math.ceil(build.left)`) and land on the dip, not the drop.
@@ -58,13 +59,14 @@ Every buildup reads one shared state, `sf.build(ctx)` (below), and implements bo
   the loop.
 - **Never scaled by loudness:** a build's RMS falls as the music high-passes, so a build that
   followed it would dim exactly as the music climbed. Onset may scale how hard a pulse hits.
-- **Groups enter one at a time and beams lift** as the build climbs.
+- **Groups enter one at a time and beams lift** as the build climbs; phaser rates climb the
+  ladder in `build.measure` (8, 4, 2 beats, moving only on 8-beat lines so a cycle never jumps).
 
 Each buildup is one idea that drives every layer:
 
 | Loop | Idea |
 |---|---|
-| `countdown` | Counting: the strip fills from the centre one step per downbeat, then counts back one step per beat over the last eight; the beams lift. |
+| `countdown` | Counting: the strip is a meter filling from the centre to half its length with the build's tension (stepping on downbeats); over a cued drop's last eight beats the count closes the rest from both ends one step per beat, full on the last beat before the dip; the beams lift. |
 | `tighten` | Converging: the fan closes onto the movers' shared point while the washes hold back, so the closed beam point is the brightest thing in the room. |
 | `stutter` | Subdividing: the roll halves on downbeats (a bar, half a bar, a beat, half a beat) and its gaps fill in until it is a wall of light. |
 | `stack` | Layering: strip first, washes from a third of the build, movers from two thirds, the beams lifting with it; the last bar locks solid. |
@@ -73,10 +75,11 @@ Each buildup is one idea that drives every layer:
 
 ### The rest of the catalogue
 
-- **Drops** pair a wash groove with a mover phaser and a strip chase, washes on colour A and,
-  in at least half of them, the movers on colour B, so the drop changes colour after a mono
-  build. Looks alternate on section time, so a drop opens on its wide look whatever bar it
-  starts on; mover dimmers pulse. `kick`, `hammer`, `crossfire`, `piston_kick`, `rolling`
+- **Drops** pair a wash groove with a mover phaser and a strip chase. The beams are the
+  production (mover floor 0.6, so a drop is never dimmer than its build) and carry colour B; in
+  `hammer` and `crossfire` the washes swap A and B every two bars with the beams opposite, so
+  the drop changes colour after a mono build. Looks alternate on section time and snap in the
+  dark, so a drop opens on its wide look whatever bar it starts on. `kick`, `hammer`, `crossfire`, `piston_kick`, `rolling`
   (directional chase, circles), `wide_fan` (slow fan, centre-out waves), `ballyhoo` (Wild:
   30-degree ballyhoo, seeded sparkle) and `wall_split` (outer members in colour B).
 - **Breakdowns** are mono and dark-first, at most one swell a bar: `heartbeat`, `afterglow`,
@@ -90,10 +93,10 @@ Each buildup is one idea that drives every layer:
 | Bank | Loops | Intensity |
 |---|---|---|
 | `hit` | `blinder` (washes and strip white), `beam_punch` (the beams white through the open gobo, where they already point), `colour_bump` (Calm: the palette's punch colour), `strobe` (Wild: white strobe on every group) | HTP |
-| `fill` | `strip_wipe` and `mover_flick` (bar 8), `turnaround` (bar 16: every group rolls, lands on a dark eighth) | LTP |
-| `riser` | `strobe_ramp` (Wild: strobing white rise), `white_sweep` (beams lift, washes and beams whiten), `strip_fill` (the strip closes from the ends) | HTP |
+| `fill` | `strip_wipe` and `mover_flick` (bar 8), `turnaround` (bar 16: washes and beams roll eighths, the strip doubles to sixteenths, lands on a dark eighth) | LTP |
+| `riser` | `strobe_ramp` (Wild: strobing white rise), `white_sweep` (beams lift in white and land back on the focus over the last bar, washes swell to 0.6), `strip_fill` (the strip closes from the ends in the punch colour, fit for Calm) | HTP |
 | `dip` | `last_beat` (every group dark), `fade` (a low glow for breakdown entry) | LTP |
-| `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (one wash per off-beat eighth), `mover_shapes` (figure-eights through a gobo) | HTP, but `mover_shapes` LTP |
+| `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (a quarter of the washes per off-beat, a lap in eight beats), `mover_shapes` (figure-eights through a gobo) | HTP, but `mover_shapes` LTP |
 
 An overlay's first line is free text saying what it does, then exactly these four lines in
 any order:
@@ -145,12 +148,17 @@ any order:
   held low) before a track's first drop and in every build and breakdown, `_drop` in drops.
 - **Write for any rig.** Never a fixture count, a cell name or a fact about the room. Use groups
   (`movers`, `wash`, `strip`; accent groups such as `fx` are refused, they play specials),
-  `sf.each` indices and counts, `sf.mirror`, `sf.members` and positions.
+  `sf.each` indices and counts, `sf.mirror`, `sf.members` and positions. Widths along a row are
+  a share of its cells with a one-cell minimum (`sf.pixels(share, count)`), never a cell count,
+  and positions in a row come from `sf.from_centre`, which never divides by `count - 1`. Prefer
+  group-wide effects and colour only the members that differ, so a 400-cell rig stays inside the
+  512-effect cap.
 - **Points derive from `sf.focus` and `sf.position`**, never literal venue coordinates. Aim
   through `sf.phaser`, `sf.aim_offset` or `sf.aim_direction`; `sf.aim` takes a point built from
   those (a group's shared focus, say).
 - **Movers.** Mirrored shapes through `sf.phaser`; mover dimmers may pulse; a Wild ballyhoo is at
-  least 30 degrees.
+  least 30 degrees. A snap moves only in the dark: `sf.snap` changes the look on the off-beat
+  with the mover dimmers at 0 for that quarter beat.
 - **Base loops**: peaks at or below 0.9 on every cell, no strobe, and no pulse faster than
   half-beat steps; anything faster reads as a strobe, and strobing is overlay-only.
 - **Loudness and music features are amplitude only.** `sf.loudness_gain(ctx.normalized_rms_level)`,
@@ -171,16 +179,46 @@ The context (`ctx`), in beats and 0..1 levels; nil where noted:
 | `autoloop_elapsed_beats` | Beats since this layer began (rotation entry or overlay begin). |
 | `section_intent`, `section_elapsed_beats` | The active cue's intent and beats since its start (nil without a cue). |
 | `next_intent`, `beats_until_next` | The pending cue's intent and beats until it starts (nil until known). |
+| `next_known_at` | The section time at which the pending cue arrived, where tension bends towards it. |
 | `beats_until_dip` | Beats until the pending cue's dip begins (nil without one). |
 | `drop_strength`, `next_drop_strength` | The active and pending drop's strength. |
 | `seed` | The active cue's seed, or 0. |
 | `normalized_rms_level`, `onset`, `bass`, `mid`, `high` | Loudness and the newest beat's features. |
 | `overlay_length_beats` | An overlay's length (overlays only). |
 
+A loop is a file returning a render function of ctx; this one is complete:
+
+```lua
+-- 8-beat loop
+-- energy: 2
+-- movement: sweep
+-- texture: wash
+local palette = sf.palette()
+return { render = function(ctx)
+    local level = 0.9 * sf.on_beat(ctx, 0.4) * sf.loudness_gain(ctx.normalized_rms_level)
+    return sf.scene { sf.colour(sf.group("wash"), palette.primary), sf.dimmer(sf.group("wash"), level),
+        sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = 20, measure = 8 }) }
+end }
+```
+
+Building blocks (all of `lighting.lua`):
+
+```lua
+sf.scene{...}                  -- flattens effects and lists of effects into one frame.
+sf.dimmer(target, level), sf.colour(target, rgb), sf.pan_tilt(target, pan, tilt)
+sf.group(name), sf.fixture(cell), sf.all()   -- targets; sf.each(target, fn(member, index, count))
+sf.members(target), sf.mirror(target), sf.position(cell) -- cells, mirror pairs, metres
+sf.on_beat(ctx, width, period) -- 1 on the beat decaying to 0 over `width` beats, every `period`.
+sf.osc.sine/triangle(beats, period, low, high, offset), sf.osc.pulse(..., duty, offset)
+sf.lerp(a, b, t), sf.mix(rgb_a, rgb_b, t), sf.rgb(r, g, b)
+sf.energy(ctx), sf.loudness_gain(rms) -- RMS (a typical level before one is measured) and its gain.
+sf.beat_in_bar(ctx), sf.bar(ctx), sf.phrase_phase(ctx, bars) -- the bar grid, 0..1 in a phrase.
+```
+
 Section and music helpers:
 
 ```lua
-sf.random(ctx, i, j)           -- 0..1, a pure hash of ctx.seed and two integers.
+sf.random(ctx, i, j, k)        -- 0..1, a pure hash of ctx.seed and up to three integers.
 sf.tension(ctx, beats)         -- 0..1 build progress, and its value at the last downbeat.
 sf.finale(ctx, beats)          -- 0..1 over the last `beats` before the next cue; 0 when unknown.
 sf.onset(ctx), sf.band(ctx, name) -- the newest beat's onset and band level, a mid level until measured.
@@ -190,12 +228,16 @@ sf.white()                     -- full white, for overlays only.
 Show helpers, shared by the banks (the W6 block in `lighting.lua`):
 
 ```lua
-sf.build(ctx) -> { drive, finale, tension, step, left }
--- A buildup's shared state: drive 0..1 (regime U to 0.7, handed over to 1 by a cued drop's
--- finale, eased down before a cued non-drop), finale 0..1, tension and step (the tension at the
--- last downbeat), left = beats until a cued drop's dip begins (nil while no drop is cued).
+sf.build(ctx) -> { drive, finale, tension, step, measure, left }
+-- A buildup's shared state: drive 0..1 (regime U 0.3 + 0.5 x tension, handed over to 1 by a cued
+-- drop's finale, eased down before a cued non-drop), finale 0..1, tension and step (the tension
+-- at the last downbeat), measure (the 8, 4, 2-beat rate ladder, moving on 8-beat lines), left =
+-- beats until a cued drop's dip begins (nil while no drop is cued).
+sf.snap(ctx, period)           -- look 0/1 changing on the off-beat before each period line, and
+                               -- `dark` for the quarter beat after, to move heads in the dark.
+sf.pixels(share, count)        -- a width along a row: share x count cells, at least one.
 sf.section_beats(ctx)          -- phrase time: beats since the section start, else the layer's.
-sf.from_centre(index, count)   -- 0 at the centre of an sf.each row, 1 at either end.
+sf.from_centre(index, count)   -- 0 at the centre of an sf.each row, 1 at either end, 0 for one.
 sf.shared_focus(target)        -- {x, y, z}, the mean of the members' focus points.
 sf.overlay_progress(ctx)       -- an overlay's progress 0..1 and the beats it has left.
 ```
@@ -263,11 +305,16 @@ replay plays the overlay on a fixed base) and run the semantic checks:
 
 - base loops peak at or below 0.9, never strobe and pulse no faster than half-beat steps;
 - buildups never restart without a cued drop (`buildup.json`), rise into a cued drop and leave
-  the dip dark (`buildup_finale.json`); `countdown` steps down once a beat over the last eight;
+  the dip dark (`buildup_finale.json`); `countdown` fills one step a beat over the last eight;
 - beat features and loudness change levels and reach only (loudness never for buildups);
 - an overlay strobes exactly when its header says so and is gone after its length and release;
+- the same rules hold on a bigger generic rig (eight movers, a 40-cell strip), every loop stays
+  inside the 512-effect cap on 400 washes and on 60 eight-cell bars, and a fan spreads in stage
+  order on a shuffled patch;
 - every loop's worst frame stays lean in Lua instructions (the suite prints the table with
-  `-- --nocapture`). Golden DMX digests guard the renderer pipeline, one loop per bank
+  `-- --nocapture`).
+
+Golden DMX digests guard the renderer pipeline, one loop per bank
 (`tests/golden/<bank>/<loop>.sha256`); new loops need no golden. After an intended render
 change, re-record the existing goldens with `STARFIRE_WRITE_GOLDEN=1`, never to turn a red
 semantic check green. A loop the preferred table names (`PREFERRED_AUTOLOOPS` in
