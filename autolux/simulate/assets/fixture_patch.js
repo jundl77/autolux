@@ -52,8 +52,10 @@
     let requestId = 0;
     let keyCounter = 0;
     const drawn = new WeakMap();
-    // A loaded recording: its header, frames and the fixture looks of the frame shown.
+    // A loaded recording: header, frames, the frame shown and its cells, and what the views need.
     let recording = null;
+    // While Play runs: when it started, from which frame, and the frame it last showed.
+    let playback = null;
 
     function* walk(node, parent = null) {
         yield [node, parent];
@@ -826,29 +828,103 @@
 
     const component = (type, props) => ({ namespace: "dash_html_components", type, props });
 
-    // The whole track in rows under the scrubber: each base section in its colour, each group's
-    // mean intensity, and where anything strobes; the server computes the columns.
+    // The whole track in rows under the scrubber, from columns the server computes: bank names
+    // (a drop marked), each section's two strongest colours as stripes with faults in red, each
+    // group's lowest-to-highest cell level against the headroom line, white (kept for hits) and
+    // the fastest strobe against the cap, with a line at every phrase.
     function drawOverview(overview, frameCount) {
         const strip = document.getElementById("preview-overview");
         if (!strip) return;
-        const row = (label, title, width, rects) =>
-            `<div title="${escapeXml(title)}">${escapeXml(label)}</div><svg viewBox="0 0 ${width} 1" preserveAspectRatio="none">${rects.join("")}</svg>`;
-        const column = (value, index, fill) => (value > 0 ? `<rect x="${index}" y="0" width="1.02" height="1" fill="${fill}" fill-opacity="${value}"/>` : "");
-        const sections = overview.sections.map(
-            (section) =>
-                `<rect x="${section.start}" y="0" width="${section.end - section.start}" height="1" fill="${section.rgb ? `rgb(${section.rgb.map((value) => Math.round(255 * value)).join(",")})` : "#1d2733"}"><title>${escapeXml(section.base || "idle")}</title></rect>`
-        );
+        const columns = overview.columns;
+        const slice = frameCount / columns;
+        const row = (label, title, width, body, kind = "") =>
+            `<div title="${escapeXml(title)}">${escapeXml(label)}</div><svg class="${kind}" viewBox="0 0 ${width} 1" preserveAspectRatio="none">${body}</svg>`;
+        // A level axis 0..1 drawn upward; a band never thinner than a hairline.
+        const band = (low, high, index, fill) => (high > 0 ? `<rect x="${index}" y="${1 - high}" width="1.02" height="${Math.max(0.05, high - low)}" fill="${fill}"/>` : "");
+        const share = (value, x, width, fill) => (value > 0 ? `<rect x="${x}" y="0" width="${width}" height="1" fill="${fill}" fill-opacity="${value}"/>` : "");
+        const headroom = `<line class="preview-headroom" x1="0" x2="${columns}" y1="${1 - overview.headroom}" y2="${1 - overview.headroom}" vector-effect="non-scaling-stroke"/>`;
+        const sections = overview.sections.flatMap(({ start, end, colours, base }) => {
+            const stripes = colours.length ? colours : [null];
+            return stripes.map(
+                (rgb, k) =>
+                    `<rect x="${start}" y="${k / stripes.length}" width="${end - start}" height="${1 / stripes.length}" fill="${rgb ? cssRgb(rgb) : "#1d2733"}"><title>${escapeXml(base || "idle")}</title></rect>`
+            );
+        });
+        const faults = overview.faults.map((value, index) => share(value, index * slice, slice * 1.02, "#e5534b"));
+        const banks = overview.sections
+            .filter((section) => section.bank)
+            .map(({ start, end, bank }) => {
+                const drop = bank === "drop";
+                return `<span class="${drop ? "drop" : ""}" style="left:${(100 * start) / frameCount}%;width:${(100 * (end - start)) / frameCount}%">${drop ? "▼ " : ""}${escapeXml(bank)}</span>`;
+            });
+        const at = (frame) => `calc(${OVERVIEW_TRACK_LEFT} + ${frame / frameCount} * (100% - ${OVERVIEW_TRACK_LEFT}))`;
         strip.innerHTML = [
-            row("sections", "Base loop runs in their intensity-weighted colour", frameCount, sections),
-            ...Object.entries(overview.groups).map(([group, levels]) =>
-                row(group, `${group}: mean intensity; strobe ${overview.group_strobe_seconds[group]} s`, overview.columns, levels.map((value, index) => column(value, index, "#e6edf3")))
+            `<div></div><div class="preview-banks">${banks.join("")}</div>`,
+            row("sections", "Base loop runs in their two strongest colours; red where a script fault left them dark", frameCount, sections.join("") + faults.join("")),
+            ...Object.entries(overview.groups).map(([group, { low, high }]) =>
+                row(group, `${group}: lowest to highest cell level, line at ${overview.headroom}; strobe ${overview.group_strobe_seconds[group]} s`, columns, low.map((value, index) => band(value, high[index], index, "#e6edf3")).join("") + headroom, "band")
             ),
-            row(`strobe ${overview.strobe_seconds} s`, "Share of each slice with any fixture strobing", overview.columns, overview.strobe.map((value, index) => column(value, index, "#f0c674"))),
+            row("white", "Share of each slice with a lit white cell; white is kept for hits", columns, overview.white.map((value, index) => share(value, index, 1.02, "#ffffff")).join("")),
+            row(`strobe ${overview.strobe_seconds} s`, `Fastest strobe in each slice against the ${overview.strobe_max_hz} Hz cap`, columns, overview.strobe.map((hz, index) => band(0, hz / overview.strobe_max_hz, index, "#f0c674")).join(""), "band"),
+            ...overview.phrases.map((frame) => `<span class="preview-phrase" style="left:${at(frame)}"></span>`),
             '<span class="preview-cursor"></span>'
         ].join("");
     }
 
     const previewClock = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
+
+    function seekPreview(frame) {
+        if (recording) ds.set_props("preview-frame", { value: Math.max(0, Math.min(recording.frames.length - 1, frame)) });
+    }
+
+    // The frame where the beat (or bar) after `shown` starts, or with step -1 the one where the
+    // current beat starts, or the previous one's when already at a start.
+    function beatStep(shown, step, perBar) {
+        const { frames } = recording;
+        const unit = (index) => Math.floor(frames[index].beat / perBar);
+        let index = shown;
+        if (step > 0) {
+            while (index < frames.length - 1 && unit(index) === unit(shown)) index += 1;
+            return index;
+        }
+        const startOf = (from) => {
+            let start = from;
+            while (start > 0 && unit(start - 1) === unit(from)) start -= 1;
+            return start;
+        };
+        index = startOf(shown);
+        return index === shown && index > 0 ? startOf(index - 1) : index;
+    }
+
+    document.addEventListener("click", (event) => {
+        const strip = event.target.closest?.("#preview-overview");
+        if (!strip || !recording) return;
+        const box = strip.getBoundingClientRect();
+        const left = box.left + parseFloat(OVERVIEW_TRACK_LEFT);
+        if (event.clientX < left) return;
+        seekPreview(Math.round(((event.clientX - left) / (box.right - left)) * (recording.frames.length - 1)));
+    });
+
+    // ←/→ step a beat, with Shift a bar, and PgUp/PgDn a section. Taken in the capture phase,
+    // before the focused slider would step a single frame.
+    document.addEventListener(
+        "keydown",
+        (event) => {
+            const step = { ArrowRight: 1, ArrowLeft: -1, PageDown: 1, PageUp: -1 }[event.key];
+            if (!step || !recording || !event.target.closest?.("#preview-card")) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const { shown, sections, frames, header } = recording;
+            if (event.key.startsWith("Page")) {
+                const later = sections.find((start) => start > shown);
+                const earlier = sections.filter((start) => start < shown).at(-1);
+                seekPreview(step > 0 ? (later ?? frames.length - 1) : (earlier ?? 0));
+                return;
+            }
+            seekPreview(beatStep(shown, step, event.shiftKey ? header.beats_per_bar || 1 : 1));
+        },
+        true
+    );
 
     ds.fixture_patch = {
         describeProfile(spec, settings) {
@@ -870,7 +946,16 @@
                 ds.set_props("preview-status", { children: `Recording not shown: ${error.message}` });
                 return ds.no_update;
             }
-            recording = { header, frames, looks: null };
+            playback = null;
+            recording = {
+                header,
+                frames,
+                shown: 0,
+                cells: null,
+                strobeMax: source.overview.strobe_max_hz,
+                sections: source.overview.sections.map((section) => section.start),
+                reach: previewReach(header, frames)
+            };
             drawOverview(source.overview, frames.length);
             ds.set_props("preview-frame", { value: 0 });
             ds.set_props("preview-clock", { disabled: true });
@@ -882,7 +967,7 @@
             if (!recording) return ["", "preview-beat"];
             const shown = Math.max(0, Math.min(index || 0, recording.frames.length - 1));
             const frame = recording.frames[shown];
-            recording.looks = previewLooks(recording.header, frame);
+            Object.assign(recording, { shown, cells: previewCells(recording.header, frame) });
             // A redraw mid-gesture would drop the pointer's capture; the next frame catches up.
             if (rig && !planDrag && !planNav) showPlan(planView);
             const cursor = document.querySelector?.("#preview-overview .preview-cursor");
@@ -899,12 +984,28 @@
             return [`${previewClock(frame.t)} · ${where} · ${base}${frame.fault ? " · dark from a script fault" : ""}`, flash];
         },
 
-        // Play steps one frame per clock tick and stops at the end; Play at the end restarts.
+        // Play shows the frame due by the time since Play, so playback runs at real time however
+        // late the clock ticks; moving the scrubber while playing plays on from there.
         stepPreview(_clicks, _ticks, value, max, paused) {
+            const now = performance.now();
             if (ds.callback_context.triggered_id === "preview-play") {
-                return paused ? [value >= max ? 0 : ds.no_update, false, "Pause"] : [ds.no_update, true, "Play"];
+                if (!paused) {
+                    playback = null;
+                    return [ds.no_update, true, "Play"];
+                }
+                const from = value >= max ? 0 : value;
+                playback = { at: now, from, shown: from };
+                return [from === value ? ds.no_update : from, false, "Pause"];
             }
-            return value >= max ? [max, true, "Play"] : [value + 1, ds.no_update, ds.no_update];
+            if (!playback || !recording) return [ds.no_update, true, "Play"];
+            if (value !== playback.shown) playback = { at: now, from: value, shown: value };
+            const due = Math.min(max, playback.from + Math.floor(((now - playback.at) / 1000) * recording.header.frame_rate_hz));
+            playback.shown = due;
+            if (due >= max) {
+                playback = null;
+                return [max === value ? ds.no_update : max, true, "Play"];
+            }
+            return [due === value ? ds.no_update : due, ds.no_update, ds.no_update];
         },
 
         renderPatch(draft, universe, selection, busy, settings) {
@@ -1187,65 +1288,102 @@
         return { x: anchor[0] - (at[0] - box.x) * s, y: anchor[1] - (at[1] - box.y) * s, w, h: box.h * s };
     }
 
-    // A recording frame's look per fixture uuid: the mean of its cells' rgb·i fills the mark,
-    // their mean colour draws the beam at the brightest cell's opacity, any cell strobing rings it.
-    function previewLooks(header, frame) {
-        const looks = {};
+    // A recording frame's cells by fixture uuid, each where the rendered rig hangs it (scene mm)
+    // with its level, colour, strobe, beam and gobo; a cell the rig could not place is left out.
+    function previewCells(header, frame) {
+        const cells = {};
         header.cells.forEach((cell, index) => {
-            const [i, r, g, b, strobe, direction] = frame.c[index];
-            const look = (looks[cell.fixture.toUpperCase()] ||= { lit: [0, 0, 0], rgb: [0, 0, 0], cells: 0, i: 0, strobe: 0, direction: null });
-            [r, g, b].forEach((value, channel) => {
-                look.lit[channel] += value * i;
-                look.rgb[channel] += value;
-            });
-            look.cells += 1;
-            look.i = Math.max(look.i, i);
-            look.strobe = Math.max(look.strobe, strobe);
-            look.direction ||= direction || null;
+            if (cell.x === null) return;
+            const [i, r, g, b, strobe, direction = null, gobo = null] = frame.c[index];
+            const at = [cell.x, cell.y, cell.z].map((metres) => metres * 1000);
+            (cells[cell.fixture.toUpperCase()] ||= []).push({ at, i, rgb: [r, g, b], strobe, direction, gobo });
         });
-        for (const look of Object.values(looks)) {
-            const css = (channels) => `rgb(${channels.map((value) => Math.round((255 * value) / look.cells)).join(",")})`;
-            [look.fill, look.hue] = [css(look.lit), css(look.rgb)];
+        return cells;
+    }
+
+    const cssRgb = (rgb, scale = 1) => `rgb(${rgb.map((value) => Math.round(255 * value * scale)).join(",")})`;
+
+    // Where a beam stops: PREVIEW_BEAM_MM along it, or on the floor (Z = 0) if it lands first.
+    function beamEnd(at, direction) {
+        const reach = direction[2] < 0 ? Math.min(PREVIEW_BEAM_MM, Math.max(0, at[2]) / -direction[2]) : PREVIEW_BEAM_MM;
+        return at.map((value, axis) => value + direction[axis] * reach);
+    }
+
+    // The X and Z extent of every placed cell and beam end over the whole recording, floor
+    // included, so the elevation keeps one frame while beams move.
+    function previewReach(header, frames) {
+        const placed = header.cells.map((cell) => (cell.x === null ? null : [cell.x, cell.y, cell.z].map((metres) => metres * 1000)));
+        const reach = [Infinity, -Infinity, 0, 0];
+        const take = ([x, , z]) => {
+            [reach[0], reach[1], reach[2], reach[3]] = [Math.min(reach[0], x), Math.max(reach[1], x), Math.min(reach[2], z), Math.max(reach[3], z)];
+        };
+        placed.forEach((at) => at && take(at));
+        for (const frame of frames) frame.c.forEach((cell, index) => placed[index] && cell[5] && take(beamEnd(placed[index], cell[5])));
+        return Number.isFinite(reach[0]) ? reach : [0, 0, 0, 0];
+    }
+
+    const cellTitle = (name, cells, index) => {
+        const { i, strobe, gobo } = cells[index];
+        return [cells.length > 1 ? `${name} cell ${index + 1}` : name, `${Math.round(i * 100)}%`, strobe > 0 && `strobe ${strobe} Hz`, gobo && `gobo ${gobo}`].filter(Boolean).join(" · ");
+    };
+
+    // One cell in a view drawing scene axes `axes` ([0, 1] plan, [0, 2] elevation), SVG y up:
+    // its beam (dashed through a gobo other than Open), its rgb·i disc outlined in its group's
+    // colour, as rgb·i alone reads black at both 0 and 10%, and a dashed ring whose weight
+    // follows the strobe rate.
+    function cellGlyph(cell, axes, r, n, outline, title, strobeMax) {
+        const [x, y] = [n(cell.at[axes[0]]), n(-cell.at[axes[1]])];
+        let beam = "";
+        if (cell.direction) {
+            const end = beamEnd(cell.at, cell.direction);
+            const gobo = cell.gobo && cell.gobo.toLowerCase() !== "open" ? ` stroke-dasharray="${n(r * 0.6)} ${n(r * 0.5)}"` : "";
+            beam = `<line class="plan-beam" x1="${x}" y1="${y}" x2="${n(end[axes[0]])}" y2="${n(-end[axes[1]])}" stroke="${cssRgb(cell.rgb)}" stroke-opacity="${cell.i}" stroke-width="${n(r * 0.5)}" stroke-linecap="round"${gobo}/>`;
         }
-        return looks;
+        const level = Math.min(1, cell.strobe / strobeMax);
+        const strobe =
+            cell.strobe > 0
+                ? `<circle class="plan-strobe" cx="${x}" cy="${y}" r="${n(r * 1.8)}" stroke-width="${n(r * (0.15 + 0.35 * level))}" stroke-opacity="${0.35 + 0.65 * level}" stroke-dasharray="${n(r * 0.4)} ${n(r * 0.3)}"/>`
+                : "";
+        const disc = `<circle class="preview-cell" cx="${x}" cy="${y}" r="${n(r)}" fill="${cssRgb(cell.rgb, cell.i)}" style="--group:${outline}"><title>${escapeXml(title)}</title></circle>`;
+        return { beam, disc: disc + strobe };
     }
 
-    // A beam is drawn PREVIEW_BEAM_MM along its direction, so in each view its length is the
-    // direction's share in that view's plane: an upright beam is a dot on the plan.
-    function lookGlyph(look, x, y, along, r, n) {
-        const beam = look.direction
-            ? `<line class="plan-beam" x1="${x}" y1="${y}" x2="${n(x + along[0] * PREVIEW_BEAM_MM)}" y2="${n(y - along[1] * PREVIEW_BEAM_MM)}" stroke="${look.hue}" stroke-opacity="${look.i}" stroke-width="${n(r * 0.5)}" stroke-linecap="round"/>`
-            : "";
-        const strobe = look.strobe > 0 ? `<circle class="plan-strobe" cx="${x}" cy="${y}" r="${n(r * 1.8)}" stroke-width="${n(r * 0.25)}" stroke-dasharray="${n(r * 0.4)} ${n(r * 0.3)}"/>` : "";
-        return { beam, strobe };
+    // A fixture's cells drawn at their own places, beams under discs; several cells share the
+    // fixture's room, so they draw smaller.
+    function cellsGlyph(cells, name, axes, r, n, outline, strobeMax) {
+        const glyphs = cells.map((cell, index) => cellGlyph(cell, axes, cells.length > 1 ? r * 0.6 : r, n, outline, cellTitle(name, cells, index), strobeMax));
+        return glyphs.map((glyph) => glyph.beam).join("") + glyphs.map((glyph) => glyph.disc).join("");
     }
 
-    // The front elevation, seen from the audience: X across, Z up, the floor at Z = 0.
-    function elevationSvg(fixtures, looks) {
-        const xs = fixtures.length ? fixtures.map((mark) => mark.x) : [0];
-        const zs = fixtures.length ? fixtures.map((mark) => mark.z) : [0];
-        const [minX, maxX, top] = [Math.min(...xs), Math.max(...xs), Math.max(0, ...zs)];
-        const span = Math.max(PLAN_MIN_SPAN_MM, maxX - minX, top);
-        const [pad, r] = [span * 0.15, span * 0.018];
-        const n = (value) => Math.round(value);
-        const box = [minX - pad, -top - pad, maxX - minX + 2 * pad, top + 2 * pad].map(n).join(" ");
+    function groupColours(fixtures, settings) {
+        const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
+        return Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
+    }
+
+    // The front elevation, seen from the audience: X across, Z up, the floor at Z = 0, framed on
+    // the recording's reach. Upstage cells draw first, so nearer ones stand in front.
+    function elevationSvg(fixtures, settings, preview) {
+        const [x0, x1, z0, z1] = preview.reach;
+        const span = Math.max(PLAN_MIN_SPAN_MM, x1 - x0, z1 - z0);
+        const [pad, r] = [span * 0.06, span * 0.014];
+        const n = Math.round;
+        const colour = groupColours(fixtures, settings);
+        const placed = fixtures.filter((mark) => preview.cells[mark.uuid]);
+        placed.sort((a, b) => Math.max(...preview.cells[b.uuid].map((cell) => cell.at[1])) - Math.max(...preview.cells[a.uuid].map((cell) => cell.at[1])));
         const parts = [
-            `<svg class="elevation" xmlns="http://www.w3.org/2000/svg" viewBox="${box}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Front elevation, seen from the audience" font-size="${n(r * 1.3)}">`,
-            `<line class="plan-stage-edge" x1="${n(minX - pad)}" y1="0" x2="${n(maxX + pad)}" y2="0" stroke-width="${n(r * 0.3)}"/>`,
-            `<text x="${n(minX - pad * 0.8)}" y="${n(r * 2)}">floor</text>`,
+            `<svg class="elevation" xmlns="http://www.w3.org/2000/svg" viewBox="${[x0 - pad, -z1 - pad, x1 - x0 + 2 * pad, z1 - z0 + 2 * pad].map(n).join(" ")}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Front elevation, seen from the audience" font-size="${n(r * 1.3)}">`,
+            `<line class="plan-stage-edge" x1="${n(x0 - pad)}" y1="0" x2="${n(x1 + pad)}" y2="0" stroke-width="${n(r * 0.3)}"/>`,
+            `<text x="${n(x0 - pad * 0.8)}" y="${n(r * 2)}">floor</text>`,
             `<g stroke-width="${n(r * 0.25)}">`
         ];
-        for (const mark of fixtures) {
-            const look = looks[mark.uuid];
-            const [x, y] = [n(mark.x), n(-mark.z)];
-            const { beam, strobe } = look ? lookGlyph(look, x, y, [look.direction?.[0], look.direction?.[2]], r, n) : { beam: "", strobe: "" };
-            parts.push(`<g data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${beam}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${look ? look.fill : "#7f8ea3"}"/>${strobe}</g>`);
+        for (const mark of placed) {
+            parts.push(`<g data-node-key="${escapeXml(mark.key)}">${cellsGlyph(preview.cells[mark.uuid], mark.name, [0, 2], r, n, colour[mark.group], preview.strobeMax)}</g>`);
         }
         parts.push("</g></svg>");
         return parts.join("");
     }
 
-    function planSvg({ fixtures, others }, settings, view, looks = null) {
+    function planSvg({ fixtures, others }, settings, view, preview = null) {
         const all = [...fixtures, ...others];
         const xs = all.length ? all.map((mark) => mark.x) : [0];
         const ys = all.length ? all.map((mark) => -mark.y) : [0];
@@ -1271,7 +1409,7 @@
         const charWidth = font * 0.58;
         const rect = ({ x, y, w, h }, round = n) => [x, y, w, h].map(round).join(" ");
         const groups = [...new Set(fixtures.map((mark) => mark.group))].sort();
-        const colour = Object.fromEntries(groups.map((group, index) => [group, group ? groupColour(index, settings.colors) : "#7f8ea3"]));
+        const colour = groupColours(fixtures, settings);
         const counts = fixtures.reduce((total, mark) => ({ ...total, [mark.group]: (total[mark.group] || 0) + 1 }), {});
         const edge = n(maxY + r * 2);
         const metres = scaleMetres(span / zoom);
@@ -1290,10 +1428,11 @@
             parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title><rect class="plan-object${mark.hollow ? " hollow" : ""}" x="${x}" y="${y}" width="${side}" height="${side}"/></g>`);
         }
         for (const mark of fixtures) {
-            const look = looks?.[mark.uuid];
+            const cells = preview?.cells[mark.uuid];
             const [x, y, fill] = [n(mark.x), n(-mark.y), colour[mark.group]];
-            const arrow = mark.facing ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
-            const { beam, strobe } = look ? lookGlyph(look, x, y, look.direction || [], r, n) : { beam: "", strobe: "" };
+            // A recording's beams show where each head points; the yaw arrow would only clutter them.
+            const arrow = mark.facing && !preview ? `<line x1="${x}" y1="${y}" x2="${n(x + mark.facing[0] * r * 2.4)}" y2="${n(y - mark.facing[1] * r * 2.4)}" stroke="${fill}"/>` : "";
+            const body = cells ? cellsGlyph(cells, mark.name, [0, 1], r, n, fill, preview.strobeMax) : `<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${fill}"/>`;
             // Role by glyph: every fixture is filled; an accent one also wears a dotted ring.
             const ring = mark.accent
                 ? `<circle cx="${x}" cy="${y}" r="${n(r * 1.4)}" fill="none" class="ring" style="--ring:${fill}" stroke-width="${n(r * 0.3)}" stroke-dasharray="${n(r * 0.5)} ${n(r * 0.4)}"/>`
@@ -1303,7 +1442,7 @@
             const label = labelled
                 ? `<text class="plan-name" x="${n(flip ? x - r * 1.4 : x + r * 1.4)}" y="${n(y + r * 0.4)}"${flip ? ' text-anchor="end"' : ""} stroke-width="${n(font * 0.3)}">${escapeXml(mark.name)}</text>`
                 : "";
-            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${beam}${arrow}<circle cx="${x}" cy="${y}" r="${n(r)}" fill="${look ? look.fill : fill}"/>${ring}${strobe}${label}</g>`);
+            parts.push(`<g class="mvr-object" data-node-key="${escapeXml(mark.key)}"><title>${escapeXml(mark.name)}</title>${arrow}${body}${ring}${label}</g>`);
         }
         parts.push("</g></svg>");
         const key = (glyph, text) => `<span class="plan-key"><svg viewBox="0 0 14 14" width="14" height="14">${glyph}</svg>${text}</span>`;
@@ -1328,8 +1467,8 @@
 
     // With a recording loaded, the plan wears the frame shown and the elevation stands beside it.
     function planWithPreview(marks, settings, view) {
-        const looks = recording?.looks;
-        return planSvg(marks, settings, view, looks) + (looks ? elevationSvg(marks.fixtures, looks) : "");
+        const preview = recording?.cells ? recording : null;
+        return planSvg(marks, settings, view, preview) + (preview ? elevationSvg(marks.fixtures, settings, preview) : "");
     }
 
     function drawPlan(container, draft, settings) {

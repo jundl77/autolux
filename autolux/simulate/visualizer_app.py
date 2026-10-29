@@ -2000,13 +2000,22 @@ PREVIEW_CSS = '''
 .preview-beat.on {background:#73b6ff;}
 .preview-beat.bar {background:#e6edf3;box-shadow:0 0 6px #e6edf3;}
 .preview-overview {position:relative;font-size:11px;color:var(--muted);margin-top:6px;}
+.preview-overview {cursor:pointer;}
+.preview-overview:focus-visible {outline:1px solid var(--accent);}
 .preview-overview svg {display:block;width:100%;height:12px;background:#0b121c;}
-.preview-overview .preview-cursor {position:absolute;top:0;bottom:0;width:1px;background:#e6edf3;pointer-events:none;}
+.preview-overview svg.band {height:22px;}
+.preview-overview .preview-headroom {stroke:#e5534b;stroke-width:1;stroke-dasharray:3 3;}
+.preview-banks {position:relative;height:14px;}
+.preview-banks span {position:absolute;top:0;overflow:hidden;white-space:nowrap;}
+.preview-banks .drop {color:#f0c674;font-weight:600;}
+.preview-overview .preview-cursor,.preview-overview .preview-phrase {position:absolute;top:0;bottom:0;width:1px;pointer-events:none;}
+.preview-overview .preview-cursor {background:#e6edf3;}
+.preview-overview .preview-phrase {background:#5d6d80;opacity:.7;}
 #mvr-plan:has(svg.elevation) {display:grid;grid-template-columns:3fr 2fr;gap:8px;}
 #mvr-plan:has(svg.elevation) .plan-legend {grid-column:1 / -1;}
 #mvr-plan svg.elevation {display:block;width:100%;height:max(480px,55vh);background:#0b121c;border:1px solid #273345;border-radius:4px;}
 #mvr-plan .plan-strobe {fill:none;stroke:#f5f7fa;}
-#mvr-plan svg.elevation circle:not(.plan-strobe) {stroke:#e6edf3;}
+#mvr-plan svg circle.preview-cell {stroke:var(--group);}
 #mvr-plan svg.elevation .selected circle:not(.plan-strobe) {stroke:var(--accent);}
 #mvr-plan svg.elevation text {fill:var(--muted);}
 @media (max-width:700px) {#mvr-plan:has(svg.elevation) {grid-template-columns:1fr;}}
@@ -2112,7 +2121,12 @@ def _build_preview_card():
                 className='preview-scrub',
             ),
             # fixture_patch.js draws the whole-track strip here once the frames arrive.
-            html.Div(id='preview-overview', className='preview-overview'),
+            html.Div(
+                id='preview-overview',
+                className='preview-overview',
+                tabIndex='0',
+                title='Click to seek; arrows step a beat, Shift+arrows a bar, PgUp/PgDn a section',
+            ),
             dcc.Interval(id='preview-clock', interval=100, disabled=True),
             dcc.Store(id='preview-source'),
             dcc.Store(id='preview-ready'),
