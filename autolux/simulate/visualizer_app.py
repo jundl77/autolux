@@ -1876,7 +1876,7 @@ CALLBACK_RESOLVED_JS = (
 )
 
 GATE_JS = (
-    'function(n, selected, control) {'
+    'function(n, selected) {'
     + _GATE_STATE_JS
     + '''
     const changed = gate.tab !== selected || gate.hidden;
@@ -1906,10 +1906,11 @@ GATE_JS = (
     + ''';
     if (timeline) gate.viewAt = now;
     if (metrics) gate.metricsAt = now;
-    // The rig changes only on a show restart, so it is fetched once per rig revision.
-    if (control && 'rig' in control) gate.rig = control.rig_revision;
+    // The rig changes only on a show restart, so a request names the revision the Config page
+    // holds and the show sends the rig until the page has taken it: a control state that
+    // carried it but was overtaken before the page saw it cannot lose it.
     const request = {tick: n, tab: selected, timeline: timeline, metrics: metrics};
-    if ('rig' in gate) request.rig = gate.rig;
+    if (ds.fixture_rig_revision !== undefined) request.rig = ds.fixture_rig_revision;
     return request;
 }'''
 )
@@ -2516,7 +2517,6 @@ def build_app(snapshot_source, fixture_store: FixtureStore | None = None) -> das
         Output('gate', 'data'),
         Input('tick', 'n_intervals'),
         Input('dashboard-tab', 'value'),
-        State('control-state', 'data'),
     )
 
     @app.callback(

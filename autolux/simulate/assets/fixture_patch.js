@@ -1064,8 +1064,10 @@
             if (tab !== "config") clearTest();
             // The show dropped the test unasked (standby, sound stop, restart): stop holding it.
             else if (lit && show?.highlight && state && !state.highlight) stopRefresh();
-            // The control state carries the rig only when its revision changed; keep the last one.
+            // The control state carries the rig until this page holds its revision (the gate asks
+            // with ds.fixture_rig_revision); keep the last one between.
             show = state && !("rig" in state) ? { ...state, rig: show?.rig } : state;
+            if (state && "rig" in state) ds.fixture_rig_revision = state.rig_revision;
             paintTest();
             // No show reporting a rig means nothing to restart. A restart holds until the next
             // session reports, which may run the same revision: a restart without a Save.
