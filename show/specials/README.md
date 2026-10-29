@@ -79,8 +79,8 @@ is the only place the two vocabularies meet.
 Values are sent as written. Starfire applies the intensity macro: it scales speed and gates and
 caps pulse; energy is not scaled. Autolux only gates which specials may fire (below).
 
-Specials never strobe. The drop's strobe is the cue's `hit/strobe` overlay (and the Wild riser),
-which the director places and venue-gates (`autolux/lib/engine/cue_director.py`).
+Specials never strobe; the drop's strobe is the cue's `hit/strobe` overlay (and the Wild riser),
+placed and venue-gated by `autolux/lib/engine/cue_director.py`.
 
 Unknown or missing keys, out-of-range values and a name that does not match the file are
 rejected at startup, with the file and the key's path (such as `effect.size`) named.
@@ -89,23 +89,21 @@ rejected at startup, with the file and the key's path (such as `effect.size`) na
 
 A special is intense when it pulses or its speed is above `INTENSE_SPEED` (0.6).
 This is derived from the values and never declared. A drop whose cue strobes (hit or riser)
-and the intense special entering with it count as one intense event on one cooldown, the drop
-strobe cooldown setting (halved at wild), and nothing intense fires at or below intensity 0.3.
-While the cooldown runs neither a strobing overlay nor an intense special fires; a calm special
-may. Calm specials are free.
+and the intense special entering with it are one intense event on one cooldown, the drop strobe
+cooldown setting (halved at wild). Nothing intense fires at or below intensity 0.3, nor while the
+cooldown runs; calm specials are free.
 
 ## Selection
 
 When an intent starts, Autolux picks among that intent's specials that the rig can play:
 the group must be reported by Starfire at login with fixtures in it, and able to express every
 axis the special sets (colour, speed when above 0, pulse, pattern; energy always), and not
-resting after its last special. Within those
-it plays each one before repeating any, then favours the least recently used, seeded like the
-loops. An intent with no
-playable special releases the one running. When the pick lands on an accent and several accent
-groups are ready, their MVR positions choose the group: house left-most first, then each time the
-ready group furthest in X from the last accent (equal reach: the one that waited longest), so
-accents alternate across the room instead of following the seed.
+resting after its last special. Within those it plays each one before repeating any, then
+favours the least recently used, seeded like the loops. An intent with no playable special
+releases the one running. When the pick lands on an accent and several accent groups are ready,
+their MVR positions choose the group: house left-most first, then each time the ready group
+furthest in X from the last accent (equal reach: the one that waited longest), so accents
+alternate across the room instead of following the seed.
 
 The room is a living room, so the accent group `fx` plays two tiers and stays dark through
 buildup (the rows select `role = "accent"`, so a second accent group able to express them, such

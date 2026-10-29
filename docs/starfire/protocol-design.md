@@ -11,43 +11,39 @@ Only top-level wire messages have direction annotations.
 | --- | --- |
 | `PlayAutoloop` | Play one globally unique autoloop ID until changed. Repeating the ID continues the loop. An empty ID enters idle and clears effects. Transitions are cuts or positive beat-duration crossfades. |
 | `SetActiveEffect` / `UnsetActiveEffect` | Set or remove an identified accent. Specify fixture properties directly; omitted properties leave the baseline untouched. An optional duration in seconds expires the effect; otherwise it lasts until unset. `instantaneous_release` drops a special this frame; otherwise it runs its own release. |
-| `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. `BeatFeatures` (onset, bass, mid, high, each 0..1 against the track's own peaks) ride along once measured; a beat without them clears the previous ones. |
+| `UpdateBeat` | Autolux reports one detected beat with the bar it belongs to: beat index, the tracker's bar phase (absent if unknown), beats per bar and tempo. Starfire derives the continuous bar-aligned position from those facts and interpolates at tempo between beats; animation speed never changes musical phase. `BeatFeatures` ride along once measured; a beat without them clears the previous ones. |
 | `SetParameter` | Change one global parameter, independently of the active autoloop. |
 
 ## Section cues
 
-Autolux decides a section about 9 s before the room hears it and sends its plan at once as
-one `CueSection`: the start (an Autolux beat index on a downbeat), the intent, a rotation of
-1..8 base looks (each some bars long, cycled from the start), 0..8 Lua overlays (hit, fill,
-riser, dip, accent rows with priority, begin, length, repeat, attack and release in beats),
-the palette, a drop strength (drops only) and a seed for `sf.random`. Starfire maps the
-start onto its own grid through the newest beat, so bar-phase corrections move a waiting
-cue with the grid, and plays it on its render clock.
+Autolux sends each section's plan as one `CueSection` when it decides it, ahead of the room.
+Starfire maps the start beat onto its own grid through the newest beat, so a bar-phase
+correction moves a waiting cue with the grid, and plays it on its render clock.
 
 - **On time:** the cue starts on the first frame at or past its start beat.
-- **Late** (its start has passed on receipt): it starts on the next bar line. Its rotation
-  still counts from the true start; its entry rows (begin >= 0) enter on that bar line and
-  its pre-roll rows (begin < 0) are skipped as past.
+- **Late** (its start has passed on receipt): it starts on the next bar line, its rotation
+  counted from the true start; entry rows (begin >= 0) enter on that bar line and pre-roll
+  rows (begin < 0) are skipped.
 - **Supersession:** a cue drops every waiting cue starting at or after its own start, so
-  Autolux re-sends cues in start order. Several cues passing in one frame: the latest
-  starts, the others drop.
-- **Re-cue:** a cue with the active section's start replaces it on the next bar line
-  without restarting anything: a running entry loop, its seed and every overlay row still
-  playing carry on, and its entry rows never fire twice. It is not a next section.
+  Autolux re-sends cues in start order. Of several cues passing in one frame the latest
+  starts; the others drop.
+- **Re-cue:** a cue with the active section's start replaces it on the next bar line and
+  restarts nothing: the running entry loop, its seed and every playing overlay row carry on,
+  and entry rows never fire twice. It is not a next section.
 - **Clearing:** `ClearCues` (sent with every Autolux queue clear) and `PlayAutoloop` end
   every cue and release their overlays; the base look plays on. Stop also drops overlays.
-- **Dip bank:** a pre-roll row from the `dip` bank is the blackout before the section.
+- **Dip bank:** a pre-roll row from the `dip` bank is the blackout before the section;
   Starfire derives `beats_until_dip` and the move in black from that bank name only.
 - **Lua context:** the active section's intent and elapsed beats (from the bar line at or
   before a selection without a cue), the next section's intent, beats until it, when it
-  became known and the beats until its dip, drop strengths, the seed, tempo and beat
-  features; each is nil until there is something to say.
+  became known and beats until its dip, drop strengths, the seed, tempo and beat features;
+  each is nil until known.
 
 Bounds are errors (ErrorReply), never clamps: 8 rotation entries, 8 overlays, 4 waiting
-cues, 8 overlays playing at once (a ninth is not started and reported), pre-roll at most 64
-beats, one-shot begins up to 1,024 beats, a repeating row inside its period with length plus
-release fitting it. The largest cue stays under the 4 KiB real-time cap. Overlay faults and
-refusals never stop the show; they go to `Metrics.overlay_error`.
+cues, pre-roll at most 64 beats, one-shot begins up to 1,024 beats, a repeating row inside
+its period with length plus release fitting it. At most 8 overlays play at once; a ninth is
+not started and is reported. The largest cue stays under the 4 KiB real-time cap. Overlay
+faults and refusals never stop the show; they go to `Metrics.overlay_error`.
 
 `DiscardDelayedAudio` is the one transport command: when the source stops, the embedded
 Radius TX silences the audio it holds for the playback delay instead of playing it out.
@@ -71,7 +67,7 @@ Effects target all fixtures by default, or a named group/fixture. They replace
 only specified intensity, colour, pan, tilt, strobe or GDTF attribute values.
 Generic attributes use physical numbers or named ChannelSet presets; qualify
 ambiguous names with geometry or a full function path. Higher priority
-wins; command order breaks ties. Global brightness and blackout apply last.
+wins; command order breaks ties.
 Explicit physical attributes take precedence over convenience values on the
 same channel; global brightness and blackout still apply last.
 Removing an effect reveals the continuing baseline. There is no blend-mode API.
@@ -85,9 +81,8 @@ Autolux owns fixture configuration and scripts. `Login` supplies a complete snap
   typed `DmxMode`: channels, functions, sets, mode masters); fixtures reference it by ID.
   Rust validates it once at Login and parses no GDTF.
 - `AutoloopDefinition` entries with globally unique autoloop IDs, bank grouping
-  metadata and Lua source code, carried in `Login.autoloops`. `intensity_htp` says whether
-  an overlay's intensity takes the higher of below and overlay (else LTP); Autolux reads it
-  from the overlay's `-- intensity:` header, and base loops send false.
+  metadata and Lua source code, carried in `Login.autoloops`. `intensity_htp` comes from an
+  overlay's `-- intensity: htp` or `ltp` header; base loops send false.
 - Initial parameters and the unicast Art-Net destination.
 - The nonzero random 64-bit `run_id` generated by Autolux for this start. LoginReply
   and Metrics echo it; subsequent commands belong to the owned process stream.
@@ -115,9 +110,8 @@ Only Login has a success reply. Rejections send `ErrorReply` with the command ID
 and a reason; rejection preserves accepted state. There are no automatic retries.
 
 `Metrics` reports completed frames, missed deadlines, queue depth, render duration,
-active autoloop, faults and `last_processed_command_id`, plus `pending_cues`,
-`active_overlay_count` and `overlay_error` (at most 256 bytes; a notice, never a renderer
-fault). This progress counter
+active autoloop, faults, `pending_cues`, `active_overlay_count`, `overlay_error` (at most
+256 bytes; a notice, never a renderer fault) and `last_processed_command_id`. That counter
 includes accepted and rejected commands; it is not a per-command success receipt.
 FPS comes from frame-count and elapsed-time differences. Both endpoints send
 independent ten-second heartbeats and time out after thirty seconds. Heartbeats
