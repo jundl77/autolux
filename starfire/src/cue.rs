@@ -110,7 +110,7 @@ impl OverlayInstance {
     }
 
     pub fn nominal_end(&self, now: &CueSample) -> Option<f64> {
-        Some(self.nominal_begin(now)? + self.overlay.length_beats)
+        Some(self.nominal_begin(now)? + self.overlay.duration_beats)
     }
 
     fn nominal_begin(&self, now: &CueSample) -> Option<f64> {
@@ -123,7 +123,7 @@ impl OverlayInstance {
             && (own.bank.as_str(), own.autoloop.as_str(), own.every_bars)
                 == (row.bank.as_str(), row.autoloop.as_str(), row.every_bars)
             && own.begin_beats == row.begin_beats
-            && own.length_beats == row.length_beats
+            && own.duration_beats == row.duration_beats
     }
 
     fn release(&mut self, at: f64) {
@@ -139,7 +139,7 @@ impl OverlayInstance {
         let Some(begin) = self.nominal_begin(now) else {
             return true;
         };
-        let end = begin + self.overlay.length_beats;
+        let end = begin + self.overlay.duration_beats;
         if now.beat_position >= end {
             return false;
         }
@@ -306,7 +306,7 @@ impl CueTimeline {
             context.beats_until_dip = cue
                 .overlays
                 .iter()
-                .filter(|row| row.blackout)
+                .filter(|row| row.dip)
                 .map(|row| row.begin_beats)
                 .reduce(f64::min)
                 .map(|begin| (until + begin).max(0.0));
@@ -563,7 +563,12 @@ impl CueTimeline {
         let rotation = &active.cue.rotation;
         let cycle: f64 = rotation.iter().map(|step| f64::from(step.bars) * bar).sum();
         let elapsed = (now.beat_position - start_grid).max(0.0);
-        let cycles = (elapsed / cycle).floor();
+        let holds = rotation.last().is_some_and(|step| step.bars == 0);
+        let cycles = if holds {
+            0.0
+        } else {
+            (elapsed / cycle).floor()
+        };
         let mut step_begin = cycles * cycle;
         let mut index = rotation.len() - 1;
         for (candidate, step) in rotation.iter().enumerate().take(rotation.len() - 1) {

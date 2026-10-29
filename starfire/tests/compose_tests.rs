@@ -47,7 +47,7 @@ const TINT: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.group("wash"), 0.25), sf.colour(sf.all(), sf.rgb(0, 0, 1)),
     {target = sf.group("movers"), values = {pan = 1}}, sf.strobe(sf.all(), 4)} end}"#;
 const HIT: &str = r#"return {render=function(ctx) return sf.scene {
-    sf.dimmer(sf.all(), 1 - ctx.autoloop_elapsed_beats / ctx.overlay_length_beats),
+    sf.dimmer(sf.all(), 1 - ctx.autoloop_elapsed_beats / ctx.overlay_duration_beats),
     sf.colour(sf.all(), sf.rgb(1, 1, 1)), sf.pan_tilt(sf.group("movers"), 1, 0.4)} end}"#;
 const BEAM: &str = r#"return {render=function(ctx) return sf.scene {
     sf.dimmer(sf.group("movers"), 0.5), sf.pan_tilt(sf.group("movers"), 0.8, 0.6),
@@ -174,27 +174,27 @@ fn at(beat: f64) -> f64 {
     beat * SECONDS_PER_BEAT
 }
 
-fn overlay(id: &str, begin_beats: f64, length_beats: f64) -> Overlay {
+fn overlay(id: &str, begin_beats: f64, duration_beats: f64) -> Overlay {
     let (bank, autoloop) = identity(id);
     Overlay {
         bank,
         autoloop,
         priority: 0,
         begin_beats,
-        length_beats,
+        duration_beats,
         every_bars: 0,
         envelope: Envelope::default(),
-        blackout: false,
+        dip: false,
     }
 }
 
-fn enveloped(id: &str, length_beats: f64, attack_beats: f64, release_beats: f64) -> Overlay {
+fn enveloped(id: &str, duration_beats: f64, attack_beats: f64, release_beats: f64) -> Overlay {
     Overlay {
         envelope: Envelope {
             attack_beats,
             release_beats,
         },
-        ..overlay(id, 0.0, length_beats)
+        ..overlay(id, 0.0, duration_beats)
     }
 }
 
@@ -204,7 +204,7 @@ fn dip(beats: f64, attack_beats: f64) -> Overlay {
             attack_beats,
             release_beats: 0.0,
         },
-        blackout: true,
+        dip: true,
         ..overlay("dip/dip", -beats, beats)
     }
 }
@@ -1044,7 +1044,7 @@ fn move_in_black_follows_the_dip_through_a_late_beat_and_a_bar_phase_correction(
 }
 
 #[test]
-fn only_a_blackout_moves_in_black_whatever_its_bank() {
+fn only_a_dip_moves_in_black_whatever_its_bank() {
     for id in ["fill/dark_left_mover", "dip/dip"] {
         let mut engine = playing("before");
         send(&mut engine, 0.0, 8, "after", vec![overlay(id, -2.0, 2.0)]);
@@ -1060,10 +1060,10 @@ fn only_a_blackout_moves_in_black_whatever_its_bank() {
 }
 
 #[test]
-fn a_blackout_that_ends_before_its_cue_moves_nothing() {
+fn a_dip_that_ends_before_its_cue_moves_nothing() {
     let mut engine = playing("before");
     let early = Overlay {
-        blackout: true,
+        dip: true,
         ..overlay("dip/dip", -4.0, 1.0)
     };
     send(&mut engine, 0.0, 16, "after", vec![early]);

@@ -517,7 +517,7 @@ function sf.drop_within(build, beats)
 end
 
 function sf.overlay_progress(ctx)
-    local length = ctx.overlay_length_beats or 1
+    local length = ctx.overlay_duration_beats or 1
     return math.min(1, ctx.autoloop_elapsed_beats / length), length - ctx.autoloop_elapsed_beats
 end
 

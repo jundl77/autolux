@@ -62,7 +62,7 @@
         "bank": "standby",
         "autoloop": "white",
         "transition": {
-          "kind": "cut"
+          "crossfade_beats": 0.0
         },
         "palette": "techno"
       }
@@ -74,7 +74,7 @@
         "bank": "standby",
         "autoloop": "white",
         "transition": {
-          "kind": "cut"
+          "crossfade_beats": 0.0
         },
         "palette": "techno"
       }

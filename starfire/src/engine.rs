@@ -424,7 +424,7 @@ impl Engine {
     pub fn check_scripts_pure(&self) -> Result<()> {
         let time = self.clock.sample_at(0.0)?;
         let context = RenderContext {
-            overlay_length_beats: Some(1.0),
+            overlay_duration_beats: Some(1.0),
             ..self.frame_context(0.0, time)
         };
         self.scripts
@@ -506,7 +506,7 @@ impl Engine {
             bass: features.map(|features| features.bass),
             mid: features.map(|features| features.mid),
             high: features.map(|features| features.high),
-            overlay_length_beats: None,
+            overlay_duration_beats: None,
         }
     }
 
@@ -574,10 +574,13 @@ impl Engine {
             );
             validate_unit(strength, "drop strength")?;
         }
-        for step in &cue.rotation {
+        for (index, step) in cue.rotation.iter().enumerate() {
             validate_identifier(&step.bank)?;
             validate_identifier(&step.autoloop)?;
-            ensure!(step.bars >= 1, "a step lasts at least one bar");
+            ensure!(
+                step.bars >= 1 || index + 1 == cue.rotation.len(),
+                "only the last step may hold with 0 bars"
+            );
             validate_transition(
                 &self.resolve_transition(&step.transition),
                 time.elapsed_musical_beats,
@@ -589,9 +592,9 @@ impl Engine {
             validate_identifier(&overlay.bank)?;
             validate_identifier(&overlay.autoloop)?;
             ensure!(
-                overlay.length_beats.is_finite()
-                    && overlay.length_beats > 0.0
-                    && overlay.length_beats <= MAX_SPAN_BEATS,
+                overlay.duration_beats.is_finite()
+                    && overlay.duration_beats > 0.0
+                    && overlay.duration_beats <= MAX_SPAN_BEATS,
                 "overlay length is outside the supported range"
             );
             ensure!(
@@ -610,12 +613,12 @@ impl Engine {
             );
             ensure!(
                 overlay.every_bars == 0
-                    || overlay.length_beats + overlay.envelope.release_beats <= period,
+                    || overlay.duration_beats + overlay.envelope.release_beats <= period,
                 "a repeating overlay's length and release exceed its period"
             );
             ensure!(
-                !overlay.blackout || (overlay.every_bars == 0 && overlay.begin_beats < 0.0),
-                "a blackout plays once before its section"
+                !overlay.dip || (overlay.every_bars == 0 && overlay.begin_beats < 0.0),
+                "a dip plays once before its section"
             );
             self.load_script(&overlay.bank, &overlay.autoloop)?;
         }
@@ -1025,11 +1028,11 @@ impl Engine {
                 rank: (overlay.priority, instance.order),
                 script: Rc::clone(&script.script),
                 intensity_htp: script.intensity_htp,
-                length_beats: overlay.length_beats,
+                duration_beats: overlay.duration_beats,
                 elapsed_beats,
                 seed: instance.seed,
                 level: instance.level(beat),
-                holds_to_one: overlay.blackout
+                holds_to_one: overlay.dip
                     && matches!(instance.state, InstanceState::Running(_))
                     && instance
                         .nominal_end(&sample)
@@ -1120,7 +1123,7 @@ impl Engine {
                 autoloop_elapsed_beats: layer.elapsed_beats,
                 // The envelope runs on musical beats; a speed change must not detach it.
                 autoloop_speed_scaled_elapsed_beats: layer.elapsed_beats,
-                overlay_length_beats: Some(layer.length_beats),
+                overlay_duration_beats: Some(layer.duration_beats),
                 seed: layer.seed,
                 ..*frame
             },
@@ -1129,7 +1132,7 @@ impl Engine {
         layer_values(&self.rig, &effects)
     }
 
-    /// Only under a blackout row, and only when the next cue cuts to a new loop.
+    /// Only under a dip row, and only when the next cue cuts to a new loop.
     fn move_in_black(
         &self,
         frame: &RenderContext,
@@ -1655,7 +1658,7 @@ struct OverlayLayer {
     rank: (i32, u64),
     script: Rc<RefCell<LuaAutoloop>>,
     intensity_htp: bool,
-    length_beats: f64,
+    duration_beats: f64,
     elapsed_beats: f64,
     seed: u32,
     level: f64,

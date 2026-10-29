@@ -1288,7 +1288,7 @@ fn overlays_end_within_length_plus_release() {
                 Command::CueSection { value } => value
                     .overlays
                     .first()
-                    .map(|row| row.begin_beats + row.length_beats + row.envelope.release_beats),
+                    .map(|row| row.begin_beats + row.duration_beats + row.envelope.release_beats),
                 _ => None,
             })
             .unwrap();
@@ -1353,7 +1353,7 @@ fn contexts(look: &Look) -> Vec<RenderContext> {
             bass: Some(0.8),
             mid: Some(0.5),
             high: Some(0.3),
-            overlay_length_beats: look.is_overlay().then_some(length),
+            overlay_duration_beats: look.is_overlay().then_some(length),
             ..RenderContext::default()
         };
         contexts.push(base);

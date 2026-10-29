@@ -75,7 +75,7 @@
               "autoloop": "stutter",
               "bars": 16,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -930,7 +930,7 @@
               "autoloop": "kick",
               "bars": 16,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -940,39 +940,39 @@
               "autoloop": "last_beat",
               "priority": 50,
               "begin_beats": -1,
-              "length_beats": 1,
+              "duration_beats": 1,
               "every_bars": 0,
               "envelope": {
                 "attack_beats": 0.0,
                 "release_beats": 0.0
               },
-              "blackout": true
+              "dip": true
             },
             {
               "bank": "riser",
               "autoloop": "white_rise",
               "priority": 30,
               "begin_beats": -17,
-              "length_beats": 16,
+              "duration_beats": 16,
               "every_bars": 0,
               "envelope": {
                 "attack_beats": 0.5,
                 "release_beats": 0.0
               },
-              "blackout": false
+              "dip": false
             },
             {
               "bank": "hit",
               "autoloop": "white",
               "priority": 40,
               "begin_beats": 0,
-              "length_beats": 2,
+              "duration_beats": 2,
               "every_bars": 0,
               "envelope": {
                 "attack_beats": 0.0,
                 "release_beats": 0.0
               },
-              "blackout": false
+              "dip": false
             }
           ],
           "palette": "techno",

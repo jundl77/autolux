@@ -69,7 +69,7 @@
         "bank": "breakdown",
         "autoloop": "drift_apart",
         "transition": {
-          "kind": "cut"
+          "crossfade_beats": 0.0
         },
         "palette": "techno"
       }
@@ -401,7 +401,7 @@
         "bank": "breakdown",
         "autoloop": "drift_apart",
         "transition": {
-          "kind": "cut"
+          "crossfade_beats": 0.0
         },
         "palette": "techno"
       }

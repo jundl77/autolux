@@ -75,7 +75,7 @@
               "autoloop": "white",
               "bars": 32,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -85,13 +85,13 @@
               "autoloop": "last_beat",
               "priority": 50,
               "begin_beats": 16,
-              "length_beats": 4,
+              "duration_beats": 4,
               "every_bars": 0,
               "envelope": {
                 "attack_beats": 0.0,
                 "release_beats": 0.0
               },
-              "blackout": false
+              "dip": false
             }
           ],
           "palette": "techno",
@@ -240,7 +240,7 @@
               "autoloop": "white",
               "bars": 32,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -250,13 +250,13 @@
               "autoloop": "last_beat",
               "priority": 50,
               "begin_beats": 16,
-              "length_beats": 4,
+              "duration_beats": 4,
               "every_bars": 0,
               "envelope": {
                 "attack_beats": 0.0,
                 "release_beats": 0.0
               },
-              "blackout": false
+              "dip": false
             }
           ],
           "palette": "techno",

@@ -196,13 +196,9 @@ pub fn read_event(input: &mut impl Read) -> Result<Option<ServerMessage>> {
 }
 
 fn transition(value: Option<&wire::Transition>) -> Transition {
-    match value {
-        None => Transition::RendererDefault,
-        Some(value) => value
-            .crossfade_beats
-            .map(|duration_beats| Transition::Crossfade { duration_beats })
-            .unwrap_or(Transition::Cut),
-    }
+    value.map_or(Transition::RendererDefault, |value| {
+        Transition::from_crossfade_beats(value.crossfade_beats)
+    })
 }
 
 fn envelope(value: Option<&wire::Envelope>) -> Envelope {
@@ -243,10 +239,10 @@ fn cue_section(engine: &Engine, value: &wire::CueSection) -> Result<CueSection> 
                 autoloop,
                 priority: overlay.priority,
                 begin_beats: overlay.begin_beats,
-                length_beats: overlay.length_beats,
+                duration_beats: overlay.duration_beats,
                 every_bars: overlay.every_bars,
                 envelope: envelope(overlay.envelope.as_ref()),
-                blackout: overlay.blackout,
+                dip: overlay.dip,
             })
         })
         .collect::<Result<_>>()?;

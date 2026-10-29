@@ -697,7 +697,7 @@ impl LuaAutoloop {
         .chain(context.beats_until_next)
         .chain(context.beats_until_dip)
         .chain(context.next_known_at)
-        .chain(context.overlay_length_beats)
+        .chain(context.overlay_duration_beats)
         {
             ensure!(
                 value.is_finite() && value >= 0.0,

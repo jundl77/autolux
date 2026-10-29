@@ -95,19 +95,19 @@ fn section(start: u64, intent: SectionIntent, rotation: &[(&str, u32)]) -> CueSe
     }
 }
 
-fn overlay(begin_beats: f64, length_beats: f64, every_bars: u32, release_beats: f64) -> Overlay {
+fn overlay(begin_beats: f64, duration_beats: f64, every_bars: u32, release_beats: f64) -> Overlay {
     Overlay {
         bank: "test".into(),
         autoloop: "still".into(),
         priority: 0,
         begin_beats,
-        length_beats,
+        duration_beats,
         every_bars,
         envelope: Envelope {
             attack_beats: 0.0,
             release_beats,
         },
-        blackout: false,
+        dip: false,
     }
 }
 
@@ -356,7 +356,7 @@ fn section_elapsed_stays_at_zero_when_a_late_beat_re_anchors_before_the_start() 
 }
 
 #[test]
-fn rotation_entries_change_on_bar_lines_from_the_start_and_cycle() {
+fn steps_change_on_bar_lines_from_the_start_and_cycle() {
     let mut engine = engine();
     beat(&mut engine, 0);
     send(
@@ -378,6 +378,28 @@ fn rotation_entries_change_on_bar_lines_from_the_start_and_cycle() {
         assert_eq!(frame.autoloop.as_deref(), Some(autoloop), "beat {beat}");
         near(frame.autoloop_elapsed, entry_elapsed);
         near(frame.section_elapsed, beat - 4.0);
+    }
+}
+
+#[test]
+fn a_last_step_of_no_bars_holds_until_the_next_cue() {
+    let mut engine = engine();
+    beat(&mut engine, 0);
+    send(
+        &mut engine,
+        at(1.0),
+        section(4, SectionIntent::Drop, &[("probe", 1), ("other", 0)]),
+    )
+    .unwrap();
+    for (beat, autoloop, step_elapsed) in [
+        (4.0, "probe", 0.0),
+        (8.0, "other", 0.0),
+        (16.0, "other", 8.0),
+        (100.0, "other", 92.0),
+    ] {
+        let frame = probe(&mut engine, beat);
+        assert_eq!(frame.autoloop.as_deref(), Some(autoloop), "beat {beat}");
+        near(frame.autoloop_elapsed, step_elapsed);
     }
 }
 
@@ -497,8 +519,8 @@ fn invalid_cues_are_refused_before_anything_changes() {
     let mut cue = valid.clone();
     cue.rotation = vec![valid.rotation[0].clone(); MAX_ROTATION + 1];
     cases.push(cue);
-    let mut cue = valid.clone();
-    cue.rotation[0].bars = 0;
+    let mut cue = section(8, SectionIntent::Drop, &[("probe", 0), ("other", 1)]);
+    cue.overlays = valid.overlays.clone();
     cases.push(cue);
     let mut cue = valid.clone();
     cue.rotation[0].autoloop = "missing".into();
@@ -524,11 +546,11 @@ fn invalid_cues_are_refused_before_anything_changes() {
         overlay(0.0, 1.0, 0, -1.0),
         overlay(0.0, f64::NAN, 0, 0.0),
         Overlay {
-            blackout: true,
+            dip: true,
             ..overlay(0.0, 1.0, 0, 0.0)
         },
         Overlay {
-            blackout: true,
+            dip: true,
             ..overlay(0.0, 1.0, 1, 0.0)
         },
     ] {
@@ -725,7 +747,7 @@ fn pause_drops_releasing_overlays() {
 fn worst_case_cue() -> wire::CueSection {
     let id = "i".repeat(128);
     let crossfade = Some(wire::Transition {
-        crossfade_beats: Some(f64::MAX),
+        crossfade_beats: f64::MAX,
     });
     let envelope = Some(wire::Envelope {
         attack_beats: f64::MAX,
@@ -748,10 +770,10 @@ fn worst_case_cue() -> wire::CueSection {
                 autoloop_id: id.clone(),
                 priority: i32::MIN,
                 begin_beats: f64::MAX,
-                length_beats: f64::MAX,
+                duration_beats: f64::MAX,
                 every_bars: u32::MAX,
                 envelope,
-                blackout: true,
+                dip: true,
             };
             MAX_OVERLAYS
         ],
@@ -1151,7 +1173,7 @@ fn a_stopped_row_never_repeats_while_its_cue_plays() {
 }
 
 #[test]
-fn a_resent_cue_is_no_next_section_and_the_blackout_sets_the_finale_target() {
+fn a_resent_cue_is_no_next_section_and_the_dip_sets_the_finale_target() {
     let mut timeline = CueTimeline::default();
     let buildup = section(0, SectionIntent::Buildup, &[("probe", 16)]);
     timeline.receive(buildup.clone(), sample(0.0)).unwrap();
@@ -1166,7 +1188,7 @@ fn a_resent_cue_is_no_next_section_and_the_blackout_sets_the_finale_target() {
     let mut drop = section(32, SectionIntent::Drop, &[("probe", 16)]);
     drop.overlays = vec![
         Overlay {
-            blackout: true,
+            dip: true,
             ..overlay(-2.0, 2.0, 0, 0.0)
         },
         overlay(-16.0, 16.0, 0, 0.0),

@@ -363,7 +363,7 @@ fn playback_resolves_autoloop_ids_or_idle_and_validates_repeated_selection() {
         Operation::PlayAutoloop(wire::PlayAutoloop {
             autoloop_id: "atmospheric/dawn".into(),
             transition: Some(wire::Transition {
-                crossfade_beats: Some(f64::NAN),
+                crossfade_beats: f64::NAN,
             }),
             palette: "techno".into(),
             ..Default::default()
@@ -502,7 +502,7 @@ fn standalone_controls_and_recorded_commands_produce_identical_dmx() {
             Operation::PlayAutoloop(wire::PlayAutoloop {
                 autoloop_id: "drop/kick".into(),
                 transition: Some(wire::Transition {
-                    crossfade_beats: Some(2.0),
+                    crossfade_beats: 2.0,
                 }),
                 palette: "house".into(),
                 ..Default::default()
