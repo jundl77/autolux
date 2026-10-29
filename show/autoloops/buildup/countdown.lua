@@ -30,7 +30,7 @@ return {
             sf.each(sf.group("strip"), function(pixel, index, count)
                 local rank = math.floor(math.abs(index - (count + 1) / 2))
                 local lit = math.max(0, math.min(1, share * math.ceil(count / 2) - rank))
-                return sf.dimmer(pixel, STRIP_PEAK * lit * sf.lerp(0.5, 1, build.drive))
+                return sf.dimmer(pixel, STRIP_PEAK * lit)
             end),
             sf.dimmer(sf.group("movers"), MOVER_PEAK * build.drive * sf.lerp(0.5, 1, tick)),
             sf.phaser(sf.group("movers"), ctx, {

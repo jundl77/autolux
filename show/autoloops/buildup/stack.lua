@@ -9,11 +9,11 @@ local FAN_DEGREES, LIFT_DEGREES = 12, 35
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 
 -- Each group enters on the downbeat after the build's tension passes its line, so the look
--- stacks strip, then washes, then movers, and the beams lift with the tension. Onset scales
--- how hard a beat pulses, never where a head points; the last bar locks every pulse solid.
+-- stacks strip, then washes, then movers, and the beams lift with the tension. The last bar
+-- locks every pulse solid.
 local function pulsing(ctx, build)
     if build.left ~= nil and build.left <= ctx.beats_per_bar then return 1 end
-    return sf.lerp(0.35, 1, sf.on_beat(ctx, PULSE_WIDTH_BEATS) * sf.onset(ctx))
+    return sf.lerp(0.35, 1, sf.on_beat(ctx, PULSE_WIDTH_BEATS))
 end
 
 return {

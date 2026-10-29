@@ -11,7 +11,8 @@ One Lua file per look, `show/autoloops/<bank>/<loop>.lua`. The API is
 
 `standby/warm_white` is the exception: Autolux shows it while the input is digitally
 silent (the player stopped). It is outside the rotation, required by readiness, and
-deliberately static: no beat or loudness response, movers parked dark, warm white only.
+deliberately static: no beat or loudness response, movers parked dark, `sf.white()` held low
+so it never depends on a palette's name.
 
 Track boundaries and pauses come from the first live source, in this order. The Windows
 system media session (the `media` extra; Spotify's session is preferred, else the current
@@ -94,8 +95,8 @@ Each buildup is one idea that drives every layer:
 | `dip` | `last_beat` (every group dark), `fade` (a low glow for breakdown entry) | LTP |
 | `accent` | `sparkle` (seeded strip sparkle on the off-beat eighths), `wash_roll` (one wash per off-beat eighth), `mover_shapes` (figure-eights through a gobo) | HTP, but `mover_shapes` LTP |
 
-An overlay's first line is free text saying what it does, then exactly these four lines in any
-order:
+An overlay's first line is free text saying what it does, then exactly these four lines,
+`strobe` and `intensity` first:
 
 ```
 -- strobe: yes|no
@@ -251,8 +252,16 @@ Overlays carry the four-line header above instead.
 
 Drop the file into its bank directory and run `cargo test -p starfire --test autoloop_replay`.
 The tests discover it, replay it on the generic stage rig (the bank default
-`tests/replays/<bank>.json`, unless `tests/replays/<bank>/<loop>.json` exists) and run the
-per-bank semantic checks. Golden DMX digests guard the renderer pipeline, one loop per bank
+`tests/replays/<bank>.json`, unless `tests/replays/<bank>/<loop>.json` exists; an overlay bank's
+replay plays the overlay on a fixed base) and run the semantic checks:
+
+- base loops peak at or below 0.9, never strobe and pulse no faster than half-beat steps;
+- buildups never restart without a cued drop (`buildup.json`), rise into a cued drop and leave
+  the dip dark (`buildup_finale.json`); `countdown` steps down once a beat over the last eight;
+- beat features and loudness change levels and reach only (loudness never for buildups);
+- an overlay strobes exactly when its header says so and is gone after its length and release;
+- every loop's worst frame stays lean in Lua instructions (the suite prints the table with
+  `-- --nocapture`). Golden DMX digests guard the renderer pipeline, one loop per bank
 (`tests/golden/<bank>/<loop>.sha256`); new loops need no golden. After an intended render
 change, re-record the existing goldens with `STARFIRE_WRITE_GOLDEN=1`, never to turn a red
 semantic check green. A loop the preferred table names (`PREFERRED_AUTOLOOPS` in
