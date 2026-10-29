@@ -278,18 +278,20 @@ class MusicAnalyser:
         return audio_signal
 
     def _track_digital_silence(self, audio_signal: np.ndarray) -> bool:
+        threshold = self._settings().digital_silence_seconds * self.sample_rate
         if np.max(np.abs(audio_signal), initial=0.0) >= _DIGITAL_SILENCE_PEAK:
             gap, self._digital_silence_samples = self._digital_silence_samples, 0
-            if not self._zeros_mark_tracks():
-                return self.in_standby
             if self.in_standby:
-                self.leave_standby()
-            elif gap:
+                # A live session's pause keeps its standby until zeros pass the threshold,
+                # so the fade-out tail right after the pause does not re-arm the show.
+                if gap >= threshold or self._zeros_mark_tracks():
+                    self.leave_standby()
+                return self.in_standby
+            if gap and self._zeros_mark_tracks():
                 self._note_gap(gap)
             return False
         self._digital_silence_samples += len(audio_signal)
-        threshold = self._settings().digital_silence_seconds * self.sample_rate
-        if self._digital_silence_samples >= threshold and self._zeros_mark_tracks():
+        if self._digital_silence_samples >= threshold:
             seconds = self._digital_silence_samples / self.sample_rate
             self.enter_standby(f'{seconds:.1f}s of digital silence')
         return self.in_standby

@@ -1,4 +1,6 @@
 import asyncio
+import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -113,7 +115,7 @@ async def test_the_audio_cues_are_dormant_while_the_session_reports_and_return_a
     assert not show.light._after_silence, 'no gap cue while the session is live'
     assert not new_track_for_an_intro_after_a_drop(show.light)
     await show.play(3.0, 0.0)
-    assert not show.light.standby, 'no zeros standby while the session is live'
+    assert show.light.standby, 'the zeros darken the room even while the session is live'
 
     await show.play(QUIET_SECONDS + 1.0, 0.2)
     assert show.app.track_source.name == 'zeros'
@@ -129,7 +131,7 @@ async def test_a_session_stopped_for_thirty_seconds_counts_as_absent():
     await show.play(QUIET_SECONDS - 2.0, 0.0)
     assert show.app.track_source.media_session_live
     await show.play(0.5, 0.2)
-    assert show.light.standby, 'audio from elsewhere waits while the session is still live'
+    assert not show.light.standby, 'audio after the zeros re-arms even while the session is live'
     await show.play(2.0, 0.0)
     await show.play(0.5, 0.2)
     assert not show.light.standby, 'the returning signal re-arms once the zeros own the show'
@@ -161,6 +163,66 @@ async def test_an_unavailable_session_reports_so_and_starts_nothing(monkeypatch,
     with caplog.at_level('INFO'):
         assert not listener.start(asyncio.get_running_loop())
     assert 'unavailable' in caplog.text
+    listener.stop()
+
+
+class _Session:
+    source_app_user_model_id = 'Spotify.exe'
+
+    def __init__(self):
+        self.properties = SimpleNamespace(title='A', artist='B', album_title='C')
+        zero = datetime.timedelta(0)
+        self.timeline = SimpleNamespace(
+            start_time=zero, end_time=datetime.timedelta(seconds=200), position=zero
+        )
+        self.playback = SimpleNamespace(playback_status=5)
+
+    async def try_get_media_properties_async(self):
+        return self.properties
+
+    def get_timeline_properties(self):
+        return self.timeline
+
+    def get_playback_info(self):
+        return self.playback
+
+
+@pytest.mark.parametrize('missing', ['properties', 'timeline', 'playback'])
+async def test_a_session_mid_swap_reports_nothing_that_round(missing):
+    listener = MediaSessionListener(lambda event: None)
+    session = _Session()
+    assert listener.changes(await listener._read(session), at=1.0)
+    setattr(session, missing, None)
+    assert listener.changes(await listener._read(session), at=2.0) == []
+
+
+async def test_a_failing_watch_crashes_the_show_rather_than_going_quiet(monkeypatch):
+    def fail():
+        raise RuntimeError('session manager broke')
+
+    async def request_async():
+        return manager
+
+    def ignore(*_):
+        return None
+
+    manager = SimpleNamespace(
+        get_sessions=fail,
+        add_sessions_changed=ignore,
+        add_current_session_changed=ignore,
+        remove_sessions_changed=ignore,
+        remove_current_session_changed=ignore,
+    )
+    control = SimpleNamespace(
+        GlobalSystemMediaTransportControlsSessionManager=SimpleNamespace(
+            request_async=request_async
+        )
+    )
+    monkeypatch.setattr(media_session, 'winrt_media_control', lambda: control)
+    listener = MediaSessionListener(lambda event: None)
+    watching = listener.start(asyncio.get_running_loop())
+    with pytest.raises(RuntimeError, match='session manager broke'):
+        watching.result(timeout=5.0)
     listener.stop()
 
 
