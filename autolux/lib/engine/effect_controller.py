@@ -347,7 +347,9 @@ class EffectController:
             return  # Standby or another look is showing; the next entry obeys the level.
         intensity = self._settings().intensity
         remapped = look_intent(context.intent, intensity) != current.look
-        if not remapped and current.meta.energy <= max_energy_for_intensity(intensity):
+        if not remapped and current.meta.energy <= max_energy_for_intensity(
+            intensity, current.look
+        ):
             return
         try:
             choice = self._policy.choose(

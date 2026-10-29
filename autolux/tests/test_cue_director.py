@@ -39,7 +39,7 @@ META = {
     ('breakdown', 'pulse'): AutoloopMeta(1, 'still', 'wash'),
     ('breakdown', 'float'): AutoloopMeta(1, 'still', 'mixed'),
     ('buildup', 'climb'): AutoloopMeta(2, 'sweep', 'mixed'),
-    ('buildup', 'rise'): AutoloopMeta(2, 'still', 'wash'),
+    ('buildup', 'rise'): AutoloopMeta(2, 'still', 'mixed'),
     ('drop', 'stomp'): AutoloopMeta(2, 'snap', 'wash'),
     ('drop', 'stomp_twin'): AutoloopMeta(2, 'snap', 'wash'),
     ('drop', 'fan'): AutoloopMeta(2, 'still', 'mixed'),
@@ -55,10 +55,10 @@ OVERLAYS = {
     ('dip', 'last_beat'): overlay(htp=False),
     ('dip', 'fade'): overlay(htp=False),
     ('hit', 'colour_bump'): overlay(texture='wash'),
-    ('hit', 'blinder'): overlay(texture='wash'),
-    ('hit', 'beam_punch'): overlay(texture='beam'),
+    ('hit', 'white'): overlay(),
     ('hit', 'strobe'): overlay(strobe=True),
     ('riser', 'strip_fill'): overlay(texture='pixel'),
+    ('riser', 'white_rise'): overlay(texture='wash'),
     ('riser', 'strobe_ramp'): overlay(strobe=True),
     ('fill', 'wipe'): overlay(htp=False, movement='sweep'),
     ('fill', 'flick'): overlay(htp=False, movement='sweep', texture='beam'),
@@ -254,9 +254,8 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
             Gate(),
             [
                 'dip/last_beat',
-                'riser/strip_fill',
-                'hit/blinder',
-                'hit/beam_punch',
+                'riser/white_rise',
+                'hit/white',
                 'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
@@ -267,12 +266,11 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
             'wild',
             Gate(),
             [
-                # Over the 8-row cap the bar-8 fill gives way to the entry.
                 'dip/last_beat',
                 'riser/strobe_ramp',
-                'hit/blinder',
-                'hit/beam_punch',
+                'hit/white',
                 'hit/strobe',
+                'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
                 'accent/sparkle',
@@ -283,9 +281,8 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
             Gate(blocked='cooldown'),
             [
                 'dip/last_beat',
-                'riser/strip_fill',
-                'hit/blinder',
-                'hit/beam_punch',
+                'riser/white_rise',
+                'hit/white',
                 'fill/wipe',
                 'fill/turnaround',
                 'accent/mover_shapes',
@@ -297,7 +294,7 @@ def test_mono_until_the_first_drop_and_in_every_breakdown_and_buildup():
             Gate(crowded=True),
             [
                 'dip/last_beat',
-                'riser/strip_fill',
+                'riser/white_rise',
                 'hit/colour_bump',
                 'fill/wipe',
                 'fill/turnaround',
@@ -323,7 +320,7 @@ def test_the_entry_rows_land_on_the_one():
     assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'the riser ends at the dip'
     assert (riser.length_beats, riser.every_bars, riser.release_beats) == (16, 0, 2.0)
     hits = [o for o in drop.cue.overlays if o.bank == 'hit']
-    assert {o.autoloop for o in hits} == {'blinder', 'beam_punch'}, 'both on the one'
+    assert [o.autoloop for o in hits] == ['white']
     assert {(o.begin_beats, o.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
     priorities = {overlay.bank: overlay.priority for overlay in drop.cue.overlays}
     assert priorities['fill'] < priorities['accent'] < priorities['riser']
@@ -339,7 +336,7 @@ def test_the_wild_strobe_hit_is_the_burst_setting_in_beats_and_the_riser_fits_th
     cues = director()
     for number, (intent, start) in enumerate(SET[:3]):
         plan = cues.plan(number, request(intent, start, new_track=not number), tight, 'ice', Gate())
-    assert row(plan, 'riser').autoloop == 'strip_fill', '8 beats at 120 bpm is 4 s, over 3 s'
+    assert row(plan, 'riser').autoloop == 'white_rise', '8 beats at 120 bpm is 4 s, over 3 s'
 
 
 def test_fills_on_bar_8_and_a_bigger_one_on_bar_16_and_accents_8_bars_off_the_base():
@@ -435,7 +432,8 @@ def test_an_accent_or_riser_never_leads_with_the_base_loops_own_layer():
     }
     _, drop = play(SET[1:3], cues=director(meta=meta))
     assert [name for name in rows(drop) if name.split('/')[0] in ('accent', 'riser')] == [
-        'accent/mover_shapes'
+        'riser/white_rise',
+        'accent/mover_shapes',
     ], 'the pixel lead keeps the strip sparkle and the strip riser off'
 
 
@@ -481,7 +479,7 @@ def test_a_second_drop_opens_on_the_first_drops_look_and_hit_and_adds_one_layer(
         first.choices[0].autoloop,
     )
     once = [[o for o in plan.cue.overlays if o.every_bars == 0] for plan in (first, second)]
-    assert [o.bank for o in once[0]] == ['dip', 'riser', 'hit', 'hit']
+    assert [o.bank for o in once[0]] == ['dip', 'riser', 'hit']
     assert once[1][: len(once[0])] == once[0] and len(once[1]) == len(once[0]) + 1
     [added] = once[1][len(once[0]) :]
     meta = OVERLAYS[added.bank, added.autoloop]
@@ -520,7 +518,7 @@ def test_a_soft_drop_keeps_its_white_but_never_strobes():
     settings = ShowSettings(intensity=INTENSITY_WILD)
     cues.plan(0, request(B, 0, new_track=True), settings, 'ice', Gate())
     soft = cues.plan(1, request(D, 64, arrival=0.6), settings, 'ice', Gate())
-    assert entry_of(soft.cue) == 'white' and row(soft, 'riser').autoloop == 'strip_fill'
+    assert entry_of(soft.cue) == 'white' and row(soft, 'riser').autoloop == 'white_rise'
     assert not soft.events.intense and soft.events.accent
 
 
@@ -661,4 +659,19 @@ def test_a_wild_second_drop_keeps_its_entry_whole_under_the_row_cap():
     second = play(level='wild')[5]
     assert len(second.cue.overlays) <= 8
     banks = [o.bank for o in second.cue.overlays if o.every_bars == 0]
-    assert banks.count('hit') == 3 and 'dip' in banks and 'riser' in banks
+    assert banks.count('hit') == 2 and 'dip' in banks and 'riser' in banks
+    # Nine rows: the bar-8 fill gives way, the accents stay.
+    assert [o.bank for o in second.cue.overlays if o.every_bars > 0].count('accent') == 2
+
+
+def test_balanced_rises_on_white_rise_over_any_build_it_pairs_with():
+    meta = {
+        **{loop: value for loop, value in META.items() if loop[0] != 'buildup'},
+        ('buildup', 'countdown'): AutoloopMeta(2, 'sweep', 'pixel'),
+    }
+    _, drop = play(SET[1:3], cues=director(meta=meta))
+    assert row(drop, 'riser').autoloop == 'white_rise', 'countdown gets a riser too'
+    calm = play(SET[1:3], level='calm', cues=director(meta=meta))[1]
+    assert 'riser' not in {o.bank for o in calm.cue.overlays}, (
+        "the strip riser is countdown's own layer"
+    )

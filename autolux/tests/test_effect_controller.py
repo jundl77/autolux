@@ -608,9 +608,9 @@ async def test_lowering_intensity_swaps_an_over_cap_loop_at_once_and_raising_it_
 
 @pytest.mark.parametrize(
     ('decision', 'calm_look'),
-    [('drop', 'breakdown/drift_apart'), ('buildup', 'atmospheric/dawn')],
+    [('drop', 'breakdown/drift_apart')],
 )
-async def test_calm_swaps_a_drop_or_build_to_its_quiet_bank_at_once_and_back_on_leaving(
+async def test_calm_swaps_a_drop_to_its_quiet_bank_at_once_and_back_on_leaving(
     tmp_path, caplog, decision, calm_look
 ):
     from autolux.tests.test_light_engine import beat_at_phase, selections
