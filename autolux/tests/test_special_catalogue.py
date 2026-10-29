@@ -58,8 +58,13 @@ def test_the_shipped_specials_parse_and_skip_buildups():
     assert served == {LightIntent.ATMOSPHERIC, LightIntent.BREAKDOWN, LightIntent.DROP}
 
 
-def test_no_shipped_special_strobes():
-    assert 'strobe_burst' not in {special.name for special in discover_specials()}
+def test_the_drop_strobe_row_is_the_whole_rig_strobe_burst():
+    [strobe] = [special for special in discover_specials() if special.strobe_hz is not None]
+    assert (strobe.name, strobe.group, strobe.intents) == (
+        'strobe_burst',
+        'all',
+        (LightIntent.DROP,),
+    )
 
 
 def test_only_drop_rows_are_intense_in_the_shipped_set():
@@ -161,10 +166,17 @@ def test_a_missing_field_is_named_by_its_file_path():
         parse_special(row(effect={'size': None}, playback={'release_beats': None}), 'glow')
 
 
-def test_a_special_never_strobes():
+def test_a_strobe_row_carries_only_its_rate():
     strobe = {'name': 's', 'intents': ['drop'], 'group': 'all'}
-    with pytest.raises(SpecialError, match=r'effect\.form\.strobe_hz'):
-        parse_special(strobe | {'effect': {'form': {'strobe_hz': 8}}}, 's')
+    assert parse_special(strobe | {'effect': {'form': {'strobe_hz': 8}}}, 's').strobe_hz == 8.0
+    with pytest.raises(SpecialError, match=r'unknown preset\.colour'):
+        parse_special(
+            strobe | {'effect': {'form': {'strobe_hz': 8}}, 'preset': {'colour': 'x'}}, 's'
+        )
+    with pytest.raises(
+        SpecialError, match=r'effect\.form\.strobe_hz 20 must be a number within 0\.\.10'
+    ):
+        parse_special(strobe | {'effect': {'form': {'strobe_hz': 20}}}, 's')
 
 
 def test_discovery_reports_every_bad_file_by_name(tmp_path):

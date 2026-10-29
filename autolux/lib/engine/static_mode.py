@@ -91,7 +91,8 @@ class StaticLooks:
         self._clock = clock
         self.rig = rig
         self._capabilities = capabilities
-        self._rows = {row.name: row for row in specials}
+        # The strobe row is the show's own drop accent; the operator never holds one.
+        self._rows = {row.name: row for row in specials if row.strobe_hz is None}
         self._looks: dict[str, dict] = {}
         self._special: Special | None = None
         self._floor = False

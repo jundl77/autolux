@@ -79,19 +79,24 @@ is the only place the two vocabularies meet.
 Values are sent as written. Starfire applies the intensity macro: it scales speed and gates and
 caps pulse; energy is not scaled. Autolux only gates which specials may fire (below).
 
-Specials never strobe; the drop's strobe is the cue's `hit/strobe` overlay (and the Wild riser),
-placed and venue-gated by `autolux/lib/engine/cue_director.py`.
+A strobe row has only the selection keys and `[effect] form = { strobe_hz = 8.0 }` and names a
+group. It is never selected: it joins whichever special is chosen on the first beat of every drop
+of at least half the track's peak (its drop strength), and goes out as a strobe accent for two
+bars, inside Starfire's rate and burst caps at the current intensity. `strobe_burst` is the drop
+burst on the whole rig; FX off leaves it out with the other automatic specials. The Wild cue's
+`hit/strobe` overlay and riser strobe on top of it as one intense event.
 
 Unknown or missing keys, out-of-range values and a name that does not match the file are
 rejected at startup, with the file and the key's path (such as `effect.size`) named.
 
 ## Intense
 
-A special is intense when it pulses or its speed is above `INTENSE_SPEED` (0.6).
-This is derived from the values and never declared. A drop whose cue strobes (hit or riser)
-and the intense special entering with it are one intense event on one cooldown, the drop strobe
-cooldown setting (halved at wild). Nothing intense fires at or below intensity 0.3. While the
-cooldown runs neither a strobing overlay nor an intense special fires; calm specials are free.
+A special is intense when it strobes, pulses or its speed is above `INTENSE_SPEED` (0.6).
+This is derived from the values and never declared. A drop's strobe burst, its cue's strobing
+rows and the intense special entering with it are one intense event on one cooldown, the drop
+strobe cooldown setting (halved at wild), so back-to-back drops strobe once. Nothing intense fires
+at or below intensity 0.3, so Calm never strobes. While the cooldown runs neither a strobe, a
+strobing overlay nor an intense special fires; calm specials are free.
 
 ## Selection
 

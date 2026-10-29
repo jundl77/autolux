@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 
 from autolux.lib.engine.cue import Envelope
-from autolux.lib.engine.effect_definitions import LightIntent
+from autolux.lib.engine.effect_definitions import STARFIRE_MAX_STROBE_HZ, LightIntent
 from autolux.lib.engine.special_policy import Special, Venue
 from autolux.lighting.mvr_schema import DEPTHS, ROLES, ZONES
 from autolux.lighting.palettes import SLOTS
@@ -23,6 +23,7 @@ FILE_FIELDS = {
     ('effect', 'rate'): 'speed',
     ('effect', 'size'): 'energy',
     ('effect', 'form', 'pulse_beats'): 'pulse_beats',
+    ('effect', 'form', 'strobe_hz'): 'strobe_hz',
     ('effect', 'pattern'): 'pattern',
     ('playback', 'attack_beats'): 'attack_beats',
     ('playback', 'release_beats'): 'release_beats',
@@ -33,8 +34,12 @@ SECTIONS = {path[:depth] for path in FILE_FIELDS for depth in range(1, len(path)
 SPECIAL_KEYS = frozenset(
     {'name', 'intents', 'colour_slot', 'energy', 'speed', 'attack_beats', 'release_beats'}
 )
+STROBE_KEYS = frozenset({'name', 'intents', 'group', 'strobe_hz'})
 TARGET_KEYS = ('group', 'role')
-OPTIONAL_KEYS = {'pulse_beats', 'pattern', 'cooldown_seconds', 'group', 'role', 'zone', 'depth'}
+OPTIONAL_KEYS = {
+    SPECIAL_KEYS: {'pulse_beats', 'pattern', 'cooldown_seconds', 'group', 'role', 'zone', 'depth'},
+    STROBE_KEYS: set(),
+}
 
 
 class SpecialError(ValueError):
@@ -106,10 +111,11 @@ def parse_special(document, stem: str) -> Special:
     if not isinstance(document, dict):
         raise SpecialError('a special must be a TOML table')
     data, labels = file_fields(document), FILE_NAMES
-    missing = SPECIAL_KEYS - data.keys()
+    shape = STROBE_KEYS if 'strobe_hz' in data else SPECIAL_KEYS
+    missing = shape - data.keys()
     if missing:
         raise SpecialError(f'missing {_names(missing, labels)}')
-    unknown = data.keys() - SPECIAL_KEYS - OPTIONAL_KEYS
+    unknown = data.keys() - shape - OPTIONAL_KEYS[shape]
     if unknown:
         raise SpecialError(f'unknown {_names(unknown, labels)}')
     if data['name'] != stem:
@@ -133,6 +139,9 @@ def parse_special(document, stem: str) -> Special:
         if not isinstance(group, str) or not NAME.fullmatch(group):
             raise SpecialError(f'group {group!r} must be a lower-case rig group name')
         common['group'] = group
+    if shape is STROBE_KEYS:
+        strobe_hz = _number(data, 'strobe_hz', 0.0, STARFIRE_MAX_STROBE_HZ, labels)
+        return Special(**common, strobe_hz=strobe_hz)
     cooldown = (
         _number(data, 'cooldown_seconds', 0.0, math.inf, labels)
         if 'cooldown_seconds' in data

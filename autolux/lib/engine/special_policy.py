@@ -11,6 +11,7 @@ from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lighting.mvr_schema import ACCENT_ROLE, LOOP_ROLE
 
 INTENSE_SPEED = 0.6
+MIN_STROBE_DROP_STRENGTH = 0.5
 ACCENT_WINDOW_SECONDS = 60.0
 VENUE_GROUP = 'venue'
 STROBE_COOLDOWN_LABEL = 'strobe'
@@ -31,15 +32,20 @@ class Special:
     pulse_beats: int | None = None
     pattern: float | None = None
     envelope: Envelope = field(default_factory=Envelope)
+    strobe_hz: float | None = None
     # Never sent to Starfire: the whole group rests, since the room tires of fixtures.
     cooldown_seconds: float = 0.0
 
     @property
     def intense(self) -> bool:
-        return self.pulse_beats is not None or self.speed > INTENSE_SPEED
+        return (
+            self.strobe_hz is not None or self.pulse_beats is not None or self.speed > INTENSE_SPEED
+        )
 
     @property
     def axes(self) -> frozenset[str]:
+        if self.strobe_hz is not None:
+            return frozenset()
         present = {
             'colour': True,
             'speed': self.speed > 0,
@@ -112,11 +118,12 @@ class SpecialCapabilities:
 @dataclass(frozen=True)
 class SpecialChoice:
     special: Special | None
+    strobes: tuple[Special, ...] = ()
     suppressed: str | None = None
 
     @property
     def intense(self) -> bool:
-        return self.special is not None and self.special.intense
+        return bool(self.strobes) or (self.special is not None and self.special.intense)
 
 
 @dataclass(frozen=True)
@@ -152,6 +159,7 @@ class SpecialPolicy:
         *,
         now: float = 0.0,
         moment: Hashable = None,
+        drop_strength: float | None = None,
     ) -> SpecialChoice:
         rows = [
             row
@@ -159,22 +167,27 @@ class SpecialPolicy:
             if intent in special.intents
             for row in capabilities.targets(special)
         ]
+        # A strobe row is never selected: it joins whichever row is, on the intense cooldown only.
+        strobe_rows = tuple(special for special in rows if special.strobe_hz is not None)
+        weak = drop_strength is not None and drop_strength < MIN_STROBE_DROP_STRENGTH
+        strobes = () if intense_blocked or weak else strobe_rows
         recent = self._recent_accents(now, moment)
         crowded = len(recent) >= self._venue.max_accent_events_per_minute
         selectable = [
             special
             for special in rows
-            if not self._cooling(special, now)
+            if special.strobe_hz is None
+            and not self._cooling(special, now)
             and not (crowded and capabilities.role(special.group) == ACCENT_ROLE)
         ]
         calm = [special for special in selectable if not special.intense]
         restraint = intense_blocked or soft_drop
         if restraint:
-            suppressed = restraint if len(calm) < len(selectable) else None
+            held = len(calm) < len(selectable) or len(strobes) < len(strobe_rows)
             chosen = self._pick(calm, capabilities) if calm else None
-            return SpecialChoice(chosen, suppressed=suppressed)
+            return SpecialChoice(chosen, strobes, restraint if held else None)
         chosen = self._pick(selectable, capabilities) if selectable else None
-        return SpecialChoice(chosen)
+        return SpecialChoice(chosen, strobes)
 
     def record(
         self,
@@ -225,6 +238,7 @@ class SpecialPolicy:
         groups = dict.fromkeys(
             row.group
             for special in self._specials
+            if special.strobe_hz is None
             for row in (capabilities.targets(special) if special.role else [special])
         )
         entries = []

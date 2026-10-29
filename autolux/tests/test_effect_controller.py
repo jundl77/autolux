@@ -5,7 +5,9 @@ import pytest
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
 from autolux.lib.engine.cue import Envelope
+from autolux.lib.engine.cue_director import SectionRequest
 from autolux.lib.engine.effect_controller import (
+    DROP_ACCENT_ID,
     SPECIAL_ID,
     SPECIAL_PRIORITY,
     EffectController,
@@ -392,7 +394,7 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
     assert len(textures) == 1
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    assert accents(lighting, start) == []
+    assert [c['value']['id'] for c in accents(lighting, start)] == [DROP_ACCENT_ID], 'fx rests'
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.BREAKDOWN)
@@ -401,10 +403,11 @@ async def test_the_catalogue_plays_one_texture_per_fx_cooldown_then_a_drop_accen
     clock.advance(240)
     start = len(lighting.events)
     await controller.change_effect(LightIntent.DROP)
-    [spin] = accents(lighting, start)
+    spin, strobe = accents(lighting, start)
     assert spin['value']['id'] == SPECIAL_ID
     assert spin['value']['target'] == {'group': 'fx'}
     assert spin['value']['special_fx']['pulse_beats'] == 1
+    assert strobe['value']['id'] == DROP_ACCENT_ID
 
 
 async def test_a_soft_drop_plays_no_intense_special(caplog):
@@ -444,12 +447,71 @@ async def test_at_or_below_the_strobe_gate_no_intense_special_is_sent(caplog):
     assert 'intense special suppressed | intensity 0.29 at or below 0.30' in caplog.text
 
 
-async def test_standby_releases_the_special_at_once():
+async def test_standby_releases_the_special_and_the_drop_strobe_at_once():
     controller, lighting, _ = with_specials([DRIFT])
     await controller.change_effect(LightIntent.ATMOSPHERIC)
     start = len(lighting.events)
     controller.enter_standby(120.0)
-    assert accents(lighting, start) == [CUT]
+    assert accents(lighting, start) == [{'kind': 'clear_override', 'id': DROP_ACCENT_ID}, CUT]
+
+
+STROBE = Special('strobe_burst', (LightIntent.DROP,), 'all', strobe_hz=8.0)
+
+
+async def enter_cued_drop(controller, *, arrival=None, bpm=128.0):
+    context = SelectionContext(LightIntent.DROP, arrival_of_peak=arrival)
+    moment = object()
+    request = SectionRequest(
+        64, LightIntent.DROP, context, controller.clock.monotonic(), bpm, beats_per_bar=4
+    )
+    controller.plan_cue(moment, request)
+    await controller.change_effect(LightIntent.DROP, bpm, context, moment)
+
+
+def strobe_specials(lighting, start=0):
+    return [
+        command['value']
+        for command in accents(lighting, start)
+        if command['kind'] == 'set_override' and command['value']['id'] == DROP_ACCENT_ID
+    ]
+
+
+@pytest.mark.parametrize(
+    ('intensity', 'hz', 'seconds'),
+    [(INTENSITY_WILD, 8.0, 8 * 60 / 128), (INTENSITY_BALANCED, 0.7 * 8.0, 0.7 * 4.0)],
+)
+async def test_a_drop_fires_the_strobe_special_for_two_bars_inside_the_engine_caps(
+    intensity, hz, seconds
+):
+    controller, lighting, _ = with_specials([STROBE], settings=ShowSettings(intensity=intensity))
+    await enter_cued_drop(controller)
+    [strobe] = strobe_specials(lighting)
+    assert strobe['target'] == 'all' and strobe['priority'] == SPECIAL_PRIORITY
+    assert strobe['values'] == {'strobe_hz': pytest.approx(hz)}
+    assert strobe['lifetime'] == {'kind': 'seconds', 'duration_seconds': pytest.approx(seconds)}
+
+
+async def test_calm_and_weak_drops_fire_no_strobe_special():
+    calm = ShowSettings(intensity=INTENSITY_CALM)
+    controller, lighting, _ = with_specials([STROBE], settings=calm)
+    await enter_cued_drop(controller)
+    assert strobe_specials(lighting) == []
+    controller, lighting, _ = with_specials([STROBE], settings=BALANCED)
+    await enter_cued_drop(controller, arrival=0.4)
+    assert strobe_specials(lighting) == []
+    await enter_cued_drop(controller, arrival=0.5)
+    assert len(strobe_specials(lighting)) == 1
+
+
+async def test_back_to_back_drops_fire_one_strobe_special_on_the_intense_cooldown():
+    controller, lighting, clock = with_specials([STROBE], settings=BALANCED)
+    await enter_cued_drop(controller)
+    clock.advance(30.0)
+    await enter_cued_drop(controller)
+    assert len(strobe_specials(lighting)) == 1
+    clock.advance(STROBE_COOLDOWN_SECONDS)
+    await enter_cued_drop(controller)
+    assert len(strobe_specials(lighting)) == 2
 
 
 async def test_the_event_buffer_shows_the_active_special_and_the_capable_groups():
