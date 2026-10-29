@@ -446,6 +446,14 @@ impl Engine {
         let phrase = self
             .phrase_start
             .map(|start| (time.beat_position - start).max(0.0));
+        let section_elapsed_beats = section.section_elapsed_beats.or(phrase);
+        // Counted back over elapsed musical beats, which a re-anchoring beat never moves.
+        let next_known_at =
+            section_elapsed_beats
+                .zip(section.next_received_at)
+                .map(|(elapsed, received)| {
+                    (elapsed - (time.elapsed_musical_beats - received)).max(0.0)
+                });
         let features = self.features;
         RenderContext {
             time_seconds: self.paused_at_seconds.unwrap_or(seconds),
@@ -459,10 +467,11 @@ impl Engine {
             intensity: self.intensity,
             bpm: self.clock.tempo_bpm(),
             section_intent: section.section_intent,
-            section_elapsed_beats: section.section_elapsed_beats.or(phrase),
+            section_elapsed_beats,
             next_intent: section.next_intent,
             beats_until_next: section.beats_until_next,
             beats_until_dip: section.beats_until_dip,
+            next_known_at,
             drop_strength: section.drop_strength,
             next_drop_strength: section.next_drop_strength,
             seed: section.seed,

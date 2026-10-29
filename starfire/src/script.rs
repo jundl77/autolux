@@ -640,6 +640,7 @@ impl LuaAutoloop {
         .chain(context.section_elapsed_beats)
         .chain(context.beats_until_next)
         .chain(context.beats_until_dip)
+        .chain(context.next_known_at)
         .chain(context.overlay_length_beats)
         {
             ensure!(

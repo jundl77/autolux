@@ -200,24 +200,24 @@ local function phrase_beats(ctx)
     return ctx.section_elapsed_beats or ctx.autoloop_elapsed_beats
 end
 
--- 0..1, an ease-in (cubic) over the build: the share of it already played when the next cue is
--- known, else over `beats` (128) of section time. The second value is the level at the bar
--- line at or before now, for loops that step on downbeats.
+-- 0..1, an ease-in (cubic) over `beats` (128) of section time until the next change becomes
+-- known (at ctx.next_known_at); from there it bends linearly to full at that change, so the
+-- curve fills the real build without a jump. The second value is the tension at the last
+-- downbeat, for loops that step against it.
 function sf.tension(ctx, beats)
     beats = beats or TENSION_BEATS
     assert(finite(beats) and beats > 0, "tension length must be positive and finite")
-    local elapsed, left = phrase_beats(ctx), ctx.beats_until_next
-    local function level(played)
-        local t
-        if left ~= nil and elapsed + left > 0 then
-            t = played / (elapsed + left)
-        else
-            t = math.min(1, played / beats)
-        end
-        return t * t * t
+    local elapsed, left, known = phrase_beats(ctx), ctx.beats_until_next, ctx.next_known_at
+    local function ease(played) return math.min(1, played / beats) ^ 3 end
+    local function at(played)
+        if left == nil or known == nil or played < known then return ease(played) end
+        local rest = elapsed - known + left
+        if rest <= 0 then return 1 end
+        local base = ease(known)
+        return base + (1 - base) * (played - known) / rest
     end
     local bar = ctx.beats_per_bar
-    return level(elapsed), level(math.floor(elapsed / bar) * bar)
+    return at(elapsed), at(math.floor(elapsed / bar) * bar)
 end
 
 -- 0..1 over the last `beats` before the next cue starts, 0 while none is pending. Given `from`
