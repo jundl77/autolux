@@ -36,7 +36,7 @@ from autolux.lib.engine.effect_definitions import (
     intensity_level,
     transition_for,
 )
-from autolux.lib.engine.palette_policy import PalettePolicy, palette_variant, section_palette
+from autolux.lib.engine.palette_policy import PalettePolicy, section_palette
 from autolux.lib.engine.special_policy import (
     Special,
     SpecialCapabilities,
@@ -94,6 +94,8 @@ class EffectController:
         self._entered: tuple[LightIntent, AutoloopChoice] | None = None
         # The section key of the entered cue; None while the look came from a selection.
         self._entered_moment: Hashable = None
+        # The room's track has played a drop: uncued looks leave mono from then on.
+        self._track_dropped = False
         # Called after the track palette or the pin changes, so planned cues follow it.
         self.palette_listener: Callable[[], None] | None = None
         self._palette_policy = PalettePolicy(palettes, random.Random(f'{seed}/palette'))
@@ -155,18 +157,21 @@ class EffectController:
                 plan.request.intent,
                 after_first_drop=plan.after_first_drop,
             )
-        intent = LightIntent.ATMOSPHERIC if self._entered is None else self._entered[1].look
-        if self._pinned_palette is not None:
-            return palette_variant(self._pinned_palette, intent)
         if self._entered is None:
-            return None
-        return self._palette_policy.variant_for(intent)
+            if self._pinned_palette is None:
+                return None
+            return self._palette_for(LightIntent.ATMOSPHERIC, LightIntent.ATMOSPHERIC)
+        intent, choice = self._entered
+        return self._palette_for(choice.look, intent)
 
     def _palette_base(self) -> str:
         return self._pinned_palette or self._palette_policy.track_palette
 
-    def _palette_for(self, look: LightIntent) -> str:
-        return palette_variant(self._palette_base(), look)
+    def _palette_for(self, look: LightIntent, intent: LightIntent) -> str:
+        """An uncued section's palette, under the cues' mono discipline."""
+        return section_palette(
+            self._palette_base(), look, intent, after_first_drop=self._track_dropped
+        )
 
     def _entered_plan(self) -> SectionPlan | None:
         if self._entered_moment is None:
@@ -274,10 +279,14 @@ class EffectController:
         if plan is not None:
             return self._enter_cue(intent, bpm, context, moment, plan)
         self._entered_moment = None
+        if context.new_track:
+            self._track_dropped = False
         choice, fresh = self._entry_choice(context)
         bank, autoloop = choice.bank, choice.autoloop
         transition = transition_for(choice.look)
-        palette = self._palette_for(choice.look)
+        palette = self._palette_for(choice.look, intent)
+        if intent is LightIntent.DROP:
+            self._track_dropped = True
         if not self.lighting_client.select_autoloop(
             bank, autoloop, palette=palette, transition=transition
         ):
@@ -304,6 +313,9 @@ class EffectController:
         plan: SectionPlan,
     ) -> bool:
         fresh = moment is not self._entered_moment
+        if context.new_track:
+            self._track_dropped = False
+        self._track_dropped = self._track_dropped or intent is LightIntent.DROP
         choice = plan.choices[0]
         self._entered = intent, choice
         self._entered_moment = moment
@@ -344,7 +356,7 @@ class EffectController:
             return
         cause = f'intensity {intensity_level(intensity)}' if remapped else 'intensity cap'
         choice = dataclasses.replace(choice, reason=f'{cause}; {choice.reason}')
-        palette = self._palette_for(choice.look) if remapped else None
+        palette = self._palette_for(choice.look, context.intent) if remapped else None
         self.lighting_client.select_autoloop(
             choice.bank, choice.autoloop, palette=palette, transition=operator_transition(bpm)
         )

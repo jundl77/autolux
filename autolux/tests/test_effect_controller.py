@@ -625,7 +625,7 @@ async def test_calm_swaps_a_drop_or_build_to_its_quiet_bank_at_once_and_back_on_
     swap = selections(lighting)[-1]['command']
     assert f"{swap['bank']}/{swap['autoloop']}" == calm_look
     assert swap['palette'] == light.effect_controller._palette_for(
-        LightIntent(calm_look.split('/')[0])
+        LightIntent(calm_look.split('/')[0]), LightIntent(decision)
     )
     assert 'reason=intensity calm;' in caplog.text
     await beat_at_phase(light, decoder, 0)

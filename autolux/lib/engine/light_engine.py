@@ -146,6 +146,8 @@ class LightEngine(IMusicAnalyserHandler):
         self._beat_index_never_reset: int = 0
         self._beat_ring: deque[AnalysedBeat] = deque(maxlen=BEAT_RING_SIZE)
         self._room_beat_index: int = 0
+        # The first beat Starfire was sent: its grid's bar lines count from it.
+        self._grid_origin: int | None = None
         self._room_beat_phase: int | None = None
         self._room_beat_at: float = float('-inf')
         self._held_intent: LightIntent | None = None
@@ -664,6 +666,8 @@ class LightEngine(IMusicAnalyserHandler):
             self.lighting_client.set_normalized_rms_level(normalized_rms_level)
             self._room_levels.append(normalized_rms_level)
             if published_bpm > 0:
+                if self._grid_origin is None:
+                    self._grid_origin = beat_index
                 self.lighting_client.beat(
                     beat_index, phase, BEATS_PER_BAR, published_bpm, features=features
                 )
@@ -754,9 +758,18 @@ class LightEngine(IMusicAnalyserHandler):
             planned.switch_beat_index = start
             return
         for beat in self._beat_ring:
-            if beat.beat_index > self._room_beat_index and beat.phase in (0, None):
+            if beat.beat_index > self._room_beat_index and self._bar_line(beat):
                 planned.switch_beat_index = beat.beat_index
                 return
+
+    def _bar_line(self, beat: AnalysedBeat) -> bool:
+        """Where Starfire starts a late cue: a downbeat, or without a decoder phase a bar line
+        of its grid, which counts bars from the first beat it was sent."""
+        if beat.phase is not None:
+            return beat.phase == 0
+        if self._grid_origin is None:
+            return True
+        return (beat.beat_index - self._grid_origin) % BEATS_PER_BAR == 0
 
     def _place_waiting_sections(self) -> None:
         for planned in self._pending_intents:
@@ -789,13 +802,16 @@ class LightEngine(IMusicAnalyserHandler):
     # ---- W5 plan state ----
     def _plan_cue(self, planned: PlannedSection) -> Cue | None:
         """The director's plan for a committed section, against the planned previous one."""
+        bpm = self._last_bpm
+        lead_sec = max(0.0, planned.fire_at - self._clock.monotonic())
         request = SectionRequest(
             start_beat_index=planned.start_beat_index,
             intent=planned.intent,
             context=self._plan_context(planned),
             room_sec=planned.fire_at,
-            bpm=self._last_bpm,
+            bpm=bpm,
             levels_before=self._levels_before(planned.start_sec),
+            lead_beats=lead_sec * bpm / 60.0 if bpm else 0.0,
         )
         self._plan_new_track = False
         return self.effect_controller.plan_cue(planned, request)
@@ -854,13 +870,21 @@ class LightEngine(IMusicAnalyserHandler):
             return [self._current_plan, *ahead]
         return ahead
 
+    def _sendable(self, planned: PlannedSection, cue: Cue) -> Cue:
+        """A section the room is in goes out with its recurring rows only: Starfire would
+        anchor its one-shot rows on the bar line it activates on and fire the entry again."""
+        if planned is not self._current_plan:
+            return cue
+        again = tuple(row for row in cue.overlays if row.every_bars > 0)
+        return dataclasses.replace(cue, overlays=again)
+
     def _resend_cues(self, *, current: bool) -> None:
         if self._static_mode:
             return
         for planned in self._planned_sections(current=current):
             cue = self.effect_controller.cue_for(planned)
             if cue is not None:
-                self.lighting_client.cue_section(cue)
+                self.lighting_client.cue_section(self._sendable(planned, cue))
 
     def _revise_cues(self, *, palette: bool) -> None:
         """A level or palette change: each stored cue again with its start and seed."""
@@ -871,7 +895,7 @@ class LightEngine(IMusicAnalyserHandler):
                 continue
             planned.cue = cue
             if not self._static_mode:
-                self.lighting_client.cue_section(cue)
+                self.lighting_client.cue_section(self._sendable(planned, cue))
 
     # ---- end W5 plan state ----
 

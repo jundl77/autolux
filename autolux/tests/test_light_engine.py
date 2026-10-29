@@ -1902,29 +1902,34 @@ async def test_policy_palettes_reach_the_room_with_their_section_and_operator_pi
     assert sent(lighting, 'select', 'set_palette') == []
     clock.advance(0.2)
     await queue.drain()
-    [(selected_at, track_palette)] = palette_commands(lighting)
+    [(selected_at, sent_palette)] = palette_commands(lighting)
     assert selected_at == pytest.approx(decided_at + 14.0, abs=0.2)
-    assert track_palette in PALETTE_NAMES
-    assert light.event_buffer.snapshot()['palette'] == {'name': track_palette, 'pinned': False}
+    # Mono until the track's first drop.
+    track_palette = sent_palette.removesuffix('_mono')
+    assert sent_palette == f'{track_palette}_mono' and track_palette in PALETTE_NAMES
+    assert light.event_buffer.snapshot()['palette'] == {'name': sent_palette, 'pinned': False}
 
     pinned = next(name for name in PALETTE_NAMES if name != track_palette)
     pinned_at = clock.monotonic()
     control.commands.put_nowait({'action': 'palette', 'name': pinned})
     await control.apply_pending(light)
-    assert palette_commands(lighting)[-1] == (pinned_at, pinned)
-    assert light.event_buffer.snapshot()['palette'] == {'name': pinned, 'pinned': True}
+    assert palette_commands(lighting)[-1] == (pinned_at, f'{pinned}_mono')
+    assert light.event_buffer.snapshot()['palette'] == {'name': f'{pinned}_mono', 'pinned': True}
 
     await light._commit_intent(LightIntent.BREAKDOWN, 0.0, section_label='breakdown')
     clock.advance(14.1)
     await queue.drain()
     breakdown = [command for _, command in sent(lighting, 'select')][-1]
-    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', f'{pinned}_breakdown')
+    assert (breakdown['bank'], breakdown['palette']) == ('breakdown', f'{pinned}_breakdown_mono')
 
     control.commands.put_nowait({'action': 'palette', 'name': 'auto'})
     await control.apply_pending(light)
-    assert palette_commands(lighting)[-1] == (clock.monotonic(), f'{track_palette}_breakdown')
+    assert palette_commands(lighting)[-1] == (
+        clock.monotonic(),
+        f'{track_palette}_breakdown_mono',
+    )
     assert light.event_buffer.snapshot()['palette'] == {
-        'name': f'{track_palette}_breakdown',
+        'name': f'{track_palette}_breakdown_mono',
         'pinned': False,
     }
 
@@ -2272,3 +2277,76 @@ async def test_a_skip_holds_the_operators_loop_and_keeps_the_later_cues():
         'breakdown'
     ], 'the skipped section is no longer cued'
     assert light.effect_controller.cue_for(planned) is not None, 'its plan stays for the track'
+
+
+async def wild_drop_in_the_room():
+    from autolux.tests.test_cue_director import OVERLAYS
+
+    decoder = FakeDecoder()
+    wild = ShowSettings(intensity=1.0)
+    light, queue, clock, lighting = engine(decoder=decoder, overlay_meta=OVERLAYS)
+    light._settings = light.effect_controller._settings = lambda: wild
+    planned = await planned_drop(light, decoder, clock)
+    clock.advance(14.5)
+    await queue.drain()
+    assert light._current_plan is planned
+    return light, lighting, planned
+
+
+def sent_hits(lighting):
+    return [
+        row
+        for event in cue_events(lighting)
+        for row in event['command']['value']['overlays']
+        if row['bank'] == 'hit'
+    ]
+
+
+@pytest.mark.parametrize('cause', ['supersession', 'static'])
+async def test_a_running_drop_sent_again_never_fires_its_entry_twice(cause):
+    light, lighting, planned = await wild_drop_in_the_room()
+    [hit] = sent_hits(lighting)
+    assert hit['autoloop'] == 'strobe'
+    booked = dict(light.effect_controller._intense_at)
+    before = len(cue_events(lighting))
+    if cause == 'static':
+        light.enter_static()
+        await light.leave_static()
+    else:
+        light._withdraw_superseded_cues()
+    [again] = (e['command']['value'] for e in cue_events(lighting)[before:])
+    assert again['start_beat_index'] == planned.start_beat_index
+    assert again['overlays'] and all(row['every_bars'] > 0 for row in again['overlays'])
+    assert sent_hits(lighting) == [hit], 'Starfire would anchor the hit on its next bar line'
+    assert light.effect_controller._intense_at == booked
+
+
+async def test_the_plan_knows_its_lead_over_the_room():
+    decoder = FakeDecoder()
+    light, _, clock, _ = engine(decoder=decoder)
+    planned = await planned_drop(light, decoder, clock)
+    request = light.effect_controller._director.plan_for(planned).request
+    lead_sec = planned.fire_at - clock.monotonic()
+    assert request.lead_beats == pytest.approx(lead_sec * request.bpm / 60.0)
+    assert 0 < request.lead_beats < 14.0 * request.bpm / 60.0
+
+
+async def test_a_late_section_without_a_phase_switches_on_starfires_next_bar_line():
+    decoder = FakeDecoder()
+    light, queue, clock, _ = engine(decoder=decoder, playback_delay_sec=1.0)
+    await elapse(light, clock, 20.0)
+    for _ in range(3):
+        await beat_at_phase(light, decoder, None)
+        await elapse(light, clock, 0.5)
+        await queue.drain()
+    clock.advance(1.0)
+    await queue.drain()
+    assert light._grid_origin == 1
+    # The room has heard beat 1, where the section starts; Starfire's bars count from beat 1.
+    decoder._script.append([BarDecision(0, 'drop', light.audio_sec - 1.5)])
+    await beat_at_phase(light, decoder, None)
+    [planned] = light._pending_intents
+    assert (planned.start_beat_index, planned.switch_beat_index) == (1, None), 'not beat 4'
+    await elapse(light, clock, 0.5)
+    await beat_at_phase(light, decoder, None)
+    assert planned.switch_beat_index == 5
