@@ -103,6 +103,9 @@ def test_the_overview_bounds_each_groups_level_and_marks_strobe_over_the_track()
     assert overview['strobe_seconds'] == 0.6
     assert overview['group_strobe_seconds'] == {'wash': 0.6}
     assert overview['phrases'] == [0]
+    # Without cues a section is named by the bank a selection chose; nothing overlays it.
+    assert overview['intents'] == [{'name': 'drop', 'start': 5, 'end': 21}]
+    assert overview['overlays'] == []
     assert overview['sections'] == [
         {'base': None, 'bank': None, 'start': 0, 'end': 5, 'colours': []},
         {'base': 'drop/chase', 'bank': 'drop', 'start': 5, 'end': 21, 'colours': [[1.0, 0.0, 0.0]]},
@@ -124,6 +127,32 @@ def test_a_section_of_two_looks_keeps_both_colours_and_white_counts_as_hits():
     # magenta of their mean.
     assert overview['sections'][0]['colours'] == [[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
     assert overview['white'] == [0.0, 0.0, 0.143]
+
+
+def test_the_overview_names_cued_sections_and_marks_each_stretch_an_overlay_sounds():
+    def frame(index):
+        overlays = ['hit/flash'] if 3 <= index < 6 or index == 9 else []
+        if index == 4:
+            overlays.append('fill/roll')
+        intent = 'buildup' if index < 10 else 'drop'
+        cells = [[1.0, 1.0, 0.0, 0.0, 0.0]] * 2
+        return (
+            {'t': index / RATE_HZ, 'beat': index / 5, 'intent': intent, 'bank': 'drop'},
+            ({'overlays': overlays} if overlays else {}),
+            cells,
+        )
+
+    frames = [{**head, **extra, 'c': cells} for head, extra, cells in map(frame, range(21))]
+    overview = preview_overview(load_preview(preview_text(frames)), columns=3)
+    assert overview['intents'] == [
+        {'name': 'buildup', 'start': 0, 'end': 10},
+        {'name': 'drop', 'start': 10, 'end': 21},
+    ]
+    assert overview['overlays'] == [
+        {'name': 'hit/flash', 'start': 3, 'end': 6},
+        {'name': 'fill/roll', 'start': 4, 'end': 5},
+        {'name': 'hit/flash', 'start': 9, 'end': 10},
+    ]
 
 
 def test_report_conversion_is_deterministic():
