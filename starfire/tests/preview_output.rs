@@ -2,7 +2,7 @@ mod support;
 
 use serde_json::{Value, json};
 use starfire::model::{
-    Command, OverlayCue, RotationEntry, SectionCue, SectionIntent, TimedCommand, Transition,
+    Command, CueSection, Envelope, Overlay, SectionIntent, Step, TimedCommand, Transition,
 };
 use starfire::protocol::wire;
 use starfire::replay::{PREVIEW_KIND, Replay, render_replay, write_preview};
@@ -289,24 +289,24 @@ fn frames_name_the_cues_section_and_its_sounding_overlays() {
         definition("flash", RED_HALF),
     ])
     .unwrap();
-    let drop = SectionCue {
+    let drop = CueSection {
         start_beat_index: 4,
         intent: SectionIntent::Drop,
-        rotation: vec![RotationEntry {
+        rotation: vec![Step {
             bank: "test".into(),
             autoloop: "base".into(),
             bars: 16,
             transition: Transition::Cut,
         }],
-        overlays: vec![OverlayCue {
+        overlays: vec![Overlay {
             bank: "test".into(),
             autoloop: "flash".into(),
             priority: 0,
             begin_beats: 0.0,
-            length_beats: 2.0,
+            duration_beats: 2.0,
             every_bars: 0,
-            attack_beats: 0.0,
-            release_beats: 0.0,
+            envelope: Envelope::default(),
+            dip: false,
         }],
         palette: "techno".into(),
         drop_strength: None,

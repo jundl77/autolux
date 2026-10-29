@@ -1,4 +1,7 @@
 -- 16-beat loop
+-- energy: 1
+-- movement: still
+-- texture: wash
 local WASH_LEVEL = 0.12
 local STRIP_LEVEL = 0.04
 

@@ -28,7 +28,11 @@ fn beat(engine: &mut Engine, at: f64, beat_index: u64, bar_phase: Option<u32>, b
 }
 
 fn engine_at(rig: FixtureRig, scripts: &[(&str, &str)], bpm: f64) -> Engine {
-    let catalog = support::directory_catalog("test", scripts).unwrap();
+    let scripts: Vec<_> = scripts
+        .iter()
+        .map(|(name, source)| (*name, support::base_loop(source)))
+        .collect();
+    let catalog = support::directory_catalog("test", &scripts).unwrap();
     let mut engine = Engine::new(rig, catalog, support::palettes()).unwrap();
     beat(&mut engine, 0.0, 0, None, bpm);
     engine

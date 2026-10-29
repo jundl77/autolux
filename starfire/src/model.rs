@@ -6,6 +6,8 @@ pub const DMX_CHANNELS: usize = 512;
 pub const DEFAULT_FRAME_RATE_HZ: u32 = 40;
 pub const MAX_FRAME_RATE_HZ: u32 = 100;
 pub const MAX_STROBE_HZ: f64 = DEFAULT_FRAME_RATE_HZ as f64 / 4.0;
+/// Bounds every envelope, transition and overlay span a command names.
+pub const MAX_SPAN_BEATS: f64 = 1_024.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -153,7 +155,7 @@ pub struct RenderContext {
     pub bass: Option<f64>,
     pub mid: Option<f64>,
     pub high: Option<f64>,
-    pub overlay_length_beats: Option<f64>,
+    pub overlay_duration_beats: Option<f64>,
 }
 
 impl Default for RenderContext {
@@ -183,19 +185,19 @@ impl Default for RenderContext {
             bass: None,
             mid: None,
             high: None,
-            overlay_length_beats: None,
+            overlay_duration_beats: None,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct SectionCue {
+pub struct CueSection {
     pub start_beat_index: u64,
     pub intent: SectionIntent,
-    pub rotation: Vec<RotationEntry>,
+    pub rotation: Vec<Step>,
     #[serde(default)]
-    pub overlays: Vec<OverlayCue>,
+    pub overlays: Vec<Overlay>,
     pub palette: String,
     #[serde(default)]
     pub drop_strength: Option<f64>,
@@ -205,7 +207,7 @@ pub struct SectionCue {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RotationEntry {
+pub struct Step {
     pub bank: String,
     pub autoloop: String,
     pub bars: u32,
@@ -215,23 +217,58 @@ pub struct RotationEntry {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OverlayCue {
+pub struct Overlay {
     pub bank: String,
     pub autoloop: String,
     #[serde(default)]
     pub priority: i32,
     pub begin_beats: f64,
-    pub length_beats: f64,
+    pub duration_beats: f64,
     #[serde(default)]
     pub every_bars: u32,
     #[serde(default)]
-    pub attack_beats: f64,
+    pub envelope: Envelope,
     #[serde(default)]
+    pub dip: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Envelope {
+    pub attack_beats: f64,
     pub release_beats: f64,
 }
 
+impl Envelope {
+    pub fn is_valid(&self) -> bool {
+        [self.attack_beats, self.release_beats]
+            .iter()
+            .all(|beats| beats.is_finite() && (0.0..=MAX_SPAN_BEATS).contains(beats))
+    }
+
+    /// All three in elapsed musical beats.
+    pub fn level(&self, started: f64, released_at: Option<f64>, now: f64) -> f64 {
+        let attack = |at: f64| {
+            if self.attack_beats > 0.0 {
+                ((at - started) / self.attack_beats).clamp(0.0, 1.0)
+            } else {
+                1.0
+            }
+        };
+        match released_at {
+            None => attack(now),
+            Some(released_at) if self.release_beats > 0.0 => {
+                attack(released_at)
+                    * (1.0 - (now - released_at) / self.release_beats).clamp(0.0, 1.0)
+            }
+            Some(_) => 0.0,
+        }
+    }
+}
+
+/// Serialized as the proto's Transition: null or absent is the renderer default.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(from = "Option<CrossfadeBeats>", into = "Option<CrossfadeBeats>")]
 pub enum Transition {
     #[default]
     RendererDefault,
@@ -242,11 +279,43 @@ pub enum Transition {
 }
 
 impl Transition {
+    pub fn from_crossfade_beats(beats: f64) -> Self {
+        if beats == 0.0 {
+            Self::Cut
+        } else {
+            Self::Crossfade {
+                duration_beats: beats,
+            }
+        }
+    }
+
     pub fn crossfade_beats(&self) -> f64 {
         match self {
             Self::Crossfade { duration_beats } => *duration_beats,
             Self::Cut | Self::RendererDefault => 0.0,
         }
+    }
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrossfadeBeats {
+    crossfade_beats: f64,
+}
+
+impl From<Option<CrossfadeBeats>> for Transition {
+    fn from(value: Option<CrossfadeBeats>) -> Self {
+        value.map_or(Self::RendererDefault, |value| {
+            Self::from_crossfade_beats(value.crossfade_beats)
+        })
+    }
+}
+
+impl From<Transition> for Option<CrossfadeBeats> {
+    fn from(value: Transition) -> Self {
+        (value != Transition::RendererDefault).then(|| CrossfadeBeats {
+            crossfade_beats: value.crossfade_beats(),
+        })
     }
 }
 
@@ -270,9 +339,8 @@ pub struct SpecialFx {
     pub energy: f64,
     pub speed: f64,
     pub pulse_beats: Option<u32>,
-    pub attack_beats: f64,
-    pub release_beats: f64,
     pub pattern: Option<f64>,
+    pub envelope: Envelope,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -340,7 +408,7 @@ pub enum Command {
     },
     /// A re-sent cue's rows that are already playing carry on.
     CueSection {
-        value: Box<SectionCue>,
+        value: Box<CueSection>,
     },
     /// Overlays release; the base look plays on.
     ClearCues,

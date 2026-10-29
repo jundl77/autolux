@@ -8,16 +8,15 @@ use serde::Serialize;
 
 use crate::clock::{BeatFact, ClockSample, MusicalClock, validate_time};
 use crate::cue::{
-    BaseStep, CueSample, CueTimeline, DIP_BANK, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS,
-    MAX_ROTATION, OverlayInstance, Span,
+    CueSample, CueTimeline, DueStep, InstanceState, MAX_OVERLAYS, MAX_PREROLL_BEATS, MAX_ROTATION,
 };
 use crate::fixtures::FixtureRig;
 use crate::gdtf::{GdtfProfile, SNAP_POINT};
 use crate::intensity;
 use crate::model::{
-    AttributeValue, BeatFeatures, Command, Effect, FixtureState, FixtureStates, LightingOverride,
-    MAX_STROBE_HZ, OverrideLifetime, PropertyValues, RenderContext, SectionCue, SectionIntent,
-    SpecialFx, Target, Transition, lerp,
+    AttributeValue, BeatFeatures, Command, CueSection, Effect, FixtureState, FixtureStates,
+    LightingOverride, MAX_SPAN_BEATS, MAX_STROBE_HZ, OverrideLifetime, PropertyValues,
+    RenderContext, SectionIntent, SpecialFx, Target, Transition, lerp,
 };
 use crate::palette::{PaletteSlots, PaletteTable};
 use crate::protocol::wire;
@@ -27,7 +26,6 @@ use crate::special::{self, CellMap, Progress, SpecialFrame};
 const MAX_ACTIVE_OVERRIDES: usize = 128;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 const MAX_INTENSITY_MULTIPLIER: f64 = 8.0;
-const MAX_TRANSITION_BEATS: f64 = 1_024.0;
 const MAX_STROBE_BURST_SECONDS: f64 = 60.0;
 const STROBE_FLASH_SECONDS: f64 = 0.05;
 const MAX_STROBE_OPEN_FRACTION: f64 = 0.5;
@@ -109,8 +107,10 @@ impl ActiveOverride {
 
     fn release(self, beat: f64) -> Option<ReleasingSpecial> {
         let special = *self.value.special_fx?;
-        let from_level = special::attack_level(&special, beat - self.progress.started_beat);
-        (special.release_beats > 0.0 && from_level > 0.0).then_some(ReleasingSpecial {
+        let level = special
+            .envelope
+            .level(self.progress.started_beat, None, beat);
+        (special.envelope.release_beats > 0.0 && level > 0.0).then_some(ReleasingSpecial {
             id: self.value.id,
             special,
             cell_ids: self.cell_ids,
@@ -118,7 +118,6 @@ impl ActiveOverride {
             order: self.order,
             progress: self.progress,
             released_beat: beat,
-            from_level,
         })
     }
 }
@@ -131,12 +130,13 @@ struct ReleasingSpecial {
     order: u64,
     progress: Progress,
     released_beat: f64,
-    from_level: f64,
 }
 
 impl ReleasingSpecial {
     fn level(&self, beat: f64) -> f64 {
-        special::release_level(&self.special, self.from_level, beat - self.released_beat)
+        self.special
+            .envelope
+            .level(self.progress.started_beat, Some(self.released_beat), beat)
     }
 }
 
@@ -347,7 +347,7 @@ impl Engine {
             }
             Command::SetDefaultCrossfadeBeats { beats } => {
                 ensure!(
-                    beats.is_finite() && (0.0..=MAX_TRANSITION_BEATS).contains(beats),
+                    beats.is_finite() && (0.0..=MAX_SPAN_BEATS).contains(beats),
                     "default crossfade is outside the supported range"
                 );
                 self.default_crossfade_beats = *beats;
@@ -424,7 +424,7 @@ impl Engine {
     pub fn check_scripts_pure(&self) -> Result<()> {
         let time = self.clock.sample_at(0.0)?;
         let context = RenderContext {
-            overlay_length_beats: Some(1.0),
+            overlay_duration_beats: Some(1.0),
             ..self.frame_context(0.0, time)
         };
         self.scripts
@@ -506,7 +506,7 @@ impl Engine {
             bass: features.map(|features| features.bass),
             mid: features.map(|features| features.mid),
             high: features.map(|features| features.high),
-            overlay_length_beats: None,
+            overlay_duration_beats: None,
         }
     }
 
@@ -514,7 +514,7 @@ impl Engine {
         let Some(step) = self.cues.advance(self.cue_sample(time)) else {
             return Ok(());
         };
-        let BaseStep {
+        let DueStep {
             bank,
             autoloop,
             transition,
@@ -557,10 +557,10 @@ impl Engine {
         Ok(())
     }
 
-    fn validate_cue(&self, cue: &SectionCue, time: ClockSample) -> Result<()> {
+    fn validate_cue(&self, cue: &CueSection, time: ClockSample) -> Result<()> {
         ensure!(
             (1..=MAX_ROTATION).contains(&cue.rotation.len()),
-            "a cue needs 1..{MAX_ROTATION} rotation entries"
+            "a cue needs 1..{MAX_ROTATION} steps"
         );
         ensure!(
             cue.overlays.len() <= MAX_OVERLAYS,
@@ -574,35 +574,36 @@ impl Engine {
             );
             validate_unit(strength, "drop strength")?;
         }
-        for entry in &cue.rotation {
-            validate_identifier(&entry.bank)?;
-            validate_identifier(&entry.autoloop)?;
-            ensure!(entry.bars >= 1, "a rotation entry lasts at least one bar");
+        for (index, step) in cue.rotation.iter().enumerate() {
+            validate_identifier(&step.bank)?;
+            validate_identifier(&step.autoloop)?;
+            ensure!(
+                step.bars >= 1 || index + 1 == cue.rotation.len(),
+                "only the last step may hold with 0 bars"
+            );
             validate_transition(
-                &self.resolve_transition(&entry.transition),
+                &self.resolve_transition(&step.transition),
                 time.elapsed_musical_beats,
             )?;
-            self.load_script(&entry.bank, &entry.autoloop)?;
+            self.load_script(&step.bank, &step.autoloop)?;
         }
         let bar = f64::from(time.beats_per_bar);
         for overlay in &cue.overlays {
             validate_identifier(&overlay.bank)?;
             validate_identifier(&overlay.autoloop)?;
             ensure!(
-                overlay.length_beats.is_finite()
-                    && overlay.length_beats > 0.0
-                    && overlay.length_beats <= MAX_TRANSITION_BEATS,
+                overlay.duration_beats.is_finite()
+                    && overlay.duration_beats > 0.0
+                    && overlay.duration_beats <= MAX_SPAN_BEATS,
                 "overlay length is outside the supported range"
             );
-            for value in [overlay.attack_beats, overlay.release_beats] {
-                ensure!(
-                    value.is_finite() && (0.0..=MAX_TRANSITION_BEATS).contains(&value),
-                    "overlay attack and release are outside the supported range"
-                );
-            }
+            ensure!(
+                overlay.envelope.is_valid(),
+                "overlay attack and release are outside the supported range"
+            );
             let period = f64::from(overlay.every_bars) * bar;
             let begins = if overlay.every_bars == 0 {
-                (-MAX_PREROLL_BEATS..=MAX_TRANSITION_BEATS).contains(&overlay.begin_beats)
+                (-MAX_PREROLL_BEATS..=MAX_SPAN_BEATS).contains(&overlay.begin_beats)
             } else {
                 (0.0..period).contains(&overlay.begin_beats)
             };
@@ -611,8 +612,13 @@ impl Engine {
                 "overlay begin is outside its pre-roll or repeat period"
             );
             ensure!(
-                overlay.every_bars == 0 || overlay.length_beats + overlay.release_beats <= period,
+                overlay.every_bars == 0
+                    || overlay.duration_beats + overlay.envelope.release_beats <= period,
                 "a repeating overlay's length and release exceed its period"
+            );
+            ensure!(
+                !overlay.dip || (overlay.every_bars == 0 && overlay.begin_beats < 0.0),
+                "a dip plays once before its section"
             );
             self.load_script(&overlay.bank, &overlay.autoloop)?;
         }
@@ -1022,11 +1028,11 @@ impl Engine {
                 rank: (overlay.priority, instance.order),
                 script: Rc::clone(&script.script),
                 intensity_htp: script.intensity_htp,
-                length_beats: overlay.length_beats,
+                duration_beats: overlay.duration_beats,
                 elapsed_beats,
                 seed: instance.seed,
-                level: overlay_level(instance, beat),
-                holds_to_one: overlay.bank == DIP_BANK
+                level: instance.level(beat),
+                holds_to_one: overlay.dip
                     && matches!(instance.state, InstanceState::Running(_))
                     && instance
                         .nominal_end(&sample)
@@ -1117,7 +1123,7 @@ impl Engine {
                 autoloop_elapsed_beats: layer.elapsed_beats,
                 // The envelope runs on musical beats; a speed change must not detach it.
                 autoloop_speed_scaled_elapsed_beats: layer.elapsed_beats,
-                overlay_length_beats: Some(layer.length_beats),
+                overlay_duration_beats: Some(layer.duration_beats),
                 seed: layer.seed,
                 ..*frame
             },
@@ -1126,7 +1132,7 @@ impl Engine {
         layer_values(&self.rig, &effects)
     }
 
-    /// Only for the dip, and only when the next cue cuts to a new loop.
+    /// Only under a dip row, and only when the next cue cuts to a new loop.
     fn move_in_black(
         &self,
         frame: &RenderContext,
@@ -1161,16 +1167,16 @@ impl Engine {
         let Some((cue, one)) = self.cues.next_cue(sample) else {
             return Ok(());
         };
-        let entry = &cue.rotation[0];
-        let cuts_to_new_loop = self.resolve_transition(&entry.transition) == Transition::Cut
-            && !self.is_playing(&entry.bank, &entry.autoloop);
+        let first = &cue.rotation[0];
+        let cuts_to_new_loop = self.resolve_transition(&first.transition) == Transition::Cut
+            && !self.is_playing(&first.bank, &first.autoloop);
         if !cuts_to_new_loop {
             return Ok(());
         }
         let bar = f64::from(frame.beats_per_bar);
         let effects = self
             .scripts
-            .get(&entry.bank, &entry.autoloop)?
+            .get(&first.bank, &first.autoloop)?
             .borrow_mut()
             .render(
                 &RenderContext {
@@ -1200,7 +1206,7 @@ impl Engine {
                 strobe_hz: None,
                 ..values.clone()
             };
-            overlay_properties(&self.rig, id, state, &positions);
+            replace_properties(&self.rig, id, state, &positions);
         }
         Ok(())
     }
@@ -1346,7 +1352,9 @@ impl Engine {
                 let special = value.value.special_fx.as_deref().map(|special| {
                     (
                         special,
-                        special::attack_level(special, beat - value.progress.started_beat),
+                        special
+                            .envelope
+                            .level(value.progress.started_beat, None, beat),
                         value.progress,
                     )
                 });
@@ -1377,7 +1385,7 @@ impl Engine {
                     continue;
                 };
                 if let Some((value, rig)) = value {
-                    overlay_properties(&self.rig, id, state, &value.values);
+                    replace_properties(&self.rig, id, state, &value.values);
                     if (value.pan_sweep || value.aim_focus)
                         && let Some((pan, tilt)) = rig.aim(id)
                     {
@@ -1445,7 +1453,7 @@ fn validate_transition(transition: &Transition, elapsed_beats: f64) -> Result<()
         ensure!(
             duration_beats.is_finite()
                 && *duration_beats > 0.0
-                && *duration_beats <= MAX_TRANSITION_BEATS,
+                && *duration_beats <= MAX_SPAN_BEATS,
             "crossfade duration is outside the supported range"
         );
         expiry(elapsed_beats, *duration_beats)?;
@@ -1604,20 +1612,20 @@ fn pan_sweep_position(seconds: f64) -> f64 {
     1.0 - (2.0 * phase - 1.0).abs()
 }
 
-fn overlay_properties(
+fn replace_properties(
     rig: &FixtureRig,
     id: &str,
     state: &mut FixtureState,
     values: &PropertyValues,
 ) {
     match rig.profile(id) {
-        Some(profile) => profile.overlay_attributes(&mut state.attributes, &values.attributes),
+        Some(profile) => profile.replace_attributes(&mut state.attributes, &values.attributes),
         None => state.attributes.extend(values.attributes.clone()),
     }
     apply_scalar_properties(state, values);
 }
 
-/// Keeps two keys on one channel, unlike `overlay_properties`, so the encoder reports the conflict.
+/// Keeps two keys on one channel, unlike `replace_properties`, so the encoder reports the conflict.
 fn apply_properties(state: &mut FixtureState, values: &PropertyValues) {
     state.attributes.extend(values.attributes.clone());
     apply_scalar_properties(state, values);
@@ -1650,35 +1658,11 @@ struct OverlayLayer {
     rank: (i32, u64),
     script: Rc<RefCell<LuaAutoloop>>,
     intensity_htp: bool,
-    length_beats: f64,
+    duration_beats: f64,
     elapsed_beats: f64,
     seed: u32,
     level: f64,
     holds_to_one: bool,
-}
-
-fn overlay_level(instance: &OverlayInstance, beat: f64) -> f64 {
-    let attack_beats = instance.overlay.attack_beats;
-    let attack = |at: f64, span: &Span| {
-        if attack_beats > 0.0 {
-            ((at - span.started) / attack_beats).clamp(0.0, 1.0)
-        } else {
-            1.0
-        }
-    };
-    match &instance.state {
-        InstanceState::Pending => 0.0,
-        InstanceState::Running(span) => attack(beat, span),
-        InstanceState::Releasing { span, released_at } => {
-            let release_beats = instance.overlay.release_beats;
-            if release_beats > 0.0 {
-                attack(*released_at, span)
-                    * (1.0 - (beat - released_at) / release_beats).clamp(0.0, 1.0)
-            } else {
-                0.0
-            }
-        }
-    }
 }
 
 fn layer_values(rig: &FixtureRig, effects: &[Effect]) -> Result<BTreeMap<String, PropertyValues>> {
@@ -1763,7 +1747,7 @@ fn compose_layer(
             layer.insert(key.clone(), blended);
         }
     }
-    profile.overlay_attributes(&mut state.attributes, &layer);
+    profile.replace_attributes(&mut state.attributes, &layer);
 }
 
 fn states_for_effects(rig: &FixtureRig, effects: &[Effect]) -> Result<FixtureStates> {

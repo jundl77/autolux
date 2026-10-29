@@ -11,8 +11,7 @@ import "proto/starfire/rig.proto";
 
 enum ProtocolVersion {
   PROTOCOL_VERSION_UNSPECIFIED = 0;
-  PROTOCOL_MINOR = 2;
-  PROTOCOL_MAJOR = 3;
+  PROTOCOL_MAJOR = 4;
 }
 
 enum MessageType {
@@ -61,14 +60,13 @@ message Login {
   repeated AutoloopDefinition autoloops = 3;
   oneof output {
     string artnet_destination = 4;  // IPv4:port.
-    RadiusOutput radius = 10;
+    RadiusOutput radius = 5;
   }
   repeated Parameter parameters = 6;
-  uint32 protocol_major = 7;  // Must match the server's major version.
-  uint32 protocol_minor = 8;
-  fixed64 run_id = 9;
-  optional uint32 render_core = 11;  // Logical CPU index.
-  repeated Palette palettes = 12;
+  uint32 protocol_major = 7;  // Must equal the server's.
+  fixed64 run_id = 8;
+  optional uint32 render_core = 9;  // Logical CPU index.
+  repeated Palette palettes = 10;
 
   message RadiusOutput {
     string receiver_address = 1;  // IPv4:TCP port.
@@ -84,12 +82,11 @@ message Login {
 
 message LoginReply {
   uint64 command_id = 1;
-  uint32 frame_rate_hz = 3;
-  uint32 max_message_bytes = 4;  // Cap for every type except LOGIN.
-  uint32 protocol_major = 5;
-  uint32 protocol_minor = 6;
-  fixed64 run_id = 7;
-  repeated GroupCapability groups = 8;
+  uint32 frame_rate_hz = 2;
+  uint32 max_message_bytes = 3;  // Cap for every type except LOGIN.
+  uint32 protocol_major = 4;
+  fixed64 run_id = 5;
+  repeated GroupCapability groups = 6;
 }
 
 message GroupCapability {
@@ -109,15 +106,26 @@ message ErrorReply {
   string message = 2;
 }
 
+// Ends every cue as ClearCues does. An empty autoloop_id instead drops every overlay and effect
+// at once and goes dark (idle), and takes no transition or palette.
 message PlayAutoloop {
   uint64 command_id = 1;
-  string autoloop_id = 2;  // Empty enters idle: effects cleared, darkness. Every cue is cleared.
-  Transition transition = 4;
-  string palette = 5;
+  string autoloop_id = 2;
+  Transition transition = 3;
+  string palette = 4;
+}
 
-  message Transition {
-    optional double crossfade_beats = 1;  // Absent means cut; otherwise positive.
-  }
+// An absent Transition crossfades over DEFAULT_CROSSFADE_BEATS.
+message Transition {
+  double crossfade_beats = 1;  // 0 cuts; otherwise at most 1024.
+}
+
+// In beats, each 0..1024. The level is the layer's mix: it rises linearly from 0 over
+// attack_beats (0 snaps to 1) and on release falls linearly from the level reached to 0 over
+// release_beats.
+message Envelope {
+  double attack_beats = 1;
+  double release_beats = 2;
 }
 
 message SetActiveEffect {
@@ -166,9 +174,10 @@ message SpecialFX {
   float energy = 2;        // 0..1.
   float speed = 3;         // 0..1.
   optional uint32 pulse_beats = 4;
-  float attack_beats = 5;
-  float release_beats = 6;
-  optional float pattern = 7;  // 0..1.
+  optional float pattern = 5;  // 0..1.
+  // From the beat the command applies. The release starts when duration_seconds expires, when
+  // the effect ID is set again, or on an UnsetActiveEffect without instantaneous_release.
+  Envelope envelope = 6;
 }
 
 message UnsetActiveEffect {
@@ -201,39 +210,53 @@ message BeatFeatures {
 // Starts on the first frame at or past start_beat_index; a cue whose start has passed starts on
 // the next bar line, its rotation still counted from the true start. A cue drops every pending
 // cue starting at or after its start, so cues are sent in start order. At most 4 cues wait.
-// A re-sent cue's rows that are already playing carry on.
 message CueSection {
   uint64 command_id = 1;
   uint64 start_beat_index = 2;  // An UpdateBeat.beat_index whose bar_phase is 0.
   SectionIntent intent = 3;
-  repeated BaseLook rotation = 4;  // 1..8 entries, played in order from the start, then cycled.
-  repeated Overlay overlays = 5;   // 0..8.
+  // 1..8 steps, played in order from the start, then cycled unless the last one holds.
+  repeated Step rotation = 4;
+  repeated Overlay overlays = 5;  // 0..8.
+  // The latest palette to apply wins: this one when the cue starts, PlayAutoloop.palette and the
+  // PALETTE parameter on receipt.
   string palette = 6;
   optional double drop_strength = 7;  // 0..1, DROP only.
   uint32 seed = 8;
 
-  message BaseLook {
+  // The transition plays each time the step is entered, wraps included, unless its loop is
+  // already playing.
+  message Step {
     string autoloop_id = 1;
-    uint32 bars = 2;  // At least 1.
-    PlayAutoloop.Transition transition = 3;
+    uint32 bars = 2;  // At least 1; the last step may be 0, which holds it until the next cue.
+    Transition transition = 3;
   }
 
-  // A pre-roll row from the "dip" bank is the blackout before the section: Starfire derives
-  // ctx.beats_until_dip and the move in black from that bank name alone.
+  // Overlays compose over the base in (priority, list order), each by its envelope level over the
+  // properties it sets. An LTP row (intensity: ltp) crossfades intensity, colour, pan, tilt and
+  // attributes from the look below to its own; an HTP row takes the higher of the intensity below
+  // and its own times the level, and crossfades colour by its share of that result. Strobe and
+  // stepped attributes switch at half level. A row is lit for its duration plus its release,
+  // which starts at begin plus duration, or at once when its cue is cleared or replaced. A row of
+  // a re-sent cue that matches a playing one in autoloop_id, begin_beats, duration_beats and
+  // every_bars carries on with its playing priority, envelope and dip.
   message Overlay {
     string autoloop_id = 1;
-    sint32 priority = 2;  // Higher composes later; ties keep list order.
+    sint32 priority = 2;  // Orders overlays only; every SetActiveEffect composes above them all.
     // From the section start. Playing once: -64..1024, negative is pre-roll. Repeating: within the
-    // period, and length plus release fit it.
+    // period, and duration plus release fit it.
     double begin_beats = 3;
-    double length_beats = 4;  // Positive.
-    uint32 every_bars = 5;    // 0 plays once.
-    double attack_beats = 6;
-    double release_beats = 7;
+    double duration_beats = 4;  // 0 < beats <= 1024.
+    uint32 every_bars = 5;      // 0 plays once.
+    Envelope envelope = 6;      // Starts on the row's first rendered frame.
+    // The dark before the section, drawn by the row's loop: plays once with a negative begin. The
+    // earliest sets ctx.beats_until_dip; while one reaching the section start holds fixtures
+    // dark, they move in black to the first step's look if that step cuts to a new loop.
+    bool dip = 7;
   }
 }
 
-// Ends every cue: its overlays release and the base look plays on.
+// Ends the active and every waiting cue: their overlays release, and the current step's loop
+// plays on without rotating.
 message ClearCues {
   uint64 command_id = 1;
 }

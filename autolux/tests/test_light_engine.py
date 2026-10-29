@@ -1543,10 +1543,7 @@ async def test_two_seconds_of_digital_silence_park_the_rig_and_silence_the_room_
     assert show.queue.pending == 0, 'the delayed queue must be purged'
     select = next(c for c in standby if c['kind'] == 'select')
     assert (select['bank'], select['autoloop']) == ('standby', 'white')
-    assert select['transition'] == {
-        'kind': 'crossfade',
-        'duration_beats': pytest.approx(2.0, rel=0.01),
-    }
+    assert select['transition'] == {'crossfade_beats': pytest.approx(2.0, rel=0.01)}
     assert {'kind': 'clear_cues'} in standby
 
     parked = len(show.lighting.events)
@@ -1624,7 +1621,7 @@ async def test_a_paused_show_still_leaves_standby_for_the_dimmed_baseline():
 
     entered = [c for c in show.commands() if c['kind'] == 'select'][-1]
     assert entered['autoloop'] == 'white'
-    assert entered['transition'] == {'kind': 'cut'}
+    assert entered['transition'] == {'crossfade_beats': 0.0}
 
     await show.play(15.5, 0.2)
     assert show.light.paused
@@ -1996,9 +1993,15 @@ async def planned_drop(light, decoder, clock):
 
 
 def planned_cue(planned):
-    from autolux.lib.engine.cue import BaseLook, Cue
+    from autolux.lib.engine.cue import CueSection, Step
 
-    return Cue(planned.start_beat_index, planned.intent, (BaseLook('drop', 'kick', 16),), 'techno')
+    return CueSection(
+        planned.start_beat_index,
+        planned.intent,
+        (Step('drop', 'kick', 16),),
+        'techno',
+        beats_per_bar=4,
+    )
 
 
 async def test_the_cue_is_sent_at_commit_time_on_the_sections_analysed_downbeat():

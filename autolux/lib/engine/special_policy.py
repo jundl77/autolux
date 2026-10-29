@@ -6,6 +6,7 @@ from collections.abc import Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from autolux.lib.clients.starfire_client import WHOLE_RIG
+from autolux.lib.engine.cue import Envelope
 from autolux.lib.engine.effect_definitions import LightIntent
 from autolux.lighting.mvr_schema import ACCENT_ROLE, LOOP_ROLE
 
@@ -28,9 +29,8 @@ class Special:
     energy: float = 0.0
     speed: float = 0.0
     pulse_beats: int | None = None
-    attack_beats: float = 0.0
-    release_beats: float = 0.0
     pattern: float | None = None
+    envelope: Envelope = field(default_factory=Envelope)
     # Never sent to Starfire: the whole group rests, since the room tires of fixtures.
     cooldown_seconds: float = 0.0
 
@@ -54,9 +54,8 @@ class Special:
             'energy': self.energy,
             'speed': self.speed,
             'pulse_beats': self.pulse_beats,
-            'attack_beats': self.attack_beats,
-            'release_beats': self.release_beats,
             'pattern': self.pattern,
+            'envelope': self.envelope.command(),
         }
 
 

@@ -23,7 +23,7 @@ fn fault_replay(duration_seconds: f64) -> (Replay, FixtureRig, AutoloopCatalog) 
     fs::create_dir(directory.path().join("test")).unwrap();
     fs::write(
         directory.path().join("test/fault.lua"),
-        "return {render=function(ctx) error(string.rep('é', 800000)) end}",
+        support::base_loop("return {render=function(ctx) error(string.rep('é', 800000)) end}"),
     )
     .unwrap();
     let catalog = AutoloopCatalog::load(directory.path()).unwrap();
@@ -68,10 +68,10 @@ fn native_pattern_matching_cannot_bypass_the_script_budget() {
     ] {
         fs::write(
             autoloops.join("test/pattern.lua"),
-            format!(
+            support::base_loop(&format!(
                 "return {{render=function(ctx) local text=string.rep('a',24); \
                  local pattern=string.rep('a*',24)..'b'; {expression}; return {{}} end}}"
-            ),
+            )),
         )
         .unwrap();
         let mut child = ProcessCommand::new(env!("CARGO_BIN_EXE_starfire"))

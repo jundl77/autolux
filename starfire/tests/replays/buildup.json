@@ -75,7 +75,7 @@
               "autoloop": "stutter",
               "bars": 64,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -418,7 +418,7 @@
               "autoloop": "stutter",
               "bars": 64,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],

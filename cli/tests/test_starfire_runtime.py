@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+from google.protobuf.json_format import MessageToDict
 
 from autolux.lighting import mvr
 from cli import starfire_protocol as protocol
@@ -87,9 +88,8 @@ def test_control_adapter_translates_a_special_one_to_one():
         'energy': 0.25,
         'speed': 0.5,
         'pulse_beats': 2,
-        'attack_beats': 8.0,
-        'release_beats': 4.0,
         'pattern': 0.75,
+        'envelope': {'attack_beats': 8.0, 'release_beats': 4.0},
     }
     command = {
         'kind': 'set_override',
@@ -97,7 +97,7 @@ def test_control_adapter_translates_a_special_one_to_one():
     }
     effect = protocol.build_command(command)
     assert (effect.group, effect.priority, effect.HasField('intensity')) == ('fx', 50, False)
-    assert {field.name: value for field, value in effect.special_fx.ListFields()} == special
+    assert MessageToDict(effect.special_fx, preserving_proto_field_name=True) == special
     effect.command_id = 1
     encoded = protocol.encode_command(effect)
     assert wire.SetActiveEffect.FromString(encoded[protocol.FRAME_HEADER.size :]) == effect
@@ -221,7 +221,7 @@ def test_control_adapter_rejects_invalid_gdtf_values(value):
             'kind': 'select',
             'bank': 'drop',
             'autoloop': 'x',
-            'transition': {'kind': 'cut', 'extra': 1},
+            'transition': {'crossfade_beats': 0.0, 'extra': 1},
         },
     ],
 )
@@ -435,7 +435,7 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
         assert value.command_id == 1
         assert value.HasField('rig') and value.rig.fixtures and value.autoloops
         assert value.artnet_destination
-        assert value.protocol_major == wire.PROTOCOL_MAJOR and value.protocol_minor == wire.PROTOCOL_MINOR
+        assert value.protocol_major == wire.PROTOCOL_MAJOR
         if mode == 'login_error':
             event(wire.ErrorReply(command_id=value.command_id, message='fixture patch is missing'))
         else:
@@ -443,7 +443,6 @@ while prefix := sys.stdin.buffer.read(FRAME_HEADER.size):
                 run_id=run_id if mode != 'wrong_login_run' else 1,
                 frame_rate_hz=40, max_message_bytes=MAX_MESSAGE_BYTES,
                 protocol_major=wire.PROTOCOL_MAJOR + (mode == 'wrong_major_reply'),
-                protocol_minor=wire.PROTOCOL_MINOR + (mode == 'newer_minor_reply'),
                 groups=[wire.GroupCapability(name='fx', cell_count=1, colour=True, pulse=True)],
             ))
     elif isinstance(value, wire.Heartbeat):
@@ -561,7 +560,7 @@ def test_partial_start_failure_reaps_only_owned_renderer(tmp_path, mode, reason)
     assert all(not thread.is_alive() for thread in runtime._threads)
 
 
-@pytest.mark.parametrize('mode', ['wrong_major_reply', 'newer_minor_reply', 'wrong_login_run'])
+@pytest.mark.parametrize('mode', ['wrong_major_reply', 'wrong_login_run'])
 def test_login_rejects_an_incompatible_server_version_and_reaps_it(tmp_path, mode):
     runtime = _fake_runtime(tmp_path, mode)
     with pytest.raises(RuntimeError, match='Unexpected Starfire login reply'), runtime:
@@ -865,6 +864,7 @@ def test_preflight_rejects_valid_catalog_missing_an_autolux_autoloop(tmp_path):
         directory = tmp_path / intent.value
         directory.mkdir()
         (directory / f'{autoloop}.lua').write_text(
+            '-- 8-beat loop\n-- energy: 2\n-- movement: snap\n-- texture: wash\n'
             'return { render = function(ctx) return {} end }'
         )
     with pytest.raises(RuntimeError, match='missing Autolux autoloops: drop/kick'):
@@ -970,9 +970,9 @@ def test_an_omitted_transition_leaves_the_default_to_starfire_and_a_cut_stays_ex
     default = protocol.build_command({'kind': 'select', 'bank': 'buildup', 'autoloop': 'stutter'})
     assert not default.HasField('transition')
     cut = protocol.build_command(
-        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'kind': 'cut'}}
+        {'kind': 'select', 'bank': 'drop', 'autoloop': 'kick', 'transition': {'crossfade_beats': 0}}
     )
-    assert cut.HasField('transition') and not cut.transition.HasField('crossfade_beats')
+    assert cut.HasField('transition') and cut.transition.crossfade_beats == 0.0
 
 
 def test_a_renderer_that_survives_its_kill_is_logged_not_raised(caplog):

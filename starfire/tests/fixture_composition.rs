@@ -18,7 +18,8 @@ fn steady_stage() -> Engine {
     fs::create_dir(directory.path().join("test")).unwrap();
     fs::write(
         directory.path().join("test/steady.lua"),
-        r#"
+        support::base_loop(
+            r#"
         return { render = function(ctx)
             return sf.scene {
                 sf.dimmer(sf.all(), 0.8),
@@ -27,6 +28,7 @@ fn steady_stage() -> Engine {
             }
         end }
     "#,
+        ),
     )
     .unwrap();
     let catalogue = AutoloopCatalog::load(directory.path()).unwrap();

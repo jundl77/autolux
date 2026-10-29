@@ -68,7 +68,7 @@ fn engine(rig: &FixtureRig) -> Engine {
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,
             autoloop_id: DARK_LOOK.into(),
-            transition: Some(wire::play_autoloop::Transition::default()),
+            transition: Some(wire::Transition::default()),
             palette: "techno".into(),
         }),
     ] {
@@ -83,7 +83,7 @@ fn special(group: &str, value: wire::SpecialFx) -> ClientMessage {
         effect_id: "special".into(),
         target: Some(wire::set_active_effect::Target::Group(group.into())),
         priority: 100,
-        special_fx: Some(value),
+        special_fx: Some(Box::new(value)),
         ..Default::default()
     })
 }
@@ -94,6 +94,13 @@ fn steady(colour_slot: &str, energy: f32, speed: f32) -> wire::SpecialFx {
         energy,
         speed,
         ..Default::default()
+    }
+}
+
+fn released_over(release_beats: f64) -> wire::Envelope {
+    wire::Envelope {
+        attack_beats: 0.0,
+        release_beats,
     }
 }
 
@@ -290,8 +297,10 @@ fn attack_and_release_follow_the_musical_clock_without_snapping() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
     let eased = wire::SpecialFx {
-        attack_beats: 4.0,
-        release_beats: 4.0,
+        envelope: Some(wire::Envelope {
+            attack_beats: 4.0,
+            release_beats: 4.0,
+        }),
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", eased));
@@ -313,7 +322,7 @@ fn an_operator_cut_drops_the_special_this_frame_off_the_beat() {
     let red = SCANNER.start + 2;
     let mut engine = engine(&rig);
     let texture = wire::SpecialFx {
-        release_beats: 64.0,
+        envelope: Some(released_over(64.0)),
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", texture));
@@ -327,7 +336,7 @@ fn a_cut_also_drops_a_special_already_fading_under_its_id() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let red = SCANNER.start + 2;
     let texture = wire::SpecialFx {
-        release_beats: 64.0,
+        envelope: Some(released_over(64.0)),
         ..steady("primary", 1.0, 0.0)
     };
     for replace in [false, true] {
@@ -361,12 +370,15 @@ fn a_replacement_crossfades_through_the_releasing_special() {
     let rig = FixtureRig::from_wire(&synthetic_rig()).unwrap();
     let mut engine = engine(&rig);
     let first = wire::SpecialFx {
-        release_beats: 2.0,
+        envelope: Some(released_over(2.0)),
         ..steady("primary", 1.0, 0.0)
     };
     fire(&mut engine, 0.0, &special("scanners", first));
     let second = wire::SpecialFx {
-        attack_beats: 2.0,
+        envelope: Some(wire::Envelope {
+            attack_beats: 2.0,
+            release_beats: 0.0,
+        }),
         ..steady("primary", 0.0, 0.0)
     };
     fire(&mut engine, 1.0, &special("scanners", second));
@@ -463,7 +475,10 @@ fn invalid_specials_are_rejected() {
             ..steady("primary", 1.0, 0.0)
         },
         wire::SpecialFx {
-            attack_beats: -1.0,
+            envelope: Some(wire::Envelope {
+                attack_beats: -1.0,
+                release_beats: 0.0,
+            }),
             ..steady("primary", 1.0, 0.0)
         },
         wire::SpecialFx {
@@ -501,7 +516,7 @@ fn the_stage_fx_group_spins_colours_and_gates_to_its_dark_slot() {
         ClientMessage::PlayAutoloop(wire::PlayAutoloop {
             command_id: 1,
             autoloop_id: "standby/white".into(),
-            transition: Some(wire::play_autoloop::Transition::default()),
+            transition: Some(wire::Transition::default()),
             palette: "techno".into(),
         }),
     ] {

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use prost::Message;
 use serde_json::Value;
 use starfire::fixtures::FixtureRig;
-use starfire::model::{Command, SectionCue, Transition};
+use starfire::model::{Command, CueSection, Transition};
 use starfire::palette::{PaletteDefinition, PaletteTable};
 use starfire::protocol::wire;
 use starfire::script::AutoloopCatalog;
@@ -45,12 +45,20 @@ pub fn test_catalog(scripts: &[(&str, &str)]) -> AutoloopCatalog {
     .unwrap()
 }
 
-pub fn directory_catalog(bank: &str, scripts: &[(&str, &str)]) -> anyhow::Result<AutoloopCatalog> {
+/// The directory loader classifies a script by its header.
+pub fn base_loop(source: &str) -> String {
+    format!("-- test loop\n-- energy: 1\n{source}")
+}
+
+pub fn directory_catalog(
+    bank: &str,
+    scripts: &[(&str, impl AsRef<str>)],
+) -> anyhow::Result<AutoloopCatalog> {
     let directory = tempfile::tempdir().unwrap();
     let bank_directory = directory.path().join(bank);
     std::fs::create_dir(&bank_directory).unwrap();
     for (name, source) in scripts {
-        std::fs::write(bank_directory.join(format!("{name}.lua")), source).unwrap();
+        std::fs::write(bank_directory.join(format!("{name}.lua")), source.as_ref()).unwrap();
     }
     AutoloopCatalog::load(directory.path())
 }
@@ -74,7 +82,7 @@ pub fn select(bank: &str, autoloop: &str, transition: Transition) -> Command {
     }
 }
 
-pub fn cue(cue: SectionCue) -> Command {
+pub fn cue(cue: CueSection) -> Command {
     Command::CueSection {
         value: Box::new(cue),
     }

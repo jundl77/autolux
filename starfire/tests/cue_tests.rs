@@ -8,8 +8,8 @@ use starfire::cue::{
 };
 use starfire::engine::{Engine, RenderedFrame};
 use starfire::model::{
-    BeatFeatures, Command, OverlayCue, RenderContext, Rgb, RotationEntry, SectionCue,
-    SectionIntent, Transition,
+    BeatFeatures, Command, CueSection, Envelope, Overlay, RenderContext, Rgb, SectionIntent, Step,
+    Transition,
 };
 use starfire::protocol::{ClientMessage, MAX_MESSAGE_BYTES, apply_command, wire};
 
@@ -75,13 +75,13 @@ fn select(engine: &mut Engine, seconds: f64, name: &str) {
         .unwrap();
 }
 
-fn section(start: u64, intent: SectionIntent, rotation: &[(&str, u32)]) -> SectionCue {
-    SectionCue {
+fn section(start: u64, intent: SectionIntent, rotation: &[(&str, u32)]) -> CueSection {
+    CueSection {
         start_beat_index: start,
         intent,
         rotation: rotation
             .iter()
-            .map(|(name, bars)| RotationEntry {
+            .map(|(name, bars)| Step {
                 bank: "test".into(),
                 autoloop: (*name).into(),
                 bars: *bars,
@@ -95,20 +95,23 @@ fn section(start: u64, intent: SectionIntent, rotation: &[(&str, u32)]) -> Secti
     }
 }
 
-fn overlay(begin_beats: f64, length_beats: f64, every_bars: u32, release_beats: f64) -> OverlayCue {
-    OverlayCue {
+fn overlay(begin_beats: f64, duration_beats: f64, every_bars: u32, release_beats: f64) -> Overlay {
+    Overlay {
         bank: "test".into(),
         autoloop: "still".into(),
         priority: 0,
         begin_beats,
-        length_beats,
+        duration_beats,
         every_bars,
-        attack_beats: 0.0,
-        release_beats,
+        envelope: Envelope {
+            attack_beats: 0.0,
+            release_beats,
+        },
+        dip: false,
     }
 }
 
-fn send(engine: &mut Engine, seconds: f64, cue: SectionCue) -> anyhow::Result<()> {
+fn send(engine: &mut Engine, seconds: f64, cue: CueSection) -> anyhow::Result<()> {
     engine.apply(seconds, &support::cue(cue))
 }
 
@@ -353,7 +356,7 @@ fn section_elapsed_stays_at_zero_when_a_late_beat_re_anchors_before_the_start() 
 }
 
 #[test]
-fn rotation_entries_change_on_bar_lines_from_the_start_and_cycle() {
+fn steps_change_on_bar_lines_from_the_start_and_cycle() {
     let mut engine = engine();
     beat(&mut engine, 0);
     send(
@@ -375,6 +378,28 @@ fn rotation_entries_change_on_bar_lines_from_the_start_and_cycle() {
         assert_eq!(frame.autoloop.as_deref(), Some(autoloop), "beat {beat}");
         near(frame.autoloop_elapsed, entry_elapsed);
         near(frame.section_elapsed, beat - 4.0);
+    }
+}
+
+#[test]
+fn a_last_step_of_no_bars_holds_until_the_next_cue() {
+    let mut engine = engine();
+    beat(&mut engine, 0);
+    send(
+        &mut engine,
+        at(1.0),
+        section(4, SectionIntent::Drop, &[("probe", 1), ("other", 0)]),
+    )
+    .unwrap();
+    for (beat, autoloop, step_elapsed) in [
+        (4.0, "probe", 0.0),
+        (8.0, "other", 0.0),
+        (16.0, "other", 8.0),
+        (100.0, "other", 92.0),
+    ] {
+        let frame = probe(&mut engine, beat);
+        assert_eq!(frame.autoloop.as_deref(), Some(autoloop), "beat {beat}");
+        near(frame.autoloop_elapsed, step_elapsed);
     }
 }
 
@@ -494,8 +519,8 @@ fn invalid_cues_are_refused_before_anything_changes() {
     let mut cue = valid.clone();
     cue.rotation = vec![valid.rotation[0].clone(); MAX_ROTATION + 1];
     cases.push(cue);
-    let mut cue = valid.clone();
-    cue.rotation[0].bars = 0;
+    let mut cue = section(8, SectionIntent::Drop, &[("probe", 0), ("other", 1)]);
+    cue.overlays = valid.overlays.clone();
     cases.push(cue);
     let mut cue = valid.clone();
     cue.rotation[0].autoloop = "missing".into();
@@ -520,6 +545,14 @@ fn invalid_cues_are_refused_before_anything_changes() {
         overlay(0.0, 0.0, 0, 0.0),
         overlay(0.0, 1.0, 0, -1.0),
         overlay(0.0, f64::NAN, 0, 0.0),
+        Overlay {
+            dip: true,
+            ..overlay(0.0, 1.0, 0, 0.0)
+        },
+        Overlay {
+            dip: true,
+            ..overlay(0.0, 1.0, 1, 0.0)
+        },
     ] {
         let mut cue = valid.clone();
         cue.overlays = vec![bad];
@@ -713,15 +746,19 @@ fn pause_drops_releasing_overlays() {
 
 fn worst_case_cue() -> wire::CueSection {
     let id = "i".repeat(128);
-    let crossfade = Some(wire::play_autoloop::Transition {
-        crossfade_beats: Some(f64::MAX),
+    let crossfade = Some(wire::Transition {
+        crossfade_beats: f64::MAX,
+    });
+    let envelope = Some(wire::Envelope {
+        attack_beats: f64::MAX,
+        release_beats: f64::MAX,
     });
     wire::CueSection {
         command_id: u64::MAX,
         start_beat_index: u64::MAX,
         intent: wire::SectionIntent::Breakdown as i32,
         rotation: vec![
-            wire::cue_section::BaseLook {
+            wire::cue_section::Step {
                 autoloop_id: id.clone(),
                 bars: u32::MAX,
                 transition: crossfade,
@@ -733,10 +770,10 @@ fn worst_case_cue() -> wire::CueSection {
                 autoloop_id: id.clone(),
                 priority: i32::MIN,
                 begin_beats: f64::MAX,
-                length_beats: f64::MAX,
+                duration_beats: f64::MAX,
                 every_bars: u32::MAX,
-                attack_beats: f64::MAX,
-                release_beats: f64::MAX,
+                envelope,
+                dip: true,
             };
             MAX_OVERLAYS
         ],
@@ -767,7 +804,7 @@ fn a_wire_cue_resolves_autoloop_ids_and_needs_an_intent() {
             command_id: 1,
             start_beat_index: 4,
             intent: intent as i32,
-            rotation: vec![wire::cue_section::BaseLook {
+            rotation: vec![wire::cue_section::Step {
                 autoloop_id: id.into(),
                 bars: 2,
                 transition: None,
@@ -1150,8 +1187,8 @@ fn a_resent_cue_is_no_next_section_and_the_dip_sets_the_finale_target() {
 
     let mut drop = section(32, SectionIntent::Drop, &[("probe", 16)]);
     drop.overlays = vec![
-        OverlayCue {
-            bank: "dip".into(),
+        Overlay {
+            dip: true,
             ..overlay(-2.0, 2.0, 0, 0.0)
         },
         overlay(-16.0, 16.0, 0, 0.0),
@@ -1227,14 +1264,18 @@ fn metrics_at_their_largest_fit_the_realtime_cap() {
 }
 
 #[test]
-fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
+fn the_directory_loader_classifies_a_script_by_its_header_not_its_bank() {
     const BODY: &str = "return {render=function(ctx) return {} end}\n";
     let htp = |bank: &str, header: &str| {
         support::directory_catalog(bank, &[("look", &format!("-- 1-beat hit\n{header}{BODY}"))])
             .map(|catalog| catalog.intensity_htp(bank, "look"))
     };
     const FULL: &str = "-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n";
-    assert!(htp("hit", FULL).unwrap());
+    const BASE: &str = "-- energy: 2\n-- movement: snap\n-- texture: wash\n";
+    for bank in ["hit", "drop", "anything"] {
+        assert!(htp(bank, FULL).unwrap(), "{bank}");
+        assert!(!htp(bank, BASE).unwrap(), "{bank}");
+    }
     let reordered = "-- texture: beam\n-- intensity: ltp\n-- movement: snap\n-- strobe: yes\n";
     assert!(!htp("dip", reordered).unwrap());
     let error = htp(
@@ -1249,6 +1290,7 @@ fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
     for header in [
         "",
         "-- strobe: no\n",
+        "-- energy: 2\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n",
         "-- strobe: no\n-- intensity: max\n-- movement: still\n-- texture: wash\n",
         "-- strobe: no\n-- strobe: no\n-- intensity: htp\n-- movement: still\n-- texture: wash\n",
         "-- strobe: no\n-- intensity: htp\n-- movement: drift\n-- texture: wash\n",
@@ -1257,7 +1299,6 @@ fn overlay_banks_need_their_strobe_and_intensity_header_as_login_does() {
         let error = htp("fill", header).unwrap_err();
         assert!(format!("{error:#}").contains("fill/look.lua"), "{error:#}");
     }
-    assert!(!htp("drop", "").unwrap());
 }
 
 #[test]

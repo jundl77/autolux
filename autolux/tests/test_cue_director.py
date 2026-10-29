@@ -95,7 +95,9 @@ def director(seed=0, overlays=OVERLAYS, meta=META):
 
 def request(intent, start, *, new_track=False, levels=LOUD_BUILD, arrival=None, lead=LEAD_BEATS):
     context = SelectionContext(intent, new_track=new_track, arrival_of_peak=arrival)
-    return SectionRequest(start, intent, context, start * BEAT_SEC, BPM, levels, lead)
+    return SectionRequest(
+        start, intent, context, start * BEAT_SEC, BPM, levels, lead, beats_per_bar=4
+    )
 
 
 def play(sections=SET, *, level='balanced', gate=None, cues=None, seed=0):
@@ -184,24 +186,24 @@ def test_seeds_follow_the_track_and_the_start_not_the_plan_count():
 
 def test_rotation_per_intent_with_phrase_transitions():
     atmos, build, drop, breakdown, rebuild, _ = play()
-    assert [(look.bars, look.transition) for look in drop.cue.rotation] == [
-        (16, {'kind': 'cut'}),
-        (16, {'kind': 'crossfade', 'duration_beats': 4.0}),
+    assert [(step.bars, step.crossfade_beats) for step in drop.cue.rotation] == [
+        (16, 0.0),
+        (16, 4.0),
     ]
-    assert [look.bars for look in atmos.cue.rotation] == [32, 32]
-    assert atmos.cue.rotation[0].transition is None
-    assert breakdown.cue.rotation[0].transition == {'kind': 'crossfade', 'duration_beats': 8.0}
-    assert len(build.cue.rotation) == 1, 'a buildup keeps its tension: one look'
-    assert build.cue.rotation[0].transition == {'kind': 'crossfade', 'duration_beats': 1.0}
-    assert rebuild.cue.rotation[0].transition == {'kind': 'crossfade', 'duration_beats': 1.0}
+    assert [step.bars for step in atmos.cue.rotation] == [32, 32]
+    assert atmos.cue.rotation[0].crossfade_beats is None
+    assert breakdown.cue.rotation[0].crossfade_beats == 8.0
+    assert [step.bars for step in build.cue.rotation] == [0], 'a buildup keeps one look, held'
+    assert build.cue.rotation[0].crossfade_beats == 1.0
+    assert rebuild.cue.rotation[0].crossfade_beats == 1.0
     [after_drop] = play(((D, 0), (B, 64)))[1:]
-    assert after_drop.cue.rotation[0].transition == {'kind': 'cut'}
+    assert after_drop.cue.rotation[0].crossfade_beats == 0.0
 
 
 def test_calm_stretches_and_wild_snaps_the_rotation_steps():
     for level, beats in (('calm', 8.0), ('wild', 2.0)):
         drop = play(level=level)[2]
-        assert drop.cue.rotation[1].transition == {'kind': 'crossfade', 'duration_beats': beats}
+        assert drop.cue.rotation[1].crossfade_beats == beats
 
 
 def test_consecutive_looks_contrast_in_movement_or_texture():
@@ -320,12 +322,13 @@ def test_the_drop_entry_per_venue_setting(level, gate, expected):
 def test_the_entry_rows_land_on_the_one():
     drop = play(SET[:3])[2]
     dip, riser = row(drop, 'dip'), row(drop, 'riser')
-    assert (dip.begin_beats + dip.length_beats, dip.attack_beats) == (0.0, 0.0)
-    assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'the riser ends at the dip'
-    assert (riser.length_beats, riser.every_bars, riser.release_beats) == (16, 0, 2.0)
+    assert (dip.begin_beats + dip.duration_beats, dip.envelope.attack_beats) == (0.0, 0.0)
+    assert [o.bank for o in drop.cue.overlays if o.dip] == ['dip'], 'the dip blacks out'
+    assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'the riser ends at the dip'
+    assert (riser.duration_beats, riser.every_bars, riser.envelope.release_beats) == (16, 0, 2.0)
     hits = [o for o in drop.cue.overlays if o.bank == 'hit']
     assert [o.autoloop for o in hits] == ['white']
-    assert {(o.begin_beats, o.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
+    assert {(o.begin_beats, o.envelope.attack_beats, o.every_bars) for o in hits} == {(0.0, 0.0, 0)}
     priorities = {overlay.bank: overlay.priority for overlay in drop.cue.overlays}
     assert priorities['fill'] < priorities['accent'] < priorities['riser']
     assert priorities['riser'] < priorities['hit'] < priorities['dip']
@@ -334,7 +337,11 @@ def test_the_entry_rows_land_on_the_one():
 def test_the_wild_strobe_hit_is_the_burst_setting_in_beats_and_the_riser_fits_the_cap():
     drop = play(SET[:3], level='wild')[2]
     [strobe] = [o for o in drop.cue.overlays if o.autoloop == 'strobe']
-    assert (strobe.begin_beats, strobe.length_beats, strobe.release_beats) == (0.0, 2.0, 0.0)
+    assert (strobe.begin_beats, strobe.duration_beats, strobe.envelope.release_beats) == (
+        0.0,
+        2.0,
+        0.0,
+    )
     tight = ShowSettings(intensity=INTENSITY_WILD, strobe_max_burst_seconds=3.0)
     cues = director()
     for number, (intent, start) in enumerate(SET[:3]):
@@ -349,12 +356,14 @@ def test_fills_on_bar_8_and_a_bigger_one_on_bar_16_and_accents_8_bars_off_the_ba
     }
     assert fills == {('wipe', 28.0, 16), ('turnaround', 60.0, 16)}
     accents = sorted(
-        (o.begin_beats, o.length_beats, o.every_bars)
+        (o.begin_beats, o.duration_beats, o.every_bars)
         for o in drop.cue.overlays
         if o.bank == 'accent'
     )
     assert accents == [(32.0, 64.0, 32), (96.0, 64.0, 32)], 'bars 8 and 24 of each 32'
-    assert all(o.attack_beats >= 0.5 for o in drop.cue.overlays if o.bank in ('fill', 'accent'))
+    assert all(
+        o.envelope.attack_beats >= 0.5 for o in drop.cue.overlays if o.bank in ('fill', 'accent')
+    )
     calm = play(SET[:3], level='calm')[2]
     assert [(o.begin_beats, o.every_bars) for o in calm.cue.overlays if o.bank == 'fill'] == [
         (60.0, 16)
@@ -365,6 +374,7 @@ def test_breakdown_and_atmospheric_rows():
     atmos, build, _, breakdown, _, _ = play()
     assert [o.bank for o in breakdown.cue.overlays] == ['dip', 'fill']
     assert (row(breakdown, 'dip').begin_beats, row(breakdown, 'fill').begin_beats) == (-2.0, 60.0)
+    assert [o.dip for o in breakdown.cue.overlays] == [True, False]
     assert [o.bank for o in atmos.cue.overlays] == ['fill'] and rows(build) == []
     calm_atmos, _, _, calm_breakdown, _, _ = play(level='calm')
     assert rows(calm_atmos) == []
@@ -411,8 +421,8 @@ def test_the_riser_starts_after_starfire_has_the_cue_and_inside_the_build(
         return
     [riser] = risers
     dip = row(drop, 'dip')
-    assert riser.length_beats == riser_beats
-    assert riser.begin_beats + riser.length_beats == dip.begin_beats, 'never inside the dip'
+    assert riser.duration_beats == riser_beats
+    assert riser.begin_beats + riser.duration_beats == dip.begin_beats, 'never inside the dip'
     assert -riser.begin_beats <= lead and -riser.begin_beats <= build_beats
 
 
@@ -453,14 +463,14 @@ def test_an_accent_or_riser_never_leads_with_the_base_loops_own_layer():
 )
 def test_the_dip_follows_the_energy_gap_before_the_drop(quiet_beats, dip):
     levels = (0.8,) * (16 - quiet_beats) + (0.05,) * quiet_beats
-    assert dip_beats(levels) == dip
+    assert dip_beats(levels, 4) == dip
 
 
 def test_a_filtered_build_is_no_gap_and_only_near_silence_earns_two_bars():
-    assert dip_beats((0.8,) * 8 + (0.3,) * 8) == 0.5, 'a high-passed roll keeps playing'
-    assert dip_beats((0.8,) * 8 + (0.15,) * 8) == 4.0, 'quiet but not silent: one bar'
-    assert dip_beats((0.0,) * 16) == 8.0, 'the build stopped: the longest dip'
-    assert dip_beats(()) == 0.5, 'nothing measured: the shortest'
+    assert dip_beats((0.8,) * 8 + (0.3,) * 8, 4) == 0.5, 'a high-passed roll keeps playing'
+    assert dip_beats((0.8,) * 8 + (0.15,) * 8, 4) == 4.0, 'quiet but not silent: one bar'
+    assert dip_beats((0.0,) * 16, 4) == 8.0, 'the build stopped: the longest dip'
+    assert dip_beats((), 4) == 0.5, 'nothing measured: the shortest'
 
 
 def test_dip_shapes_land_in_the_drop_cue():
@@ -471,11 +481,11 @@ def test_dip_shapes_land_in_the_drop_cue():
         ((0.9,) * 8 + (0.05,) * 8, 8.0),
     ):
         drop = drop_after_build(levels=levels)
-        assert (row(drop, 'dip').begin_beats, row(drop, 'dip').length_beats) == (-dip, dip)
+        assert (row(drop, 'dip').begin_beats, row(drop, 'dip').duration_beats) == (-dip, dip)
         riser = row(drop, 'riser')
-        assert riser.begin_beats + riser.length_beats == -dip
+        assert riser.begin_beats + riser.duration_beats == -dip
         assert -riser.begin_beats <= LEAD_BEATS
-    assert dip_beats(()) == 0.5, 'nothing measured: the shortest dip'
+    assert dip_beats((), 4) == 0.5, 'nothing measured: the shortest dip'
 
 
 def test_a_second_drop_opens_on_the_first_drops_look_and_hit_and_adds_one_layer():
@@ -491,7 +501,7 @@ def test_a_second_drop_opens_on_the_first_drops_look_and_hit_and_adds_one_layer(
     [added] = once[1][len(once[0]) :]
     meta = OVERLAYS[added.bank, added.autoloop]
     begin = 0.0 if meta.intensity_htp and meta.movement == 'still' else 2.0
-    assert (added.bank, added.begin_beats, added.length_beats) == ('accent', begin, 32.0 - begin)
+    assert (added.bank, added.begin_beats, added.duration_beats) == ('accent', begin, 32.0 - begin)
     assert second.drop_number == 2
 
 
@@ -513,7 +523,7 @@ def test_a_drop_split_in_two_goes_on_with_its_next_look_and_no_second_entry():
     _, _, drop, again = play(((A, 0), (B, 64), (D, 128), (D, 192)))
     assert again.continued and not drop.continued
     assert [c.autoloop for c in again.choices] == [c.autoloop for c in drop.choices][::-1]
-    assert again.cue.rotation[0].transition == {'kind': 'crossfade', 'duration_beats': 4.0}
+    assert again.cue.rotation[0].crossfade_beats == 4.0
     assert {o.bank for o in again.cue.overlays} <= {'fill', 'accent'}
     assert all(o.every_bars > 0 for o in again.cue.overlays), 'no dip, riser or hit mid-drop'
     assert not again.events.intense and not again.events.accent
@@ -602,9 +612,11 @@ def controller(level='wild', clock=None, venue=None):
 
 
 def plan_drop(effects, moment, at, start):
-    build = SectionRequest(start - 64, B, SelectionContext(B), at - 32.0, BPM, LOUD_BUILD)
+    build = SectionRequest(
+        start - 64, B, SelectionContext(B), at - 32.0, BPM, LOUD_BUILD, beats_per_bar=4
+    )
     effects.plan_cue((moment, 'build'), build)
-    drop = SectionRequest(start, D, SelectionContext(D), at, BPM, LOUD_BUILD)
+    drop = SectionRequest(start, D, SelectionContext(D), at, BPM, LOUD_BUILD, beats_per_bar=4)
     return effects.plan_cue(moment, drop)
 
 

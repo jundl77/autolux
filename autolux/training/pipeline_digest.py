@@ -8,6 +8,8 @@ import json
 import time
 from pathlib import Path
 
+from autolux.lib.engine.event_buffer import cue_record
+
 ANALYSIS_BEAT_COLUMNS = ('t', 'bpm', 'change', 'rms')
 ANALYSIS_DIGEST_KEYS = (
     'beats_detected',
@@ -80,18 +82,6 @@ def _command_effect(command: dict) -> tuple[str, str] | None:
     return None
 
 
-CUE_RECORD_KEYS = ('start_beat_index', 'intent', 'rotation', 'overlays')
-
-
-def _cue_record(value: dict) -> dict:
-    return {
-        'start_beat_index': value['start_beat_index'],
-        'intent': value['intent'],
-        'rotation': [f"{look['bank']}/{look['autoloop']}" for look in value['rotation']],
-        'overlays': [f"{row['bank']}/{row['autoloop']}" for row in value['overlays']],
-    }
-
-
 def _effects_match_report(events: list, report: dict) -> bool:
     commands = [event['command'] for event in events]
     applied = [_command_effect(command) for command in commands]
@@ -102,8 +92,8 @@ def _effects_match_report(events: list, report: dict) -> bool:
     ]
     if [effect for effect in applied if effect is not None] != played:
         return False
-    sent = [_cue_record(c['value']) for c in commands if c['kind'] == 'cue_section']
-    recorded = [{key: cue[key] for key in CUE_RECORD_KEYS} for cue in report['cues']]
+    sent = [cue_record(c['value']) for c in commands if c['kind'] == 'cue_section']
+    recorded = [{key: value for key, value in cue.items() if key != 't'} for cue in report['cues']]
     if sent != recorded:
         return False
     planned = {(cue['start_beat_index'], cue['rotation'][0]) for cue in report['cues']}

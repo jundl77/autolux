@@ -75,7 +75,7 @@
               "autoloop": "kick",
               "bars": 8,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             },
             {
@@ -83,7 +83,7 @@
               "autoloop": "hammer",
               "bars": 8,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -93,10 +93,13 @@
               "autoloop": "strip_wipe",
               "priority": 10,
               "begin_beats": 28,
-              "length_beats": 4,
+              "duration_beats": 4,
               "every_bars": 8,
-              "attack_beats": 0.5,
-              "release_beats": 0.5
+              "envelope": {
+                "attack_beats": 0.5,
+                "release_beats": 0.5
+              },
+              "dip": false
             }
           ],
           "palette": "techno",
@@ -438,7 +441,7 @@
               "autoloop": "kick",
               "bars": 8,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             },
             {
@@ -446,7 +449,7 @@
               "autoloop": "hammer",
               "bars": 8,
               "transition": {
-                "kind": "cut"
+                "crossfade_beats": 0.0
               }
             }
           ],
@@ -456,10 +459,13 @@
               "autoloop": "strip_wipe",
               "priority": 10,
               "begin_beats": 28,
-              "length_beats": 4,
+              "duration_beats": 4,
               "every_bars": 8,
-              "attack_beats": 0.5,
-              "release_beats": 0.5
+              "envelope": {
+                "attack_beats": 0.5,
+                "release_beats": 0.5
+              },
+              "dip": false
             }
           ],
           "palette": "techno",

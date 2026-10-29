@@ -8,6 +8,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     prost_build::Config::new()
         .protoc_executable(protoc_bin_vendored::protoc_bin_path()?)
+        // Keeps ClientMessage's variants within clippy's large_enum_variant spread.
+        .boxed(".autolux.starfire.SetActiveEffect.special_fx")
         .compile_protos(SCHEMAS, &[".."])?;
     Ok(())
 }

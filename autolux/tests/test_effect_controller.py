@@ -4,6 +4,7 @@ import pytest
 
 from autolux.lib.clock import VirtualClock
 from autolux.lib.engine.autoloop_policy import SelectionContext
+from autolux.lib.engine.cue import Envelope
 from autolux.lib.engine.effect_controller import (
     SPECIAL_ID,
     SPECIAL_PRIORITY,
@@ -73,7 +74,7 @@ async def test_stop_allows_the_same_autoloop_to_resume(effect_controller, record
         (LightIntent.ATMOSPHERIC, None),
         (LightIntent.BREAKDOWN, None),
         (LightIntent.BUILDUP, None),
-        (LightIntent.DROP, {'kind': 'cut'}),
+        (LightIntent.DROP, {'crossfade_beats': 0.0}),
     ],
 )
 async def test_a_drop_cuts_in_and_every_other_change_takes_the_renderer_crossfade(
@@ -162,7 +163,7 @@ async def test_a_chosen_drop_still_cuts(recorded_lighting):
     second = await _drop_after(controller, recorded_lighting, clock, 30)
     assert [e['command']['kind'] for e in first + second] == ['select', 'select']
     assert first[0]['command']['autoloop'] != second[0]['command']['autoloop']
-    assert second[0]['command']['transition'] == {'kind': 'cut'}
+    assert second[0]['command']['transition'] == {'crossfade_beats': 0.0}
 
 
 async def test_the_event_buffer_records_why_a_loop_was_chosen(recorded_lighting):
@@ -320,7 +321,7 @@ SPIN = Special(
     energy=0.8,
     speed=0.8,
     pulse_beats=1,
-    release_beats=4,
+    envelope=Envelope(release_beats=4),
 )
 DRIFT = Special(
     'drift',
@@ -329,8 +330,7 @@ DRIFT = Special(
     colour_slot='secondary',
     energy=0.2,
     speed=0.1,
-    attack_beats=32,
-    release_beats=32,
+    envelope=Envelope(32, 32),
 )
 
 
@@ -372,9 +372,8 @@ async def test_a_special_is_sent_in_the_wire_vocabulary_unscaled_by_intensity():
                     'energy': 0.2,
                     'speed': 0.1,
                     'pulse_beats': None,
-                    'attack_beats': 32.0,
-                    'release_beats': 32.0,
                     'pattern': None,
+                    'envelope': {'attack_beats': 32.0, 'release_beats': 32.0},
                 },
                 'priority': SPECIAL_PRIORITY,
             },
@@ -589,7 +588,7 @@ async def test_lowering_intensity_swaps_an_over_cap_loop_at_once_and_raising_it_
     assert swap['at_seconds'] == clock.monotonic()
     assert (swap['command']['autoloop'], swap['command']['transition']) == (
         'soft',
-        {'kind': 'crossfade', 'duration_beats': pytest.approx(128.0 / 60.0 * 0.1)},
+        {'crossfade_beats': pytest.approx(128.0 / 60.0 * 0.1)},
     )
     assert 'reason=intensity cap;' in caplog.text
     assert [e['command']['kind'] for e in lighting.events[-3:]] == [
@@ -799,7 +798,7 @@ def _long_texture_on_a_drop(tmp_path):
     control.settings = FULL_INTENSITY
     clock = VirtualClock()
     lighting = RecordingStarfireClient(clock=clock, groups=(FX_GROUP,))
-    texture = dataclasses.replace(SPIN, release_beats=64)
+    texture = dataclasses.replace(SPIN, envelope=Envelope(release_beats=64))
     controller = EffectController(
         lighting, clock=clock, settings=lambda: control.settings, specials=[texture]
     )

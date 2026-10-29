@@ -8,7 +8,7 @@ local LIFT_DEGREES, WASH_CAP = 40, 0.6
 return {
     render = function(ctx)
         local _, left = sf.overlay_progress(ctx)
-        local length, bar = ctx.overlay_length_beats or 1, ctx.beats_per_bar
+        local length, bar = ctx.overlay_duration_beats or 1, ctx.beats_per_bar
         local rising = math.min(1, ctx.autoloop_elapsed_beats / math.max(1, length - bar))
         local level = 1 - (1 - rising) ^ 2
         local landing = math.max(0, math.min(1, left / bar))

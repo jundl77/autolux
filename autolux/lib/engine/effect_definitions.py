@@ -196,8 +196,8 @@ def live_crossfade_beats(settings: ShowSettings) -> float:
     return settings.crossfade_beats * CROSSFADE_SCALE[intensity_level(settings.intensity)]
 
 
-def transition_for(intent: LightIntent) -> dict | None:
-    return {'kind': 'cut'} if intent == LightIntent.DROP else None
+def crossfade_for(intent: LightIntent) -> float | None:
+    return 0.0 if intent == LightIntent.DROP else None
 
 
 def intent_for_class(label: str) -> LightIntent:
