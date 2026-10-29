@@ -66,9 +66,7 @@ BREAKDOWN_DIP_BEATS = 2.0
 DROP_DIP_BEATS = 1.0
 
 HIT_BEATS = 2.0
-RISER_BEATS = 16
-LONG_BUILD_BARS = 32
-LONG_RISER_BEATS = 32
+RISER_BARS = 8
 MIN_RISER_BEATS = 4
 # A decoder re-decision must not snap a lit riser off; at the drop the dip covers it.
 RISER_RELEASE_BEATS = 2.0
@@ -584,8 +582,7 @@ class CueDirector:
 
     @staticmethod
     def _riser_beats(plan: SectionPlan, dip: float) -> float | None:
-        long_build = LONG_BUILD_BARS * plan.request.beats_per_bar
-        longest = LONG_RISER_BEATS if plan.previous_beats >= long_build else RISER_BEATS
+        longest = RISER_BARS * plan.request.beats_per_bar
         beats = min(longest, plan.previous_beats - dip, math.floor(plan.request.lead_beats - dip))
         return beats if beats >= MIN_RISER_BEATS else None
 
