@@ -13,16 +13,7 @@ end
 return {
     render = function(ctx)
         local _, left = sf.overlay_progress(ctx)
-        local hz = strobe_hz(ctx, math.ceil(left))
         local rising = math.max(0, math.min(1, 1 - left / STROBE_BEATS))
-        local level = 1 - (1 - rising) ^ 2
-        local effects = {}
-        for _, name in ipairs({ "wash", "strip", "movers" }) do
-            local group = sf.group(name)
-            effects[#effects + 1] = {
-                sf.colour(group, sf.white()), sf.dimmer(group, level), sf.strobe(group, hz)
-            }
-        end
-        return sf.scene(effects)
+        return sf.white_strobe(1 - (1 - rising) ^ 2, strobe_hz(ctx, math.ceil(left)))
     end
 }

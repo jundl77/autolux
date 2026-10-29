@@ -26,9 +26,7 @@ return {
             sf.dimmer(sf.group("wash"), level),
             sf.colour(sf.group("strip"), palette.accent),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - (1 - progress)) * (count - 1) / 2
-                local wiped = math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count))
-                return sf.dimmer(pixel, strip_level * wiped)
+                return sf.dimmer(pixel, strip_level * sf.mirrored_spot(index, count, 1 - progress, WIPE_SHARE))
             end),
             sf.colour(movers, palette.accent),
             sf.dimmer(movers, level),

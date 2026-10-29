@@ -21,8 +21,7 @@ return {
             sf.dimmer(sf.group("wash"), 0),
             sf.colour(sf.group("strip"), palette.cold),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local centre = math.abs(index - (count + 1) / 2) < 1
-                return sf.dimmer(pixel, centre and breath * level or 0)
+                return sf.dimmer(pixel, sf.is_middle(index, count) and breath * level or 0)
             end),
             sf.colour(sf.group("movers"), palette.cold),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),

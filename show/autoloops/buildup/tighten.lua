@@ -19,8 +19,7 @@ return {
             sf.colour(sf.all(), palette.primary),
             sf.dimmer(sf.group("wash"), held_back),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - opening) * (count - 1) / 2
-                local dot = math.max(STRIP_GLOW, 1 - distance / sf.pixels(DOT_SHARE, count))
+                local dot = math.max(STRIP_GLOW, sf.mirrored_spot(index, count, opening, DOT_SHARE))
                 return sf.dimmer(pixel, STRIP_PEAK * build.drive * dot)
             end),
             sf.dimmer(movers, MOVER_PEAK * build.drive),

@@ -408,6 +408,23 @@ function sf.pixels(share, count)
     return math.max(1, share * count)
 end
 
+function sf.is_middle(index, count)
+    return math.abs(index - (count + 1) / 2) < 1
+end
+
+local function fade_over(cells_away, share, count)
+    return math.max(0, 1 - cells_away / sf.pixels(share, count))
+end
+
+function sf.mirrored_spot(index, count, at, share)
+    return fade_over(math.abs(sf.from_centre(index, count) - at) * (count - 1) / 2, share, count)
+end
+
+function sf.chase(index, count, head, tail_share)
+    local behind = (head * count - (index - 1)) % count
+    return fade_over(behind, tail_share, count), behind
+end
+
 function sf.shared_focus(target)
     local members, x, y, z = sf.members(target), 0, 0, 0
     if #members == 0 then return nil end
@@ -425,12 +442,34 @@ function sf.snap(ctx, period)
     return math.floor(beats / period) % 2, beats % period < SNAP_DARK_BEATS
 end
 
+function sf.snap_look(ctx, period, looks, reach)
+    local index, dark = sf.snap(ctx, period)
+    local look = looks[index + 1]
+    return { shape = look.shape, size = look.size * reach, centre_tilt = (look.centre_tilt or 0) * reach },
+        dark, index
+end
+
+local COLOUR_SWAP_BEATS = 8
+
+function sf.colours_swapped(ctx)
+    return math.floor(sf.section_beats(ctx) / COLOUR_SWAP_BEATS) % 2 == 1
+end
+
+function sf.drop_levels(ctx, floor_quiet, floor_loud)
+    local energy = sf.energy(ctx)
+    return sf.loudness_gain(energy), sf.lerp(floor_quiet, floor_loud, energy), energy
+end
+
 local FINALE_BEATS, EASE_BEATS, LADDER_BEATS = 16, 8, 8
 local DRIVE_FLOOR, DRIVE_GAIN = 0.25, 0.65
 local STAGE_TENSIONS = { 1 / 3, 1 / 2 }
 
 local function stage_of(tension)
     return tension < STAGE_TENSIONS[1] and 0 or tension < STAGE_TENSIONS[2] and 1 or 2
+end
+
+local function ramp_to_dip(left, over)
+    return over > 0 and math.max(0, math.min(1, 1 - left / over)) or 1
 end
 
 local function back_at_line(ctx, beats)
@@ -451,7 +490,7 @@ function sf.build(ctx)
     if left ~= nil then
         local known = ctx.next_known_at
         span = known and math.min(FINALE_BEATS, left + sf.section_beats(ctx) - known) or FINALE_BEATS
-        finale = span > 0 and 1 - math.min(1, left / span) or 1
+        finale = ramp_to_dip(left, span)
         drive = drive + (1 - drive) * finale
     elseif ctx.next_intent ~= nil then
         drive = drive * (1 - 0.5 * sf.finale(ctx, EASE_BEATS))
@@ -465,13 +504,27 @@ end
 
 function sf.approach(build, beats)
     if build.left == nil then return 0 end
-    local over = math.min(beats, build.span)
-    return over > 0 and math.max(0, math.min(1, 1 - build.left / over)) or 1
+    return ramp_to_dip(build.left, math.min(beats, build.span))
+end
+
+function sf.drop_within(build, beats)
+    return build.left ~= nil and build.left <= beats
 end
 
 function sf.overlay_progress(ctx)
     local length = ctx.overlay_length_beats or 1
     return math.min(1, ctx.autoloop_elapsed_beats / length), length - ctx.autoloop_elapsed_beats
+end
+
+local LOOP_GROUPS = { "wash", "strip", "movers" }
+
+function sf.white_strobe(level, hz)
+    local effects = {}
+    for _, name in ipairs(LOOP_GROUPS) do
+        local group = sf.group(name)
+        effects[#effects + 1] = { sf.colour(group, sf.white()), sf.dimmer(group, level), sf.strobe(group, hz) }
+    end
+    return sf.scene(effects)
 end
 
 return sf, named_palettes, function(palette) active_palette = palette end, use_render_intensity

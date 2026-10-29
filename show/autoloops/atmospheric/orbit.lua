@@ -22,9 +22,7 @@ return {
             end),
             sf.colour(sf.group("strip"), palette.primary),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - swing) * (count - 1) / 2
-                local glow = math.max(0, 1 - distance / sf.pixels(GLOW_SHARE, count))
-                return sf.dimmer(pixel, GLOW_LEVEL * glow * level)
+                return sf.dimmer(pixel, GLOW_LEVEL * sf.mirrored_spot(index, count, swing, GLOW_SHARE) * level)
             end),
             sf.colour(sf.group("movers"), palette.primary),
             sf.dimmer(sf.group("movers"), MOVER_LEVEL * level),

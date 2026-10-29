@@ -16,7 +16,7 @@ return {
             sf.dimmer(sf.group("movers"), 0),
             sf.phaser(sf.group("movers"), ctx, { shape = "fan", size = 0 }),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                return sf.dimmer(pixel, math.abs(index - (count + 1) / 2) < 1 and breath * level or 0)
+                return sf.dimmer(pixel, sf.is_middle(index, count) and breath * level or 0)
             end)
         }
     end

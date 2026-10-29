@@ -11,14 +11,10 @@ local SHAPES = { { shape = "fan", size = 15 }, { shape = "cross", size = 8, cent
 
 return {
     render = function(ctx)
-        local energy = sf.energy(ctx)
-        local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
+        local gain, floor, energy = sf.drop_levels(ctx, FLOOR_QUIET, FLOOR_LOUD)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
         local peak = WASH_PEAK * sf.lerp(0.75, 1, sf.onset(ctx))
-        local half_bar, dark = sf.snap(ctx, HALF_BAR_BEATS)
-        local look = SHAPES[half_bar + 1]
-        local reach = sf.lerp(0.5, 1, energy)
+        local look, dark, half_bar = sf.snap_look(ctx, HALF_BAR_BEATS, SHAPES, sf.lerp(0.5, 1, energy))
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),
             sf.dimmer(sf.group("wash"), sf.lerp(floor, peak, kick) * gain),
@@ -26,9 +22,7 @@ return {
             sf.dimmer(sf.group("strip"), STRIP_LEVEL * gain),
             sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), dark and 0 or sf.lerp(MOVER_FLOOR, MOVER_PEAK, kick) * gain),
-            sf.phaser(sf.group("movers"), ctx, {
-                shape = look.shape, size = look.size * reach, centre_tilt = (look.centre_tilt or 0) * reach
-            })
+            sf.phaser(sf.group("movers"), ctx, look)
         }
     end
 }

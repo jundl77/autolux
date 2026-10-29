@@ -17,9 +17,7 @@ end
 
 return {
     render = function(ctx)
-        local energy = sf.energy(ctx)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
+        local gain, floor, energy = sf.drop_levels(ctx, FLOOR_QUIET, FLOOR_LOUD)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
         local wipe = 1 - sf.phrase_phase(ctx, 1)
         return sf.scene {
@@ -29,9 +27,7 @@ return {
             sf.colour(sf.group("strip"), palette.primary),
             outer_in_b(sf.group("strip")),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - wipe) * (count - 1) / 2
-                local lit = math.max(0, 1 - distance / sf.pixels(WIPE_SHARE, count))
-                return sf.dimmer(pixel, STRIP_PEAK * lit * gain)
+                return sf.dimmer(pixel, STRIP_PEAK * sf.mirrored_spot(index, count, wipe, WIPE_SHARE) * gain)
             end),
             sf.colour(sf.group("movers"), palette.secondary),
             sf.dimmer(sf.group("movers"), sf.lerp(MOVER_FLOOR, MOVER_PEAK, kick) * gain),

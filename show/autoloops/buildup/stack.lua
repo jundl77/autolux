@@ -8,7 +8,7 @@ local FAN_DEGREES, LIFT_DEGREES = 12, 35
 local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 
 local function pulsing(ctx, build)
-    if build.left ~= nil and build.left <= ctx.beats_per_bar then return 1 end
+    if sf.drop_within(build, ctx.beats_per_bar) then return 1 end
     return sf.lerp(0.35, 1, sf.on_beat(ctx, PULSE_WIDTH_BEATS))
 end
 

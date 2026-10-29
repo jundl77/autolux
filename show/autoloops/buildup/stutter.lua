@@ -8,7 +8,7 @@ local WASH_PEAK, STRIP_PEAK, MOVER_PEAK = 0.9, 0.9, 0.85
 local WIDE_DEGREES, NARROW_DEGREES, RISE_DEGREES = 20, 6, 15
 
 local function pulse_period(ctx, build)
-    if build.left ~= nil and build.left <= ROLL_BEATS then return 0.5 end
+    if sf.drop_within(build, ROLL_BEATS) then return 0.5 end
     return ({ ctx.beats_per_bar, ctx.beats_per_bar / 2, 1 })[build.stage + 1]
 end
 

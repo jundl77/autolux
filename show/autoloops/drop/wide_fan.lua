@@ -10,17 +10,14 @@ local WASH_PEAK, STRIP_PEAK, MOVER_FLOOR, MOVER_PEAK = 0.85, 0.9, 0.6, 0.85
 
 return {
     render = function(ctx)
-        local energy = sf.energy(ctx)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
+        local gain, floor, energy = sf.drop_levels(ctx, FLOOR_QUIET, FLOOR_LOUD)
         local kick = sf.on_beat(ctx, KICK_WIDTH_BEATS)
         local wave = ctx.beat_position % 1
         return sf.scene {
             sf.colour(sf.group("wash"), palette.primary),
             sf.dimmer(sf.group("wash"), sf.lerp(floor, WASH_PEAK, kick) * gain),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local distance = math.abs(sf.from_centre(index, count) - wave) * (count - 1) / 2
-                local front = math.max(0, 1 - distance / sf.pixels(WAVE_SHARE, count)) * (1 - wave)
+                local front = sf.mirrored_spot(index, count, wave, WAVE_SHARE) * (1 - wave)
                 return {
                     sf.colour(pixel, palette.secondary),
                     sf.dimmer(pixel, STRIP_PEAK * front * gain)

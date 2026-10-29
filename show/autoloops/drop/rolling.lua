@@ -12,9 +12,7 @@ local CIRCLE_DEGREES, CIRCLE_MEASURE = 10, 8
 
 return {
     render = function(ctx)
-        local energy = sf.energy(ctx)
-        local gain = sf.loudness_gain(ctx.normalized_rms_level)
-        local floor = sf.lerp(FLOOR_QUIET, FLOOR_LOUD, energy)
+        local gain, floor, energy = sf.drop_levels(ctx, FLOOR_QUIET, FLOOR_LOUD)
         local eighth = sf.on_beat(ctx, ROLL_WIDTH_BEATS, 0.5)
         local kick = math.max(sf.on_beat(ctx, KICK_WIDTH_BEATS), ROLL_LEVEL * eighth)
         local head = ctx.beat_position / LAP_BEATS % 1
@@ -22,8 +20,7 @@ return {
             sf.colour(sf.group("wash"), palette.primary),
             sf.dimmer(sf.group("wash"), sf.lerp(floor, WASH_PEAK, kick) * gain),
             sf.each(sf.group("strip"), function(pixel, index, count)
-                local behind = (head * count - (index - 1)) % count
-                local lit = math.max(0, 1 - behind / sf.pixels(TAIL_SHARE, count))
+                local lit, behind = sf.chase(index, count, head, TAIL_SHARE)
                 return {
                     sf.colour(pixel, behind < 1 and palette.secondary or palette.primary),
                     sf.dimmer(pixel, STRIP_PEAK * lit * gain)

@@ -244,12 +244,22 @@ sf.build(ctx) -> { drive, finale, tension, step, stage, measure, left, span }
 -- dip begins (nil while no drop is cued), span = the beats the finale runs over.
 sf.approach(build, beats)      -- 0..1 over the last `beats` before the dip, over less after a
                                -- late cue, so nothing timed to the drop jumps; 0 uncued.
+sf.drop_within(build, beats)   -- a drop is cued and its dip is at most `beats` away.
+sf.drop_levels(ctx, floor_quiet, floor_loud) -> gain, floor, energy
+                               -- a drop's loudness gain and its floor between the two by energy.
 sf.snap(ctx, period)           -- look 0/1 changing on the off-beat before each period line, and
                                -- `dark` for the quarter beat after, to move heads in the dark.
+sf.snap_look(ctx, period, looks, reach) -> spec, dark, index
+                               -- sf.snap between two {shape, size, centre_tilt} looks, scaled by reach.
+sf.colours_swapped(ctx)        -- true on every other two-bar line: drops and accents swap A and B together.
 sf.pixels(share, count)        -- a width along a row: share x count cells, at least one.
 sf.from_centre(index, count)   -- 0 at the centre of an sf.each row, 1 at either end, 0 for one.
+sf.is_middle(index, count)     -- the middle cell of a row, or the middle two.
+sf.mirrored_spot(index, count, at, share) -- 1 where from_centre is `at`, 0 `share` of the row away.
+sf.chase(index, count, head, tail_share) -> level, cells_behind -- a tail behind `head` (0..1 a lap).
 sf.shared_focus(target)        -- {x, y, z}, the mean of the members' focus points.
 sf.overlay_progress(ctx)       -- an overlay's progress 0..1 and the beats it has left.
+sf.white_strobe(level, hz)     -- wash, strip and movers in white at `level`, strobing at `hz`.
 ```
 
 Aim and phasers. Points are metres in the MVR scene frame: X cross-stage, Y upstage, Z up.

@@ -10,7 +10,7 @@ local FAN_DEGREES, LIFT_DEGREES = 12, 35
 
 local function meter_and_count(build)
     local meter = 0.5 * build.step
-    if build.left == nil or build.left > COUNT_BEATS then return meter, 0 end
+    if not sf.drop_within(build, COUNT_BEATS) then return meter, 0 end
     local steps = math.max(1, math.min(COUNT_BEATS, math.ceil(build.span)))
     local counted = math.max(0, steps - math.ceil(build.left) + 1) / steps
     return meter, counted * (1 - meter)
@@ -20,7 +20,7 @@ return {
     render = function(ctx)
         local build = sf.build(ctx)
         local meter, closing = meter_and_count(build)
-        local counting = build.left ~= nil and build.left <= COUNT_BEATS
+        local counting = sf.drop_within(build, COUNT_BEATS)
         local tick = sf.on_beat(ctx, TICK_WIDTH_BEATS, counting and 1 or ctx.beats_per_bar)
         local landing = 1 - sf.approach(build, ctx.beats_per_bar)
         return sf.scene {
