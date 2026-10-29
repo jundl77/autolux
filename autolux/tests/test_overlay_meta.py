@@ -10,18 +10,20 @@ from autolux.lighting.autoloop_catalogue import (
     required_autoloops,
 )
 
-HEADER = '-- Washes at full white, decaying.\n-- strobe: no\n-- intensity: htp\n'
+LAYER = '-- movement: still\n-- texture: wash\n'
+HEADER = '-- Washes at full white, decaying.\n-- strobe: no\n-- intensity: htp\n' + LAYER
+HIT = {'movement': 'still', 'texture': 'wash'}
 
 
 @pytest.mark.parametrize(
     ('header', 'meta'),
     [
-        (HEADER, OverlayMeta(strobe=False, intensity_htp=True)),
+        (HEADER, OverlayMeta(strobe=False, intensity_htp=True, **HIT)),
         (
-            '-- x\n-- intensity: ltp\n-- strobe: yes\n',
-            OverlayMeta(strobe=True, intensity_htp=False),
+            '-- x\n-- texture: beam\n-- intensity: ltp\n-- movement: sweep\n-- strobe: yes\n',
+            OverlayMeta(strobe=True, intensity_htp=False, movement='sweep', texture='beam'),
         ),
-        (HEADER.replace('\n', '\r\n'), OverlayMeta(strobe=False, intensity_htp=True)),
+        (HEADER.replace('\n', '\r\n'), OverlayMeta(strobe=False, intensity_htp=True, **HIT)),
     ],
 )
 def test_the_header_block_after_the_first_line_is_the_overlay_metadata(header, meta):
@@ -32,7 +34,9 @@ def test_the_header_block_after_the_first_line_is_the_overlay_metadata(header, m
     ('header', 'message'),
     [
         (HEADER.replace('-- intensity: htp\n', ''), 'missing intensity'),
-        ('-- strobe: no\n-- intensity: htp\n', 'missing strobe'),
+        ('-- strobe: no\n-- intensity: htp\n' + LAYER, 'missing strobe'),
+        (HEADER.replace('-- texture: wash\n', ''), 'missing texture'),
+        (HEADER.replace('texture: wash', 'texture: haze'), "texture 'haze' is not one of"),
         (HEADER.replace('strobe: no', 'strobe: maybe'), "strobe 'maybe' is not one of yes, no"),
         (HEADER.replace('intensity: htp', 'intensity: HTP'), "intensity 'HTP' is not one of"),
         (HEADER + '-- strobe: yes\n', 'strobe declared twice'),
@@ -65,8 +69,8 @@ def test_overlay_banks_are_required_read_on_their_own_and_reported_at_once(tmp_p
     (tmp_path / 'dip' / 'last_beat.lua').unlink()
     (tmp_path / 'fill' / 'wipe.lua').unlink()
     assert read_overlay_meta(tmp_path) == {
-        ('hit', 'blinder'): OverlayMeta(strobe=False, intensity_htp=True),
-        ('riser', 'strobe_ramp'): OverlayMeta(strobe=True, intensity_htp=True),
+        ('hit', 'blinder'): OverlayMeta(strobe=False, intensity_htp=True, **HIT),
+        ('riser', 'strobe_ramp'): OverlayMeta(strobe=True, intensity_htp=True, **HIT),
     }
 
 

@@ -76,7 +76,12 @@ def parse_autoloop_meta(source: str) -> AutoloopMeta:
 
 def parse_overlay_meta(source: str) -> OverlayMeta:
     values = _header(source, OVERLAY_META_VALUES)
-    return OverlayMeta(strobe=values['strobe'] == 'yes', intensity_htp=values['intensity'] == 'htp')
+    return OverlayMeta(
+        strobe=values['strobe'] == 'yes',
+        intensity_htp=values['intensity'] == 'htp',
+        movement=values['movement'],
+        texture=values['texture'],
+    )
 
 
 def _read_meta(

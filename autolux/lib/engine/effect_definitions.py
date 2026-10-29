@@ -71,6 +71,8 @@ OVERLAY_BANKS = ('hit', 'fill', 'riser', 'dip', 'accent')
 OVERLAY_META_VALUES: dict[str, tuple[str, ...]] = {
     'strobe': ('yes', 'no'),
     'intensity': ('htp', 'ltp'),
+    'movement': AUTOLOOP_META_VALUES['movement'],
+    'texture': AUTOLOOP_META_VALUES['texture'],
 }
 
 
@@ -78,10 +80,13 @@ OVERLAY_META_VALUES: dict[str, tuple[str, ...]] = {
 class OverlayMeta:
     """strobe: the overlay strobes, so the venue gate counts it as an intense event.
     intensity_htp: its intensity takes the higher of the look below and its own; else it
-    replaces the look below (LTP)."""
+    replaces the look below (LTP). movement and texture name the layer it plays on, as for a
+    base loop, so the director can keep it off a base loop whose lead layer it would fight."""
 
     strobe: bool
     intensity_htp: bool
+    movement: str
+    texture: str
 
 
 OverlayMetaTable = Mapping[tuple[str, str], OverlayMeta]
