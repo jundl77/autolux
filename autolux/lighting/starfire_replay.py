@@ -7,13 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from autolux.lib.clients.starfire_client import rms_to_normalized_level
-from autolux.lib.engine.autoloop_policy import (
-    LOUDNESS_TREND_BEATS,
-    SelectionContext,
-    loudness_trend,
-)
 from autolux.lib.engine.cue import Cue
-from autolux.lib.engine.cue_director import GAP_REFERENCE_BEATS, SectionRequest
+from autolux.lib.engine.cue_director import SectionRequest
 from autolux.lib.engine.effect_controller import EffectController
 from autolux.lib.engine.effect_definitions import (
     DEFAULT_AUTOLOOPS,
@@ -21,7 +16,7 @@ from autolux.lib.engine.effect_definitions import (
     LightIntent,
     ShowSettings,
 )
-from autolux.lib.engine.light_engine import BUILD_INTENTS
+from autolux.lib.engine.light_engine import BUILD_INTENTS, levels_before, planned_context
 from autolux.lib.engine.section_decoder import BEATS_PER_BAR
 from autolux.lighting.autoloop_catalogue import (
     AUTOLOOP_DIRECTORY,
@@ -80,12 +75,6 @@ class _Section:
 def _start_beat(placed: list[tuple[float, int, float]], at: float) -> tuple[float, int, float]:
     near = [beat for beat in placed if abs(beat[0] - at) <= 30.0 / beat[2]]
     return min(near, key=lambda beat: abs(beat[0] - at), default=None)
-
-
-def _levels_before(levels: list[tuple[float, float]], start: tuple[float, int, float]) -> tuple:
-    opens = start[0] - 30.0 / start[2]
-    before = [level for at, level in levels if at < opens]
-    return tuple(before[-max(GAP_REFERENCE_BEATS, LOUDNESS_TREND_BEATS) :])
 
 
 @dataclass(frozen=True)
@@ -159,18 +148,15 @@ def _cue_events(
             events.append({'at_seconds': at, 'command': command})
         else:
             beat_at, index, bpm = start
-            building = (
-                intent in (LightIntent.BUILDUP, LightIntent.DROP) and previous in BUILD_INTENTS
-            )
-            bar_seconds = BEATS_PER_BAR * 60.0 / bpm
-            levels_before = _levels_before(levels, start)
-            context = SelectionContext(
+            before = levels_before(levels, beat_at - 30.0 / bpm)
+            context = planned_context(
                 intent,
-                seconds_since_drop=None if drop_ended_at is None else at - drop_ended_at,
-                build_bars=(at - build_started_at) / bar_seconds
-                if building and build_started_at is not None
-                else 0.0,
-                loudness=loudness_trend(levels_before),
+                at,
+                previous=previous,
+                drop_ended_at=drop_ended_at,
+                build_started_at=build_started_at,
+                bar_seconds=BEATS_PER_BAR * 60.0 / bpm,
+                levels=before,
                 new_track=new_track,
             )
             sent_at = max(0.0, beat_at - delay)
@@ -180,7 +166,7 @@ def _cue_events(
                 context=context,
                 room_sec=beat_at,
                 bpm=bpm,
-                levels_before=levels_before,
+                levels_before=before,
                 lead_beats=(beat_at - sent_at) * bpm / 60.0,
             )
             cue = plan(moment, request)

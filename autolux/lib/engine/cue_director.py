@@ -15,7 +15,7 @@ from autolux.lib.engine.autoloop_policy import (
     look_intent,
     soft_drop,
 )
-from autolux.lib.engine.cue import MAX_OVERLAYS, BaseLook, Cue, Overlay
+from autolux.lib.engine.cue import MAX_OVERLAYS, BaseLook, Cue, Overlay, recurring_rows
 from autolux.lib.engine.effect_definitions import (
     CALM,
     CROSSFADE_SCALE,
@@ -162,6 +162,10 @@ def cue_seed(seed: int, track: int, start_beat_index: int) -> int:
     return zlib.crc32(f'{seed}/{track}/{start_beat_index}'.encode())
 
 
+def _crossfade(beats: float) -> dict:
+    return {'kind': 'crossfade', 'duration_beats': beats}
+
+
 def _row(
     overlay: tuple[str, str],
     begin: float,
@@ -278,7 +282,7 @@ class CueDirector:
         revised = self._with_overlays(plan, settings, gate, moment)
         if started:
             once = tuple(row for row in plan.cue.overlays if row.every_bars == 0)
-            again = tuple(row for row in revised.cue.overlays if row.every_bars > 0)
+            again = recurring_rows(revised.cue.overlays)
             revised = dataclasses.replace(
                 plan, cue=dataclasses.replace(plan.cue, overlays=once + again)
             )
@@ -330,7 +334,7 @@ class CueDirector:
     ) -> tuple[BaseLook, ...]:
         scale = CROSSFADE_SCALE[intensity_level(settings.intensity)]
         _, bars = ROTATION[request.intent]
-        step = {'kind': 'crossfade', 'duration_beats': STEP_CROSSFADE_BEATS * scale}
+        step = _crossfade(STEP_CROSSFADE_BEATS * scale)
         entry = step if continued else self._entry_transition(request.intent, previous, scale)
         return tuple(
             BaseLook(choice.bank, choice.autoloop, bars, entry if index == 0 else step)
@@ -344,11 +348,11 @@ class CueDirector:
         if intent is LightIntent.DROP:
             return {'kind': 'cut'}
         if intent is LightIntent.BREAKDOWN:
-            return {'kind': 'crossfade', 'duration_beats': BREAKDOWN_CROSSFADE_BEATS * scale}
+            return _crossfade(BREAKDOWN_CROSSFADE_BEATS * scale)
         if intent is LightIntent.BUILDUP:
             if previous is not None and previous.request.intent is LightIntent.DROP:
                 return {'kind': 'cut'}
-            return {'kind': 'crossfade', 'duration_beats': BUILDUP_CROSSFADE_BEATS}
+            return _crossfade(BUILDUP_CROSSFADE_BEATS)
         return None
 
     def _bank(
@@ -567,14 +571,17 @@ class CueDirector:
         fill = plan.picks.fill
         if fill is None:
             return []
-        last_bar = (PHRASE_BARS - 1) * BEATS_PER_BAR
+
+        def on_bar(loop: tuple[str, str], bar: int) -> Overlay:
+            begin = (bar - 1) * BEATS_PER_BAR
+            return _row(loop, begin, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0)
+
         if level == CALM:
-            return [_row(fill, last_bar, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0)]
+            return [on_bar(fill, PHRASE_BARS)]
         turnaround = self._shipped(TURNAROUND_FILL)
         if turnaround is None or any(self._fights(turnaround, base) for base in plan.choices):
             turnaround = fill
-        rows = [_row(turnaround, last_bar, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0)]
+        rows = [on_bar(turnaround, PHRASE_BARS)]
         if bar_8:
-            middle = (PHRASE_BARS // 2 - 1) * BEATS_PER_BAR
-            rows.insert(0, _row(fill, middle, FILL_BEATS, PHRASE_BARS, MOVER_FADE_BEATS, 1.0))
+            rows.insert(0, on_bar(fill, PHRASE_BARS // 2))
         return rows

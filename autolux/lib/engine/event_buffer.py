@@ -15,6 +15,10 @@ STANDBY_INTENT = 'standby'
 STOP_PERSISTENCE_SEC = 2.0
 
 
+def _loop_id(entry: dict) -> str:
+    return f"{entry['bank']}/{entry['autoloop']}"
+
+
 class EventBuffer:
     SNAPSHOT_WINDOW_SEC = 35.0
 
@@ -127,8 +131,8 @@ class EventBuffer:
                 't': now,
                 'start_beat_index': cue['start_beat_index'],
                 'intent': cue['intent'],
-                'rotation': [f"{look['bank']}/{look['autoloop']}" for look in cue['rotation']],
-                'overlays': [f"{row['bank']}/{row['autoloop']}" for row in cue['overlays']],
+                'rotation': [_loop_id(look) for look in cue['rotation']],
+                'overlays': [_loop_id(row) for row in cue['overlays']],
             }
             cutoff = now - self._window_sec * 2
             self._cues = [*(c for c in self._cues if c['t'] >= cutoff), record]
