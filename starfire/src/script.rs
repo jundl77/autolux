@@ -656,6 +656,12 @@ impl LuaAutoloop {
         })
     }
 
+    /// Lua instructions the last render ran, to the hook's 100-instruction granularity; the
+    /// replay suite reports each loop's worst frame against the per-script budget.
+    pub fn instructions_used(&self) -> u32 {
+        LUA_INSTRUCTION_LIMIT - self.instruction_budget.load(Ordering::Relaxed)
+    }
+
     pub fn render(
         &mut self,
         context: &RenderContext,
