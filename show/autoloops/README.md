@@ -50,7 +50,7 @@ Every buildup reads one shared state, `sf.build(ctx)` (below), and implements bo
 - **Regime U, the drop unknown.** `drive = 0.35 + 0.65 * tension`, with tension `e / (e + 24)`
   of section time: 0.35 on bar 1, 0.70 on bar 8, 0.81 on bar 16, 0.89 on bar 32, still rising,
   so an uncued build climbs from its first bar and never restarts. Live, the drop is known only
-  about 9 s ahead, so most of a build plays in this regime.
+  the playback delay less the analysis latency ahead, so most of a build plays in this regime.
 - **Regime K, a drop cued.** `drive` hands over continuously to 1 over the last 16 beats before
   the dip and holds full over the last 4 (`drive + (1 - drive) * finale`); a cue that arrives with
   fewer than 16 beats to go hands over across what is left, full for its last half at most 4

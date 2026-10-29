@@ -116,10 +116,10 @@ Explicit Art-Net output remains available for standalone rendering and replay.
   start. At 44.1 kHz, 44,100 frames represent one second. This 64-bit frame index identifies
   the audible position; it adds no delay itself. Lighting sequences attach DMX state to audio.
 
-The **14-second show delay** gives analysis time to decide. It is applied once
+The **24-second show delay** gives analysis time to decide. It is applied once
 to TX audio and once to the matching control stream. The receiver's approximately
 **500 ms jitter buffer** is additional and shared by audio/DMX scheduling.
-An event at source second 10 reaches the transport around second 24, then plays
+An event at source second 10 reaches the transport around second 34, then plays
 after receiver/device buffering.
 
 Each audio block references its preceding lighting state. RX queues them together

@@ -5,15 +5,13 @@ import random
 import time
 from pathlib import Path
 
-from autolux.lib.audio_config import BUFFER_SIZE, SAMPLE_RATE
+from autolux.lib.audio_config import BUFFER_SIZE, PLAYBACK_DELAY_SEC, SAMPLE_RATE
 from autolux.lib.clock import SYSTEM_CLOCK, Clock, VirtualClock
 from autolux.simulate import cell_cache
 
 LOGGER = logging.getLogger(__name__)
 
 TIMING_TOLERANCE_SEC = 0.050
-# Must match lib/main.py's PLAYBACK_DELAY_SEC and the native audio sender's delay.
-PLAYBACK_DELAY_SEC = 14.0
 FAST_SIM_RANDOM_SEED = 1337
 
 
