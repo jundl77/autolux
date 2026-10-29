@@ -14,7 +14,8 @@ local FAN_DEGREES, LIFT_DEGREES = 12, 35
 local function meter_and_count(build)
     local meter = 0.5 * build.step
     if build.left == nil or build.left > COUNT_BEATS then return meter, 0 end
-    local counted = (COUNT_BEATS - math.ceil(build.left) + 1) / COUNT_BEATS
+    local steps = math.max(1, math.min(COUNT_BEATS, math.ceil(build.span)))
+    local counted = math.max(0, steps - math.ceil(build.left) + 1) / steps
     return meter, counted * (1 - meter)
 end
 
@@ -24,6 +25,7 @@ return {
         local meter, closing = meter_and_count(build)
         local counting = build.left ~= nil and build.left <= COUNT_BEATS
         local tick = sf.on_beat(ctx, TICK_WIDTH_BEATS, counting and 1 or ctx.beats_per_bar)
+        local landing = 1 - sf.approach(build, ctx.beats_per_bar)
         return sf.scene {
             sf.colour(sf.all(), palette.primary),
             sf.dimmer(sf.group("wash"), WASH_PEAK * build.drive * sf.lerp(0.3, 1, tick)),
@@ -37,8 +39,8 @@ return {
             end),
             sf.dimmer(sf.group("movers"), MOVER_PEAK * build.drive * sf.lerp(0.5, 1, tick)),
             sf.phaser(sf.group("movers"), ctx, {
-                shape = "fan", size = FAN_DEGREES, measure = build.measure,
-                centre_tilt = LIFT_DEGREES * build.drive
+                shape = "fan", size = FAN_DEGREES * landing, measure = build.measure,
+                centre_tilt = LIFT_DEGREES * build.drive * landing
             })
         }
     end

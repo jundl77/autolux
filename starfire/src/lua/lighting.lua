@@ -509,7 +509,13 @@ function sf.snap(ctx, period)
 end
 
 local FINALE_BEATS, EASE_BEATS, LADDER_BEATS = 16, 8, 8
-local DRIVE_FLOOR, DRIVE_PLATEAU = 0.3, 0.8
+local DRIVE_FLOOR, DRIVE_GAIN = 0.25, 0.65
+-- Tension lines for a build's stages: about bar 6 and bar 12 of an uncued build.
+local STAGE_LINES = { 1 / 3, 1 / 2 }
+
+local function stage_of(tension)
+    return tension < STAGE_LINES[1] and 0 or tension < STAGE_LINES[2] and 1 or 2
+end
 
 -- The context as it was at the last `beats` line of section time, for the fields tension reads.
 local function back_at_line(ctx, beats)
@@ -522,25 +528,41 @@ local function back_at_line(ctx, beats)
     }
 end
 
--- Every buildup's shared state. drive 0..1: with no drop known 0.3 + 0.5 x tension; a cued drop
--- hands it over continuously to 1 over the last 16 beats before the dip; a cued non-drop eases
--- it down by half. finale 0..1 is that hand-over, tension the build's progress, step the tension
--- at the last downbeat (compare thresholds with it so steps land on the one), measure the
--- phaser rate ladder 8, 4, 2 beats, which moves only on 8-beat lines so cycles never jump, left
--- the beats until a cued drop's dip begins (nil while no drop is cued).
+-- Every buildup's shared state. drive 0..1: with no drop known 0.25 + 0.65 x tension (0.3 at
+-- bar 1, 0.62 at bar 16, twice bar 1); a cued drop hands it over continuously to 1 over the last 16 beats
+-- before the dip; a cued non-drop eases it down by half. finale 0..1 is that hand-over, tension
+-- the build's progress, step the tension at the last downbeat, stage 0, 1, 2 from step (so
+-- stages change on the one), measure the phaser rate ladder 8, 4, 2 beats by stage at the last
+-- 8-beat line, so cycles never jump, left
+-- the beats until a cued drop's dip begins (nil while no drop is cued), span the beats the
+-- finale runs over (16, or what was left when a late cue arrived).
 function sf.build(ctx)
     local tension, step = sf.tension(ctx)
-    local drive, finale = sf.lerp(DRIVE_FLOOR, DRIVE_PLATEAU, tension), 0
+    local drive, finale = DRIVE_FLOOR + DRIVE_GAIN * tension, 0
     local left = ctx.next_intent == "drop" and (ctx.beats_until_dip or ctx.beats_until_next) or nil
+    local span = FINALE_BEATS
     if left ~= nil then
-        finale = 1 - math.min(1, left / FINALE_BEATS)
+        -- A drop cued with fewer than 16 beats to go hands over across what is left, not in a jump.
+        local known = ctx.next_known_at
+        span = known and math.min(FINALE_BEATS, left + sf.section_beats(ctx) - known) or FINALE_BEATS
+        finale = span > 0 and 1 - math.min(1, left / span) or 1
         drive = drive + (1 - drive) * finale
     elseif ctx.next_intent ~= nil then
         drive = drive * (1 - 0.5 * sf.finale(ctx, EASE_BEATS))
     end
-    local at_line = sf.tension(back_at_line(ctx, LADDER_BEATS))
-    local measure = at_line < 1 / 3 and 8 or at_line < 2 / 3 and 4 or 2
-    return { drive = drive, finale = finale, tension = tension, step = step, left = left, measure = measure }
+    local measure = ({ 8, 4, 2 })[stage_of(sf.tension(back_at_line(ctx, LADDER_BEATS))) + 1]
+    return {
+        drive = drive, finale = finale, tension = tension, step = step, stage = stage_of(step),
+        left = left, span = span, measure = measure,
+    }
+end
+
+-- 0..1 over a cued drop's last `beats` before the dip, over less when the cue came later than
+-- that, so nothing a build times to the drop ever jumps; 0 while no drop is cued.
+function sf.approach(build, beats)
+    if build.left == nil then return 0 end
+    local over = math.min(beats, build.span)
+    return over > 0 and math.max(0, math.min(1, 1 - build.left / over)) or 1
 end
 
 -- An overlay's progress through its length, 0..1, and the beats it has left.
