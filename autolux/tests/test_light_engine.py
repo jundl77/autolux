@@ -2159,6 +2159,41 @@ async def test_a_level_change_re_plans_a_pending_cue_and_leaves_the_running_one(
     assert running['rotation'] == balanced['rotation'], 'a running cue keeps its loops'
 
 
+async def test_a_drop_that_lifts_the_auto_intensity_is_planned_under_the_level_it_lifts_to():
+    from autolux.lib.engine.effect_definitions import CALM, INTENSITY_BALANCED
+    from autolux.lib.engine.track_mood import MeasuredBeat
+
+    decoder = FakeDecoder()
+    control = SimpleNamespace(settings=ShowSettings(intensity=0.3, intensity_auto=True))
+    light, queue, clock, lighting = engine(decoder=decoder)
+    light._settings = light.effect_controller._settings = lambda: control.settings
+    asked = []
+
+    def auto_intensity(level, why):
+        asked.append(level)
+        control.settings = ShowSettings(intensity=level, intensity_auto=True)
+        light.intensity_changed()
+
+    light.on_auto_intensity = auto_intensity
+    light._track_beats = [MeasuredBeat(140.0, 1.0, 3000.0, 0.0)] * 8
+    music = light.follow_music
+    music.track_level, music.opening_heard, music.energies = CALM, True, [1, 1, 2, 1]
+    assert music.heard_calm()
+
+    planned = await planned_drop(light, decoder, clock)
+    [cue] = (e['command']['value'] for e in cue_events(lighting))
+    assert [step['bank'] for step in cue['rotation']] == ['drop'], 'planned under its own arrival'
+    assert asked == [], 'the room level changes on arrival, not at planning'
+    assert music.track_level == CALM
+
+    clock.advance(14.5)
+    await queue.drain()
+    assert light._current_plan is planned
+    assert asked == [INTENSITY_BALANCED]
+    running = cue_events(lighting)[-1]['command']['value']
+    assert running['rotation'] == cue['rotation']
+
+
 async def test_static_holds_the_look_without_cues_and_leaving_it_sends_them_again():
     decoder = FakeDecoder()
     light, queue, clock, lighting = engine(decoder=decoder)

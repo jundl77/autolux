@@ -205,8 +205,13 @@ class EffectController:
             return None
         return self._director.plan_for(self._entered_moment)
 
-    def plan_cue(self, moment: Hashable, request: SectionRequest) -> CueSection:
-        plan = self._director.plan(moment, request, self._settings(), self._palette_base(), self)
+    def plan_cue(
+        self, moment: Hashable, request: SectionRequest, intensity: float | None = None
+    ) -> CueSection:
+        settings = self._settings()
+        if intensity is not None:
+            settings = dataclasses.replace(settings, intensity=intensity)
+        plan = self._director.plan(moment, request, settings, self._palette_base(), self)
         self._book(moment, plan)
         LOGGER.info(
             '[lighting] cue | intent=%s start=%d | looks=%s | palette=%s | overlays=%s',
@@ -263,9 +268,6 @@ class EffectController:
     def _release_booking(self, moment: Hashable) -> None:
         self._intense_at = {key: at for key, at in self._intense_at.items() if key != moment}
         self._special_policy.forget_accent(moment)
-
-    def intense_blocked(self, at: float, moment: Hashable) -> str | None:
-        return self._intense_blocked(self._settings(), at, moment)
 
     def accent_crowded(self, at: float, moment: Hashable) -> bool:
         return self._special_policy.accent_crowded(at, moment)
@@ -457,7 +459,7 @@ class EffectController:
         remaining = 0.0 if last is None else max(0.0, total - (now - last))
         return self._special_policy.cooldowns(now, total, remaining, self._capabilities)
 
-    def _intense_blocked(
+    def intense_blocked(
         self, settings: ShowSettings, at: float, moment: Hashable = None
     ) -> str | None:
         if settings.intensity <= STROBE_GATE_INTENSITY:
@@ -484,7 +486,7 @@ class EffectController:
         choice = self._special_policy.choose(
             intent,
             self.special_capabilities(),
-            self._intense_blocked(settings, now, moment),
+            self.intense_blocked(settings, now, moment),
             soft_drop=(
                 f'drop arrival {arrival_of_peak:.2f} below {MAXIMAL_ARRIVAL_OF_PEAK:.2f} '
                 'of the track peak'

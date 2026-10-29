@@ -77,7 +77,7 @@ class Gate:
     def __init__(self, blocked: str | None = None, crowded: bool = False):
         self.blocked, self.crowded = blocked, crowded
 
-    def intense_blocked(self, at, moment):
+    def intense_blocked(self, settings, at, moment):
         return self.blocked
 
     def accent_crowded(self, at, moment):
@@ -665,8 +665,8 @@ def test_the_drops_special_shares_its_cues_intense_moment():
     effects, clock = controller('wild')
     plan_drop(effects, 'drop', 10.0, 128)
     clock.advance(10.0)
-    assert effects.intense_blocked(10.0, 'drop') is None
-    assert effects.intense_blocked(10.0, 'another') is not None
+    assert effects.intense_blocked(effects._settings(), 10.0, 'drop') is None
+    assert effects.intense_blocked(effects._settings(), 10.0, 'another') is not None
 
 
 def test_the_venue_cap_turns_a_third_white_hit_in_a_minute_into_the_colour_bump():
@@ -682,8 +682,10 @@ def test_resetting_the_plans_releases_bookings_still_ahead_of_the_room():
     plan_drop(effects, 'ahead', 50.0, 256)
     clock.advance(20.0)
     effects.reset_cues()
-    assert effects.intense_blocked(60.0, None) is None
-    assert effects.intense_blocked(30.0, None) is not None, 'the drop the room saw still counts'
+    assert effects.intense_blocked(effects._settings(), 60.0, None) is None
+    assert effects.intense_blocked(effects._settings(), 30.0, None) is not None, (
+        'the drop the room saw still counts'
+    )
 
 
 def test_calm_rises_on_the_palette_riser_only():

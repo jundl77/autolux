@@ -22,6 +22,8 @@ INTENT_ENERGY is the section's own energy, not the autoloop tier it played at: t
 depends on the level, and evidence that follows the level would hold any level it chose.
 """
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from statistics import fmean
 
 from autolux.lib.engine.autoloop_policy import soft_drop
@@ -61,6 +63,14 @@ def no_higher_than(target: str, current: str) -> str:
     return min(target, current, key=LEVELS.index)
 
 
+@dataclass(frozen=True)
+class DropFollow:
+    level: str | None
+    track_level: str | None
+    capped: bool
+    loud_drop: bool
+
+
 class FollowMusic:
     def __init__(self):
         self.start_track()
@@ -85,18 +95,21 @@ class FollowMusic:
     def mean_energy(self) -> float | None:
         return fmean(self.energies) if self.energies else None
 
-    def heard_calm(self) -> bool:
+    def heard_calm(self, ahead: Sequence[LightIntent] = ()) -> bool:
+        energies = [*self.energies, *(INTENT_ENERGY[intent] for intent in ahead)]
         return (
             self.opening_heard
             and not self.drop_in_opening
-            and self.mean_energy is not None
-            and self.mean_energy <= CALM_MAX_MEAN_ENERGY
+            and bool(energies)
+            and fmean(energies) <= CALM_MAX_MEAN_ENERGY
         )
 
-    def level_at_drop(self, drive: float) -> str:
-        if self.heard_calm():
+    def level_at_drop(
+        self, drive: float, loud_drop: bool, ahead: Sequence[LightIntent] = ()
+    ) -> str:
+        if self.heard_calm(ahead):
             return CALM
-        if self.loud_drop and drive > WILD_ABOVE_DRIVE:
+        if loud_drop and drive > WILD_ABOVE_DRIVE:
             return WILD
         if drive > BALANCED_ABOVE_DRIVE:
             return BALANCED
@@ -121,15 +134,35 @@ class FollowMusic:
 
         drive is the track's drive over every beat so far, None while the opening window is open.
         """
+        follow = self.drop_follow(arrival_of_peak, current, drive)
+        self.track_level, self.capped, self.loud_drop = (
+            follow.track_level,
+            follow.capped,
+            follow.loud_drop,
+        )
+        return follow.level
+
+    def drop_follow(
+        self,
+        arrival_of_peak: float | None,
+        current: str,
+        drive: float | None = None,
+        ahead: Sequence[LightIntent] = (),
+    ) -> DropFollow:
+        """What on_drop decides, without applying it.
+
+        ahead are the intents still to commit up to and including this drop, for a drop planned
+        before it arrives.
+        """
         soft = soft_drop(arrival_of_peak)
-        if arrival_of_peak is not None and not soft:
-            self.loud_drop = True
-        if self.track_level is None or self.capped:
-            return None
-        if drive is not None:
-            self.track_level = one_step_up_toward(self.level_at_drop(drive), current)
-        level = BALANCED if self.track_level == WILD and soft else self.track_level
-        if level == current:
-            return None
-        self.capped = level != self.track_level
-        return level
+        loud_drop = self.loud_drop or (arrival_of_peak is not None and not soft)
+        track_level, capped = self.track_level, self.capped
+        if track_level is not None and not capped:
+            if drive is not None:
+                track_level = one_step_up_toward(
+                    self.level_at_drop(drive, loud_drop, ahead), current
+                )
+            level = BALANCED if track_level == WILD and soft else track_level
+            if level != current:
+                return DropFollow(level, track_level, level != track_level, loud_drop)
+        return DropFollow(None, track_level, capped, loud_drop)

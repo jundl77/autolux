@@ -81,7 +81,9 @@ ENTRY_ACCENT_BARS = 8
 
 
 class VenueGate(Protocol):
-    def intense_blocked(self, at: float, moment: Hashable) -> str | None: ...
+    def intense_blocked(
+        self, settings: ShowSettings, at: float, moment: Hashable
+    ) -> str | None: ...
 
     def accent_crowded(self, at: float, moment: Hashable) -> bool: ...
 
@@ -524,7 +526,7 @@ class CueDirector:
         accents: tuple[tuple[str, str], ...],
     ) -> tuple[list[Overlay], EntryEvents, tuple[str, str] | None]:
         at, bpm = plan.request.room_sec, plan.request.bpm
-        blocked = gate.intense_blocked(at, moment)
+        blocked = gate.intense_blocked(settings, at, moment)
         crowded = gate.accent_crowded(at, moment)
         white = level != CALM and not crowded
         strobing = (

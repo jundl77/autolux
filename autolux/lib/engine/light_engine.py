@@ -807,7 +807,22 @@ class LightEngine(IMusicAnalyserHandler):
             beats_per_bar=self._beats_per_bar,
         )
         self._plan_new_track = False
-        return self.effect_controller.plan_cue(planned, request)
+        return self.effect_controller.plan_cue(
+            planned, request, self._intensity_on_arrival(planned)
+        )
+
+    def _intensity_on_arrival(self, planned: PlannedSection) -> float | None:
+        if planned.intent != LightIntent.DROP:
+            return None
+        ahead = self._pending_intents[: self._pending_intents.index(planned) + 1]
+        follow = self.follow_music.drop_follow(
+            planned.arrival,
+            self._intensity_level(),
+            self._drive_so_far(),
+            [section.intent for section in ahead],
+        )
+        level = self._auto_change(follow.level)
+        return None if level is None else LEVEL_INTENSITIES[level]
 
     def _reset_plan_state(self) -> None:
         self.effect_controller.reset_cues()
@@ -919,9 +934,7 @@ class LightEngine(IMusicAnalyserHandler):
     def _follow_drop(self, arrival: float | None) -> None:
         if not self._settings().intensity_auto:
             return
-        drive = None
-        if self._track_beats and not self._track_mood.measuring:
-            drive = level_drive(self._track_beats)
+        drive = self._drive_so_far()
         level = self.follow_music.on_drop(arrival, self._intensity_level(), drive)
         if drive is not None and not self.follow_music.capped:
             self._follow(level, f'drive {drive:+.2f}')
@@ -930,18 +943,28 @@ class LightEngine(IMusicAnalyserHandler):
                 level, 'drop arrival ' + ('unknown' if arrival is None else f'{arrival:.2f}')
             )
 
+    def _drive_so_far(self) -> float | None:
+        if self._track_beats and not self._track_mood.measuring:
+            return level_drive(self._track_beats)
+        return None
+
     def _intensity_level(self) -> str:
         return intensity_level(self._settings().intensity)
 
-    def _follow(self, level: str | None, why: str) -> None:
+    def _auto_change(self, level: str | None) -> str | None:
         if (
             level is None
             or level == self._intensity_level()
             or not self._settings().intensity_auto
             or self.on_auto_intensity is None
         ):
-            return
-        self.on_auto_intensity(LEVEL_INTENSITIES[level], why)
+            return None
+        return level
+
+    def _follow(self, level: str | None, why: str) -> None:
+        level = self._auto_change(level)
+        if level is not None:
+            self.on_auto_intensity(LEVEL_INTENSITIES[level], why)
 
     def _discard_track_mood(self) -> None:
         self._track_mood.finish()
